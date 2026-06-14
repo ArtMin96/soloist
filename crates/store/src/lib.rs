@@ -1,32 +1,34 @@
-//! SQLite-backed implementation of the core's [`Store`] port.
+//! SQLite-backed implementation of the core's durable ports.
 //!
-//! The walking skeleton proves the storage thread with a single `meta` key/value
-//! table behind a versioned migration, opened in WAL mode in the app data directory.
-//! Later phases grow focused repositories (trust, projects, todos, scratchpads, …)
-//! on this same connection following the repository pattern. SQLite is bundled, so
-//! the binary carries its own engine and needs no system `libsqlite3`.
+//! One connection (WAL, foreign keys on) behind a `Mutex` backs the durable
+//! repositories, following the repository pattern: each port lives in its own
+//! module (`meta`, `projects`, `trust`) implementing the matching core trait. Schema
+//! changes are versioned, idempotent [`migrate`]ions. SQLite is bundled, so the
+//! binary carries its own engine and needs no system `libsqlite3`.
+
+mod meta;
+mod migrate;
+mod projects;
+mod trust;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::Connection;
-use soloist_core::{Store, StoreError};
-
-/// The newest schema version this build knows how to migrate to.
-const SCHEMA_VERSION: i64 = 1;
+use soloist_core::StoreError;
 
 /// A durable store backed by a single SQLite connection.
 ///
-/// `rusqlite::Connection` is `Send` but not `Sync`, so it is guarded by a `Mutex` to
-/// satisfy the `Send + Sync` [`Store`] contract. Critical sections are tiny
-/// (single-statement metadata reads/writes) and never held across an `await`.
+/// `rusqlite::Connection` is `Send` but not `Sync`, so it is guarded by a `Mutex`
+/// to satisfy the `Send + Sync` repository contracts. Critical sections are tiny
+/// (single-statement reads/writes) and never held across an `await`.
 pub struct SqliteStore {
     conn: Mutex<Connection>,
 }
 
 impl SqliteStore {
-    /// Opens (creating if needed) the database at `path`, enabling WAL and running
-    /// pending migrations. Parent directories are created as needed.
+    /// Opens (creating if needed) the database at `path` in WAL mode with foreign
+    /// keys enabled, running pending migrations. Parent directories are created.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(io_err)?;
@@ -36,9 +38,7 @@ impl SqliteStore {
         let _mode: String = conn
             .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
             .map_err(sql_err)?;
-        conn.pragma_update(None, "foreign_keys", true)
-            .map_err(sql_err)?;
-        migrate(&conn)?;
+        configure(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -50,19 +50,19 @@ impl SqliteStore {
         Self::open(&path)
     }
 
-    /// Opens an ephemeral in-memory database (migrated, but not durable). Used as a
-    /// graceful fallback when the durable location is unavailable, so the app stays
-    /// usable rather than failing to launch.
+    /// Opens an ephemeral in-memory database (migrated, foreign keys on, but not
+    /// durable). Used as a graceful fallback when the durable location is
+    /// unavailable, so the app stays usable rather than failing to launch.
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory().map_err(sql_err)?;
-        migrate(&conn)?;
+        configure(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
 
     /// Locks the connection, recovering the guard if a previous holder panicked.
-    fn lock(&self) -> MutexGuard<'_, Connection> {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, Connection> {
         match self.conn.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -70,51 +70,12 @@ impl SqliteStore {
     }
 }
 
-impl Store for SqliteStore {
-    fn meta_get(&self, key: &str) -> Result<Option<String>, StoreError> {
-        let conn = self.lock();
-        let mut stmt = conn
-            .prepare("SELECT value FROM meta WHERE key = ?1")
-            .map_err(sql_err)?;
-        match stmt.query_row([key], |row| row.get::<_, String>(0)) {
-            Ok(value) => Ok(Some(value)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(err) => Err(sql_err(err)),
-        }
-    }
-
-    fn meta_set(&self, key: &str, value: &str) -> Result<(), StoreError> {
-        self.lock()
-            .execute(
-                "INSERT INTO meta (key, value) VALUES (?1, ?2)
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (key, value),
-            )
-            .map(|_| ())
-            .map_err(sql_err)
-    }
-}
-
-/// Applies any migrations newer than the database's recorded `user_version`. Each
-/// step is idempotent and the version is bumped only after it succeeds.
-fn migrate(conn: &Connection) -> Result<(), StoreError> {
-    let version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
+/// Enables foreign-key enforcement (so trust cascades when a project is removed) and
+/// runs migrations. Shared by the durable and in-memory constructors.
+fn configure(conn: &Connection) -> Result<(), StoreError> {
+    conn.pragma_update(None, "foreign_keys", true)
         .map_err(sql_err)?;
-
-    if version < 1 {
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS meta (
-                 key   TEXT PRIMARY KEY,
-                 value TEXT NOT NULL
-             );",
-        )
-        .map_err(sql_err)?;
-    }
-
-    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
-        .map_err(sql_err)?;
-    Ok(())
+    migrate::migrate(conn)
 }
 
 /// Resolves the app data directory: `SOLOIST_APP_DATA_DIR`, else `$XDG_DATA_HOME/soloist`,
@@ -136,12 +97,20 @@ pub fn data_dir() -> Result<PathBuf, StoreError> {
     ))
 }
 
-fn sql_err(err: rusqlite::Error) -> StoreError {
+pub(crate) fn sql_err(err: rusqlite::Error) -> StoreError {
     StoreError::Backend(err.to_string())
 }
 
-fn io_err(err: std::io::Error) -> StoreError {
+pub(crate) fn io_err(err: std::io::Error) -> StoreError {
     StoreError::Backend(err.to_string())
+}
+
+/// SQLite stores text as UTF-8, so a path that is not valid UTF-8 cannot be used as
+/// a key. In practice project roots and icon paths are UTF-8; non-UTF-8 is rejected
+/// loudly rather than corrupted by a lossy conversion.
+pub(crate) fn path_str(path: &Path) -> Result<&str, StoreError> {
+    path.to_str()
+        .ok_or_else(|| StoreError::Backend(format!("path is not valid UTF-8: {}", path.display())))
 }
 
 #[cfg(test)]
@@ -150,47 +119,24 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn opens_with_wal_and_migration_then_round_trips_meta() {
+    fn open_enables_wal_and_migrates_to_the_current_version() {
         let dir = tempdir().expect("temp dir");
         let db = dir.path().join("soloist.db");
         let store = SqliteStore::open(&db).expect("open store");
         assert!(db.exists(), "database file should be created");
 
-        {
-            let conn = store.lock();
-            let mode: String = conn
-                .query_row("PRAGMA journal_mode", [], |row| row.get(0))
-                .expect("read journal mode");
-            assert_eq!(mode, "wal");
-            let version: i64 = conn
-                .query_row("PRAGMA user_version", [], |row| row.get(0))
-                .expect("read user_version");
-            assert_eq!(version, SCHEMA_VERSION);
-        }
-
-        assert_eq!(store.meta_get("schema").expect("get absent"), None);
-        store.meta_set("schema", "alpha").expect("set");
-        assert_eq!(
-            store.meta_get("schema").expect("get present"),
-            Some("alpha".to_string())
-        );
-        // Upsert replaces rather than duplicating.
-        store.meta_set("schema", "beta").expect("upsert");
-        assert_eq!(
-            store.meta_get("schema").expect("get updated"),
-            Some("beta".to_string())
-        );
-    }
-
-    #[test]
-    fn reopening_an_existing_db_is_idempotent() {
-        let dir = tempdir().expect("temp dir");
-        let db = dir.path().join("soloist.db");
-        SqliteStore::open(&db)
-            .expect("first open")
-            .meta_set("k", "v")
-            .expect("write");
-        let reopened = SqliteStore::open(&db).expect("second open");
-        assert_eq!(reopened.meta_get("k").expect("read"), Some("v".to_string()));
+        let conn = store.lock();
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .expect("read journal mode");
+        assert_eq!(mode, "wal");
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user_version");
+        assert_eq!(version, migrate::SCHEMA_VERSION);
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("read foreign_keys");
+        assert_eq!(fk, 1, "foreign keys must be enforced for trust cascade");
     }
 }

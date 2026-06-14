@@ -20,8 +20,10 @@
 pub mod agents;
 pub mod config;
 pub mod coordination;
+pub mod debounce;
 pub mod events;
 pub mod facade;
+pub mod hash;
 pub mod identity;
 pub mod idle;
 pub mod ids;
@@ -40,11 +42,16 @@ mod sync;
 #[cfg(test)]
 mod testing;
 
+pub use config::{ConfigEngine, ConfigError, ConfigSync, ProcessSpec, Rename, SoloYml, SyncError};
+pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::Facade;
+pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};
 pub use ports::{
-    Clock, ExitFuture, ExitStatus, ProcessControl, ProcessSpawner, SpawnError, SpawnSpec, Spawned,
-    Store, StoreError, TokioClock,
+    Clock, ExitFuture, ExitStatus, ProcessControl, ProcessSpawner, ProjectRecord, ProjectRepo,
+    SpawnError, SpawnSpec, Spawned, Store, StoreError, TokioClock, TrustRepo,
 };
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView};
+pub use projects::{ProjectError, Projects};
+pub use trust::{Trust, TrustStore};

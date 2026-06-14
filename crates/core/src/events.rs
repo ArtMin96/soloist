@@ -12,7 +12,8 @@
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-use crate::ids::ProcessId;
+use crate::config::ConfigSync;
+use crate::ids::{ProcessId, ProjectId};
 use crate::process::{ProcStatus, ProcessKind};
 
 /// A change in domain state, serialized to adapters verbatim. `#[serde(tag = "type")]`
@@ -35,6 +36,14 @@ pub enum DomainEvent {
     },
     /// A process left the registry.
     ProcessRemoved { id: ProcessId },
+    /// A project's `solo.yml` changed on disk. Carries the add/update/remove/rename
+    /// diff and whether any added/updated command now needs (re-)trust. Sync never
+    /// starts a process — this event only informs adapters of the change.
+    ConfigChanged {
+        project: ProjectId,
+        diff: ConfigSync,
+        requires_trust: bool,
+    },
 }
 
 /// The outbound event port: anything the core publishes domain events through.

@@ -7,10 +7,14 @@
 //! whole supervisor headless-testable with no real time elapsed.
 
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+
+use crate::hash::Hash;
+use crate::ids::ProjectId;
 
 // ───────────────────────────── ProcessSpawner ──────────────────────────────
 
@@ -124,6 +128,48 @@ pub trait Store: Send + Sync {
     fn meta_get(&self, key: &str) -> Result<Option<String>, StoreError>;
     /// Inserts or replaces a metadata value.
     fn meta_set(&self, key: &str, value: &str) -> Result<(), StoreError>;
+}
+
+/// A persisted project: a workspace root plus optional display metadata. `id` is
+/// the durable [`ProjectId`] (stable across runs), assigned by the store from the
+/// project's canonical root path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectRecord {
+    pub id: ProjectId,
+    pub root: PathBuf,
+    pub name: Option<String>,
+    pub icon: Option<PathBuf>,
+}
+
+/// Durable registry of projects (the workspace roots Soloist manages). The
+/// canonical `root` path is the natural key; `id` is stable across runs.
+pub trait ProjectRepo: Send + Sync {
+    /// Inserts the project at `root`, or updates its metadata if already present,
+    /// returning its durable record.
+    fn upsert(
+        &self,
+        root: &Path,
+        name: Option<&str>,
+        icon: Option<&Path>,
+    ) -> Result<ProjectRecord, StoreError>;
+    /// All known projects, most-recently-added first.
+    fn list(&self) -> Result<Vec<ProjectRecord>, StoreError>;
+    /// One project by id, `None` if absent.
+    fn get(&self, id: ProjectId) -> Result<Option<ProjectRecord>, StoreError>;
+    /// Removes a project (cascading to its trust records).
+    fn remove(&self, id: ProjectId) -> Result<(), StoreError>;
+}
+
+/// Durable trust store, keyed by `(project, command-variant hash)`. The presence of
+/// a row means that exact command variant is trusted to run within that project.
+/// All methods are idempotent.
+pub trait TrustRepo: Send + Sync {
+    /// Whether `variant` is trusted within `project`.
+    fn is_trusted(&self, project: ProjectId, variant: &Hash) -> Result<bool, StoreError>;
+    /// Marks `variant` trusted within `project`.
+    fn set_trusted(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError>;
+    /// Revokes trust for `variant` within `project`.
+    fn revoke(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError>;
 }
 
 // ───────────── Ports realized in later phases (contracts only) ──────────────
