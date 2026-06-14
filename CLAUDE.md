@@ -448,3 +448,40 @@ job builds and uploads the `.deb`.
 
 Playwright e2e arrives in Phase 5; soak/longevity in Phase 13. The build host must be Ubuntu 22.04+
 (Tauri v2 needs WebKitGTK 4.1); 20.04 is a runtime target via the AppImage.
+
+---
+
+## 15. Codebase discipline (clean, reusable, single-source — MANDATORY)
+
+The brief is a **clean, disciplined, reusable codebase that stays easy to read and won't break when a
+later phase changes it** — not "tons of code that passes." These are hard rules, checked in every review
+and every phase; a change that violates one is **not done**.
+
+- **Single source of truth.** Every concept is defined **once** and referenced everywhere else — a
+  status, a process kind, an event/command name, a limit, a path. No second definition that can drift.
+  Rust domain enums live in `core`; the TS side mirrors them in **one** `domain.ts` and nowhere else.
+  Cross-boundary constants (e.g. the Tauri event name) are a single named constant on each side.
+- **No magic strings or numbers.** Never compare against or emit a bare status/kind/state string or a
+  bare numeric limit/timeout. Use the enum or a named `const`. Stringly-typed domain state is forbidden
+  (the closed enums in §3 lock this) — keep it that way in **adapters and frontend** too.
+- **DRY — one place to change.** A requirement changes in exactly one place. Extract shared logic to a
+  single helper/module; never copy-paste a behaviour. Editing "the same thing" in two files is a signal
+  to refactor, not to make two edits.
+- **Small, single-purpose files.** A file does one thing; when it starts doing two, split it (§10). No
+  god-files — many small focused modules over one large one, in Rust **and** the frontend.
+- **Clear domain separation.** Respect the bounded contexts (§3) and hexagonal layering (§8): logic in
+  its context, adapters thin, frontend renders projections. Don't smear one concern across layers.
+- **Reusable, component-based frontend.** Keep the structure: `domain.ts` (types) · `api.ts` (typed IPC
+  only) · `store/` (read-model: pure reducers + hooks) · `components/` (small, reusable, presentational).
+  **No** business logic in components, **no** huge `App.tsx`, **no** duplicated markup — extract a
+  component. Pure reducers are unit-tested; components stay declarative.
+- **Tests test behaviour, not vanity.** Every test exercises real business logic or a real flow and can
+  fail for a real reason. **No** placeholder/empty tests, **no** tautological asserts, **no** test
+  written only to turn a check green or that pretends to cover something it doesn't. If a module has
+  nothing meaningful to test yet, it has **no** test yet — that's honest. Delete pretend tests on sight.
+- **No unnecessary code or comments.** Doc comments on public items (§8) and the rare comment explaining
+  a *non-obvious* decision — nothing else. No dead code, no speculative abstraction (YAGNI), no comment
+  that restates the code. Less code that works beats more code that impresses.
+- **Built to change safely.** Prefer the design that survives the next phase touching it: typed
+  boundaries, exhaustive `match`, ports over concretions, names that say what they mean. Optimize for the
+  reader six months from now.
