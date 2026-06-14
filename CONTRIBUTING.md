@@ -22,6 +22,13 @@ sudo apt update && sudo apt install -y \
 Ubuntu 20.04 ships only `libwebkit2gtk-4.0-dev`, which Tauri v2 does not support; build
 the AppImage on 22.04 and run it on 20.04+.
 
+> **Build distributable artifacts on Ubuntu 22.04 — not on a newer host.** A Rust binary
+> links against its build host's glibc, so a `.deb` built on, say, 24.04 (glibc 2.39+)
+> fails to start on 22.04 with `version 'GLIBC_2.xx' not found`. The CI `bundle` job builds
+> on `ubuntu-22.04` for this reason, and the `smoke` job installs that artifact in a
+> 22.04 environment to catch ABI drift. Building locally on a newer host is fine for
+> running on that same host, but the resulting `.deb` is **not** 22.04-compatible.
+
 ### Toolchains
 
 ```bash

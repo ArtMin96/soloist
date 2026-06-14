@@ -32,8 +32,9 @@ React/TS UI shell; tooling (rustfmt/clippy/ESLint/tsc); CI on `ubuntu-22.04`; on
 6. **CI** on `ubuntu-22.04`: system deps → `cargo clippy`+`cargo test` → frontend lint/test →
    `tauri build` (deb). Cache cargo+pnpm.
 7. **First bundle:** emit a `.deb`; install in a clean container (xvfb) and confirm the window opens.
-8. **Docs:** `CONTRIBUTING.md` with exact `apt-get` lines for Ubuntu 20.04 (webkit 4.0) **and** 22.04
-   (4.1).
+8. **Docs:** `CONTRIBUTING.md` with exact `apt-get` lines for the **Ubuntu 22.04+ build host**
+   (webkit 4.1). Ubuntu 20.04 (webkit 4.0) is a *runtime* target via the AppImage, **not** a build host —
+   Tauri v2 requires webkit 4.1.
 
 ## Acceptance criteria
 - `cargo test` + `vitest` run; CI green on `ubuntu-22.04`.
@@ -46,7 +47,8 @@ React/TS UI shell; tooling (rustfmt/clippy/ESLint/tsc); CI on `ubuntu-22.04`; on
 - **Manual:** launch on a real Ubuntu 22.04 desktop.
 
 ## Risks & mitigations
-- **webkit 4.0 vs 4.1 across Ubuntu versions** → document both; add a 20.04 CI runner.
+- **webkit 4.0 vs 4.1 across Ubuntu versions** → build on 22.04 (4.1); reach 20.04 via the AppImage
+  (it bundles its own webkit). GitHub no longer offers 20.04 hosted runners, so CI is 22.04-only.
 - **Tauri v2 API churn** → pin exact versions; verify against current docs (context7), not memory.
 
 ## Effort

@@ -110,3 +110,43 @@ jobs:
           name: soloist-deb
           path: target/release/bundle/deb/*.deb
           if-no-files-found: error
+
+  smoke:
+    runs-on: ubuntu-22.04
+    needs: bundle
+    steps:
+      - name: Download the .deb artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: soloist-deb
+          path: deb
+
+      - name: Install runtime deps + Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0 \
+            libayatana-appindicator3-1 xvfb dbus-x11
+
+      - name: Install the .deb
+        run: sudo dpkg -i deb/*.deb || sudo apt-get install -f -y
+
+      - name: Verify shared libraries resolve (catches glibc/ABI drift)
+        run: |
+          if ldd /usr/bin/soloist | grep -i "not found"; then
+            echo "::error::soloist has unresolved shared libraries on ubuntu-22.04 (built too new?)"
+            exit 1
+          fi
+          echo "all shared libraries resolve on ubuntu-22.04"
+
+      - name: Launch under Xvfb (startup smoke; non-gating)
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" timeout 8 /usr/bin/soloist > run.log 2>&1 &
+          pid=$!
+          sleep 5
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "soloist started and stayed up under Xvfb"
+            kill "$pid" 2>/dev/null || true
+          else
+            echo "::warning::soloist exited early under Xvfb; startup log follows"
+            cat run.log || true
+          fi

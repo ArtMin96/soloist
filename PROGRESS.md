@@ -20,6 +20,11 @@
 
 - **Build host:** Ubuntu **22.04+** only (Tauri v2 needs WebKitGTK **4.1**; 20.04 has only 4.0). Run the
   app from `crates/app` (`cargo tauri dev`) or via `just`. CI runs on `ubuntu-22.04`.
+- **glibc pins the runtime floor — build distributables on 22.04, not newer.** A Rust/Tauri binary
+  links its *build host's* glibc. A deb built on a newer host (this dev box is glibc **2.43**) requires
+  `GLIBC_2.39+` and **won't start on 22.04** (glibc 2.35) — `version 'GLIBC_2.xx' not found`. CI builds
+  on 22.04 and the new CI `smoke` job `ldd`-checks the artifact on 22.04. Local builds run only on the
+  same host. Verified via a clean-container smoke 2026-06-14.
 - **Toolchain:** Rust **1.96** (pinned in `rust-toolchain.toml`), pnpm **11.6**, **tauri-cli 2.11.2**,
   **just**. App crates: `tauri` 2.11.2 / `tauri-build` 2.6.2.
 - **`Cargo.lock` is load-bearing — do NOT run a bare `cargo update`.** It pins `brotli-decompressor`
@@ -45,7 +50,7 @@ Status vocabulary: `Not started` · `In progress` · `Done — pending verify` �
 | Phase | Name | Status | Evidence / notes |
 |------:|------|--------|------------------|
 | — | Planning (foundation + 14 phase docs) | **Done** | 22 plan files in `plan/`; decisions D1–D6 locked; coordination=v1; summarization off; under git |
-| 0 | Foundations (workspace, CI, `.deb` build) | **Verified** | 8-crate workspace builds; `just lint` + `just test` green (clippy -D warnings, rustfmt, ESLint, Prettier, tsc, vitest 2/2, Rust placeholder tests); dependency-direction guard passes (detection verified against `soloist-app`); `Soloist_0.1.0_amd64.deb` (2.3 MB) builds; app launches on a real desktop and renders `app_info` → "version 0.1.0" (user-confirmed). Clean-container dpkg-install smoke not run (substituted by real-desktop launch); CI `bundle` job builds the `.deb`. |
+| 0 | Foundations (workspace, CI, `.deb` build) | **Verified** | 8-crate workspace builds; `just lint` + `just test` green (clippy -D warnings, rustfmt, ESLint, Prettier, tsc, vitest 2/2, Rust placeholder tests); dependency-direction guard passes (detection verified against `soloist-app`); `Soloist_0.1.0_amd64.deb` (2.3 MB) builds; app launches on a real desktop and renders `app_info` → "version 0.1.0" (user-confirmed). Clean-container dpkg-install smoke (Ubuntu 22.04) now run: install + `Soloist.desktop` + binary OK, and it surfaced that **host-built** debs need glibc 2.39+ (this host is 2.43) so they don't run on 22.04 — distributable debs are the CI (22.04) artifact. CI `bundle` builds the `.deb`; new CI `smoke` job installs + `ldd`-checks + Xvfb-launches it on 22.04. Container *GUI launch* on a 22.04-built artifact still to be confirmed (the host-built deb is glibc-incompatible with 22.04 by design). |
 | 1 | Walking skeleton (ports/adapters + event bus) | Not started | **Next.** Spawn one process end-to-end through every layer; proves the architecture before features |
 | 2 | Config & projects (real `solo.yml`, trust, sync, detect) | Not started | |
 | 3 | Process supervisor (3 subtypes, status FSM, orphans) | Not started | Highest-risk; budget extra test time |
@@ -66,6 +71,28 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Phase 0 review + cleanup (2026-06-14)
+- Reviewed the Phase 0 commit (`963e072`) across all dimensions; gates re-run green (`just lint`,
+  `just test`) and the `.deb` rebuilt (2.3 MB, stripped). Applied the review's should-fix / nit items:
+  - Removed a `plan/01` citation from `crates/app/Cargo.toml` (comment policy, CLAUDE.md §8).
+  - Added a restrictive **CSP** + `freezePrototype: true` to `tauri.conf.json` (was unset → no policy).
+  - Resolved the CLI-transport contradiction toward **HTTP client** (per `plan/04` §8/§10): fixed the
+    `ipc` crate doc and the `ipc/` lines in `plan/01`/`plan/04` — `ipc` = app↔mcp UDS transport + shared
+    message types; the CLI is a thin HTTP client of the loopback API.
+  - Renamed core module `ports` → **`portscan`** (network port discovery); the hexagonal port *traits*
+    keep the name "ports" to avoid the collision.
+  - `vite.config.ts` target → `safari13` (dropped dead Windows branch); moved `shadcn` to
+    `devDependencies` (lockfile regenerated; `--frozen-lockfile` passes); added deb-only `just deb`;
+    hardened `check-core-deps.sh` to also catch sub-crates (`tauri-*`, `axum-core`).
+  - De-staled `phase-00` task #8 + risk (22.04-only build; 20.04 = runtime-via-AppImage).
+  - **Not changed:** the `dev.soloist.app` identifier (locked §9; its macOS `.app` build warning is
+    harmless on Linux-only).
+- **glibc / distribution finding (important):** the clean-container smoke (Ubuntu 22.04) showed a `.deb`
+  **built on this host won't run on 22.04** — the host runs glibc **2.43** and the binary needs up to
+  `GLIBC_2.39`, but 22.04 ships **2.35**. Rust binaries link the build host's glibc, so **distributable
+  debs must be built on 22.04** (the CI `bundle` job already is). Added a CI **`smoke`** job (installs the
+  artifact on 22.04, asserts `ldd` resolves, launches under Xvfb non-gating) + a CONTRIBUTING warning.
 
 ### Phase 0 build (2026-06-14)
 - Stood up the **8-crate Cargo workspace** (`core/store/pty/app/mcp/httpapi/cli/ipc`): a pure `core`
@@ -113,8 +140,11 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
   status encoding.
 - **`KNOWN-DIVERGENCES.md`** not created yet (introduced in Phase 13; start it the moment a real
   Solo-behavior divergence is implemented — not needed for the build/toolchain decisions above).
-- **Clean-container `.deb` smoke** not run (docker is available); the real-desktop launch + the CI
-  `bundle` job cover it. A containerized dpkg-install + xvfb smoke can be added to CI for full automation.
+- **Clean-container `.deb` smoke** now run (docker) and added as a CI `smoke` job. It found the glibc
+  floor (above): **build distributable debs on Ubuntu 22.04**, not a newer host. Remaining: the CI
+  `smoke` job's Xvfb GUI launch is **non-gating** (headless flakiness) — make it gating once a 22.04-built
+  artifact is observed launching a window; and the container *GUI launch* on a 22.04-built deb is still
+  unconfirmed (only install + `ldd` were proven; the host-built deb can't be used for it due to glibc).
 - **Placeholder app icon** (`crates/app/app-icon.png` → generated `crates/app/icons/`): a simple "S"
   glyph; replace with real art in Phase 11/12.
 

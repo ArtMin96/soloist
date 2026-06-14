@@ -9,7 +9,11 @@ default:
 dev:
     cd {{app}} && cargo tauri dev
 
-# Build the .deb and .AppImage bundles.
+# Build only the .deb bundle (mirrors CI; faster than the full release set).
+deb:
+    cd {{app}} && cargo tauri build --bundles deb
+
+# Build the full release set (.deb + .AppImage). AppImage is finalized in Phase 12.
 bundle:
     cd {{app}} && cargo tauri build
 

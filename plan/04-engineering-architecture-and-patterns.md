@@ -241,7 +241,7 @@ crates/
   mcp/     # `soloist-mcp` binary: MCP (stdio) adapter over the core via IPC
   httpapi/ # local HTTP API (127.0.0.1) adapter
   cli/     # `soloist` CLI (thin HTTP client, ref §8)
-  ipc/     # shared transport + message types for app<->mcp<->cli/httpapi
+  ipc/     # app<->mcp UDS transport + request/response message types shared by app/mcp/httpapi/cli
 ```
 **Frontend (`crates/app/ui`, React/TS):** `api.ts` (typed `invoke`/`listen` only) · `store/` (event
 reducer → read-model) · `components/` · `views/`. **No business logic in React** — it renders

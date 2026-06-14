@@ -48,7 +48,7 @@ crates/
   mcp/     # soloist-mcp binary (stdio MCP adapter)
   httpapi/ # loopback HTTP API adapter (used by app)
   cli/     # soloist CLI (HTTP client)
-  ipc/     # shared transport + message types (app <-> mcp <-> cli)
+  ipc/     # app<->mcp UDS transport + request/response message types shared by app/mcp/httpapi/cli
 ```
 
 The dependency rule (adapters → core, never the reverse) is CI-enforced (ref `04` §10).

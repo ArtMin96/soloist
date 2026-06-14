@@ -21,7 +21,7 @@ pub mod identity;
 pub mod idle;
 pub mod metrics;
 pub mod notify;
-pub mod ports;
+pub mod portscan;
 pub mod projects;
 pub mod supervisor;
 pub mod terminal;

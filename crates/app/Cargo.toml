@@ -1,6 +1,6 @@
 [package]
 name = "soloist-app"
-description = "The soloist desktop app (Tauri v2) — hosts the domain core, the command/event adapter, and the loopback HTTP API; bundles the React/TS UI. plan/01."
+description = "The soloist desktop app (Tauri v2) — hosts the domain core, the command/event adapter, and the loopback HTTP API; bundles the React/TS UI."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
