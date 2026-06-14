@@ -16,6 +16,28 @@
 
 ---
 
+## Critical details (carry forward — don't relearn these)
+
+- **Build host:** Ubuntu **22.04+** only (Tauri v2 needs WebKitGTK **4.1**; 20.04 has only 4.0). Run the
+  app from `crates/app` (`cargo tauri dev`) or via `just`. CI runs on `ubuntu-22.04`.
+- **Toolchain:** Rust **1.96** (pinned in `rust-toolchain.toml`), pnpm **11.6**, **tauri-cli 2.11.2**,
+  **just**. App crates: `tauri` 2.11.2 / `tauri-build` 2.6.2.
+- **`Cargo.lock` is load-bearing — do NOT run a bare `cargo update`.** It pins `brotli-decompressor`
+  **5.0.0** + `alloc-stdlib` **0.2.2** to dodge an `alloc-no-stdlib` 2↔3 conflict in the Tauri tree
+  (upstream brotli 8.0.3 bug). CI uses `--locked`. Unpin only once brotli fixes it upstream.
+- **Frontend gotchas:** Vite **8** (oxc bundler — use a boolean `minify`, not `"esbuild"`); React **19**;
+  TS **6** (use `paths` with **no `baseUrl`**); Tailwind **v4** + shadcn (radix-nova, OKLCH tokens,
+  `@/*` alias); ESLint **10** flat config (register `react-hooks`/`react-refresh` as plugin objects —
+  their preset configs are still eslintrc-shaped and crash flat config).
+- **Tauri before-commands run from the frontend dir** (`crates/app/ui`): they are `pnpm dev` / `pnpm
+  build` (NOT `pnpm -C ui …`); `frontendDist` is `ui/dist` relative to `tauri.conf.json`; dev port 1420.
+- **Gates:** `just lint` (rustfmt, clippy `-D warnings`, tsc, ESLint, Prettier, dependency-direction
+  guard) and `just test` (cargo + vitest). The guard is `scripts/check-core-deps.sh`.
+- **Comment policy:** docblocks + important comments only — no phase numbers, `plan/§` citations, or
+  changelog notes in source (CLAUDE.md §8). Use `REVIEW-PROMPT.md` to review a phase's changes.
+
+---
+
 ## Phase status
 
 Status vocabulary: `Not started` · `In progress` · `Done — pending verify` · `Verified`.

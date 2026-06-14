@@ -314,6 +314,13 @@ These come from `plan/04`. They are **rigid** — adapt the *feature*, never the
   scratchpads/todos. Leases carry TTL + owner `ProcessId`, auto-release on expiry/owner-close.
 - **Security in the core:** the trust gate is enforced in core (not UI) for `start*`/`restart*`/auto-*,
   per (project, command-variant hash). MCP/HTTP honor scope + auth.
+- **Comment discipline (source is not a notebook):** code carries **doc comments** (what an item does /
+  how to use it / what it depends on) and the **rare** comment that explains a *non-obvious* decision —
+  nothing else. **Never** write phase numbers, plan/doc citations (e.g. `plan/04 §6`), changelog or
+  progress narration, `placeholder`/`TBD` notes, or comments that merely restate the code into source
+  files (`.rs`/`.ts`/`.tsx`/`.css`/config/`justfile`/scripts; `*.md` docs are exempt). That context
+  lives in `PROGRESS.md` and git history. Any temporary note added mid-phase is removed before the phase
+  ends.
 
 Performance/size budget is §6; see `plan/04` §13 for the explicit forbidden anti-patterns and §14 for
 the longevity checklist.
@@ -412,6 +419,7 @@ will not know what happened.
 | "I'll pull this nice `later` feature into v1" | Don't gold-plate. v1 is the matrix's v1 rows. |
 | "I'll finish and skip the `PROGRESS.md` update" | Handoff failed. The next session is now blind. |
 | "I'll guess the RAM/size footprint number" | Measure or say unknown. Never fabricate. |
+| "I'll note the phase / plan-ref in a code comment for traceability" | Source isn't a ledger. Docblocks + important comments only — no phase numbers or `plan/§` citations (§8). |
 
 ---
 
