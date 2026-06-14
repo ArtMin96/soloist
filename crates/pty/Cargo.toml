@@ -15,6 +15,4 @@ nix = { version = "0.29", features = ["signal", "process"] }
 tokio = { version = "1", features = ["macros", "process", "rt", "time"] }
 
 [dev-dependencies]
-soloist-core = { path = "../core" }
-nix = { version = "0.29", features = ["signal", "process"] }
-tokio = { version = "1", features = ["macros", "process", "rt", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }

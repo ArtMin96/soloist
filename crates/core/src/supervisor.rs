@@ -125,6 +125,9 @@ pub(crate) fn spawn_supervised(
 
         if let Err(join_err) = body.await {
             if join_err.is_panic() {
+                // A panic is an out-of-band fault: force `Crashed` directly rather
+                // than through the FSM, since the unit must end up crashed even from
+                // a state the normal transition rules would reject.
                 let from = registry.last_status(id).unwrap_or(ProcStatus::Running);
                 registry.set_status(id, ProcStatus::Crashed);
                 bus.publish(DomainEvent::ProcessStatusChanged {

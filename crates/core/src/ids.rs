@@ -66,9 +66,14 @@ mod tests {
     }
 
     #[test]
-    fn distinct_id_types_do_not_share_a_counter_value_meaning() {
-        // Both are u64-backed but are distinct types; this only checks Display.
-        let p = ProjectId::next();
-        assert_eq!(p.to_string(), p.get().to_string());
+    fn display_matches_the_raw_value() {
+        let id = ProjectId::next();
+        assert_eq!(id.to_string(), id.get().to_string());
+    }
+
+    #[test]
+    fn from_raw_round_trips_a_wire_value() {
+        let id = ProcessId::next();
+        assert_eq!(ProcessId::from_raw(id.get()), id);
     }
 }

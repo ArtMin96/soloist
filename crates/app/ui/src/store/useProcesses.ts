@@ -36,12 +36,25 @@ export function useProcesses(): ProcessStore {
   );
 
   useEffect(() => {
-    const unlisten = onDomainEvent((event) => setProcesses((prev) => applyEvent(prev, event)));
-    refresh();
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    // Attach the listener before reading the snapshot, so an event emitted between
+    // the snapshot and the subscription cannot be lost (snapshot-then-deltas).
+    onDomainEvent((event) => setProcesses((prev) => applyEvent(prev, event)))
+      .then((stopListening) => {
+        if (cancelled) {
+          stopListening();
+          return;
+        }
+        unlisten = stopListening;
+        refresh();
+      })
+      .catch(fail);
     return () => {
-      void unlisten.then((stopListening) => stopListening());
+      cancelled = true;
+      unlisten?.();
     };
-  }, [refresh]);
+  }, [refresh, fail]);
 
   return { processes, error, start, stop, refresh };
 }
