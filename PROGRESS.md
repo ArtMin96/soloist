@@ -17,8 +17,8 @@
   `/impeccable` skill before UI work** (north star: soloterm.com feel, clean-room); Tauri authority =
   the project-local `tauri-*` skill suite + official docs; **performance/size/responsiveness budget** is now a
   first-class gate. Then ran **`/impeccable init`** → created `PRODUCT.md`.
-- **Awaiting user:** approval to move from plan → implementation, and a decision on **git** (currently
-  "no repo"; `CLAUDE.md` §3 flags revisiting this before code is written).
+- **Awaiting user:** approval to move from plan → implementation. *(Git resolved this session — private
+  repo `ArtMin96/soloist`.)*
 
 ---
 
@@ -78,13 +78,17 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
   invoking the matching `tauri-*` skill before any Tauri work** — e.g. `tauri-linux-packaging` for
   `.deb`/`.AppImage`, `tauri-binary-size` for the size budget, `tauri-ipc`/`tauri-capabilities` for
   commands/security — backed by the official docs.
+- 2026-06-14: **Git initialized + private repo created.** `git init` (branch `main`); `.gitignore`
+  added (Rust/Node/Tauri build output, `.impeccable/` runtime, `.claude/settings.local.json`). Initial
+  commit `44e8c01` (157 files, incl. `.claude/skills` tooling). Private GitHub remote
+  **`ArtMin96/soloist`** created and pushed → https://github.com/ArtMin96/soloist.
 
 ---
 
 ## Open threads / unresolved
 
-- **Git:** currently no repo. Revisit before Phase 0 writes code (`CLAUDE.md` §3). *User decision
-  needed.*
+- **Git:** ✅ resolved — initialized (`main`), private GitHub remote **`ArtMin96/soloist`**
+  (`origin/main`, https://github.com/ArtMin96/soloist). Commit per phase from here.
 - **Plan review:** user to skim `plan/05` (Solo behavior), `plan/04` (architecture), `plan/02` (parity)
   and confirm before implementation begins.
 - `KNOWN-DIVERGENCES.md` not created yet (formally introduced in Phase 13, but start it the moment any
@@ -99,7 +103,7 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Next session should start with
 
-1. Confirm with the user: **plan approved?** and **git: yes/no?**
+1. Confirm with the user: **plan approved?** (git is done — private repo `ArtMin96/soloist`).
 2. If approved → either (a) produce the detailed implementation plan for **Phase 0 + Phase 1** (the
    foundations + walking-skeleton spine), or (b) begin Phase 0 directly if the user wants to build.
 3. Whoever completes Phase 0 must fill in the real toolchain commands in `CLAUDE.md` §14 and flip
