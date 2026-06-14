@@ -116,7 +116,7 @@ fn has_meaningful_content(text: &str) -> bool {
 mod tests {
     use super::*;
 
-    /// The verbatim example from the schema reference (ref §3).
+    /// The verbatim example from Solo's documented `solo.yml` schema.
     const REFERENCE_YML: &str = "\
 name: storefront
 icon: assets/project-icon.png

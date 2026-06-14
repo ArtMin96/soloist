@@ -21,7 +21,7 @@ pub enum Trust {
     /// The variant has not been trusted (or was invalidated by an edit).
     Untrusted,
     /// The variant is trusted; the key that was matched is carried for reference.
-    Trusted { variant: Hash },
+    Trusted { variant_hash: Hash },
 }
 
 /// The trust gate over the durable store.
@@ -39,7 +39,9 @@ impl TrustStore {
     pub fn status(&self, project: ProjectId, spec: &ProcessSpec) -> Result<Trust, StoreError> {
         let variant = spec.variant_hash();
         if self.repo.is_trusted(project, &variant)? {
-            Ok(Trust::Trusted { variant })
+            Ok(Trust::Trusted {
+                variant_hash: variant,
+            })
         } else {
             Ok(Trust::Untrusted)
         }

@@ -12,7 +12,7 @@
 - **Overall:** **Phase 2 (Config & Projects, C1) code-complete — `Done — pending verify`.** The
   `solo.yml` model, loader/validator, durable trust store, project registry, content-hash sync engine,
   and a Clock-driven debouncer are built on the Phase 1 skeleton and proven headless by automated tests
-  (`just lint && just test` green: **59 tests**, core 41 / pty-integration 3 / store 9 / UI 6). Two v1
+  (`just lint && just test` green: **61 tests**, core 42 / pty-integration 3 / store 10 / UI 6). Two v1
   rows (A2 fields-honored-**at-runtime**, A6 untrusted-**cannot-run**) have their C1 modeling/decision
   done here; their *runtime* verification belongs to Phase 3 (which spawns processes and enforces the
   gate). `later` rows A5/A8/A10/A12/A13 deferred (tracked). Live `notify` watcher deferred to Phase 6.
@@ -79,6 +79,29 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Phase 2 review fixes (2026-06-15)
+Reviewed the Phase 2 PR (`3601d6d`, range `7ef2334..3601d6d`) across all dimensions via
+`REVIEW-PROMPT.md`. No blockers; gates re-verified green (`just lint`, `just test`). Applied every
+finding:
+- **Test-count evidence corrected (should-fix, §10).** The build note + commit message claimed "59
+  tests (core 41)"; `cargo test` actually showed **60** (core **42**). The review-fix test below makes
+  it **61** (core 42 / pty 3 / store 10 / UI 6) — every count in this ledger now matches the runner.
+  (The commit message is already pushed and immutable; the ledger is the corrected record.)
+- **`ConfigEngine::sync` single-writer + blocking-I/O contract documented (should-fix, `plan/04` §5).**
+  The method releases its lock for file I/O + the trust lookup, so concurrent same-project calls could
+  race the snapshot and double-publish `ConfigChanged`. Documented that it must be driven by one
+  debounced writer per project and invoked off-thread (`spawn_blocking`); the Phase 6 watcher must honor
+  this (open thread updated). No behaviour change — latent until the live watcher lands.
+- **Removed speculative `Serialize` from `SoloYml`/`ProcessSpec` (nit, §15 YAGNI).** Nothing serializes
+  the model (`ConfigChanged` carries only the name-based `ConfigSync`); Phase 5 re-adds it when wiring
+  config to the UI. Dropped the now-dead `skip_serializing_if` field attributes with it.
+- **Migration downgrade guard (nit).** `store::migrate` now refuses a DB whose `user_version` exceeds
+  `SCHEMA_VERSION` (an older build opening a newer schema) instead of silently downgrading it, and writes
+  the version only when advancing. New test `refuses_a_schema_newer_than_this_build` (store 9→10).
+- **Doc/comment nits.** Dropped a `(ref §3)` plan citation from a `load.rs` test doc (§8); renamed
+  `Trust::Trusted { variant }` → `{ variant_hash }` to match the documented enum (CLAUDE.md §3);
+  refreshed the stale `testing.rs` module doc to mention `FakeTrustRepo`/`FakeProjectRepo`.
+
 ### Phase 2 build — Config & Projects / context C1 (2026-06-15)
 - **Built C1 headless on the Phase 1 skeleton.** `crates/core`: `config/` split into `model` (types +
   documented defaults: `auto_start` default **true**, all else off/empty; `deny_unknown_fields`;
@@ -118,7 +141,7 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
   only minimal empty-glob validation now) to protect the §6 size budget.
 - **No frontend changes.** C1 is headless and not yet wired to the Tauri adapter; the TS `DomainEvent`
   mirror gains `ConfigChanged` in Phase 5 when the event is wired through `/impeccable` UI work — avoids
-  speculative, hand-rolled frontend (§5/§15). `just lint && just test` green: **59 tests**.
+  speculative, hand-rolled frontend (§5/§15). `just lint && just test` green: **61 tests**.
 
 ### Phase 1 review fixes (2026-06-14)
 Reviewed the Phase 1 PR (`82fa935`, `main...phase-1-walking-skeleton`) across all dimensions via
@@ -267,7 +290,9 @@ review's one should-fix + the mechanical nits:
 - **Live `FileWatcher` adapter (Phase 6).** The port is still a methods-less stub; Phase 6 adds its
   methods + a `notify`-backed adapter that drives `ConfigEngine::sync` through the `Debouncer`, and also
   serves glob file-watch restart (D6). Pick the watcher-adapter crate home then (new `crates/watch` vs
-  fold into an adapters crate).
+  fold into an adapters crate). **`ConfigEngine::sync` is documented single-writer + blocking** (Phase 2
+  review): drive it from **one debounced task per project** and invoke it off-thread (`spawn_blocking`)
+  so it neither races the snapshot/double-publishes `ConfigChanged` nor stalls the `tokio` runtime.
 - **Clean-container `.deb` smoke** now run (docker) and added as a CI `smoke` job. It found the glibc
   floor (above): **build distributable debs on Ubuntu 22.04**, not a newer host. Remaining: the CI
   `smoke` job's Xvfb GUI launch is **non-gating** (headless flakiness) — make it gating once a 22.04-built
@@ -295,7 +320,7 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-1. Run `just lint && just test` first to confirm the Phase 2 baseline is still green (**59 tests**).
+1. Run `just lint && just test` first to confirm the Phase 2 baseline is still green (**61 tests**).
 2. **Begin Phase 3 — Process supervisor.** Read `plan/phases/phase-03-process-supervisor.md` end to end
    and re-read its parity rows (B1–B9). It **consumes C1**: wire `Projects` + `TrustStore` +
    `ConfigEngine` through the `Facade`, and **enforce the trust gate in core** on `start*`/auto-start/

@@ -1,7 +1,9 @@
 //! In-memory port fakes used by the core's headless tests: a manually-advanced
-//! [`MockClock`] and a [`FakeSpawner`] whose children never touch the OS. These let
-//! every actor transition, the grace window, and panic isolation be exercised
-//! deterministically with no real time elapsed and no real processes spawned.
+//! [`MockClock`], a [`FakeSpawner`] whose children never touch the OS, and
+//! [`FakeTrustRepo`]/[`FakeProjectRepo`] standing in for the durable store. These
+//! let every actor transition, the grace window, panic isolation, and the trust and
+//! sync logic be exercised deterministically — no real time elapsed, no real
+//! processes spawned, no SQLite.
 
 use std::collections::HashSet;
 use std::path::Path;

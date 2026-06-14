@@ -4,21 +4,21 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::hash::{Hash, Hasher};
 
 /// A parsed `solo.yml`. Top-level keys mirror Solo's schema (`name`, `icon`,
 /// `processes`); `processes` preserves the file's order via [`IndexMap`] so the
 /// sidebar lists commands as written.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoloYml {
     /// Optional display name shown on first load.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub name: Option<String>,
     /// Optional icon path, relative to the project root.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub icon: Option<PathBuf>,
     /// The managed commands, keyed by display name. Empty when the `processes` key
     /// is absent — an empty or comment-only file is a valid, empty config.
@@ -37,13 +37,13 @@ impl SoloYml {
 /// One command definition from `solo.yml`. Field defaults encode our documented
 /// decisions: `auto_start` defaults **true** (the `auto_start` schema gap — we
 /// auto-start a project's stack); everything else defaults to off/empty.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessSpec {
     /// The shell command to run. Required.
     pub command: String,
     /// Working directory, relative to the project root. `None` means the root.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub working_dir: Option<PathBuf>,
     /// Whether to start this command when the project opens. Defaults to `true`.
     #[serde(default = "default_true")]
@@ -52,11 +52,11 @@ pub struct ProcessSpec {
     #[serde(default)]
     pub auto_restart: bool,
     /// Globs (relative to the project root) whose changes trigger a restart.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub restart_when_changed: Vec<String>,
     /// Per-process environment overrides. A sorted map so the variant hash does not
     /// depend on declaration order.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(default)]
     pub env: BTreeMap<String, String>,
 }
 

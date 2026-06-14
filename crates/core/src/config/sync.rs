@@ -76,6 +76,13 @@ impl ConfigEngine {
     /// empty), and updates sync state. Returns the diff when bytes changed, or
     /// `None` when the file is byte-identical or the project is unknown. Never
     /// starts a process.
+    ///
+    /// Drive this from a **single writer per project** (one debounced task). It reads
+    /// sync state, releases the lock for blocking file I/O and the trust lookup, then
+    /// writes new state back — so two concurrent calls for the same project can race
+    /// the snapshot and double-publish [`DomainEvent::ConfigChanged`]. Because the
+    /// I/O is blocking, an async caller must invoke it off-thread (e.g. via
+    /// `spawn_blocking`) so it never stalls the runtime.
     pub fn sync(&self, project: ProjectId) -> Result<Option<ConfigSync>, SyncError> {
         let Some((root, prev_hash, prev)) = self.snapshot(project) else {
             return Ok(None);
