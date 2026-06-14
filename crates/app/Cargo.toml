@@ -1,0 +1,25 @@
+[package]
+name = "soloist-app"
+description = "The soloist desktop app (Tauri v2) — hosts the domain core, the command/event adapter, and the loopback HTTP API; bundles the React/TS UI. plan/01."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "soloist"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+soloist-core = { path = "../core" }
+soloist-httpapi = { path = "../httpapi" }
+soloist-ipc = { path = "../ipc" }
+soloist-pty = { path = "../pty" }
+soloist-store = { path = "../store" }
+tauri = { version = "2.11.2", features = [] }
+
+[build-dependencies]
+tauri-build = { version = "2.6.2", features = [] }

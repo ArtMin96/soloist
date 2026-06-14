@@ -39,7 +39,8 @@ STEP 2 — Honor the non-negotiables (full detail in CLAUDE.md):
   - Small, fast, smooth: respect the performance/size budget — measure, never invent a number.
     (CLAUDE.md §6)
   - Locked decisions (CLAUDE.md §3): Tauri v2 + Rust + React/TS + xterm.js; Ubuntu x86_64; SQLite;
-    MCP stdio binary; coordination layer is v1; auto-summarization off by default; no git.
+    MCP stdio binary; coordination layer is v1; auto-summarization off by default; git: yes — under
+    git with a private remote (commit per phase).
 
 STEP 3 — Announce your plan: state the phase, the exact parity IDs / tasks you intend to complete this
 session, and confirm they match PROGRESS.md. Then PAUSE for my go-ahead before writing code.

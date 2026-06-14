@@ -415,18 +415,28 @@ will not know what happened.
 
 ---
 
-## 14. Quick reference — toolchain & commands (fill in as Phase 0 establishes them)
+## 14. Quick reference — toolchain & commands
 
-> Phase 0 stands up the workspace and CI. Once it does, record the real commands here so every later
-> session runs the same gates. Until then, this is the intended shape:
+**Toolchain:** Rust stable (rustup) · Node 20+ · pnpm · `cargo install tauri-cli` ·
+`cargo install just`. System libraries (Ubuntu 22.04+) are listed in `CONTRIBUTING.md`.
 
-- Build: `cargo build` (workspace) · UI: `pnpm -C crates/app/ui build` (TBD in Phase 0).
-- Lint/format gates: `cargo clippy --workspace -- -D warnings` · `cargo fmt --check` ·
-  `tsc --noEmit` · `eslint`.
-- Dependency-direction check: (Phase 0 wires this; it must fail if `core` imports `tauri`/`rmcp`/
-  `axum`/`rusqlite`).
-- Tests: `cargo test --workspace` (core uses the mock `Clock`) · Playwright for UI (from Phase 5).
-- Run the app (dev): `cargo tauri dev` (TBD).
-- Soak/longevity (Phase 13, nightly from Phase 6): see `plan/phases/phase-13-…`.
+**Task runner (`just`):**
+- `just dev` — run the app (Vite + Tauri) with hot reload.
+- `just test` — `cargo test --workspace` + UI unit tests (`vitest`).
+- `just lint` — `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+  UI `tsc`/ESLint/Prettier, and the dependency-direction guard.
+- `just fmt` — auto-format Rust + UI.
+- `just bundle` — build the `.deb` (and `.AppImage`).
+- `just setup` — install UI dependencies.
 
-**Whoever completes Phase 0: replace the TBDs above with the exact, verified commands.**
+**Dependency-direction guard:** `scripts/check-core-deps.sh` (run by `just lint` and CI) fails if
+`crates/core` depends on `tauri`/`rmcp`/`axum`/`rusqlite`/`notify-rust`.
+
+**CI:** `.github/workflows/ci.yml` on `ubuntu-22.04` — the `check` job runs every gate; the `bundle`
+job builds and uploads the `.deb`.
+
+**Without `just`:** `cargo build --workspace` · `cargo test --workspace` ·
+`pnpm -C crates/app/ui build`; run the app from `crates/app` with `cargo tauri dev`.
+
+Playwright e2e arrives in Phase 5; soak/longevity in Phase 13. The build host must be Ubuntu 22.04+
+(Tauri v2 needs WebKitGTK 4.1); 20.04 is a runtime target via the AppImage.

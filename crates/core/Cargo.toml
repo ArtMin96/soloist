@@ -1,0 +1,11 @@
+[package]
+name = "soloist-core"
+description = "Pure, framework-free domain core for Soloist. Imports no tauri, rmcp, axum, or rusqlite."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]

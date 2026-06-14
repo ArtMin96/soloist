@@ -78,8 +78,10 @@ referenced as "ref §N" point to [`05-solo-reference-and-sources.md`](05-solo-re
 | Errors | `thiserror` + `anyhow` | typed boundaries |
 | Tracing | `tracing` (+`-subscriber`) | structured logs/spans |
 
-**Frontend**: React 18 + TS + Vite; TanStack Query; xterm.js; `markdown-it` + `mermaid` (lazy);
-`@tauri-apps/api` (wrapped in `api.ts`); CSS-variable theming.
+**Frontend**: React 19 + TS + Vite; **shadcn/ui (Radix primitives + Tailwind CSS) for components**;
+TanStack Query; xterm.js; `markdown-it` + `mermaid` (lazy); `@tauri-apps/api` (wrapped in `api.ts`);
+CSS-variable theming (shadcn design tokens, light/dark). Visual design is driven through `/impeccable`
+(Phase 5); shadcn supplies the component primitives, not the visual identity.
 
 ## Resolved open questions (from v1 draft)
 1. **D1/D2/D3** — confirmed by you.
@@ -93,4 +95,5 @@ referenced as "ref §N" point to [`05-solo-reference-and-sources.md`](05-solo-re
   idle-watchers → scratchpads/todos → key-value so the highest-value coordination lands first.
 - **Auto-summarization = off by default** (your call). Heuristic idle detection is always on;
   summarization is opt-in via your own headless agent CLI — no cloud/key requirement (D8).
-- **No git repo** (your call) — `soloist/` stays plain files for now; revisit before writing code.
+- **Git: yes** (revised 2026-06-14) — under git with a private GitHub remote (`ArtMin96/soloist`);
+  commit per phase. *(Earlier draft said "no git repo"; superseded.)*

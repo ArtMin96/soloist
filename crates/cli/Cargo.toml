@@ -1,0 +1,17 @@
+[package]
+name = "soloist-cli"
+description = "The soloist command-line client: a thin HTTP client of the loopback API."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# Named to avoid colliding with the desktop app's `soloist` binary in one workspace.
+[[bin]]
+name = "soloist-cli"
+path = "src/main.rs"
+
+[dependencies]
+soloist-ipc = { path = "../ipc" }

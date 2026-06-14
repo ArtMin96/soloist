@@ -1,0 +1,12 @@
+[package]
+name = "soloist-pty"
+description = "Process and PTY spawner for Soloist, built on portable-pty and nix."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+soloist-core = { path = "../core" }
