@@ -1,0 +1,333 @@
+# 05 — Solo Reference & Sources (ground truth)
+
+This is the **canonical, cited record** of how the real Solo behaves, gathered from soloterm.com's
+public docs (a 183-URL sitemap), blog, comparison pages, changelog, and one independent hands-on
+review. Every phase cites this file instead of re-deriving behavior. Facts are marked:
+
+- ✅ **Documented** — stated on an official `/docs` page (URL given).
+- 🟡 **Stated elsewhere** — marketing/blog/changelog/review (less precise).
+- ❓ **Gap** — not publicly documented; a design decision for us (flagged where it lands).
+
+> Honesty note: nobody on our side has run the macOS app or read its source (it's closed). The MCP
+> tool *names* are documented; their exact JSON parameter schemas are **not** — those are ❓ and we
+> design our own. We never copy Solo code or assets.
+
+---
+
+## 1. The product model — "metaharness"
+
+✅🟡 Solo is **not** a coding agent, **not** a terminal emulator, **not** a git-worktree orchestrator.
+It is a **process-supervision + coordination layer** that runs the agent CLIs you already use as
+ordinary managed processes and gives them a shared, project-scoped workspace over MCP.
+Source: [blog/the-agentic-metaharness](https://soloterm.com/blog/the-agentic-metaharness),
+[alternatives/conductor](https://soloterm.com/alternatives/conductor),
+[alternatives/cmux](https://soloterm.com/alternatives/cmux).
+
+The six things the metaharness owns (verbatim, blog): a **process graph**; **readable output/status**;
+**scratchpads**; **todos/blockers/comments/locks/key-value**; **timers/idle-watchers**;
+**notifications/restart behavior**. This list is effectively our feature spec.
+
+🟡 Explicitly **no** parallel isolated branches, **no** worktrees, **no** sandboxes/containers. Agents
+are **sibling processes in one shared workspace** that coordinate cooperatively.
+
+---
+
+## 2. Process model — three subtypes
+
+✅ "Process" is the umbrella; three subtypes. Source:
+[docs/getting-started/concepts](https://soloterm.com/docs/getting-started/concepts).
+
+| Subtype | What | Lifecycle traits |
+|---------|------|------------------|
+| **Command** | named shell command (`npm run dev`, a worker) | trust-gated; auto-start; auto-restart; file-watch; from `solo.yml` **or** local app state |
+| **Agent** | an AI CLI in an interactive terminal (Claude Code, Codex, Gemini, Amp, OpenCode…) | has **activity/attention state** (idle detection, §6); "Resume last session" |
+| **Terminal** | a plain interactive shell | freeform typing |
+
+✅ A **project** is a filesystem folder (repo/workspace root) that (1) sets the working dir, (2)
+watches/syncs `solo.yml`, (3) auto-detects project type to suggest commands. Free tier (not relevant to
+us — D3): 4 projects / 20 processes.
+
+---
+
+## 3. `solo.yml` — exact schema
+
+✅ Source: [docs/projects/solo-yml](https://soloterm.com/docs/projects/solo-yml). Verbatim example:
+
+```yaml
+name: storefront                 # optional: display name on first load
+icon: assets/project-icon.png    # optional: image path relative to project root
+processes:                       # REQUIRED: a MAP keyed by process name (not a list)
+  Web:
+    command: npm run dev         # required: shell command
+    working_dir: null            # optional: path relative to project root
+    auto_start: false            # optional (default ❓ — see gap below)
+    auto_restart: false          # optional, default false
+    restart_when_changed: []     # optional: glob list → file-watch restart
+    env: {}                      # optional: env key/values
+```
+
+- Top-level keys: `name`, `icon`, `processes`. Per-process: `command`, `working_dir`, `auto_start`,
+  `auto_restart`, `restart_when_changed`, `env`.
+- ✅ File size **limited to 1 MB**. Empty/comment-only file = empty config (valid).
+- ✅ **Rename detection:** a rename is recognized as an unambiguous remove/add pair with the **same
+  command string**; the row (and its trust) is preserved.
+- ❓ **`auto_start` default is NOT authoritatively documented.** The example shows `false`; one summary
+  inferred `true`. **Decision for us:** default `auto_start: true` (matches "auto-starts your stack"
+  marketing) but make it explicit in our schema docs. Do not treat Solo's default as known.
+- ❓ **No `agents:` block, no global `env:`, no readiness field in YAML.** Agents are processes/spawned
+  via execution profiles; readiness is runtime-only (§7 `wait_for_bound_port`). `env` layering
+  precedence over captured shell env (§5) is undocumented — we define it (§ decisions).
+- ❌ **NOT in YAML (lives in app state):** local (non-shared) processes, trust state, agent tool
+  definitions, window/layout. `solo.yml` carries only shared command definitions.
+
+> ⚠️ This corrects the earlier draft, which modeled `processes` as a list with `cwd`/`restart`/`ready`/
+> `visibility`. The real schema is the table above.
+
+---
+
+## 4. Lifecycle, trust & sync
+
+### Start / stop / restart
+✅ Source: [docs/commands/start-stop-restart](https://soloterm.com/docs/commands/start-stop-restart).
+- **Start** only if the command is **trusted** and within limits.
+- **Stop** stops the process, **releases any todo locks held by that process**, and removes it from
+  crash-recovery tracking.
+- **Restart** = stop + start with the latest saved command config and terminal size. Untrusted →
+  blocked.
+- ❓ SIGTERM-vs-SIGKILL ordering / grace period **not documented** (MCP calls stop "graceful"). We
+  define: SIGTERM to the process group → grace window → SIGKILL (§ Phase 3 / architecture).
+
+### Auto-start
+✅ Source: [docs/commands/auto-start](https://soloterm.com/docs/commands/auto-start). Auto-starts only
+when ALL true: it's a **command** (not terminal/agent); `auto_start` enabled; **trusted**; limits
+allow. Untrusted + auto-start → reported **blocked**, not run.
+
+### Crash auto-restart
+✅ Source: [docs/commands/auto-restart](https://soloterm.com/docs/commands/auto-restart).
+- Relaunches a **trusted** command after unexpected exit; keeps last crash output + shows a **restart
+  banner** before new output.
+- **Rate limit (concrete):** after **10 restarts in a 60-second window**, auto-restart **pauses** for
+  that command and shows an "exhausted" indicator. (No exponential backoff documented — just this gate.)
+- Disabled during app shutdown. Untrusted never auto-restarts.
+
+### File-watch auto-restart
+✅ Source: [docs/commands/file-watch-auto-restart](https://soloterm.com/docs/commands/file-watch-auto-restart).
+- Globs in `restart_when_changed`, evaluated **relative to project root**; `*` **matches across path
+  separators**; recommend explicit patterns (`src/**/*.ts`, `config/**`, `**/*.go`).
+- Watches project dir **recursively** for **create + modify**; events **debounced/coalesced** into a
+  quiet window, then a **full restart cycle** + emits a file-restart event.
+- **Command-only, trusted-only.** Empty/invalid glob list → no watcher created.
+- Independent from crash auto-restart (separate rate-limit).
+- ❓ No documented ignore-list (`.git`/`node_modules`). We add sensible default ignores.
+
+### Orphaned processes
+✅ Source: [docs/commands/orphaned-processes](https://soloterm.com/docs/commands/orphaned-processes).
+On restart after crash/force-quit, Solo prunes stale orphan records and **adopts** running orphans only
+when project path + process name + command config all match; otherwise a dialog offers **Kill / Kill
+All / Leave running**. Historical output from the disconnected window may be unrecoverable.
+
+### Trust / security
+✅ Source: [docs/commands/trust-security](https://soloterm.com/docs/commands/trust-security),
+[docs/projects/yml-change-notifications](https://soloterm.com/docs/projects/yml-change-notifications).
+- Untrusted command → **manual start, auto-start, restart, file-watch, AND crash auto-restart are all
+  blocked.**
+- Trust is **local to the machine**, scoped to **project + remembered command variant**. Renaming can
+  preserve trust; changing **command string / working_dir / env** invalidates it.
+- "**Automatically trust command changes**" setting re-trusts on sync **only** when the sync came from a
+  user action that creates/saves the command.
+- **Sync:** debounces FS events, compares **file hashes**; a sync may add/update/remove commands and
+  preserves rows on unambiguous renames; re-trust required after changes to command / working_dir /
+  auto-start / auto-restart / watch / env. **Sync updates config only — it does not auto-start or
+  restart anything.**
+
+---
+
+## 5. Shell environment & PATH
+✅ Source: [docs/environment/shell-environment](https://soloterm.com/docs/environment/shell-environment).
+- Shell resolved via `$SHELL` → passwd entry → `/bin/sh` fallback.
+- Solo runs the shell as **`-ilc env`** (interactive login), parses output, **caches 10 minutes** — so
+  version managers (nvm/rbenv/etc.) are visible. Changing startup files doesn't affect already-running
+  children.
+- On capture failure: falls back to the app's env and prepends common Homebrew paths. (On Linux we'd
+  prepend `~/.local/bin`, `/usr/local/bin`, etc.)
+- ❓ Precedence of `solo.yml` `env` over captured env undocumented → we define: per-process `env`
+  overrides captured shell env, which overrides app env.
+
+---
+
+## 6. Agents: tools, launching, idle detection
+✅ Sources: [docs/agents/setting-up-tools](https://soloterm.com/docs/agents/setting-up-tools),
+[launching-agents](https://soloterm.com/docs/agents/launching-agents),
+[idle-detection](https://soloterm.com/docs/agents/idle-detection),
+[auto-summarization](https://soloterm.com/docs/agents/auto-summarization).
+
+- **Built-in tool types:** Claude, Codex, Amp, Gemini, OpenCode, Generic (+ Copilot CLI, Kimi CLI in
+  v0.7.1). Solo does **not** install the CLIs. Per-tool config: Name, Command, Default arguments
+  (appended every launch), Tool-type mode (auto-detect/manual), Prompt mode for generic (`stdin` or
+  appended arg). **Auto-detect probes `--version`** for `claude`, `codex`, `amp`, `gemini`, `opencode`.
+- **Launching:** `Cmd+T` picker; right-click → Add agent; "Agent with flags" modal to edit flags for a
+  single launch. Agents launch in the selected project's dir; many concurrently.
+- **Idle detection (5 states): `IDLE`, `PERMISSION`, `THINKING`, `WORKING`, `ERROR`.** Heuristics differ
+  per runtime: Claude/OpenCode use visible output; Codex/Amp watch **OSC title stability**; Gemini
+  tracks OSC title status.
+- **Auto-summarization:** sends a **compact rendered-text snapshot** (not full transcript) to a
+  summarizer; Claude/Codex/Gemini use **native headless** invocations; default models `sonnet`,
+  `gpt-5-codex`, `flash-lite`; cadence 15s / 30s / 1min. Caveat: "a quiet terminal is not always
+  completed work."
+- ⚠️ Design implication: idle detection drives **timers** (fire-when-idle) and **notifications**.
+  Auto-summarization needs an LLM → for our clone it must be **optional/configurable** (use the user's
+  own agent CLI in headless mode or disable). Don't hard-require a cloud model.
+
+---
+
+## 7. MCP server — the integration surface
+✅ Sources: [docs/integrations/mcp-server](https://soloterm.com/docs/integrations/mcp-server),
+[docs/mcp-tools/overview](https://soloterm.com/docs/mcp-tools/overview) + per-category pages.
+
+- **Transport: stdio only.** "No public MCP host or port for normal clients." Clients launch Solo's
+  bundled **`mcp` helper** binary. Solo generates setup snippets for Claude Code, Cursor, Windsurf,
+  Cline, Claude Desktop. Non-default data dir → snippet includes `SOLOTERM_APP_DATA_DIR`.
+- **Identity & scope:** tools act on an **effective project scope** set by `select_project` or inferred
+  from the MCP session / bound process. Solo-launched agents auto-bind via **`bind_session_process`**
+  using the **`SOLO_PROCESS_ID`** env var Solo injects. External callers use **`register_agent`**.
+  **`whoami`** reports the resolved process/actor/scope. Binding ties **timers, locks, todo-locks,
+  scratchpad activity, and cleanup** to the right process (locks auto-release when the bound process
+  closes).
+- **Tool gating:** core groups always on when MCP enabled (Project, Services, Process, Bulk, Output,
+  Agent/Terminal, Coordination, Setup/Support). Feature groups have toggles: Scratchpads, Todos, Timers
+  inherit; **Key-Value defaults OFF**. v0.8.2 added optional **prompt-template** tools.
+
+### Full tool catalog (names ✅ documented; param schemas ❓ ours to design)
+
+- **Project:** `list_projects`, `select_project`, `get_project_status`, `get_project_stats` (CPU/mem).
+- **Services:** `services_list`, `wait_for_bound_port`.
+- **Process:** `list_processes`, `get_process_status`, `rename_process`, `select_process`,
+  `start_process`, `stop_process`, `restart_process`, `send_input` (text or raw control bytes; optional
+  `wait_ms` returns rendered tail), `close_process`.
+- **Bulk:** `start_all_commands`, `stop_all_commands`, `restart_all_commands` (trusted commands only).
+- **Output:** `get_process_output` (rendered), `get_process_raw_output` (with control sequences),
+  `search_output`, `search_raw_output`, `clear_output` (buffer only, not PTY), `flush_terminal_perf`,
+  `get_process_ports` (detected localhost ports/URLs — readiness/discovery).
+- **Agent/Terminal:** `list_agent_tools`, `spawn_process`, `spawn_agent` (alias, v0.7.1),
+  `bind_session_process`, `whoami`.
+- **Coordination:** `register_agent`, `lock_acquire`, `lock_status`, `lock_release` (project-scoped
+  **lease** locks — "signals, not ownership"; ❓ TTL/renewal undocumented).
+- **Scratchpads (~14–18):** `scratchpad_list`, `_tags_list`, `_read`, `_write` (**revision-guarded**),
+  `_rename`, `_add_tags`, `_remove_tags`, `_append`, `_clear`, `_delete`, `_archive`, `_transfer`,
+  `_save_to_file`, `_load_from_file` (+ v0.7.1 `_edit`, `_append_section`, `_tail`, `_find`). Leading H1
+  is the title; revisions prevent clobbering newer edits.
+- **Todos (~19):** `todo_create`, `_list`, `_tags_list`, `_get`, `_update`, `_add_tag`, `_remove_tag`,
+  `_transfer`, `_set_blockers`, `_add_blocker`, `_remove_blocker`, `_complete`, `_lock`, `_unlock`,
+  `_delete`, `_comment_create`, `_comment_update`, `_comment_delete`, `_comment_list`. Process-owned
+  locks release when the bound process closes.
+- **Timers (7):** `timer_set` (on fire, **`body` is delivered verbatim to the owning agent as a fresh
+  user turn**), `timer_fire_when_idle_any`, `timer_fire_when_idle_all`, `timer_cancel`, `timer_pause`,
+  `timer_resume`, `timer_list`. Require a bound owning actor. Responses include `already_idle`,
+  `waiting_on`.
+- **Key-Value (4, default off):** `kv_set`, `kv_get`, `kv_delete`, `kv_list` (project-scoped **JSON**;
+  "small structured state, not logs/long text").
+- **Setup/Support:** `help`, `submit_solo_feedback`, `setup_agent_integration` (writes Solo MCP docs
+  into `AGENTS.md` / `CLAUDE.md`).
+
+---
+
+## 8. Local HTTP API + `solo` CLI
+✅ Source: [docs/integrations/raycast-http-api](https://soloterm.com/docs/integrations/raycast-http-api),
+changelog.
+- Binds **`127.0.0.1:24678`** (port editable only while disabled; auto-fallback if taken). Mutations
+  require header **`X-Solo-Local-Auth: 1`**. CORS limited to localhost.
+- **Read:** `GET /health`, `/status`, `/processes`, `/processes/:id/ports`, `/projects`.
+- **Mutate:** `POST /processes/:id/start|stop|restart`; `POST /projects/:id/start-all|stop-all|reload|
+  start-auto|restart-running|restart-all`; `POST /focus`.
+- 🟡 A **`solo` CLI exists** and talks to this local API (v0.7.1+): version/status, process
+  list/get/start/stop/restart/rename/spawn, recent output, filter by status, delete processes, todo/
+  scratchpad workflows. (So the CLI is a thin HTTP client, not a separate engine.)
+
+---
+
+## 9. Command auto-detection
+✅ Source: [docs/projects/command-auto-detection](https://soloterm.com/docs/projects/command-auto-detection).
+Runs **only on initial project add when no `solo.yml` exists**. Reads project-root files (+ targeted
+subdir checks like Phoenix `assets/package.json`, root `.csproj`). Sources: package.json scripts
+(prioritizes `dev`/`start`/`serve`/`build`/`test`; detects Next/Nuxt/Prisma), Procfile, Make/Just/Task,
+PM2 ecosystem, turbo.json, nx.json, plus Laravel/Rust/Spring/FastAPI/Flask/Django/Rails/Go/.NET/
+Phoenix/Docker Compose. Dev servers pre-selected for auto-start/auto-restart; build/test offered
+unchecked.
+
+---
+
+## 10. UI surface (from changelog + review; imagery unverified)
+🟡 Sources: [changelog](https://soloterm.com/changelog),
+[eshlox.net review](https://eshlox.net/solo-changed-how-i-work-with-terminals), comparison pages.
+- **Left sidebar = process tree**, grouped into collapsible subgroups **Agents / Terminals / Commands**
+  (collapse state per project), drag-reorder, nested child agents, optional subprocess counts.
+- **Per-row status:** running/crashed indicator; **green = running, red = crashed**; CPU/mem; agent
+  working/idle/permission/error.
+- **Main pane:** selected process's interactive PTY (full ANSI, **GPU renderer** since v0.6.0); stopped
+  process shows an in-pane **Start** (or "Resume last session" for agents).
+- **Attention bell** in title bar; **unified unread** across sidebar/title bar/dock badge; clicking a
+  crash notification opens that terminal.
+- **Command palette** `Cmd+K`, quick actions `Cmd+P`, **jump** `Cmd+E`, attention-jump `Cmd+Shift+E`,
+  new item `Cmd+T`. Deep links **`solo://`** to projects/processes/todos/scratchpads.
+- **Scratchpads & Todos panels** with Markdown editors, search/filter/sort/archive, checkbox task lists,
+  "terminal selection → scratchpad".
+- **Trust review screen** showing command + working dir + env before approval; "Trust all commands".
+- **First launch** shows a **guided demo project**.
+- ⚠️ **Limitation:** closing Solo **stops all processes** — no detached/background persistence (unlike
+  tmux).
+
+### Keyboard shortcuts (macOS Cmd-based; we remap to Ctrl/Super on Linux)
+✅ [docs/keyboard-shortcuts/default-reference](https://soloterm.com/docs/keyboard-shortcuts/default-reference):
+`Cmd+K` palette, `Cmd+P` quick actions, `Cmd+E` jump, `Cmd+Shift+E` attention jump, `Cmd+T` new,
+`Cmd+W` close, `Cmd+,` settings, `Cmd+F` terminal search, `Cmd+Left/Right` focus sidebar/terminal,
+`Cmd+[`/`]` history, font zoom (`Cmd+=`/`-` terminal, `Cmd+Shift+=`/`-` app), `Option+1–9` project,
+`Cmd+1–9` process; sidebar arrows; header keys S/A/P/R (start-auto/all, stop-all, restart-running);
+row keys S/R/C.
+
+### Settings tabs
+✅ [docs/settings/overview](https://soloterm.com/docs/settings/overview): Appearance, Terminal,
+Notifications, Sidebar, Notes & todos, Hotkeys, Agents, Tools (default editor/terminal), MCP, Account.
+Most settings auto-save.
+
+---
+
+## 11. Distribution & versions
+🟡 Sources: [download](https://soloterm.com/download), [changelog](https://soloterm.com/changelog),
+[homepage](https://soloterm.com/).
+- macOS universal `.dmg`, "signed & notarized", ~64.9 MB download (25 MB marketing). **Tauri**, system
+  WebKit. Min macOS 11. Windows/Linux "coming soon" (Ubuntu 20.04+ target).
+- In-app **"Check for updates"**; updater backend unnamed (Tauri updater inferred ❓).
+- Latest **v0.8.2 (2026-06-05)**; fast cadence. v0.8.2 added **execution profiles** (project-level,
+  incl. Windows/WSL), **prompt templates**, "Resume last session". v0.6.0 added the **GPU renderer**.
+- 🟡 `SOLOTERM_APP_DATA_DIR` env names the app data dir. ❓ On-disk storage format for todos/
+  scratchpads/KV/locks/trust is undocumented (SQLite likely).
+
+---
+
+## 12. Confirmed gaps → our explicit decisions
+Each gap is something Solo does NOT publicly document; we choose and own the answer (cross-ref
+`03-tech-stack-and-decisions.md` and `04-engineering-architecture-and-patterns.md`):
+
+| Gap | Our decision (default) |
+|-----|------------------------|
+| `auto_start` default | `true`, documented explicitly |
+| Stop signal semantics | SIGTERM to process group → 5s grace → SIGKILL |
+| `env` precedence | process `env` > captured `-ilc` shell env > app env |
+| File-watch ignores | default-ignore `.git`, `node_modules`, `target`, `dist`, `.venv` |
+| Lease lock TTL | explicit TTL + renew; auto-release on bound-process close |
+| Auto-summarization model | optional; use user's configured agent CLI headless, else disabled |
+| MCP param schemas | clean-room JSON Schemas, documented per tool |
+| Storage layer | **SQLite** (todos/scratchpads/KV/locks/trust); runtime process state in memory |
+| Terminfo / `TERM` | `TERM=xterm-256color` (no custom terminfo) |
+
+---
+
+## 13. Source index
+Primary: [soloterm.com/docs](https://soloterm.com/docs) (full tree via
+[sitemap.xml](https://soloterm.com/sitemap.xml)) · [changelog](https://soloterm.com/changelog) ·
+[blog/the-agentic-metaharness](https://soloterm.com/blog/the-agentic-metaharness) ·
+[agents](https://soloterm.com/agents) · comparison/alternatives pages ·
+[GitHub org soloterm](https://github.com/soloterm) (note: `soloterm/solo` there is the unrelated
+**Laravel PHP TUI**, not this app — the macOS app is closed-source). Independent:
+[eshlox.net review](https://eshlox.net/solo-changed-how-i-work-with-terminals),
+[YouTube "vogel" review](https://www.youtube.com/watch?v=uHA9cHuaJ4E) (metadata only).

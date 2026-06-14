@@ -1,0 +1,27 @@
+# ---- Rust ----
+/target
+**/target/
+
+# ---- Node / frontend ----
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# ---- Tauri ----
+# build output lives in src-tauri/target → covered by **/target/
+**/gen/schemas/
+
+# ---- impeccable (design skill) runtime / generated ----
+.impeccable/
+
+# ---- Claude Code local (machine-specific) ----
+.claude/settings.local.json
+
+# ---- OS / editor cruft ----
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
