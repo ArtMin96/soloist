@@ -32,6 +32,11 @@ use super::registry::Registry;
 /// the *signalling* is the adapter's job.
 const STOP_GRACE: Duration = Duration::from_secs(5);
 
+/// How long the actor waits for the read loop's final, in-flight bytes after the child
+/// has exited before giving up. Bounded so a forked grandchild that keeps the PTY slave
+/// open (no EOF) cannot wedge the actor on shutdown.
+const DRAIN_GRACE: Duration = Duration::from_millis(100);
+
 /// A message to a running actor.
 pub(crate) enum ActorMsg {
     /// Stop the process: graceful SIGTERM → grace → SIGKILL, then the actor ends.
@@ -170,8 +175,10 @@ async fn run(
             io,
         } = spawned;
         let pgid = pid.map(|raw| raw as i32);
+        // Record the running group before announcing Running, so a crash immediately
+        // after the announcement still leaves a reconcilable runtime-state record.
+        record_orphan(&runtime, &identity, &launch, pgid).await;
         advance(&registry, &bus, id, &mut status, ProcStatus::Running, None);
-        record_orphan(&runtime, &identity, &launch, pgid);
 
         // Once the child closes its output the branch is disabled (its `recv` would
         // otherwise return `None` forever and busy-spin the select).
@@ -198,8 +205,8 @@ async fn run(
 
         match outcome {
             Outcome::Exited(exit_status) => {
-                drain_output(&mut output, &recorder, id, &bus);
-                forget_orphan(&runtime, pgid);
+                drain_output(&mut output, &recorder, id, &bus, clock.as_ref()).await;
+                forget_orphan(&runtime, pgid).await;
                 let (to, code) = classify_exit(exit_status);
                 advance(&registry, &bus, id, &mut status, to, code);
                 locks.release_all(id);
@@ -208,8 +215,8 @@ async fn run(
             Outcome::Stop => {
                 advance(&registry, &bus, id, &mut status, ProcStatus::Stopping, None);
                 graceful_stop(control, exit, clock.as_ref()).await;
-                drain_output(&mut output, &recorder, id, &bus);
-                forget_orphan(&runtime, pgid);
+                drain_output(&mut output, &recorder, id, &bus, clock.as_ref()).await;
+                forget_orphan(&runtime, pgid).await;
                 advance(&registry, &bus, id, &mut status, ProcStatus::Stopped, None);
                 locks.release_all(id);
                 return;
@@ -224,8 +231,8 @@ async fn run(
                     None,
                 );
                 graceful_stop(control, exit, clock.as_ref()).await;
-                drain_output(&mut output, &recorder, id, &bus);
-                forget_orphan(&runtime, pgid);
+                drain_output(&mut output, &recorder, id, &bus, clock.as_ref()).await;
+                forget_orphan(&runtime, pgid).await;
                 advance(&registry, &bus, id, &mut status, ProcStatus::Starting, None);
                 // Loop to respawn a fresh child under the same actor (and buffers).
             }
@@ -236,26 +243,31 @@ async fn run(
 /// Records the running process group in the runtime-state file so a leftover from a
 /// crash or force-quit can be reconciled on the next launch. Best-effort: a failed
 /// write must not take down the actor.
-fn record_orphan(
+async fn record_orphan(
     runtime: &Arc<dyn RuntimeState>,
     identity: &OrphanIdentity,
     launch: &SpawnSpec,
     pgid: Option<i32>,
 ) {
     if let Some(pgid) = pgid {
-        let _ = runtime.record(&OrphanRecord {
+        let runtime = runtime.clone();
+        let record = OrphanRecord {
             project_root: identity.project_root.clone(),
             name: identity.name.clone(),
             command: launch.command.clone(),
             pgid,
-        });
+        };
+        // The runtime-state write touches the filesystem; run it off the async runtime
+        // so a slow disk never stalls the supervisor's worker thread.
+        let _ = tokio::task::spawn_blocking(move || runtime.record(&record)).await;
     }
 }
 
-/// Drops the runtime-state record for a reaped process group.
-fn forget_orphan(runtime: &Arc<dyn RuntimeState>, pgid: Option<i32>) {
+/// Drops the runtime-state record for a reaped process group, off the async runtime.
+async fn forget_orphan(runtime: &Arc<dyn RuntimeState>, pgid: Option<i32>) {
     if let Some(pgid) = pgid {
-        let _ = runtime.forget(pgid);
+        let runtime = runtime.clone();
+        let _ = tokio::task::spawn_blocking(move || runtime.forget(pgid)).await;
     }
 }
 
@@ -271,16 +283,28 @@ fn publish_output(recorder: &Recorder, id: ProcessId, bus: &EventBus, chunk: Vec
     }
 }
 
-/// Drains any output buffered at a transition so a process's final bytes (e.g. a crash
-/// message) are not lost when its actor winds down.
-fn drain_output(
+/// Drains the read loop's remaining output as the actor winds down so a process's final
+/// bytes (e.g. a crash message) are not lost. Prefers buffered chunks and waits for the
+/// in-flight tail until the channel closes (EOF — every byte captured), but is bounded
+/// by [`DRAIN_GRACE`] so a forked grandchild holding the PTY slave open cannot wedge it.
+async fn drain_output(
     output: &mut mpsc::Receiver<Vec<u8>>,
     recorder: &Recorder,
     id: ProcessId,
     bus: &EventBus,
+    clock: &dyn Clock,
 ) {
-    while let Ok(chunk) = output.try_recv() {
-        publish_output(recorder, id, bus, chunk);
+    let deadline = clock.sleep(DRAIN_GRACE);
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            biased;
+            chunk = output.recv() => match chunk {
+                Some(chunk) => publish_output(recorder, id, bus, chunk),
+                None => break,
+            },
+            _ = &mut deadline => break,
+        }
     }
 }
 

@@ -22,7 +22,7 @@ use crate::ids::ProcessId;
 use crate::ports::PtySize;
 use crate::sync::lock;
 
-use buffers::TerminalBuffers;
+use buffers::{ScrollbackBudget, TerminalBuffers};
 
 /// Input channel depth: typed bytes and resizes buffered before the sender awaits.
 /// Bounded so a paste burst applies backpressure instead of growing without limit.
@@ -107,10 +107,13 @@ impl Recorder {
 
 /// The registry of live terminal channels, keyed by process. Cloneable; all clones
 /// share one map. An entry persists after its process stops so a stopped process's
-/// scrollback stays readable; only its input/live halves go dead.
+/// scrollback stays readable; only its input/live halves go dead. A single
+/// [`ScrollbackBudget`] shared by every channel bounds the aggregate raw scrollback
+/// across all processes.
 #[derive(Clone, Default)]
 pub(crate) struct Terminals {
     inner: Arc<Mutex<HashMap<ProcessId, TerminalChannel>>>,
+    budget: Arc<ScrollbackBudget>,
 }
 
 impl Terminals {
@@ -119,7 +122,7 @@ impl Terminals {
     pub(crate) fn open(&self, id: ProcessId) -> ActorTerminal {
         let (input_tx, input_rx) = mpsc::channel(INPUT_CAPACITY);
         let (live_tx, _live_rx) = broadcast::channel(LIVE_CAPACITY);
-        let buffers = Arc::new(Mutex::new(TerminalBuffers::default()));
+        let buffers = Arc::new(Mutex::new(TerminalBuffers::shared(self.budget.clone())));
         lock(&self.inner).insert(
             id,
             TerminalChannel {

@@ -18,7 +18,7 @@
 //!   one reaps the child and resolves its exit future. Both end with the process.
 
 use std::io::{Read, Write};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use nix::errno::Errno;
@@ -119,8 +119,8 @@ impl ProcessSpawner for PtyProcessSpawner {
             .take_writer()
             .map_err(|err| SpawnError::Spawn(err.to_string()))?;
         let io = Box::new(MasterIo {
-            master: Mutex::new(pair.master),
-            writer: Mutex::new(writer),
+            master: Arc::new(Mutex::new(pair.master)),
+            writer: Arc::new(Mutex::new(writer)),
         });
 
         Ok(Spawned {
@@ -158,33 +158,56 @@ fn drain_reader(mut reader: Box<dyn Read + Send>, output: mpsc::Sender<Vec<u8>>)
     }
 }
 
-/// Writes input to and resizes a child's PTY through its master.
+/// Writes input to and resizes a child's PTY through its master. Both handles are
+/// shared (`Arc`) so the blocking operations can be moved onto the blocking-thread pool.
 struct MasterIo {
-    master: Mutex<Box<dyn MasterPty + Send>>,
-    writer: Mutex<Box<dyn Write + Send>>,
+    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
 }
 
 #[async_trait]
 impl PtyIo for MasterIo {
     async fn write(&self, data: &[u8]) -> Result<(), SpawnError> {
-        let mut writer = self
-            .writer
-            .lock()
-            .map_err(|_| SpawnError::Signal("pty writer poisoned".into()))?;
-        writer
-            .write_all(data)
-            .and_then(|()| writer.flush())
-            .map_err(|err| SpawnError::Signal(err.to_string()))
+        // A PTY master write blocks when the child stops reading its input, so run it
+        // off the async runtime — a stuck write must never stall the owning actor's loop.
+        let writer = self.writer.clone();
+        let data = data.to_vec();
+        run_blocking(move || {
+            let mut writer = writer
+                .lock()
+                .map_err(|_| SpawnError::Signal("pty writer poisoned".into()))?;
+            writer
+                .write_all(&data)
+                .and_then(|()| writer.flush())
+                .map_err(|err| SpawnError::Signal(err.to_string()))
+        })
+        .await
     }
 
     async fn resize(&self, size: PtySize) -> Result<(), SpawnError> {
-        let master = self
-            .master
-            .lock()
-            .map_err(|_| SpawnError::Signal("pty master poisoned".into()))?;
-        master
-            .resize(to_pt_size(size))
-            .map_err(|err| SpawnError::Signal(err.to_string()))
+        let master = self.master.clone();
+        let size = to_pt_size(size);
+        run_blocking(move || {
+            let master = master
+                .lock()
+                .map_err(|_| SpawnError::Signal("pty master poisoned".into()))?;
+            master
+                .resize(size)
+                .map_err(|err| SpawnError::Signal(err.to_string()))
+        })
+        .await
+    }
+}
+
+/// Runs a blocking PTY operation on the blocking-thread pool, flattening the join error
+/// into the operation's own error type.
+async fn run_blocking<F>(op: F) -> Result<(), SpawnError>
+where
+    F: FnOnce() -> Result<(), SpawnError> + Send + 'static,
+{
+    match tokio::task::spawn_blocking(op).await {
+        Ok(result) => result,
+        Err(join) => Err(SpawnError::Signal(join.to_string())),
     }
 }
 
@@ -285,5 +308,23 @@ fn signal_number(name: &str) -> i32 {
             .strip_prefix("Signal ")
             .and_then(|n| n.trim().parse().ok())
             .unwrap_or(UNKNOWN_SIGNAL),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signal_descriptions_map_to_their_numbers() {
+        // Common signal descriptions map to their libc numbers (locale-independent here
+        // because the description is passed directly, not derived from the host locale).
+        assert_eq!(signal_number("Terminated"), libc::SIGTERM);
+        assert_eq!(signal_number("Killed"), libc::SIGKILL);
+        assert_eq!(signal_number("Interrupt"), libc::SIGINT);
+        // The generic "Signal N" fallback is parsed; an unrecognised (e.g. localized)
+        // description degrades to the sentinel, never panicking.
+        assert_eq!(signal_number("Signal 7"), 7);
+        assert_eq!(signal_number("beendet"), UNKNOWN_SIGNAL);
     }
 }

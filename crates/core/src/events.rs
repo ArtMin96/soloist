@@ -54,7 +54,8 @@ pub enum DomainEvent {
     /// A process rang the terminal bell (`BEL`). Drives attention notifications.
     TerminalBell { id: ProcessId },
     /// Reconciliation found leftover process groups from a previous run that match no
-    /// known command, awaiting a user Kill / Kill All / Leave decision (Phase-5 UI).
+    /// known command, awaiting a user Kill / Kill All / Leave decision surfaced by the
+    /// UI. The core only reports them; it neither kills nor keeps them on its own.
     OrphansFound { orphans: Vec<OrphanInfo> },
 }
 

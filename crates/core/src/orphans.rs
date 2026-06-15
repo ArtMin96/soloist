@@ -13,7 +13,7 @@ use crate::ids::ProcessId;
 use crate::ports::OrphanRecord;
 
 /// A leftover process group surfaced to the user for a Kill / Kill All / Leave running
-/// decision. The dialog is the Phase-5 UI; the core only reports the candidate.
+/// decision. The dialog lives in the UI; the core only reports the candidate.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct OrphanInfo {
     pub name: String,

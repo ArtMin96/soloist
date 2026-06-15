@@ -413,6 +413,12 @@ impl Supervisor {
                 OrphanFate::Adopt { record, target } => {
                     if self.adopt_orphan(target, record.pgid) {
                         report.adopted.push(target);
+                    } else {
+                        // The target was already claimed by another record with the
+                        // same identity (a rare duplicate): surface this still-live
+                        // group for a user decision rather than leave it running and
+                        // unattended.
+                        surfaced.push(OrphanInfo::from(&record));
                     }
                 }
                 OrphanFate::Surface(record) => surfaced.push(OrphanInfo::from(&record)),
@@ -1025,5 +1031,33 @@ mod tests {
         assert!(report.adopted.is_empty());
         assert!(report.surfaced.is_empty());
         assert!(h.runtime.records().is_empty(), "stale record pruned");
+    }
+
+    #[tokio::test]
+    async fn reconcile_surfaces_a_duplicate_that_loses_the_adoption() {
+        let mut h = harness(FakeSpawner::exits_on_terminate());
+        // One registered command, but two live leftover groups with the same identity.
+        let spec = command_spec("npm run dev", false);
+        let id = h.sup.register(Registration::command(
+            PROJECT,
+            Path::new("/p"),
+            "Web",
+            &spec,
+        ));
+        h.runtime.seed(orphan_record("Web", "npm run dev", 555));
+        h.runtime.seed(orphan_record("Web", "npm run dev", 556));
+        h.orphans.set_alive(555);
+        h.orphans.set_alive(556);
+
+        // The command can adopt only one group; the duplicate is surfaced for a user
+        // decision rather than silently left running and unattended.
+        let report = h.sup.reconcile_orphans();
+        assert_eq!(report.adopted, vec![id]);
+        assert_eq!(
+            report.surfaced.len(),
+            1,
+            "the second live group is surfaced"
+        );
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
     }
 }

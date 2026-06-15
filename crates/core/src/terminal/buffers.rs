@@ -5,8 +5,15 @@
 //! replayed verbatim to a terminal emulator on attach and exposes control sequences;
 //! the **rendered** buffer is the plain-text projection for logs, search, and
 //! `get_process_output`. Keeping one read loop drive both is what avoids divergence.
+//!
+//! Memory is bounded twice: each process's raw scrollback has its own byte cap, and a
+//! [`ScrollbackBudget`] shared across every process caps the *aggregate* raw bytes, so a
+//! fleet of chatty processes cannot grow memory without limit even when each stays under
+//! its own cap.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use vte::Parser;
 
@@ -19,32 +26,101 @@ use super::{LogLine, RenderedScreen, TerminalSignal};
 const RAW_SCROLLBACK_BYTES: usize = 256 * 1024;
 /// Default rendered scrollback cap in lines: the logs/search history depth.
 const LOG_LINES: usize = 5_000;
+/// Default aggregate raw-scrollback cap across *all* processes. Sized so a typical
+/// fleet (each well under its own 256 KB cap) never trims, while an extreme number of
+/// chatty processes is still bounded — the global ceiling the longevity rules require.
+const GLOBAL_RAW_SCROLLBACK_BYTES: usize = 16 * 1024 * 1024;
+
+/// A counter of total raw scrollback bytes across every process, with a global cap.
+/// Shared (behind an `Arc`) by every [`TerminalBuffers`] a supervisor creates: each
+/// buffer adds the bytes it retains and releases them on drop, and sheds its own oldest
+/// bytes when the aggregate is over budget. Lock-free — a relaxed atomic is enough for a
+/// soft memory ceiling.
+pub(crate) struct ScrollbackBudget {
+    total: AtomicUsize,
+    cap: usize,
+}
+
+impl ScrollbackBudget {
+    /// A budget capping the aggregate raw scrollback at `cap` bytes (clamped to ≥ 1).
+    pub(crate) fn new(cap: usize) -> Self {
+        Self {
+            total: AtomicUsize::new(0),
+            cap: cap.max(1),
+        }
+    }
+
+    fn add(&self, n: usize) {
+        self.total.fetch_add(n, Ordering::Relaxed);
+    }
+
+    fn sub(&self, n: usize) {
+        self.total.fetch_sub(n, Ordering::Relaxed);
+    }
+
+    /// How many bytes the aggregate currently exceeds the global cap by (0 if under).
+    fn overflow(&self) -> usize {
+        self.total.load(Ordering::Relaxed).saturating_sub(self.cap)
+    }
+}
+
+impl Default for ScrollbackBudget {
+    fn default() -> Self {
+        Self::new(GLOBAL_RAW_SCROLLBACK_BYTES)
+    }
+}
 
 /// A byte buffer capped at `cap` bytes that drops the oldest bytes once exceeded — the
-/// verbatim, escape-sequence-preserving record of what a process emitted.
+/// verbatim, escape-sequence-preserving record of what a process emitted. It also
+/// accounts its retained bytes against a shared [`ScrollbackBudget`], shedding more of
+/// its own oldest bytes when the global aggregate is over budget.
 struct RawScrollback {
     cap: usize,
     bytes: VecDeque<u8>,
+    budget: Arc<ScrollbackBudget>,
 }
 
 impl RawScrollback {
-    fn new(cap: usize) -> Self {
+    fn new(cap: usize, budget: Arc<ScrollbackBudget>) -> Self {
         Self {
             cap: cap.max(1),
             bytes: VecDeque::new(),
+            budget,
         }
     }
 
     fn extend(&mut self, data: &[u8]) {
         self.bytes.extend(data.iter().copied());
+        self.budget.add(data.len());
+        // This process's own cap: drop the oldest bytes beyond its ceiling.
         if self.bytes.len() > self.cap {
-            let excess = self.bytes.len() - self.cap;
-            self.bytes.drain(..excess);
+            self.drop_front(self.bytes.len() - self.cap);
         }
+        // Global cap: when the aggregate across all processes is over budget, the
+        // writing buffer sheds its oldest bytes until the total is back under.
+        let overflow = self.budget.overflow().min(self.bytes.len());
+        if overflow > 0 {
+            self.drop_front(overflow);
+        }
+    }
+
+    /// Drops the `n` oldest bytes, keeping the shared budget in step.
+    fn drop_front(&mut self, n: usize) {
+        self.bytes.drain(..n);
+        self.budget.sub(n);
     }
 
     fn to_vec(&self) -> Vec<u8> {
         self.bytes.iter().copied().collect()
+    }
+}
+
+impl Drop for RawScrollback {
+    fn drop(&mut self) {
+        // Release this process's retained bytes from the shared budget when its
+        // terminal buffers go away (e.g. replaced on a fresh start), so the aggregate
+        // reflects only live buffers.
+        self.budget.sub(self.bytes.len());
     }
 }
 
@@ -62,21 +138,32 @@ pub(crate) struct TerminalBuffers {
 
 impl Default for TerminalBuffers {
     fn default() -> Self {
-        Self::new(RAW_SCROLLBACK_BYTES, LOG_LINES)
+        // A standalone budget — for unit tests that exercise one buffer in isolation.
+        Self::new(
+            RAW_SCROLLBACK_BYTES,
+            LOG_LINES,
+            Arc::new(ScrollbackBudget::default()),
+        )
     }
 }
 
 impl TerminalBuffers {
-    /// Buffers with explicit raw-byte and rendered-line caps. The defaults cover the
-    /// production path; tests use small caps to exercise eviction.
-    pub(crate) fn new(raw_cap: usize, log_cap: usize) -> Self {
+    /// Buffers with explicit raw-byte and rendered-line caps over a shared budget. The
+    /// defaults cover the production path; tests use small caps to exercise eviction.
+    pub(crate) fn new(raw_cap: usize, log_cap: usize, budget: Arc<ScrollbackBudget>) -> Self {
         Self {
-            raw: RawScrollback::new(raw_cap),
+            raw: RawScrollback::new(raw_cap, budget),
             log: Ring::new(log_cap),
             line: Vec::new(),
             cursor: 0,
             parser: Parser::new(),
         }
+    }
+
+    /// Production buffers: default per-process caps, sharing the supervisor-wide raw
+    /// scrollback `budget` so total memory across all processes is bounded too.
+    pub(crate) fn shared(budget: Arc<ScrollbackBudget>) -> Self {
+        Self::new(RAW_SCROLLBACK_BYTES, LOG_LINES, budget)
     }
 
     /// Feeds a chunk of raw PTY bytes through both buffers, returning the semantic
@@ -120,6 +207,16 @@ impl TerminalBuffers {
 mod tests {
     use super::*;
 
+    /// Buffers over an effectively unbounded global budget, so a test exercises the
+    /// per-process caps in isolation.
+    fn buffers(raw_cap: usize, log_cap: usize) -> TerminalBuffers {
+        TerminalBuffers::new(
+            raw_cap,
+            log_cap,
+            Arc::new(ScrollbackBudget::new(usize::MAX)),
+        )
+    }
+
     fn ingest(buffers: &mut TerminalBuffers, bytes: &[u8]) -> Vec<TerminalSignal> {
         buffers.ingest(bytes)
     }
@@ -147,7 +244,7 @@ mod tests {
     #[test]
     fn the_log_ring_never_exceeds_its_cap() {
         // A tiny rendered cap so eviction is observable.
-        let mut b = TerminalBuffers::new(64 * 1024, 3);
+        let mut b = buffers(64 * 1024, 3);
         for n in 0..10 {
             ingest(&mut b, format!("line {n}\n").as_bytes());
         }
@@ -163,19 +260,57 @@ mod tests {
 
     #[test]
     fn the_raw_scrollback_never_exceeds_its_byte_cap() {
-        let mut b = TerminalBuffers::new(8, 5_000);
+        let mut b = buffers(8, 5_000);
         ingest(&mut b, b"0123456789");
         // Capped to the most recent 8 bytes.
         assert_eq!(b.raw(), b"23456789".to_vec());
     }
 
     #[test]
+    fn the_global_budget_bounds_total_raw_bytes_across_buffers() {
+        let budget = Arc::new(ScrollbackBudget::new(16));
+        let mut a = TerminalBuffers::new(1024, 5_000, budget.clone());
+        let mut b = TerminalBuffers::new(1024, 5_000, budget.clone());
+        // Neither hits its own 1 KB cap, but the shared 16-byte global cap forces the
+        // writers to shed oldest bytes so the aggregate never exceeds it.
+        ingest(&mut a, &[b'a'; 10]);
+        ingest(&mut b, &[b'b'; 10]);
+        assert!(
+            a.raw().len() + b.raw().len() <= 16,
+            "aggregate raw bytes stay within the global budget"
+        );
+    }
+
+    #[test]
+    fn dropping_a_buffer_frees_its_bytes_from_the_global_budget() {
+        let budget = Arc::new(ScrollbackBudget::new(1_000));
+        let mut a = TerminalBuffers::new(1024, 5_000, budget.clone());
+        ingest(&mut a, &[b'x'; 100]);
+        assert_eq!(budget.total.load(Ordering::Relaxed), 100);
+        drop(a);
+        assert_eq!(
+            budget.total.load(Ordering::Relaxed),
+            0,
+            "a dropped buffer releases its bytes"
+        );
+    }
+
+    #[test]
     fn an_osc_title_and_a_bell_surface_as_signals() {
         let mut b = TerminalBuffers::default();
+        // OSC title set (BEL-terminated), printable text, then a standalone bell.
         let signals = ingest(&mut b, b"\x1b]0;my title\x07ding\x07");
         assert!(signals
             .iter()
             .any(|s| matches!(s, TerminalSignal::Title(t) if t == "my title")));
-        assert!(signals.iter().any(|s| matches!(s, TerminalSignal::Bell)));
+        // Exactly one bell: the OSC's BEL terminator is consumed as the string
+        // terminator, not rung; only the standalone BEL after "ding" rings.
+        assert_eq!(
+            signals
+                .iter()
+                .filter(|s| matches!(s, TerminalSignal::Bell))
+                .count(),
+            1
+        );
     }
 }
