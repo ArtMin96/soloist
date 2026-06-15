@@ -9,24 +9,40 @@
 
 ## Current state
 
-- **Overall:** **Phase 3 (Process Supervisor, C2) — `In progress`. The B1–B7 core slice + the Phase-2
-  runtime deferrals (A2, A6) are code-complete and headless-verified; B8 (orphan adoption) and Task 4
-  (output capture/log ring) are deferred to the next Phase-3 session** (the user chose "Core first" to
-  give B8 dedicated test time). Built on the Phase 1 actor + Phase 2 C1: a real `Supervisor` (registry,
-  mailbox-driven actor with `Stop`/`Restart`, status FSM, graceful SIGTERM→5s→SIGKILL on the **process
-  group**, exit classification, panic isolation), the **trust gate enforced in core** on
-  start/restart/bulk, bulk ops (start_all/stop_all/restart_running), the stop→lock-release hook, and
-  login-shell execution (`$SHELL -lc`) honoring `working_dir`/`env`/`auto_start`. **Phase 3 PR
-  reviewed via `REVIEW-PROMPT.md` and all findings applied** (shutdown wired to the Tauri exit
-  event; atomic start-claim; passwd shell fallback; comment/doc nits). `just lint && just test`
-  green: **77 tests** (core 56 / pty-integration 5 / store 10 / UI 6).
-- **Active phase:** **Phase 3 (Process Supervisor).** Status `In progress` (B1–B7 done-pending-verify;
-  B8 + output capture remain).
-- **Phase 2:** `Done — pending verify` — its runtime deferrals A2/A6 are now closed in Phase 3.
+- **Overall:** **Phase 4 (PTY & Terminal I/O, C3) — `Done — pending verify`.** Real pseudo-terminals
+  replace Phase 3's null stdio: each process runs `$SHELL -lc <command>` on the **slave** side of a PTY
+  (`portable-pty`), so children see a real terminal (`isatty`) and behave interactively (colours, cursor
+  control, agent TUIs). New core context **C3** (`crates/core/terminal/`) maintains, from one read
+  stream, a bounded **raw** byte scrollback (256 KB) **and** a bounded **rendered** line buffer
+  (5,000-line `Ring<LogLine>`) via a `vte` parser — this **folds in Phase 3's deferred Task 4** (output
+  capture), built once over the PTY instead of throwaway pipe capture. It surfaces OSC **title** +
+  **bell** as `DomainEvent`s and streams live raw bytes over a per-process broadcast. The `Supervisor`
+  gains `write_stdin` / `resize` / `attach_pty` (atomic scrollback replay + live) / `pty_scrollback` /
+  `rendered`; the actor drains PTY output → buffers/events and routes input → PTY. The `pty` adapter was
+  rewritten over `portable-pty` (`TokioProcessSpawner` → **`PtyProcessSpawner`**), keeping the Phase-3
+  process-group reaping contract. **Phase 3's B8 (orphan adoption) also landed this session** (see below).
+  `just lint && just test` green: **98 tests** (core 71 / pty 9 / store 12 / UI 6). All v1 rows **C1–C7,
+  C9** verified headless on a real PTY (`test -t 1`, `read x`, `tput cols`, OSC title/bell, raw-vs-rendered,
+  attach replay); **B8** verified via core reconcile/adopt tests + real-adapter tests.
+- **Active phase:** **Phase 4 (PTY & Terminal I/O)** — `Done — pending verify`. The pending piece is the
+  **xterm.js terminal pane** (parity **C8** `later` + phase-04 Task 9), deferred to Phase 5 via
+  `/impeccable` (matches the Phase 2/3 frontend-deferral rhythm). **Phase 3 is now also `Done — pending
+  verify`** — B8 (orphan adoption) landed this session, so B1–B8 are complete. Next up is **Phase 5
+  (Dashboard UI)**.
+- **Phase 3:** **`Done — pending verify`** — **B8 (orphan adoption) landed this session**: runtime-state
+  file recording (record on Running / forget on reap) + `reconcile_orphans()` (pure adopt/surface/prune
+  classification) + adoption via a *synthesized* `Spawned` over the existing pgid (liveness-poll exit +
+  killpg control + closed PTY), so an adopted process runs through the **same** actor — all headless-tested
+  on fakes + the mock clock. Real adapters: `FileRuntimeState` (store, atomic JSON file) + `PgidOrphanControl`
+  (pty, killpg). B1–B8 + A2/A6 delivered + tested. **Pending verify:** the app's reconcile-on-launch *call*
+  (wired in Phase 5 after config-registration, so matches are found) + the in-GUI bits (Phase 5 Playwright);
+  B7's "clears crash tracking" half still waits on the Phase-6 restart policy.
+- **Phase 2:** `Done — pending verify` — its runtime deferrals A2/A6 closed in Phase 3.
 - **Phase 1:** still `Done — pending verify` — its one open step is the **manual in-GUI Start/Stop
-  click** (`just dev`); the demo now routes through the real supervisor (an ungated terminal running
-  `sleep 60`), so the click-through path is unchanged and still valid to confirm.
-- **Last session:** 2026-06-15 — built Phase 3 / context C2 (B1–B7 + A2/A6); details under "Decisions / changes".
+  click** (`just dev`); the demo now runs an ungated terminal (`sleep 60`) on a **real PTY** through the
+  supervisor, so the click-through path is unchanged and still valid to confirm.
+- **Last session:** 2026-06-15 — built Phase 4 / context C3 (C1–C7, C9 + folded Task 4); details under
+  "Decisions / changes".
 
 ---
 
@@ -44,6 +60,13 @@
 - **`Cargo.lock` is load-bearing — do NOT run a bare `cargo update`.** It pins `brotli-decompressor`
   **5.0.0** + `alloc-stdlib` **0.2.2** to dodge an `alloc-no-stdlib` 2↔3 conflict in the Tauri tree
   (upstream brotli 8.0.3 bug). CI uses `--locked`. Unpin only once brotli fixes it upstream.
+- **PTY adapter = `portable-pty` 0.9 (blocking I/O → 2 OS threads per *running* process):** one blocking
+  thread drains the master into a bounded channel (backpressure), one reaps the child + resolves the exit
+  future; both are bounded by the actor's lifetime (the actor drops the output receiver on stop). Correct
+  and leak-free, but a **footprint item to revisit in Phase 13** for "hundreds of processes" (could move
+  reads to `tokio::AsyncFd` + `try_wait` polling to drop the threads). New deps this phase: `vte` 0.15
+  (core, pure ANSI parser — dep-guard still green) + `portable-pty` 0.9 (pty adapter). `Cargo.lock` brotli
+  pins unchanged.
 - **Frontend gotchas:** Vite **8** (oxc bundler — use a boolean `minify`, not `"esbuild"`); React **19**;
   TS **6** (use `paths` with **no `baseUrl`**); Tailwind **v4** + shadcn (radix-nova, OKLCH tokens,
   `@/*` alias); ESLint **10** flat config (register `react-hooks`/`react-refresh` as plugin objects —
@@ -67,8 +90,8 @@ Status vocabulary: `Not started` · `In progress` · `Done — pending verify` �
 | 0 | Foundations (workspace, CI, `.deb` build) | **Verified** | 8-crate workspace builds; `just lint` + `just test` green (clippy -D warnings, rustfmt, ESLint, Prettier, tsc, vitest 2/2, Rust placeholder tests); dependency-direction guard passes (detection verified against `soloist-app`); `Soloist_0.1.0_amd64.deb` (2.3 MB) builds; app launches on a real desktop and renders `app_info` → "version 0.1.0" (user-confirmed). Clean-container dpkg-install smoke (Ubuntu 22.04) now run: install + `Soloist.desktop` + binary OK, and it surfaced that **host-built** debs need glibc 2.39+ (this host is 2.43) so they don't run on 22.04 — distributable debs are the CI (22.04) artifact. CI `bundle` builds the `.deb`; new CI `smoke` job installs + `ldd`-checks + Xvfb-launches it on 22.04. Container *GUI launch* on a 22.04-built artifact still to be confirmed (the host-built deb is glibc-incompatible with 22.04 by design). |
 | 1 | Walking skeleton (ports/adapters + event bus) | **Done — pending verify** | Ports (`ProcessSpawner`/`Clock`/`Store`/`EventSink` + `FileWatcher`/`Notifier`/`Summarizer` stubs), `DomainEvent` broadcast bus, `Facade` (C8), supervised process actor (FSM-driven; clock-driven SIGTERM→grace→SIGKILL; panic-isolated→`Crashed`), real `TokioProcessSpawner` (fresh pgroup + `nix::killpg`) + SQLite `Store` (WAL + `user_version` migration + `meta`). Tauri command/event wiring + reusable debug panel. **Evidence:** 10 core + 2 store + 3 pty(integration) + 6 UI tests green; `just lint && just test` green; K7 guard green. **Pending:** in-GUI Start/Stop click (Playwright → Phase 5). |
 | 2 | Config & projects (real `solo.yml`, trust, sync, detect) | **Done — pending verify** | Context C1 built headless on the skeleton. `crates/core/config/{model,load,diff,sync}` (serde `SoloYml`/`ProcessSpec`, `deny_unknown_fields`, `IndexMap` order, documented defaults; total `load`/`parse` w/ 1 MB cap + empty/comment-only = empty + typed `ConfigError`; `ConfigSync` add/update/remove/**rename** diff; `ConfigEngine` content-hash sync that flags `requires_trust` and emits `DomainEvent::ConfigChanged` — **owns no spawner, starts nothing**), `core/hash` (SHA-256 `Hash` + length-prefixed variant hash), `core/trust` (`TrustStore`/`Trust`), `core/projects` (`Projects`, canonical-root identity), `core/debounce` (Clock-driven). `crates/store` grown to the repository pattern (`meta`/`projects`/`trust` modules + migration **v2**: `projects`/`trust` tables, FK cascade) implementing `ProjectRepo`/`TrustRepo`. **v1 evidence:** A1/A3/A4 (`config/load` tests), A7 (`trust` + store `trust_persists_across_reopen`), A9 (`config/sync` write→mutate→`ConfigChanged{requires_trust}`, rename-preserves, no-op-on-touch), A11 (store `projects` + core `projects`). A2/A6 runtime verify → Phase 3. `later` A5/A8/A10/A12/A13 deferred. New core deps: `serde_norway` 0.9, `indexmap` 2, `sha2` 0.11 (dep-direction guard green). Divergences: `KNOWN-DIVERGENCES.md` D-1 (variant scope), D-2 (live watcher → Phase 6). |
-| 3 | Process supervisor (3 subtypes, status FSM, orphans) | **In progress** | **B1–B7 + A2/A6 done — pending verify.** `Supervisor` (C2) on the Phase-1 actor: mailbox actor (`Stop`/`Restart`), status FSM (+`Crashed→Starting` edge), graceful SIGTERM→5s→SIGKILL on the **pgroup**, exit classification (+`exit_code` on the status event), panic isolation; **trust gate in core** on start/restart/start_all (A6); login-shell `$SHELL -lc` honoring `working_dir`/`env`/`auto_start` (A2/B5); bulk start_all/stop_all/restart_running (B4); stop→lock-release hook (B7, `LockReleaser` port, `NoopLockReleaser` until C6/Phase 9). **Evidence:** core 56 (14 supervisor incl. FSM-restart + shutdown-reaps tests), pty 5 (real-OS: pgroup reap, grandchild reap, trap-TERM→SIGKILL escalation, cwd/env-honored-via-exit-code, **start/stop 50 → zero leaked PIDs**). `just lint && just test` green (77). **Reviewed + fixed** (see Decisions): shutdown now wired to the Tauri `ExitRequested` event; start path made race-free; shell resolution gains the passwd fallback. **Remaining (next session):** B8 orphan adoption (runtime-state file port + reconcile adopt/surface/prune), Task 4 output capture/log ring (5,000-line bound), and the "clears crash tracking" half of B7 (Phase-6 restart policy). |
-| 4 | PTY & terminal I/O (rendered+raw, input, resize, OSC) | Not started | |
+| 3 | Process supervisor (3 subtypes, status FSM, orphans) | **Done — pending verify** | **B1–B8 + A2/A6 delivered + tested.** `Supervisor` (C2) on the Phase-1 actor: mailbox actor (`Stop`/`Restart`), status FSM, graceful SIGTERM→5s→SIGKILL on the **pgroup**, exit classification, panic isolation; **trust gate in core** (A6); login-shell `$SHELL -lc` (A2/B5); bulk ops (B4); stop→lock-release hook (B7). Task 4 (output/log ring) delivered in Phase 4. **B8 orphan adoption (this session):** runtime-state file recording + `reconcile_orphans()` (adopt/surface/prune) + adoption via a synthesized `Spawned` over the existing pgid (liveness poll + killpg), reusing the actor; real adapters `FileRuntimeState` (store) + `PgidOrphanControl` (pty). **Evidence:** core reconcile/adopt/surface/prune + record/forget tests; store `FileRuntimeState` round-trip; pty `is_alive` on a real group. **Pending verify:** the app reconcile-on-launch *call* (Phase 5, after config-registration) + in-GUI bits (Phase 5 Playwright); B7's "clears crash tracking" half (Phase-6). |
+| 4 | PTY & terminal I/O (rendered+raw, input, resize, OSC) | **Done — pending verify** | **C1–C7, C9 v1 delivered (C3 context).** Real PTY per process via `portable-pty` (`$SHELL -lc` on the slave; child sees a tty); `pty` adapter rewritten (`PtyProcessSpawner`) keeping pgroup reaping. Core `terminal/` (`ring`/`buffers`/`parser`): bounded raw scrollback (256 KB, **C5**) + `vte`-driven rendered `Ring<LogLine>` (5,000 lines, **C4** + folded Task 4) with `\r` overwrite/tab stops; OSC **title**+**bell** → `DomainEvent`s (**C7**); live raw bytes via per-process broadcast. `Supervisor`: `write_stdin`/`resize` (**C3**/**C6**), `attach_pty` (atomic replay+live, **C9**), `pty_scrollback`/`rendered`. **Evidence:** core 66 (+10: 5 buffers, 2 ring, 3 supervisor PTY), pty 8 real-OS (`test -t 1`→tty **C1**, `read x`→input echo **C3**, `tput cols`→resize **C6**, + the Phase-3 pgroup/reap suite green). `just lint && just test` green (**90**). **Pending verify:** xterm.js terminal pane (**C8** `later` + phase-04 Task 9) → Phase 5 via `/impeccable`; "vim/htop visually render" is the Phase-5/manual check. |
 | 5 | Dashboard UI (sidebar tree, status dots, terminal pane, trust dialog) | Not started | Playwright e2e starts here; drive UI through `/impeccable`; seed `DESIGN.md` first |
 | 6 | Monitoring, restart (10/60s), file-watch, notifications | Not started | **Nightly soak test starts running from here** |
 | 7 | Agents & idle detection (5-state FSM, optional summarization) | Not started | Summarization OFF by default |
@@ -85,6 +108,79 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Phase 4 build — PTY & Terminal I/O / context C3 (2026-06-15)
+- **Scope (user-approved):** work Phase 4 now and **fold Phase 3's deferred Task 4 (output capture / log
+  ring) into Phase 4's PTY read loop** — the ring is built once, in final form, over the PTY (phase-04
+  Task 2 + phase-03 Task 4 agree: "same buffer/event contract; Phase 4 swaps to PTY"), avoiding throwaway
+  pipe capture. **B8 (orphan adoption) stays the one open Phase-3 v1 row** (independent of PTY I/O); Phase
+  3 remains `In progress`. The xterm.js frontend (C8 `later`, phase-04 Task 9) → Phase 5 via `/impeccable`
+  (DESIGN.md still unseeded), matching the Phase 2/3 frontend-deferral rhythm.
+- **Library verification (no assumptions, §4):** confirmed `portable-pty` 0.9 + `vte` 0.15 APIs via
+  context7 + docs.rs **before** coding. Key finding: portable-pty's `ExitStatus::signal()` returns a
+  `strsignal` **description** ("Terminated"/"Killed"), locale-sensitive — the exact signal *number* isn't
+  faithfully recoverable. Resolved by keying the actor's crash classification off `success()` (correct on
+  a signal death) and mapping the description back best-effort (C-locale table + `Signal {n}` fallback);
+  the number is inspected only by one adapter test, whose `signal == Some(SIGTERM)` assertion empirically
+  passes on this host.
+- **New deps:** `vte` 0.15 in **core** (pure ANSI parser; pulls only `arrayvec`+`memchr`, already in tree;
+  dep-direction guard still green — vte is not a forbidden adapter); `portable-pty` 0.9 in the **pty**
+  adapter (pulls `serial2`/`shell-words`/`downcast-rs`/`filedescriptor` + its own `nix` 0.28, a duplicate
+  of our 0.29 — acceptable). Real `.deb`/AppImage size impact is **measured in Phase 12**, not guessed.
+- **Port contract evolved (justified, like Phase 3's `SpawnSpec`):** `SpawnSpec` gains `size: PtySize`;
+  `Spawned` gains `output: mpsc::Receiver<Vec<u8>>` (bounded → backpressure) + `io: Box<dyn PtyIo>`
+  (write/resize); new `PtyIo` port. `FakeSpawner` updated + a `streams_then_exits` variant for the actor
+  output-drain test.
+- **Design decisions (recorded):**
+  - **PTY bytes are a per-process broadcast, NOT a `DomainEvent::PtyOutput` on the main bus.** High-rate
+    output must not flood the low-rate status stream or make status subscribers lag (§5 isolation, §8
+    backpressure). Only low-rate OSC **title**/**bell** are `DomainEvent`s; raw bytes flow over
+    `attach_pty`'s broadcast. A deliberate divergence from the phase-04 interface sketch.
+  - **`subscribe_logs` (live `LogLine` stream) folded:** the `Ring<LogLine>` is exposed as a bounded
+    snapshot (`rendered()`); live consumers use the raw `attach_pty` stream (lines are derived). Avoids a
+    duplicate fan-out (§15 single-source).
+  - **Rendered output is line-oriented, not a cell grid** — `KNOWN-DIVERGENCES.md` **D-3**. The frontend
+    xterm.js is the real emulator (consumes the byte-exact raw buffer); the core's rendered text answers
+    "what plain text printed" (exact for CLI output, approximate for cursor-addressed TUIs). Avoids a
+    redundant grid emulator in core (§6).
+  - **`attach_pty` is race-free:** the recorder publishes to the live stream *while holding the buffers
+    lock*, so an attaching viewer sees each chunk in exactly one of {scrollback snapshot, live stream} —
+    no gap, no duplicate (C9).
+  - **Restart keeps the terminal buffers; a fresh stop-then-start resets them** (the actor `open`s the
+    channel once per launch; restart-in-place reuses it).
+- **Tauri:** no Tauri code this phase — phase-04 v1 is headless ("drive PTYs from Rust"). The terminal
+  pane + `pty_write`/`pty_resize` commands + `PtyChunk`/`RenderedScreen` TS mirror land in Phase 5 via
+  `tauri-calling-rust`/`tauri-calling-frontend` + `/impeccable`. The only app change was the one-line
+  `PtyProcessSpawner` rename.
+
+### Phase 3 B8 build — Orphan adoption (2026-06-15, same session)
+- **Closed the last Phase-3 v1 row** (user chose "build B8 now" after Phase 4 landed green) → Phase 3 is
+  now `Done — pending verify`.
+- **Adoption reuses the existing actor (key design):** rather than a second actor type, an adopted orphan
+  is driven through the normal actor by handing it a *synthesized* `Spawned` over the existing pgid — its
+  exit future polls `OrphanControl::is_alive` on the `Clock` (resolving when the group dies), its control
+  signals the group via `killpg`, its output is closed (the original PTY died with the previous run —
+  historical output unrecoverable, matching Solo), its I/O is a no-op. The actor gained an optional
+  `initial: Option<Spawned>` (first iteration uses it; restart re-spawns fresh). `supervisor/adopt.rs`.
+- **Reconcile is a pure classifier (`orphans.rs`):** `classify(records, is_alive, matcher)` →
+  adopt/surface/prune, unit-tested in isolation. `Supervisor::reconcile_orphans()` performs the side
+  effects: adopt (re-attach to a resting registered command matched by project_root+name+command), surface
+  (`DomainEvent::OrphansFound` — the Kill/KillAll/Leave dialog is Phase-5 UI; core only emits), prune
+  (forget dead records). Adoption is **ungated** (the process is already running; we re-attach, not start —
+  matches Solo).
+- **New ports:** `RuntimeState` (record/forget/load; `NoopRuntimeState` default) + `OrphanControl`
+  (is_alive/signal a pgid; `NoopOrphanControl` default) + `OrphanRecord`. The actor records on Running /
+  forgets on each child-end. `Registration` gained `project_root` (the adoption identity).
+- **Real adapters:** `store::FileRuntimeState` — a small **JSON file** (`runtime-state.json` in the data
+  dir, **NOT SQLite** per plan/04 §7), mirrored in memory behind one lock (serializes concurrent actors),
+  atomic temp-file+rename writes, tolerant of a missing/corrupt file; round-trip tested. `pty::PgidOrphanControl`
+  — `killpg(pgid, None)` liveness (`Ok`/`EPERM`=alive, `ESRCH`=gone) + SIGTERM/SIGKILL; real-OS is_alive
+  test. New dep `serde_json` in **store** (`OrphanRecord` gained serde derives); dep-guard green.
+- **App:** recording is **live now** (`FileRuntimeState` + `PgidOrphanControl` in `Facade::new`). The
+  reconcile-on-launch **call is deferred to Phase 5**: it must run *after* config commands are registered
+  (so adoptable leftovers match instead of being mis-surfaced), and that registration wiring is Phase 5.
+  Calling it now (demo-only app, no config commands) would only prune/surface — so the call lands with
+  config-registration. Recorded in open threads.
 
 ### Phase 3 review fixes (2026-06-15)
 Reviewed the Phase 3 PR (commit `cdb6367`, range `25d2e73..cdb6367`) across every dimension via
@@ -376,12 +472,22 @@ review's one should-fix + the mechanical nits:
   register` of a project's commands (loading a `solo.yml` into managed processes) — Phase 3's B8 session
   or Phase 5 will connect "open project → register its commands → start_all". Phase 5 surfaces
   `ConfigChanged`/`ProcessView` (now carrying `project`/`exit_code`) in the UI + the TS mirror via `/impeccable`.
-- **Phase 3 remaining (next session):** **B8 orphan adoption** — needs a new runtime-state-file port
-  (persist `{project_root,name,command,pgid}`; NOT SQLite, per plan/04 §7) + a liveness/adopt mechanism,
-  and `reconcile_orphans()` classifying adopt (project+name+command match) / surface (`OrphansFound`) /
-  prune; **Task 4 output capture** — add an output channel to `Spawned` + a bounded `Ring<LogLine>`
-  (5,000-line cap, plan/04 §8) + per-process log fan-out, drained by the actor (the dashboard/MCP
-  consume it later); and B7's **"clears crash tracking"** half (Phase-6 restart policy).
+- **B8 orphan adoption — DONE this session** (Phase 3 → `Done — pending verify`). The mechanism (record/
+  reconcile/adopt/surface/prune) + real adapters (`FileRuntimeState`, `PgidOrphanControl`) are complete and
+  tested. **One deferred wiring:** the app must **call `Supervisor::reconcile_orphans()` on launch *after*
+  registering config commands** (so a leftover that matches a `solo.yml` command is adopted, not
+  mis-surfaced). That belongs in the Phase-5 "open project → register commands → reconcile → start_all"
+  sequence; recording is already live. B7's **"clears crash tracking"** half remains a Phase-6 item.
+- **Phase 4 follow-ups (Phase 5 frontend):** the **xterm.js terminal pane** (C8 `later`, phase-04 Task 9)
+  + the Tauri `pty_write`/`pty_resize` commands + a per-process `pty:<id>` event channel bridging the core
+  `attach_pty` broadcast to the webview — all through `/impeccable` + `tauri-calling-rust`/
+  `tauri-calling-frontend`. The **TS domain mirror** gains `PtyChunk`/`RenderedScreen`/`LogLine` + the
+  `TerminalTitleChanged`/`TerminalBell` `DomainEvent` variants (hand-mirrored in `domain.ts`, as in
+  Phase 2/3). "vim/htop visually render & accept input" is the Phase-5/manual acceptance check for C1/C2.
+- **PTY footprint (revisit Phase 13 soak):** `portable-pty`'s blocking reader/writer/wait means 2 OS
+  threads per *running* process (drain + reap). Correct and bounded, but for many processes consider
+  moving reads to `tokio::AsyncFd` + `try_wait` polling to drop the threads. Measure in the §6/Phase-13
+  footprint pass before optimizing.
 - **Live `FileWatcher` adapter (Phase 6).** The port is still a methods-less stub; Phase 6 adds its
   methods + a `notify`-backed adapter that drives `ConfigEngine::sync` through the `Debouncer`, and also
   serves glob file-watch restart (D6). Pick the watcher-adapter crate home then (new `crates/watch` vs
@@ -415,26 +521,23 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-1. Run `just lint && just test` first to confirm the Phase 3 baseline is still green (**77 tests**:
-   core 56 / pty 5 / store 10 / UI 6).
-2. **Finish Phase 3 — B8 orphan adoption + Task 4 output capture.** Re-read
-   `plan/phases/phase-03-process-supervisor.md` Tasks 4 & 9 and parity row **B8**, plus plan/04 §7
-   (runtime-state file, NOT SQLite) and §8 (bounded ring). Suggested order:
-   - **B8:** add a `RuntimeState`/`OrphanStore` port (persist `{project_root, name, command, pgid}` to a
-     small file in the data dir) + a liveness/adopt mechanism (the spawner adapter or a new port: is the
-     pgid alive? signal it). `Supervisor::reconcile_orphans()` → pure classify (adopt when
-     project+name+command match a known config command / surface `OrphansFound` / prune dead), with the
-     adopted process re-registered as `Running` tracking the existing pgid (poll liveness on the
-     `Clock`). The Kill/KillAll/Leave dialog is Phase 5 UI — emit the decision event only.
-   - **Task 4:** add `output: mpsc::Receiver<Vec<u8>>` to `Spawned` (bounded — backpressure), have the
-     `pty` adapter pipe stdout+stderr through a reader task, and have the actor drain it into a bounded
-     `Ring<LogLine>` (new small `ring.rs`, 5,000-line cap) + a per-process log broadcast
-     (`subscribe_logs`). Add the "buffer bound" test from the phase test plan.
-   - Then flip Phase 3 to `Done — pending verify` once every B1–B8 row + acceptance + test plan is green.
-3. **Wire "open project → register commands → start_all"** (connect `ConfigEngine::open` to
-   `Supervisor::register` per command) — either in the B8 session or Phase 5.
-4. **Still open from Phase 1 (independent, user-only):** confirm the in-GUI Start/Stop click via
-   `just dev` (the demo terminal `sleep 60` goes `stopped → starting → running`, then `stopping →
-   stopped`), then flip the Phase 1 row to `Verified`. Cannot be automated headlessly before Phase 5 Playwright.
-5. **Do not pull deferred `later` rows into v1** (A5/A8/A10/A12/A13, B9 "resume last session") and **do
-   not** build the live `notify` watcher before Phase 6 — all recorded above with rationale.
+1. Run `just lint && just test` first to confirm the baseline is still green (**98 tests**: core 71 /
+   pty 9 / store 12 / UI 6). Phases 1–4 are all `Done — pending verify`; **Phase 5 is next.**
+2. **Phase 5 — Dashboard UI** (consumes the Phase 2/3/4 read models). First **seed `DESIGN.md`** via
+   `/impeccable document` (WebFetch soloterm.com as a clean-room *feel* reference; confirm color-blind-safe
+   status encoding) — a hard prerequisite (CLAUDE.md §5). Then drive the dashboard through `/impeccable` +
+   `webapp-testing` (Playwright starts here): sidebar tree (Agents/Terminals/Commands, I1), status dots,
+   trust dialog, the **xterm.js terminal pane** wired to the core's `attach_pty` (replay + live) via a
+   Tauri `pty:<id>` channel + `pty_write`/`pty_resize` commands (`tauri-calling-*`), and the
+   **OrphansFound** Kill/KillAll/Leave dialog. Add the TS mirror (`PtyChunk`/`RenderedScreen`/`LogLine` +
+   the `TerminalTitleChanged`/`TerminalBell`/`OrphansFound` events).
+3. **Wire "open project → register config commands → `reconcile_orphans()` → `start_all`"** (connect
+   `ConfigEngine` to `Supervisor::register` per command). The **reconcile call must come *after*
+   registration** so a leftover that matches a `solo.yml` command is adopted, not mis-surfaced (B8's one
+   deferred wiring; the mechanism + recording are already done and tested).
+4. **Still open from Phase 1 (independent, user-only):** confirm the in-GUI Start/Stop click via `just
+   dev` (the demo terminal `sleep 60` now runs on a real PTY: `stopped → starting → running`, then
+   `stopping → stopped`), then flip the Phase 1 row to `Verified`. Headless automation waits for Phase 5
+   Playwright.
+5. **Do not pull deferred `later` rows into v1** (A5/A8/A10/A12/A13, B9 "resume last session", C8 webgl)
+   and **do not** build the live `notify` watcher before Phase 6 — all recorded above with rationale.

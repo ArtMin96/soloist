@@ -11,13 +11,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::hash::Hash;
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{
-    Clock, ExitFuture, ExitStatus, LockReleaser, ProcessControl, ProcessSpawner, ProjectRecord,
-    ProjectRepo, SpawnError, SpawnSpec, Spawned, StoreError, TrustRepo,
+    Clock, ExitFuture, ExitStatus, LockReleaser, OrphanControl, OrphanRecord, ProcessControl,
+    ProcessSpawner, ProjectRecord, ProjectRepo, PtyIo, PtySize, RuntimeState, RuntimeStateError,
+    SpawnError, SpawnSpec, Spawned, StoreError, TrustRepo,
 };
 use crate::sync::lock;
 
@@ -119,6 +120,9 @@ enum Behavior {
     PanicsAfterRunning,
     /// Exits on its own immediately with a fixed status.
     ExitsImmediately(ExitStatus),
+    /// Emits the given output chunks, then exits cleanly — drives the actor's PTY
+    /// output drain into the terminal buffers without a real process.
+    StreamsThenExits(Vec<Vec<u8>>),
 }
 
 /// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is chosen
@@ -165,6 +169,21 @@ impl FakeSpawner {
             behavior: Behavior::ExitsImmediately(killed_by(signal)),
         }
     }
+
+    /// A child that emits `chunks` on its PTY, then exits cleanly. Used to prove the
+    /// actor drains output into the per-process terminal buffers.
+    pub fn streams_then_exits(chunks: Vec<Vec<u8>>) -> Self {
+        Self {
+            behavior: Behavior::StreamsThenExits(chunks),
+        }
+    }
+}
+
+/// A closed PTY output channel: the receiver yields nothing and reports EOF at once.
+/// Most fake children produce no output; the streaming behaviour overrides this.
+fn no_output() -> mpsc::Receiver<Vec<u8>> {
+    let (_tx, rx) = mpsc::channel(1);
+    rx
 }
 
 #[async_trait]
@@ -181,16 +200,20 @@ impl ProcessSpawner for FakeSpawner {
                     Box::pin(async move { exit_rx.await.unwrap_or_else(|_| killed_by(SIGKILL)) });
                 Ok(Spawned {
                     pid: Some(424242),
+                    output: no_output(),
                     exit,
                     control,
+                    io: Box::new(NoopPtyIo),
                 })
             }
             Behavior::PanicsAfterRunning => {
                 let exit: ExitFuture = Box::pin(async { panic!("fake child panicked") });
                 Ok(Spawned {
                     pid: Some(0),
+                    output: no_output(),
                     exit,
                     control: Box::new(NoopControl),
+                    io: Box::new(NoopPtyIo),
                 })
             }
             Behavior::ExitsImmediately(status) => {
@@ -198,8 +221,30 @@ impl ProcessSpawner for FakeSpawner {
                 let exit: ExitFuture = Box::pin(async move { status });
                 Ok(Spawned {
                     pid: Some(1),
+                    output: no_output(),
                     exit,
                     control: Box::new(NoopControl),
+                    io: Box::new(NoopPtyIo),
+                })
+            }
+            Behavior::StreamsThenExits(chunks) => {
+                let (tx, output) = mpsc::channel(chunks.len().max(1));
+                for chunk in chunks {
+                    let _ = tx.try_send(chunk.clone());
+                }
+                drop(tx);
+                let exit: ExitFuture = Box::pin(async {
+                    ExitStatus {
+                        code: Some(0),
+                        signal: None,
+                    }
+                });
+                Ok(Spawned {
+                    pid: Some(7),
+                    output,
+                    exit,
+                    control: Box::new(NoopControl),
+                    io: Box::new(NoopPtyIo),
                 })
             }
         }
@@ -249,6 +294,21 @@ impl ProcessControl for NoopControl {
     }
 }
 
+/// A [`PtyIo`] that accepts and discards every write and resize — fake children have
+/// no real terminal to drive.
+struct NoopPtyIo;
+
+#[async_trait]
+impl PtyIo for NoopPtyIo {
+    async fn write(&self, _data: &[u8]) -> Result<(), SpawnError> {
+        Ok(())
+    }
+
+    async fn resize(&self, _size: PtySize) -> Result<(), SpawnError> {
+        Ok(())
+    }
+}
+
 // ────────────────────────────── RecordingLockReleaser ───────────────────────
 
 /// A [`LockReleaser`] that records which processes it was asked to release locks for,
@@ -272,6 +332,89 @@ impl RecordingLockReleaser {
 impl LockReleaser for RecordingLockReleaser {
     fn release_all(&self, process: ProcessId) {
         lock(&self.released).push(process);
+    }
+}
+
+// ────────────────────────────── FakeRuntimeState ────────────────────────────
+
+/// An in-memory [`RuntimeState`] standing in for the runtime-state file: records are
+/// upserted by pgid, so a test can seed leftovers and assert what reconciliation
+/// recorded, forgot, or pruned.
+#[derive(Clone, Default)]
+pub struct FakeRuntimeState {
+    records: Arc<Mutex<Vec<OrphanRecord>>>,
+}
+
+impl FakeRuntimeState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Pre-populates a leftover record, as if written by a previous run.
+    pub fn seed(&self, record: OrphanRecord) {
+        lock(&self.records).push(record);
+    }
+
+    /// The currently recorded process groups.
+    pub fn records(&self) -> Vec<OrphanRecord> {
+        lock(&self.records).clone()
+    }
+}
+
+impl RuntimeState for FakeRuntimeState {
+    fn record(&self, record: &OrphanRecord) -> Result<(), RuntimeStateError> {
+        let mut records = lock(&self.records);
+        records.retain(|r| r.pgid != record.pgid);
+        records.push(record.clone());
+        Ok(())
+    }
+
+    fn forget(&self, pgid: i32) -> Result<(), RuntimeStateError> {
+        lock(&self.records).retain(|r| r.pgid != pgid);
+        Ok(())
+    }
+
+    fn load(&self) -> Result<Vec<OrphanRecord>, RuntimeStateError> {
+        Ok(lock(&self.records).clone())
+    }
+}
+
+// ───────────────────────────── FakeOrphanControl ─────────────────────────────
+
+/// An in-memory [`OrphanControl`]: a test marks pgids alive, and signalling reaps the
+/// group (removing it from the live set) so an adopted process's liveness poll sees it
+/// die. Records the signals sent for assertions.
+#[derive(Clone, Default)]
+pub struct FakeOrphanControl {
+    alive: Arc<Mutex<HashSet<i32>>>,
+    signalled: Arc<Mutex<Vec<(i32, bool)>>>,
+}
+
+impl FakeOrphanControl {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Marks a process group alive, as if left running by a previous run.
+    pub fn set_alive(&self, pgid: i32) {
+        lock(&self.alive).insert(pgid);
+    }
+
+    /// The signals sent, as `(pgid, force)` where `force` is SIGKILL vs SIGTERM.
+    pub fn signalled(&self) -> Vec<(i32, bool)> {
+        lock(&self.signalled).clone()
+    }
+}
+
+impl OrphanControl for FakeOrphanControl {
+    fn is_alive(&self, pgid: i32) -> bool {
+        lock(&self.alive).contains(&pgid)
+    }
+
+    fn signal(&self, pgid: i32, force: bool) -> Result<(), SpawnError> {
+        lock(&self.signalled).push((pgid, force));
+        lock(&self.alive).remove(&pgid);
+        Ok(())
     }
 }
 

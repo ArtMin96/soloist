@@ -6,6 +6,7 @@
 //! mutable domain state behind a lock beyond the map itself.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
@@ -17,7 +18,7 @@ use crate::ports::SpawnSpec;
 use crate::process::{ProcStatus, ProcessKind, ProcessView};
 use crate::sync::lock;
 
-use super::actor::ActorMsg;
+use super::actor::{ActorMsg, OrphanIdentity};
 
 /// A live actor's control surface: a bounded mailbox to message it and the join
 /// handle awaited at shutdown to confirm its child was reaped.
@@ -31,6 +32,8 @@ pub(crate) struct ActorHandle {
 struct Managed {
     view: ProcessView,
     launch: SpawnSpec,
+    /// The project root this process belongs to — part of its orphan-adoption identity.
+    project_root: PathBuf,
     trust_variant: Option<Hash>,
     auto_start: bool,
     handle: Option<ActorHandle>,
@@ -64,6 +67,7 @@ impl Registry {
         &self,
         view: ProcessView,
         launch: SpawnSpec,
+        project_root: PathBuf,
         trust_variant: Option<Hash>,
         auto_start: bool,
     ) {
@@ -73,11 +77,43 @@ impl Registry {
             Managed {
                 view,
                 launch,
+                project_root,
                 trust_variant,
                 auto_start,
                 handle: None,
             },
         );
+    }
+
+    /// The orphan-adoption identity of `id`: its project root and name.
+    pub(crate) fn identity(&self, id: ProcessId) -> Option<OrphanIdentity> {
+        let guard = lock(&self.inner);
+        let entry = guard.get(&id)?;
+        Some(OrphanIdentity {
+            project_root: entry.project_root.clone(),
+            name: entry.view.label.clone(),
+        })
+    }
+
+    /// A registered, resting (`Stopped`) process whose orphan identity — project root,
+    /// name, and command — matches a leftover group, i.e. the process to re-attach it
+    /// to. Returns `None` if nothing matches (the leftover is surfaced instead).
+    pub(crate) fn find_resting_match(
+        &self,
+        project_root: &Path,
+        name: &str,
+        command: &str,
+    ) -> Option<ProcessId> {
+        let guard = lock(&self.inner);
+        guard
+            .values()
+            .find(|entry| {
+                entry.view.status == ProcStatus::Stopped
+                    && entry.project_root == project_root
+                    && entry.view.label == name
+                    && entry.launch.command == command
+            })
+            .map(|entry| entry.view.id)
     }
 
     /// The launch-relevant fields for `id`, if present.

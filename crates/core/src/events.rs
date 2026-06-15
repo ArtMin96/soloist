@@ -14,6 +14,7 @@ use tokio::sync::broadcast;
 
 use crate::config::ConfigSync;
 use crate::ids::{ProcessId, ProjectId};
+use crate::orphans::OrphanInfo;
 use crate::process::{ProcStatus, ProcessKind};
 
 /// A change in domain state, serialized to adapters verbatim. `#[serde(tag = "type")]`
@@ -47,6 +48,14 @@ pub enum DomainEvent {
         diff: ConfigSync,
         requires_trust: bool,
     },
+    /// A process set its terminal title via an OSC sequence. Drives window/tab titles
+    /// and feeds the agent idle heuristics that watch title stability.
+    TerminalTitleChanged { id: ProcessId, title: String },
+    /// A process rang the terminal bell (`BEL`). Drives attention notifications.
+    TerminalBell { id: ProcessId },
+    /// Reconciliation found leftover process groups from a previous run that match no
+    /// known command, awaiting a user Kill / Kill All / Leave decision (Phase-5 UI).
+    OrphansFound { orphans: Vec<OrphanInfo> },
 }
 
 /// The outbound event port: anything the core publishes domain events through.

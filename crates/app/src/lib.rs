@@ -8,9 +8,11 @@
 use std::sync::Arc;
 
 use serde::Serialize;
-use soloist_core::{Facade, ProcessId, ProcessView, Store, TokioClock};
-use soloist_pty::TokioProcessSpawner;
-use soloist_store::SqliteStore;
+use soloist_core::{
+    Facade, NoopRuntimeState, ProcessId, ProcessView, RuntimeState, Store, TokioClock,
+};
+use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
+use soloist_store::{FileRuntimeState, SqliteStore};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::broadcast::error::RecvError;
 
@@ -63,12 +65,25 @@ fn build_facade() -> Facade {
     // Exercise the storage thread in the real binary: record the launching version.
     let _ = store.meta_set("last_launch_version", env!("CARGO_PKG_VERSION"));
 
+    // Running process groups are recorded to a small file (not SQLite) so a leftover
+    // from a crash can be reconciled on the next launch; degrade to a no-op if the data
+    // location is unavailable so the app still launches.
+    let runtime: Arc<dyn RuntimeState> = match FileRuntimeState::open_default() {
+        Ok(runtime) => Arc::new(runtime),
+        Err(err) => {
+            eprintln!("soloist: runtime-state unavailable ({err}); orphan adoption disabled");
+            Arc::new(NoopRuntimeState)
+        }
+    };
+
     // One SQLite store backs the trust and project repositories the façade needs.
     Facade::new(
-        Arc::new(TokioProcessSpawner),
+        Arc::new(PtyProcessSpawner),
         Arc::new(TokioClock),
         store.clone(),
         store,
+        runtime,
+        Arc::new(PgidOrphanControl),
     )
 }
 
