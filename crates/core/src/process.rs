@@ -39,6 +39,14 @@ pub struct IllegalTransition {
 }
 
 impl ProcStatus {
+    /// Whether a process in this state has a live owning actor — it is starting,
+    /// running, restarting, or stopping. Resting (`Stopped`) and terminal (`Crashed`,
+    /// `RestartExhausted`) states do not.
+    pub fn is_active(self) -> bool {
+        use ProcStatus::*;
+        matches!(self, Starting | Running | Restarting | Stopping)
+    }
+
     /// Validates a transition, returning the new state or [`IllegalTransition`].
     ///
     /// The FSM is the contract: callers route every state change through here so an

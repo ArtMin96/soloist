@@ -103,6 +103,14 @@ pub fn run() {
             stop_process,
             list_processes
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                // Reap every managed process group before the app exits, so no child
+                // outlives it (the deterministic-shutdown contract).
+                let facade = app.state::<Facade>();
+                tauri::async_runtime::block_on(facade.supervisor().shutdown());
+            }
+        });
 }

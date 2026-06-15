@@ -7,7 +7,10 @@
 //! * **Login-shell execution** — every command runs as `$SHELL -lc <command>` in its
 //!   resolved working directory, with per-process `env` layered onto the inherited
 //!   environment (process env wins). This is how aliases and version-manager PATHs
-//!   resolve. Full `$SHELL -ilc env` capture/caching is a later phase.
+//!   resolve. The shell is resolved from `$SHELL`, then the user's passwd entry, then
+//!   `/bin/sh`, so a desktop launch that does not export `$SHELL` still uses the user's
+//!   real shell rather than a bare `/bin/sh`. Full `$SHELL -ilc env` capture/caching is
+//!   a later phase.
 //! * **Process-group containment** — each child is the leader of a fresh process
 //!   group, and stop signals target the whole group (via `killpg`), so a command that
 //!   forks children is torn down completely rather than leaking orphans.
@@ -16,14 +19,33 @@ use std::process::Stdio;
 
 use async_trait::async_trait;
 use nix::sys::signal::{killpg, Signal};
-use nix::unistd::Pid;
+use nix::unistd::{Pid, Uid, User};
 use soloist_core::{
     ExitFuture, ExitStatus, ProcessControl, ProcessSpawner, SpawnError, SpawnSpec, Spawned,
 };
 use tokio::process::Command;
 
-/// Fallback shell when `$SHELL` is unset.
+/// Fallback shell when neither `$SHELL` nor the passwd entry yields one.
 const FALLBACK_SHELL: &str = "/bin/sh";
+
+/// Resolves the user's login shell: `$SHELL`, then the passwd-entry shell, then
+/// `/bin/sh`. A desktop launcher does not always export `$SHELL`, so the passwd
+/// fallback keeps commands running under the user's real shell.
+fn login_shell() -> String {
+    if let Ok(shell) = std::env::var("SHELL") {
+        if !shell.is_empty() {
+            return shell;
+        }
+    }
+    if let Ok(Some(user)) = User::from_uid(Uid::current()) {
+        if let Some(shell) = user.shell.to_str() {
+            if !shell.is_empty() {
+                return shell.to_owned();
+            }
+        }
+    }
+    FALLBACK_SHELL.to_string()
+}
 
 /// Spawns processes with `tokio::process`, placing each in its own process group.
 #[derive(Clone, Copy, Default)]
@@ -32,8 +54,7 @@ pub struct TokioProcessSpawner;
 #[async_trait]
 impl ProcessSpawner for TokioProcessSpawner {
     async fn spawn(&self, spec: &SpawnSpec) -> Result<Spawned, SpawnError> {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| FALLBACK_SHELL.to_string());
-        let mut command = Command::new(shell);
+        let mut command = Command::new(login_shell());
         command
             .arg("-lc")
             .arg(&spec.command)

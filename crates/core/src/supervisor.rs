@@ -25,7 +25,7 @@ use registry::{ActorHandle, Registry};
 
 /// Per-actor mailbox capacity. Tiny on purpose: at most a couple of control messages
 /// are ever in flight for one process, and a bounded channel honours the no-unbounded
-/// rule (plan/04 §8).
+/// rule.
 const MAILBOX_CAPACITY: usize = 4;
 
 /// How to create a managed process.
@@ -173,7 +173,7 @@ impl Supervisor {
             .registry
             .describe(id)
             .ok_or(SupervisorError::NotFound(id))?;
-        if is_active(info.status) {
+        if info.status.is_active() {
             return Ok(());
         }
         self.guard_trust(info.project, info.trust_variant.as_ref())?;
@@ -181,14 +181,17 @@ impl Supervisor {
         Ok(())
     }
 
-    /// Requests a graceful stop. Returns whether a live actor was messaged.
+    /// Requests a graceful stop. Returns whether an active process was messaged; a
+    /// resting or already-finished process reports `false`.
     pub fn stop(&self, id: ProcessId) -> bool {
-        match self.registry.mailbox(id) {
-            Some(mailbox) => {
-                let _ = mailbox.try_send(ActorMsg::Stop);
+        match self.registry.status(id) {
+            Some(status) if status.is_active() => {
+                if let Some(mailbox) = self.registry.mailbox(id) {
+                    let _ = mailbox.try_send(ActorMsg::Stop);
+                }
                 true
             }
-            None => false,
+            _ => false,
         }
     }
 
@@ -200,7 +203,7 @@ impl Supervisor {
             .describe(id)
             .ok_or(SupervisorError::NotFound(id))?;
         self.guard_trust(info.project, info.trust_variant.as_ref())?;
-        if is_active(info.status) {
+        if info.status.is_active() {
             if let Some(mailbox) = self.registry.mailbox(id) {
                 let _ = mailbox.try_send(ActorMsg::Restart);
             }
@@ -220,8 +223,9 @@ impl Supervisor {
                 None => true,
             };
             if trusted {
-                self.launch_actor(candidate.id, candidate.launch);
-                summary.started.push(candidate.id);
+                if self.launch_actor(candidate.id, candidate.launch) {
+                    summary.started.push(candidate.id);
+                }
             } else {
                 summary.skipped_untrusted.push(candidate.id);
             }
@@ -249,7 +253,8 @@ impl Supervisor {
     }
 
     /// Stops every live process across all projects and awaits each actor's exit, so no
-    /// children leak on app quit (the deterministic-shutdown contract, plan/04 §8).
+    /// children leak on app quit (the deterministic-shutdown contract). Wired into the
+    /// Tauri shell's exit event so a normal quit reaps every process group.
     pub async fn shutdown(&self) {
         let mut joins = Vec::new();
         for id in self.registry.with_live_actor() {
@@ -277,21 +282,23 @@ impl Supervisor {
         Ok(())
     }
 
-    /// Moves a resting process into `Starting` and spawns its actor.
-    fn launch_actor(&self, id: ProcessId, launch: SpawnSpec) {
-        if let Some(from) = self.registry.status(id) {
-            apply_transition(
-                &self.registry,
-                &self.bus,
-                id,
-                from,
-                ProcStatus::Starting,
-                None,
-            );
-        }
+    /// Atomically claims a resting process, moves it into `Starting`, and spawns its
+    /// actor. Returns `false` without spawning if the process was already active —
+    /// closing the start race when two callers target the same process at once.
+    fn launch_actor(&self, id: ProcessId, launch: SpawnSpec) -> bool {
+        let Some(from) = self.registry.begin_launch(id) else {
+            return false;
+        };
+        self.bus.publish(DomainEvent::ProcessStatusChanged {
+            id,
+            from,
+            to: ProcStatus::Starting,
+            exit_code: None,
+        });
         let (mailbox, inbox) = tokio::sync::mpsc::channel(MAILBOX_CAPACITY);
         let join = actor::spawn(id, launch, self.actor_ports(), inbox);
         self.registry.set_handle(id, ActorHandle { mailbox, join });
+        true
     }
 
     fn actor_ports(&self) -> ActorPorts {
@@ -330,14 +337,6 @@ pub(crate) fn apply_transition(
         }
         Err(_) => from,
     }
-}
-
-/// Whether a status means an actor is (or should be) live for this process.
-fn is_active(status: ProcStatus) -> bool {
-    matches!(
-        status,
-        ProcStatus::Starting | ProcStatus::Running | ProcStatus::Restarting | ProcStatus::Stopping
-    )
 }
 
 #[cfg(test)]
@@ -695,5 +694,21 @@ mod tests {
 
         h.sup.restart_running(PROJECT).expect("restart_running");
         assert_eq!(next_to(&mut h.rx).await, ProcStatus::Restarting);
+    }
+
+    #[tokio::test]
+    async fn shutdown_stops_and_reaps_every_live_process() {
+        let mut h = harness(FakeSpawner::exits_on_terminate());
+        let one = terminal(&h.sup, "sleep 60");
+        let two = terminal(&h.sup, "sleep 60");
+        h.sup.start(one).expect("start one");
+        h.sup.start(two).expect("start two");
+        wait_all(&mut h.rx, &[one, two], ProcStatus::Running).await;
+
+        // Shutdown awaits every actor, so on return both children are reaped and at
+        // rest — the no-leak-on-quit contract, proven without racing the event stream.
+        h.sup.shutdown().await;
+        assert_eq!(status_of(&h.sup, one), ProcStatus::Stopped);
+        assert_eq!(status_of(&h.sup, two), ProcStatus::Stopped);
     }
 }

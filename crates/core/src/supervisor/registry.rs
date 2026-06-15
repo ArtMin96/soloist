@@ -106,6 +106,24 @@ impl Registry {
         }
     }
 
+    /// Atomically claims the right to launch a resting process: if it is not already
+    /// active, transitions it to `Starting` under the lock and returns its prior
+    /// status; if it is already active (another launch won, or it is running), returns
+    /// `None`. Setting the status under the same lock as the check is what makes the
+    /// supervisor's start path race-free without holding the lock across the spawn.
+    pub(crate) fn begin_launch(&self, id: ProcessId) -> Option<ProcStatus> {
+        let mut guard = lock(&self.inner);
+        let entry = guard.get_mut(&id)?;
+        let from = entry.view.status;
+        if from.is_active() {
+            return None;
+        }
+        let next = from.transition(ProcStatus::Starting).ok()?;
+        entry.view.status = next;
+        entry.view.exit_code = None;
+        Some(from)
+    }
+
     /// Stores the handle of a freshly launched actor.
     pub(crate) fn set_handle(&self, id: ProcessId, handle: ActorHandle) {
         let mut guard = lock(&self.inner);
@@ -130,7 +148,9 @@ impl Registry {
         guard.get_mut(&id).and_then(|entry| entry.handle.take())
     }
 
-    /// Every process that currently has a live actor.
+    /// Every process that still holds an actor handle — the shutdown set. Messaging
+    /// then awaiting each reaps any child still alive; it is a harmless no-op for an
+    /// actor that already finished but whose handle was not reclaimed.
     pub(crate) fn with_live_actor(&self) -> Vec<ProcessId> {
         let guard = lock(&self.inner);
         guard
@@ -140,12 +160,12 @@ impl Registry {
             .collect()
     }
 
-    /// Live actors within `project` — the targets of `stop_all`.
+    /// Active processes within `project` — the targets of `stop_all`.
     pub(crate) fn live_in(&self, project: ProjectId) -> Vec<ProcessId> {
         let guard = lock(&self.inner);
         guard
             .values()
-            .filter(|entry| entry.view.project == project && entry.handle.is_some())
+            .filter(|entry| entry.view.project == project && entry.view.status.is_active())
             .map(|entry| entry.view.id)
             .collect()
     }
