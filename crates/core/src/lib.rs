@@ -49,9 +49,11 @@ pub use facade::Facade;
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};
 pub use ports::{
-    Clock, ExitFuture, ExitStatus, ProcessControl, ProcessSpawner, ProjectRecord, ProjectRepo,
-    SpawnError, SpawnSpec, Spawned, Store, StoreError, TokioClock, TrustRepo,
+    Clock, ExitFuture, ExitStatus, LockReleaser, NoopLockReleaser, ProcessControl, ProcessSpawner,
+    ProjectRecord, ProjectRepo, SpawnError, SpawnSpec, Spawned, Store, StoreError, TokioClock,
+    TrustRepo,
 };
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView};
 pub use projects::{ProjectError, Projects};
+pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};
 pub use trust::{Trust, TrustStore};

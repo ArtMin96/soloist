@@ -6,6 +6,7 @@
 //! implementations. Mockable ports plus a controllable [`Clock`] are what make the
 //! whole supervisor headless-testable with no real time elapsed.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -14,16 +15,24 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 
 use crate::hash::Hash;
-use crate::ids::ProjectId;
+use crate::ids::{ProcessId, ProjectId};
 
 // ───────────────────────────── ProcessSpawner ──────────────────────────────
 
-/// What to launch. Grows (working dir, env, PTY size) as later phases need it; the
-/// walking skeleton only needs a program and its arguments.
+/// What to launch: a shell command line, the directory it runs in, and per-process
+/// environment overrides. The command is executed through the user's login shell
+/// (`$SHELL -lc <command>`) so aliases and version-manager PATHs resolve; `env`
+/// overrides are layered onto the inherited app environment (process `env` wins —
+/// the documented precedence). The PTY size is added in the terminal-I/O phase.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SpawnSpec {
-    pub program: String,
-    pub args: Vec<String>,
+    /// The shell command line, run via the login shell.
+    pub command: String,
+    /// The absolute working directory the command runs in.
+    pub working_dir: PathBuf,
+    /// Per-process environment overrides, layered onto the inherited app env. A sorted
+    /// map so application order is deterministic.
+    pub env: BTreeMap<String, String>,
 }
 
 /// How a child finished: an exit code, or the signal that terminated it.
@@ -170,6 +179,27 @@ pub trait TrustRepo: Send + Sync {
     fn set_trusted(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError>;
     /// Revokes trust for `variant` within `project`.
     fn revoke(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError>;
+}
+
+// ──────────────────────────────── LockReleaser ─────────────────────────────
+
+/// Notified when a managed process closes so any cross-process coordination state it
+/// holds — todo locks, leases — can be released. The coordination context (C6)
+/// provides the real implementation in a later phase; until then [`NoopLockReleaser`]
+/// satisfies the port. The supervisor calls this whenever a process reaches a
+/// terminal state (stopped or crashed), matching Solo's "locks auto-release when the
+/// owning process closes".
+pub trait LockReleaser: Send + Sync {
+    /// Releases every lock or lease owned by `process`. Must not block or panic.
+    fn release_all(&self, process: ProcessId);
+}
+
+/// A [`LockReleaser`] that does nothing — the default until coordination (C6) lands.
+#[derive(Clone, Copy, Default)]
+pub struct NoopLockReleaser;
+
+impl LockReleaser for NoopLockReleaser {
+    fn release_all(&self, _process: ProcessId) {}
 }
 
 // ───────────── Ports realized in later phases (contracts only) ──────────────

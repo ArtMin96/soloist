@@ -3068,6 +3068,7 @@ dependencies = [
  "async-trait",
  "nix",
  "soloist-core",
+ "tempfile",
  "tokio",
 ]
 

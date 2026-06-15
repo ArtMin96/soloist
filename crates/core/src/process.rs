@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::ProcessId;
+use crate::ids::{ProcessId, ProjectId};
 
 /// The three process subtypes Soloist supervises. A closed enum so every consumer
 /// must handle each case via an exhaustive `match`.
@@ -58,6 +58,7 @@ impl ProcStatus {
                 | (Running, Restarting)
                 | (Restarting, Starting)
                 | (Stopping, Stopped)
+                | (Crashed, Starting)
                 | (RestartExhausted, Starting)
         ) || (matches!(self, Starting | Running | Stopping | Restarting)
             && to == Crashed);
@@ -71,13 +72,17 @@ impl ProcStatus {
 }
 
 /// A cheap, cloneable snapshot of one process for adapters to render. Holds no
-/// behaviour — the authoritative state lives in the owning actor and registry.
+/// behaviour — the authoritative state lives in the owning actor and registry. The
+/// `project` scopes it; `exit_code` is the most recent terminal exit code (`None`
+/// while running, or when terminated by a signal).
 #[derive(Clone, Debug, Serialize)]
 pub struct ProcessView {
     pub id: ProcessId,
+    pub project: ProjectId,
     pub kind: ProcessKind,
     pub label: String,
     pub status: ProcStatus,
+    pub exit_code: Option<i32>,
 }
 
 #[cfg(test)]
@@ -130,5 +135,22 @@ mod tests {
         }
         // ...but not from a terminal/resting state.
         assert!(ProcStatus::Stopped.transition(ProcStatus::Crashed).is_err());
+    }
+
+    #[test]
+    fn a_terminal_process_can_be_restarted() {
+        // Starting a process again from any resting state is legal — a user can
+        // restart a stopped, crashed, or restart-exhausted command.
+        for resting in [
+            ProcStatus::Stopped,
+            ProcStatus::Crashed,
+            ProcStatus::RestartExhausted,
+        ] {
+            assert_eq!(
+                resting.transition(ProcStatus::Starting),
+                Ok(ProcStatus::Starting),
+                "{resting:?} should be restartable",
+            );
+        }
     }
 }

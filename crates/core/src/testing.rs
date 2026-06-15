@@ -1,9 +1,9 @@
 //! In-memory port fakes used by the core's headless tests: a manually-advanced
-//! [`MockClock`], a [`FakeSpawner`] whose children never touch the OS, and
-//! [`FakeTrustRepo`]/[`FakeProjectRepo`] standing in for the durable store. These
-//! let every actor transition, the grace window, panic isolation, and the trust and
-//! sync logic be exercised deterministically — no real time elapsed, no real
-//! processes spawned, no SQLite.
+//! [`MockClock`], a [`FakeSpawner`] whose children never touch the OS, a
+//! [`RecordingLockReleaser`], and [`FakeTrustRepo`]/[`FakeProjectRepo`] standing in
+//! for the durable store. These let every actor transition, the grace window, panic
+//! isolation, the trust gate, and the sync logic be exercised deterministically — no
+//! real time elapsed, no real processes spawned, no SQLite.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -14,21 +14,22 @@ use async_trait::async_trait;
 use tokio::sync::oneshot;
 
 use crate::hash::Hash;
-use crate::ids::ProjectId;
+use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{
-    Clock, ExitFuture, ExitStatus, ProcessControl, ProcessSpawner, ProjectRecord, ProjectRepo,
-    SpawnError, SpawnSpec, Spawned, StoreError, TrustRepo,
+    Clock, ExitFuture, ExitStatus, LockReleaser, ProcessControl, ProcessSpawner, ProjectRecord,
+    ProjectRepo, SpawnError, SpawnSpec, Spawned, StoreError, TrustRepo,
 };
 use crate::sync::lock;
 
-/// Signal number a simulated SIGKILL records on a fake child's exit status.
+/// Signal numbers a simulated kill records on a fake child's exit status.
 const SIGKILL: i32 = 9;
+const SIGTERM: i32 = 15;
 
-/// The exit status of a fake child that was force-killed.
-fn killed() -> ExitStatus {
+/// The exit status of a fake child terminated by `signal`.
+fn killed_by(signal: i32) -> ExitStatus {
     ExitStatus {
         code: None,
-        signal: Some(SIGKILL),
+        signal: Some(signal),
     }
 }
 
@@ -104,29 +105,64 @@ impl Clock for MockClock {
 
 // ─────────────────────────────── FakeSpawner ───────────────────────────────
 
-enum Behavior {
-    /// Ignores SIGTERM; exits only when killed — forces the grace path.
-    ExitsOnKill,
-    /// Panics the moment it is polled after reaching `Running`.
-    PanicsAfterRunning,
+/// Which signal makes a long-lived fake child finally exit.
+#[derive(Clone, Copy)]
+enum DiesOn {
+    Terminate,
+    Kill,
 }
 
-/// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is
-/// chosen per constructor so tests can drive specific actor paths.
+enum Behavior {
+    /// Runs until signalled; obeys SIGTERM or only SIGKILL per [`DiesOn`].
+    LongLived(DiesOn),
+    /// Panics the moment its exit future is polled after reaching `Running`.
+    PanicsAfterRunning,
+    /// Exits on its own immediately with a fixed status.
+    ExitsImmediately(ExitStatus),
+}
+
+/// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is chosen
+/// per constructor so tests can drive specific actor paths.
 pub struct FakeSpawner {
     behavior: Behavior,
 }
 
 impl FakeSpawner {
+    /// A child that ignores SIGTERM and exits only on SIGKILL — forces the grace path.
     pub fn exits_on_kill() -> Self {
         Self {
-            behavior: Behavior::ExitsOnKill,
+            behavior: Behavior::LongLived(DiesOn::Kill),
         }
     }
 
+    /// A child that exits promptly on SIGTERM — the fast graceful-stop path.
+    pub fn exits_on_terminate() -> Self {
+        Self {
+            behavior: Behavior::LongLived(DiesOn::Terminate),
+        }
+    }
+
+    /// A child that panics once running — drives the panic-isolation boundary.
     pub fn panics_after_running() -> Self {
         Self {
             behavior: Behavior::PanicsAfterRunning,
+        }
+    }
+
+    /// A child that exits on its own with the given code (no terminating signal).
+    pub fn exits_with_code(code: i32) -> Self {
+        Self {
+            behavior: Behavior::ExitsImmediately(ExitStatus {
+                code: Some(code),
+                signal: None,
+            }),
+        }
+    }
+
+    /// A child that is terminated on its own by an external `signal`.
+    pub fn killed_by_signal(signal: i32) -> Self {
+        Self {
+            behavior: Behavior::ExitsImmediately(killed_by(signal)),
         }
     }
 }
@@ -134,13 +170,15 @@ impl FakeSpawner {
 #[async_trait]
 impl ProcessSpawner for FakeSpawner {
     async fn spawn(&self, _spec: &SpawnSpec) -> Result<Spawned, SpawnError> {
-        match self.behavior {
-            Behavior::ExitsOnKill => {
+        match &self.behavior {
+            Behavior::LongLived(dies_on) => {
                 let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
-                let control = Box::new(KillExitsControl {
+                let control = Box::new(OneshotControl {
                     exit_tx: Mutex::new(Some(exit_tx)),
+                    dies_on: *dies_on,
                 });
-                let exit: ExitFuture = Box::pin(async move { exit_rx.await.unwrap_or(killed()) });
+                let exit: ExitFuture =
+                    Box::pin(async move { exit_rx.await.unwrap_or_else(|_| killed_by(SIGKILL)) });
                 Ok(Spawned {
                     pid: Some(424242),
                     exit,
@@ -155,26 +193,45 @@ impl ProcessSpawner for FakeSpawner {
                     control: Box::new(NoopControl),
                 })
             }
+            Behavior::ExitsImmediately(status) => {
+                let status = *status;
+                let exit: ExitFuture = Box::pin(async move { status });
+                Ok(Spawned {
+                    pid: Some(1),
+                    exit,
+                    control: Box::new(NoopControl),
+                })
+            }
         }
     }
 }
 
-/// Control whose `kill` resolves the paired exit future (the child "dies" on SIGKILL
-/// only); `terminate` is a no-op, modelling a child that ignores SIGTERM.
-struct KillExitsControl {
+/// Control whose configured signal resolves the paired exit future. Holds only the
+/// exit sender, so it never aliases the child handle the exit future owns.
+struct OneshotControl {
     exit_tx: Mutex<Option<oneshot::Sender<ExitStatus>>>,
+    dies_on: DiesOn,
+}
+
+impl OneshotControl {
+    fn resolve(&self, status: ExitStatus) {
+        if let Some(tx) = lock(&self.exit_tx).take() {
+            let _ = tx.send(status);
+        }
+    }
 }
 
 #[async_trait]
-impl ProcessControl for KillExitsControl {
+impl ProcessControl for OneshotControl {
     async fn terminate(&mut self) -> Result<(), SpawnError> {
+        if matches!(self.dies_on, DiesOn::Terminate) {
+            self.resolve(killed_by(SIGTERM));
+        }
         Ok(())
     }
 
     async fn kill(&mut self) -> Result<(), SpawnError> {
-        if let Some(tx) = lock(&self.exit_tx).take() {
-            let _ = tx.send(killed());
-        }
+        self.resolve(killed_by(SIGKILL));
         Ok(())
     }
 }
@@ -192,10 +249,36 @@ impl ProcessControl for NoopControl {
     }
 }
 
+// ────────────────────────────── RecordingLockReleaser ───────────────────────
+
+/// A [`LockReleaser`] that records which processes it was asked to release locks for,
+/// so a test can assert the supervisor frees a process's locks when it closes.
+#[derive(Clone, Default)]
+pub struct RecordingLockReleaser {
+    released: Arc<Mutex<Vec<ProcessId>>>,
+}
+
+impl RecordingLockReleaser {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The processes whose locks have been released, in order.
+    pub fn released(&self) -> Vec<ProcessId> {
+        lock(&self.released).clone()
+    }
+}
+
+impl LockReleaser for RecordingLockReleaser {
+    fn release_all(&self, process: ProcessId) {
+        lock(&self.released).push(process);
+    }
+}
+
 // ─────────────────────────────── FakeTrustRepo ──────────────────────────────
 
-/// An in-memory [`TrustRepo`] keyed by `(project, variant hex)`, for headless
-/// trust and sync tests.
+/// An in-memory [`TrustRepo`] keyed by `(project, variant hex)`, for headless trust
+/// and sync tests.
 #[derive(Default)]
 pub struct FakeTrustRepo {
     trusted: Mutex<HashSet<(u64, String)>>,
@@ -230,9 +313,9 @@ struct FakeProjects {
     rows: Vec<ProjectRecord>,
 }
 
-/// An in-memory [`ProjectRepo`] assigning sequential ids, for headless registry
-/// tests. Mirrors the SQLite store's semantics (canonical-root upsert, cascade-free
-/// remove) closely enough to exercise the [`crate::projects::Projects`] logic.
+/// An in-memory [`ProjectRepo`] assigning sequential ids, for headless registry tests.
+/// Mirrors the SQLite store's semantics (canonical-root upsert, cascade-free remove)
+/// closely enough to exercise the [`crate::projects::Projects`] logic.
 pub struct FakeProjectRepo {
     inner: Mutex<FakeProjects>,
 }

@@ -2,10 +2,15 @@
 //!
 //! In the walking skeleton this spawns plain OS processes via `tokio::process`; a
 //! later phase upgrades it to a full PTY (portable-pty) without changing the port.
-//! The invariant that matters now is **process-group containment**: every child is
-//! spawned as the leader of a fresh process group, and stop signals target the whole
-//! group (via `killpg`), so a process that forks children is torn down completely
-//! rather than leaking orphans.
+//! Two invariants matter here:
+//!
+//! * **Login-shell execution** — every command runs as `$SHELL -lc <command>` in its
+//!   resolved working directory, with per-process `env` layered onto the inherited
+//!   environment (process env wins). This is how aliases and version-manager PATHs
+//!   resolve. Full `$SHELL -ilc env` capture/caching is a later phase.
+//! * **Process-group containment** — each child is the leader of a fresh process
+//!   group, and stop signals target the whole group (via `killpg`), so a command that
+//!   forks children is torn down completely rather than leaking orphans.
 
 use std::process::Stdio;
 
@@ -17,6 +22,9 @@ use soloist_core::{
 };
 use tokio::process::Command;
 
+/// Fallback shell when `$SHELL` is unset.
+const FALLBACK_SHELL: &str = "/bin/sh";
+
 /// Spawns processes with `tokio::process`, placing each in its own process group.
 #[derive(Clone, Copy, Default)]
 pub struct TokioProcessSpawner;
@@ -24,16 +32,21 @@ pub struct TokioProcessSpawner;
 #[async_trait]
 impl ProcessSpawner for TokioProcessSpawner {
     async fn spawn(&self, spec: &SpawnSpec) -> Result<Spawned, SpawnError> {
-        let mut command = Command::new(&spec.program);
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| FALLBACK_SHELL.to_string());
+        let mut command = Command::new(shell);
         command
-            .args(&spec.args)
+            .arg("-lc")
+            .arg(&spec.command)
+            .current_dir(&spec.working_dir)
+            // Per-process overrides layer onto the inherited app env (process wins).
+            .envs(&spec.env)
             // `0` makes the child the leader of a new group whose pgid is its pid.
             .process_group(0)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            // Safety net: if the owning task is dropped without a clean stop, the
-            // child is killed rather than leaked.
+            // Safety net: if the owning task is dropped without a clean stop, the child
+            // is killed rather than leaked.
             .kill_on_drop(true);
 
         let mut child = command

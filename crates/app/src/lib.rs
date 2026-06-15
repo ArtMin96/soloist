@@ -41,7 +41,7 @@ async fn spawn_demo(facade: State<'_, Facade>) -> Result<u64, String> {
 /// found.
 #[tauri::command]
 async fn stop_process(id: u64, facade: State<'_, Facade>) -> Result<bool, String> {
-    Ok(facade.stop(ProcessId::from_raw(id)))
+    Ok(facade.supervisor().stop(ProcessId::from_raw(id)))
 }
 
 /// The current process read model — the snapshot half of snapshot-then-deltas.
@@ -53,20 +53,22 @@ async fn list_processes(facade: State<'_, Facade>) -> Result<Vec<ProcessView>, S
 /// Builds the façade over the real adapters, degrading to an in-memory store if the
 /// durable location is unavailable so the app still launches.
 fn build_facade() -> Facade {
-    let store = match SqliteStore::open_default() {
+    let store = Arc::new(match SqliteStore::open_default() {
         Ok(store) => store,
         Err(err) => {
             eprintln!("soloist: durable store unavailable ({err}); using in-memory store");
             SqliteStore::open_in_memory().expect("open in-memory store")
         }
-    };
+    });
     // Exercise the storage thread in the real binary: record the launching version.
     let _ = store.meta_set("last_launch_version", env!("CARGO_PKG_VERSION"));
 
+    // One SQLite store backs the trust and project repositories the façade needs.
     Facade::new(
         Arc::new(TokioProcessSpawner),
         Arc::new(TokioClock),
-        Arc::new(store),
+        store.clone(),
+        store,
     )
 }
 

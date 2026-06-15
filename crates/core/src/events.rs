@@ -28,11 +28,14 @@ pub enum DomainEvent {
         label: String,
         status: ProcStatus,
     },
-    /// A process moved between lifecycle states.
+    /// A process moved between lifecycle states. `exit_code` is set on a terminal
+    /// transition driven by the child exiting on its own (`None` when terminated by a
+    /// signal or for non-terminal transitions).
     ProcessStatusChanged {
         id: ProcessId,
         from: ProcStatus,
         to: ProcStatus,
+        exit_code: Option<i32>,
     },
     /// A process left the registry.
     ProcessRemoved { id: ProcessId },

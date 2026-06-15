@@ -9,17 +9,22 @@
 
 ## Current state
 
-- **Overall:** **Phase 2 (Config & Projects, C1) code-complete — `Done — pending verify`.** The
-  `solo.yml` model, loader/validator, durable trust store, project registry, content-hash sync engine,
-  and a Clock-driven debouncer are built on the Phase 1 skeleton and proven headless by automated tests
-  (`just lint && just test` green: **61 tests**, core 42 / pty-integration 3 / store 10 / UI 6). Two v1
-  rows (A2 fields-honored-**at-runtime**, A6 untrusted-**cannot-run**) have their C1 modeling/decision
-  done here; their *runtime* verification belongs to Phase 3 (which spawns processes and enforces the
-  gate). `later` rows A5/A8/A10/A12/A13 deferred (tracked). Live `notify` watcher deferred to Phase 6.
-- **Active phase:** **Phase 2 (Config & Projects).** Status `Done — pending verify`.
+- **Overall:** **Phase 3 (Process Supervisor, C2) — `In progress`. The B1–B7 core slice + the Phase-2
+  runtime deferrals (A2, A6) are code-complete and headless-verified; B8 (orphan adoption) and Task 4
+  (output capture/log ring) are deferred to the next Phase-3 session** (the user chose "Core first" to
+  give B8 dedicated test time). Built on the Phase 1 actor + Phase 2 C1: a real `Supervisor` (registry,
+  mailbox-driven actor with `Stop`/`Restart`, status FSM, graceful SIGTERM→5s→SIGKILL on the **process
+  group**, exit classification, panic isolation), the **trust gate enforced in core** on
+  start/restart/bulk, bulk ops (start_all/stop_all/restart_running), the stop→lock-release hook, and
+  login-shell execution (`$SHELL -lc`) honoring `working_dir`/`env`/`auto_start`. `just lint && just
+  test` green: **76 tests** (core 55 / pty-integration 5 / store 10 / UI 6).
+- **Active phase:** **Phase 3 (Process Supervisor).** Status `In progress` (B1–B7 done-pending-verify;
+  B8 + output capture remain).
+- **Phase 2:** `Done — pending verify` — its runtime deferrals A2/A6 are now closed in Phase 3.
 - **Phase 1:** still `Done — pending verify` — its one open step is the **manual in-GUI Start/Stop
-  click** (`just dev`); independent of Phase 2 and unchanged this session.
-- **Last session:** 2026-06-15 — built Phase 2 / context C1 end to end (details under "Decisions / changes").
+  click** (`just dev`); the demo now routes through the real supervisor (an ungated terminal running
+  `sleep 60`), so the click-through path is unchanged and still valid to confirm.
+- **Last session:** 2026-06-15 — built Phase 3 / context C2 (B1–B7 + A2/A6); details under "Decisions / changes".
 
 ---
 
@@ -60,7 +65,7 @@ Status vocabulary: `Not started` · `In progress` · `Done — pending verify` �
 | 0 | Foundations (workspace, CI, `.deb` build) | **Verified** | 8-crate workspace builds; `just lint` + `just test` green (clippy -D warnings, rustfmt, ESLint, Prettier, tsc, vitest 2/2, Rust placeholder tests); dependency-direction guard passes (detection verified against `soloist-app`); `Soloist_0.1.0_amd64.deb` (2.3 MB) builds; app launches on a real desktop and renders `app_info` → "version 0.1.0" (user-confirmed). Clean-container dpkg-install smoke (Ubuntu 22.04) now run: install + `Soloist.desktop` + binary OK, and it surfaced that **host-built** debs need glibc 2.39+ (this host is 2.43) so they don't run on 22.04 — distributable debs are the CI (22.04) artifact. CI `bundle` builds the `.deb`; new CI `smoke` job installs + `ldd`-checks + Xvfb-launches it on 22.04. Container *GUI launch* on a 22.04-built artifact still to be confirmed (the host-built deb is glibc-incompatible with 22.04 by design). |
 | 1 | Walking skeleton (ports/adapters + event bus) | **Done — pending verify** | Ports (`ProcessSpawner`/`Clock`/`Store`/`EventSink` + `FileWatcher`/`Notifier`/`Summarizer` stubs), `DomainEvent` broadcast bus, `Facade` (C8), supervised process actor (FSM-driven; clock-driven SIGTERM→grace→SIGKILL; panic-isolated→`Crashed`), real `TokioProcessSpawner` (fresh pgroup + `nix::killpg`) + SQLite `Store` (WAL + `user_version` migration + `meta`). Tauri command/event wiring + reusable debug panel. **Evidence:** 10 core + 2 store + 3 pty(integration) + 6 UI tests green; `just lint && just test` green; K7 guard green. **Pending:** in-GUI Start/Stop click (Playwright → Phase 5). |
 | 2 | Config & projects (real `solo.yml`, trust, sync, detect) | **Done — pending verify** | Context C1 built headless on the skeleton. `crates/core/config/{model,load,diff,sync}` (serde `SoloYml`/`ProcessSpec`, `deny_unknown_fields`, `IndexMap` order, documented defaults; total `load`/`parse` w/ 1 MB cap + empty/comment-only = empty + typed `ConfigError`; `ConfigSync` add/update/remove/**rename** diff; `ConfigEngine` content-hash sync that flags `requires_trust` and emits `DomainEvent::ConfigChanged` — **owns no spawner, starts nothing**), `core/hash` (SHA-256 `Hash` + length-prefixed variant hash), `core/trust` (`TrustStore`/`Trust`), `core/projects` (`Projects`, canonical-root identity), `core/debounce` (Clock-driven). `crates/store` grown to the repository pattern (`meta`/`projects`/`trust` modules + migration **v2**: `projects`/`trust` tables, FK cascade) implementing `ProjectRepo`/`TrustRepo`. **v1 evidence:** A1/A3/A4 (`config/load` tests), A7 (`trust` + store `trust_persists_across_reopen`), A9 (`config/sync` write→mutate→`ConfigChanged{requires_trust}`, rename-preserves, no-op-on-touch), A11 (store `projects` + core `projects`). A2/A6 runtime verify → Phase 3. `later` A5/A8/A10/A12/A13 deferred. New core deps: `serde_norway` 0.9, `indexmap` 2, `sha2` 0.11 (dep-direction guard green). Divergences: `KNOWN-DIVERGENCES.md` D-1 (variant scope), D-2 (live watcher → Phase 6). |
-| 3 | Process supervisor (3 subtypes, status FSM, orphans) | Not started | Highest-risk; budget extra test time |
+| 3 | Process supervisor (3 subtypes, status FSM, orphans) | **In progress** | **B1–B7 + A2/A6 done — pending verify.** `Supervisor` (C2) on the Phase-1 actor: mailbox actor (`Stop`/`Restart`), status FSM (+`Crashed→Starting` edge), graceful SIGTERM→5s→SIGKILL on the **pgroup**, exit classification (+`exit_code` on the status event), panic isolation; **trust gate in core** on start/restart/start_all (A6); login-shell `$SHELL -lc` honoring `working_dir`/`env`/`auto_start` (A2/B5); bulk start_all/stop_all/restart_running (B4); stop→lock-release hook (B7, `LockReleaser` port, `NoopLockReleaser` until C6/Phase 9). **Evidence:** core 55 (13 supervisor + FSM-restart test), pty 5 (real-OS: pgroup reap, grandchild reap, trap-TERM→SIGKILL escalation, cwd/env-honored-via-exit-code, **start/stop 50 → zero leaked PIDs**). `just lint && just test` green (76). **Remaining (next session):** B8 orphan adoption (runtime-state file port + reconcile adopt/surface/prune), Task 4 output capture/log ring (5,000-line bound), and the "clears crash tracking" half of B7 (Phase-6 restart policy). |
 | 4 | PTY & terminal I/O (rendered+raw, input, resize, OSC) | Not started | |
 | 5 | Dashboard UI (sidebar tree, status dots, terminal pane, trust dialog) | Not started | Playwright e2e starts here; drive UI through `/impeccable`; seed `DESIGN.md` first |
 | 6 | Monitoring, restart (10/60s), file-watch, notifications | Not started | **Nightly soak test starts running from here** |
@@ -78,6 +83,54 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Phase 3 build — Process supervisor / context C2, core slice B1–B7 (2026-06-15)
+- **Session scope (user decision):** "Core first" — land **B1–B7 + A2/A6** fully tested this session;
+  defer **B8 (orphan adoption)** and **Task 4 (output capture/log ring)** to a focused next session so
+  B8 (the highest-risk sub-piece) gets dedicated test time. The phase stays `In progress` until those
+  land; not marked done.
+- **`Supervisor` (C2) built on the Phase-1 actor.** New `crates/core/supervisor/` (`registry` +
+  `actor`) under the `supervisor` module root. Each managed process is one supervised `tokio` task with
+  a bounded **mailbox** (`ActorMsg::Stop`/`Restart`, cap 4) — restart cycles the child *in place*
+  (`Running→Restarting→Starting→Running`) under the same actor, so there is one owner per process. The
+  registry's `Mutex` guards only the lookup map. Panic isolation retained (inner task + `is_panic()` →
+  `Crashed` + lock release). `apply_transition` is a single shared FSM helper used by both the
+  supervisor (reads `from` from the registry) and the actor (threads its local mirror) — DRY (§15).
+- **Trust gate enforced in core (A6).** `start`/`restart`/`start_all` refuse an untrusted command
+  variant via the shared `TrustRepo`; terminals/agents are ungated (`trust_variant: None`). Proven
+  refused by **every** path (`an_untrusted_command_cannot_run_by_any_path`).
+- **Fields honored at runtime (A2/B5).** The `pty` spawner now runs `$SHELL -lc <command>` in the
+  resolved `working_dir` with per-process `env` layered onto the inherited env (process wins — the
+  documented precedence). Verified on a **real** shell by exit code (`runs_a_command_in_its_working_dir_with_its_env`).
+  `auto_start` gates `start_all` candidacy. (Full `$SHELL -ilc env` capture/caching stays Phase 11 / I10.)
+- **`SpawnSpec` evolved** `{program,args}` → `{command, working_dir, env}` (a Phase-1 contract change,
+  justified by B5). **`Spawned` unchanged** this session — the output channel lands with Task 4's ring.
+- **FSM refinement:** added the `Crashed→Starting` edge — a user can restart a crashed command (matches
+  Solo; the prior FSM only allowed `RestartExhausted→Starting`). Tested (`a_terminal_process_can_be_restarted`).
+- **Exit classification (gap-decision, encoded in the phase FSM):** clean `exit(0)` → `Stopped`;
+  non-zero code or an unsolicited terminating signal → `Crashed` (+ `exit_code` on
+  `ProcessStatusChanged`). A user-initiated stop is a separate path and is always `Stopped`, even when
+  escalated to SIGKILL. (Solo doesn't document the exact boundary; this matches the phase-03 FSM.)
+- **Graceful group stop (B6):** SIGTERM→**5s grace** (mock-clock-driven, no real waiting)→SIGKILL→reap,
+  always on the **process group**. Real-OS evidence: pgroup reaped, grandchildren reaped (`$SHELL -lc
+  "sleep 30"`), a `trap '' TERM` shell escalates to SIGKILL, and **start/stop 50 processes leaves zero
+  surviving groups** (the Phase-13 soak precursor).
+- **Stop releases locks (B7):** the actor calls a `LockReleaser` port on **any** terminal transition
+  (stop *and* crash), matching Solo's "locks auto-release when the owning process closes". Real impl is
+  C6 (Phase 9); `NoopLockReleaser` until then. "Clears crash tracking" is the other half — deferred to
+  Phase 6 (no restart/crash policy state exists yet to clear).
+- **Façade (C8) now owns C2 + C1.** `Facade::new(spawner, clock, trust_repo, project_repo)` builds the
+  `Supervisor` + `Projects`/`TrustStore`/`ConfigEngine` over **one shared `TrustRepo`** and one bus, and
+  exposes `supervisor()`/`projects()`/`trust()`/`config()` accessors so adapters route to a single impl
+  (no per-adapter reimplementation). The Phase-1 demo (`spawn_demo_process`) now registers + starts an
+  ungated terminal through the **real** supervisor path (keeps the Phase-1 manual GUI verify valid).
+- **Tauri touch (skill used).** Invoked the project-local **`tauri-calling-rust`** skill before editing
+  `crates/app/src/lib.rs`; the only changes were `build_facade` (one `Arc<SqliteStore>` feeding the
+  trust + project repos) and `stop_process` (now `facade.supervisor().stop`). Managed-state + async-
+  command contract unchanged; `Facade` stays `Send + Sync`.
+- **No new dependencies** (dev-only `tempfile` added to `crates/pty` for the cwd test — not shipped, no
+  §6 size impact). No frontend changes (the TS `ProcessView`/`ProcessStatusChanged` mirror updates land
+  with the Phase-5 UI wiring, as in Phase 2). Dep-direction guard green.
 
 ### Phase 2 review fixes (2026-06-15)
 Reviewed the Phase 2 PR (`3601d6d`, range `7ef2334..3601d6d`) across all dimensions via
@@ -280,13 +333,20 @@ review's one should-fix + the mechanical nits:
 - **Phase 2 deferred `later` rows (tracked, non-gating):** A5 JSON Schema (`schemars` → `solo.schema.json`),
   A8 "automatically trust command changes" setting, A10 command auto-detection, A12 local-vs-shared
   (`Visibility`) commands, A13 project icon rendering. Build when their consuming phase needs them.
-- **A2/A6 runtime verification is Phase 3.** Phase 2 modeled all per-process fields + the trust *decision*
-  (`TrustStore::is_trusted`), but "each field honored **at runtime**" (A2) and "untrusted **cannot run**
-  by any path" (A6) require the supervisor to spawn + enforce — verify these when Phase 3 wires C1 into
-  the start path (the gate must live in core, not any adapter; §12).
-- **C1 not yet wired to the façade/adapters.** `Projects`/`TrustStore`/`ConfigEngine` are standalone C1
-  contexts; Phase 3 routes them through `Facade` (trust-gated start) and Phase 5 surfaces `ConfigChanged`
-  in the UI (adding it to the TS `DomainEvent` mirror then, via `/impeccable`).
+- **A2/A6 — CLOSED in Phase 3.** A6 (untrusted cannot run by any path) is enforced in core on
+  start/restart/start_all (`an_untrusted_command_cannot_run_by_any_path`); A2 (fields honored at
+  runtime) is verified on a real shell via exit code. Phase 13's parity walk re-confirms.
+- **C1 now wired to the façade.** `Facade` owns `Projects`/`TrustStore`/`ConfigEngine` + the
+  `Supervisor` over one shared `TrustRepo`/bus. **Still to wire:** `ConfigEngine::open`→`Supervisor::
+  register` of a project's commands (loading a `solo.yml` into managed processes) — Phase 3's B8 session
+  or Phase 5 will connect "open project → register its commands → start_all". Phase 5 surfaces
+  `ConfigChanged`/`ProcessView` (now carrying `project`/`exit_code`) in the UI + the TS mirror via `/impeccable`.
+- **Phase 3 remaining (next session):** **B8 orphan adoption** — needs a new runtime-state-file port
+  (persist `{project_root,name,command,pgid}`; NOT SQLite, per plan/04 §7) + a liveness/adopt mechanism,
+  and `reconcile_orphans()` classifying adopt (project+name+command match) / surface (`OrphansFound`) /
+  prune; **Task 4 output capture** — add an output channel to `Spawned` + a bounded `Ring<LogLine>`
+  (5,000-line cap, plan/04 §8) + per-process log fan-out, drained by the actor (the dashboard/MCP
+  consume it later); and B7's **"clears crash tracking"** half (Phase-6 restart policy).
 - **Live `FileWatcher` adapter (Phase 6).** The port is still a methods-less stub; Phase 6 adds its
   methods + a `notify`-backed adapter that drives `ConfigEngine::sync` through the `Debouncer`, and also
   serves glob file-watch restart (D6). Pick the watcher-adapter crate home then (new `crates/watch` vs
@@ -320,17 +380,26 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-1. Run `just lint && just test` first to confirm the Phase 2 baseline is still green (**61 tests**).
-2. **Begin Phase 3 — Process supervisor.** Read `plan/phases/phase-03-process-supervisor.md` end to end
-   and re-read its parity rows (B1–B9). It **consumes C1**: wire `Projects` + `TrustStore` +
-   `ConfigEngine` through the `Facade`, and **enforce the trust gate in core** on `start*`/auto-start/
-   `restart*` (this closes A6 runtime verify "untrusted cannot run by any path") and honor each
-   `ProcessSpec` field at spawn time — `working_dir` (`ProcessSpec::resolved_working_dir`), `env`,
-   `auto_start`, `auto_restart` (this closes A2 "fields honored at runtime"). Phase 3 is the
-   highest-risk phase — budget extra test time. Keep the discipline bar (§15): single-source, no magic
-   strings, real behavioural tests, small files.
-3. **Still open from Phase 1 (independent, user-only):** confirm the in-GUI Start/Stop click via
-   `just dev` (a real `sleep 60` goes `starting → running`, then `stopping → stopped`), then flip the
-   Phase 1 row to `Verified`. Cannot be automated headlessly before Phase 5 Playwright.
-4. **Do not pull deferred `later` rows into v1** (A5/A8/A10/A12/A13) and **do not** build the live
-   `notify` watcher before Phase 6 — both are recorded above with rationale.
+1. Run `just lint && just test` first to confirm the Phase 3 baseline is still green (**76 tests**:
+   core 55 / pty 5 / store 10 / UI 6).
+2. **Finish Phase 3 — B8 orphan adoption + Task 4 output capture.** Re-read
+   `plan/phases/phase-03-process-supervisor.md` Tasks 4 & 9 and parity row **B8**, plus plan/04 §7
+   (runtime-state file, NOT SQLite) and §8 (bounded ring). Suggested order:
+   - **B8:** add a `RuntimeState`/`OrphanStore` port (persist `{project_root, name, command, pgid}` to a
+     small file in the data dir) + a liveness/adopt mechanism (the spawner adapter or a new port: is the
+     pgid alive? signal it). `Supervisor::reconcile_orphans()` → pure classify (adopt when
+     project+name+command match a known config command / surface `OrphansFound` / prune dead), with the
+     adopted process re-registered as `Running` tracking the existing pgid (poll liveness on the
+     `Clock`). The Kill/KillAll/Leave dialog is Phase 5 UI — emit the decision event only.
+   - **Task 4:** add `output: mpsc::Receiver<Vec<u8>>` to `Spawned` (bounded — backpressure), have the
+     `pty` adapter pipe stdout+stderr through a reader task, and have the actor drain it into a bounded
+     `Ring<LogLine>` (new small `ring.rs`, 5,000-line cap) + a per-process log broadcast
+     (`subscribe_logs`). Add the "buffer bound" test from the phase test plan.
+   - Then flip Phase 3 to `Done — pending verify` once every B1–B8 row + acceptance + test plan is green.
+3. **Wire "open project → register commands → start_all"** (connect `ConfigEngine::open` to
+   `Supervisor::register` per command) — either in the B8 session or Phase 5.
+4. **Still open from Phase 1 (independent, user-only):** confirm the in-GUI Start/Stop click via
+   `just dev` (the demo terminal `sleep 60` goes `stopped → starting → running`, then `stopping →
+   stopped`), then flip the Phase 1 row to `Verified`. Cannot be automated headlessly before Phase 5 Playwright.
+5. **Do not pull deferred `later` rows into v1** (A5/A8/A10/A12/A13, B9 "resume last session") and **do
+   not** build the live `notify` watcher before Phase 6 — all recorded above with rationale.
