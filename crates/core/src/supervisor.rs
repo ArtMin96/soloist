@@ -187,6 +187,7 @@ impl Supervisor {
             .add(view, launch, project_root, trust_variant, auto_start);
         self.bus.publish(DomainEvent::ProcessSpawned {
             id,
+            project,
             kind,
             label,
             status: ProcStatus::Stopped,
