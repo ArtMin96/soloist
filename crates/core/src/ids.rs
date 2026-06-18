@@ -1,9 +1,12 @@
 //! Stable, newtype identifiers for domain aggregates.
 //!
 //! IDs are opaque newtypes, never bare integers, so the compiler rejects mixing a
-//! [`ProcessId`] with a [`ProjectId`]. Each id is minted from a process-wide
-//! monotonic counter via `next`; values are unique within a single run (the runtime
-//! registry is rebuilt on every launch, so cross-run stability is not required here).
+//! [`ProcessId`] with a [`ProjectId`]. A [`ProcessId`] is minted per run from a
+//! process-wide monotonic counter via `next`; the runtime process registry is
+//! rebuilt on every launch, so its values need only be unique within a run. A
+//! [`ProjectId`], by contrast, is **durable**: the store assigns it from a project's
+//! canonical root and reconstructs it via `from_raw` on later runs, so trust keyed
+//! by project survives restarts.
 
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,14 +27,15 @@ macro_rules! id_newtype {
             }
 
             /// The raw underlying value (for wire encoding and display only).
-            pub fn get(self) -> u64 {
+            pub const fn get(self) -> u64 {
                 self.0
             }
 
-            /// Reconstructs an id from a raw value that crossed a process boundary
-            /// (e.g. an IPC argument). For adapters decoding the wire only — never
-            /// to mint a new id (use `next`).
-            pub fn from_raw(value: u64) -> Self {
+            /// Reconstructs an id from a raw value that crossed a boundary — an IPC
+            /// argument, or a durable id the store assigned (see [`ProjectId`]).
+            /// Used by adapters decoding the wire and by the store; never to mint a
+            /// fresh runtime id (use `next`).
+            pub const fn from_raw(value: u64) -> Self {
                 Self(value)
             }
         }
