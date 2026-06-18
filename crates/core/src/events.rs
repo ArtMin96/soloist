@@ -25,6 +25,7 @@ pub enum DomainEvent {
     /// A new process entered the registry (initial status included).
     ProcessSpawned {
         id: ProcessId,
+        project: ProjectId,
         kind: ProcessKind,
         label: String,
         status: ProcStatus,

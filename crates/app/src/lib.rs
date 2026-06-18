@@ -2,19 +2,23 @@
 //!
 //! This adapter holds no business logic. It builds the [`Facade`] over the real port
 //! adapters (process spawner, clock, SQLite store), registers it as managed state,
-//! routes `invoke` calls to facade commands, and forwards the core's `DomainEvent`
-//! stream to the webview as Tauri events. The UI renders the resulting read model.
+//! routes `invoke` calls to facade commands (see [`commands`]), and forwards the core's
+//! `DomainEvent` stream to the webview as Tauri events. The UI renders the read model.
+
+mod commands;
+mod demo;
+mod pty_bridge;
 
 use std::sync::Arc;
 
 use serde::Serialize;
-use soloist_core::{
-    Facade, NoopRuntimeState, ProcessId, ProcessView, RuntimeState, Store, TokioClock,
-};
+use soloist_core::{Facade, NoopRuntimeState, RuntimeState, Store, TokioClock};
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use soloist_store::{FileRuntimeState, SqliteStore};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::broadcast::error::RecvError;
+
+use pty_bridge::PtyBridge;
 
 /// The webview event name carrying every serialized [`soloist_core::DomainEvent`].
 const DOMAIN_EVENT: &str = "domain-event";
@@ -31,25 +35,6 @@ fn app_info() -> AppInfo {
         name: "Soloist".into(),
         version: env!("CARGO_PKG_VERSION").into(),
     }
-}
-
-/// Spawns the demo process end to end and returns its id.
-#[tauri::command]
-async fn spawn_demo(facade: State<'_, Facade>) -> Result<u64, String> {
-    Ok(facade.spawn_demo_process().get())
-}
-
-/// Requests a graceful stop of the process with the given id; reports whether it was
-/// found.
-#[tauri::command]
-async fn stop_process(id: u64, facade: State<'_, Facade>) -> Result<bool, String> {
-    Ok(facade.supervisor().stop(ProcessId::from_raw(id)))
-}
-
-/// The current process read model — the snapshot half of snapshot-then-deltas.
-#[tauri::command]
-async fn list_processes(facade: State<'_, Facade>) -> Result<Vec<ProcessView>, String> {
-    Ok(facade.snapshot())
 }
 
 /// Builds the façade over the real adapters, degrading to an in-memory store if the
@@ -88,8 +73,8 @@ fn build_facade() -> Facade {
 }
 
 /// Subscribes to the core event bus and forwards each event to the webview. Lagged
-/// receivers are skipped (the UI re-syncs via `list_processes`); a closed bus ends
-/// the task at shutdown.
+/// receivers are skipped (the UI re-syncs via `proc_list`); a closed bus ends the task
+/// at shutdown.
 fn forward_events(app: AppHandle) {
     let mut events = app.state::<Facade>().subscribe();
     tauri::async_runtime::spawn(async move {
@@ -108,15 +93,25 @@ fn forward_events(app: AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .manage(build_facade())
+        .manage(PtyBridge::default())
         .setup(|app| {
+            demo::seed(app.state::<Facade>().inner());
             forward_events(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
-            spawn_demo,
-            stop_process,
-            list_processes
+            commands::proc_list,
+            commands::proc_start,
+            commands::proc_stop,
+            commands::proc_restart,
+            commands::stack_start,
+            commands::stack_stop,
+            commands::stack_restart_running,
+            commands::pty_write,
+            commands::pty_resize,
+            commands::pty_attach,
+            commands::pty_detach,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
