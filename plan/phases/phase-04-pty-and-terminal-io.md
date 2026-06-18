@@ -14,8 +14,9 @@ interactive prompts. Pipes break this; a PTY makes interactivity (C3) and ANSI (
 ## Tasks
 1. **PTY backend:** per process, `portable-pty` `openpty(PtySize)`; spawn the command on the slave (still
    in its own process group from Phase 3); keep the master for I/O.
-2. **Read loop → dual buffers:** stream raw bytes → `PtyOutput{id,bytes}` event + append to a **raw**
-   byte scrollback (bounded, default 256 KB) **and** feed a terminal parser (`vte`) to maintain a
+2. **Read loop → dual buffers:** stream raw bytes → a per-process **broadcast** (not a `PtyOutput`
+   `DomainEvent`; see Interfaces) + append to a **raw** byte scrollback (bounded, default 256 KB, plus a
+   global aggregate cap across all processes) **and** feed a terminal parser (`vte`) to maintain a
    **rendered** screen/line buffer. Keep the line-oriented `LogLine` stream from Phase 3 for logs/search.
 3. **Input (C3):** `write_stdin(id, bytes)` forwards keystrokes/control bytes to the master (bounded mpsc
    = backpressure, `04` §8). Supports raw control bytes (Ctrl-C, arrows) per `send_input`.
@@ -30,10 +31,34 @@ interactive prompts. Pipes break this; a PTY makes interactivity (C3) and ANSI (
    live-streams; multiple viewers via shared broadcast.
 8. **Env hygiene:** `TERM=xterm-256color` (ref §12), sane `LANG`/`COLUMNS`/`LINES`; strip Soloist-
    internal vars except the injected `SOLOIST_PROCESS_ID` (Phase 8).
+   > **Implemented:** `TERM=xterm-256color` is set; the full env is otherwise inherited (so `PATH`/`LANG`
+   > resolve). `COLUMNS`/`LINES` are *intentionally not* exported — the PTY winsize is authoritative and
+   > the shell derives them from it; exporting them would conflict on resize. There are no Soloist-internal
+   > vars to strip yet (`SOLOIST_PROCESS_ID` injection lands in Phase 8). Tracked in `PROGRESS.md`.
 9. **Frontend terminal:** xterm.js + fit + webgl (canvas fallback) bound to `pty:<id>`; send input via
    `pty_write`; this is consumed by the Phase 5 dashboard.
 
 ## Interfaces
+
+> **Implemented (divergence from the sketch below, recorded in `PROGRESS.md`):** high-rate raw PTY
+> bytes flow over a **per-process broadcast** returned by `attach_pty`, *not* a `DomainEvent::PtyOutput`
+> on the shared bus — that would flood low-rate status subscribers (`04` §5 isolation / §8 backpressure).
+> Only the low-rate semantic events (`TerminalTitleChanged`/`TerminalBell`) ride the bus. So the actual
+> surface is:
+>
+> ```rust
+> impl Supervisor {
+>   // raw scrollback snapshot + a live receiver, captured atomically (no gap/dup):
+>   fn attach_pty(&self,id:ProcessId)->Option<(Vec<u8>, broadcast::Receiver<PtyChunk>)>;
+>   fn pty_scrollback(&self,id:ProcessId)->Option<Vec<u8>>;   // raw replay
+>   fn rendered(&self,id:ProcessId)->Option<RenderedScreen>;  // for get_process_output
+>   async fn write_stdin(&self,id:ProcessId,data:Vec<u8>)->Result<(),SupervisorError>;
+>   async fn resize(&self,id:ProcessId,cols:u16,rows:u16)->Result<(),SupervisorError>;
+> }
+> enum DomainEvent { TerminalTitleChanged{id,title}, TerminalBell{id}, OrphansFound{orphans}, … }
+> ```
+
+Original sketch:
 ```rust
 impl Supervisor {
   fn subscribe_pty(&self,id:ProcessId)->Receiver<PtyOutput>;

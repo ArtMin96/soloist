@@ -19,7 +19,7 @@ Stopped ─start─► Starting ─ok─► Running ─exit0─► Stopped
                     │spawn-fail        │exit≠0
                     └────► Crashed ◄────┘
 stop(): any ─► Stopping ─(group dead)─► Stopped
-restart(): Running ─► Stopping ─► Starting ─► Running
+restart(): Running ─► Restarting ─► Starting ─► Running
 (RestartExhausted set by Phase 6 policy after 10/60s)
 ```
 Every transition emits `ProcessStatusChanged{id,from,to,at,exit_code}`. Transitions are explicit

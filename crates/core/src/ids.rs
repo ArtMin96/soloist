@@ -27,7 +27,7 @@ macro_rules! id_newtype {
             }
 
             /// The raw underlying value (for wire encoding and display only).
-            pub fn get(self) -> u64 {
+            pub const fn get(self) -> u64 {
                 self.0
             }
 
@@ -35,7 +35,7 @@ macro_rules! id_newtype {
             /// argument, or a durable id the store assigned (see [`ProjectId`]).
             /// Used by adapters decoding the wire and by the store; never to mint a
             /// fresh runtime id (use `next`).
-            pub fn from_raw(value: u64) -> Self {
+            pub const fn from_raw(value: u64) -> Self {
                 Self(value)
             }
         }

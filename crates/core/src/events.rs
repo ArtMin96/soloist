@@ -14,6 +14,7 @@ use tokio::sync::broadcast;
 
 use crate::config::ConfigSync;
 use crate::ids::{ProcessId, ProjectId};
+use crate::orphans::OrphanInfo;
 use crate::process::{ProcStatus, ProcessKind};
 
 /// A change in domain state, serialized to adapters verbatim. `#[serde(tag = "type")]`
@@ -24,15 +25,19 @@ pub enum DomainEvent {
     /// A new process entered the registry (initial status included).
     ProcessSpawned {
         id: ProcessId,
+        project: ProjectId,
         kind: ProcessKind,
         label: String,
         status: ProcStatus,
     },
-    /// A process moved between lifecycle states.
+    /// A process moved between lifecycle states. `exit_code` is set on a terminal
+    /// transition driven by the child exiting on its own (`None` when terminated by a
+    /// signal or for non-terminal transitions).
     ProcessStatusChanged {
         id: ProcessId,
         from: ProcStatus,
         to: ProcStatus,
+        exit_code: Option<i32>,
     },
     /// A process left the registry.
     ProcessRemoved { id: ProcessId },
@@ -44,6 +49,15 @@ pub enum DomainEvent {
         diff: ConfigSync,
         requires_trust: bool,
     },
+    /// A process set its terminal title via an OSC sequence. Drives window/tab titles
+    /// and feeds the agent idle heuristics that watch title stability.
+    TerminalTitleChanged { id: ProcessId, title: String },
+    /// A process rang the terminal bell (`BEL`). Drives attention notifications.
+    TerminalBell { id: ProcessId },
+    /// Reconciliation found leftover process groups from a previous run that match no
+    /// known command, awaiting a user Kill / Kill All / Leave decision surfaced by the
+    /// UI. The core only reports them; it neither kills nor keeps them on its own.
+    OrphansFound { orphans: Vec<OrphanInfo> },
 }
 
 /// The outbound event port: anything the core publishes domain events through.

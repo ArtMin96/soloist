@@ -35,7 +35,7 @@
         "base-uri": "'self'",
         "frame-ancestors": "'none'"
       },
-      "freezePrototype": true
+      "freezePrototype": false
     }
   },
   "bundle": {

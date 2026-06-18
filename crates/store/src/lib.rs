@@ -9,6 +9,7 @@
 mod meta;
 mod migrate;
 mod projects;
+mod runtime;
 mod trust;
 
 use std::path::{Path, PathBuf};
@@ -16,6 +17,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::Connection;
 use soloist_core::StoreError;
+
+pub use runtime::FileRuntimeState;
 
 /// A durable store backed by a single SQLite connection.
 ///

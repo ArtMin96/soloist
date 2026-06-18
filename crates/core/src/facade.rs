@@ -1,182 +1,202 @@
-//! The public command and query API that adapters call.
+//! The public command and query API that adapters call (context C8).
 //!
-//! [`Facade`] is the one surface every adapter (Tauri, MCP, HTTP/CLI) talks to, so a
-//! behaviour like "stop this process" is implemented exactly once. It owns the
-//! ports and the event bus, routes commands to the owning context, and exposes cheap
-//! queries. The walking skeleton implements one demo command thread end to end.
+//! [`Facade`] is the one surface every adapter (Tauri, MCP, HTTP/CLI) talks to. It
+//! owns the event bus and the bounded contexts — process supervision (C2), and the
+//! projects/trust/config of C1 — and hands adapters references to them, so a behaviour
+//! like "restart" or "is this command trusted" is implemented exactly once. Adapters
+//! translate requests in and project the read model out; they hold no business state.
 
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
 
+use crate::config::ConfigEngine;
 use crate::events::{DomainEvent, EventBus};
-use crate::ids::ProcessId;
-use crate::ports::{Clock, ProcessSpawner, SpawnSpec, Store};
-use crate::process::{ProcStatus, ProcessKind, ProcessView};
-use crate::supervisor::{spawn_supervised, Registry};
+use crate::ids::{ProcessId, ProjectId};
+use crate::ports::{
+    Clock, NoopLockReleaser, OrphanControl, ProcessSpawner, ProjectRepo, PtySize, RuntimeState,
+    SpawnSpec, TrustRepo,
+};
+use crate::process::{ProcessKind, ProcessView};
+use crate::projects::Projects;
+use crate::supervisor::{Registration, Supervisor};
+use crate::trust::TrustStore;
 
-/// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a
-/// snapshot (see [`crate::events`]) rather than growing memory without limit.
+/// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot
+/// (see [`crate::events`]) rather than growing memory without limit.
 const EVENT_BUFFER: usize = 1024;
 
-/// The walking-skeleton demo command: a process that simply sleeps so its lifecycle
-/// (start → run → stop) can be driven end to end.
-const DEMO_PROGRAM: &str = "sleep";
-const DEMO_ARGS: &[&str] = &["60"];
+/// The project the walking-skeleton demo process is registered under.
+const DEMO_PROJECT: ProjectId = ProjectId::from_raw(1);
+/// The walking-skeleton demo command: a long sleep whose lifecycle (start → run →
+/// stop) can be driven end to end from the GUI. An ungated terminal, so it needs no
+/// trust record; replaced by real config-driven processes when the dashboard lands.
+const DEMO_COMMAND: &str = "sleep 60";
 
-/// The integration façade (context C8): holds the ports and the process registry and
-/// exposes the command/query API. Cheap to clone-share behind an `Arc`.
+/// The integration façade (context C8). Cheap to share as Tauri-managed state.
 pub struct Facade {
-    spawner: Arc<dyn ProcessSpawner>,
-    clock: Arc<dyn Clock>,
-    store: Arc<dyn Store>,
     bus: EventBus,
-    registry: Registry,
+    supervisor: Supervisor,
+    projects: Projects,
+    trust: TrustStore,
+    config: ConfigEngine,
 }
 
 impl Facade {
     /// Builds a façade over the given port adapters (real ones in the app, fakes in
-    /// tests).
+    /// tests). The trust repository is shared by the supervisor's trust gate, the
+    /// trust store, and the config sync engine, so all three agree on what is trusted.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         spawner: Arc<dyn ProcessSpawner>,
         clock: Arc<dyn Clock>,
-        store: Arc<dyn Store>,
+        trust: Arc<dyn TrustRepo>,
+        projects: Arc<dyn ProjectRepo>,
+        runtime: Arc<dyn RuntimeState>,
+        orphan_control: Arc<dyn OrphanControl>,
     ) -> Self {
-        Self {
+        let bus = EventBus::new(EVENT_BUFFER);
+        let supervisor = Supervisor::new(
             spawner,
             clock,
-            store,
-            bus: EventBus::new(EVENT_BUFFER),
-            registry: Registry::default(),
+            trust.clone(),
+            Arc::new(NoopLockReleaser),
+            runtime,
+            orphan_control,
+            bus.clone(),
+        );
+        Self {
+            supervisor,
+            projects: Projects::new(projects),
+            trust: TrustStore::new(trust.clone()),
+            config: ConfigEngine::new(trust, bus.clone()),
+            bus,
         }
     }
 
-    /// Subscribes to the domain event stream. Pair with [`Facade::snapshot`]:
-    /// read the snapshot first, then apply events (snapshot-then-deltas).
+    /// Subscribes to the domain event stream. Pair with [`Facade::snapshot`]: read the
+    /// snapshot first, then apply events (snapshot-then-deltas).
     pub fn subscribe(&self) -> broadcast::Receiver<DomainEvent> {
         self.bus.subscribe()
     }
 
-    /// The current read model: every known process. Cheap; never blocks writers.
+    /// The current process read model. Cheap; never blocks writers.
     pub fn snapshot(&self) -> Vec<ProcessView> {
-        self.registry.snapshot()
+        self.supervisor.snapshot()
     }
 
-    /// The durable store port (the walking-skeleton seed; adapters use it directly
-    /// to prove the storage thread).
-    pub fn store(&self) -> &dyn Store {
-        self.store.as_ref()
+    /// The process supervisor (C2) — start/stop/restart and bulk operations.
+    pub fn supervisor(&self) -> &Supervisor {
+        &self.supervisor
     }
 
-    /// Spawns the demo process (`sleep 60`) end to end: registers it as `Starting`,
-    /// emits [`DomainEvent::ProcessSpawned`], and starts its supervised actor.
-    /// Returns its id. Must be called from within a `tokio` runtime.
+    /// The project registry (C1).
+    pub fn projects(&self) -> &Projects {
+        &self.projects
+    }
+
+    /// The trust gate (C1).
+    pub fn trust(&self) -> &TrustStore {
+        &self.trust
+    }
+
+    /// The `solo.yml` sync engine (C1).
+    pub fn config(&self) -> &ConfigEngine {
+        &self.config
+    }
+
+    /// Registers and starts the demo process end to end, returning its id. Must be
+    /// called from within a `tokio` runtime.
     pub fn spawn_demo_process(&self) -> ProcessId {
-        let id = ProcessId::next();
-        let label = format!("demo {id}");
-        let view = ProcessView {
-            id,
-            kind: ProcessKind::Command,
-            label: label.clone(),
-            status: ProcStatus::Starting,
-        };
-        let cancel = CancellationToken::new();
-        self.registry.insert(view, cancel.clone());
-        self.bus.publish(DomainEvent::ProcessSpawned {
-            id,
-            kind: ProcessKind::Command,
-            label,
-            status: ProcStatus::Starting,
-        });
-
-        spawn_supervised(
-            id,
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let id = self.supervisor.register(Registration::launched(
+            DEMO_PROJECT,
+            ProcessKind::Terminal,
+            "demo",
             SpawnSpec {
-                program: DEMO_PROGRAM.into(),
-                args: DEMO_ARGS.iter().map(|a| (*a).to_string()).collect(),
+                command: DEMO_COMMAND.into(),
+                working_dir,
+                env: BTreeMap::new(),
+                size: PtySize::default(),
             },
-            self.spawner.clone(),
-            self.clock.clone(),
-            self.bus.clone(),
-            self.registry.clone(),
-            cancel,
-        );
+        ));
+        // Starting an ungated terminal cannot fail the trust gate.
+        let _ = self.supervisor.start(id);
         id
-    }
-
-    /// Requests a graceful stop of the process. Returns whether it was found.
-    pub fn stop(&self, id: ProcessId) -> bool {
-        self.registry.cancel(id)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::{StoreError, TokioClock};
-    use crate::testing::FakeSpawner;
-    use std::collections::HashMap;
-    use std::sync::Mutex;
+    use crate::ports::{NoopOrphanControl, NoopRuntimeState, TokioClock};
+    use crate::process::ProcStatus;
+    use crate::supervisor::SupervisorError;
+    use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTrustRepo};
+    use std::path::Path;
     use tokio::sync::broadcast::error::RecvError;
 
-    #[derive(Default)]
-    struct FakeStore {
-        map: Mutex<HashMap<String, String>>,
+    fn facade(spawner: FakeSpawner) -> (Facade, Arc<FakeTrustRepo>) {
+        let trust = Arc::new(FakeTrustRepo::new());
+        let facade = Facade::new(
+            Arc::new(spawner),
+            Arc::new(TokioClock),
+            trust.clone(),
+            Arc::new(FakeProjectRepo::new()),
+            Arc::new(NoopRuntimeState),
+            Arc::new(NoopOrphanControl),
+        );
+        (facade, trust)
     }
 
-    impl Store for FakeStore {
-        fn meta_get(&self, key: &str) -> Result<Option<String>, StoreError> {
-            Ok(crate::sync::lock(&self.map).get(key).cloned())
-        }
-        fn meta_set(&self, key: &str, value: &str) -> Result<(), StoreError> {
-            crate::sync::lock(&self.map).insert(key.into(), value.into());
-            Ok(())
+    async fn wait_for(rx: &mut broadcast::Receiver<DomainEvent>, target: ProcStatus) {
+        loop {
+            match rx.recv().await {
+                Ok(DomainEvent::ProcessStatusChanged { to, .. }) if to == target => return,
+                Ok(_) | Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => panic!("event bus closed"),
+            }
         }
     }
 
     #[tokio::test]
-    async fn spawn_demo_registers_and_announces_a_process() {
-        let facade = Facade::new(
-            Arc::new(FakeSpawner::exits_on_kill()),
-            Arc::new(TokioClock),
-            Arc::new(FakeStore::default()),
-        );
+    async fn spawn_demo_registers_and_runs_a_process() {
+        let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
         let mut rx = facade.subscribe();
 
         let id = facade.spawn_demo_process();
+        assert_eq!(facade.snapshot().len(), 1);
+        wait_for(&mut rx, ProcStatus::Running).await;
 
-        // It appears in the snapshot immediately, as Starting.
-        let snap = facade.snapshot();
-        assert_eq!(snap.len(), 1);
-        assert_eq!(snap[0].id, id);
-        assert_eq!(snap[0].status, ProcStatus::Starting);
+        // Stop routes through the same supervisor the snapshot reflects.
+        assert!(facade.supervisor().stop(id));
+        wait_for(&mut rx, ProcStatus::Stopped).await;
+    }
 
-        // The spawn is announced on the bus.
-        match rx.recv().await {
-            Ok(DomainEvent::ProcessSpawned {
-                id: got, status, ..
-            }) => {
-                assert_eq!(got, id);
-                assert_eq!(status, ProcStatus::Starting);
-            }
-            other => panic!("expected ProcessSpawned, got {other:?}"),
-        }
+    #[tokio::test]
+    async fn the_trust_gate_is_enforced_through_the_facade() {
+        let (facade, trust) = facade(FakeSpawner::exits_on_terminate());
+        let config =
+            crate::config::parse("processes:\n  Web:\n    command: npm run dev\n").expect("parse");
+        let spec = config.processes.get("Web").cloned().expect("Web");
+        let project = ProjectId::from_raw(1);
+        let id = facade.supervisor().register(Registration::command(
+            project,
+            Path::new("/p"),
+            "Web",
+            &spec,
+        ));
 
-        // stop() finds the process; stopping an unknown id does not.
-        assert!(facade.stop(id));
-        assert!(!facade.stop(ProcessId::next()));
+        assert!(matches!(
+            facade.supervisor().start(id),
+            Err(SupervisorError::Untrusted)
+        ));
 
-        // Drain a couple of events to confirm the stream stays usable.
-        loop {
-            match rx.recv().await {
-                Ok(DomainEvent::ProcessStatusChanged {
-                    to: ProcStatus::Stopping,
-                    ..
-                }) => break,
-                Ok(_) | Err(RecvError::Lagged(_)) => continue,
-                Err(RecvError::Closed) => panic!("bus closed"),
-            }
-        }
+        trust
+            .set_trusted(project, &spec.variant_hash())
+            .expect("trust");
+        facade.supervisor().start(id).expect("start once trusted");
     }
 }
