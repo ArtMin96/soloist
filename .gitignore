@@ -18,6 +18,12 @@ dist-ssr/
 
 # ---- Claude Code local (machine-specific) ----
 .claude/settings.local.json
+# session-local tooling artifacts (Forge Studio pipeline state); tracked: .claude/skills
+.claude/sessions/
+.claude/state/
+.claude/evolution/
+.claude/spec.md
+.claude/features.json
 
 # ---- OS / editor cruft ----
 .DS_Store

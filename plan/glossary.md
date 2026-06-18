@@ -82,3 +82,20 @@ engineering terms.
   PIDs (Phase 13 gate).
 - **Parity matrix** — `02-feature-parity-matrix.md`; the checklist that defines "done."
 - **Reference (§N)** — a section in `05-solo-reference-and-sources.md` (e.g. "ref §7" = MCP).
+- **Driving vs driven adapter** — a *driving* adapter calls into the core (Tauri UI, MCP, HTTP, CLI); a
+  *driven* adapter is called by the core through a port (PTY spawner, SQLite store, clock, watcher). Both
+  depend on `core`; `core` depends on neither. Ref `06` §1.
+- **Out-of-process vs in-process adapter** — out-of-process driving adapters are separate binaries
+  (`soloist-mcp`, the `soloist` CLI) the app never links, so removing one is dropping a binary; in-process
+  adapters (the HTTP API, the Tauri command surface) are linked into the `app` binary, so making one
+  optional requires a Cargo feature or runtime toggle. Ref `06` §8.
+- **Composition root** — the single place a binary picks real-vs-`Noop` adapters and assembles the
+  `Facade` (`crates/app/src/lib.rs::build_facade`). Exactly one per binary; tests are alternate roots built
+  from `core::testing` fakes. Ref `06` §8.
+- **Null-Object port** — an optional driven subsystem ships a `Noop*` default impl of its port (e.g.
+  `NoopLockReleaser`, `NoopRuntimeState`) so the core always holds *a* port and never branches on "is it
+  wired?". The mechanism behind graceful degradation. Ref `04` §8, `06` §4.
+- **`CorePorts`** — (planned, R3) the parameter-object struct holding the set of `Arc<dyn Port>` the core
+  needs, passed to `Facade::new` so adding a port is one field, not another constructor argument. Ref `06` §7.
+- **Placeholder module** — an empty `pub mod foo;` permitted *only* when `foo` maps to a documented future
+  bounded context (`01`/`06` §3); a roadmap marker carrying a doc comment, not dead code. Ref `06` §3.

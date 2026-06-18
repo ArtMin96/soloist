@@ -305,13 +305,25 @@ single reviewable commit.
 This is the user's explicit requirement, and it decomposes into two mechanisms — one per dependency
 direction:
 
-**Driving adapters (MCP, HTTP, CLI, the UI) are independent crates.** Each lives in its own crate that
-depends only on `core` (or `ipc`). The core has **zero** knowledge of them. Concretely, to remove the MCP
-surface entirely: drop `crates/mcp` from the workspace `members`, stop launching the `soloist-mcp` sidecar
-in the composition root, and remove its `ipc` message types. `core`, `store`, `pty`, `app`, `httpapi`, `cli`
-all still compile and run — nothing in them references `mcp`. The dependency-direction guard (K7) makes the
-reverse dependency *impossible to introduce by accident*. Same for HTTP/CLI. The app degrades to "no MCP
-integration," not "broken."
+**Driving adapters (MCP, HTTP, CLI, the UI) are independent crates depending only on `core`/`ipc`** — the
+core has **zero** knowledge of them, and the dependency-direction guard (K7) makes the reverse dependency
+*impossible to introduce by accident*. But "removable" has **two shapes**, and they must not be conflated:
+
+- **Out-of-process adapters — separate binaries (trivially removable).** `crates/mcp` (`soloist-mcp`) and
+  `crates/cli` (`soloist`) compile to their own binaries that the app never links. To remove MCP entirely:
+  drop `crates/mcp` from the workspace `members`, stop launching the sidecar from the composition root, and
+  drop its `ipc` message types. `core`, `store`, `pty`, `app`, `httpapi` are untouched and still build/run —
+  nothing in them references `mcp`. The app degrades to "no MCP integration," not "broken." Same for the CLI.
+- **In-process adapters — linked into the `app` binary (must be feature-gated to be removable).** The
+  loopback **HTTP API (`crates/httpapi`)** is a library crate compiled *into* `app` and run as a supervised
+  task inside the app process; the **Tauri command surface** is likewise intrinsic to the app binary.
+  Dropping `crates/httpapi` from the workspace does **not** by itself leave `app` building — `app` links it.
+  So an in-process adapter that must be optional is gated **at compile time behind a Cargo feature**
+  (`app/Cargo.toml` `[features] http = ["dep:soloist-httpapi"]`, the composition root starts it only under
+  `#[cfg(feature = "http")]`) **or at runtime** (a setting that simply never starts the server task). The
+  Tauri UI is not "removable" in this sense — it *is* the app. Rule: **a new driving adapter that lives
+  in-process ships behind a feature flag or a runtime toggle from day one**, so "turn it off" never means
+  "edit `app` and hope."
 
 **Driven adapters (optional subsystems the core calls) use the Null Object pattern.** A subsystem the core
 *uses* but that may be absent (lock releaser, runtime-state/orphan adoption, file watcher, notifier,
