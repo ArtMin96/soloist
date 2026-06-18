@@ -1,32 +1,48 @@
-//! The real [`ProcessSpawner`] adapter.
+//! The real [`ProcessSpawner`] adapter, backed by a pseudo-terminal.
 //!
-//! In the walking skeleton this spawns plain OS processes via `tokio::process`; a
-//! later phase upgrades it to a full PTY (portable-pty) without changing the port.
-//! Two invariants matter here:
+//! Each command runs as `$SHELL -lc <command>` on the slave side of a PTY, so the
+//! child sees a real terminal (`isatty`) and behaves interactively — colours, cursor
+//! control, agent TUIs. Three invariants matter here:
 //!
-//! * **Login-shell execution** — every command runs as `$SHELL -lc <command>` in its
-//!   resolved working directory, with per-process `env` layered onto the inherited
-//!   environment (process env wins). This is how aliases and version-manager PATHs
-//!   resolve. The shell is resolved from `$SHELL`, then the user's passwd entry, then
-//!   `/bin/sh`, so a desktop launch that does not export `$SHELL` still uses the user's
-//!   real shell rather than a bare `/bin/sh`. Full `$SHELL -ilc env` capture/caching is
-//!   a later phase.
-//! * **Process-group containment** — each child is the leader of a fresh process
-//!   group, and stop signals target the whole group (via `killpg`), so a command that
-//!   forks children is torn down completely rather than leaking orphans.
+//! * **Login-shell execution** — the shell is resolved from `$SHELL`, then the user's
+//!   passwd entry, then `/bin/sh`, and run with `-lc <command>` in the working
+//!   directory, with per-process `env` layered onto the inherited environment (process
+//!   env wins). `TERM=xterm-256color` is advertised so colour and cursor control work.
+//! * **Process-group containment** — `portable-pty` makes the child a session leader,
+//!   so its process-group id equals its pid; stop signals target the whole group (via
+//!   `killpg`), tearing down a forking command without leaking orphans.
+//! * **Bounded, backpressured I/O** — `portable-pty`'s reader, writer, and `wait` are
+//!   blocking, so each running process uses two short-lived OS threads: one drains the
+//!   master into a bounded channel (blocking when the consumer is slow, so the OS PTY
+//!   buffer fills and the child blocks rather than memory growing without limit), and
+//!   one reaps the child and resolves its exit future. Both end with the process.
 
-use std::process::Stdio;
+use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use nix::errno::Errno;
+use nix::libc;
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::{Pid, Uid, User};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize as PtPtySize};
 use soloist_core::{
-    ExitFuture, ExitStatus, ProcessControl, ProcessSpawner, SpawnError, SpawnSpec, Spawned,
+    ExitFuture, ExitStatus, OrphanControl, ProcessControl, ProcessSpawner, PtyIo, PtySize,
+    SpawnError, SpawnSpec, Spawned,
 };
-use tokio::process::Command;
+use tokio::sync::{mpsc, oneshot};
 
 /// Fallback shell when neither `$SHELL` nor the passwd entry yields one.
 const FALLBACK_SHELL: &str = "/bin/sh";
+/// Terminal type advertised to children — a widely supported 256-colour terminfo
+/// entry. Soloist ships no custom terminfo.
+const TERM: &str = "xterm-256color";
+/// Read granularity for the PTY master drain loop.
+const READ_CHUNK: usize = 8 * 1024;
+/// Bounded depth of the output channel from the read loop to the actor.
+const OUTPUT_CAPACITY: usize = 1024;
+/// Reported for a signal death whose name the platform does not map to a known number.
+const UNKNOWN_SIGNAL: i32 = -1;
 
 /// Resolves the user's login shell: `$SHELL`, then the passwd-entry shell, then
 /// `/bin/sh`. A desktop launcher does not always export `$SHELL`, so the passwd
@@ -47,57 +63,156 @@ fn login_shell() -> String {
     FALLBACK_SHELL.to_string()
 }
 
-/// Spawns processes with `tokio::process`, placing each in its own process group.
+/// Spawns processes onto a pseudo-terminal, each as the leader of its own process group.
 #[derive(Clone, Copy, Default)]
-pub struct TokioProcessSpawner;
+pub struct PtyProcessSpawner;
 
 #[async_trait]
-impl ProcessSpawner for TokioProcessSpawner {
+impl ProcessSpawner for PtyProcessSpawner {
     async fn spawn(&self, spec: &SpawnSpec) -> Result<Spawned, SpawnError> {
-        let mut command = Command::new(login_shell());
-        command
-            .arg("-lc")
-            .arg(&spec.command)
-            .current_dir(&spec.working_dir)
-            // Per-process overrides layer onto the inherited app env (process wins).
-            .envs(&spec.env)
-            // `0` makes the child the leader of a new group whose pgid is its pid.
-            .process_group(0)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            // Safety net: if the owning task is dropped without a clean stop, the child
-            // is killed rather than leaked.
-            .kill_on_drop(true);
-
-        let mut child = command
-            .spawn()
+        let pair = native_pty_system()
+            .openpty(to_pt_size(spec.size))
             .map_err(|err| SpawnError::Spawn(err.to_string()))?;
 
-        let pid = child.id();
+        // `$SHELL -lc <command>`; `CommandBuilder::new` seeds the child env from the
+        // current environment, onto which TERM and the per-process overrides layer.
+        let mut builder = CommandBuilder::new(login_shell());
+        builder.arg("-lc");
+        builder.arg(&spec.command);
+        builder.cwd(&spec.working_dir);
+        builder.env("TERM", TERM);
+        for (key, value) in &spec.env {
+            builder.env(key, value);
+        }
+
+        let mut child = pair
+            .slave
+            .spawn_command(builder)
+            .map_err(|err| SpawnError::Spawn(err.to_string()))?;
+        // Drop our copy of the slave so EOF on the master reflects the child closing it.
+        drop(pair.slave);
+
+        let pid = child.process_id();
         let pgid = pid.map(|raw| Pid::from_raw(raw as i32));
 
-        let exit: ExitFuture = Box::pin(async move {
-            match child.wait().await {
-                Ok(status) => to_exit_status(status),
-                // The reaper failed; report an unknown exit rather than panicking.
-                Err(_) => ExitStatus {
-                    code: None,
-                    signal: None,
-                },
-            }
+        // Drain the master into a bounded channel on a blocking thread. It ends on EOF
+        // (or read error once the slave closes) or when the actor drops the receiver.
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|err| SpawnError::Spawn(err.to_string()))?;
+        let (output_tx, output) = mpsc::channel::<Vec<u8>>(OUTPUT_CAPACITY);
+        std::thread::spawn(move || drain_reader(reader, output_tx));
+
+        // Reap the child on a blocking thread and resolve the exit future once.
+        let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
+        std::thread::spawn(move || {
+            let status = child.wait().map(to_exit_status).unwrap_or(UNKNOWN_EXIT);
+            let _ = exit_tx.send(status);
+        });
+        let exit: ExitFuture = Box::pin(async move { exit_rx.await.unwrap_or(UNKNOWN_EXIT) });
+
+        // The master drives input and resize. `MasterPty` is `Send` but not `Sync` and
+        // its writer is blocking, so both live behind mutexes.
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|err| SpawnError::Spawn(err.to_string()))?;
+        let io = Box::new(MasterIo {
+            master: Arc::new(Mutex::new(pair.master)),
+            writer: Arc::new(Mutex::new(writer)),
         });
 
         Ok(Spawned {
             pid,
+            output,
             exit,
             control: Box::new(GroupControl { pgid }),
+            io,
         })
     }
 }
 
+/// Reported when the reaper itself fails — an unknown exit rather than a panic.
+const UNKNOWN_EXIT: ExitStatus = ExitStatus {
+    code: None,
+    signal: None,
+};
+
+/// Reads from the PTY master until EOF or the receiver is gone, forwarding chunks with
+/// backpressure. A closed slave surfaces as either a zero-length read or an I/O error
+/// depending on the platform; both end the loop.
+fn drain_reader(mut reader: Box<dyn Read + Send>, output: mpsc::Sender<Vec<u8>>) {
+    let mut buf = [0u8; READ_CHUNK];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                if output.blocking_send(buf[..n].to_vec()).is_err() {
+                    break;
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+}
+
+/// Writes input to and resizes a child's PTY through its master. Both handles are
+/// shared (`Arc`) so the blocking operations can be moved onto the blocking-thread pool.
+struct MasterIo {
+    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+}
+
+#[async_trait]
+impl PtyIo for MasterIo {
+    async fn write(&self, data: &[u8]) -> Result<(), SpawnError> {
+        // A PTY master write blocks when the child stops reading its input, so run it
+        // off the async runtime — a stuck write must never stall the owning actor's loop.
+        let writer = self.writer.clone();
+        let data = data.to_vec();
+        run_blocking(move || {
+            let mut writer = writer
+                .lock()
+                .map_err(|_| SpawnError::Signal("pty writer poisoned".into()))?;
+            writer
+                .write_all(&data)
+                .and_then(|()| writer.flush())
+                .map_err(|err| SpawnError::Signal(err.to_string()))
+        })
+        .await
+    }
+
+    async fn resize(&self, size: PtySize) -> Result<(), SpawnError> {
+        let master = self.master.clone();
+        let size = to_pt_size(size);
+        run_blocking(move || {
+            let master = master
+                .lock()
+                .map_err(|_| SpawnError::Signal("pty master poisoned".into()))?;
+            master
+                .resize(size)
+                .map_err(|err| SpawnError::Signal(err.to_string()))
+        })
+        .await
+    }
+}
+
+/// Runs a blocking PTY operation on the blocking-thread pool, flattening the join error
+/// into the operation's own error type.
+async fn run_blocking<F>(op: F) -> Result<(), SpawnError>
+where
+    F: FnOnce() -> Result<(), SpawnError> + Send + 'static,
+{
+    match tokio::task::spawn_blocking(op).await {
+        Ok(result) => result,
+        Err(join) => Err(SpawnError::Signal(join.to_string())),
+    }
+}
+
 /// Signals the child's whole process group. Holds only the pgid, so it never aliases
-/// the child handle the exit future owns.
+/// the child handle the reaper thread owns.
 struct GroupControl {
     pgid: Option<Pid>,
 }
@@ -123,10 +238,93 @@ impl ProcessControl for GroupControl {
     }
 }
 
-fn to_exit_status(status: std::process::ExitStatus) -> ExitStatus {
-    use std::os::unix::process::ExitStatusExt;
-    ExitStatus {
-        code: status.code(),
-        signal: status.signal(),
+/// Operates on a leftover process group by id for orphan adoption, via `killpg` — the
+/// same group-targeting the spawner uses, so a forking orphan is reaped, not orphaned
+/// further.
+#[derive(Clone, Copy, Default)]
+pub struct PgidOrphanControl;
+
+impl OrphanControl for PgidOrphanControl {
+    fn is_alive(&self, pgid: i32) -> bool {
+        // The null signal performs only existence/permission checks: `Ok` or `EPERM`
+        // means the group still has a member; `ESRCH` means it is gone.
+        match killpg(Pid::from_raw(pgid), None) {
+            Ok(()) | Err(Errno::EPERM) => true,
+            Err(_) => false,
+        }
+    }
+
+    fn signal(&self, pgid: i32, force: bool) -> Result<(), SpawnError> {
+        let signal = if force {
+            Signal::SIGKILL
+        } else {
+            Signal::SIGTERM
+        };
+        killpg(Pid::from_raw(pgid), signal).map_err(|err| SpawnError::Signal(err.to_string()))
+    }
+}
+
+fn to_pt_size(size: PtySize) -> PtPtySize {
+    PtPtySize {
+        rows: size.rows,
+        cols: size.cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    }
+}
+
+/// Maps a `portable-pty` exit status to the core's. A signal death carries no exit
+/// code; a normal exit carries its code. The crash/stop classification depends only on
+/// success-vs-not (a signal death is never a success), so the recovered signal number
+/// is best-effort — `portable-pty` exposes only the platform's signal *description*.
+fn to_exit_status(status: portable_pty::ExitStatus) -> ExitStatus {
+    match status.signal() {
+        Some(name) => ExitStatus {
+            code: None,
+            signal: Some(signal_number(name)),
+        },
+        None => ExitStatus {
+            code: Some(status.exit_code() as i32),
+            signal: None,
+        },
+    }
+}
+
+/// Recovers a signal number from the platform description `portable-pty` reports
+/// (`strsignal`). Covers the common signals; an unrecognised description falls back to
+/// the `Signal {n}` form, then to a sentinel. The exact number is informational —
+/// classification keys off the presence of a signal, not its value.
+fn signal_number(name: &str) -> i32 {
+    match name {
+        "Terminated" => libc::SIGTERM,
+        "Killed" => libc::SIGKILL,
+        "Interrupt" => libc::SIGINT,
+        "Hangup" => libc::SIGHUP,
+        "Quit" => libc::SIGQUIT,
+        "Aborted" => libc::SIGABRT,
+        "Segmentation fault" => libc::SIGSEGV,
+        "Broken pipe" => libc::SIGPIPE,
+        other => other
+            .strip_prefix("Signal ")
+            .and_then(|n| n.trim().parse().ok())
+            .unwrap_or(UNKNOWN_SIGNAL),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signal_descriptions_map_to_their_numbers() {
+        // Common signal descriptions map to their libc numbers (locale-independent here
+        // because the description is passed directly, not derived from the host locale).
+        assert_eq!(signal_number("Terminated"), libc::SIGTERM);
+        assert_eq!(signal_number("Killed"), libc::SIGKILL);
+        assert_eq!(signal_number("Interrupt"), libc::SIGINT);
+        // The generic "Signal N" fallback is parsed; an unrecognised (e.g. localized)
+        // description degrades to the sentinel, never panicking.
+        assert_eq!(signal_number("Signal 7"), 7);
+        assert_eq!(signal_number("beendet"), UNKNOWN_SIGNAL);
     }
 }

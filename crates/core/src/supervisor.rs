@@ -8,19 +8,27 @@
 //! core, on every start/restart path: an untrusted command variant cannot run.
 
 mod actor;
+mod adopt;
 mod registry;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use tokio::sync::broadcast;
 
 use crate::config::ProcessSpec;
 use crate::events::{DomainEvent, EventBus};
 use crate::hash::Hash;
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::{Clock, LockReleaser, ProcessSpawner, SpawnSpec, StoreError, TrustRepo};
+use crate::orphans::{classify, OrphanFate, OrphanInfo, OrphanReport};
+use crate::ports::{
+    Clock, LockReleaser, OrphanControl, ProcessSpawner, PtySize, RuntimeState, SpawnSpec, Spawned,
+    StoreError, TrustRepo,
+};
 use crate::process::{ProcStatus, ProcessKind, ProcessView};
+use crate::terminal::{PtyChunk, PtyInput, RenderedScreen, Terminals};
 
-use actor::{ActorMsg, ActorPorts};
+use actor::{ActorMsg, ActorPorts, OrphanIdentity};
 use registry::{ActorHandle, Registry};
 
 /// Per-actor mailbox capacity. Tiny on purpose: at most a couple of control messages
@@ -34,6 +42,8 @@ pub struct Registration {
     pub kind: ProcessKind,
     pub label: String,
     pub launch: SpawnSpec,
+    /// The project root, recorded as part of the process's orphan-adoption identity.
+    pub project_root: PathBuf,
     /// `Some(variant)` makes this a trust-gated command; `None` (terminals and agents,
     /// which the user launches directly) is never trust-gated.
     pub trust_variant: Option<Hash>,
@@ -57,7 +67,9 @@ impl Registration {
                 command: spec.command.clone(),
                 working_dir: spec.resolved_working_dir(root),
                 env: spec.env.clone(),
+                size: PtySize::default(),
             },
+            project_root: root.to_path_buf(),
             trust_variant: Some(spec.variant_hash()),
             auto_start: spec.auto_start,
         }
@@ -71,11 +83,15 @@ impl Registration {
         label: impl Into<String>,
         launch: SpawnSpec,
     ) -> Self {
+        // A launched terminal/agent has no project-root command identity; its working
+        // directory stands in, so a leftover never matches a configured command.
+        let project_root = launch.working_dir.clone();
         Self {
             project,
             kind,
             label: label.into(),
             launch,
+            project_root,
             trust_variant: None,
             auto_start: false,
         }
@@ -107,18 +123,26 @@ pub struct Supervisor {
     clock: Arc<dyn Clock>,
     trust: Arc<dyn TrustRepo>,
     locks: Arc<dyn LockReleaser>,
+    runtime: Arc<dyn RuntimeState>,
+    orphan_control: Arc<dyn OrphanControl>,
     bus: EventBus,
     registry: Registry,
+    terminals: Terminals,
 }
 
 impl Supervisor {
     /// Builds a supervisor over the given ports and event bus. The bus is shared with
-    /// the façade so adapters see process events alongside config events.
+    /// the façade so adapters see process events alongside config events. `runtime`
+    /// persists running process groups and `orphan_control` operates on them for
+    /// orphan adoption.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         spawner: Arc<dyn ProcessSpawner>,
         clock: Arc<dyn Clock>,
         trust: Arc<dyn TrustRepo>,
         locks: Arc<dyn LockReleaser>,
+        runtime: Arc<dyn RuntimeState>,
+        orphan_control: Arc<dyn OrphanControl>,
         bus: EventBus,
     ) -> Self {
         Self {
@@ -126,8 +150,11 @@ impl Supervisor {
             clock,
             trust,
             locks,
+            runtime,
+            orphan_control,
             bus,
             registry: Registry::default(),
+            terminals: Terminals::default(),
         }
     }
 
@@ -144,6 +171,7 @@ impl Supervisor {
             kind,
             label,
             launch,
+            project_root,
             trust_variant,
             auto_start,
         } = registration;
@@ -155,9 +183,11 @@ impl Supervisor {
             status: ProcStatus::Stopped,
             exit_code: None,
         };
-        self.registry.add(view, launch, trust_variant, auto_start);
+        self.registry
+            .add(view, launch, project_root, trust_variant, auto_start);
         self.bus.publish(DomainEvent::ProcessSpawned {
             id,
+            project,
             kind,
             label,
             status: ProcStatus::Stopped,
@@ -177,7 +207,7 @@ impl Supervisor {
             return Ok(());
         }
         self.guard_trust(info.project, info.trust_variant.as_ref())?;
-        self.launch_actor(id, info.launch);
+        self.launch_actor(id, info.launch, None);
         Ok(())
     }
 
@@ -208,7 +238,7 @@ impl Supervisor {
                 let _ = mailbox.try_send(ActorMsg::Restart);
             }
         } else {
-            self.launch_actor(id, info.launch);
+            self.launch_actor(id, info.launch, None);
         }
         Ok(())
     }
@@ -223,7 +253,7 @@ impl Supervisor {
                 None => true,
             };
             if trusted {
-                if self.launch_actor(candidate.id, candidate.launch) {
+                if self.launch_actor(candidate.id, candidate.launch, None) {
                     summary.started.push(candidate.id);
                 }
             } else {
@@ -268,6 +298,54 @@ impl Supervisor {
         }
     }
 
+    /// Attaches a viewer to a process's terminal output (detach/attach): returns the
+    /// raw scrollback to replay plus a live receiver to stream, captured atomically so
+    /// there is no gap or duplicate between them. `None` if the process has never been
+    /// started. Detaching is just dropping the receiver — the process keeps running and
+    /// other viewers are unaffected.
+    pub fn attach_pty(&self, id: ProcessId) -> Option<(Vec<u8>, broadcast::Receiver<PtyChunk>)> {
+        self.terminals.attach(id)
+    }
+
+    /// A process's raw byte scrollback snapshot (control sequences included), for output
+    /// tools that read without attaching. `None` if it has never been started.
+    pub fn pty_scrollback(&self, id: ProcessId) -> Option<Vec<u8>> {
+        self.terminals.scrollback(id)
+    }
+
+    /// A process's rendered output snapshot (escape sequences applied to plain text).
+    /// `None` if the process has never been started.
+    pub fn rendered(&self, id: ProcessId) -> Option<RenderedScreen> {
+        self.terminals.rendered(id)
+    }
+
+    /// Writes bytes (typed text or raw control sequences) to a running process's PTY.
+    /// Returns [`SupervisorError::NotFound`] for a process with no terminal; input to a
+    /// process that has since stopped is delivered best-effort and dropped.
+    pub async fn write_stdin(&self, id: ProcessId, data: Vec<u8>) -> Result<(), SupervisorError> {
+        self.send_input(id, PtyInput::Write(data)).await
+    }
+
+    /// Resizes a running process's PTY so the child sees the new dimensions (and a
+    /// `SIGWINCH`). Best-effort, as for [`Supervisor::write_stdin`].
+    pub async fn resize(&self, id: ProcessId, cols: u16, rows: u16) -> Result<(), SupervisorError> {
+        self.send_input(id, PtyInput::Resize(PtySize { cols, rows }))
+            .await
+    }
+
+    /// Routes one input message to a process's owning actor over its bounded input
+    /// channel, applying backpressure rather than dropping when the actor is busy.
+    async fn send_input(&self, id: ProcessId, input: PtyInput) -> Result<(), SupervisorError> {
+        match self.terminals.input(id) {
+            // A closed channel (the process has since stopped) is a harmless no-op.
+            Some(sender) => {
+                let _ = sender.send(input).await;
+                Ok(())
+            }
+            None => Err(SupervisorError::NotFound(id)),
+        }
+    }
+
     /// Refuses an untrusted trust-gated command; ungated processes always pass.
     fn guard_trust(
         &self,
@@ -283,9 +361,11 @@ impl Supervisor {
     }
 
     /// Atomically claims a resting process, moves it into `Starting`, and spawns its
-    /// actor. Returns `false` without spawning if the process was already active —
-    /// closing the start race when two callers target the same process at once.
-    fn launch_actor(&self, id: ProcessId, launch: SpawnSpec) -> bool {
+    /// actor. `initial` is the pre-built handle for an adopted orphan (the first
+    /// iteration uses it instead of spawning); a normal launch passes `None`. Returns
+    /// `false` without spawning if the process was already active — closing the start
+    /// race when two callers target the same process at once.
+    fn launch_actor(&self, id: ProcessId, launch: SpawnSpec, initial: Option<Spawned>) -> bool {
         let Some(from) = self.registry.begin_launch(id) else {
             return false;
         };
@@ -295,10 +375,77 @@ impl Supervisor {
             to: ProcStatus::Starting,
             exit_code: None,
         });
+        let identity = self
+            .registry
+            .identity(id)
+            .unwrap_or_else(|| OrphanIdentity {
+                project_root: PathBuf::new(),
+                name: String::new(),
+            });
         let (mailbox, inbox) = tokio::sync::mpsc::channel(MAILBOX_CAPACITY);
-        let join = actor::spawn(id, launch, self.actor_ports(), inbox);
+        let join = actor::spawn(id, launch, identity, self.actor_ports(), inbox, initial);
         self.registry.set_handle(id, ActorHandle { mailbox, join });
         true
+    }
+
+    /// Reconciles the runtime-state file against live process groups on launch: prunes
+    /// dead records, adopts live groups that match a registered command (re-attaching
+    /// them as running), and surfaces unmatched live groups via [`DomainEvent::OrphansFound`]
+    /// for a user Kill/Leave decision. Registered commands must be in place before this
+    /// is called so matches can be found. Must run within a `tokio` runtime.
+    pub fn reconcile_orphans(&self) -> OrphanReport {
+        let records = self.runtime.load().unwrap_or_default();
+        let fates = classify(
+            records,
+            |pgid| self.orphan_control.is_alive(pgid),
+            |record| {
+                self.registry.find_resting_match(
+                    &record.project_root,
+                    &record.name,
+                    &record.command,
+                )
+            },
+        );
+
+        let mut report = OrphanReport::default();
+        let mut surfaced = Vec::new();
+        for fate in fates {
+            match fate {
+                OrphanFate::Adopt { record, target } => {
+                    if self.adopt_orphan(target, record.pgid) {
+                        report.adopted.push(target);
+                    } else {
+                        // The target was already claimed by another record with the
+                        // same identity (a rare duplicate): surface this still-live
+                        // group for a user decision rather than leave it running and
+                        // unattended.
+                        surfaced.push(OrphanInfo::from(&record));
+                    }
+                }
+                OrphanFate::Surface(record) => surfaced.push(OrphanInfo::from(&record)),
+                OrphanFate::Prune(record) => {
+                    let _ = self.runtime.forget(record.pgid);
+                    report.pruned += 1;
+                }
+            }
+        }
+        if !surfaced.is_empty() {
+            self.bus.publish(DomainEvent::OrphansFound {
+                orphans: surfaced.clone(),
+            });
+            report.surfaced = surfaced;
+        }
+        report
+    }
+
+    /// Re-attaches a leftover process group `pgid` to the resting registered process
+    /// `target`, running it through the normal actor over a synthesized handle.
+    fn adopt_orphan(&self, target: ProcessId, pgid: i32) -> bool {
+        let Some(launch) = self.registry.describe(target).map(|info| info.launch) else {
+            return false;
+        };
+        let spawned = adopt::adopt(pgid, self.orphan_control.clone(), self.clock.clone());
+        self.launch_actor(target, launch, Some(spawned))
     }
 
     fn actor_ports(&self) -> ActorPorts {
@@ -306,8 +453,10 @@ impl Supervisor {
             spawner: self.spawner.clone(),
             clock: self.clock.clone(),
             locks: self.locks.clone(),
+            runtime: self.runtime.clone(),
             bus: self.bus.clone(),
             registry: self.registry.clone(),
+            terminals: self.terminals.clone(),
         }
     }
 }
@@ -342,7 +491,11 @@ pub(crate) fn apply_transition(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{FakeSpawner, FakeTrustRepo, MockClock, RecordingLockReleaser};
+    use crate::ports::OrphanRecord;
+    use crate::testing::{
+        FakeOrphanControl, FakeRuntimeState, FakeSpawner, FakeTrustRepo, MockClock,
+        RecordingLockReleaser,
+    };
     use std::collections::{BTreeMap, HashSet};
     use std::path::PathBuf;
     use std::time::Duration;
@@ -351,6 +504,8 @@ mod tests {
 
     /// A duration safely past the actor's SIGTERM→SIGKILL grace window.
     const PAST_GRACE: Duration = Duration::from_secs(6);
+    /// A duration past the adopted-process liveness poll, so a death is observed.
+    const PAST_POLL: Duration = Duration::from_secs(2);
     const PROJECT: ProjectId = ProjectId::from_raw(1);
 
     struct Harness {
@@ -358,6 +513,8 @@ mod tests {
         trust: Arc<FakeTrustRepo>,
         locks: RecordingLockReleaser,
         clock: MockClock,
+        runtime: Arc<FakeRuntimeState>,
+        orphans: Arc<FakeOrphanControl>,
         rx: broadcast::Receiver<DomainEvent>,
     }
 
@@ -367,11 +524,15 @@ mod tests {
         let trust = Arc::new(FakeTrustRepo::new());
         let locks = RecordingLockReleaser::new();
         let clock = MockClock::new();
+        let runtime = Arc::new(FakeRuntimeState::new());
+        let orphans = Arc::new(FakeOrphanControl::new());
         let sup = Supervisor::new(
             Arc::new(spawner),
             Arc::new(clock.clone()),
             trust.clone(),
             Arc::new(locks.clone()),
+            runtime.clone(),
+            orphans.clone(),
             bus,
         );
         Harness {
@@ -379,6 +540,8 @@ mod tests {
             trust,
             locks,
             clock,
+            runtime,
+            orphans,
             rx,
         }
     }
@@ -388,6 +551,7 @@ mod tests {
             command: command.into(),
             working_dir: PathBuf::from("/"),
             env: BTreeMap::new(),
+            size: PtySize::default(),
         }
     }
 
@@ -710,5 +874,191 @@ mod tests {
         h.sup.shutdown().await;
         assert_eq!(status_of(&h.sup, one), ProcStatus::Stopped);
         assert_eq!(status_of(&h.sup, two), ProcStatus::Stopped);
+    }
+
+    #[tokio::test]
+    async fn pty_output_is_buffered_and_a_title_is_published() {
+        let chunk = b"\x1b]0;my title\x07hello\n".to_vec();
+        let mut h = harness(FakeSpawner::streams_then_exits(vec![chunk.clone()]));
+        let id = terminal(&h.sup, "agent");
+        h.sup.start(id).expect("start");
+
+        // Consume the lifecycle, capturing any terminal title set along the way. The
+        // process is at rest once it reaches Stopped, with its buffers fully drained.
+        let mut title = None;
+        loop {
+            match h.rx.recv().await {
+                Ok(DomainEvent::TerminalTitleChanged { id: got, title: t }) if got == id => {
+                    title = Some(t);
+                }
+                Ok(DomainEvent::ProcessStatusChanged { id: got, to, .. })
+                    if got == id && to == ProcStatus::Stopped =>
+                {
+                    break
+                }
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => panic!("event bus closed"),
+            }
+        }
+
+        assert_eq!(title.as_deref(), Some("my title"));
+        // The rendered line has the OSC stripped; the raw scrollback keeps every byte.
+        assert_eq!(
+            h.sup.rendered(id).expect("rendered").lines,
+            vec!["hello".to_string()]
+        );
+        assert_eq!(h.sup.pty_scrollback(id).expect("scrollback"), chunk);
+    }
+
+    #[tokio::test]
+    async fn attach_replays_the_scrollback_of_a_finished_process() {
+        let chunk = b"output line\n".to_vec();
+        let mut h = harness(FakeSpawner::streams_then_exits(vec![chunk.clone()]));
+        let id = terminal(&h.sup, "cmd");
+        h.sup.start(id).expect("start");
+        wait_all(&mut h.rx, &[id], ProcStatus::Stopped).await;
+
+        // Attaching after the process stopped still replays its raw scrollback.
+        let (scrollback, _live) = h.sup.attach_pty(id).expect("a terminal channel");
+        assert_eq!(scrollback, chunk);
+    }
+
+    #[tokio::test]
+    async fn input_to_an_unknown_process_is_not_found() {
+        let h = harness(FakeSpawner::exits_on_kill());
+        let unknown = ProcessId::from_raw(999);
+        assert!(matches!(
+            h.sup.write_stdin(unknown, b"x".to_vec()).await,
+            Err(SupervisorError::NotFound(_))
+        ));
+        assert!(matches!(
+            h.sup.resize(unknown, 80, 24).await,
+            Err(SupervisorError::NotFound(_))
+        ));
+    }
+
+    fn orphan_record(name: &str, command: &str, pgid: i32) -> OrphanRecord {
+        OrphanRecord {
+            project_root: PathBuf::from("/p"),
+            name: name.into(),
+            command: command.into(),
+            pgid,
+        }
+    }
+
+    async fn next_orphans(rx: &mut broadcast::Receiver<DomainEvent>) -> Vec<OrphanInfo> {
+        loop {
+            match rx.recv().await {
+                Ok(DomainEvent::OrphansFound { orphans }) => return orphans,
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => panic!("event bus closed"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_running_process_is_recorded_then_forgotten() {
+        let mut h = harness(FakeSpawner::exits_on_terminate());
+        let id = terminal(&h.sup, "sleep 60");
+        h.sup.start(id).expect("start");
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
+
+        // While running, the process group is in the runtime-state file.
+        assert_eq!(h.runtime.records().len(), 1, "recorded while running");
+
+        h.sup.stop(id);
+        wait_all(&mut h.rx, &[id], ProcStatus::Stopped).await;
+        tokio::task::yield_now().await;
+        assert!(h.runtime.records().is_empty(), "forgotten once reaped");
+    }
+
+    #[tokio::test]
+    async fn reconcile_adopts_a_matching_live_orphan_then_can_stop_it() {
+        let mut h = harness(FakeSpawner::exits_on_terminate());
+        // A registered, resting command and a leftover group that matches it.
+        let spec = command_spec("npm run dev", false);
+        let id = h.sup.register(Registration::command(
+            PROJECT,
+            Path::new("/p"),
+            "Web",
+            &spec,
+        ));
+        h.runtime.seed(orphan_record("Web", "npm run dev", 555));
+        h.orphans.set_alive(555);
+
+        let report = h.sup.reconcile_orphans();
+        assert_eq!(report.adopted, vec![id], "matched live orphan is adopted");
+        assert!(report.surfaced.is_empty());
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
+
+        // Stopping the adopted process signals its group and clears its record.
+        h.sup.stop(id);
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Stopping);
+        tokio::task::yield_now().await;
+        h.clock.advance(PAST_POLL);
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Stopped);
+        assert!(
+            h.orphans.signalled().contains(&(555, false)),
+            "SIGTERM to group"
+        );
+        assert!(h.runtime.records().is_empty(), "record cleared on stop");
+    }
+
+    #[tokio::test]
+    async fn reconcile_surfaces_an_unmatched_live_orphan() {
+        let mut h = harness(FakeSpawner::exits_on_terminate());
+        h.runtime.seed(orphan_record("stray", "weird --serve", 777));
+        h.orphans.set_alive(777);
+
+        let report = h.sup.reconcile_orphans();
+        assert!(report.adopted.is_empty());
+        assert_eq!(report.surfaced.len(), 1);
+        assert_eq!(report.surfaced[0].pgid, 777);
+
+        // The same candidate is announced for a user Kill/Leave decision.
+        let announced = next_orphans(&mut h.rx).await;
+        assert_eq!(announced.len(), 1);
+        assert_eq!(announced[0].name, "stray");
+    }
+
+    #[tokio::test]
+    async fn reconcile_prunes_a_dead_orphan() {
+        let h = harness(FakeSpawner::exits_on_terminate());
+        // Recorded but no longer alive (never marked alive in the fake control).
+        h.runtime.seed(orphan_record("gone", "old", 888));
+
+        let report = h.sup.reconcile_orphans();
+        assert_eq!(report.pruned, 1);
+        assert!(report.adopted.is_empty());
+        assert!(report.surfaced.is_empty());
+        assert!(h.runtime.records().is_empty(), "stale record pruned");
+    }
+
+    #[tokio::test]
+    async fn reconcile_surfaces_a_duplicate_that_loses_the_adoption() {
+        let mut h = harness(FakeSpawner::exits_on_terminate());
+        // One registered command, but two live leftover groups with the same identity.
+        let spec = command_spec("npm run dev", false);
+        let id = h.sup.register(Registration::command(
+            PROJECT,
+            Path::new("/p"),
+            "Web",
+            &spec,
+        ));
+        h.runtime.seed(orphan_record("Web", "npm run dev", 555));
+        h.runtime.seed(orphan_record("Web", "npm run dev", 556));
+        h.orphans.set_alive(555);
+        h.orphans.set_alive(556);
+
+        // The command can adopt only one group; the duplicate is surfaced for a user
+        // decision rather than silently left running and unattended.
+        let report = h.sup.reconcile_orphans();
+        assert_eq!(report.adopted, vec![id]);
+        assert_eq!(
+            report.surfaced.len(),
+            1,
+            "the second live group is surfaced"
+        );
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
     }
 }

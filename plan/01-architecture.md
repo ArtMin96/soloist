@@ -89,8 +89,9 @@ authoritative state.
 ## Data-flow walkthroughs
 
 - **Start stack:** adapter → `facade.stack_start(project)` → C2 starts each **trusted, auto_start**
-  command in its own PTY+pgroup (C3) → `ProcessStatusChanged` + `LogLine`/`PtyOutput` events → all
-  adapters update. C5 begins sampling.
+  command in its own PTY+pgroup (C3) → `ProcessStatusChanged` on the shared bus + raw PTY bytes over a
+  per-process **broadcast** (`attach_pty`; rendered `LogLine`s derive from it) → all adapters update.
+  C5 begins sampling.
 - **Crash → restart:** child exits non-zero → C2 `Crashed` → C7 toast → restart policy checks the
   **10-in-60s** window → respawn (`Restarting→Running`) or `RestartExhausted`.
 - **File-watch restart:** C1 watcher matches a changed path to a command's `restart_when_changed` →

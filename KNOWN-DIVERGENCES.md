@@ -61,3 +61,34 @@ User-approved at the Phase 2 planning checkpoint.
 in Phase 2 via direct-drive integration tests; the live-trigger + debounce-against-real-events
 wiring completes in Phase 6. This is a build-sequencing divergence, not a behavioral one — the end
 state matches Solo.
+
+---
+
+## D-3 — The core's *rendered* output is line-oriented, not a full cell grid 🟡
+
+**Introduced:** Phase 4 (PTY & Terminal I/O).
+
+**Solo (ref `plan/05` §10):** ships a GPU terminal renderer (v0.6.0) and a `get_process_output`
+(rendered) tool; a full terminal emulator resolves cursor addressing, scroll regions, and screen
+clears into an on-screen cell grid.
+
+**Soloist:** the **core** maintains two bounded buffers from one PTY read stream — a byte-accurate
+**raw** scrollback (every escape sequence preserved) and a **line-oriented rendered** buffer
+(printable text with carriage-return overwrite and tab stops; colour/cursor escapes consumed, not
+leaked). The core does **not** maintain a positional cell grid. Faithful rendering of a full-screen
+TUI (vim, htop, an agent's live UI) is the **frontend terminal emulator's** job (xterm.js, Phase 5
+/ parity C8), which consumes the raw stream. The core's rendered text for such an app is therefore
+*approximate* (no cursor addressing); for ordinary line-based CLI output it is exact.
+
+**Rationale:** the frontend xterm.js *is* the real terminal emulator; duplicating a full cell-grid
+emulator in the core would be redundant and weigh against the size/footprint budget (§6). The
+rendered projection answers "what plain text did this print" — correct for the common case and for
+MCP/CLI output reads — while the raw buffer answers "exactly which bytes," which drives grid-exact
+rendering downstream. Both buffers are bounded (raw 256 KB, rendered 5,000 lines).
+
+**Effect on parity:** C4 (rendered text retrievable) and C2/C5 (raw stream with control sequences)
+verify as specified; `get_process_raw_output` is byte-exact. The only difference from a
+hypothetical grid-in-core design is that `get_process_output` of a cursor-addressed TUI is
+line-approximate rather than grid-exact. Revisit (→🟢) if a consumer needs grid-exact rendered text
+inside the core; a cell-grid model can be added behind the same buffer interface without touching
+callers.

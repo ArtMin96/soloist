@@ -12,7 +12,8 @@ repository.workspace = true
 soloist-core = { path = "../core" }
 async-trait = "0.1"
 nix = { version = "0.29", features = ["signal", "process", "user"] }
-tokio = { version = "1", features = ["macros", "process", "rt", "time"] }
+portable-pty = "0.9"
+tokio = { version = "1", features = ["rt", "sync"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }

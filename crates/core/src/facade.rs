@@ -15,7 +15,10 @@ use tokio::sync::broadcast;
 use crate::config::ConfigEngine;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::{Clock, NoopLockReleaser, ProcessSpawner, ProjectRepo, SpawnSpec, TrustRepo};
+use crate::ports::{
+    Clock, NoopLockReleaser, OrphanControl, ProcessSpawner, ProjectRepo, PtySize, RuntimeState,
+    SpawnSpec, TrustRepo,
+};
 use crate::process::{ProcessKind, ProcessView};
 use crate::projects::Projects;
 use crate::supervisor::{Registration, Supervisor};
@@ -45,11 +48,14 @@ impl Facade {
     /// Builds a façade over the given port adapters (real ones in the app, fakes in
     /// tests). The trust repository is shared by the supervisor's trust gate, the
     /// trust store, and the config sync engine, so all three agree on what is trusted.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         spawner: Arc<dyn ProcessSpawner>,
         clock: Arc<dyn Clock>,
         trust: Arc<dyn TrustRepo>,
         projects: Arc<dyn ProjectRepo>,
+        runtime: Arc<dyn RuntimeState>,
+        orphan_control: Arc<dyn OrphanControl>,
     ) -> Self {
         let bus = EventBus::new(EVENT_BUFFER);
         let supervisor = Supervisor::new(
@@ -57,6 +63,8 @@ impl Facade {
             clock,
             trust.clone(),
             Arc::new(NoopLockReleaser),
+            runtime,
+            orphan_control,
             bus.clone(),
         );
         Self {
@@ -111,6 +119,7 @@ impl Facade {
                 command: DEMO_COMMAND.into(),
                 working_dir,
                 env: BTreeMap::new(),
+                size: PtySize::default(),
             },
         ));
         // Starting an ungated terminal cannot fail the trust gate.
@@ -122,7 +131,7 @@ impl Facade {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::TokioClock;
+    use crate::ports::{NoopOrphanControl, NoopRuntimeState, TokioClock};
     use crate::process::ProcStatus;
     use crate::supervisor::SupervisorError;
     use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTrustRepo};
@@ -136,6 +145,8 @@ mod tests {
             Arc::new(TokioClock),
             trust.clone(),
             Arc::new(FakeProjectRepo::new()),
+            Arc::new(NoopRuntimeState),
+            Arc::new(NoopOrphanControl),
         );
         (facade, trust)
     }

@@ -29,6 +29,7 @@ pub mod idle;
 pub mod ids;
 pub mod metrics;
 pub mod notify;
+pub mod orphans;
 pub mod ports;
 pub mod portscan;
 pub mod process;
@@ -48,12 +49,15 @@ pub use events::{DomainEvent, EventBus};
 pub use facade::Facade;
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};
+pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{
-    Clock, ExitFuture, ExitStatus, LockReleaser, NoopLockReleaser, ProcessControl, ProcessSpawner,
-    ProjectRecord, ProjectRepo, SpawnError, SpawnSpec, Spawned, Store, StoreError, TokioClock,
-    TrustRepo,
+    Clock, ExitFuture, ExitStatus, LockReleaser, NoopLockReleaser, NoopOrphanControl,
+    NoopRuntimeState, OrphanControl, OrphanRecord, ProcessControl, ProcessSpawner, ProjectRecord,
+    ProjectRepo, PtyIo, PtySize, RuntimeState, RuntimeStateError, SpawnError, SpawnSpec, Spawned,
+    Store, StoreError, TokioClock, TrustRepo,
 };
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView};
 pub use projects::{ProjectError, Projects};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};
+pub use terminal::{LogLine, PtyChunk, RenderedScreen};
 pub use trust::{Trust, TrustStore};
