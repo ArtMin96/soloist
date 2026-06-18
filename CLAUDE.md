@@ -39,8 +39,14 @@ Run these steps **in order, every session**, before writing code, planning, or a
 3. **Read `plan/05-solo-reference-and-sources.md`** — the **behavior contract** (how Solo actually
    works, with citations and confidence markers). Never invent Solo behavior; if it's not here or in
    the matrix, it's a documented gap with *our* decision attached.
-4. **Read `plan/04-engineering-architecture-and-patterns.md`** — the **design contract** (the rules
-   that keep the app from rotting). Every line of code must conform to it.
+4. **Read the architecture set, in this order, before writing or changing any code:**
+   `ARCHITECTURE.md` (repo root — the read-first digest: the hexagonal diagram, the 8 bounded contexts,
+   the design-patterns-in-practice table, adapter independence) → `plan/04-engineering-architecture-and-patterns.md`
+   (the **design contract** — the rules that keep the app from rotting) → `plan/06-codebase-blueprint-and-cleanup.md`
+   (the **concrete blueprint** — where every kind of code lives, the *add-a-X* recipes, the cleanup
+   roadmap). **Every change must conform to all three** (`CLAUDE.md` §16 is the must-obey summary). They
+   are the load-bearing architecture rules — **do not architect a change differently from them**; if you
+   believe one must bend, stop and surface it (§12), don't silently diverge.
 5. **Open the phase file for the phase named in `PROGRESS.md`** (`plan/phases/phase-NN-*.md`) and read
    it end to end. Then re-read its rows in `plan/02-feature-parity-matrix.md`. That phase file + its
    matrix rows are your task list and your **definition of done** for this session.
@@ -72,6 +78,8 @@ source-of-truth order is in §2.
 3. **`plan/05-solo-reference-and-sources.md`** — what Solo *does* (behavior contract). A 🟡/❓ marker
    means "not fully confirmed — our decision is recorded; follow that."
 4. **`plan/04-engineering-architecture-and-patterns.md`** — how we *build* it (design contract).
+4b. **`plan/06-codebase-blueprint-and-cleanup.md`** — the *concrete* structural blueprint + recipes,
+   derived from `04`; if the two disagree, `04` wins and `06` is fixed.
 5. **`plan/02-feature-parity-matrix.md`** — the per-feature scope/verify contract (v1 vs later).
 6. **The phase file** — the per-phase plan derived from the above.
 7. **This `CLAUDE.md`** — process rules.
@@ -90,6 +98,8 @@ one and note it in `PROGRESS.md`. Never resolve a contradiction by guessing.
 | `plan/03-tech-stack-and-decisions.md` | Decisions D1–D10, crate choices, rationale |
 | `plan/04-engineering-architecture-and-patterns.md` | **Design contract** — domains, patterns, longevity rules |
 | `plan/05-solo-reference-and-sources.md` | **Behavior contract** — cited Solo facts + gap decisions |
+| `plan/06-codebase-blueprint-and-cleanup.md` | **Structural blueprint** — where code lives, design-patterns-in-practice, add-a-X recipes, the cleanup roadmap (§16) |
+| `ARCHITECTURE.md` | **Read-first architecture digest** (repo root) — diagram, contexts, patterns; defers to `04`/`06` |
 | `plan/glossary.md` | Shared vocabulary (use these exact terms) |
 | `plan/phases/phase-NN-*.md` | The build, phase by phase (00 → 13) |
 | `PROGRESS.md` | **State ledger** — what's done, what's next (update every session) |
@@ -276,6 +286,12 @@ rotting; this section keeps it small and quick.
      check**, and (from Phase 6 on) the nightly soak.
   5. `PROGRESS.md` updated (§10) and any new intentional divergence recorded in `KNOWN-DIVERGENCES.md`
      (created in Phase 13; start the list earlier if you introduce one).
+  6. **Codebase-discipline gate (§15, `plan/04` §15) passes:** the phase's code keeps clean
+     domain/service separation (hexagonal layering + bounded contexts intact, adapters thin), is
+     reusable and DRY (single source of truth; no copy-paste), lives in **small single-purpose files**
+     (no god-files — a non-test source file pushing past ~400 lines is a split smell to act on, not
+     ignore), and carries no dead code or restating comments. A change that regresses this is **not
+     done**, even if tests pass.
 
 ---
 
@@ -485,3 +501,44 @@ and every phase; a change that violates one is **not done**.
 - **Built to change safely.** Prefer the design that survives the next phase touching it: typed
   boundaries, exhaustive `match`, ports over concretions, names that say what they mean. Optimize for the
   reader six months from now.
+
+---
+
+## 16. Architecture & structure rules — how to build *any* change (MANDATORY)
+
+The detailed blueprint is **`plan/06-codebase-blueprint-and-cleanup.md`** (where every kind of code lives,
+the design-patterns-in-practice catalog, the step-by-step *add-a-X* recipes, and the cleanup roadmap). Read
+it before any structural change. These are the load-bearing invariants it expands — **do not diverge**; if
+you think a change needs to break one, stop and surface it (§12):
+
+- **Behavior → context → port → one façade.** All business logic lives in a **bounded context** in
+  `crates/core` (`04` §3 map), behind **ports** (traits in `core::ports`), exposed through the **single
+  `Facade` (C8)**. Adapters and React hold **no** business logic — they marshal a wire format to one
+  `Facade` call and project the read-model back. Never reimplement an action (restart, trust-check) per
+  adapter; route to the core. Never add a domain `if` to an adapter.
+- **Adapters are independent crates; the dependency points one way.** Each external surface (Tauri UI,
+  MCP, HTTP, CLI) is its **own crate** depending only on `core`/`ipc`. `core` depends on **nothing
+  app-specific** (CI-enforced, K7). This is the mechanical guarantee that **removing an adapter (e.g. MCP)
+  leaves the app building and running** — drop the crate from the workspace + the composition root; nothing
+  else references it. Don't put a new integration's logic in `core` or in another adapter.
+- **Optional subsystems are ports with `Noop` defaults (Null Object).** A subsystem the core *calls* but
+  that may be absent (lock releaser, runtime-state, file watcher, notifier, summarizer) is a trait with a
+  `Noop*` default. The core always holds *a* port and never branches on "is it present?". Add new optional
+  subsystems the same way (`plan/06` §5.2).
+- **One composition root per binary.** `crates/app/src/lib.rs::build_facade` is the **only** place real-vs-
+  `Noop` adapters are chosen and the `Facade` is assembled. No other code constructs adapters. Tests are
+  alternate composition roots built from `core::testing` fakes.
+- **Single source of truth, everywhere.** Every status/kind/event/command/limit/path is defined **once**
+  (Rust enum in `core`; the TS mirror in **one** `domain.ts`; one command/event-name constant per side).
+  Shared **test fakes** live once in `core::testing` (reused cross-crate via its `testing` feature — see the
+  roadmap), never re-rolled per crate.
+- **Small, single-purpose files; tests inline but honest.** Split a non-test source file at the ~400-line
+  smell (`scripts/check-file-size.sh` signals it). Unit tests stay **inline** (`#[cfg(test)] mod tests`) by
+  project decision — but every test must exercise real behavior and be deletable-on-sight if it doesn't.
+- **Reach for a pattern when its trigger fires, not before.** Use the `plan/06` §4 table: FSM for legal
+  state transitions, Registry for a growing set of handlers (MCP tools, agent providers — never a giant
+  `match`), Strategy for per-provider behavior, Repository per durable aggregate, Parameter-Object/Builder
+  when a constructor passes >4 collaborators. No speculative abstraction (YAGNI).
+- **Use the recipes.** Adding a context behavior, a port+adapter, an MCP tool, an HTTP/CLI/Tauri command, a
+  `DomainEvent`, or a UI surface each has a closed checklist in `plan/06` §5. Follow it so the change lands
+  in the right layer with the dependency rule, single-source, and DRY intact.

@@ -152,6 +152,100 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Architecture blueprint + cleanup roadmap authored (2026-06-18, docs only — awaiting review)
+- **User goal:** before new features, fully clean up / organize the codebase for long-term discipline —
+  clear domain separation, reuse, single source of truth, honest tests, and **architecture rules that tell
+  future sessions how to architect changes** so adapters (MCP/tools/agents/skills) can be added/removed
+  without the app rotting. Asked for a comprehensive, **phased** plan file first; **no code yet**.
+- **Research done (no fabrication):** read the full plan corpus (`00`–`05`, glossary, all 14 phase files)
+  + the live tree (core/store/pty/app + frontend) + targeted web research (Rust test layout; shared-fixture
+  patterns; hexagonal pluggability). Census facts: 8 crates; core has real C1–C3 + C8 and **7 empty
+  placeholder modules** (agents/coordination/identity/idle/metrics/notify/portscan → their future
+  contexts) + **4 stub adapter crates** (mcp/httpapi/cli/ipc); `supervisor.rs` = 491 code + 573 inline
+  test lines (the one >400 outlier); `core::testing` fakes are `#[cfg(test)]`-**private** (not reusable by
+  store/pty/future adapters — the real DRY gap); two `#[allow(too_many_arguments)]` (facade.rs:51,
+  supervisor.rs:138); `core::facade::spawn_demo_process` is demo scaffolding in the pure core kept alive
+  only by `pty/tests/integration.rs:262` (duplicates `app/demo.rs`); frontend split is already clean.
+- **User decisions (locked this session):** (1) **tests stay inline** — trim pretend/oversized, do **not**
+  relocate (reverses the opening "no tests in rust code"; user confirmed via the option); (2) **keep** the
+  empty core modules **and** the 4 stub crates as **documented placeholders**; (3) **plan-first, then
+  review** — write the doc + `CLAUDE.md` rules, stop before touching code.
+- **Authored `plan/06-codebase-blueprint-and-cleanup.md`** (new): crate topology + placement map (incl. the
+  one-allowed placeholder-module rule), design-patterns-in-practice catalog (with triggers + where), the
+  *add-a-X* recipes (context behavior / port+adapter / MCP tool / HTTP-CLI-Tauri command / `DomainEvent` /
+  UI), single-source + the test-fakes-reuse fix, the **adapter-independence guarantee** ("remove MCP, app
+  survives" = independent crates + Null-Object `Noop` ports + one composition root), and the **R0–R6
+  cleanup roadmap** (R0 blueprint+file-size guard · R1 reusable `core::testing` via a `testing` feature ·
+  R2 split `supervisor.rs` · R3 `CorePorts` parameter object, kill both `too_many_arguments` · R4 purge
+  core demo scaffolding · R5 honest-test audit · R6 doc/ledger converge). Each R-phase starts/ends `just
+  lint && just test` green.
+- **Updated `CLAUDE.md`:** added the doc to the canonical table + source-of-truth hierarchy (slot 4b,
+  below `04`), and **new §16 "Architecture & structure rules — how to build any change"** (the load-bearing
+  invariants, pointing to `plan/06`).
+- **No code logic changed; gates not re-run** (docs only). **Awaiting user review of `plan/06` + §16
+  before executing R0.**
+
+### Codebase-discipline audit + plan-enforced gate (2026-06-18)
+- **Audit (no code changed).** Line-count + structure pass over `crates/`. The codebase **already
+  honors** the discipline: hexagonal layering holds (dep-guard green), bounded contexts intact,
+  single-source domain types (`domain.ts`), reused components, files small — **TS** max **121** lines
+  (`useTerminal.ts`); most **Rust** under ~330. Single notable outlier: `crates/core/src/supervisor.rs`
+  = **1064 lines, but 491 code + 573 in-file tests** — the C2/C8 facade (~15 methods) + `Registration`/
+  `StartSummary`/errors, with `actor`/`registry`/`adopt` already in `supervisor/`. Not a true god-file;
+  it's the largest core module and a **candidate split** (e.g. pull bulk-ops + `reconcile_orphans` out),
+  not urgent. `testing.rs` (519) is shared test-support (fakes) — acceptable, splittable later.
+- **Encoded the discipline as an enforced gate (user request: "include in plan").** Avoided a second
+  source of truth — `CLAUDE.md` §15 stays authoritative; the plan now adds the **enforcement hooks**:
+  - `CLAUDE.md` §7 — added **definition-of-done item 6**: codebase-discipline gate (separation, reuse,
+    small single-purpose files, clean) must pass; a regression is "not done" even if tests pass.
+  - `plan/04` §10 — expanded the soft "module size discipline" bullet into a concrete **Codebase
+    discipline** block (domain/service separation; single-source + DRY; small files with a **~400
+    non-test-line split smell**; reusable component frontend; no dead code), pointing to `CLAUDE.md` §15.
+  - `plan/04` §15 — new **Codebase discipline gate** checklist (mirrors the §14 longevity checklist) that
+    every phase verifies; notes an optional future `scripts/check-file-size.sh` in `just lint`/CI.
+- **Open follow-up (recorded below):** optionally split `supervisor.rs` and add the file-size lint —
+  flagged for a decision, not done this session (touches Phase-3/4 verified-pending code).
+
+### Research — Claude Code OAuth/interactive shell + full soloterm re-research (2026-06-18)
+- **No code changed — research + plan-doc updates only** (user request).
+- **Q: make Soloist "work with Claude Code using native OAuth login + an interactive shell."** Findings,
+  no fabrication:
+  - **Claude Code does its own auth; Soloist does/should manage none.** Native OAuth is the CLI's `/login`
+    browser/loopback flow (paste-code fallback), writing **`~/.claude/.credentials.json`** (Linux:
+    plaintext, mode 0600 — *its* file). Other methods: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+    `apiKeyHelper`, `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), cloud providers. Source:
+    [code.claude.com/docs/en/authentication](https://code.claude.com/docs/en/authentication) (fetched 2026-06-18).
+  - **This matches Solo exactly** — now **citable** ([agents](https://soloterm.com/agents)): *"Solo does
+    not farm OAuth tokens or route your work through a vendor account"*; agents *"keep using whatever
+    accounts, subscriptions, API keys, and auth flows you already set up."*
+  - **Requirement is largely already satisfied by our architecture.** The interactive PTY (Phase 4,
+    `test -t 1`/`read x` verified) + xterm pane (Phase 5) is exactly the substrate the OAuth REPL needs.
+    The missing piece is **first-class agent launch = Phase 7** (Not started). The only rule: launch the
+    agent **interactively** (never `-p` for the main process) and pass env through (`$DISPLAY`/`BROWSER`,
+    `ANTHROPIC_*`). No credential plumbing — we run the agent **on the host**, where the CLI's creds
+    already live.
+  - **`madarco/agentbox` researched** (cloned to `/tmp/agentbox-research`). It always runs the agent in
+    an **isolated box** (Docker/Vercel/E2B/Hetzner/Daytona), so it must **stage/forward** host
+    `~/.claude/.credentials.json` into the box (symlink pivot, token-refresh backups) + tmux+node-pty
+    attach. **~90% of that is N/A for us** (local execution); the one transferable idea is launching
+    `claude "<seed prompt>"` interactively — already how Phase 7 plans to launch.
+  - **The plan never named agent auth** (grep of `plan/`: every "login" = unix login shell, every "auth"
+    = the HTTP `X-Soloist-Local-Auth` header). Recorded it now: **`05` §6** (Solo's stance, cited),
+    **matrix `E8`** (v1), **phase-07** (scope/Task 3/acceptance/risk). No new divergence (we match Solo).
+- **Full soloterm re-research pass (vs `05`/`02`).** `05` was already very thorough (and *more* complete
+  than the new pass on the 10/60s limit, port 24678, `X-Solo-Local-Auth`). **Genuinely untracked Solo
+  features found** (all verified verbatim against [changelog](https://soloterm.com/changelog)) and added
+  as **`later`** (non-gating, no v1 gold-plating):
+  - **Activity Monitor view** (v0.6.1) — cross-project flat/tree process+subprocess monitor, filters,
+    sortable CPU/mem/port columns, quick actions → `05` §10 + matrix **`I12`** (+ descendant-stat data
+    **`D12`**).
+  - **Prompt templates** (v0.8.2) — UI view + optional MCP tools (placeholders, global/project scope) →
+    `05` §10/§7 + matrix **`F14`** (MCP) and **`I13`** (UI).
+  - **Nested child-agent display** (v0.6.4) — spawned agents nested under parent in sidebar → matrix
+    **`I14`** (`05` §10 already noted "nested child agents").
+  - **Dropped as unverified:** the subagent's "Kitty keyboard protocol" claim did **not** confirm on the
+    changelog re-fetch — not added (no fabrication).
+
 ### Phase 5 build — Dashboard UI / interactive core slice (2026-06-16)
 - **Session scope (user-approved):** the "interactive core slice" — `DESIGN.md` + the Tauri/TS plumbing +
   sidebar/status/controls/live-status + the **xterm.js terminal pane**. **Deferred** to a focused
@@ -590,6 +684,20 @@ review's one should-fix + the mechanical nits:
 
 - **Plan review:** user may still skim `plan/05` (Solo behavior), `plan/04` (architecture), `plan/02`
   (parity) and confirm before deep feature work — not blocking Phase 1.
+- **Agent native OAuth/login (E8) → Phase 7, no new work beyond launching right.** When Phase 7 lands,
+  launch the agent interactively (no `-p`) with `$DISPLAY`/`BROWSER`/`ANTHROPIC_*` passed through;
+  manage no agent credentials. A quick manual proof is possible **now** without Phase 7: register a
+  Command running `claude`, open its terminal, complete the login — validates the substrate. Recorded in
+  `05` §6, matrix E8, phase-07.
+- **Codebase-discipline gate now enforced (CLAUDE.md §7.6, plan/04 §10/§15).** Two optional follow-ups,
+  flagged for a decision (not done — would touch verified-pending code): (1) **split `supervisor.rs`**
+  (491 code lines; pull bulk-ops + `reconcile_orphans` into `supervisor/` submodules); (2) add
+  `scripts/check-file-size.sh` to `just lint`/CI (warn on non-test source files over ~400 lines), the
+  way `check-core-deps.sh` guards layering. Everything else already meets the bar.
+- **New `later` parity rows added this session (tracked, non-gating):** `D12` descendant subprocess
+  stats (Phase 6); `F14` prompt-template MCP tools (Phase 8); `I12` Activity Monitor view, `I13` prompt
+  templates UI, `I14` nested child-agent display (Phase 11; I14 also Phase 5). Build when their consuming
+  phase needs them — do **not** pull into v1.
 - **`DESIGN.md` — DONE (Phase 5).** Seeded via `/impeccable document` + user-approved ("The Instrument
   Panel": cool-slate neutral + one azure accent; saturated color spent only on status, encoded as
   shape+color+label). `index.css` implements its OKLCH tokens. **Still open:** generate the
@@ -668,6 +776,13 @@ review's one should-fix + the mechanical nits:
 ---
 
 ## Next session should start with
+
+0. **Cleanup track (user's current priority — do before new features).** Review
+   `plan/06-codebase-blueprint-and-cleanup.md` + `CLAUDE.md` §16 with the user. On approval, execute the
+   **R0–R6 roadmap in order**, one reviewable commit per R-phase, each starting and ending with `just lint
+   && just test` green (baseline **106 tests**). R0 = add `scripts/check-file-size.sh` to `just lint`/CI
+   (warn-only first). Do **not** relocate inline tests, delete the placeholder modules, or drop the stub
+   crates — all three were decided to stay (see Decisions above).
 
 1. Run `just lint && just test` to confirm the baseline is still green (**106 tests**: Rust 96 / UI 10).
    Phase 5's **interactive core slice** landed `Done — pending verify`; Phases 1–4 unchanged.

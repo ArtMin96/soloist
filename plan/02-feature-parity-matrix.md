@@ -68,6 +68,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | D9 | In-app toasts | 🟡 | 6 | later | In-app notification surface |
 | D10 | Attention bell + unified unread (sidebar/title/dock) | 🟡 | 6 | later | Bell lights; click opens terminal |
 | D11 | Auto-restart disabled during app shutdown | ✅ | 6 | v1 | Quit doesn't trigger restarts |
+| D12 | Tracked descendant/child subprocess stats (CPU/mem/ports of spawned children) | 🟡 | 6 | later | A process's child shows its own CPU/RSS/port |
 
 ## E. Agents & idle (Phase 7)
 
@@ -80,6 +81,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | E5 | 5-state idle detection (IDLE/PERMISSION/THINKING/WORKING/ERROR) | ✅ | 7 | v1 | State tracks a real agent |
 | E6 | Optional auto-summarization (headless, degradable) | ✅❓ | 7 | later | Summary when enabled; disabled OK |
 | E7 | Agents spawning agents (cross-vendor) | ✅ | 7,9 | v1 | Lead spawns a worker via MCP |
+| E8 | Agents authenticate via their **own** native flow (OAuth/API key) in the interactive PTY; Soloist manages no agent credentials | 🟡 | 7 | v1 | Fresh `claude` (no stored creds) completes its native login in its terminal; Soloist stores/injects no key/token; `$DISPLAY`/`BROWSER`/`ANTHROPIC_*` pass through |
 
 ## F. MCP server — core (Phase 8)
 
@@ -98,6 +100,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | F11 | Agent/terminal tools (`spawn_process`,`spawn_agent`,`list_agent_tools`) | ✅ | 8 | v1 | Spawn a terminal/agent |
 | F12 | Setup/support (`help`,`submit_solo_feedback`,`setup_agent_integration`) | ✅ | 8 | later | `setup_agent_integration` writes CLAUDE.md |
 | F13 | Action tools honor trust + scope | ✅❓ | 8 | v1 | Untrusted action refused |
+| F14 | Prompt-template MCP tools (list/read/create/update/delete/export; default off) | 🟡 | 8 | later | Tool group toggles on; round-trips a template |
 
 ## G. Coordination layer (Phase 9)
 
@@ -139,6 +142,9 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | I9 | Open in editor (`code`/`zed`/…); default terminal | ✅ | 11 | v1 | Opens project root |
 | I10 | Env capture via `$SHELL -ilc env`, cached 10 min | ✅ | 11 | v1 | Version-manager PATH visible |
 | I11 | First-launch guided demo project | 🟡 | 11 | later | Demo appears on first run |
+| I12 | Activity Monitor view (cross-project; flat/tree; project/type/status/ports filters; sortable CPU/mem/port columns; subprocess actions) | 🟡 | 11 | later | Monitor lists processes + descendants; filter/sort works |
+| I13 | Prompt templates UI (create/edit/search/duplicate; global+project scope; placeholder fill-in) | 🟡 | 11 | later | Template saved, filled, and applied to an agent |
+| I14 | Nested child-agent display (agent-spawned agents nested under their parent in the sidebar) | 🟡 | 5,11 | later | Spawned agent appears under its parent |
 
 ## J. Packaging (Phase 12)
 

@@ -174,9 +174,27 @@ All / Leave running**. Historical output from the disconnected window may be unr
   summarizer; Claude/Codex/Gemini use **native headless** invocations; default models `sonnet`,
   `gpt-5-codex`, `flash-lite`; cadence 15s / 30s / 1min. Caveat: "a quiet terminal is not always
   completed work."
+- **Agent authentication — Solo manages NONE of it (🟡, [agents](https://soloterm.com/agents)).** An
+  agent is just its CLI run as a process; the CLI keeps using whatever auth the user already configured
+  on the machine. Verbatim: *"Your agents keep using the accounts, API keys, and subscriptions you
+  already configured locally. Solo does not farm OAuth tokens or route your work through a vendor
+  account."* and *"Solo does not need to impersonate you, collect provider OAuth tokens, or sit between
+  you and the agent account you pay for."* So Solo never stores, prompts for, or injects API keys / OAuth
+  tokens — Claude Code's **own** native login (browser/loopback OAuth, or paste-code fallback) runs in
+  the agent's interactive terminal, and the CLI persists its own credentials (Claude Code: plaintext
+  `~/.claude/.credentials.json` on Linux, mode 0600 — its file, not ours; per
+  [code.claude.com/docs/en/authentication](https://code.claude.com/docs/en/authentication)).
 - ⚠️ Design implication: idle detection drives **timers** (fire-when-idle) and **notifications**.
   Auto-summarization needs an LLM → for our clone it must be **optional/configurable** (use the user's
   own agent CLI in headless mode or disable). Don't hard-require a cloud model.
+- ⚠️ Auth design implication for **Soloist**: because we run the agent **directly on the host** (no
+  sandbox/container — `00-vision-and-scope.md`), the CLI's credentials already live where it looks; we
+  inherit Solo's stance exactly — **manage no agent credentials**. The only requirements are ours
+  already-built terminal substrate: launch the agent **interactively** in a real PTY (never headless
+  `-p` for the main agent process) and pass the env through (`$DISPLAY`/`BROWSER` for the browser step,
+  any `ANTHROPIC_*` the user set) so the native login completes in-terminal. (Contrast: tools that run
+  the agent in an isolated box — e.g. `madarco/agentbox` — must *stage/forward* host credentials into
+  the box; that whole apparatus is N/A for our local-execution model. Researched 2026-06-18.)
 
 ---
 
@@ -269,6 +287,14 @@ unchecked.
   crash notification opens that terminal.
 - **Command palette** `Cmd+K`, quick actions `Cmd+P`, **jump** `Cmd+E`, attention-jump `Cmd+Shift+E`,
   new item `Cmd+T`. Deep links **`solo://`** to projects/processes/todos/scratchpads.
+- **Activity Monitor view** (🟡 changelog v0.6.1): a dedicated **cross-project** view of running
+  commands/terminals/agents **and tracked subprocesses** — project/type/status/ports filters, **flat or
+  tree** layout, **sortable** CPU/mem/descendant-port columns, and quick subprocess actions. Distinct
+  from the per-project sidebar tree. Source: [changelog](https://soloterm.com/changelog).
+- **Prompt templates** (🟡 changelog v0.8.2): a dedicated view to create/edit/search/filter/duplicate
+  reusable prompts, moved between **global and project** scope, with **placeholder** fill-in before a
+  prompt is applied (also exposed as optional MCP tools, §7). Source:
+  [changelog](https://soloterm.com/changelog).
 - **Scratchpads & Todos panels** with Markdown editors, search/filter/sort/archive, checkbox task lists,
   "terminal selection → scratchpad".
 - **Trust review screen** showing command + working dir + env before approval; "Trust all commands".

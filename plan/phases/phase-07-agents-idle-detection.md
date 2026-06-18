@@ -10,9 +10,12 @@ titles; `Summarizer` + `Clock` ports.
 
 ## Scope
 **In:** agent-tool registry (config); `--version` autodetect; launch (picker + flags); the idle FSM with
-per-provider heuristics; optional auto-summarization; activity surfacing in the UI. **Out:** the MCP
+per-provider heuristics; optional auto-summarization; activity surfacing in the UI. The main agent
+process launches **interactively in its real PTY** (Phase 4) — never headless `-p` — so the CLI's
+**own** native login/OAuth flow runs in-terminal (E8). **Out:** the MCP
 `spawn_agent`/coordination tools (Phases 8/9 expose these); the settings *screen* (Phase 11; the model
-lives here).
+lives here); **agent credential management** — Soloist never stores, prompts for, or injects API keys /
+OAuth tokens; agents use the auth the user already configured, exactly as Solo does (`05` §6, E8).
 
 ## Tasks
 1. **Agent-tool registry (E1/E3, ref §6):** persisted (SQLite) tool defs — built-in types **Claude,
@@ -23,7 +26,11 @@ lives here).
    present/absent. We never install the CLIs.
 3. **Launch (E4, ref §6):** create an **Agent** process (Phase 3 subtype) in the project's dir via the
    tool's command+args; "agent with flags" lets the user edit flags for one launch; many agents
-   concurrently. "Resume last session" for a stopped agent (B9) where supported.
+   concurrently. "Resume last session" for a stopped agent (B9) where supported. Launch **interactively**
+   on the real PTY (no `-p`) and pass the env through (`$DISPLAY`/`BROWSER` for the browser step, any
+   `ANTHROPIC_*` the user set) so a not-yet-authenticated CLI can complete its **own** native login
+   (OAuth loopback, or paste-code fallback) right in the terminal pane — Soloist authenticates nothing
+   itself (E8, `05` §6).
 4. **Idle FSM (E5, ref §6):** classify each agent into `IDLE/PERMISSION/THINKING/WORKING/ERROR` using a
    **Strategy per provider** (`04` §9): Claude/OpenCode → visible-output deltas; Codex/Amp → **OSC title
    stability** (from Phase 4 `TerminalTitleChanged`); Gemini → OSC title status. Emit
@@ -50,6 +57,10 @@ impl Agents { async fn launch(&self, project:ProjectId, tool:&str, extra_args:Ve
   `PERMISSION` on a permission prompt (drives the attention bell).
 - With summarization **disabled** everything works (heuristic-only); with it **enabled** and a working
   headless CLI, a short summary appears; with the CLI missing, no crash, graceful fallback.
+- **Native agent auth works untouched (E8):** a `claude` with no stored credentials, launched as an
+  agent, can complete its **own** login (browser/loopback OAuth, or paste-code) inside its Soloist
+  terminal; afterwards relaunches run authenticated. Soloist stores/injects no API key or OAuth token,
+  and never reads/writes the CLI's credential file.
 
 ## Test plan
 - **Unit:** the idle FSM per provider against recorded output/OSC-title fixtures (deterministic, mock
@@ -62,6 +73,10 @@ impl Agents { async fn launch(&self, project:ProjectId, tool:&str, extra_args:Ve
   treat "quiet ≠ done" explicitly; never auto-act on idle without a timer/user.
 - **Summarizer cost/availability** → optional, opt-in, user's own CLI, cadence-limited, degradable.
 - **Provider drift (new agent CLIs)** → `Generic` type + pluggable strategy keeps it open.
+- **Native OAuth login needs a reachable browser** → the CLI opens a loopback browser; on a headless or
+  no-`$DISPLAY` host it falls back to paste-a-code in the PTY (Claude Code documents both). Don't strip
+  `$DISPLAY`/`BROWSER` from the agent's env; the interactive PTY already lets the user paste the code.
+  This is the CLI's flow, not ours — we only avoid breaking it.
 
 ## Effort
 ~5–7 days.

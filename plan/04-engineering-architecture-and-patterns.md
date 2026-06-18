@@ -250,8 +250,20 @@ projections and sends commands.
 **Standards (CI-enforced):**
 - `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]` in `core`; `clippy -D warnings`
   workspace-wide; `rustfmt`; `tsc --noEmit`; ESLint.
-- **Module size discipline:** when a file does more than one thing, split it. Favor many small,
-  single-purpose modules over god-files (also keeps each unit in-context for reliable edits).
+- **Codebase discipline (authoritative rules: `CLAUDE.md` §15; gate: §15 below).** The brief is a
+  *clean, reusable, single-source* codebase, not "code that passes." Concretely, every phase keeps:
+  - **Domain/service separation** — logic in its bounded context (§3), behind ports (§1); adapters thin;
+    React renders projections (§2). No business logic smeared across layers.
+  - **Single source of truth + DRY** — every status/kind/event/command/limit/path defined **once** (Rust
+    enums in `core`; the TS mirror in **one** `domain.ts`); shared logic extracted to one helper, never
+    copy-pasted.
+  - **Small, single-purpose files** — when a file does two things, split it. Target most source files
+    well under ~300 lines; a **non-test** file past ~400 lines is a **split smell to act on** (also keeps
+    each unit in-context for reliable edits). God-files are forbidden in Rust **and** the frontend.
+  - **Reusable, component-based frontend** — `domain.ts` (types) · `api.ts` (typed IPC) · `store/` (pure
+    reducers + hooks) · small presentational `components/`. No logic in components, no huge `App.tsx`.
+  - **No unnecessary code/comments** — doc comments on public items + the rare non-obvious *why*; no dead
+    code, no speculative abstraction (YAGNI), no comment that restates the code.
 - **Doc comments** on every public item: what it does, how to use it, what it depends on.
 - **Dependency-direction test** in CI: fail the build if `core` imports a forbidden adapter crate.
 - Errors are values; logging via `tracing` spans keyed by `ProcessId`/`ProjectId`.
@@ -310,3 +322,27 @@ projections and sends commands.
 - [ ] Force-quit the app mid-run → next launch adopts/cleans orphans; SQLite state intact.
 - [ ] `solo.yml` edited 50× rapidly → debounced to few sync prompts, no runaway restarts.
 - [ ] Dependency-direction CI check is green (`core` has no adapter imports).
+
+---
+
+## 15. Codebase discipline gate (every phase verifies; ref `CLAUDE.md` §15)
+
+A phase is **not done** until these hold for the code it added — independent of whether tests pass.
+This is the per-phase checkpoint of the §10 standards.
+
+- [ ] **Separation:** new logic sits in the right bounded context (§3) behind a port (§1); the adapter
+      added (if any) is thin and holds no business state; React added (if any) only renders/sends.
+- [ ] **Single source of truth:** no concept (status/kind/event/command/limit/path) defined twice; the
+      Rust↔TS mirror changed in **one** place per side (`domain.ts`).
+- [ ] **DRY:** no behaviour copy-pasted; shared logic extracted to one helper/module.
+- [ ] **Small files:** no new god-file; any non-test source file over ~400 lines was split (or there's a
+      recorded reason it can't be). Frontend included.
+- [ ] **Reusable frontend:** components small/presentational; no logic in components; no bloated
+      `App.tsx`; no duplicated markup.
+- [ ] **Clean:** no dead code, no speculative abstraction (YAGNI); comments are doc-comments + rare
+      *why*-notes only (no phase numbers, plan citations, or code-restating comments — §10/`CLAUDE.md` §8).
+- [ ] **Honest tests:** every new test exercises real behaviour and can fail for a real reason; no
+      placeholder/tautological tests.
+
+> Suggested enforcement (optional, not yet built): a `scripts/check-file-size.sh` in `just lint`/CI that
+> warns on non-test source files over the threshold, the same way `check-core-deps.sh` guards layering.
