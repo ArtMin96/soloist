@@ -37,11 +37,13 @@
   XWayland/WebKit quirk, unconfirmed; a **real human click** must verify start/echo **before R2**) — and the
   Playwright e2e. See the 2026-06-19 entry + open threads.
 - **Active phase:** **Phase 5 (Dashboard UI)** — `Done — pending verify` (interactive core slice).
-  **Deferred to a Phase-5 follow-up** (per the session-scope decision the user approved): the **trust
-  dialog** (A6/A9 UI), the **orphan dialog** (B8 UI), and **project load/switch** + the
-  `ConfigEngine → Supervisor::register → reconcile_orphans → start_all` wiring. A built-in **demo stack**
-  (`crates/app/src/demo.rs`, app-level scaffolding, commands pre-trusted) stands in for real config
-  loading so the tree is populated and interactive; it is replaced when project-load lands.
+  **Phase-5 follow-up — PARTIALLY landed (2026-06-19 feature session):** done = the mockIPC dashboard test,
+  the **orphan dialog (B8 UI)** + `kill_orphan`/`orphans_resolve`, **terminal title/bell → header**, and the
+  **`Facade::load_project`** core wiring (`config → register → reconcile_orphans → start_all`). **Remaining =
+  the trust dialog (A6/A9)** (needs `ConfigChanged` enriched with per-command specs + a first-open trust-UX
+  decision + a `config_trust` method) and the **project-load UI** (a `project_load` command + file-picker via
+  `tauri-plugin-dialog`, then delete `demo.rs`). See "Next session should start with" for the precise plan. A
+  built-in **demo stack** (`crates/app/src/demo.rs`) still seeds the tree until the project-load UI replaces it.
 
 ### Prior-phase carry-forward (still accurate)
 
@@ -137,7 +139,7 @@ Status vocabulary: `Not started` · `In progress` · `Done — pending verify` �
 | 2 | Config & projects (real `solo.yml`, trust, sync, detect) | **Done — pending verify** | Context C1 built headless on the skeleton. `crates/core/config/{model,load,diff,sync}` (serde `SoloYml`/`ProcessSpec`, `deny_unknown_fields`, `IndexMap` order, documented defaults; total `load`/`parse` w/ 1 MB cap + empty/comment-only = empty + typed `ConfigError`; `ConfigSync` add/update/remove/**rename** diff; `ConfigEngine` content-hash sync that flags `requires_trust` and emits `DomainEvent::ConfigChanged` — **owns no spawner, starts nothing**), `core/hash` (SHA-256 `Hash` + length-prefixed variant hash), `core/trust` (`TrustStore`/`Trust`), `core/projects` (`Projects`, canonical-root identity), `core/debounce` (Clock-driven). `crates/store` grown to the repository pattern (`meta`/`projects`/`trust` modules + migration **v2**: `projects`/`trust` tables, FK cascade) implementing `ProjectRepo`/`TrustRepo`. **v1 evidence:** A1/A3/A4 (`config/load` tests), A7 (`trust` + store `trust_persists_across_reopen`), A9 (`config/sync` write→mutate→`ConfigChanged{requires_trust}`, rename-preserves, no-op-on-touch), A11 (store `projects` + core `projects`). A2/A6 runtime verify → Phase 3. `later` A5/A8/A10/A12/A13 deferred. New core deps: `serde_norway` 0.9, `indexmap` 2, `sha2` 0.11 (dep-direction guard green). Divergences: `KNOWN-DIVERGENCES.md` D-1 (variant scope), D-2 (live watcher → Phase 6). |
 | 3 | Process supervisor (3 subtypes, status FSM, orphans) | **Done — pending verify** | **B1–B8 + A2/A6 delivered + tested.** `Supervisor` (C2) on the Phase-1 actor: mailbox actor (`Stop`/`Restart`), status FSM, graceful SIGTERM→5s→SIGKILL on the **pgroup**, exit classification, panic isolation; **trust gate in core** (A6); login-shell `$SHELL -lc` (A2/B5); bulk ops (B4); stop→lock-release hook (B7). Task 4 (output/log ring) delivered in Phase 4. **B8 orphan adoption (this session):** runtime-state file recording + `reconcile_orphans()` (adopt/surface/prune) + adoption via a synthesized `Spawned` over the existing pgid (liveness poll + killpg), reusing the actor; real adapters `FileRuntimeState` (store) + `PgidOrphanControl` (pty). **Evidence:** core reconcile/adopt/surface/prune + record/forget tests; store `FileRuntimeState` round-trip; pty `is_alive` on a real group. **Pending verify:** the app reconcile-on-launch *call* (Phase 5, after config-registration) + in-GUI bits (Phase 5 Playwright); B7's "clears crash tracking" half (Phase-6). |
 | 4 | PTY & terminal I/O (rendered+raw, input, resize, OSC) | **Done — pending verify** | **C1–C7, C9 v1 delivered (C3 context); PR reviewed + all findings fixed.** Real PTY per process via `portable-pty` (`$SHELL -lc` on the slave; child sees a tty); `pty` adapter rewritten (`PtyProcessSpawner`) keeping pgroup reaping. Core `terminal/` (`ring`/`buffers`/`parser`): bounded raw scrollback (256 KB per-process **+ a 16 MB global aggregate cap**, **C5**) + `vte`-driven rendered `Ring<LogLine>` (5,000 lines, **C4** + folded Task 4) with `\r` overwrite/tab stops; OSC **title**+**bell** → `DomainEvent`s (**C7**); live raw bytes via per-process broadcast. `Supervisor`: `write_stdin`/`resize` (**C3**/**C6**), `attach_pty` (atomic replay+live, **C9**), `pty_scrollback`/`rendered`. **Evidence:** **102 tests** (core 74 / pty 10 / store 12 / UI 6); real-OS pty suite green (`test -t 1`→tty **C1**, `read x`→input echo **C3**, `tput cols`→resize **C6**, group reap/no-survivors hardened against the async-grandchild-reap race). `just lint && just test` green. **Pending verify:** xterm.js terminal pane (**C8** `later` + phase-04 Task 9) → Phase 5 via `/impeccable`; "vim/htop visually render" is the Phase-5/manual check. |
-| 5 | Dashboard UI (sidebar tree, status dots, terminal pane, trust dialog) | **Done — pending verify** | **Interactive core slice:** `DESIGN.md` seeded (`/impeccable`) + approved; full Tauri command/event/PTY-Channel adapter; TS domain mirror re-synced; sidebar tree (I1), color-blind-safe status (shape+color+label), per-row + bulk controls (B2/B3/B4), live status, xterm.js terminal pane (C1–C7 UI), empty/error states. **Demo stack** seeds the tree (real project-load deferred). `just lint && just test` green (**107** after the R6 cleanup track). **Deferred follow-up:** trust dialog (A6/A9), orphan dialog (B8 UI), project load/switch + reconcile wiring. **Pending verify:** on-screen **render now observed green (2026-06-19, screenshots)**; live terminal I/O + control activation (synthetic clicks don't fire controls — verify a real human click before R2) + Playwright e2e still pending (see 2026-06-19 entry) |
+| 5 | Dashboard UI (sidebar tree, status dots, terminal pane, trust dialog) | **Done — pending verify** | **Interactive core slice:** `DESIGN.md` seeded (`/impeccable`) + approved; full Tauri command/event/PTY-Channel adapter; TS domain mirror re-synced; sidebar tree (I1), color-blind-safe status (shape+color+label), per-row + bulk controls (B2/B3/B4), live status, xterm.js terminal pane (C1–C7 UI), empty/error states. **Follow-up partially landed (2026-06-19 feature session):** mockIPC dashboard test; **orphan dialog (B8 UI)** + core `kill_orphan` + `orphans_resolve` command; **terminal title/bell → header**; **`Facade::load_project`** core wiring (config→register→reconcile→start_all). `just lint && just test` green (**120**: Rust 100 / UI 20). **Still deferred:** **trust dialog (A6/A9)** and the **project-load UI** (a `project_load` command + file-picker + removing `demo.rs`) — see the feature-session entry + "Next session". **Pending verify:** render observed green + a real human click started a process + echoed (2026-06-19); the real-window WebdriverIO/tauri-driver e2e (not Playwright — wrong engine) is the remaining automated gap. |
 | 6 | Monitoring, restart (10/60s), file-watch, notifications | Not started | **Nightly soak test starts running from here** |
 | 7 | Agents & idle detection (5-state FSM, optional summarization) | Not started | Summarization OFF by default |
 | 8 | MCP server core (`soloist-mcp` stdio, scope+identity, tools) | Not started | High-risk |
@@ -153,6 +155,60 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Phase-5 follow-up — feature session (2026-06-19, after cleanup sign-off)
+- **Scope:** the deferred Phase-5 follow-up. Cleanup R0–R6 was signed off (the session prompt directing
+  this feature work is the sign-off). Worked in disciplined, gated, one-feature-per-commit increments;
+  `just lint && just test` green at the start of and after every commit. **Baseline confirmed first:**
+  107 (Rust 97 / UI 10). **End: 120 (Rust 100 / UI 20).** Stray root `package-lock.json` left untouched
+  (user decision); no `cargo update`; `Cargo.lock` unchanged.
+- **Task-6 testing — RESEARCHED; Playwright is the wrong tool for Tauri.** The session prompt named
+  "Playwright via the webapp-testing skill," but: the `webapp-testing` skill is **not installed** (only the
+  project-local `tauri-testing` skill exists), and `tauri-driver`/`WebKitWebDriver` are **not present**.
+  Researched the ecosystem (official Tauri testing docs + the `tauri-testing` skill): Tauri on Linux renders
+  in **WebKitGTK**, which exposes no CDP, so **Playwright cannot drive a Tauri app** ("Playwright flat-out
+  doesn't work because Tauri uses WebKitGTK, not Chromium"). Tauri's official e2e is the **WebDriver protocol
+  via `tauri-driver` + WebdriverIO/Selenium** — never Playwright. Sources: v2.tauri.app/develop/tests/(webdriver/),
+  the WebKit-engine-mismatch writeup, tauri discussion #3768. **Decision (two layers):** (layer 1, built
+  this session) component/integration tests via `vitest` + `jsdom` + `@testing-library/react` + the
+  `@tauri-apps/api/mocks` `mockIPC` — fast, deterministic, CI-ready today, no system installs; (layer 2,
+  recorded as a follow-up) the real-window e2e is **WebdriverIO + `tauri-driver` + `webkit2gtk-driver` (apt,
+  sudo) + xvfb**, which the skill's reference CI workflow runs on ubuntu — wire it when the system dep is
+  installed (offer the user `! sudo apt install webkit2gtk-driver xvfb`). **New dev-deps (UI, dev-only — no
+  shipped-bundle impact):** `jsdom` 29.1.1, `@testing-library/react` 16.3.2.
+- **Commit `d1ef290` — mockIPC dashboard test (Task 6, layer 1).** `crates/app/ui/src/App.test.tsx`
+  (per-file `// @vitest-environment jsdom`, so the pure reducer tests stay on the fast node env). Renders
+  `App` against a mocked backend and asserts the integration-level behaviour the pure tests can't: subtype
+  **grouping**, per-row **`[data-status]`**, **FSM-derived control enable/disable**, **row selection**
+  opening the terminal pane, and the **empty state**. The xterm-backed `useTerminal` hook is `vi.mock`-stubbed
+  (jsdom can't measure the emulator surface; the real PTY/echo path is layer 2 + the recorded human-verified
+  echo). UI 10 → 14.
+- **Commit `482988b` — orphan dialog (B8 UI).** Core primitive **`Supervisor::kill_orphan(pgid)`**
+  (`supervisor/reconcile.rs`): SIGKILL the group via `OrphanControl` + `RuntimeState::forget` — best-effort,
+  with a direct test. Thin **`orphans_resolve(pgids)`** Tauri command routes to it (registered in the handler).
+  New **`Dialog` primitive** (`components/ui/dialog.tsx`) hand-authored on the **unified `radix-ui` package**
+  (matches the project's `Collapsible`/`Tooltip`/`Slot` pattern; avoids the redundant `@radix-ui/react-dialog`
+  dep the shadcn CLI would pull — its `components.json` reads as "Manual"). App-level **`OrphanDialog`** +
+  **`useOrphans`** store hook (subscribes to `OrphansFound`; Kill / Kill all / Leave). Per **DESIGN.md's
+  Spent-on-Status rule**, killing stays **slate** (ghost/outline — no saturated red), and the non-destructive
+  **Leave running** is the one azure primary + the Esc/backdrop default. Rust 97 → 98, UI 14 → 17.
+- **Commit `d9416ed` — terminal title/bell → header.** Focused **`useTerminalChrome(id)`** hook subscribes
+  the selected pane to the low-rate `TerminalTitleChanged`/`TerminalBell` events (kept off the
+  high-throughput byte path `useTerminal` owns): renders the OSC title (falling back to the label) + a
+  transient azure bell indicator. Test drives **real `domain-event` emissions** via
+  `mockIPC(..., { shouldMockEvents: true })` + `emit`. UI 17 → 20.
+- **Commit `47458ea` — `Facade::load_project(root)` core wiring (the heart of project-load).** Opens a
+  project end to end: `projects.add` (durable `ProjectId` + canonical root) → `config.open` (load `solo.yml`,
+  seed sync state) → register each `ProcessSpec` as a trust-gated command → **`reconcile_orphans()` AFTER
+  registration** (so a leftover matching a `solo.yml` command is adopted, not mis-surfaced) → `start_all`
+  (the trusted auto-start subset). Untrusted commands register visible-but-`Stopped` and never run until
+  trusted — loading never bypasses the trust gate. New `LoadProjectError` (exported). Two tests (registers
+  each declared command; starts a pre-trusted auto-start command). Rust 98 → 100. **`demo.rs` is NOT yet
+  removed** — that happens with the driving command + file-picker (next).
+- **Architecture conformance:** every behaviour routes through the one `Facade`/`Supervisor`; adapters/React
+  hold no business logic; the `DomainEvent` union + TS mirror stay exhaustive; new strings live once
+  (`orphans_resolve` in `api.ts`); the `Dialog` is a reused primitive. File-size guard zero outliers; dep-guard
+  green; tests inline + honest.
 
 ### Cleanup R6 landed — converge docs & ledger; R-phase cleanup track COMPLETE (2026-06-19)
 - **Baseline re-confirmed green first** (the start-and-end gate): `just lint && just test` → **106 tests**
@@ -1025,21 +1081,21 @@ review's one should-fix + the mechanical nits:
 - **A2/A6 — CLOSED in Phase 3.** A6 (untrusted cannot run by any path) is enforced in core on
   start/restart/start_all (`an_untrusted_command_cannot_run_by_any_path`); A2 (fields honored at
   runtime) is verified on a real shell via exit code. Phase 13's parity walk re-confirms.
-- **Config→supervisor wiring — STILL DEFERRED (now the Phase-5 follow-up).** `Facade` owns
-  `Projects`/`TrustStore`/`ConfigEngine` + the `Supervisor` over one shared `TrustRepo`/bus, but **nothing
-  yet connects** `ConfigEngine` (a loaded `solo.yml`) → `Supervisor::register` of its commands. Phase 5
-  used a temporary `crates/app/src/demo.rs` seed instead (one Agent + one Terminal + two pre-trusted
-  Commands). The follow-up wires "open project → register commands → `reconcile_orphans` → `start_all`"
-  (reconcile **after** registration) and **replaces the demo seed**. Phase 5 already surfaces `ProcessView`
-  (with `project`/`exit_code`) in the UI + TS mirror; the deferred UI for this thread is the **trust/sync
-  dialog** (A6/A9, on `ConfigChanged`) and the **orphan dialog** (B8 UI, on `OrphansFound`) — commands
-  `project_load`/`project_switch`/`config_trust`/`orphans_resolve` are not built yet.
-- **B8 orphan adoption — DONE this session** (Phase 3 → `Done — pending verify`). The mechanism (record/
-  reconcile/adopt/surface/prune) + real adapters (`FileRuntimeState`, `PgidOrphanControl`) are complete and
-  tested. **One deferred wiring:** the app must **call `Supervisor::reconcile_orphans()` on launch *after*
-  registering config commands** (so a leftover that matches a `solo.yml` command is adopted, not
-  mis-surfaced). That belongs in the Phase-5 "open project → register commands → reconcile → start_all"
-  sequence; recording is already live. B7's **"clears crash tracking"** half remains a Phase-6 item.
+- **Config→supervisor wiring — CORE DONE (`Facade::load_project`, `47458ea`); UI REMAINS.** The core
+  orchestration is built + tested: `load_project(root)` does `projects.add` → `config.open` →
+  `Supervisor::register` per `ProcessSpec` → **`reconcile_orphans()` after registration** → `start_all`
+  (trusted auto-start subset). What remains is the **driving side**: a `project_load(path)` Tauri command,
+  a **file-picker** (the `tauri-plugin-dialog` crate + capability), an "Open project" affordance, and then
+  **deleting `crates/app/src/demo.rs`** + its `demo::seed` call. Until then `demo.rs` still seeds the app.
+  `orphans_resolve` **is built** (`482988b`); `config_trust`/`project_load`/`project_switch` are not yet.
+- **B8 orphan adoption — mechanism + UI + reconcile-call now all in place.** The mechanism (record/reconcile/
+  adopt/surface/prune) + real adapters were done earlier; **this session added the B8 *dialog*** (`482988b`:
+  `OrphanDialog` + `useOrphans` on `OrphansFound`, core `kill_orphan`, `orphans_resolve` command) and the
+  **reconcile-on-launch call now lives inside `Facade::load_project`** (after registration), so it fires when
+  a project loads. **Remaining to make it user-visible end to end:** the project-load UI must actually call
+  `load_project` (item 2) — until then nothing triggers `reconcile_orphans`, so `OrphansFound`/the dialog
+  won't fire at runtime (the dialog + command are unit-tested in isolation). B7's **"clears crash tracking"**
+  half remains a Phase-6 item.
 - **Phase 4 frontend follow-ups — DONE (Phase 5), with one divergence.** The **xterm.js terminal pane**
   + `pty_write`/`pty_resize` + the `attach_pty` bridge all landed. **Divergence from the phase-04/`plan/01`
   sketch:** raw bytes ride a single **`tauri::ipc::Channel<Vec<u8>>`** opened by `pty_attach` (high-
@@ -1089,40 +1145,43 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-0. **Cleanup track — COMPLETE (R0–R6 all done, 2026-06-19).** Commits: `ea4bad1` (R0 file-size guard) ·
-   `4c80eb7` (R1 reusable `core::testing` behind a `testing` feature) · `c04859a` (R2 split `supervisor.rs`)
-   · `71eafac` (R3 `CorePorts` param object + single composition root; both `too_many_arguments` allows gone;
-   `ports.rs` → `ports/{mod,bundle}.rs`) · `65cf819` (R4 purged the demo seam from the pure core) · `3f07350`
-   (R5 split `core/testing.rs` 547 → `testing/{mod,clock,spawner,lock_releaser,runtime_state,repos,fixtures}.rs`;
-   file-size guard **zero outliers**; honest-test audit, **zero deletions**) · `2dce185` + the docs-convergence
-   commit (R6: direct `store::migrate` forward-migration test, count **106 → 107**; reconciled `plan/03`
-   `serde_yaml`→`serde_norway`, the post-refactor structural claims, roadmap completion banners).
-   `just lint && just test` green: **107** (Rust **97** / UI **10**); file-size guard zero outliers.
-   **DO NOT start new feature work without the user confirming the cleanup is signed off** (the agreed gate
-   after the last R-phase). The locked decisions hold: tests stay **inline**; the 7 empty placeholder modules
-   and the 4 stub adapter crates **stay**; the stray root `package-lock.json` is **left** (do not rm/gitignore/
-   stage). Once signed off, begin real feature work — the deferred Phase-5 follow-up (items 2–3 below).
-1. **Runtime echo/control gate — CLOSED (2026-06-19).** A real human click on per-row **Start** for `shell`
-   started it and `echo hi` echoed in the xterm — control wiring + core start path + the
-   `Channel<Vec<u8>>`→`Uint8Array`→rAF boundary in `useTerminal.ts` all work. No longer blocks R2. **One
-   Phase-5 follow-up finding to fold into B4 bulk ops:** the toolbar **"Start all"** does nothing because
-   `Supervisor::start_all` only launches `auto_start` candidates (demo commands are `auto_start=false`) — Solo
-   separates `start-all` (all trusted commands) from `start-auto` (auto_start only); implement the split or
-   relabel the button. Deferred, non-blocking (see open threads). Still pending verify (cosmetic, non-blocking):
-   status-hue **contrast** AA in both themes.
-   - **Playwright e2e (Task 6, still pending):** assert grouping, `[data-status]`, control enable/disable,
-     selection, empty state via **`@tauri-apps/api/mocks` `mockIPC`** (installed) with a fixture stack; full
-     PTY echo needs `tauri-driver` + `WebKitWebDriver`. Drive via the `webapp-testing` skill.
-2. **Then build the deferred Phase-5 follow-up** (still `/impeccable`-driven): **trust dialog** (A6/A9 —
-   on `ConfigChanged{requires_trust}`, show command+working_dir+env+diff → `config_trust`; Start disabled
-   for untrusted), **orphan dialog** (B8 UI — on `OrphansFound`, Kill/KillAll/Leave → `orphans_resolve`),
-   and **project load/switch**. Add the matching commands (`project_load`/`project_switch`/`config_trust`/
-   `orphans_resolve`) + forward `TerminalTitleChanged`/`TerminalBell` to the terminal header.
-3. **Wire "open project → register config commands → `reconcile_orphans()` → `start_all`"** (connect
-   `ConfigEngine` to `Supervisor::register` per command), replacing the temporary `demo.rs` seed. The
-   **reconcile call must come *after* registration** so a leftover matching a `solo.yml` command is
-   adopted, not mis-surfaced (B8's one deferred wiring; mechanism + recording already done/tested).
-4. **Smaller follow-ups recorded below:** generate the `.impeccable/design.json` sidecar once components
+0. **Phase-5 follow-up — PARTIALLY landed (2026-06-19 feature session); two pieces remain.** Done this
+   session (commits, each gated green): `d1ef290` mockIPC dashboard test · `482988b` orphan dialog (B8) +
+   `kill_orphan`/`orphans_resolve` · `d9416ed` terminal title/bell → header · `47458ea` `Facade::load_project`
+   core wiring. `just lint && just test` green: **120** (Rust **100** / UI **20**). The cleanup R0–R6 track is
+   signed off; locked decisions still hold (tests inline; 7 placeholder modules + 4 stub crates stay; stray
+   root `package-lock.json` left — do not rm/gitignore/stage). **`demo.rs` still seeds the app on launch** —
+   it is removed when the project-load UI lands (item 2).
+1. **Build the trust dialog (A6/A9) — the highest-value remaining piece.** It is **coupled to project-load**
+   and needs core work first:
+   - **Enrich `DomainEvent::ConfigChanged`** so the dialog can show **command + working_dir + env** per
+     added/updated/renamed-target command (today it carries only the `diff` of *names* + `requires_trust`).
+     Recommended: add a `Vec<{name, command, working_dir, env}>` to the event (mirror the `ProcessSpawned`-
+     carries-`project` precedent), then mirror in `domain.ts` + handle in the projection's exhaustive switch
+     (plan/06 §5.6). Alternative: a `Facade` query returning the loaded config's specs.
+   - **First-open trust UX decision (NOT yet decided):** `ConfigEngine::open` (called by `load_project`) does
+     **not** emit `ConfigChanged` — only a later `sync` (a file *change*) does. So on initial open the trust
+     dialog won't fire. Decide: (A) emit a trust-review event on open when there are untrusted commands, or
+     (B) surface per-command untrusted state in the sidebar (disabled Start + a "Trust" affordance) and reach
+     the dialog from there. Solo blocks untrusted starts and shows them; the yml-change dialog is for *changes*.
+   - **Add `config_trust` (e.g. `Facade::trust_command(project, name)` + "Trust all")** — look up the spec from
+     the loaded config and call `TrustStore::trust`; needs a `ConfigEngine` accessor for the current config's
+     spec-by-name. Then the `/impeccable`-driven dialog (reuse the new `Dialog` primitive + `Button`): show
+     command/working_dir/env + the add/update/remove/rename diff; Start stays disabled for untrusted.
+2. **Project-load UI — wire `Facade::load_project` to the GUI and remove `demo.rs`.** The core method exists
+   and is tested (`47458ea`). Add a thin **`project_load(path)`** Tauri command → `facade.load_project` (§5.5),
+   plus a **file-picker** (the **`tauri-plugin-dialog`** crate + `@tauri-apps/plugin-dialog` + a capability —
+   use the `tauri-capabilities`/`tauri-permissions` skills + the v2 docs; verify the key, don't guess). Add a
+   "Open project" affordance (toolbar/empty-state), a `useProjects` store action, then **delete `crates/app/src/demo.rs`**
+   and its `demo::seed` call in `lib.rs::run`. On launch with no project → the empty state (correct); opening a
+   `solo.yml` loads its stack.
+3. **Task 6 layer 2 — real-window e2e (recorded follow-up, needs a system dep).** Layer 1 (mockIPC component
+   tests) is done. The real-window/PTY-echo e2e is **WebdriverIO + `tauri-driver` + `webkit2gtk-driver`** — NOT
+   Playwright (WebKitGTK exposes no CDP; researched 2026-06-19). Install: `cargo install tauri-driver --locked`
+   + `! sudo apt install webkit2gtk-driver xvfb`, then an `e2e/` WebdriverIO harness (the `tauri-testing` skill's
+   reference `wdio.conf.js`) + a CI job (its reference workflow runs on ubuntu). Offer the sudo step to the user.
+4. **Also fold in:** the toolbar **"Start all"** start-all-vs-start-auto split (open thread); and the smaller
+   follow-ups below — generate the `.impeccable/design.json` sidecar once components
    stabilise; consider lazy-loading xterm to trim the 167 KB-gzip bundle (§6, measure in Phase 12);
    refine `useTerminal` so a resting↔active status flip doesn't re-create the xterm (it currently
    re-attaches/replays — correct but mildly janky).
