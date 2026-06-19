@@ -154,6 +154,44 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Cleanup R4 landed — purged demo scaffolding from the pure core (2026-06-19)
+- **Baseline re-confirmed green first** (the start-and-end gate): `just lint && just test` → **106 tests**
+  (Rust **96** / UI **10**); clippy `-D warnings`, rustfmt, tsc, ESLint, Prettier, dep-guard pass; file-size
+  guard warns (non-gating) on the **one** outlier `core/testing.rs` (527 — R5 territory). R3 reviewed before
+  proceeding (sound: `CorePorts`/builder, single composition root, no `too_many_arguments`, public surface
+  byte-stable).
+- **R4 executed (commit `65cf819`, one reviewable commit per the per-R-phase rule).** `core::facade` carried
+  demo scaffolding in the *pure* core: `spawn_demo_process` + the `DEMO_PROJECT`/`DEMO_COMMAND` consts + a
+  `std::env::current_dir()` call (`facade.rs`) — host/demo concern, kept alive only by
+  `pty/tests/integration.rs` and duplicating `app/src/demo.rs`. Purged:
+  - **Removed `spawn_demo_process` + `DEMO_PROJECT`/`DEMO_COMMAND` + the `std::env::current_dir` call** from
+    `core::facade`, and trimmed the now-unused imports (`std::collections::BTreeMap`, `std::path::PathBuf`,
+    `ProcessId`/`ProjectId`, `PtySize`/`SpawnSpec`, `ProcessKind`, `Registration`). A repo-wide grep confirms
+    `core/src` now contains **zero** `std::env`/`std::process`/`current_dir` and no `spawn_demo_process`
+    anywhere.
+  - **Single-sourced the seam into `core::testing::terminal_registration(project, name, command)`** — the
+    minimal launched-terminal `Registration` fixture (no `std::env`; `working_dir: "."`), the **first real
+    cross-crate consumer** of the `testing` feature R1 set up. Used by both the facade unit test and the pty
+    integration test (DRY, §15).
+  - **The integration test (`facade_runs_the_full_thread_with_real_spawner_and_clock`) still proves the same
+    path** — real `PtyProcessSpawner` → `TokioClock` → `Facade` → actor → `stop` → `Stopped` snapshot — now
+    building its own `Registration` via the helper and additionally asserting the ungated start succeeds (its
+    real coverage is preserved, not weakened).
+  - **The facade unit test** (was `spawn_demo_registers_and_runs_a_process`, the demo-seam test) is renamed
+    `the_facade_registers_starts_and_stops_a_process` and rewritten to register via the helper — keeping the
+    register→start→stop-through-the-façade coverage at the fake-spawner level (no test retired; count holds).
+- **Demo seeding now lives ONLY in the `app` adapter** (`app/src/demo.rs`, its own `DEMO_PROJECT` const,
+  untouched) — the correct home per the composition-root rule.
+- **Pure structural / dead-code removal** — no supervisor/FSM/trust-gate/port-trait/logic change; the only
+  behavior moved is where the demo registration is built. **Public surface loses only the genuinely-dead
+  `spawn_demo_process` method**; `lib.rs` re-exports are byte-for-byte unchanged.
+- **Verification (honest).** `just lint && just test` green before and after: **106** (Rust **96** / UI **10**),
+  unchanged. The load-bearing integration test re-run in isolation passes (`cargo test -p soloist-pty --test
+  integration facade_runs_… → 1 passed`). File-size guard still reports **one** outlier — `core/testing.rs`
+  grew 527 → **547** from the small shared helper (still R5's split target; non-gating). `Cargo.lock` untouched.
+  Tests stay **inline**; placeholder modules + stub crates untouched. The stray root `package-lock.json` was
+  **not staged** (user decision: leave it). **R4 done; stopped for review before R5** per the agreed sequence.
+
 ### Cleanup R3 landed — `CorePorts` parameter object + single composition root (2026-06-19)
 - **Baseline re-confirmed green first** (the start-and-end gate): `just lint && just test` → **106 tests**
   (Rust **96** / UI **10**); clippy `-D warnings`, rustfmt, tsc, ESLint, Prettier, dep-guard pass; file-size
@@ -847,13 +885,15 @@ review's one should-fix + the mechanical nits:
 - **Stray `package-lock.json` at repo root (untracked) — user decision: LEAVE IT (2026-06-19).** Project uses
   pnpm; asked, user chose to leave it in place. Stays flagged; not gitignored, not removed.
 - **Cleanup roadmap status:** **R0 done** (`ea4bad1`) + **R1 done** (`4c80eb7`) + **R2 done** (`c04859a`) +
-  **R3 done** (`71eafac`, reviewed R2 first). **R4–R6 remain** (`plan/06` §7), to run strictly in order, one
-  reviewable commit each, every one starting + ending `just lint && just test` green (baseline **106**). R3 was
-  stopped for review per the agreed sequence. **R4 = purge core demo scaffolding** — move
-  `core::facade::spawn_demo_process` / `DEMO_PROJECT`/`DEMO_COMMAND` / `std::env::current_dir` out of the pure
-  core (kept alive only by `pty/tests/integration.rs`, duplicating `app/src/demo.rs`); the integration test
-  builds its own `Registration` (optionally via a `core::testing` helper); demo seeding lives **only** in the
-  `app` adapter. Then sweep `core` for any other host/demo concern or unused `pub` exports.
+  **R3 done** (`71eafac`, reviewed R2 first) + **R4 done** (`65cf819`, reviewed R3 first). **R5–R6 remain**
+  (`plan/06` §7), to run strictly in order, one reviewable commit each, every one starting + ending `just lint
+  && just test` green (baseline **106**). R4 was stopped for review per the agreed sequence. **R5 = honest-test
+  audit** — walk every test (Rust inline + vitest); delete any tautological/pretend test; confirm each
+  remaining test can fail for a real reason; record honestly any module whose real coverage is thin. The
+  `core/testing.rs` **547-line split** is R5's territory (the lone file-size outlier; split the shared fakes by
+  concern). Verify the small ones explicitly (e.g. `ui/src/lib/utils.test.ts`). **R6 = converge docs & ledger**
+  (`plan/03` still lists `serde_yaml`; we ship `serde_norway` — fix drift; refresh `PROGRESS.md` +
+  `KNOWN-DIVERGENCES.md`).
 - **Plan review:** user may still skim `plan/05` (Solo behavior), `plan/04` (architecture), `plan/02`
   (parity) and confirm before deep feature work — not blocking Phase 1.
 - **Agent native OAuth/login (E8) → Phase 7, no new work beyond launching right.** When Phase 7 lands,
@@ -949,19 +989,22 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-0. **Cleanup track (user's current priority — do before new features). R0 + R1 + R2 + R3 are DONE** (`ea4bad1`
-   file-size guard; `4c80eb7` reusable `core::testing` behind a `testing` feature; `c04859a` split
+0. **Cleanup track (user's current priority — do before new features). R0 + R1 + R2 + R3 + R4 are DONE**
+   (`ea4bad1` file-size guard; `4c80eb7` reusable `core::testing` behind a `testing` feature; `c04859a` split
    `supervisor.rs`; `71eafac` `CorePorts` parameter object + single composition root, both
-   `too_many_arguments` allows removed, `ports.rs` split into `ports/{mod,bundle}.rs`). **R3 was stopped for
-   review per the agreed sequence — review it, then execute R4.** Run the rest of the **R4–R6 roadmap in
-   order** (`plan/06` §7), one reviewable commit per R-phase, each starting and ending with `just lint && just
-   test` green (baseline **106 tests**). **R4 = purge core demo scaffolding:** move
-   `core::facade::spawn_demo_process` / `DEMO_PROJECT`/`DEMO_COMMAND` / `std::env::current_dir` out of the pure
-   core (kept alive only by `pty/tests/integration.rs:262`, duplicating `app/src/demo.rs`) — the integration
-   test builds its own `Registration` (optionally via a `core::testing` helper); demo seeding lives **only** in
-   the `app` adapter. Then sweep `core` for any other host/demo concern or unused `pub` exports. Do **not**
-   relocate inline tests to a `tests/` dir, delete the placeholder modules, or drop the stub crates — all
-   three were decided to stay (see Decisions above).
+   `too_many_arguments` allows removed, `ports.rs` split into `ports/{mod,bundle}.rs`; `65cf819` purged the
+   demo seam from the pure core — `spawn_demo_process`/`DEMO_*`/`std::env` gone, single-sourced into
+   `core::testing::terminal_registration`, demo seeding now app-only). **R4 was stopped for review per the
+   agreed sequence — review it, then execute R5.** Run the rest of the **R5–R6 roadmap in order** (`plan/06`
+   §7), one reviewable commit per R-phase, each starting and ending with `just lint && just test` green
+   (baseline **106 tests**). **R5 = honest-test audit:** walk every test (Rust inline + vitest); delete any
+   tautological/pretend test; confirm each remaining test can fail for a real reason; record honestly any
+   module whose real coverage is thin (no pretend test to fill a gap). **The lone file-size outlier
+   `core/testing.rs` (547) is R5's split target** — split the shared fakes by concern. Verify the small ones
+   explicitly (e.g. `ui/src/lib/utils.test.ts`). Then **R6 = converge docs & ledger** (`plan/03` lists
+   `serde_yaml`; we ship `serde_norway` — fix drift; refresh `PROGRESS.md` + `KNOWN-DIVERGENCES.md`). Do
+   **not** relocate inline tests to a `tests/` dir, delete the placeholder modules, or drop the stub crates —
+   all three were decided to stay (see Decisions above).
 1. **Runtime echo/control gate — CLOSED (2026-06-19).** A real human click on per-row **Start** for `shell`
    started it and `echo hi` echoed in the xterm — control wiring + core start path + the
    `Channel<Vec<u8>>`→`Uint8Array`→rAF boundary in `useTerminal.ts` all work. No longer blocks R2. **One
