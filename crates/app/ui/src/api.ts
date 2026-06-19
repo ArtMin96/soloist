@@ -65,6 +65,12 @@ export function ptyDetach(): Promise<void> {
   return invoke<void>("pty_detach");
 }
 
+// Resolves surfaced orphans: the pgids to SIGKILL and forget. An empty list ("Leave
+// running") signals nothing.
+export function orphansResolve(pgids: number[]): Promise<void> {
+  return invoke<void>("orphans_resolve", { pgids });
+}
+
 export function onDomainEvent(handler: (event: DomainEvent) => void): Promise<UnlistenFn> {
   return listen<DomainEvent>(DOMAIN_EVENT, (event) => handler(event.payload));
 }

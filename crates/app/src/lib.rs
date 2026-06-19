@@ -117,6 +117,7 @@ pub fn run() {
             commands::pty_resize,
             commands::pty_attach,
             commands::pty_detach,
+            commands::orphans_resolve,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

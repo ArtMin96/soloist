@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { OrphanDialog } from "@/components/OrphanDialog";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
 import { Toolbar } from "@/components/Toolbar";
 import { useAppInfo } from "@/store/useAppInfo";
+import { useOrphans } from "@/store/useOrphans";
 import { useProcesses } from "@/store/useProcesses";
 
 // The dashboard shell: a top bar of stack controls, the process tree, and the selected
@@ -13,6 +15,7 @@ import { useProcesses } from "@/store/useProcesses";
 export default function App() {
   const info = useAppInfo();
   const store = useProcesses();
+  const orphans = useOrphans();
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const selected = store.processes.find((process) => process.id === selectedId) ?? null;
@@ -51,6 +54,12 @@ export default function App() {
           )}
         </main>
       </div>
+      <OrphanDialog
+        orphans={orphans.orphans}
+        onKillOne={orphans.killOne}
+        onKillAll={orphans.killAll}
+        onLeave={orphans.leave}
+      />
     </div>
   );
 }

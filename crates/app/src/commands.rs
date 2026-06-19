@@ -136,3 +136,14 @@ pub async fn pty_detach(bridge: State<'_, PtyBridge>) -> Result<(), String> {
     bridge.clear();
     Ok(())
 }
+
+/// Resolves surfaced orphans the user chose to reap: SIGKILLs each listed process
+/// group and forgets its runtime-state record. "Leave running" sends an empty list, so
+/// nothing is signalled — the dialog simply dismisses.
+#[tauri::command]
+pub async fn orphans_resolve(pgids: Vec<i32>, facade: State<'_, Facade>) -> Result<(), String> {
+    for pgid in pgids {
+        facade.supervisor().kill_orphan(pgid);
+    }
+    Ok(())
+}

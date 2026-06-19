@@ -64,6 +64,14 @@ impl Supervisor {
         report
     }
 
+    /// Forcibly reaps a surfaced orphan the user chose to kill: SIGKILL to its process
+    /// group and drop its runtime-state record so the next launch will not see it again.
+    /// Best-effort — a group that already exited and a missing record are both no-ops.
+    pub fn kill_orphan(&self, pgid: i32) {
+        let _ = self.orphan_control.signal(pgid, true);
+        let _ = self.runtime.forget(pgid);
+    }
+
     /// Re-attaches a leftover process group `pgid` to the resting registered process
     /// `target`, running it through the normal actor over a synthesized handle.
     fn adopt_orphan(&self, target: ProcessId, pgid: i32) -> bool {
@@ -216,5 +224,23 @@ mod tests {
             "the second live group is surfaced"
         );
         wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
+    }
+
+    #[tokio::test]
+    async fn kill_orphan_sigkills_the_group_and_forgets_the_record() {
+        let h = harness(FakeSpawner::exits_on_terminate());
+        h.runtime.seed(orphan_record("stray", "weird --serve", 777));
+        h.orphans.set_alive(777);
+
+        h.sup.kill_orphan(777);
+
+        assert!(
+            h.orphans.signalled().contains(&(777, true)),
+            "the chosen orphan group is SIGKILLed"
+        );
+        assert!(
+            h.runtime.records().is_empty(),
+            "its runtime-state record is forgotten"
+        );
     }
 }
