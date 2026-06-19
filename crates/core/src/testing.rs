@@ -80,6 +80,12 @@ impl MockClock {
     }
 }
 
+impl Default for MockClock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl Clock for MockClock {
     fn now(&self) -> Instant {
@@ -207,6 +213,8 @@ impl ProcessSpawner for FakeSpawner {
                 })
             }
             Behavior::PanicsAfterRunning => {
+                // The fake panics by design to drive the actor's panic-isolation boundary.
+                #[allow(clippy::panic)]
                 let exit: ExitFuture = Box::pin(async { panic!("fake child panicked") });
                 Ok(Spawned {
                     pid: Some(0),

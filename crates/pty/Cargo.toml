@@ -16,5 +16,6 @@ portable-pty = "0.9"
 tokio = { version = "1", features = ["rt", "sync"] }
 
 [dev-dependencies]
+soloist-core = { path = "../core", features = ["testing"] }
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tempfile = "3"

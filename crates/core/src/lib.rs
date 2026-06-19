@@ -40,8 +40,8 @@ pub mod trust;
 
 mod sync;
 
-#[cfg(test)]
-mod testing;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub use config::{ConfigEngine, ConfigError, ConfigSync, ProcessSpec, Rename, SoloYml, SyncError};
 pub use debounce::Debouncer;

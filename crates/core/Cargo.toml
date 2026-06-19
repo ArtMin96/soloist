@@ -8,6 +8,12 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+# Exposes the in-memory port fakes in `core::testing` to other crates' tests
+# (adapters reuse the one fake set instead of re-rolling them). Off by default,
+# so the fakes never compile into a production build.
+testing = []
+
 [dependencies]
 async-trait = "0.1"
 indexmap = { version = "2", features = ["serde"] }
