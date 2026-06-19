@@ -141,8 +141,8 @@ trigger that tells you to reach for it. Use a pattern when its trigger fires —
 | **Newtype + closed enum** | `ids.rs`, `process.rs` | a domain id/state → newtype/enum, never a bare `String`/`int` |
 | **Null Object** | `Noop{LockReleaser,RuntimeState,OrphanControl}` in `ports/mod.rs` | a **driven** subsystem is optional → ship a `Noop` default so the core runs without the real adapter (§8) |
 | **Parameter Object / Builder** | `core::ports::CorePorts` + `CorePortsBuilder` — the port set for `Facade::new`/`Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) → group them in a struct/builder |
-| **Registry** | **to add** — MCP tool registry (P8), agent-tool defs (P7) | a growing set of "one of many" handlers → register entries, don't extend a giant `match` |
-| **Strategy** | **to add** — per-provider idle heuristics (P7), per-agent-tool launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
+| **Registry** | `config::detect::DETECTORS` (C1, command auto-detection); **to add** — MCP tool registry (P8), agent-tool defs (P7) | a growing set of "one of many" handlers → register entries, don't extend a giant `match` |
+| **Strategy** | `config::detect::Detector` — one impl per ecosystem (C1); **to add** — per-provider idle heuristics (P7), per-agent-tool launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
 | **Optimistic concurrency** | **to add** — scratchpad/todo `expected_revision` (P9) | concurrent writers to one durable record → revision guard, reject stale writes |
 | **Lease/lock** | **to add** — coordination locks (P9) | cooperative cross-agent intent → TTL + owner `ProcessId`, auto-release on close |
 

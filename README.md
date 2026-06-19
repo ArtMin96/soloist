@@ -21,6 +21,74 @@ with source URLs.
 | D5 | `solo.yml` | **Byte-compatible** with Solo's documented schema | Real schema now known (ref §3) |
 | D6 | Storage | **SQLite** for durable state; in-memory for runtime | See architecture §7 |
 
+## The `solo.yml` project file
+
+`solo.yml` lives at a project's root and declares the commands Soloist supervises. It is
+**byte-compatible with Solo's schema** (D5). The file is optional: open a folder without one and
+Soloist **auto-detects** a starting set of commands and writes a `solo.yml` for you — it never rewrites
+an existing one. Maximum size **1 MB**; an empty or comment-only file is a valid, empty config. The
+implementation source of truth is `crates/core/src/config/model.rs`; the cited Solo reference is
+[`plan/05` §3](plan/05-solo-reference-and-sources.md).
+
+### Full example
+
+```yaml
+name: storefront                 # optional — display name shown for the project
+icon: assets/icon.png            # optional — image path, relative to the project root
+
+processes:                       # a MAP keyed by each command's display name (not a list)
+  web:
+    command: npm run dev         # required — the shell command to run
+    working_dir: web             # optional — relative to the project root (default: the root)
+    auto_start: true             # optional — start when the project opens (default: true)
+    auto_restart: true           # optional — relaunch after an unexpected exit (default: false)
+    restart_when_changed:        # optional — globs (relative to root) that trigger a restart
+      - src/**/*.ts
+      - config/**
+    env:                         # optional — per-process environment overrides
+      PORT: "3000"
+  build:
+    command: npm run build
+    auto_start: false            # a one-shot task — don't start it on open
+```
+
+### Fields
+
+**Top level**
+
+| Key | Type | Required | Default | Meaning |
+|-----|------|----------|---------|---------|
+| `name` | string | no | — | Display name for the project. |
+| `icon` | path | no | — | Image path, relative to the project root. |
+| `processes` | map | no | `{}` | Commands keyed by display name; file order is preserved. |
+
+**Each entry under `processes:`**
+
+| Key | Type | Required | Default | Meaning |
+|-----|------|----------|---------|---------|
+| `command` | string | **yes** | — | The shell command to run. |
+| `working_dir` | path | no | project root | Working directory, relative to the root. |
+| `auto_start` | bool | no | `true` | Start this command when the project opens. |
+| `auto_restart` | bool | no | `false` | Relaunch after an unexpected (crash) exit. |
+| `restart_when_changed` | list of globs | no | `[]` | File globs (relative to root) that trigger a restart. |
+| `env` | map | no | `{}` | Environment overrides for this command (highest precedence). |
+
+Only `command` is required; every other key may be omitted and falls back to its default. When Soloist
+writes a `solo.yml` for you it omits keys left at their defaults, so the file stays minimal.
+
+### Behavior
+
+- **Trust gate.** A command must be *trusted* before it can start by any path (manual, auto-start,
+  restart, or file-watch). Trust is local to your machine and scoped to the project and the exact
+  command *variant* (`command` + `working_dir` + `env`): renaming a command preserves its trust, while
+  changing the command, directory, or environment requires re-trusting it.
+- **Auto-detection (first open only).** A folder with no `solo.yml` is scanned — `package.json` scripts,
+  `Procfile`, `Makefile`/`justfile`, `Cargo.toml`, `go.mod`, Docker Compose, … — and a `solo.yml` is
+  written from what's found: dev/start/serve commands get `auto_start: true`, build/test are added
+  without it. Detected commands start out untrusted, so nothing runs until you trust it.
+- **`restart_when_changed` / `auto_restart`** are parsed today; their live file-watch and crash-restart
+  behavior is built in Phase 6.
+
 ## How to read these docs
 
 > **New session? Start with [`CLAUDE.md`](CLAUDE.md) and [`PROGRESS.md`](PROGRESS.md).** `CLAUDE.md` is
