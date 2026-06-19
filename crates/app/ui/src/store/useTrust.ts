@@ -50,23 +50,32 @@ export function useTrust(refresh: () => void, reportError: (reason: unknown) => 
 
   const trust = useCallback(
     (project: number, name: string) => {
-      configTrust(project, name).then(refresh).catch(reportError);
-      // Drop the trusted command from an open review; close it once none remain.
-      setReview((prev) => {
-        if (!prev) return prev;
-        const commands = prev.commands.filter((command) => command.name !== name);
-        return commands.length > 0 ? { ...prev, commands } : null;
-      });
+      // Only mutate the review once trust actually applied — a failed grant leaves the
+      // command in the dialog (still blocked) and surfaces the error, rather than
+      // silently dropping it.
+      configTrust(project, name)
+        .then(() => {
+          refresh();
+          setReview((prev) => {
+            if (!prev) return prev;
+            const commands = prev.commands.filter((command) => command.name !== name);
+            return commands.length > 0 ? { ...prev, commands } : null;
+          });
+        })
+        .catch(reportError);
     },
     [refresh, reportError],
   );
 
   const trustAll = useCallback(() => {
     if (!review) return;
+    // Close the dialog only after every grant resolved; a failure keeps it open.
     Promise.all(review.commands.map((command) => configTrust(review.project, command.name)))
-      .then(refresh)
+      .then(() => {
+        refresh();
+        setReview(null);
+      })
       .catch(reportError);
-    setReview(null);
   }, [review, refresh, reportError]);
 
   const dismiss = useCallback(() => setReview(null), []);
