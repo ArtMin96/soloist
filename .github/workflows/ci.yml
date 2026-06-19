@@ -52,6 +52,9 @@ jobs:
       - name: Dependency-direction guard
         run: ./scripts/check-core-deps.sh
 
+      - name: File-size guard (warn-only)
+        run: ./scripts/check-file-size.sh
+
       - name: UI typecheck
         run: pnpm typecheck
         working-directory: crates/app/ui

@@ -30,6 +30,7 @@ lint:
     pnpm -C {{ui}} lint
     pnpm -C {{ui}} run format:check
     ./scripts/check-core-deps.sh
+    ./scripts/check-file-size.sh
 
 # Auto-format Rust and UI sources.
 fmt:
