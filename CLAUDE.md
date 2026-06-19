@@ -330,13 +330,17 @@ These come from `plan/04`. They are **rigid** — adapt the *feature*, never the
   scratchpads/todos. Leases carry TTL + owner `ProcessId`, auto-release on expiry/owner-close.
 - **Security in the core:** the trust gate is enforced in core (not UI) for `start*`/`restart*`/auto-*,
   per (project, command-variant hash). MCP/HTTP honor scope + auth.
-- **Comment discipline (source is not a notebook):** code carries **doc comments** (what an item does /
-  how to use it / what it depends on) and the **rare** comment that explains a *non-obvious* decision —
-  nothing else. **Never** write phase numbers, plan/doc citations (e.g. `plan/04 §6`), changelog or
-  progress narration, `placeholder`/`TBD` notes, or comments that merely restate the code into source
-  files (`.rs`/`.ts`/`.tsx`/`.css`/config/`justfile`/scripts; `*.md` docs are exempt). That context
-  lives in `PROGRESS.md` and git history. Any temporary note added mid-phase is removed before the phase
-  ends.
+- **Comment & naming discipline (source is not a notebook):** code carries **doc comments** (what an item
+  does / how to use it / what it depends on) and the **rare** comment that explains a *non-obvious*
+  decision — nothing else. **Never** write phase numbers, build/cleanup-phase tags (e.g. `R1`, `Phase 5`),
+  plan/doc citations (e.g. `plan/04 §6`), changelog or progress narration, `placeholder`/`TBD` notes, or
+  comments that merely restate the code. **The same prohibition applies to every name, not just comment
+  text** — file names, module names, function/test names, identifiers, and any other label must not encode
+  a phase/R-phase number or a plan citation (no `r1_reach.rs`, no `phase5_test`, no `t_R2_*`); name things
+  for *what they are*, permanently true regardless of when they were added. This governs all source
+  (`.rs`/`.ts`/`.tsx`/`.css`/config/`justfile`/scripts; `*.md` docs are exempt) **including throwaway or
+  temporary files** while they exist. That session/phase context lives in `PROGRESS.md` and git history.
+  Any temporary note or file added mid-phase is removed before the phase ends.
 
 Performance/size budget is §6; see `plan/04` §13 for the explicit forbidden anti-patterns and §14 for
 the longevity checklist.
