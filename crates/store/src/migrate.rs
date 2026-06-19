@@ -63,6 +63,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn migrates_a_fresh_database_to_the_current_schema() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+
+        migrate(&conn).expect("a fresh database migrates cleanly");
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user_version");
+        assert_eq!(
+            version, SCHEMA_VERSION,
+            "migration must advance a fresh database to the current schema version"
+        );
+
+        for table in ["meta", "projects", "trust"] {
+            let exists = conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |_| Ok(()),
+                )
+                .is_ok();
+            assert!(exists, "migration must create the `{table}` table");
+        }
+
+        // Re-running over an already-current database touches nothing (idempotent steps).
+        migrate(&conn).expect("re-running migrate on a current database is a no-op");
+    }
+
+    #[test]
     fn refuses_a_schema_newer_than_this_build() {
         let conn = Connection::open_in_memory().expect("in-memory db");
         conn.pragma_update(None, "user_version", SCHEMA_VERSION + 1)
