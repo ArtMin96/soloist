@@ -272,6 +272,12 @@ PM2 ecosystem, turbo.json, nx.json, plus Laravel/Rust/Spring/FastAPI/Flask/Djang
 Phoenix/Docker Compose. Dev servers pre-selected for auto-start/auto-restart; build/test offered
 unchecked.
 
+> **Soloist scope:** matrix **A10** is **v1** (pulled in by user decision 2026-06-19). When a picked
+> folder has no `solo.yml`, Soloist auto-detects from project-root files and **auto-creates** a
+> `solo.yml` (it never rewrites an existing one — §3); detected dev/start/serve commands get
+> `auto_start`, build/test do not; nothing detected → a clean starter file. Detected commands register
+> trust-gated — auto-creation never bypasses the trust gate (§4).
+
 ---
 
 ## 10. UI surface (from changelog + review; imagery unverified)

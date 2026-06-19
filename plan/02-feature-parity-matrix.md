@@ -20,7 +20,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | A7 | Trust scoped to (project, command-variant hash); rename preserves | ✅ | 2 | v1 | Edit command → re-trust required; rename keeps trust |
 | A8 | "Automatically trust command changes" setting | ✅ | 2 | later | User-saved change auto-trusts; external change does not |
 | A9 | Sync on change: debounce + hash-diff; add/update/remove; preserve renames | ✅ | 2 | v1 | Edit file → sync prompt with correct diff; no auto-start |
-| A10 | Command auto-detection on first add | ✅ | 2 | later | Node/Rust/Laravel repo suggests sensible commands |
+| A10 | Command auto-detection on first add | ✅ | 2 | **v1** | Open a folder with no `solo.yml` → one is auto-created from detected commands (npm/Cargo/Go/Procfile/Make/Just/Compose), trust-gated; nothing detected → a clean starter file. Delivered in the Phase-5 follow-up (user decision 2026-06-19). |
 | A11 | Multiple projects + registry | ✅ | 2 | v1 | Two projects switchable |
 | A12 | Local (app-state) vs shared (YAML) commands | ✅ | 2 | later | Local command never written to `solo.yml` |
 | A13 | Project icon | ✅ | 2 | later | Icon shows on project |
