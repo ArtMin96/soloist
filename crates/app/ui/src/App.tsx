@@ -8,6 +8,7 @@ import { Toolbar } from "@/components/Toolbar";
 import { useAppInfo } from "@/store/useAppInfo";
 import { useOrphans } from "@/store/useOrphans";
 import { useProcesses } from "@/store/useProcesses";
+import { useProjects } from "@/store/useProjects";
 
 // The dashboard shell: a top bar of stack controls, the process tree, and the selected
 // process's terminal. All state is a projection of the core read model; this composes the
@@ -15,6 +16,7 @@ import { useProcesses } from "@/store/useProcesses";
 export default function App() {
   const info = useAppInfo();
   const store = useProcesses();
+  const projects = useProjects(store.reportError);
   const orphans = useOrphans();
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
@@ -26,6 +28,7 @@ export default function App() {
         projectName={info?.name ?? "Soloist"}
         appVersion={info?.version}
         canBulk={store.projectId !== null}
+        onOpenProject={projects.open}
         onStartAll={store.startAll}
         onStopAll={store.stopAll}
         onRestartRunning={store.restartRunning}
@@ -50,7 +53,7 @@ export default function App() {
               onRestart={() => store.restart(selected.id)}
             />
           ) : (
-            <EmptyState hasProcesses={store.processes.length > 0} />
+            <EmptyState hasProcesses={store.processes.length > 0} onOpenProject={projects.open} />
           )}
         </main>
       </div>

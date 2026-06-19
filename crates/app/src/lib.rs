@@ -6,7 +6,6 @@
 //! `DomainEvent` stream to the webview as Tauri events. The UI renders the read model.
 
 mod commands;
-mod demo;
 mod pty_bridge;
 
 use std::sync::Arc;
@@ -97,16 +96,17 @@ fn forward_events(app: AppHandle) {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(build_facade())
         .manage(PtyBridge::default())
         .setup(|app| {
-            demo::seed(app.state::<Facade>().inner());
             forward_events(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
             commands::proc_list,
+            commands::project_load,
             commands::proc_start,
             commands::proc_stop,
             commands::proc_restart,

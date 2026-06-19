@@ -98,7 +98,7 @@ describe("App dashboard", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText(/No processes yet/)).toBeTruthy();
+      expect(screen.getByText(/No project loaded/)).toBeTruthy();
     });
     expect(screen.queryAllByRole("option")).toHaveLength(0);
   });

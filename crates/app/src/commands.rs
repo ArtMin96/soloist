@@ -8,6 +8,8 @@
 //!
 //! [`Channel`]: tauri::ipc::Channel
 
+use std::path::Path;
+
 use soloist_core::{Facade, ProcessId, ProcessView, ProjectId};
 use tauri::ipc::Channel;
 use tauri::State;
@@ -19,6 +21,17 @@ use crate::pty_bridge::PtyBridge;
 #[tauri::command]
 pub async fn proc_list(facade: State<'_, Facade>) -> Result<Vec<ProcessView>, String> {
     Ok(facade.snapshot())
+}
+
+/// Loads a project from a folder path: registers each `solo.yml` command (trust-gated),
+/// reconciles leftover process groups, and starts the trusted auto-start subset. The
+/// registration and status events repopulate the read model, so the UI needs no return
+/// value beyond the new project's id.
+#[tauri::command]
+pub async fn project_load(path: String, facade: State<'_, Facade>) -> Result<ProjectId, String> {
+    facade
+        .load_project(Path::new(&path))
+        .map_err(|err| err.to_string())
 }
 
 /// Starts one process; refused by the core trust gate if its command is untrusted.

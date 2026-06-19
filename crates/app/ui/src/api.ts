@@ -4,6 +4,7 @@
 // into React.
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { AppInfo, DomainEvent, ProcessView } from "@/domain";
 
 const DOMAIN_EVENT = "domain-event";
@@ -14,6 +15,18 @@ export function appInfo(): Promise<AppInfo> {
 
 export function procList(): Promise<ProcessView[]> {
   return invoke<ProcessView[]>("proc_list");
+}
+
+// Opens the native folder picker for a project root (the directory holding solo.yml).
+// Resolves to the chosen path, or null if the user cancelled.
+export function openProjectDirectory(): Promise<string | null> {
+  return open({ directory: true, multiple: false, title: "Open project" });
+}
+
+// Loads the project rooted at `path`: the core registers its commands and starts the
+// trusted auto-start subset, emitting the events that repopulate the read model.
+export function projectLoad(path: string): Promise<number> {
+  return invoke<number>("project_load", { path });
 }
 
 export function procStart(id: number): Promise<void> {

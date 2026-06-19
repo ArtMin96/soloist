@@ -17,6 +17,8 @@ export interface ProcessStore {
   /** The project the loaded stack belongs to; `null` before anything loads. */
   projectId: number | null;
   error: string | null;
+  /** Surface a failure on the shared error banner (also used by sibling stores). */
+  reportError: (reason: unknown) => void;
   clearError: () => void;
   refresh: () => void;
   start: (id: number) => void;
@@ -82,6 +84,7 @@ export function useProcesses(): ProcessStore {
     processes,
     projectId,
     error,
+    reportError: fail,
     clearError,
     refresh,
     start,
