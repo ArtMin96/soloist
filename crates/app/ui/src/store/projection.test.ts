@@ -74,5 +74,8 @@ describe("applyEvent", () => {
 
   it("leaves the process list untouched for non-process events", () => {
     expect(applyEvent([starting], { type: "TerminalBell", id: 1 })).toEqual([starting]);
+    expect(
+      applyEvent([starting], { type: "ProjectOpened", id: 1, name: "app", root: "/p", icon: null }),
+    ).toEqual([starting]);
   });
 });

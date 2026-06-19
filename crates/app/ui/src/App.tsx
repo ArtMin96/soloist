@@ -37,17 +37,14 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <Toolbar
-        projectName={info?.name ?? "Soloist"}
+        appName={info?.name ?? "Soloist"}
         appVersion={info?.version}
-        canBulk={store.projectId !== null}
         onOpenProject={projects.open}
-        onStartAll={store.startAll}
-        onStopAll={store.stopAll}
-        onRestartRunning={store.restartRunning}
       />
       {store.error && <ErrorBanner message={store.error} onDismiss={store.clearError} />}
       <div className="flex min-h-0 flex-1">
         <Sidebar
+          projects={projects.projects}
           processes={store.processes}
           selectedId={selectedId}
           onSelect={setSelectedId}
@@ -55,6 +52,9 @@ export default function App() {
           onStop={store.stop}
           onRestart={store.restart}
           onTrust={trustById}
+          onStartAll={store.startAll}
+          onRestartRunning={store.restartRunning}
+          onStopAll={store.stopAll}
         />
         <main className="min-w-0 flex-1">
           {selected ? (

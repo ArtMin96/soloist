@@ -44,24 +44,18 @@ export function ProcessGroup({
       </Collapsible.Trigger>
       <Collapsible.Content>
         <div className="mt-0.5 flex flex-col gap-px pl-1">
-          {group.processes.length === 0 ? (
-            <p className="px-2.5 py-1 text-xs text-muted-foreground/60">
-              No {group.label.toLowerCase()}
-            </p>
-          ) : (
-            group.processes.map((process) => (
-              <ProcessRow
-                key={process.id}
-                process={process}
-                selected={process.id === selectedId}
-                onSelect={() => onSelect(process.id)}
-                onStart={() => onStart(process.id)}
-                onStop={() => onStop(process.id)}
-                onRestart={() => onRestart(process.id)}
-                onTrust={() => onTrust(process.id)}
-              />
-            ))
-          )}
+          {group.processes.map((process) => (
+            <ProcessRow
+              key={process.id}
+              process={process}
+              selected={process.id === selectedId}
+              onSelect={() => onSelect(process.id)}
+              onStart={() => onStart(process.id)}
+              onStop={() => onStop(process.id)}
+              onRestart={() => onRestart(process.id)}
+              onTrust={() => onTrust(process.id)}
+            />
+          ))}
         </div>
       </Collapsible.Content>
     </Collapsible.Root>

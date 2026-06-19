@@ -2,15 +2,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
-// The picker and the load command are the IPC boundary; mock them so the test exercises
-// the hook's own logic — picking, the cancel guard, the notice copy, and where failures go.
+// The api module is the IPC boundary; mock it so the test exercises the hook's own logic —
+// picking, the cancel guard, the notice copy, and where failures go. The read-model seed
+// (projectList) and event subscription (onDomainEvent) resolve to empty/no-op here.
 vi.mock("@/api", () => ({
   openProjectDirectory: vi.fn(),
   projectLoad: vi.fn(),
+  projectList: vi.fn(() => Promise.resolve([])),
+  onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
 }));
 
 import { openProjectDirectory, projectLoad } from "@/api";
-import { useProjects } from "@/store/useProjects";
+import { mergeProject, useProjects } from "@/store/useProjects";
 
 const pickDirectory = vi.mocked(openProjectDirectory);
 const load = vi.mocked(projectLoad);
@@ -82,5 +85,21 @@ describe("useProjects", () => {
     result.current.open();
 
     await waitFor(() => expect(reportError).toHaveBeenCalledWith("solo.yml not found"));
+  });
+});
+
+describe("mergeProject", () => {
+  const opened = (id: number, name: string) =>
+    ({ type: "ProjectOpened", id, name, root: `/p/${name}`, icon: null }) as const;
+
+  it("prepends a newly opened project, newest first", () => {
+    const next = mergeProject([{ id: 1, name: "a", root: "/p/a", icon: null }], opened(2, "b"));
+    expect(next.map((project) => project.id)).toEqual([2, 1]);
+  });
+
+  it("replaces an already-open project in place (a re-open updates its identity)", () => {
+    const next = mergeProject([{ id: 1, name: "old", root: "/p/a", icon: null }], opened(1, "new"));
+    expect(next).toHaveLength(1);
+    expect(next[0].name).toBe("new");
   });
 });

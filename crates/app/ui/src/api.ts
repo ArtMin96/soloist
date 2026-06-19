@@ -5,7 +5,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppInfo, DomainEvent, ProcessView, ProjectLoad } from "@/domain";
+import type { AppInfo, DomainEvent, ProcessView, ProjectLoad, ProjectView } from "@/domain";
 
 const DOMAIN_EVENT = "domain-event";
 
@@ -15,6 +15,18 @@ export function appInfo(): Promise<AppInfo> {
 
 export function procList(): Promise<ProcessView[]> {
   return invoke<ProcessView[]>("proc_list");
+}
+
+// The project read model — every opened project's display identity. Seeds the sidebar's
+// project tree; live opens arrive as `ProjectOpened` domain events.
+export function projectList(): Promise<ProjectView[]> {
+  return invoke<ProjectView[]>("project_list");
+}
+
+// Reads a project's icon (a resolved absolute path from `ProjectView.icon`) into a data:
+// URL for an <img>, or null when absent/unreadable/too large/not an image.
+export function projectIcon(path: string): Promise<string | null> {
+  return invoke<string | null>("project_icon", { path });
 }
 
 // Opens the native folder picker for a project root (the directory holding solo.yml).

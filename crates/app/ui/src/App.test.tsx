@@ -54,12 +54,18 @@ const STACK: ProcessView[] = [
   },
 ];
 
-// Stand in for the Tauri backend: answer the snapshot/identity commands with a fixture and
-// let every other command (the event listener, the pty channel) resolve to undefined.
+// The loaded project the fixture stack belongs to. Named distinctly from the app so a
+// header assertion can tell the project title apart from the toolbar's app name.
+const PROJECT = { id: 1, name: "storefront", root: "/p", icon: null };
+
+// Stand in for the Tauri backend: answer the snapshot/identity/project commands with a
+// fixture and let every other command (the event listener, the pty channel) resolve to
+// undefined.
 function mockBackend(processes: ProcessView[]) {
   mockIPC((cmd) => {
     if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
     if (cmd === "proc_list") return processes;
+    if (cmd === "project_list") return [PROJECT];
     return undefined;
   });
 }
@@ -82,6 +88,9 @@ describe("App dashboard", () => {
 
     const rows = await screen.findAllByRole("option");
     expect(rows).toHaveLength(4);
+
+    // The project node titles the tree; its subtype subgroups nest beneath it.
+    expect(screen.getByText("storefront")).toBeTruthy();
 
     // The three subtype groups are present as sentence-case headers.
     expect(screen.getByText("Agents")).toBeTruthy();
@@ -141,6 +150,7 @@ describe("App dashboard", () => {
     mockIPC((cmd, args) => {
       if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
       if (cmd === "proc_list") return STACK;
+      if (cmd === "project_list") return [PROJECT];
       if (cmd === "config_trust") {
         trusted = args as { project: number; name: string };
         return undefined;
@@ -163,6 +173,7 @@ describe("App dashboard", () => {
       (cmd) => {
         if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
         if (cmd === "proc_list") return STACK;
+        if (cmd === "project_list") return [PROJECT];
         return undefined;
       },
       { shouldMockEvents: true },

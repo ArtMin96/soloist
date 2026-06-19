@@ -29,6 +29,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
       );
     case "ProcessRemoved":
       return processes.filter((process) => process.id !== event.id);
+    case "ProjectOpened":
     case "ConfigChanged":
     case "TerminalTitleChanged":
     case "TerminalBell":
