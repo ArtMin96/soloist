@@ -1,6 +1,7 @@
 //! Writing a `solo.yml` — serialize the [`SoloYml`] model and prepend a plain-language
 //! header. Used to auto-create a project's config from detected commands.
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use super::detect::detect_in;
@@ -45,15 +46,27 @@ pub fn render(config: &SoloYml) -> Result<String, WriteError> {
 /// Auto-creates `solo.yml` in `root` from detected commands when none exists. Returns
 /// `true` when it wrote a new file, `false` when one was already present — an existing
 /// `solo.yml` (even an empty one) is never rewritten. The thin filesystem shell over
-/// [`detect_in`] and [`render`].
+/// [`detect_in`] and [`render`]. The create is atomic (`O_EXCL`), so a file appearing
+/// between the existence check and the write is never clobbered.
 pub fn create_if_absent(root: &Path) -> Result<bool, WriteError> {
     let path = config_path(root);
     if path.exists() {
         return Ok(false);
     }
     let contents = render(&detect_in(root))?;
-    std::fs::write(&path, contents).map_err(|source| WriteError::Write { path, source })?;
-    Ok(true)
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            file.write_all(contents.as_bytes())
+                .map_err(|source| WriteError::Write { path, source })?;
+            Ok(true)
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(source) => Err(WriteError::Write { path, source }),
+    }
 }
 
 #[cfg(test)]
