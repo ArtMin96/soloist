@@ -154,6 +154,57 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Cleanup R5 landed — split `core::testing` + honest-test audit (zero deletions) (2026-06-19)
+- **Baseline re-confirmed green first** (the start-and-end gate): `just lint && just test` → **106 tests**
+  (Rust **96** / UI **10**); clippy `-D warnings`, rustfmt, tsc, ESLint, Prettier, dep-guard pass; the
+  file-size guard warned (non-gating) on the **one** outlier `core/testing.rs` (547 — R5's split target).
+  R4 reviewed before proceeding (sound: demo seam purged from the pure core; `core::testing::terminal_registration`
+  single-sources the launched-terminal fixture; public surface byte-stable).
+- **R5 executed (commit `3f07350`, one reviewable commit per the per-R-phase rule). PART 1 — split the lone
+  outlier `core/testing.rs` (547).** The shared test-fakes module was one flat file consumed cross-crate via
+  the `testing` feature (`#[cfg(any(test, feature = "testing"))] pub mod testing;`), so the guard counted all
+  547 lines as code. `git mv testing.rs → testing/mod.rs` anchored the rename; carved cohesive concerns into
+  `crates/core/src/testing/` submodules (same approach as R2's `supervisor.rs` split):
+  - **`clock.rs`** — `MockClock` (+ `Sleeper`/`MockState`).
+  - **`spawner.rs`** — `FakeSpawner` + `Behavior`/`DiesOn` + the in-memory `OneshotControl`/`NoopControl`/
+    `NoopPtyIo` + the `SIGKILL`/`SIGTERM`/`killed_by` helpers (private to the spawner).
+  - **`lock_releaser.rs`** — `RecordingLockReleaser`.
+  - **`runtime_state.rs`** — `FakeRuntimeState` + `FakeOrphanControl` (orphan-reconcile fakes).
+  - **`repos.rs`** — `FakeTrustRepo` + `FakeProjectRepo` (+ private `FakeProjects`).
+  - **`fixtures.rs`** — `terminal_registration` (the R4 cross-crate fixture).
+  - **`mod.rs`** — thin root: private `mod` declarations + `pub use` re-exporting the **same eight** public
+    items, so **every consumer path is byte-identical** — `crate::testing::*` (10 in-core consumers) and the
+    cross-crate `soloist_core::testing::terminal_registration` (pty integration test + the `store`/`pty`
+    dev-dep feature). `lib.rs` is **untouched** (`pub mod testing;` unchanged). Names are permanent/descriptive
+    — no R-phase/phase number or plan citation in any file/type (§8). Largest new file `spawner.rs` = **232**
+    lines; **file-size guard now reports ZERO outliers**.
+- **PART 2 — honest-test audit across the whole suite (26 Rust test-bearing files + 3 vitest), zero
+  deletions.** Walked every `#[test]`/`#[tokio::test]` and every vitest `it(...)`; delegated the first-pass
+  triage to a read-only pass, then **personally verified** the called-out small/likely-vanity ones
+  (`ui/src/lib/utils.test.ts`, `core/ids.rs`, `core/events.rs`). **Result: every test exercises real behaviour
+  and can fail for a real reason — no tautological/pretend/empty test found, nothing deleted** (so the count
+  holds at 106). Spot-check evidence: `utils.test.ts` `cn("p-2","p-4") → "p-4"` proves `twMerge` actually runs
+  (a plain join would give `"p-2 p-4"`); `ids.rs` exercises the atomic counter, the hand-written `Display`
+  path, and the `from_raw` wire round-trip; `events.rs` round-trips a `DomainEvent` through the real broadcast
+  bus.
+- **Two defensible SUSPECT items (kept, not deleted):** (1) `ids.rs::display_matches_the_raw_value` reads
+  circular but `Display` is a separate code path from `get()` (a format/prefix change breaks it) — real; (2)
+  `store/migrate.rs::refuses_a_schema_newer_than_this_build` is the module's **only** direct test.
+- **One honest coverage note (NOT filled with a vanity test, per §15):** `store/migrate.rs`'s forward-migration
+  branches (`< 1` → meta table, `< 2` → projects/trust tables, `user_version` bump) are covered only
+  **transitively** via `store/lib.rs::open_enables_wal_and_migrates_to_the_current_version` (asserts
+  `user_version == SCHEMA_VERSION` after a real open); only the downgrade-refusal branch is tested directly. A
+  direct forward-migration test is the one worthwhile *addition* (not a deletion) — recorded here honestly,
+  **not** papered over with a pretend test.
+- **Verification (honest).** `just lint && just test` green before and after: **106** (Rust **96** / UI **10**),
+  unchanged. clippy `-D warnings` clean — the scoped `#[allow(clippy::panic)]` on the `FakeSpawner` panic arm
+  and the `impl Default`/`new()` patterns (active because the `testing` feature compiles the fakes into core's
+  `not(test)` lib target) were **preserved across the move**. File-size guard: **zero outliers**. `Cargo.lock`
+  untouched. Tests stay **inline** (R5 split the *shared fakes* module, not the inline `#[cfg(test)] mod tests`
+  blocks — those stay with their code). Placeholder modules + stub crates untouched. The stray root
+  `package-lock.json` was **not staged** (user decision: leave it). **R5 done; stopped for review before R6**
+  per the agreed sequence.
+
 ### Cleanup R4 landed — purged demo scaffolding from the pure core (2026-06-19)
 - **Baseline re-confirmed green first** (the start-and-end gate): `just lint && just test` → **106 tests**
   (Rust **96** / UI **10**); clippy `-D warnings`, rustfmt, tsc, ESLint, Prettier, dep-guard pass; file-size
@@ -885,15 +936,14 @@ review's one should-fix + the mechanical nits:
 - **Stray `package-lock.json` at repo root (untracked) — user decision: LEAVE IT (2026-06-19).** Project uses
   pnpm; asked, user chose to leave it in place. Stays flagged; not gitignored, not removed.
 - **Cleanup roadmap status:** **R0 done** (`ea4bad1`) + **R1 done** (`4c80eb7`) + **R2 done** (`c04859a`) +
-  **R3 done** (`71eafac`, reviewed R2 first) + **R4 done** (`65cf819`, reviewed R3 first). **R5–R6 remain**
-  (`plan/06` §7), to run strictly in order, one reviewable commit each, every one starting + ending `just lint
-  && just test` green (baseline **106**). R4 was stopped for review per the agreed sequence. **R5 = honest-test
-  audit** — walk every test (Rust inline + vitest); delete any tautological/pretend test; confirm each
-  remaining test can fail for a real reason; record honestly any module whose real coverage is thin. The
-  `core/testing.rs` **547-line split** is R5's territory (the lone file-size outlier; split the shared fakes by
-  concern). Verify the small ones explicitly (e.g. `ui/src/lib/utils.test.ts`). **R6 = converge docs & ledger**
-  (`plan/03` still lists `serde_yaml`; we ship `serde_norway` — fix drift; refresh `PROGRESS.md` +
-  `KNOWN-DIVERGENCES.md`).
+  **R3 done** (`71eafac`, reviewed R2 first) + **R4 done** (`65cf819`, reviewed R3 first) + **R5 done**
+  (`3f07350`, reviewed R4 first: split `core/testing.rs` 547 → `testing/` per-concern submodules, file-size
+  guard now zero outliers; honest-test audit found **zero deletions** — suite is honest). **R6 is the last
+  R-phase** (`plan/06` §7), one reviewable commit, starting + ending `just lint && just test` green (baseline
+  **106**). R5 was stopped for review per the agreed sequence. **R6 = converge docs & ledger** (`plan/03`
+  still lists `serde_yaml`; we ship `serde_norway` — fix drift; refresh `PROGRESS.md` + `KNOWN-DIVERGENCES.md`;
+  also fold in the one honest coverage note from R5: a *direct* forward-migration test for `store/migrate.rs`
+  is the worthwhile addition — currently only its downgrade-refusal branch is tested directly).
 - **Plan review:** user may still skim `plan/05` (Solo behavior), `plan/04` (architecture), `plan/02`
   (parity) and confirm before deep feature work — not blocking Phase 1.
 - **Agent native OAuth/login (E8) → Phase 7, no new work beyond launching right.** When Phase 7 lands,
@@ -989,22 +1039,22 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-0. **Cleanup track (user's current priority — do before new features). R0 + R1 + R2 + R3 + R4 are DONE**
+0. **Cleanup track (user's current priority — do before new features). R0–R5 are DONE**
    (`ea4bad1` file-size guard; `4c80eb7` reusable `core::testing` behind a `testing` feature; `c04859a` split
    `supervisor.rs`; `71eafac` `CorePorts` parameter object + single composition root, both
    `too_many_arguments` allows removed, `ports.rs` split into `ports/{mod,bundle}.rs`; `65cf819` purged the
-   demo seam from the pure core — `spawn_demo_process`/`DEMO_*`/`std::env` gone, single-sourced into
-   `core::testing::terminal_registration`, demo seeding now app-only). **R4 was stopped for review per the
-   agreed sequence — review it, then execute R5.** Run the rest of the **R5–R6 roadmap in order** (`plan/06`
-   §7), one reviewable commit per R-phase, each starting and ending with `just lint && just test` green
-   (baseline **106 tests**). **R5 = honest-test audit:** walk every test (Rust inline + vitest); delete any
-   tautological/pretend test; confirm each remaining test can fail for a real reason; record honestly any
-   module whose real coverage is thin (no pretend test to fill a gap). **The lone file-size outlier
-   `core/testing.rs` (547) is R5's split target** — split the shared fakes by concern. Verify the small ones
-   explicitly (e.g. `ui/src/lib/utils.test.ts`). Then **R6 = converge docs & ledger** (`plan/03` lists
-   `serde_yaml`; we ship `serde_norway` — fix drift; refresh `PROGRESS.md` + `KNOWN-DIVERGENCES.md`). Do
-   **not** relocate inline tests to a `tests/` dir, delete the placeholder modules, or drop the stub crates —
-   all three were decided to stay (see Decisions above).
+   demo seam from the pure core; `3f07350` split `core/testing.rs` 547 → `testing/{mod,clock,spawner,
+   lock_releaser,runtime_state,repos,fixtures}.rs` — file-size guard now **zero outliers** — plus a
+   whole-suite honest-test audit that found **zero deletions** (every test asserts real behaviour; count
+   holds at **106**)). **R5 was stopped for review per the agreed sequence — review it, then execute R6,
+   the last R-phase.** One reviewable commit, starting and ending with `just lint && just test` green
+   (baseline **106 tests**). **R6 = converge docs & ledger** (`plan/06` §7): `plan/03` lists `serde_yaml`
+   but we ship `serde_norway` — fix the drift; refresh `PROGRESS.md` + `KNOWN-DIVERGENCES.md`; and fold in
+   R5's one honest coverage note — a *direct* forward-migration test for `store/migrate.rs` is the
+   worthwhile **addition** (today only its downgrade-refusal branch is tested directly; the create-table
+   branches are covered transitively via `store/lib.rs::open_enables_wal_and_migrates_to_the_current_version`).
+   Do **not** relocate inline tests to a `tests/` dir, delete the placeholder modules, or drop the stub
+   crates — all three were decided to stay (see Decisions above).
 1. **Runtime echo/control gate — CLOSED (2026-06-19).** A real human click on per-row **Start** for `shell`
    started it and `echo hi` echoed in the xterm — control wiring + core start path + the
    `Channel<Vec<u8>>`→`Uint8Array`→rAF boundary in `useTerminal.ts` all work. No longer blocks R2. **One
