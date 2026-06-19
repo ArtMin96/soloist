@@ -154,6 +154,41 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Cleanup R2 landed — split `supervisor.rs` into cohesive submodules (2026-06-19)
+- **Baseline re-confirmed green first** (the start-and-end gate): `just lint && just test` → **106 tests**
+  (Rust **96** / UI **10**); clippy `-D warnings`, rustfmt, tsc, ESLint, Prettier, dep-guard pass; the
+  file-size guard warned (non-gating) on `core/testing.rs` (527) **and** `core/supervisor.rs` (490).
+- **R2 executed (commit `c04859a`, one reviewable commit per the per-R-phase rule).** `supervisor.rs` was
+  490 non-test code lines (+573 inline tests), over the ~400 smell. Pulled cohesive concerns into new
+  `crates/core/src/supervisor/` submodules, leaving the root as the thin C2 published surface (per-process
+  lifecycle `start`/`stop`/`restart`/`register`/`shutdown`, the terminal-I/O surface, `guard_trust`/
+  `launch_actor`/`actor_ports`, and `apply_transition`):
+  - **`registration.rs`** — the `Registration` input type + its `command`/`launched` constructors.
+  - **`bulk.rs`** — `StartSummary` + `start_all`/`stop_all`/`restart_running`.
+  - **`reconcile.rs`** — `reconcile_orphans` + `adopt_orphan`.
+  - **`test_support.rs`** — the shared `#[cfg(test)]` `Harness` + helpers (`harness`/`spawn_spec`/
+    `command_spec`/`terminal`/`next_to`/`next_change`/`wait_all`/`status_of`/`PROJECT`), so each
+    submodule's `#[cfg(test)] mod tests` builds against **one** fixture set (DRY, §15) — not relocated to a
+    `tests/` dir (tests stay inline per the locked decision).
+- **Inline tests moved WITH their code:** `bulk` owns its 3 tests, `reconcile` its 5 (+ `orphan_record`/
+  `next_orphans` helpers), the **14** lifecycle/terminal/panic tests stay in the root. `registration.rs`
+  has no tests (its constructors are exercised indirectly — no pretend test added, §15).
+- **Pure structural move** — no behaviour, signature, or logic change. **Public surface unchanged:**
+  `lib.rs:61` `pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError}` is byte-for-byte
+  untouched (`Registration` re-exported from `registration.rs`, `StartSummary` from `bulk.rs`, the rest defined
+  in the root). `lib.rs` not touched at all.
+- **File-size-guard fix (necessary, not cosmetic):** the guard counts non-test lines as everything *before the
+  first* `#[cfg(test)]` attribute. The shared `mod test_support;` declaration must therefore sit at the **test
+  boundary** (bottom of `supervisor.rs`, with `mod tests`), not near the top — a top placement made the guard
+  read the root as 22 lines and silently stop measuring it. Now it correctly reads **331** non-test lines.
+- **Verification (honest).** `just lint && just test` green before and after: **106** (Rust 96 / UI 10),
+  unchanged. clippy `-D warnings` clean (one needed fix in `bulk.rs` tests: dropped the unused `use super::*`
+  glob and added `use crate::ports::TrustRepo` so `set_trusted` resolves — the trait used to arrive via the
+  root test module's glob). No supervisor source file now exceeds the ~400 smell: root **331**, `actor.rs`
+  **361** (untouched), `registry.rs` 248, `test_support.rs` 133, `reconcile.rs` 77, `adopt.rs` 78, `bulk.rs`
+  58, `registration.rs` 76. The remaining guard outlier is `core/testing.rs` (527 — R5 territory). `Cargo.lock`
+  untouched. **R2 done; stopped for review before R3** per the agreed sequence.
+
 ### Cleanup R1 landed — reusable `core::testing` behind a `testing` feature (2026-06-19)
 - **Baseline re-confirmed green first** (the agreed start-and-end gate): `just lint && just test` →
   **106 tests** (Rust **96** / UI **10**); clippy `-D warnings`, rustfmt, tsc, ESLint, Prettier, dep-guard
@@ -771,11 +806,13 @@ review's one should-fix + the mechanical nits:
   done. Non-blocking for the cleanup R-phases.
 - **Stray `package-lock.json` at repo root (untracked) — user decision: LEAVE IT (2026-06-19).** Project uses
   pnpm; asked, user chose to leave it in place. Stays flagged; not gitignored, not removed.
-- **Cleanup roadmap status:** **R0 done** (`ea4bad1`) + **R1 done** (`4c80eb7`, reviewed R0 first).
-  **R2–R6 remain** (`plan/06` §7), to run strictly in order, one reviewable commit each, every one starting +
-  ending `just lint && just test` green (baseline **106**). R1 was stopped for review per the agreed sequence.
-  **R2 = split `supervisor.rs`** (490 code lines > the ~400 smell) into `supervisor/` submodules, public surface
-  unchanged. **R2 is unblocked** — the runtime echo/control gate was closed by a real human click (see above).
+- **Cleanup roadmap status:** **R0 done** (`ea4bad1`) + **R1 done** (`4c80eb7`) + **R2 done** (`c04859a`,
+  reviewed R1 first). **R3–R6 remain** (`plan/06` §7), to run strictly in order, one reviewable commit each,
+  every one starting + ending `just lint && just test` green (baseline **106**). R2 was stopped for review per
+  the agreed sequence. **R3 = `CorePorts` parameter object** — introduce a struct bundling the `Arc<dyn Port>`
+  set and refactor `Facade::new` to take it, **removing both** `#[allow(clippy::too_many_arguments)]`
+  (`facade.rs:51`, `supervisor.rs:78` on `Supervisor::new`), and document `app::build_facade` as the single
+  composition root.
 - **Plan review:** user may still skim `plan/05` (Solo behavior), `plan/04` (architecture), `plan/02`
   (parity) and confirm before deep feature work — not blocking Phase 1.
 - **Agent native OAuth/login (E8) → Phase 7, no new work beyond launching right.** When Phase 7 lands,
@@ -871,15 +908,18 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-0. **Cleanup track (user's current priority — do before new features). R0 + R1 are DONE** (`ea4bad1` file-size
-   guard; `4c80eb7` reusable `core::testing` behind a `testing` feature). **R1 was stopped for review per the
-   agreed sequence — review it, then execute R2 (the runtime gate in item 1 is now closed).** Run the rest of the
-   **R2–R6 roadmap in order** (`plan/06` §7), one reviewable commit per R-phase, each starting and ending with
-   `just lint && just test` green (baseline **106 tests**). **R2** = split `supervisor.rs` (490 code lines) into
-   `supervisor/` submodules (candidates: bulk ops, `reconcile_orphans`, the `Registration`/`StartSummary`/error
-   types), leaving the root the thin C2 surface; inline tests move **with** their code; public re-exports
-   unchanged. Do **not** relocate inline tests to a `tests/` dir, delete the placeholder modules, or drop the
-   stub crates — all three were decided to stay (see Decisions above).
+0. **Cleanup track (user's current priority — do before new features). R0 + R1 + R2 are DONE** (`ea4bad1`
+   file-size guard; `4c80eb7` reusable `core::testing` behind a `testing` feature; `c04859a` split
+   `supervisor.rs` into `supervisor/{registration,bulk,reconcile,test_support}` submodules). **R2 was stopped
+   for review per the agreed sequence — review it, then execute R3.** Run the rest of the **R3–R6 roadmap in
+   order** (`plan/06` §7), one reviewable commit per R-phase, each starting and ending with `just lint && just
+   test` green (baseline **106 tests**). **R3 = `CorePorts` parameter object:** introduce a struct bundling the
+   `Arc<dyn Port>` set (+ a builder) and refactor `Facade::new` to take it, **removing both**
+   `#[allow(clippy::too_many_arguments)]` (`facade.rs:51` and `supervisor.rs:78`, now on `Supervisor::new`),
+   then document `app::build_facade` as the single composition root (one per binary;
+   optional subsystems default to their `Noop` port) in `plan/06` + `CLAUDE.md`. Do **not** relocate inline
+   tests to a `tests/` dir, delete the placeholder modules, or drop the stub crates — all three were decided
+   to stay (see Decisions above).
 1. **Runtime echo/control gate — CLOSED (2026-06-19).** A real human click on per-row **Start** for `shell`
    started it and `echo hi` echoed in the xterm — control wiring + core start path + the
    `Channel<Vec<u8>>`→`Uint8Array`→rAF boundary in `useTerminal.ts` all work. No longer blocks R2. **One
