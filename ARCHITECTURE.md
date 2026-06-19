@@ -82,6 +82,27 @@ survive restarts while PTY buffers don't.
 (and `plan/01`'s module table); it carries a doc comment naming its context + phase and exports nothing
 until then. That is a roadmap marker — **not** dead code. A leftover empty file with no mapping is forbidden.
 
+### Coordination flow — create → delegate → use (C6, the metaharness)
+
+Coordination (scratchpads, todos, timers, leases, key-value) is **durable, project-scoped SQLite state**
+agents share to orchestrate each other token-free. All paths route through the **one `Facade`** (UI, MCP,
+HTTP behave identically):
+
+- **Create** — an agent calls a coordination MCP tool (`scratchpad_write`, `todo_create`, `lock_acquire`,
+  `timer_set`, `kv_set`) → `mcp` handler → one `Facade` method → C6 aggregate → SQLite repo. Shared-record
+  writes are **revision-guarded** (`expected_revision` → `RevisionConflict`); the call is scoped to the
+  effective project and attributed to the **bound process** (`SOLOIST_PROCESS_ID`).
+- **Delegate** — a lead agent `spawn_agent`s a worker (auto-binds), hands work via `todo_create` +
+  `todo_transfer`/`_lock`/`_set_blockers`, signals intent with a **lease** (`lock_acquire`, TTL+owner), and
+  **waits without polling** via `timer_fire_when_idle_all` — which delivers its `body` to the lead as a fresh
+  turn when the watched workers go idle.
+- **Use & release** — workers read/write the shared records; **process-owned locks auto-release when the
+  owning process closes** (no stranded locks on crash); state **survives app restart** (SQLite), unlike live
+  processes and PTY buffers.
+
+Target design — **C6 is a placeholder until Phase 9**; tool *param schemas* are clean-room/undesigned (`plan/05`
+§12). Full recipe: **`plan/06` §5.8**; data-flow walkthroughs: `plan/01`; tool catalog: `plan/05` §7.
+
 ### Frontend domain split (`crates/app/ui/src`)
 
 | Path | Role | Rule |

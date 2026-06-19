@@ -211,6 +211,48 @@ DRY, and the dependency rule intact. These *are* the "how future sessions archit
 2. New presentational component under `components/<surface>/`; props-in/callbacks-out; no `invoke`.
 3. Reuse existing primitives (shadcn `Button`, `StatusIndicator`, `ProcessControls`) — never re-roll markup.
 
+### 5.8 Use the coordination layer — create → delegate → use (C6, Phase 9)
+
+Coordination (scratchpads, todos, timers, leases, key-value) is **durable, project-scoped state in SQLite**
+that agents share to orchestrate each other token-free — what makes Soloist a *metaharness* (`00`, `05` §1).
+It is context **C6** (`core::coordination`), built in **Phase 9**; the MCP tool *names* are cited in `05` §7,
+but their **parameter schemas are clean-room and undesigned** (`05` §12, decision D7) — design them per-tool
+when Phase 9 lands, don't invent them here. All three stages route through the **same `Facade`**, so the UI,
+MCP, and HTTP/CLI behave identically (one behavior, many fronts).
+
+**Create** (any adapter, identical path):
+1. An agent calls a coordination MCP tool (`scratchpad_write`, `todo_create`, `kv_set`, `lock_acquire`,
+   `timer_set`) → the `mcp` handler (§5.3) → **one `Facade` method** → the C6 aggregate → its `*Repo`
+   (SQLite, transactional). No domain logic in the handler.
+2. Writes to a shared record are **revision-guarded** (optimistic concurrency, `04` §7): `*_write` takes an
+   `expected_revision` and returns `RevisionConflict` on a stale write (matrix **G2**) — how concurrent agents
+   avoid clobbering a scratchpad.
+3. Identity & scope are resolved **in the core**, not the handler: a call acts on the **effective project
+   scope** and is attributed to the **bound process** (`SOLOIST_PROCESS_ID` → `bind_session_process`; external
+   callers `register_agent`; `whoami` reports it — `05` §7). A tool cannot touch another project's state.
+
+**Delegate** (a lead agent orchestrating workers):
+1. Lead spawns a worker with `spawn_agent`/`spawn_process` (C2/C4, MCP **F11**); the worker auto-binds via the
+   injected `SOLOIST_PROCESS_ID`.
+2. Lead hands work as **todos** — `todo_create`, then `todo_transfer`/`todo_lock`/`todo_set_blockers` to assign,
+   reserve, and order it (**G3–G5**). A **lease** (`lock_acquire`, TTL + owner, **G6**) signals cooperative
+   intent — "signals, not ownership" (`05` §7).
+3. Lead **waits without polling**: `timer_fire_when_idle_all` (**G8**) resolves when its `waiting_on` processes
+   go idle (the C4 idle FSM flips them) and delivers the timer's `body` to the lead as a fresh user turn (`01`
+   data-flow; `timer_set` body semantics, `05` §7).
+
+**Use & release** (the lifecycle invariant):
+1. Workers read/write the same scratchpads/todos/kv: reads are cheap projections, writes go through the owning
+   aggregate (CQRS-lite). Small structured shared state uses key-value (`kv_*`, default off, **G10**).
+2. **Process-owned locks auto-release when the owning process closes** (todo locks + leases): the supervisor's
+   stop hook calls the `LockReleaser` port on **any** terminal transition (matrix **B7/G5**; `NoopLockReleaser`
+   until C6 lands, §5.2). A crashed or stopped worker never strands a lock.
+3. It all **persists across an app restart** (SQLite, **G11**): todos/scratchpads survive even though live
+   processes and PTY buffers don't (the ephemeral-vs-durable split, `04` §7).
+
+> This is the **target** design — C6 is a placeholder until Phase 9. It is grounded in `05` §7 + `01`'s
+> data-flow walkthroughs; per-tool param schemas and exact semantics are designed in Phase 8/9, not here.
+
 ---
 
 ## 6. Single source of truth, DRY & the test-fakes gap
