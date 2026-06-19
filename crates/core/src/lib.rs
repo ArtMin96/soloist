@@ -46,7 +46,7 @@ pub mod testing;
 pub use config::{ConfigEngine, ConfigError, ConfigSync, ProcessSpec, Rename, SoloYml, SyncError};
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
-pub use facade::Facade;
+pub use facade::{Facade, LoadProjectError};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};
 pub use orphans::{OrphanInfo, OrphanReport};

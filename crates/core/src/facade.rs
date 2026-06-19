@@ -6,14 +6,17 @@
 //! like "restart" or "is this command trusted" is implemented exactly once. Adapters
 //! translate requests in and project the read model out; they hold no business state.
 
+use std::path::Path;
+
 use tokio::sync::broadcast;
 
-use crate::config::ConfigEngine;
+use crate::config::{ConfigEngine, ConfigError};
 use crate::events::{DomainEvent, EventBus};
+use crate::ids::ProjectId;
 use crate::ports::CorePorts;
 use crate::process::ProcessView;
-use crate::projects::Projects;
-use crate::supervisor::Supervisor;
+use crate::projects::{ProjectError, Projects};
+use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::trust::TrustStore;
 
 /// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot
@@ -78,6 +81,39 @@ impl Facade {
     pub fn config(&self) -> &ConfigEngine {
         &self.config
     }
+
+    /// Opens a project: registers its root (assigning the durable [`ProjectId`]), loads
+    /// its `solo.yml`, registers each declared process as a trust-gated command, then
+    /// reconciles leftover process groups and starts the trusted auto-start commands.
+    ///
+    /// Reconciliation runs **after** registration so a leftover group matching a
+    /// `solo.yml` command is adopted rather than mis-surfaced as an orphan. Starting is
+    /// the supervisor's trusted-auto-start subset, so an untrusted command is registered
+    /// (visible, `Stopped`) but never run until its variant is trusted. Returns the
+    /// project's id. Must run within a `tokio` runtime (reconciliation and starting do).
+    pub fn load_project(&self, root: &Path) -> Result<ProjectId, LoadProjectError> {
+        let record = self.projects.add(root, None, None)?;
+        let config = self.config.open(record.id, record.root.clone())?;
+        for (name, spec) in &config.processes {
+            self.supervisor
+                .register(Registration::command(record.id, &record.root, name, spec));
+        }
+        self.supervisor.reconcile_orphans();
+        self.supervisor.start_all(record.id)?;
+        Ok(record.id)
+    }
+}
+
+/// Why opening a project failed: resolving/persisting its root, reading its `solo.yml`,
+/// or starting its trusted commands.
+#[derive(Debug, thiserror::Error)]
+pub enum LoadProjectError {
+    #[error(transparent)]
+    Project(#[from] ProjectError),
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+    #[error(transparent)]
+    Supervisor(#[from] SupervisorError),
 }
 
 #[cfg(test)]
@@ -162,5 +198,57 @@ mod tests {
             .set_trusted(project, &spec.variant_hash())
             .expect("trust");
         facade.supervisor().start(id).expect("start once trusted");
+    }
+
+    #[tokio::test]
+    async fn load_project_registers_each_declared_command() {
+        let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            crate::config::config_path(dir.path()),
+            "processes:\n  Web:\n    command: npm run dev\n  Api:\n    command: cargo run\n",
+        )
+        .expect("write solo.yml");
+
+        facade.load_project(dir.path()).expect("load");
+
+        // Both commands are registered and resting; neither starts, because the config's
+        // variants are untrusted (loading never bypasses the trust gate).
+        let snapshot = facade.snapshot();
+        assert_eq!(snapshot.len(), 2);
+        assert!(snapshot.iter().all(|p| p.status == ProcStatus::Stopped));
+        let mut labels: Vec<_> = snapshot.iter().map(|p| p.label.clone()).collect();
+        labels.sort();
+        assert_eq!(labels, vec!["Api".to_string(), "Web".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn load_project_starts_a_trusted_auto_start_command() {
+        let (facade, trust) = facade(FakeSpawner::exits_on_terminate());
+        let mut rx = facade.subscribe();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let yml = "processes:\n  Web:\n    command: npm run dev\n";
+        std::fs::write(crate::config::config_path(dir.path()), yml).expect("write solo.yml");
+
+        // Pre-register the project to learn its id and trust the command's variant, so
+        // load's start_all reaches it (start is the trusted, auto-start subset; auto_start
+        // defaults true).
+        let record = facade
+            .projects()
+            .add(dir.path(), None, None)
+            .expect("add project");
+        let spec = crate::config::parse(yml)
+            .expect("parse")
+            .processes
+            .get("Web")
+            .cloned()
+            .expect("Web");
+        trust
+            .set_trusted(record.id, &spec.variant_hash())
+            .expect("trust");
+
+        let project = facade.load_project(dir.path()).expect("load");
+        assert_eq!(project, record.id);
+        wait_for(&mut rx, ProcStatus::Running).await;
     }
 }
