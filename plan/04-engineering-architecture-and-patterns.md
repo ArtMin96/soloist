@@ -344,5 +344,6 @@ This is the per-phase checkpoint of the §10 standards.
 - [ ] **Honest tests:** every new test exercises real behaviour and can fail for a real reason; no
       placeholder/tautological tests.
 
-> Suggested enforcement (optional, not yet built): a `scripts/check-file-size.sh` in `just lint`/CI that
-> warns on non-test source files over the threshold, the same way `check-core-deps.sh` guards layering.
+> Enforcement: `scripts/check-file-size.sh` runs in `just lint` and CI and **warns** (non-gating) on
+> non-test source files over the threshold, the same way `check-core-deps.sh` guards layering. Tightening it
+> into a hard gate stays a later, separate decision (`plan/06` §9).

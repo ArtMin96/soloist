@@ -66,7 +66,7 @@ referenced as "ref §N" point to [`05-solo-reference-and-sources.md`](05-solo-re
 | Async runtime | `tokio` | actor tasks, timers, intervals |
 | PTY | `portable-pty` | cross-platform PTY |
 | Signals / groups | `nix` | signal the whole process group |
-| Config | `serde` + `serde_yaml` + `schemars` | `solo.yml` parse + JSON Schema |
+| Config | `serde` + `serde_norway` + `indexmap` (+ `schemars` when A5 lands) | `solo.yml` parse + JSON Schema |
 | File watching | `notify` + `globset` | debounced file-watch restarts |
 | Metrics | `sysinfo` | CPU/RSS per process group |
 | Ports | parse `/proc/net/tcp{,6}` + `/proc/<pid>/fd` | port discovery |
@@ -77,6 +77,12 @@ referenced as "ref §N" point to [`05-solo-reference-and-sources.md`](05-solo-re
 | IPC | `interprocess` (UDS) | app ↔ mcp ↔ cli |
 | Errors | `thiserror` + `anyhow` | typed boundaries |
 | Tracing | `tracing` (+`-subscriber`) | structured logs/spans |
+
+> **Config crate update (Phase 2):** `serde_yaml` is archived upstream, so Phase 2 adopted the maintained
+> drop-in fork **`serde_norway` 0.9** (precise error locations for A4, `deny_unknown_fields`, `IndexMap`
+> key order) and `sha2` for variant hashing. `schemars` and `globset` are **not yet shipped** — they land
+> with the `later` A5 JSON-Schema export and the Phase 6 glob file-watch respectively; the rows above
+> record them as the intended crates for that work.
 
 **Frontend**: React 19 + TS + Vite; **shadcn/ui (Radix primitives + Tailwind CSS) for components**;
 TanStack Query; xterm.js; `markdown-it` + `mermaid` (lazy); `@tauri-apps/api` (wrapped in `api.ts`);

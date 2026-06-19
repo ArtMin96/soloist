@@ -121,7 +121,7 @@ Reach for a pattern when its **trigger** fires — not preemptively (YAGNI).
 
 | Pattern | Lives in | Reach for it when… |
 |---------|----------|--------------------|
-| **Ports & Adapters** | `ports.rs` + adapter crates | any OS/UI/transport/storage concern → trait in core, impl in an adapter |
+| **Ports & Adapters** | `ports/` + adapter crates | any OS/UI/transport/storage concern → trait in core, impl in an adapter |
 | **Facade / Anti-corruption layer** | `core::facade::Facade` (C8) | an adapter needs to *act* → one `Facade` call, never a context internal |
 | **Actor + supervision** | `supervisor/actor.rs` (one task per process) | a resource needs one owner racing events (child vs stop) → task + bounded `mpsc` |
 | **Finite state machine** | `ProcStatus::transition` (+ future `AgentActivity`, `Trust`) | state has legal transitions → `Result<New, IllegalTransition>` |
@@ -164,7 +164,8 @@ mirror in **one** `domain.ts`, one command/event-name constant per side. A numer
 never a literal at the comparison site. The Rust↔TS pair is the *only* sanctioned duplication.
 
 Shared **test fakes** (`FakeSpawner`, `MockClock`, `FakeTrustRepo`, …) live once in `core::testing` —
-reused across crates via its `testing` feature (the cleanup fixes the current `#[cfg(test)]`-private gap).
+reused across crates via its `testing` feature (R1 closed the former `#[cfg(test)]`-private gap; R5 split the
+module into per-concern submodules under `testing/`).
 
 ---
 
@@ -173,6 +174,9 @@ reused across crates via its `testing` feature (the cleanup fixes the current `#
 The tree is at build-Phase 5 (`Done — pending verify`). The cleanup is sequenced as small reviewable
 commits that don't blindly regress verified-pending code. **Decisions locked:** tests stay **inline** (trim,
 don't relocate); the empty core modules **and** the 4 stub crates **stay** as documented placeholders.
+
+**Status (2026-06-19): R0–R6 are all complete** — see `PROGRESS.md` for per-phase commits/evidence. The
+table below is the record of the executed cleanup.
 
 | R | Goal | Done when |
 |---|------|-----------|

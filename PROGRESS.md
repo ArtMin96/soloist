@@ -29,8 +29,8 @@
   user-approved; `index.css` implements its OKLCH tokens (azure accent replaces the shadcn neutral/purple
   primary — fixing the PRODUCT.md "no purple" tell; status palette; radius 10→6px; Geist Mono added).
   One core change: `DomainEvent::ProcessSpawned` gains `project` (single-source — the event must carry
-  what `ProcessView` needs to group). **`just lint && just test` green: 106 tests** (Rust 96 / UI 10 —
-  UI +4: grouping ×3, projection ×1). **Pending verify:** on-screen **rendering is now observed green
+  what `ProcessView` needs to group). **`just lint && just test` green: 107 tests** (Rust 97 / UI 10 —
+  +1 from the R6 direct `store::migrate` forward-migration test). **Pending verify:** on-screen **rendering is now observed green
   (2026-06-19** via `just dev`, host `DISPLAY=:0`, screenshots — the grouped tree + statuses + empty state
   render; the `freezePrototype` blank-window bug is confirmed fixed). **Still not observed:** live terminal
   I/O (echo) + control activation — no synthetic XTEST click fired any control this session (likely an
@@ -137,7 +137,7 @@ Status vocabulary: `Not started` · `In progress` · `Done — pending verify` �
 | 2 | Config & projects (real `solo.yml`, trust, sync, detect) | **Done — pending verify** | Context C1 built headless on the skeleton. `crates/core/config/{model,load,diff,sync}` (serde `SoloYml`/`ProcessSpec`, `deny_unknown_fields`, `IndexMap` order, documented defaults; total `load`/`parse` w/ 1 MB cap + empty/comment-only = empty + typed `ConfigError`; `ConfigSync` add/update/remove/**rename** diff; `ConfigEngine` content-hash sync that flags `requires_trust` and emits `DomainEvent::ConfigChanged` — **owns no spawner, starts nothing**), `core/hash` (SHA-256 `Hash` + length-prefixed variant hash), `core/trust` (`TrustStore`/`Trust`), `core/projects` (`Projects`, canonical-root identity), `core/debounce` (Clock-driven). `crates/store` grown to the repository pattern (`meta`/`projects`/`trust` modules + migration **v2**: `projects`/`trust` tables, FK cascade) implementing `ProjectRepo`/`TrustRepo`. **v1 evidence:** A1/A3/A4 (`config/load` tests), A7 (`trust` + store `trust_persists_across_reopen`), A9 (`config/sync` write→mutate→`ConfigChanged{requires_trust}`, rename-preserves, no-op-on-touch), A11 (store `projects` + core `projects`). A2/A6 runtime verify → Phase 3. `later` A5/A8/A10/A12/A13 deferred. New core deps: `serde_norway` 0.9, `indexmap` 2, `sha2` 0.11 (dep-direction guard green). Divergences: `KNOWN-DIVERGENCES.md` D-1 (variant scope), D-2 (live watcher → Phase 6). |
 | 3 | Process supervisor (3 subtypes, status FSM, orphans) | **Done — pending verify** | **B1–B8 + A2/A6 delivered + tested.** `Supervisor` (C2) on the Phase-1 actor: mailbox actor (`Stop`/`Restart`), status FSM, graceful SIGTERM→5s→SIGKILL on the **pgroup**, exit classification, panic isolation; **trust gate in core** (A6); login-shell `$SHELL -lc` (A2/B5); bulk ops (B4); stop→lock-release hook (B7). Task 4 (output/log ring) delivered in Phase 4. **B8 orphan adoption (this session):** runtime-state file recording + `reconcile_orphans()` (adopt/surface/prune) + adoption via a synthesized `Spawned` over the existing pgid (liveness poll + killpg), reusing the actor; real adapters `FileRuntimeState` (store) + `PgidOrphanControl` (pty). **Evidence:** core reconcile/adopt/surface/prune + record/forget tests; store `FileRuntimeState` round-trip; pty `is_alive` on a real group. **Pending verify:** the app reconcile-on-launch *call* (Phase 5, after config-registration) + in-GUI bits (Phase 5 Playwright); B7's "clears crash tracking" half (Phase-6). |
 | 4 | PTY & terminal I/O (rendered+raw, input, resize, OSC) | **Done — pending verify** | **C1–C7, C9 v1 delivered (C3 context); PR reviewed + all findings fixed.** Real PTY per process via `portable-pty` (`$SHELL -lc` on the slave; child sees a tty); `pty` adapter rewritten (`PtyProcessSpawner`) keeping pgroup reaping. Core `terminal/` (`ring`/`buffers`/`parser`): bounded raw scrollback (256 KB per-process **+ a 16 MB global aggregate cap**, **C5**) + `vte`-driven rendered `Ring<LogLine>` (5,000 lines, **C4** + folded Task 4) with `\r` overwrite/tab stops; OSC **title**+**bell** → `DomainEvent`s (**C7**); live raw bytes via per-process broadcast. `Supervisor`: `write_stdin`/`resize` (**C3**/**C6**), `attach_pty` (atomic replay+live, **C9**), `pty_scrollback`/`rendered`. **Evidence:** **102 tests** (core 74 / pty 10 / store 12 / UI 6); real-OS pty suite green (`test -t 1`→tty **C1**, `read x`→input echo **C3**, `tput cols`→resize **C6**, group reap/no-survivors hardened against the async-grandchild-reap race). `just lint && just test` green. **Pending verify:** xterm.js terminal pane (**C8** `later` + phase-04 Task 9) → Phase 5 via `/impeccable`; "vim/htop visually render" is the Phase-5/manual check. |
-| 5 | Dashboard UI (sidebar tree, status dots, terminal pane, trust dialog) | **Done — pending verify** | **Interactive core slice:** `DESIGN.md` seeded (`/impeccable`) + approved; full Tauri command/event/PTY-Channel adapter; TS domain mirror re-synced; sidebar tree (I1), color-blind-safe status (shape+color+label), per-row + bulk controls (B2/B3/B4), live status, xterm.js terminal pane (C1–C7 UI), empty/error states. **Demo stack** seeds the tree (real project-load deferred). `just lint && just test` green (106). **Deferred follow-up:** trust dialog (A6/A9), orphan dialog (B8 UI), project load/switch + reconcile wiring. **Pending verify:** on-screen **render now observed green (2026-06-19, screenshots)**; live terminal I/O + control activation (synthetic clicks don't fire controls — verify a real human click before R2) + Playwright e2e still pending (see 2026-06-19 entry) |
+| 5 | Dashboard UI (sidebar tree, status dots, terminal pane, trust dialog) | **Done — pending verify** | **Interactive core slice:** `DESIGN.md` seeded (`/impeccable`) + approved; full Tauri command/event/PTY-Channel adapter; TS domain mirror re-synced; sidebar tree (I1), color-blind-safe status (shape+color+label), per-row + bulk controls (B2/B3/B4), live status, xterm.js terminal pane (C1–C7 UI), empty/error states. **Demo stack** seeds the tree (real project-load deferred). `just lint && just test` green (**107** after the R6 cleanup track). **Deferred follow-up:** trust dialog (A6/A9), orphan dialog (B8 UI), project load/switch + reconcile wiring. **Pending verify:** on-screen **render now observed green (2026-06-19, screenshots)**; live terminal I/O + control activation (synthetic clicks don't fire controls — verify a real human click before R2) + Playwright e2e still pending (see 2026-06-19 entry) |
 | 6 | Monitoring, restart (10/60s), file-watch, notifications | Not started | **Nightly soak test starts running from here** |
 | 7 | Agents & idle detection (5-state FSM, optional summarization) | Not started | Summarization OFF by default |
 | 8 | MCP server core (`soloist-mcp` stdio, scope+identity, tools) | Not started | High-risk |
@@ -153,6 +153,54 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Cleanup R6 landed — converge docs & ledger; R-phase cleanup track COMPLETE (2026-06-19)
+- **Baseline re-confirmed green first** (the start-and-end gate): `just lint && just test` → **106 tests**
+  (Rust **96** / UI **10**); clippy `-D warnings`, rustfmt, tsc, ESLint, Prettier, dep-guard pass; the
+  file-size guard reports **zero outliers** (`file-size OK: no source file exceeds 400 non-test lines` —
+  R5 cleared the last one). R5 reviewed before proceeding (sound: commit `3f07350` is a pure structural
+  move — `testing.rs` 547 → `testing/{mod,clock,spawner,lock_releaser,runtime_state,repos,fixtures}.rs`;
+  `testing/mod.rs` re-exports the **same eight** public items so `crate::testing::*` /
+  `soloist_core::testing::*` are byte-stable; `lib.rs` untouched).
+- **R6 = docs/ledger convergence (plan/06 §7), no code-logic change.** Reconciled every plan-doc claim the
+  R0–R5 refactors invalidated. Drift grepped across the whole `plan/` tree + root `*.md`, then fixed:
+  - **`plan/03`** (the named drift): the Config row listed **`serde_yaml`** but we ship **`serde_norway`
+    0.9** (verified in `crates/core/Cargo.toml`: `serde_norway = "0.9"`, `indexmap`, `sha2`; **no**
+    `serde_yaml`). Updated the row to `serde + serde_norway + indexmap (+ schemars when A5 lands)` and added
+    a note: `serde_yaml` is archived upstream → Phase 2 adopted the maintained drop-in fork; `schemars`
+    (A5 JSON-Schema) and `globset` (Phase 6 glob watch) are **not yet shipped** — the rows record them as
+    the intended crates for that later work.
+  - **`plan/04` §15:** the file-size guard footnote said "optional, not yet built" → now wired in `just
+    lint`/CI as a **warn-only** signal (R0); footnote corrected, pointing tightening-into-a-hard-gate at
+    `plan/06` §9.
+  - **`plan/06`:** §3.2 "`supervisor.rs` (491 code lines) is the current outlier" → split in R2 (+ testing
+    in R5), **guard now zero outliers**; §4 `ports.rs` → **`ports/`** and Noop defaults in **`ports/mod.rs`**
+    (R3 split `ports.rs` → `ports/{mod,bundle}.rs`); §6 "the one real DRY gap today" rewritten as
+    **resolved (R1/R5)** — `core::testing` is `pub` behind the `testing` feature, reused by `store`/`pty`,
+    fakes in per-concern submodules; §9 enforcement row `scripts/check-file-size.sh` `to add` → **live
+    (warn-only)**; §7 gained a **completion banner** (R0–R6 done, with commit refs) and the R6 description
+    was corrected (the serde swap is a stale-doc fix, **not** a Solo-behavior divergence).
+  - **`ARCHITECTURE.md`:** §3 `ports.rs` → `ports/`; §5 test-fakes "the cleanup fixes the current gap" →
+    **R1 closed it; R5 split the module**; §6 roadmap gained the R0–R6 completion note.
+- **`KNOWN-DIVERGENCES.md` reviewed — current, no new entry.** D-1/D-2/D-3 still hold; the
+  `serde_yaml → serde_norway` swap is an internal dependency choice (not observable Solo behavior), so per
+  the file's own scope it does **not** warrant a divergence entry (confirmed with the user via the decision
+  point).
+- **Honest coverage note from R5 — folded in (user-approved "add it now").** `crates/store/src/migrate.rs`
+  previously tested only the downgrade-refusal branch directly; the forward-migration steps (create
+  `meta`/`projects`/`trust`, bump `user_version`) were covered only transitively via
+  `store/lib.rs::open_enables_wal_and_migrates_to_the_current_version`. Added a **direct** test
+  `migrates_a_fresh_database_to_the_current_schema` (commit `2dce185`, a **separate** `test(store)` commit —
+  one concern per commit): opens a fresh in-memory DB, runs `migrate()`, asserts `user_version ==
+  SCHEMA_VERSION`, that each of `meta`/`projects`/`trust` is created, and that a second `migrate()` is a
+  no-op (idempotent). Genuinely honest (fails if any forward branch breaks), per §15. **Store suite 12 →
+  13; Rust 96 → 97; total 106 → 107.**
+- **Verification (honest).** `just lint && just test` green before and after; the test commit moved the
+  count **106 → 107** (Rust **97** / UI **10**); file-size guard still **zero outliers**; `Cargo.lock`
+  untouched. Two commits: `2dce185` `test(store): cover the forward-migration path directly` + the docs
+  commit carrying this entry. The stray root `package-lock.json` was **not staged** (user decision: leave
+  it). **R6 is the LAST R-phase — the R0–R6 cleanup track is now COMPLETE.** Next is real feature work (the
+  deferred Phase-5 follow-up), to begin only after the user signs off the cleanup.
 
 ### Cleanup R5 landed — split `core::testing` + honest-test audit (zero deletions) (2026-06-19)
 - **Baseline re-confirmed green first** (the start-and-end gate): `just lint && just test` → **106 tests**
@@ -935,15 +983,17 @@ review's one should-fix + the mechanical nits:
   done. Non-blocking for the cleanup R-phases.
 - **Stray `package-lock.json` at repo root (untracked) — user decision: LEAVE IT (2026-06-19).** Project uses
   pnpm; asked, user chose to leave it in place. Stays flagged; not gitignored, not removed.
-- **Cleanup roadmap status:** **R0 done** (`ea4bad1`) + **R1 done** (`4c80eb7`) + **R2 done** (`c04859a`) +
-  **R3 done** (`71eafac`, reviewed R2 first) + **R4 done** (`65cf819`, reviewed R3 first) + **R5 done**
-  (`3f07350`, reviewed R4 first: split `core/testing.rs` 547 → `testing/` per-concern submodules, file-size
-  guard now zero outliers; honest-test audit found **zero deletions** — suite is honest). **R6 is the last
-  R-phase** (`plan/06` §7), one reviewable commit, starting + ending `just lint && just test` green (baseline
-  **106**). R5 was stopped for review per the agreed sequence. **R6 = converge docs & ledger** (`plan/03`
-  still lists `serde_yaml`; we ship `serde_norway` — fix drift; refresh `PROGRESS.md` + `KNOWN-DIVERGENCES.md`;
-  also fold in the one honest coverage note from R5: a *direct* forward-migration test for `store/migrate.rs`
-  is the worthwhile addition — currently only its downgrade-refusal branch is tested directly).
+- **Cleanup roadmap status: COMPLETE (R0–R6 all done, 2026-06-19).** **R0** (`ea4bad1`) + **R1** (`4c80eb7`)
+  + **R2** (`c04859a`) + **R3** (`71eafac`) + **R4** (`65cf819`) + **R5** (`3f07350`: split `core/testing.rs`
+  547 → `testing/` per-concern submodules, file-size guard zero outliers; honest-test audit found **zero
+  deletions**) + **R6** (`2dce185` direct `store::migrate` forward-migration test + the docs-convergence
+  commit). Each R-phase stopped for review before the next per the agreed sequence. **R6 = converge docs &
+  ledger** (`plan/06` §7): fixed `plan/03` `serde_yaml`→`serde_norway`, the post-refactor structural claims
+  in `plan/04`/`plan/06`/`ARCHITECTURE.md` (`ports/`, `supervisor/`, `core::testing/`, the live file-size
+  guard), added roadmap completion banners, and folded in the R5 coverage note as a direct migrate test
+  (count **106 → 107**). `KNOWN-DIVERGENCES.md` reviewed — no new entry (the serde swap is an internal dep
+  choice, not Solo behavior). **The cleanup track is finished; next is real feature work** (do not start it
+  without the user confirming the cleanup is signed off).
 - **Plan review:** user may still skim `plan/05` (Solo behavior), `plan/04` (architecture), `plan/02`
   (parity) and confirm before deep feature work — not blocking Phase 1.
 - **Agent native OAuth/login (E8) → Phase 7, no new work beyond launching right.** When Phase 7 lands,
@@ -1039,22 +1089,19 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-0. **Cleanup track (user's current priority — do before new features). R0–R5 are DONE**
-   (`ea4bad1` file-size guard; `4c80eb7` reusable `core::testing` behind a `testing` feature; `c04859a` split
-   `supervisor.rs`; `71eafac` `CorePorts` parameter object + single composition root, both
-   `too_many_arguments` allows removed, `ports.rs` split into `ports/{mod,bundle}.rs`; `65cf819` purged the
-   demo seam from the pure core; `3f07350` split `core/testing.rs` 547 → `testing/{mod,clock,spawner,
-   lock_releaser,runtime_state,repos,fixtures}.rs` — file-size guard now **zero outliers** — plus a
-   whole-suite honest-test audit that found **zero deletions** (every test asserts real behaviour; count
-   holds at **106**)). **R5 was stopped for review per the agreed sequence — review it, then execute R6,
-   the last R-phase.** One reviewable commit, starting and ending with `just lint && just test` green
-   (baseline **106 tests**). **R6 = converge docs & ledger** (`plan/06` §7): `plan/03` lists `serde_yaml`
-   but we ship `serde_norway` — fix the drift; refresh `PROGRESS.md` + `KNOWN-DIVERGENCES.md`; and fold in
-   R5's one honest coverage note — a *direct* forward-migration test for `store/migrate.rs` is the
-   worthwhile **addition** (today only its downgrade-refusal branch is tested directly; the create-table
-   branches are covered transitively via `store/lib.rs::open_enables_wal_and_migrates_to_the_current_version`).
-   Do **not** relocate inline tests to a `tests/` dir, delete the placeholder modules, or drop the stub
-   crates — all three were decided to stay (see Decisions above).
+0. **Cleanup track — COMPLETE (R0–R6 all done, 2026-06-19).** Commits: `ea4bad1` (R0 file-size guard) ·
+   `4c80eb7` (R1 reusable `core::testing` behind a `testing` feature) · `c04859a` (R2 split `supervisor.rs`)
+   · `71eafac` (R3 `CorePorts` param object + single composition root; both `too_many_arguments` allows gone;
+   `ports.rs` → `ports/{mod,bundle}.rs`) · `65cf819` (R4 purged the demo seam from the pure core) · `3f07350`
+   (R5 split `core/testing.rs` 547 → `testing/{mod,clock,spawner,lock_releaser,runtime_state,repos,fixtures}.rs`;
+   file-size guard **zero outliers**; honest-test audit, **zero deletions**) · `2dce185` + the docs-convergence
+   commit (R6: direct `store::migrate` forward-migration test, count **106 → 107**; reconciled `plan/03`
+   `serde_yaml`→`serde_norway`, the post-refactor structural claims, roadmap completion banners).
+   `just lint && just test` green: **107** (Rust **97** / UI **10**); file-size guard zero outliers.
+   **DO NOT start new feature work without the user confirming the cleanup is signed off** (the agreed gate
+   after the last R-phase). The locked decisions hold: tests stay **inline**; the 7 empty placeholder modules
+   and the 4 stub adapter crates **stay**; the stray root `package-lock.json` is **left** (do not rm/gitignore/
+   stage). Once signed off, begin real feature work — the deferred Phase-5 follow-up (items 2–3 below).
 1. **Runtime echo/control gate — CLOSED (2026-06-19).** A real human click on per-row **Start** for `shell`
    started it and `echo hi` echoed in the xterm — control wiring + core start path + the
    `Channel<Vec<u8>>`→`Uint8Array`→rAF boundary in `useTerminal.ts` all work. No longer blocks R2. **One

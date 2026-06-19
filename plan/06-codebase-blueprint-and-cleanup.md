@@ -104,7 +104,8 @@ do). Inside it:
 - **types vs behavior** — closed enums + newtypes + FSM transition functions live with the smallest unit
   that owns them; they are `pub` only as far as needed.
 - **the ~400-line split smell** (`CLAUDE.md` §15, counting *non-test* lines): when a `.rs` crosses it,
-  split by concern. `supervisor.rs` (491 code lines) is the current outlier — see R2 (§7).
+  split by concern. (`supervisor.rs` was the last outlier, split into `supervisor/` submodules in R2 and
+  `core::testing` into `testing/` submodules in R5; the file-size guard now reports zero outliers — §7.)
 
 ### 3.3 Frontend (`crates/app/ui/src`) — the placement map
 
@@ -130,7 +131,7 @@ trigger that tells you to reach for it. Use a pattern when its trigger fires —
 
 | Pattern | Where it lives now / will live | Reach for it when… |
 |---------|-------------------------------|--------------------|
-| **Ports & Adapters** | the whole app (`ports.rs` + adapter crates) | any OS/UI/transport/storage concern appears → define a trait in `core`, implement in an adapter |
+| **Ports & Adapters** | the whole app (`ports/` + adapter crates) | any OS/UI/transport/storage concern appears → define a trait in `core`, implement in an adapter |
 | **Facade / Anti-corruption layer** | `core::facade::Facade` (C8) | an adapter needs to *do* something → it calls one `Facade` method, never a context internal |
 | **Actor + supervision** | `supervisor/actor.rs` (one task per process) | a resource needs a single owner racing events (child vs stop) → give it a task + bounded `mpsc` |
 | **Finite state machine** | `ProcStatus::transition`, future `AgentActivity`, `Trust` | state has *legal transitions* → encode as `Result<New, IllegalTransition>`, never field mutation |
@@ -138,7 +139,7 @@ trigger that tells you to reach for it. Use a pattern when its trigger fires —
 | **CQRS-lite** | `Facade::snapshot` (query) vs `supervisor.start` (command) | reads must not block writes → cheap projection for reads, owning context for writes |
 | **Repository** | `store` (`ProjectRepo`/`TrustRepo`/…); future Todo/Scratchpad/Kv/Lock repos | durable aggregate → one focused trait per aggregate, SQLite behind it |
 | **Newtype + closed enum** | `ids.rs`, `process.rs` | a domain id/state → newtype/enum, never a bare `String`/`int` |
-| **Null Object** | `Noop{LockReleaser,RuntimeState,OrphanControl}` in `ports.rs` | a **driven** subsystem is optional → ship a `Noop` default so the core runs without the real adapter (§8) |
+| **Null Object** | `Noop{LockReleaser,RuntimeState,OrphanControl}` in `ports/mod.rs` | a **driven** subsystem is optional → ship a `Noop` default so the core runs without the real adapter (§8) |
 | **Parameter Object / Builder** | `core::ports::CorePorts` + `CorePortsBuilder` — the port set for `Facade::new`/`Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) → group them in a struct/builder |
 | **Registry** | **to add** — MCP tool registry (P8), agent-tool defs (P7) | a growing set of "one of many" handlers → register entries, don't extend a giant `match` |
 | **Strategy** | **to add** — per-provider idle heuristics (P7), per-agent-tool launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
@@ -265,13 +266,14 @@ The rules to **hold**:
   surface grows painful, evaluate generating TS from Rust (e.g. `ts-rs`) — flagged for the user (build/size
   trade-off), not adopted speculatively.
 
-**The one real DRY gap today — shared test fakes.** `core::testing` (the `FakeSpawner`, `MockClock`,
-`FakeTrustRepo`, `FakeProjectRepo`) is `#[cfg(test)] mod testing;` — **private to `core`'s own tests**. As
-`store`, `pty`, and the future `mcp`/`httpapi` adapters grow tests, they cannot reuse these fakes and will
-re-roll them → drift. Fix (R1, §7): re-gate as `#[cfg(any(test, feature = "testing"))] pub mod testing;` and
-add `soloist-core = { path = "../core", features = ["testing"] }` to each adapter's `[dev-dependencies]`.
-One set of fakes, reused everywhere. (This keeps tests inline per the project decision — it changes *who can
-reach the fakes*, not *where tests live*.)
+**Shared test fakes — resolved (R1/R5).** `core::testing` (the `FakeSpawner`, `MockClock`, `FakeTrustRepo`,
+`FakeProjectRepo`, …) is exposed behind a Cargo `testing` feature —
+`#[cfg(any(test, feature = "testing"))] pub mod testing;` — so `store`/`pty` (and the future `mcp`/`httpapi`
+adapters) reuse the **one** fake set via `soloist-core = { path = "../core", features = ["testing"] }` in
+their `[dev-dependencies]` instead of re-rolling fakes. The fakes live in per-concern submodules under
+`core::testing/` (`clock`/`spawner`/`repos`/`runtime_state`/`lock_releaser`/`fixtures`, split in R5); the
+feature is off by default, so they never compile into a production build. Tests stay inline per the project
+decision — this changed *who can reach the fakes*, not *where tests live*.
 
 ---
 
@@ -284,6 +286,10 @@ are **R-phases** (refactor), orthogonal to the build phases.
 
 > **Decisions already locked by the user (2026-06-18):** tests stay **inline** (trim, don't relocate); the
 > empty core modules **and** the four stub adapter crates **stay** as documented placeholders (§3.1).
+
+> **Status (2026-06-19): R0–R6 are all complete.** Commits: R0 `ea4bad1` · R1 `4c80eb7` · R2 `c04859a` ·
+> R3 `71eafac` · R4 `65cf819` · R5 `3f07350` · R6 (this convergence). See `PROGRESS.md` for per-phase
+> evidence. The phase descriptions below are kept as the record of the executed cleanup.
 
 ### R0 — Blueprint & guardrails (this session; docs only, no code logic)
 - Write this file; add the architecture section to `CLAUDE.md` (done with R0).
@@ -330,9 +336,11 @@ are **R-phases** (refactor), orthogonal to the build phases.
   green.
 
 ### R6 — Converge docs & ledger
-- Reconcile any plan-doc drift this cleanup surfaced (e.g. `03` still lists `serde_yaml`; we ship
-  `serde_norway` — already a known divergence); update `PROGRESS.md` (status, evidence, next pointer) and
-  `KNOWN-DIVERGENCES.md` if any new intentional divergence was introduced.
+- Reconcile any plan-doc drift this cleanup surfaced (e.g. `03` listed `serde_yaml` though we ship
+  `serde_norway` — a stale-doc fix, **not** a Solo-behavior divergence, so it stays out of
+  `KNOWN-DIVERGENCES.md`; also the post-R0–R5 structural moves: `ports/`, `supervisor/`, `core::testing/`,
+  the file-size guard now live); update `PROGRESS.md` (status, evidence, next pointer) and
+  `KNOWN-DIVERGENCES.md` only if a genuinely new intentional divergence was introduced (none this cleanup).
 - **Done when:** docs match the tree; `PROGRESS.md` reflects the cleanup; all gates green.
 
 **Sequencing rationale:** R0 sets the bar and the file-size signal; R1 makes the later phases' tests cheap
@@ -396,7 +404,7 @@ composition root, with the type system and CI proving the rest of the app is unt
 | Invariant | Gate | Status |
 |-----------|------|--------|
 | `core` imports no adapter crate | `scripts/check-core-deps.sh` (`just lint`, CI) | live (K7) |
-| No file-size god-files | `scripts/check-file-size.sh` (R0) | to add |
+| No file-size god-files | `scripts/check-file-size.sh` (`just lint`, CI) | live (warn-only) |
 | No `unwrap`/`expect`/`panic` in `core` long-running paths | `#![deny(clippy::unwrap_used,…)]` in `core` | live |
 | No clippy warnings / formatting drift | `clippy -D warnings`, `rustfmt`, `tsc`, ESLint, Prettier | live |
 | Closed-enum exhaustiveness across the boundary | exhaustive `match` (Rust) + exhaustive switch (`projection.ts`) | live |
