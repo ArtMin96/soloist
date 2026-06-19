@@ -20,6 +20,7 @@ const PROCESS: ProcessView = {
   label: "assistant",
   status: "Running",
   exit_code: null,
+  requires_trust: false,
 };
 
 const noop = () => {};
@@ -40,7 +41,15 @@ afterEach(() => {
 describe("TerminalPane chrome", () => {
   it("shows the label until an OSC title arrives, then the title", async () => {
     mockIPC(() => {}, { shouldMockEvents: true });
-    render(<TerminalPane process={PROCESS} onStart={noop} onStop={noop} onRestart={noop} />);
+    render(
+      <TerminalPane
+        process={PROCESS}
+        onStart={noop}
+        onStop={noop}
+        onRestart={noop}
+        onTrust={noop}
+      />,
+    );
     await flush();
     expect(screen.getByText("assistant")).toBeTruthy();
 
@@ -57,7 +66,15 @@ describe("TerminalPane chrome", () => {
 
   it("ignores a title meant for a different process", async () => {
     mockIPC(() => {}, { shouldMockEvents: true });
-    render(<TerminalPane process={PROCESS} onStart={noop} onStop={noop} onRestart={noop} />);
+    render(
+      <TerminalPane
+        process={PROCESS}
+        onStart={noop}
+        onStop={noop}
+        onRestart={noop}
+        onTrust={noop}
+      />,
+    );
     await flush();
 
     await act(async () => {
@@ -68,7 +85,15 @@ describe("TerminalPane chrome", () => {
 
   it("raises a bell indicator when the process rings the bell", async () => {
     mockIPC(() => {}, { shouldMockEvents: true });
-    render(<TerminalPane process={PROCESS} onStart={noop} onStop={noop} onRestart={noop} />);
+    render(
+      <TerminalPane
+        process={PROCESS}
+        onStart={noop}
+        onStop={noop}
+        onRestart={noop}
+        onTrust={noop}
+      />,
+    );
     await flush();
     expect(screen.queryByLabelText("Terminal bell")).toBeNull();
 

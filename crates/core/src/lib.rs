@@ -43,10 +43,13 @@ mod sync;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
-pub use config::{ConfigEngine, ConfigError, ConfigSync, ProcessSpec, Rename, SoloYml, SyncError};
+pub use config::{
+    ConfigEngine, ConfigError, ConfigSync, ProcessSpec, Rename, SoloYml, SyncError,
+    TrustReviewCommand,
+};
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
-pub use facade::{Facade, LoadProjectError};
+pub use facade::{Facade, LoadProjectError, TrustCommandError};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};
 pub use orphans::{OrphanInfo, OrphanReport};

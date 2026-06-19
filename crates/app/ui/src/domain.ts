@@ -21,6 +21,9 @@ export interface ProcessView {
   label: string;
   status: ProcStatus;
   exit_code: number | null;
+  // True for a trust-gated command whose variant is not yet trusted; the UI blocks its
+  // start and offers a trust affordance.
+  requires_trust: boolean;
 }
 
 // Rendered output snapshot (escape sequences applied to plain text) — the Logs source.
@@ -53,6 +56,15 @@ export interface OrphanInfo {
   pgid: number;
 }
 
+// One command awaiting trust after a config change — enough detail to review what it
+// runs (command, working dir, env) before trusting it. Carried by ConfigChanged.
+export interface TrustReviewCommand {
+  name: string;
+  command: string;
+  working_dir: string | null;
+  env: Record<string, string>;
+}
+
 // Mirrors the core's `DomainEvent` (serde `tag = "type"`).
 export type DomainEvent =
   | {
@@ -62,6 +74,7 @@ export type DomainEvent =
       kind: ProcessKind;
       label: string;
       status: ProcStatus;
+      requires_trust: boolean;
     }
   | {
       type: "ProcessStatusChanged";
@@ -71,7 +84,13 @@ export type DomainEvent =
       exit_code: number | null;
     }
   | { type: "ProcessRemoved"; id: number }
-  | { type: "ConfigChanged"; project: number; diff: ConfigSync; requires_trust: boolean }
+  | {
+      type: "ConfigChanged";
+      project: number;
+      diff: ConfigSync;
+      requires_trust: boolean;
+      commands: TrustReviewCommand[];
+    }
   | { type: "TerminalTitleChanged"; id: number; title: string }
   | { type: "TerminalBell"; id: number }
   | { type: "OrphansFound"; orphans: OrphanInfo[] };

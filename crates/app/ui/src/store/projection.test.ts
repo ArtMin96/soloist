@@ -9,6 +9,7 @@ const starting: ProcessView = {
   label: "web",
   status: "Starting",
   exit_code: null,
+  requires_trust: false,
 };
 
 describe("applyEvent", () => {
@@ -20,8 +21,22 @@ describe("applyEvent", () => {
       kind: "Command",
       label: "web",
       status: "Starting",
+      requires_trust: false,
     });
     expect(next).toEqual([starting]);
+  });
+
+  it("carries the spawned command's trust state", () => {
+    const next = applyEvent([], {
+      type: "ProcessSpawned",
+      id: 2,
+      project: 1,
+      kind: "Command",
+      label: "api",
+      status: "Stopped",
+      requires_trust: true,
+    });
+    expect(next[0]?.requires_trust).toBe(true);
   });
 
   it("ignores a duplicate spawn for the same id", () => {
@@ -32,6 +47,7 @@ describe("applyEvent", () => {
       kind: "Command",
       label: "web",
       status: "Starting",
+      requires_trust: false,
     });
     expect(next).toHaveLength(1);
   });

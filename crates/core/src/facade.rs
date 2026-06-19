@@ -13,7 +13,7 @@ use tokio::sync::broadcast;
 use crate::config::{ConfigEngine, ConfigError};
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProjectId;
-use crate::ports::CorePorts;
+use crate::ports::{CorePorts, StoreError};
 use crate::process::ProcessView;
 use crate::projects::{ProjectError, Projects};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
@@ -102,6 +102,30 @@ impl Facade {
         self.supervisor.start_all(record.id)?;
         Ok(record.id)
     }
+
+    /// Trusts a project's command by name: resolves the command to its current variant
+    /// from the loaded `solo.yml`, records trust for that variant, and updates the read
+    /// model so the command becomes startable. One method behind the trust gate, so the
+    /// UI, MCP, and CLI grant trust identically. Untrusting is not yet exposed.
+    pub fn trust_command(&self, project: ProjectId, name: &str) -> Result<(), TrustCommandError> {
+        let spec = self
+            .config
+            .spec(project, name)
+            .ok_or(TrustCommandError::NotFound)?;
+        self.trust.trust(project, &spec)?;
+        self.supervisor.mark_trusted(project, &spec.variant_hash());
+        Ok(())
+    }
+}
+
+/// Why trusting a command failed: it is not in the loaded config, or the durable trust
+/// write failed.
+#[derive(Debug, thiserror::Error)]
+pub enum TrustCommandError {
+    #[error("no such command in the loaded project config")]
+    NotFound,
+    #[error(transparent)]
+    Store(#[from] StoreError),
 }
 
 /// Why opening a project failed: resolving/persisting its root, reading its `solo.yml`,
@@ -250,5 +274,59 @@ mod tests {
         let project = facade.load_project(dir.path()).expect("load");
         assert_eq!(project, record.id);
         wait_for(&mut rx, ProcStatus::Running).await;
+    }
+
+    #[tokio::test]
+    async fn trust_command_makes_an_untrusted_command_startable() {
+        let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            crate::config::config_path(dir.path()),
+            "processes:\n  Web:\n    command: npm run dev\n    auto_start: false\n",
+        )
+        .expect("write solo.yml");
+        let project = facade.load_project(dir.path()).expect("load");
+
+        // Registered untrusted: the read model flags it and the gate refuses to start it.
+        let web = || {
+            facade
+                .snapshot()
+                .into_iter()
+                .find(|p| p.label == "Web")
+                .expect("Web")
+        };
+        assert!(web().requires_trust);
+        assert!(matches!(
+            facade.supervisor().start(web().id),
+            Err(SupervisorError::Untrusted)
+        ));
+
+        facade
+            .trust_command(project, "Web")
+            .expect("trust the command");
+
+        // The flag clears and the same start path now succeeds.
+        assert!(!web().requires_trust);
+        facade
+            .supervisor()
+            .start(web().id)
+            .expect("starts once trusted");
+    }
+
+    #[tokio::test]
+    async fn trust_command_rejects_an_unknown_command() {
+        let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            crate::config::config_path(dir.path()),
+            "processes:\n  Web:\n    command: npm run dev\n",
+        )
+        .expect("write solo.yml");
+        let project = facade.load_project(dir.path()).expect("load");
+
+        assert!(matches!(
+            facade.trust_command(project, "Missing"),
+            Err(TrustCommandError::NotFound)
+        ));
     }
 }

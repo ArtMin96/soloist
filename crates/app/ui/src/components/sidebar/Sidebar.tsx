@@ -10,6 +10,7 @@ interface SidebarProps {
   onStart: (id: number) => void;
   onStop: (id: number) => void;
   onRestart: (id: number) => void;
+  onTrust: (id: number) => void;
 }
 
 // The process tree: the three subtype groups, each collapsible with persisted state. It
@@ -22,6 +23,7 @@ export function Sidebar({
   onStart,
   onStop,
   onRestart,
+  onTrust,
 }: SidebarProps) {
   const groups = groupByKind(processes);
   const [collapsed, setCollapsed] = useCollapseState();
@@ -42,6 +44,7 @@ export function Sidebar({
           onStart={onStart}
           onStop={onStop}
           onRestart={onRestart}
+          onTrust={onTrust}
         />
       ))}
     </nav>

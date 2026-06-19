@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
+import { emit } from "@tauri-apps/api/event";
 import type { ProcessView } from "@/domain";
 
 // The terminal hook drives the real xterm.js emulator against a measured DOM surface,
@@ -15,10 +16,42 @@ vi.mock("@/components/terminal/useTerminal", () => ({
 import App from "@/App";
 
 const STACK: ProcessView[] = [
-  { id: 1, project: 1, kind: "Agent", label: "assistant", status: "Stopped", exit_code: null },
-  { id: 2, project: 1, kind: "Terminal", label: "shell", status: "Running", exit_code: null },
-  { id: 3, project: 1, kind: "Command", label: "build", status: "Stopped", exit_code: null },
-  { id: 4, project: 1, kind: "Command", label: "web", status: "Running", exit_code: null },
+  {
+    id: 1,
+    project: 1,
+    kind: "Agent",
+    label: "assistant",
+    status: "Stopped",
+    exit_code: null,
+    requires_trust: false,
+  },
+  {
+    id: 2,
+    project: 1,
+    kind: "Terminal",
+    label: "shell",
+    status: "Running",
+    exit_code: null,
+    requires_trust: false,
+  },
+  {
+    id: 3,
+    project: 1,
+    kind: "Command",
+    label: "build",
+    status: "Stopped",
+    exit_code: null,
+    requires_trust: true,
+  },
+  {
+    id: 4,
+    project: 1,
+    kind: "Command",
+    label: "web",
+    status: "Running",
+    exit_code: null,
+    requires_trust: false,
+  },
 ];
 
 // Stand in for the Tauri backend: answer the snapshot/identity commands with a fixture and
@@ -101,5 +134,57 @@ describe("App dashboard", () => {
       expect(screen.getByText(/No project loaded/)).toBeTruthy();
     });
     expect(screen.queryAllByRole("option")).toHaveLength(0);
+  });
+
+  it("blocks an untrusted command's start and trusts it from the row", async () => {
+    let trusted: { project: number; name: string } | null = null;
+    mockIPC((cmd, args) => {
+      if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
+      if (cmd === "proc_list") return STACK;
+      if (cmd === "config_trust") {
+        trusted = args as { project: number; name: string };
+        return undefined;
+      }
+      return undefined;
+    });
+    render(<App />);
+    await screen.findAllByRole("option");
+
+    // The untrusted command (row 3) cannot start; it offers a trust affordance instead.
+    const untrusted = within(row(3));
+    expect((untrusted.getByLabelText("Start") as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(untrusted.getByLabelText("Trust"));
+    await waitFor(() => expect(trusted).toEqual({ project: 1, name: "build" }));
+  });
+
+  it("pops the trust dialog when a config change needs trust", async () => {
+    mockIPC(
+      (cmd) => {
+        if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
+        if (cmd === "proc_list") return STACK;
+        return undefined;
+      },
+      { shouldMockEvents: true },
+    );
+    render(<App />);
+    await screen.findAllByRole("option");
+    // Let the trust listener register before emitting — events have no replay.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await act(async () => {
+      await emit("domain-event", {
+        type: "ConfigChanged",
+        project: 1,
+        requires_trust: true,
+        diff: { added: ["Api"], updated: [], removed: [], renamed: [] },
+        commands: [{ name: "Api", command: "cargo run", working_dir: null, env: {} }],
+      });
+    });
+
+    expect(screen.getByText("Trust changed commands")).toBeTruthy();
+    expect(screen.getByText("cargo run")).toBeTruthy();
   });
 });

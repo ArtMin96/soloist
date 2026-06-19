@@ -133,6 +133,17 @@ impl Registry {
         lock(&self.inner).get(&id).map(|entry| entry.view.status)
     }
 
+    /// Clears the trust-required flag on every entry whose variant matches within
+    /// `project` — used when the user trusts a command so the next snapshot reflects it.
+    pub(crate) fn mark_variant_trusted(&self, project: ProjectId, variant: &Hash) {
+        let mut guard = lock(&self.inner);
+        for entry in guard.values_mut() {
+            if entry.view.project == project && entry.trust_variant.as_ref() == Some(variant) {
+                entry.view.requires_trust = false;
+            }
+        }
+    }
+
     /// Updates the cached status and exit code for `id` (no-op once removed).
     pub(crate) fn set_status(&self, id: ProcessId, status: ProcStatus, exit_code: Option<i32>) {
         let mut guard = lock(&self.inner);

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Play, RotateCw, Square } from "lucide-react";
+import { Play, RotateCw, ShieldCheck, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { canRestart, canStart, canStop } from "@/lib/status";
 import type { ProcStatus } from "@/domain";
@@ -12,21 +12,38 @@ interface ProcessControlsProps {
   onStop: () => void;
   onRestart: () => void;
   size?: ControlSize;
+  /** A trust-gated command whose variant is not trusted — Start is blocked until then. */
+  requiresTrust?: boolean;
+  /** Trust the command; when provided and `requiresTrust`, a trust affordance is shown. */
+  onTrust?: () => void;
 }
 
 // The per-process start / restart / stop cluster, reused in the sidebar row and the
 // terminal header. Enabled state is derived from the status FSM (single source in
-// `lib/status`), so a control is never offered for a transition the core would reject.
+// `lib/status`), so a control is never offered for a transition the core would reject. An
+// untrusted command blocks Start and surfaces a trust affordance (A6).
 export function ProcessControls({
   status,
   onStart,
   onStop,
   onRestart,
   size = "icon-sm",
+  requiresTrust = false,
+  onTrust,
 }: ProcessControlsProps) {
   return (
     <div className="flex items-center gap-0.5">
-      <Control label="Start" size={size} disabled={!canStart(status)} onClick={onStart}>
+      {requiresTrust && onTrust && (
+        <Control label="Trust" size={size} disabled={false} onClick={onTrust}>
+          <ShieldCheck />
+        </Control>
+      )}
+      <Control
+        label="Start"
+        size={size}
+        disabled={!canStart(status) || requiresTrust}
+        onClick={onStart}
+      >
         <Play />
       </Control>
       <Control label="Restart" size={size} disabled={!canRestart(status)} onClick={onRestart}>

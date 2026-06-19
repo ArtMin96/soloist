@@ -34,6 +34,19 @@ pub async fn project_load(path: String, facade: State<'_, Facade>) -> Result<Pro
         .map_err(|err| err.to_string())
 }
 
+/// Trusts a project's command by name so it can start (A6). Routes to the one core
+/// trust gate; the read model clears the command's blocked state, which the UI re-reads.
+#[tauri::command]
+pub async fn config_trust(
+    project: u64,
+    name: String,
+    facade: State<'_, Facade>,
+) -> Result<(), String> {
+    facade
+        .trust_command(ProjectId::from_raw(project), &name)
+        .map_err(|err| err.to_string())
+}
+
 /// Starts one process; refused by the core trust gate if its command is untrusted.
 #[tauri::command]
 pub async fn proc_start(id: u64, facade: State<'_, Facade>) -> Result<(), String> {

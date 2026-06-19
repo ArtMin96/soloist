@@ -10,6 +10,7 @@
 pub mod diff;
 pub mod load;
 pub mod model;
+pub mod review;
 pub mod sync;
 
 pub use diff::{diff, ConfigSync, Rename};
@@ -17,4 +18,5 @@ pub use load::{
     config_path, load, load_or_empty, parse, ConfigError, CONFIG_FILENAME, MAX_CONFIG_BYTES,
 };
 pub use model::{ProcessSpec, SoloYml};
+pub use review::TrustReviewCommand;
 pub use sync::{ConfigEngine, SyncError};

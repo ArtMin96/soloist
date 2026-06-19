@@ -12,7 +12,7 @@
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-use crate::config::ConfigSync;
+use crate::config::{ConfigSync, TrustReviewCommand};
 use crate::ids::{ProcessId, ProjectId};
 use crate::orphans::OrphanInfo;
 use crate::process::{ProcStatus, ProcessKind};
@@ -22,13 +22,16 @@ use crate::process::{ProcStatus, ProcessKind};
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type")]
 pub enum DomainEvent {
-    /// A new process entered the registry (initial status included).
+    /// A new process entered the registry (initial status included). `requires_trust`
+    /// is true for a trust-gated command whose variant is not yet trusted — the UI
+    /// blocks its start and offers a trust affordance.
     ProcessSpawned {
         id: ProcessId,
         project: ProjectId,
         kind: ProcessKind,
         label: String,
         status: ProcStatus,
+        requires_trust: bool,
     },
     /// A process moved between lifecycle states. `exit_code` is set on a terminal
     /// transition driven by the child exiting on its own (`None` when terminated by a
@@ -42,12 +45,14 @@ pub enum DomainEvent {
     /// A process left the registry.
     ProcessRemoved { id: ProcessId },
     /// A project's `solo.yml` changed on disk. Carries the add/update/remove/rename
-    /// diff and whether any added/updated command now needs (re-)trust. Sync never
-    /// starts a process — this event only informs adapters of the change.
+    /// diff, whether any added/updated command now needs (re-)trust, and the detail of
+    /// each command awaiting trust (so the review dialog can show what will run). Sync
+    /// never starts a process — this event only informs adapters of the change.
     ConfigChanged {
         project: ProjectId,
         diff: ConfigSync,
         requires_trust: bool,
+        commands: Vec<TrustReviewCommand>,
     },
     /// A process set its terminal title via an OSC sequence. Drives window/tab titles
     /// and feeds the agent idle heuristics that watch title stability.

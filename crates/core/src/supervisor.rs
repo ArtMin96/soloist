@@ -106,6 +106,7 @@ impl Supervisor {
             trust_variant,
             auto_start,
         } = registration;
+        let requires_trust = self.requires_trust(project, trust_variant.as_ref());
         let view = ProcessView {
             id,
             project,
@@ -113,6 +114,7 @@ impl Supervisor {
             label: label.clone(),
             status: ProcStatus::Stopped,
             exit_code: None,
+            requires_trust,
         };
         self.registry
             .add(view, launch, project_root, trust_variant, auto_start);
@@ -122,8 +124,26 @@ impl Supervisor {
             kind,
             label,
             status: ProcStatus::Stopped,
+            requires_trust,
         });
         id
+    }
+
+    /// Whether a command variant still needs trust before it can run. Terminals and
+    /// agents are ungated (`None`). A store read failure fails closed (treated as
+    /// needing trust), matching the start gate, which also refuses what it cannot verify.
+    fn requires_trust(&self, project: ProjectId, variant: Option<&Hash>) -> bool {
+        match variant {
+            Some(hash) => !self.trust.is_trusted(project, hash).unwrap_or(false),
+            None => false,
+        }
+    }
+
+    /// Records that `variant`'s commands in `project` are now trusted, clearing the
+    /// read-model flag so they become startable. The durable trust write happens in the
+    /// trust store (see [`crate::facade::Facade::trust_command`]); this only reflects it.
+    pub fn mark_trusted(&self, project: ProjectId, variant: &Hash) {
+        self.registry.mark_variant_trusted(project, variant);
     }
 
     /// Starts a process. A trust-gated command whose variant is not trusted is refused

@@ -82,7 +82,8 @@ impl ProcStatus {
 /// A cheap, cloneable snapshot of one process for adapters to render. Holds no
 /// behaviour — the authoritative state lives in the owning actor and registry. The
 /// `project` scopes it; `exit_code` is the most recent terminal exit code (`None`
-/// while running, or when terminated by a signal).
+/// while running, or when terminated by a signal); `requires_trust` is true for a
+/// trust-gated command whose variant is not yet trusted (the UI blocks its start).
 #[derive(Clone, Debug, Serialize)]
 pub struct ProcessView {
     pub id: ProcessId,
@@ -91,6 +92,7 @@ pub struct ProcessView {
     pub label: String,
     pub status: ProcStatus,
     pub exit_code: Option<i32>,
+    pub requires_trust: bool,
 }
 
 #[cfg(test)]

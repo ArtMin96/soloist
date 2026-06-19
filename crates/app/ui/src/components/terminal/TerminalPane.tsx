@@ -10,12 +10,13 @@ interface TerminalPaneProps {
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
+  onTrust: () => void;
 }
 
 // The interactive PTY for the selected process: a header naming it with its status and
 // controls, over the live xterm.js surface. The emulator and IPC live in `useTerminal`;
 // this stays presentational.
-export function TerminalPane({ process, onStart, onStop, onRestart }: TerminalPaneProps) {
+export function TerminalPane({ process, onStart, onStop, onRestart, onTrust }: TerminalPaneProps) {
   const { hostRef, state } = useTerminal(process);
   const { title, ringing } = useTerminalChrome(process.id);
 
@@ -39,6 +40,8 @@ export function TerminalPane({ process, onStart, onStop, onRestart }: TerminalPa
             onStart={onStart}
             onStop={onStop}
             onRestart={onRestart}
+            requiresTrust={process.requires_trust}
+            onTrust={onTrust}
           />
         </div>
       </header>

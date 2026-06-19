@@ -3,7 +3,7 @@ import { groupByKind } from "@/store/grouping";
 import type { ProcessView } from "@/domain";
 
 function process(id: number, kind: ProcessView["kind"], label: string): ProcessView {
-  return { id, project: 1, kind, label, status: "Stopped", exit_code: null };
+  return { id, project: 1, kind, label, status: "Stopped", exit_code: null, requires_trust: false };
 }
 
 describe("groupByKind", () => {

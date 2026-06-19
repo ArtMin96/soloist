@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex};
 
 use super::diff::{diff, ConfigSync};
 use super::load::{config_path, load_or_empty, ConfigError};
-use super::model::SoloYml;
+use super::model::{ProcessSpec, SoloYml};
+use super::review::TrustReviewCommand;
 use crate::events::{DomainEvent, EventBus};
 use crate::hash::{content_hash, Hash};
 use crate::ids::ProjectId;
@@ -95,7 +96,8 @@ impl ConfigEngine {
         }
 
         let changes = diff(&prev, &config);
-        let requires_trust = self.requires_trust(project, &config, &changes)?;
+        let commands = self.pending_trust(project, &config, &changes)?;
+        let requires_trust = !commands.is_empty();
 
         lock(&self.states).insert(
             project,
@@ -111,9 +113,18 @@ impl ConfigEngine {
                 project,
                 diff: changes.clone(),
                 requires_trust,
+                commands,
             });
         }
         Ok(Some(changes))
+    }
+
+    /// The current spec for a command by name in a loaded project, if present. Reads
+    /// the last-synced snapshot — used to resolve a trust decision to a concrete
+    /// variant (see [`crate::facade::Facade::trust_command`]).
+    pub fn spec(&self, project: ProjectId, name: &str) -> Option<ProcessSpec> {
+        let states = lock(&self.states);
+        states.get(&project)?.last.processes.get(name).cloned()
     }
 
     fn snapshot(&self, project: ProjectId) -> Option<(PathBuf, Hash, SoloYml)> {
@@ -122,30 +133,32 @@ impl ConfigEngine {
         Some((state.root.clone(), state.last_hash, state.last.clone()))
     }
 
-    /// Re-trust is required when any added, updated, or rename-target command's
-    /// current variant is not already trusted. Checking by *variant* is what makes a
-    /// pure rename free — its target variant equals the source's, which was already
-    /// trusted — while a rename that also edits command/dir/env (a new variant) still
-    /// correctly demands re-trust.
-    fn requires_trust(
+    /// The commands a change touched (added, updated, or rename target) whose current
+    /// variant is not trusted — exactly what the review dialog offers to trust, with
+    /// the detail to show what each will run. Checking by *variant* is what makes a
+    /// pure rename free — its target variant equals the source's, already trusted — so
+    /// it does not appear here, while a rename that also edits command/dir/env (a new
+    /// variant) correctly does.
+    fn pending_trust(
         &self,
         project: ProjectId,
         config: &SoloYml,
         changes: &ConfigSync,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<Vec<TrustReviewCommand>, StoreError> {
         let touched = changes
             .added
             .iter()
             .chain(changes.updated.iter())
             .chain(changes.renamed.iter().map(|rename| &rename.to));
+        let mut pending = Vec::new();
         for name in touched {
             if let Some(spec) = config.processes.get(name) {
                 if !self.trust.is_trusted(project, &spec.variant_hash())? {
-                    return Ok(true);
+                    pending.push(TrustReviewCommand::from_spec(name, spec));
                 }
             }
         }
-        Ok(false)
+        Ok(pending)
     }
 }
 
@@ -203,6 +216,34 @@ mod tests {
             }) => {
                 assert!(requires_trust, "a new untrusted command requires trust");
                 assert_eq!(diff.added, vec!["Api"]);
+            }
+            other => panic!("expected ConfigChanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_change_event_carries_the_untrusted_command_detail() {
+        let (engine, _trust, mut rx, project, dir) =
+            setup("processes:\n  Web:\n    command: npm run dev\n");
+        write(
+            &config_path(dir.path()),
+            "processes:\n  Web:\n    command: npm run dev\n  Api:\n    command: cargo run\n    working_dir: api\n    env:\n      PORT: '4000'\n",
+        );
+
+        engine.sync(project).expect("sync ok").expect("a change");
+
+        match rx.try_recv() {
+            Ok(DomainEvent::ConfigChanged { commands, .. }) => {
+                assert_eq!(
+                    commands.len(),
+                    1,
+                    "only the new untrusted command is pending"
+                );
+                let api = &commands[0];
+                assert_eq!(api.name, "Api");
+                assert_eq!(api.command, "cargo run");
+                assert_eq!(api.working_dir.as_deref(), Some("api"));
+                assert_eq!(api.env.get("PORT").map(String::as_str), Some("4000"));
             }
             other => panic!("expected ConfigChanged, got {other:?}"),
         }

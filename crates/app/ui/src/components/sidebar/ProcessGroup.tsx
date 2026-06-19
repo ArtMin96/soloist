@@ -12,6 +12,7 @@ interface ProcessGroupProps {
   onStart: (id: number) => void;
   onStop: (id: number) => void;
   onRestart: (id: number) => void;
+  onTrust: (id: number) => void;
 }
 
 // One collapsible subtype group (Agents / Terminals / Commands). The header is a small
@@ -25,6 +26,7 @@ export function ProcessGroup({
   onStart,
   onStop,
   onRestart,
+  onTrust,
 }: ProcessGroupProps) {
   return (
     <Collapsible.Root open={open} onOpenChange={onOpenChange} className="select-none">
@@ -56,6 +58,7 @@ export function ProcessGroup({
                 onStart={() => onStart(process.id)}
                 onStop={() => onStop(process.id)}
                 onRestart={() => onRestart(process.id)}
+                onTrust={() => onTrust(process.id)}
               />
             ))
           )}

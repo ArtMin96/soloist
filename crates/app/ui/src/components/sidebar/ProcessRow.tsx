@@ -10,11 +10,13 @@ interface ProcessRowProps {
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
+  onTrust: () => void;
 }
 
 // One process in the tree: status dot + name, with per-row controls revealed on hover or
-// focus (always shown for the selected row). The selected row carries a full-height azure
-// marker — a selection affordance, not a decorative side-stripe.
+// focus (always shown for the selected row, and for an untrusted command so its trust
+// affordance stays visible). The selected row carries a full-height azure marker — a
+// selection affordance, not a decorative side-stripe.
 export function ProcessRow({
   process,
   selected,
@@ -22,6 +24,7 @@ export function ProcessRow({
   onStart,
   onStop,
   onRestart,
+  onTrust,
 }: ProcessRowProps) {
   return (
     <div
@@ -54,7 +57,7 @@ export function ProcessRow({
         className={cn(
           "shrink-0 opacity-0 transition-opacity",
           "group-hover/row:opacity-100 group-focus-within/row:opacity-100",
-          selected && "opacity-100",
+          (selected || process.requires_trust) && "opacity-100",
         )}
       >
         <ProcessControls
@@ -63,6 +66,8 @@ export function ProcessRow({
           onStart={onStart}
           onStop={onStop}
           onRestart={onRestart}
+          requiresTrust={process.requires_trust}
+          onTrust={onTrust}
         />
       </div>
     </div>

@@ -18,6 +18,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
           label: event.label,
           status: event.status,
           exit_code: null,
+          requires_trust: event.requires_trust,
         },
       ];
     case "ProcessStatusChanged":

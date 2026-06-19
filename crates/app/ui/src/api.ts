@@ -29,6 +29,12 @@ export function projectLoad(path: string): Promise<number> {
   return invoke<number>("project_load", { path });
 }
 
+// Trusts a project's command by name (the core trust gate) so it can start. The read
+// model clears the command's blocked state; callers re-read the snapshot to reflect it.
+export function configTrust(project: number, name: string): Promise<void> {
+  return invoke<void>("config_trust", { project, name });
+}
+
 export function procStart(id: number): Promise<void> {
   return invoke<void>("proc_start", { id });
 }

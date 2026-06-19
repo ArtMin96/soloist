@@ -107,6 +107,7 @@ pub fn run() {
             app_info,
             commands::proc_list,
             commands::project_load,
+            commands::config_trust,
             commands::proc_start,
             commands::proc_stop,
             commands::proc_restart,
