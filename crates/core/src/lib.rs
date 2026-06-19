@@ -60,7 +60,7 @@ pub use ports::{
     SpawnError, SpawnSpec, Spawned, Store, StoreError, TokioClock, TrustRepo,
 };
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView};
-pub use projects::{ProjectError, Projects};
+pub use projects::{ProjectError, ProjectView, Projects};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};
 pub use terminal::{LogLine, PtyChunk, RenderedScreen};
 pub use trust::{Trust, TrustStore};

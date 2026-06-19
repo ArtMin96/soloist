@@ -9,6 +9,8 @@
 //! gap-filled stream. The channel is bounded so a stalled subscriber can never grow
 //! memory without limit.
 
+use std::path::PathBuf;
+
 use serde::Serialize;
 use tokio::sync::broadcast;
 
@@ -44,6 +46,14 @@ pub enum DomainEvent {
     },
     /// A process left the registry.
     ProcessRemoved { id: ProcessId },
+    /// A project was opened: its durable id, resolved display name, and root. Lets
+    /// adapters add the project to their read model live, without re-querying the
+    /// snapshot. Carries the same display identity as [`crate::projects::ProjectView`].
+    ProjectOpened {
+        id: ProjectId,
+        name: String,
+        root: PathBuf,
+    },
     /// A project's `solo.yml` changed on disk. Carries the add/update/remove/rename
     /// diff, whether any added/updated command now needs (re-)trust, and the detail of
     /// each command awaiting trust (so the review dialog can show what will run). Sync

@@ -15,7 +15,7 @@ use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProjectId;
 use crate::ports::{CorePorts, StoreError};
 use crate::process::ProcessView;
-use crate::projects::{ProjectError, Projects};
+use crate::projects::{ProjectError, ProjectView, Projects};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::trust::TrustStore;
 
@@ -100,6 +100,20 @@ impl Facade {
         let record = self.projects.add(root, None, None)?;
         let created = crate::config::create_if_absent(&record.root)?;
         let config = self.config.open(record.id, record.root.clone())?;
+        // Persist the project's display metadata now the config is known. The id had to
+        // be assigned first (`config.open` needs it), but the `name`/`icon` come from the
+        // file — so a second idempotent upsert (keyed on the canonical root) records them.
+        let record =
+            self.projects
+                .add(&record.root, config.name.as_deref(), config.icon.as_deref())?;
+        // Announce the project before its processes, so an adapter folding deltas has the
+        // project in its read model before any `ProcessSpawned` references it.
+        let view = ProjectView::from_record(&record);
+        self.bus.publish(DomainEvent::ProjectOpened {
+            id: view.id,
+            name: view.name.clone(),
+            root: view.root.clone(),
+        });
         for (name, spec) in &config.processes {
             self.supervisor
                 .register(Registration::command(record.id, &record.root, name, spec));
@@ -111,6 +125,12 @@ impl Facade {
             processes: config.processes.len(),
             created,
         })
+    }
+
+    /// The project read model: every known project's display identity. The snapshot
+    /// half of snapshot-then-deltas — pair it with [`DomainEvent::ProjectOpened`].
+    pub fn projects_snapshot(&self) -> Result<Vec<ProjectView>, StoreError> {
+        self.projects.views()
     }
 
     /// Trusts a project's command by name: resolves the command to its current variant
@@ -361,6 +381,59 @@ mod tests {
         let load = facade.load_project(dir.path()).expect("load");
         assert!(!load.created, "an existing solo.yml is not recreated");
         assert_eq!(load.processes, 1);
+    }
+
+    #[tokio::test]
+    async fn load_project_persists_and_projects_the_display_name() {
+        let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            crate::config::config_path(dir.path()),
+            "name: Storefront\nprocesses:\n  Web:\n    command: npm run dev\n    auto_start: false\n",
+        )
+        .expect("write solo.yml");
+
+        let load = facade.load_project(dir.path()).expect("load");
+
+        // The `solo.yml` name (previously dropped) is persisted and projected.
+        let record = facade
+            .projects()
+            .get(load.id)
+            .expect("get")
+            .expect("record");
+        assert_eq!(record.name.as_deref(), Some("Storefront"));
+        let views = facade.projects_snapshot().expect("views");
+        let view = views
+            .iter()
+            .find(|v| v.id == load.id)
+            .expect("project view");
+        assert_eq!(view.name, "Storefront");
+    }
+
+    #[tokio::test]
+    async fn load_project_announces_the_opened_project() {
+        let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+        let mut rx = facade.subscribe();
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            crate::config::config_path(dir.path()),
+            "name: Storefront\nprocesses:\n  Web:\n    command: npm run dev\n    auto_start: false\n",
+        )
+        .expect("write solo.yml");
+
+        let load = facade.load_project(dir.path()).expect("load");
+
+        loop {
+            match rx.recv().await {
+                Ok(DomainEvent::ProjectOpened { id, name, .. }) => {
+                    assert_eq!(id, load.id);
+                    assert_eq!(name, "Storefront");
+                    break;
+                }
+                Ok(_) | Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => panic!("event bus closed before ProjectOpened"),
+            }
+        }
     }
 
     #[tokio::test]
