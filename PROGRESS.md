@@ -154,6 +154,46 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Cleanup R3 landed — `CorePorts` parameter object + single composition root (2026-06-19)
+- **Baseline re-confirmed green first** (the start-and-end gate): `just lint && just test` → **106 tests**
+  (Rust **96** / UI **10**); clippy `-D warnings`, rustfmt, tsc, ESLint, Prettier, dep-guard pass; file-size
+  guard warns (non-gating) only on `core/testing.rs` (527 — R5 territory). R2 reviewed before proceeding.
+- **R3 executed (commit `71eafac`, one reviewable commit per the per-R-phase rule).** The two
+  `#[allow(clippy::too_many_arguments)]` escapes (`facade.rs:51` on `Facade::new`; `supervisor.rs:78` on
+  `Supervisor::new`, which took 7 `Arc<dyn Port>` + the bus) are **removed** by bundling the port set into a
+  parameter object:
+  - **`core::ports::CorePorts`** (+ **`CorePortsBuilder`**) — a struct of the 7 `Arc<dyn Port>` the core is
+    built over. Required adapters (`spawner`/`clock`/`trust`/`projects`, no meaningful absence) are the four
+    `CorePorts::builder(..)` args; the **optional driven subsystems** (`locks`/`runtime`/`orphan_control`)
+    **default to their `Noop` port** and are overridden via chained setters (`.runtime(..)`/`.orphan_control(..)`).
+  - **`Facade::new(CorePorts)`** (was 6 args) and **`Supervisor::new(&CorePorts, bus)`** (was 7 args) now take
+    it. Adding a future port = **one field on `CorePorts`** (+ a builder setter if optional), not another
+    constructor parameter threaded through every call site.
+- **Builder chosen over a plain public-field struct (decision, recorded).** The builder's Noop defaults mean a
+  *future* optional port (Notifier P6, Summarizer P7, …) is added with a default and **existing composition
+  roots/tests don't change** — matches `plan/06` §8/§5.2. A plain struct would force every call site to spell
+  out each new Noop. (plan/06 §7 R3 already specified "and a builder"; the prompt's "if it reads cleanly" — it
+  does.)
+- **`ports.rs` split into a folder to avoid a new god-file.** Adding the bundle to `ports.rs` pushed it to
+  **412** non-test lines (a *new* >400 outlier — unacceptable in a cleanup phase). Converted `ports.rs` →
+  **`ports/mod.rs`** (the port *traits*, ~338 lines) + **`ports/bundle.rs`** (the `CorePorts` composition
+  object, 83 lines), keeping the path `crate::ports::CorePorts` identical (zero import churn; `mod.rs`
+  re-exports). `git mv` preserved history. File-size guard back to **one** outlier (`testing.rs` 527).
+- **Pure structural change** — no behaviour, FSM, trust-gate, or port-trait change. The one test-shape wart:
+  the supervisor test harness (`test_support.rs`) now supplies a `FakeProjectRepo` it doesn't use, because
+  `Supervisor::new(&CorePorts)` reads a *subset* of the full core port set — acceptable for one unified
+  parameter object. **Public surface gains only** `CorePorts`/`CorePortsBuilder` in `lib.rs`'s `ports`
+  re-export; every existing export (`Facade`/`Supervisor`/`Registration`/…) is byte-for-byte unchanged.
+- **Docs (R3 deliverable, in the same commit).** Documented `app::build_facade` as **the single composition
+  root** (exactly one per binary; optional subsystems default to their `Noop` port) in **`CLAUDE.md` §16** +
+  **`plan/06` §8**, and **cleared the "to add (R3)" marker** on the Parameter Object/Builder row in
+  **`ARCHITECTURE.md` §3** + **`plan/06` §4**.
+- **Verification (honest).** `just lint && just test` green before and after: **106** (Rust **96** / UI **10**),
+  unchanged. `grep too_many_arguments` over the tree is **clean** (no allow anywhere). clippy `-D warnings`
+  clean; dep-guard green (`CorePorts` lives in `core`, bundles core ports — no adapter leaks in). `Cargo.lock`
+  untouched. Tests stay **inline**; placeholder modules + stub crates untouched. **R3 done; stopped for review
+  before R4** per the agreed sequence.
+
 ### Cleanup R2 landed — split `supervisor.rs` into cohesive submodules (2026-06-19)
 - **Baseline re-confirmed green first** (the start-and-end gate): `just lint && just test` → **106 tests**
   (Rust **96** / UI **10**); clippy `-D warnings`, rustfmt, tsc, ESLint, Prettier, dep-guard pass; the
@@ -806,13 +846,14 @@ review's one should-fix + the mechanical nits:
   done. Non-blocking for the cleanup R-phases.
 - **Stray `package-lock.json` at repo root (untracked) — user decision: LEAVE IT (2026-06-19).** Project uses
   pnpm; asked, user chose to leave it in place. Stays flagged; not gitignored, not removed.
-- **Cleanup roadmap status:** **R0 done** (`ea4bad1`) + **R1 done** (`4c80eb7`) + **R2 done** (`c04859a`,
-  reviewed R1 first). **R3–R6 remain** (`plan/06` §7), to run strictly in order, one reviewable commit each,
-  every one starting + ending `just lint && just test` green (baseline **106**). R2 was stopped for review per
-  the agreed sequence. **R3 = `CorePorts` parameter object** — introduce a struct bundling the `Arc<dyn Port>`
-  set and refactor `Facade::new` to take it, **removing both** `#[allow(clippy::too_many_arguments)]`
-  (`facade.rs:51`, `supervisor.rs:78` on `Supervisor::new`), and document `app::build_facade` as the single
-  composition root.
+- **Cleanup roadmap status:** **R0 done** (`ea4bad1`) + **R1 done** (`4c80eb7`) + **R2 done** (`c04859a`) +
+  **R3 done** (`71eafac`, reviewed R2 first). **R4–R6 remain** (`plan/06` §7), to run strictly in order, one
+  reviewable commit each, every one starting + ending `just lint && just test` green (baseline **106**). R3 was
+  stopped for review per the agreed sequence. **R4 = purge core demo scaffolding** — move
+  `core::facade::spawn_demo_process` / `DEMO_PROJECT`/`DEMO_COMMAND` / `std::env::current_dir` out of the pure
+  core (kept alive only by `pty/tests/integration.rs`, duplicating `app/src/demo.rs`); the integration test
+  builds its own `Registration` (optionally via a `core::testing` helper); demo seeding lives **only** in the
+  `app` adapter. Then sweep `core` for any other host/demo concern or unused `pub` exports.
 - **Plan review:** user may still skim `plan/05` (Solo behavior), `plan/04` (architecture), `plan/02`
   (parity) and confirm before deep feature work — not blocking Phase 1.
 - **Agent native OAuth/login (E8) → Phase 7, no new work beyond launching right.** When Phase 7 lands,
@@ -908,18 +949,19 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-0. **Cleanup track (user's current priority — do before new features). R0 + R1 + R2 are DONE** (`ea4bad1`
+0. **Cleanup track (user's current priority — do before new features). R0 + R1 + R2 + R3 are DONE** (`ea4bad1`
    file-size guard; `4c80eb7` reusable `core::testing` behind a `testing` feature; `c04859a` split
-   `supervisor.rs` into `supervisor/{registration,bulk,reconcile,test_support}` submodules). **R2 was stopped
-   for review per the agreed sequence — review it, then execute R3.** Run the rest of the **R3–R6 roadmap in
+   `supervisor.rs`; `71eafac` `CorePorts` parameter object + single composition root, both
+   `too_many_arguments` allows removed, `ports.rs` split into `ports/{mod,bundle}.rs`). **R3 was stopped for
+   review per the agreed sequence — review it, then execute R4.** Run the rest of the **R4–R6 roadmap in
    order** (`plan/06` §7), one reviewable commit per R-phase, each starting and ending with `just lint && just
-   test` green (baseline **106 tests**). **R3 = `CorePorts` parameter object:** introduce a struct bundling the
-   `Arc<dyn Port>` set (+ a builder) and refactor `Facade::new` to take it, **removing both**
-   `#[allow(clippy::too_many_arguments)]` (`facade.rs:51` and `supervisor.rs:78`, now on `Supervisor::new`),
-   then document `app::build_facade` as the single composition root (one per binary;
-   optional subsystems default to their `Noop` port) in `plan/06` + `CLAUDE.md`. Do **not** relocate inline
-   tests to a `tests/` dir, delete the placeholder modules, or drop the stub crates — all three were decided
-   to stay (see Decisions above).
+   test` green (baseline **106 tests**). **R4 = purge core demo scaffolding:** move
+   `core::facade::spawn_demo_process` / `DEMO_PROJECT`/`DEMO_COMMAND` / `std::env::current_dir` out of the pure
+   core (kept alive only by `pty/tests/integration.rs:262`, duplicating `app/src/demo.rs`) — the integration
+   test builds its own `Registration` (optionally via a `core::testing` helper); demo seeding lives **only** in
+   the `app` adapter. Then sweep `core` for any other host/demo concern or unused `pub` exports. Do **not**
+   relocate inline tests to a `tests/` dir, delete the placeholder modules, or drop the stub crates — all
+   three were decided to stay (see Decisions above).
 1. **Runtime echo/control gate — CLOSED (2026-06-19).** A real human click on per-row **Start** for `shell`
    started it and `echo hi` echoed in the xterm — control wiring + core start path + the
    `Channel<Vec<u8>>`→`Uint8Array`→rAF boundary in `useTerminal.ts` all work. No longer blocks R2. **One
