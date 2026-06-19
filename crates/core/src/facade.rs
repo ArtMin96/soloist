@@ -6,30 +6,19 @@
 //! like "restart" or "is this command trusted" is implemented exactly once. Adapters
 //! translate requests in and project the read model out; they hold no business state.
 
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-
 use tokio::sync::broadcast;
 
 use crate::config::ConfigEngine;
 use crate::events::{DomainEvent, EventBus};
-use crate::ids::{ProcessId, ProjectId};
-use crate::ports::{CorePorts, PtySize, SpawnSpec};
-use crate::process::{ProcessKind, ProcessView};
+use crate::ports::CorePorts;
+use crate::process::ProcessView;
 use crate::projects::Projects;
-use crate::supervisor::{Registration, Supervisor};
+use crate::supervisor::Supervisor;
 use crate::trust::TrustStore;
 
 /// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot
 /// (see [`crate::events`]) rather than growing memory without limit.
 const EVENT_BUFFER: usize = 1024;
-
-/// The project the walking-skeleton demo process is registered under.
-const DEMO_PROJECT: ProjectId = ProjectId::from_raw(1);
-/// The walking-skeleton demo command: a long sleep whose lifecycle (start → run →
-/// stop) can be driven end to end from the GUI. An ungated terminal, so it needs no
-/// trust record; replaced by real config-driven processes when the dashboard lands.
-const DEMO_COMMAND: &str = "sleep 60";
 
 /// The integration façade (context C8). Cheap to share as Tauri-managed state.
 pub struct Facade {
@@ -89,35 +78,16 @@ impl Facade {
     pub fn config(&self) -> &ConfigEngine {
         &self.config
     }
-
-    /// Registers and starts the demo process end to end, returning its id. Must be
-    /// called from within a `tokio` runtime.
-    pub fn spawn_demo_process(&self) -> ProcessId {
-        let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let id = self.supervisor.register(Registration::launched(
-            DEMO_PROJECT,
-            ProcessKind::Terminal,
-            "demo",
-            SpawnSpec {
-                command: DEMO_COMMAND.into(),
-                working_dir,
-                env: BTreeMap::new(),
-                size: PtySize::default(),
-            },
-        ));
-        // Starting an ungated terminal cannot fail the trust gate.
-        let _ = self.supervisor.start(id);
-        id
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::ProjectId;
     use crate::ports::{TokioClock, TrustRepo};
     use crate::process::ProcStatus;
-    use crate::supervisor::SupervisorError;
-    use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTrustRepo};
+    use crate::supervisor::{Registration, SupervisorError};
+    use crate::testing::{terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
     use std::path::Path;
     use std::sync::Arc;
     use tokio::sync::broadcast::error::RecvError;
@@ -147,11 +117,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn spawn_demo_registers_and_runs_a_process() {
+    async fn the_facade_registers_starts_and_stops_a_process() {
         let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
         let mut rx = facade.subscribe();
 
-        let id = facade.spawn_demo_process();
+        let id = facade.supervisor().register(terminal_registration(
+            ProjectId::from_raw(1),
+            "term",
+            "sleep 60",
+        ));
+        // Starting an ungated terminal cannot fail the trust gate.
+        facade
+            .supervisor()
+            .start(id)
+            .expect("ungated terminal starts");
         assert_eq!(facade.snapshot().len(), 1);
         wait_for(&mut rx, ProcStatus::Running).await;
 

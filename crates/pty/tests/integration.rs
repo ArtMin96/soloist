@@ -259,7 +259,18 @@ async fn facade_runs_the_full_thread_with_real_spawner_and_clock() {
     );
     let mut events = facade.subscribe();
 
-    let id = facade.spawn_demo_process();
+    let id = facade
+        .supervisor()
+        .register(soloist_core::testing::terminal_registration(
+            ProjectId::from_raw(1),
+            "term",
+            "sleep 60",
+        ));
+    // An ungated terminal cannot fail the trust gate.
+    facade
+        .supervisor()
+        .start(id)
+        .expect("ungated terminal starts");
     wait_for_status(&mut events, ProcStatus::Running).await;
 
     assert!(facade.supervisor().stop(id), "stop finds the process");

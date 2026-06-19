@@ -5,7 +5,7 @@
 //! isolation, the trust gate, and the sync logic be exercised deterministically — no
 //! real time elapsed, no real processes spawned, no SQLite.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -20,6 +20,8 @@ use crate::ports::{
     ProcessSpawner, ProjectRecord, ProjectRepo, PtyIo, PtySize, RuntimeState, RuntimeStateError,
     SpawnError, SpawnSpec, Spawned, StoreError, TrustRepo,
 };
+use crate::process::ProcessKind;
+use crate::supervisor::Registration;
 use crate::sync::lock;
 
 /// Signal numbers a simulated kill records on a fake child's exit status.
@@ -32,6 +34,24 @@ fn killed_by(signal: i32) -> ExitStatus {
         code: None,
         signal: Some(signal),
     }
+}
+
+/// Builds a [`Registration`] for an ungated terminal running `command` — the minimal
+/// launched-process fixture for exercising the supervisor thread (register → start →
+/// stop) end to end across crates. A terminal is ungated, so the trust gate is never
+/// consulted; the working directory is `.` (irrelevant to a self-contained command).
+pub fn terminal_registration(project: ProjectId, name: &str, command: &str) -> Registration {
+    Registration::launched(
+        project,
+        ProcessKind::Terminal,
+        name,
+        SpawnSpec {
+            command: command.into(),
+            working_dir: ".".into(),
+            env: BTreeMap::new(),
+            size: PtySize::default(),
+        },
+    )
 }
 
 // ──────────────────────────────── MockClock ────────────────────────────────
