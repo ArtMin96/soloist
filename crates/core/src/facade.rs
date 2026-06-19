@@ -10,10 +10,10 @@ use std::path::Path;
 
 use tokio::sync::broadcast;
 
-use crate::config::{ConfigEngine, ConfigError};
+use crate::config::{ConfigEngine, ConfigError, SoloYml};
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProjectId;
-use crate::ports::{CorePorts, StoreError};
+use crate::ports::{CorePorts, ProjectRecord, StoreError};
 use crate::process::ProcessView;
 use crate::projects::{ProjectError, ProjectView, Projects};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
@@ -97,6 +97,42 @@ impl Facade {
     /// caller can tell the user what happened instead of doing so silently. Must run
     /// within a `tokio` runtime (reconciliation and starting do).
     pub fn load_project(&self, root: &Path) -> Result<ProjectLoad, LoadProjectError> {
+        let (record, config, created) = self.open_and_register(root)?;
+        self.supervisor.reconcile_orphans();
+        self.supervisor.start_all(record.id)?;
+        Ok(ProjectLoad {
+            id: record.id,
+            processes: config.processes.len(),
+            created,
+        })
+    }
+
+    /// Re-registers every known project without starting anything (session restore on
+    /// launch), then reconciles orphans once. Each project's commands reappear **resting**,
+    /// so the sidebar shows your projects across runs while nothing is spawned on startup —
+    /// starting stays an explicit action. Best-effort: a project whose root or `solo.yml`
+    /// is no longer readable is skipped, never failing the launch. Must run within a
+    /// `tokio` runtime (reconciliation may adopt a leftover group).
+    pub fn restore_projects(&self) {
+        let Ok(projects) = self.projects.list() else {
+            return;
+        };
+        for project in projects {
+            let _ = self.open_and_register(&project.root);
+        }
+        self.supervisor.reconcile_orphans();
+    }
+
+    /// Adds the project (auto-creating its `solo.yml` when absent), loads the config,
+    /// persists the resolved display metadata, announces the open, and registers each
+    /// command as a trust-gated process — the shared path under [`Self::load_project`]
+    /// (which then reconciles and starts) and [`Self::restore_projects`] (which does
+    /// neither). Returns the durable record, the parsed config, and whether the `solo.yml`
+    /// was just created. Does not reconcile orphans or start — the caller decides.
+    fn open_and_register(
+        &self,
+        root: &Path,
+    ) -> Result<(ProjectRecord, SoloYml, bool), LoadProjectError> {
         let record = self.projects.add(root, None, None)?;
         let created = crate::config::create_if_absent(&record.root)?;
         let config = self.config.open(record.id, record.root.clone())?;
@@ -119,13 +155,7 @@ impl Facade {
             self.supervisor
                 .register(Registration::command(record.id, &record.root, name, spec));
         }
-        self.supervisor.reconcile_orphans();
-        self.supervisor.start_all(record.id)?;
-        Ok(ProjectLoad {
-            id: record.id,
-            processes: config.processes.len(),
-            created,
-        })
+        Ok((record, config, created))
     }
 
     /// The project read model: every known project's display identity. The snapshot
@@ -435,6 +465,35 @@ mod tests {
                 Err(RecvError::Closed) => panic!("event bus closed before ProjectOpened"),
             }
         }
+    }
+
+    #[tokio::test]
+    async fn restore_projects_registers_known_projects_without_starting_them() {
+        let (facade, trust) = facade(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        let yml = "processes:\n  Web:\n    command: npm run dev\n";
+        std::fs::write(crate::config::config_path(dir.path()), yml).expect("write solo.yml");
+
+        // The project is durably known (as if opened in a prior run) and its auto-start
+        // command is trusted — so `load_project` *would* start it. Restore must not.
+        let record = facade.projects().add(dir.path(), None, None).expect("add");
+        let spec = crate::config::parse(yml)
+            .expect("parse")
+            .processes
+            .get("Web")
+            .cloned()
+            .expect("Web");
+        trust
+            .set_trusted(record.id, &spec.variant_hash())
+            .expect("trust");
+
+        facade.restore_projects();
+
+        // The command reappears resting; restore registers but never spawns on launch.
+        let snapshot = facade.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].label, "Web");
+        assert_eq!(snapshot[0].status, ProcStatus::Stopped);
     }
 
     #[tokio::test]
