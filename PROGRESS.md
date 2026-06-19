@@ -752,22 +752,30 @@ review's one should-fix + the mechanical nits:
 
 ## Open threads / unresolved
 
-- **Phase-5 control activation + terminal echo — verify before R2 (BLOCKING for structural R-phases).** The
-  app renders (verified 2026-06-19) but **no synthetic XTEST click activated any control** (Start-all, per-row
-  ▷, pane-header ▷, collapse chevron), while frontend row-selection clicks did. Coords were confirmed exact.
-  Likely an XWayland/WebKitGTK synthetic-input quirk, **not confirmed**. **Next runtime session, before R2:**
-  with `just dev` open, do a **real human click** on "Start all" (or start `shell` and type `echo hi`) and
-  screenshot — confirm dots go green + the xterm streams/echoes (this also exercises the one untested
-  boundary: `Channel<Vec<u8>>`→`Uint8Array`→rAF coalescing in `useTerminal.ts`). If a human click **also**
-  fails to start a process, it is a real Phase-5 control bug to fix **before** the structural cleanup phases.
-- **Stray `package-lock.json` at repo root (untracked).** Not created by this work; project uses pnpm. Decide:
-  `rm` it or add to `.gitignore`. Not touched this session.
+- **Phase-5 runtime echo/control gate — CLOSED by a real human click (2026-06-19), R2 unblocked.** The user
+  ran `just dev` (host `DISPLAY=:0`), selected the `shell` process in the sidebar, clicked its **per-row Start**,
+  typed `echo hi` → it **started and echoed**. So the control wiring, the core start path, and the one untested
+  boundary (`Channel<Vec<u8>>`→`Uint8Array`→rAF coalescing in `useTerminal.ts`) all work end to end. The earlier
+  failure to activate controls was the **synthetic-XTEST/XWayland quirk** (a test-harness artifact), not a real
+  control bug. **R2 is no longer blocked.**
+- **"Start all" (toolbar bulk) does nothing on the demo — expected behavior + a real parity gap (NOT an R1
+  regression).** Traced: toolbar → `store.startAll` → `stack_start` → `Supervisor::start_all` (`supervisor.rs:248`),
+  which launches only **trusted `auto_start` candidates** (`registry.auto_start_candidates`; asserted by
+  `start_all_starts_only_trusted_auto_start_commands`, `supervisor.rs:770`). The demo commands have
+  `auto_start=false`, so the candidate set is empty → it correctly starts nothing (per-row Start works because it
+  bypasses the auto_start filter). **The gap:** Solo separates **`start-all`** (all trusted commands) from
+  **`start-auto`** (auto_start only) — distinct HTTP endpoints (`05` §8) and `start_all_commands` = "trusted
+  commands only" with no auto_start filter (`05` §7). We implemented only the *auto* semantics but the button is
+  labeled "Start all". Fix belongs to the **Phase-5 follow-up / matrix B4 bulk ops** (decide the start-all vs
+  start-auto split; "Start all" should start all trusted commands, or relabel to "Start auto"); deferred, not
+  done. Non-blocking for the cleanup R-phases.
+- **Stray `package-lock.json` at repo root (untracked) — user decision: LEAVE IT (2026-06-19).** Project uses
+  pnpm; asked, user chose to leave it in place. Stays flagged; not gitignored, not removed.
 - **Cleanup roadmap status:** **R0 done** (`ea4bad1`) + **R1 done** (`4c80eb7`, reviewed R0 first).
   **R2–R6 remain** (`plan/06` §7), to run strictly in order, one reviewable commit each, every one starting +
   ending `just lint && just test` green (baseline **106**). R1 was stopped for review per the agreed sequence.
   **R2 = split `supervisor.rs`** (490 code lines > the ~400 smell) into `supervisor/` submodules, public surface
-  unchanged. **R2 is BLOCKED on the runtime-verify gap below** — close the human-click check *before* the first
-  structural edit.
+  unchanged. **R2 is unblocked** — the runtime echo/control gate was closed by a real human click (see above).
 - **Plan review:** user may still skim `plan/05` (Solo behavior), `plan/04` (architecture), `plan/02`
   (parity) and confirm before deep feature work — not blocking Phase 1.
 - **Agent native OAuth/login (E8) → Phase 7, no new work beyond launching right.** When Phase 7 lands,
@@ -865,23 +873,21 @@ review's one should-fix + the mechanical nits:
 
 0. **Cleanup track (user's current priority — do before new features). R0 + R1 are DONE** (`ea4bad1` file-size
    guard; `4c80eb7` reusable `core::testing` behind a `testing` feature). **R1 was stopped for review per the
-   agreed sequence — review it, then (after the runtime gate in item 1) execute R2.** Run the rest of the
+   agreed sequence — review it, then execute R2 (the runtime gate in item 1 is now closed).** Run the rest of the
    **R2–R6 roadmap in order** (`plan/06` §7), one reviewable commit per R-phase, each starting and ending with
    `just lint && just test` green (baseline **106 tests**). **R2** = split `supervisor.rs` (490 code lines) into
    `supervisor/` submodules (candidates: bulk ops, `reconcile_orphans`, the `Registration`/`StartSummary`/error
    types), leaving the root the thin C2 surface; inline tests move **with** their code; public re-exports
    unchanged. Do **not** relocate inline tests to a `tests/` dir, delete the placeholder modules, or drop the
    stub crates — all three were decided to stay (see Decisions above).
-1. **Before R2 (the first structural code edit), close the runtime-verify gap.** Render is verified
-   (2026-06-19, screenshots); the **terminal echo / control activation** is not. With `just dev` open (host
-   `DISPLAY=:0`), do a **real human click** on **Start all** (or start `shell` and type `echo hi`) and
-   confirm: Command dots go green + the **xterm** streams/echoes; selecting a process opens its terminal;
-   per-row stop/restart reflect in ~1s; dot colors + glyphs match DESIGN.md; status-hue **contrast** in both
-   themes (impeccable AA). Watch the one untested boundary — `Channel<Vec<u8>>`→`Uint8Array` delivery + rAF
-   coalescing in `useTerminal.ts` (if bytes arrive as `number[]`/`ArrayBuffer` instead of `Uint8Array`,
-   coerce before `term.write`). **If a human click also fails to start a process, it is a Phase-5 control bug
-   — fix it before the structural R-phases.** (Synthetic XTEST clicks could not activate controls this
-   session — likely an XWayland/WebKit quirk, unconfirmed; see the 2026-06-19 entry + open threads.)
+1. **Runtime echo/control gate — CLOSED (2026-06-19).** A real human click on per-row **Start** for `shell`
+   started it and `echo hi` echoed in the xterm — control wiring + core start path + the
+   `Channel<Vec<u8>>`→`Uint8Array`→rAF boundary in `useTerminal.ts` all work. No longer blocks R2. **One
+   Phase-5 follow-up finding to fold into B4 bulk ops:** the toolbar **"Start all"** does nothing because
+   `Supervisor::start_all` only launches `auto_start` candidates (demo commands are `auto_start=false`) — Solo
+   separates `start-all` (all trusted commands) from `start-auto` (auto_start only); implement the split or
+   relabel the button. Deferred, non-blocking (see open threads). Still pending verify (cosmetic, non-blocking):
+   status-hue **contrast** AA in both themes.
    - **Playwright e2e (Task 6, still pending):** assert grouping, `[data-status]`, control enable/disable,
      selection, empty state via **`@tauri-apps/api/mocks` `mockIPC`** (installed) with a fixture stack; full
      PTY echo needs `tauri-driver` + `WebKitWebDriver`. Drive via the `webapp-testing` skill.
