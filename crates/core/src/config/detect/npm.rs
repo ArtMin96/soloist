@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-use super::{Detector, FileSource};
+use super::{spec, Detector, FileSource};
 use crate::config::model::ProcessSpec;
 
 /// Detects Node commands from `package.json` `scripts`. Only the well-known scripts Solo
@@ -56,14 +56,7 @@ fn script_names(text: &str) -> std::collections::BTreeSet<String> {
 fn command(script: &str, auto_start: bool) -> (String, ProcessSpec) {
     (
         script.to_string(),
-        ProcessSpec {
-            command: format!("npm run {script}"),
-            working_dir: None,
-            auto_start,
-            auto_restart: false,
-            restart_when_changed: Vec::new(),
-            env: BTreeMap::new(),
-        },
+        spec(format!("npm run {script}"), auto_start),
     )
 }
 
