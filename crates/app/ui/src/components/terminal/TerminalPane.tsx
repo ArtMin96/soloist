@@ -1,6 +1,8 @@
+import { Bell } from "lucide-react";
 import { ProcessControls } from "@/components/ProcessControls";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { useTerminal } from "@/components/terminal/useTerminal";
+import { useTerminalChrome } from "@/components/terminal/useTerminalChrome";
 import type { ProcessView } from "@/domain";
 
 interface TerminalPaneProps {
@@ -15,14 +17,21 @@ interface TerminalPaneProps {
 // this stays presentational.
 export function TerminalPane({ process, onStart, onStop, onRestart }: TerminalPaneProps) {
   const { hostRef, state } = useTerminal(process);
+  const { title, ringing } = useTerminalChrome(process.id);
 
   return (
     <section className="flex h-full min-w-0 flex-col bg-background">
       <header className="flex h-9 shrink-0 items-center gap-2.5 border-b bg-sidebar px-3">
         <span className="truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">
-          {process.label}
+          {title ?? process.label}
         </span>
         <StatusIndicator status={process.status} />
+        {ringing && (
+          <Bell
+            aria-label="Terminal bell"
+            className="size-3.5 shrink-0 text-primary motion-safe:animate-pulse"
+          />
+        )}
         <div className="ml-auto">
           <ProcessControls
             status={process.status}
