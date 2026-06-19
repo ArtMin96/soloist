@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
 // The picker and the load command are the IPC boundary; mock them so the test exercises
-// the hook's own logic — picking, the cancel guard, and where failures go.
+// the hook's own logic — picking, the cancel guard, the notice copy, and where failures go.
 vi.mock("@/api", () => ({
   openProjectDirectory: vi.fn(),
   projectLoad: vi.fn(),
@@ -18,9 +18,9 @@ const load = vi.mocked(projectLoad);
 afterEach(() => vi.clearAllMocks());
 
 describe("useProjects", () => {
-  it("loads the chosen folder's stack", async () => {
+  it("loads the chosen folder's stack without a notice", async () => {
     pickDirectory.mockResolvedValue("/home/dev/app");
-    load.mockResolvedValue({ id: 1, processes: 2 });
+    load.mockResolvedValue({ id: 1, processes: 2, created: false });
     const { result } = renderHook(() => useProjects(() => {}));
 
     result.current.open();
@@ -29,14 +29,37 @@ describe("useProjects", () => {
     expect(result.current.notice).toBeNull();
   });
 
-  it("surfaces a notice when the folder declares no processes", async () => {
-    pickDirectory.mockResolvedValue("/home/dev/empty");
-    load.mockResolvedValue({ id: 1, processes: 0 });
+  it("announces an auto-created solo.yml with detected commands", async () => {
+    pickDirectory.mockResolvedValue("/home/dev/app");
+    load.mockResolvedValue({ id: 1, processes: 3, created: true });
     const { result } = renderHook(() => useProjects(() => {}));
 
     result.current.open();
 
-    await waitFor(() => expect(result.current.notice).toMatch(/No processes found/));
+    await waitFor(() => expect(result.current.notice).toMatch(/Created a solo\.yml/));
+    expect(result.current.notice).toContain("app");
+    expect(result.current.notice).toContain("3 commands");
+  });
+
+  it("announces a starter solo.yml when nothing was detected", async () => {
+    pickDirectory.mockResolvedValue("/home/dev/blank");
+    load.mockResolvedValue({ id: 1, processes: 0, created: true });
+    const { result } = renderHook(() => useProjects(() => {}));
+
+    result.current.open();
+
+    await waitFor(() => expect(result.current.notice).toMatch(/starter solo\.yml/));
+    expect(result.current.notice).toContain("blank");
+  });
+
+  it("notes an existing solo.yml that declares no commands", async () => {
+    pickDirectory.mockResolvedValue("/home/dev/empty");
+    load.mockResolvedValue({ id: 1, processes: 0, created: false });
+    const { result } = renderHook(() => useProjects(() => {}));
+
+    result.current.open();
+
+    await waitFor(() => expect(result.current.notice).toMatch(/no commands yet/));
     expect(result.current.notice).toContain("empty");
   });
 

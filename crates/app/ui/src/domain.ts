@@ -66,11 +66,13 @@ export interface TrustReviewCommand {
 }
 
 // The outcome of opening a project (the `project_load` command). `processes` is how many
-// the folder's solo.yml declared; zero means it had no solo.yml, or one declaring none —
-// the UI says so rather than leaving the screen unchanged.
+// the folder's solo.yml declared; `created` is true when Soloist auto-created the solo.yml
+// from detected commands (the folder had none). The UI turns these facts into a notice so
+// opening a project is never silent.
 export interface ProjectLoad {
   id: number;
   processes: number;
+  created: boolean;
 }
 
 // Mirrors the core's `DomainEvent` (serde `tag = "type"`).

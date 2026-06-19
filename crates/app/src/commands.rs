@@ -23,11 +23,12 @@ pub async fn proc_list(facade: State<'_, Facade>) -> Result<Vec<ProcessView>, St
     Ok(facade.snapshot())
 }
 
-/// Loads a project from a folder path: registers each `solo.yml` command (trust-gated),
-/// reconciles leftover process groups, and starts the trusted auto-start subset. The
-/// registration and status events repopulate the read model; the returned [`ProjectLoad`]
-/// also carries how many processes were declared, so the UI can report an empty load
-/// instead of leaving the screen unchanged.
+/// Loads a project from a folder path: auto-creates a `solo.yml` from detected commands
+/// when the folder has none, registers each command (trust-gated), reconciles leftover
+/// process groups, and starts the trusted auto-start subset. The registration and status
+/// events repopulate the read model; the returned [`ProjectLoad`] carries how many
+/// processes were declared and whether the `solo.yml` was just created, so the UI can
+/// confirm what happened instead of leaving the screen unchanged.
 #[tauri::command]
 pub async fn project_load(path: String, facade: State<'_, Facade>) -> Result<ProjectLoad, String> {
     facade
