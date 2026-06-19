@@ -154,6 +154,40 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Cleanup R1 landed — reusable `core::testing` behind a `testing` feature (2026-06-19)
+- **Baseline re-confirmed green first** (the agreed start-and-end gate): `just lint && just test` →
+  **106 tests** (Rust **96** / UI **10**); clippy `-D warnings`, rustfmt, tsc, ESLint, Prettier, dep-guard
+  pass; the R0 file-size guard warns (non-gating) on `core/testing.rs` + `core/supervisor.rs`.
+- **R0 reviewed before proceeding (sound).** `scripts/check-file-size.sh` is warn-only (`set -uo pipefail`,
+  no `-e`, unconditional `exit 0` in both branches), measures **code** size (skips `tests/` + `*.test.ts(x)`,
+  excludes a Rust file's inline `#[cfg(test)]` module), and is wired into `just lint` (after the dep-guard)
+  + the CI `check` job. Confirmed it warns without failing the gate.
+- **R1 executed (commit `4c80eb7`, one reviewable commit per the per-R-phase rule).** The DRY gap was that
+  `core::testing` (the `MockClock`/`FakeSpawner`/`FakeTrustRepo`/`FakeProjectRepo`/`FakeRuntimeState`/
+  `FakeOrphanControl`/`RecordingLockReleaser` fakes) was `#[cfg(test)] mod testing;` — **private to core's own
+  tests**, so `store`/`pty`/future adapters could not reuse it (`plan/06` §6). Fix:
+  - `crates/core/src/lib.rs`: `#[cfg(test)] mod testing;` → **`#[cfg(any(test, feature = "testing"))] pub mod testing;`**.
+  - `crates/core/Cargo.toml`: new **`[features] testing = []`** (off by default — the fakes never compile into a
+    production build).
+  - `crates/store/Cargo.toml` + `crates/pty/Cargo.toml`: dev-dep **`soloist-core = { path = "../core", features = ["testing"] }`**.
+- **Two lint-correctness fixes were required** because exposing `testing` as a real `pub` lib module subjects it
+  to core's production clippy (under `cargo clippy --workspace --all-targets`, the `testing` feature is unified
+  onto core's **lib** target, which compiles `not(test)` → `deny(clippy::panic)` active over `testing.rs`; it was
+  previously `#[cfg(test)]`-exempt). Both idiomatic, both in `testing.rs`: added an **`impl Default for MockClock`**
+  (`new_without_default`, matching every other fake) and a **scoped `#[allow(clippy::panic)]`** on the one
+  `FakeSpawner` arm that panics by design to drive panic-isolation. The core no-panic gate for *production* code is
+  unchanged (the deny stays `not(test)`; only the test fake is locally exempted).
+- **Verification (honest).** No fake defined twice (grep of store/pty/app for `Mock*`/`Fake*`/`Recording*` is
+  clean — they never re-rolled fakes; R1 is the *enabling* refactor, not a de-dup). **Reachability proven**: a
+  pair of ephemeral integration tests (`crates/{pty,store}/tests/_r1_reach.rs`) that `use
+  soloist_core::testing::{MockClock, FakeSpawner, FakeTrustRepo}` compiled and ran (`cargo test … --test
+  _r1_reach` → `2 passed`), then were **deleted** (committing them would be vanity tests, §15). The first *real*
+  cross-crate consumer lands in **R4** (pty integration test builds its `Registration` via a `core::testing`
+  helper) and the future mcp/httpapi adapters. `just lint && just test` green before and after: **106** (Rust 96
+  / UI 10), unchanged. `Cargo.lock` untouched (path-dep features don't change it; no `cargo update`). Tests stay
+  **inline** (R1 changed *who can reach* the fakes, not *where tests live*). **R1 done; stopped for review
+  before R2** per the agreed sequence.
+
 ### Phase-5 runtime baseline verified (render) + cleanup R0 landed (2026-06-19)
 - **Baseline gate re-confirmed green:** `just lint && just test` → **106 tests** (Rust **96** / UI **10**);
   clippy `-D warnings`, rustfmt, tsc, ESLint, Prettier, dep-guard all pass. This is the pre-refactor safety net.
@@ -728,9 +762,12 @@ review's one should-fix + the mechanical nits:
   fails to start a process, it is a real Phase-5 control bug to fix **before** the structural cleanup phases.
 - **Stray `package-lock.json` at repo root (untracked).** Not created by this work; project uses pnpm. Decide:
   `rm` it or add to `.gitignore`. Not touched this session.
-- **Cleanup roadmap status:** **R0 done** (commit `ea4bad1`). **R1–R6 remain** (`plan/06` §7), to run strictly
-  in order, one reviewable commit each, every one starting + ending `just lint && just test` green. R0 was
-  stopped for review per the agreed sequence; R1 = reusable `core::testing` behind a `testing` feature.
+- **Cleanup roadmap status:** **R0 done** (`ea4bad1`) + **R1 done** (`4c80eb7`, reviewed R0 first).
+  **R2–R6 remain** (`plan/06` §7), to run strictly in order, one reviewable commit each, every one starting +
+  ending `just lint && just test` green (baseline **106**). R1 was stopped for review per the agreed sequence.
+  **R2 = split `supervisor.rs`** (490 code lines > the ~400 smell) into `supervisor/` submodules, public surface
+  unchanged. **R2 is BLOCKED on the runtime-verify gap below** — close the human-click check *before* the first
+  structural edit.
 - **Plan review:** user may still skim `plan/05` (Solo behavior), `plan/04` (architecture), `plan/02`
   (parity) and confirm before deep feature work — not blocking Phase 1.
 - **Agent native OAuth/login (E8) → Phase 7, no new work beyond launching right.** When Phase 7 lands,
@@ -826,14 +863,15 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-0. **Cleanup track (user's current priority — do before new features). R0 is DONE** (commit `ea4bad1`:
-   warn-only `scripts/check-file-size.sh` in `just lint`/CI; blueprint docs already merged). **R0 was stopped
-   for review per the agreed sequence — review it, then execute R1.** Run the rest of the **R1–R6 roadmap in
-   order** (`plan/06` §7), one reviewable commit per R-phase, each starting and ending with `just lint && just
-   test` green (baseline **106 tests**). **R1** = make `core::testing` reusable behind a `testing` feature
-   (`#[cfg(any(test, feature = "testing"))] pub mod testing;`), reuse it from `store`/`pty` dev-deps; no fake
-   defined twice; same test count. Do **not** relocate inline tests, delete the placeholder modules, or drop
-   the stub crates — all three were decided to stay (see Decisions above).
+0. **Cleanup track (user's current priority — do before new features). R0 + R1 are DONE** (`ea4bad1` file-size
+   guard; `4c80eb7` reusable `core::testing` behind a `testing` feature). **R1 was stopped for review per the
+   agreed sequence — review it, then (after the runtime gate in item 1) execute R2.** Run the rest of the
+   **R2–R6 roadmap in order** (`plan/06` §7), one reviewable commit per R-phase, each starting and ending with
+   `just lint && just test` green (baseline **106 tests**). **R2** = split `supervisor.rs` (490 code lines) into
+   `supervisor/` submodules (candidates: bulk ops, `reconcile_orphans`, the `Registration`/`StartSummary`/error
+   types), leaving the root the thin C2 surface; inline tests move **with** their code; public re-exports
+   unchanged. Do **not** relocate inline tests to a `tests/` dir, delete the placeholder modules, or drop the
+   stub crates — all three were decided to stay (see Decisions above).
 1. **Before R2 (the first structural code edit), close the runtime-verify gap.** Render is verified
    (2026-06-19, screenshots); the **terminal echo / control activation** is not. With `just dev` open (host
    `DISPLAY=:0`), do a **real human click** on **Start all** (or start `shell` and type `echo hi`) and
