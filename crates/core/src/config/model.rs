@@ -4,24 +4,30 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use indexmap::IndexMap;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::hash::{Hash, Hasher};
 
 /// A parsed `solo.yml`. Top-level keys mirror Solo's schema (`name`, `icon`,
 /// `processes`); `processes` preserves the file's order via [`IndexMap`] so the
 /// sidebar lists commands as written.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+///
+/// [`Serialize`] is the single source for writing a `solo.yml` (auto-detection,
+/// [`super::write`]): `skip_serializing_if` omits fields left at their defaults so the
+/// generated file stays minimal, and a round-trip through [`super::load::parse`] is the
+/// identity.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoloYml {
     /// Optional display name shown on first load.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Optional icon path, relative to the project root.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<PathBuf>,
     /// The managed commands, keyed by display name. Empty when the `processes` key
-    /// is absent — an empty or comment-only file is a valid, empty config.
+    /// is absent — an empty or comment-only file is a valid, empty config. Always
+    /// written (even when empty) so a generated file shows the `processes:` key.
     #[serde(default)]
     pub processes: IndexMap<String, ProcessSpec>,
 }
@@ -37,31 +43,42 @@ impl SoloYml {
 /// One command definition from `solo.yml`. Field defaults encode our documented
 /// decisions: `auto_start` defaults **true** (the `auto_start` schema gap — we
 /// auto-start a project's stack); everything else defaults to off/empty.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessSpec {
     /// The shell command to run. Required.
     pub command: String,
     /// Working directory, relative to the project root. `None` means the root.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<PathBuf>,
-    /// Whether to start this command when the project opens. Defaults to `true`.
-    #[serde(default = "default_true")]
+    /// Whether to start this command when the project opens. Defaults to `true`, so it
+    /// is written only when `false`.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub auto_start: bool,
     /// Whether to relaunch after an unexpected exit. Defaults to `false`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub auto_restart: bool,
     /// Globs (relative to the project root) whose changes trigger a restart.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub restart_when_changed: Vec<String>,
     /// Per-process environment overrides. A sorted map so the variant hash does not
     /// depend on declaration order.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+/// `skip_serializing_if` for a `bool` that defaults to `true`: omit it when still `true`.
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+/// `skip_serializing_if` for a `bool` that defaults to `false`: omit it when still `false`.
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl ProcessSpec {
