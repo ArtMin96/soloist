@@ -86,15 +86,19 @@ impl Facade {
     /// its `solo.yml`, registers each declared process as a trust-gated command, then
     /// reconciles leftover process groups and starts the trusted auto-start commands.
     ///
-    /// Reconciliation runs **after** registration so a leftover group matching a
-    /// `solo.yml` command is adopted rather than mis-surfaced as an orphan. Starting is
-    /// the supervisor's trusted-auto-start subset, so an untrusted command is registered
-    /// (visible, `Stopped`) but never run until its variant is trusted. Returns the
-    /// project's id and how many processes its `solo.yml` declared, so the caller can
-    /// tell the user when a folder loaded nothing instead of doing so silently. Must run
+    /// When the folder has no `solo.yml`, one is auto-created from its detected commands
+    /// (A10) before opening, so a project opened from an arbitrary folder is usable; an
+    /// existing `solo.yml` is never rewritten. Reconciliation runs **after** registration
+    /// so a leftover group matching a `solo.yml` command is adopted rather than
+    /// mis-surfaced as an orphan. Starting is the supervisor's trusted-auto-start subset,
+    /// so a detected (hence untrusted) command is registered (visible, `Stopped`) but
+    /// never run until its variant is trusted. Returns the project's id, how many
+    /// processes its `solo.yml` declared, and whether the file was just created, so the
+    /// caller can tell the user what happened instead of doing so silently. Must run
     /// within a `tokio` runtime (reconciliation and starting do).
     pub fn load_project(&self, root: &Path) -> Result<ProjectLoad, LoadProjectError> {
         let record = self.projects.add(root, None, None)?;
+        let created = crate::config::create_if_absent(&record.root)?;
         let config = self.config.open(record.id, record.root.clone())?;
         for (name, spec) in &config.processes {
             self.supervisor
@@ -105,6 +109,7 @@ impl Facade {
         Ok(ProjectLoad {
             id: record.id,
             processes: config.processes.len(),
+            created,
         })
     }
 
@@ -123,13 +128,16 @@ impl Facade {
     }
 }
 
-/// The outcome of opening a project: its durable id and how many processes its
-/// `solo.yml` declared. `processes == 0` means the folder had no `solo.yml`, or one that
-/// declares none — the caller surfaces that so opening a project is never silent.
+/// The outcome of opening a project: its durable id, how many processes its `solo.yml`
+/// declared, and whether that `solo.yml` was just auto-created from detected commands.
+/// `created` lets the caller tell the user a config was made for them; `processes == 0`
+/// with `created == false` means an existing `solo.yml` declared nothing — either way the
+/// caller surfaces it so opening a project is never silent.
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct ProjectLoad {
     pub id: ProjectId,
     pub processes: usize,
+    pub created: bool,
 }
 
 /// Why trusting a command failed: it is not in the loaded config, or the durable trust
@@ -150,6 +158,8 @@ pub enum LoadProjectError {
     Project(#[from] ProjectError),
     #[error(transparent)]
     Config(#[from] ConfigError),
+    #[error(transparent)]
+    Write(#[from] crate::config::WriteError),
     #[error(transparent)]
     Supervisor(#[from] SupervisorError),
 }
@@ -313,6 +323,44 @@ mod tests {
             facade.load_project(stack.path()).expect("load").processes,
             2
         );
+    }
+
+    #[tokio::test]
+    async fn load_project_auto_creates_a_solo_yml_from_detected_commands() {
+        let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"scripts":{"dev":"vite"}}"#,
+        )
+        .expect("write package.json");
+
+        let load = facade.load_project(dir.path()).expect("load");
+
+        // A solo.yml was created for the user and the detected command registered.
+        assert!(load.created, "a solo.yml was auto-created");
+        assert_eq!(load.processes, 1);
+        assert!(crate::config::config_path(dir.path()).exists());
+        let snapshot = facade.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].label, "dev");
+        // Detected commands are untrusted — auto-create never bypasses the trust gate.
+        assert!(snapshot[0].requires_trust);
+    }
+
+    #[tokio::test]
+    async fn load_project_does_not_recreate_an_existing_solo_yml() {
+        let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            crate::config::config_path(dir.path()),
+            "processes:\n  Web:\n    command: npm run dev\n",
+        )
+        .expect("write solo.yml");
+
+        let load = facade.load_project(dir.path()).expect("load");
+        assert!(!load.created, "an existing solo.yml is not recreated");
+        assert_eq!(load.processes, 1);
     }
 
     #[tokio::test]
