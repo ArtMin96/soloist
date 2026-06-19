@@ -49,7 +49,7 @@ pub use config::{
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
-pub use facade::{Facade, LoadProjectError, TrustCommandError};
+pub use facade::{Facade, LoadProjectError, ProjectLoad, TrustCommandError};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};
 pub use orphans::{OrphanInfo, OrphanReport};

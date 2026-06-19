@@ -90,8 +90,10 @@ impl Facade {
     /// `solo.yml` command is adopted rather than mis-surfaced as an orphan. Starting is
     /// the supervisor's trusted-auto-start subset, so an untrusted command is registered
     /// (visible, `Stopped`) but never run until its variant is trusted. Returns the
-    /// project's id. Must run within a `tokio` runtime (reconciliation and starting do).
-    pub fn load_project(&self, root: &Path) -> Result<ProjectId, LoadProjectError> {
+    /// project's id and how many processes its `solo.yml` declared, so the caller can
+    /// tell the user when a folder loaded nothing instead of doing so silently. Must run
+    /// within a `tokio` runtime (reconciliation and starting do).
+    pub fn load_project(&self, root: &Path) -> Result<ProjectLoad, LoadProjectError> {
         let record = self.projects.add(root, None, None)?;
         let config = self.config.open(record.id, record.root.clone())?;
         for (name, spec) in &config.processes {
@@ -100,7 +102,10 @@ impl Facade {
         }
         self.supervisor.reconcile_orphans();
         self.supervisor.start_all(record.id)?;
-        Ok(record.id)
+        Ok(ProjectLoad {
+            id: record.id,
+            processes: config.processes.len(),
+        })
     }
 
     /// Trusts a project's command by name: resolves the command to its current variant
@@ -116,6 +121,15 @@ impl Facade {
         self.supervisor.mark_trusted(project, &spec.variant_hash());
         Ok(())
     }
+}
+
+/// The outcome of opening a project: its durable id and how many processes its
+/// `solo.yml` declared. `processes == 0` means the folder had no `solo.yml`, or one that
+/// declares none — the caller surfaces that so opening a project is never silent.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct ProjectLoad {
+    pub id: ProjectId,
+    pub processes: usize,
 }
 
 /// Why trusting a command failed: it is not in the loaded config, or the durable trust
@@ -272,8 +286,33 @@ mod tests {
             .expect("trust");
 
         let project = facade.load_project(dir.path()).expect("load");
-        assert_eq!(project, record.id);
+        assert_eq!(project.id, record.id);
         wait_for(&mut rx, ProcStatus::Running).await;
+    }
+
+    #[tokio::test]
+    async fn load_project_reports_the_process_count() {
+        let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+
+        // A folder with no solo.yml loads successfully but declares nothing — the count
+        // lets the caller tell the user instead of silently showing an unchanged screen.
+        let empty = tempfile::tempdir().expect("temp dir");
+        assert_eq!(
+            facade.load_project(empty.path()).expect("load").processes,
+            0
+        );
+
+        // A folder whose solo.yml declares commands reports their number.
+        let stack = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            crate::config::config_path(stack.path()),
+            "processes:\n  Web:\n    command: npm run dev\n  Api:\n    command: cargo run\n",
+        )
+        .expect("write solo.yml");
+        assert_eq!(
+            facade.load_project(stack.path()).expect("load").processes,
+            2
+        );
     }
 
     #[tokio::test]
@@ -302,7 +341,7 @@ mod tests {
         ));
 
         facade
-            .trust_command(project, "Web")
+            .trust_command(project.id, "Web")
             .expect("trust the command");
 
         // The flag clears and the same start path now succeeds.
@@ -325,7 +364,7 @@ mod tests {
         let project = facade.load_project(dir.path()).expect("load");
 
         assert!(matches!(
-            facade.trust_command(project, "Missing"),
+            facade.trust_command(project.id, "Missing"),
             Err(TrustCommandError::NotFound)
         ));
     }

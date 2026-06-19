@@ -67,7 +67,11 @@ export default function App() {
               onTrust={() => trustById(selected.id)}
             />
           ) : (
-            <EmptyState hasProcesses={store.processes.length > 0} onOpenProject={projects.open} />
+            <EmptyState
+              hasProcesses={store.processes.length > 0}
+              onOpenProject={projects.open}
+              notice={projects.notice}
+            />
           )}
         </main>
       </div>

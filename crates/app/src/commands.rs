@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use soloist_core::{Facade, ProcessId, ProcessView, ProjectId};
+use soloist_core::{Facade, ProcessId, ProcessView, ProjectId, ProjectLoad};
 use tauri::ipc::Channel;
 use tauri::State;
 use tokio::sync::broadcast::error::RecvError;
@@ -25,10 +25,11 @@ pub async fn proc_list(facade: State<'_, Facade>) -> Result<Vec<ProcessView>, St
 
 /// Loads a project from a folder path: registers each `solo.yml` command (trust-gated),
 /// reconciles leftover process groups, and starts the trusted auto-start subset. The
-/// registration and status events repopulate the read model, so the UI needs no return
-/// value beyond the new project's id.
+/// registration and status events repopulate the read model; the returned [`ProjectLoad`]
+/// also carries how many processes were declared, so the UI can report an empty load
+/// instead of leaving the screen unchanged.
 #[tauri::command]
-pub async fn project_load(path: String, facade: State<'_, Facade>) -> Result<ProjectId, String> {
+pub async fn project_load(path: String, facade: State<'_, Facade>) -> Result<ProjectLoad, String> {
     facade
         .load_project(Path::new(&path))
         .map_err(|err| err.to_string())

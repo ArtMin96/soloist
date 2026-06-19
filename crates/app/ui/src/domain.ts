@@ -65,6 +65,14 @@ export interface TrustReviewCommand {
   env: Record<string, string>;
 }
 
+// The outcome of opening a project (the `project_load` command). `processes` is how many
+// the folder's solo.yml declared; zero means it had no solo.yml, or one declaring none —
+// the UI says so rather than leaving the screen unchanged.
+export interface ProjectLoad {
+  id: number;
+  processes: number;
+}
+
 // Mirrors the core's `DomainEvent` (serde `tag = "type"`).
 export type DomainEvent =
   | {

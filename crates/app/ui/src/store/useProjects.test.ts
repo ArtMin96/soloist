@@ -20,12 +20,24 @@ afterEach(() => vi.clearAllMocks());
 describe("useProjects", () => {
   it("loads the chosen folder's stack", async () => {
     pickDirectory.mockResolvedValue("/home/dev/app");
-    load.mockResolvedValue(1);
+    load.mockResolvedValue({ id: 1, processes: 2 });
     const { result } = renderHook(() => useProjects(() => {}));
 
     result.current.open();
 
     await waitFor(() => expect(load).toHaveBeenCalledWith("/home/dev/app"));
+    expect(result.current.notice).toBeNull();
+  });
+
+  it("surfaces a notice when the folder declares no processes", async () => {
+    pickDirectory.mockResolvedValue("/home/dev/empty");
+    load.mockResolvedValue({ id: 1, processes: 0 });
+    const { result } = renderHook(() => useProjects(() => {}));
+
+    result.current.open();
+
+    await waitFor(() => expect(result.current.notice).toMatch(/No processes found/));
+    expect(result.current.notice).toContain("empty");
   });
 
   it("does nothing when the picker is cancelled", async () => {

@@ -5,7 +5,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppInfo, DomainEvent, ProcessView } from "@/domain";
+import type { AppInfo, DomainEvent, ProcessView, ProjectLoad } from "@/domain";
 
 const DOMAIN_EVENT = "domain-event";
 
@@ -24,9 +24,10 @@ export function openProjectDirectory(): Promise<string | null> {
 }
 
 // Loads the project rooted at `path`: the core registers its commands and starts the
-// trusted auto-start subset, emitting the events that repopulate the read model.
-export function projectLoad(path: string): Promise<number> {
-  return invoke<number>("project_load", { path });
+// trusted auto-start subset, emitting the events that repopulate the read model. Resolves
+// to the new project's id and how many processes it declared (zero ⇒ no solo.yml found).
+export function projectLoad(path: string): Promise<ProjectLoad> {
+  return invoke<ProjectLoad>("project_load", { path });
 }
 
 // Trusts a project's command by name (the core trust gate) so it can start. The read
