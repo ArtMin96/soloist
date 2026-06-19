@@ -23,7 +23,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | A10 | Command auto-detection on first add | ✅ | 2 | **v1** | Open a folder with no `solo.yml` → one is auto-created from detected commands (npm/Cargo/Go/Procfile/Make/Just/Compose), trust-gated; nothing detected → a clean starter file. Delivered in the Phase-5 follow-up (user decision 2026-06-19). |
 | A11 | Multiple projects + registry | ✅ | 2 | v1 | Two projects switchable |
 | A12 | Local (app-state) vs shared (YAML) commands | ✅ | 2 | later | Local command never written to `solo.yml` |
-| A13 | Project icon | ✅ | 2 | later | Icon shows on project |
+| A13 | Project icon | ✅ | 2,5 | **v1** | Icon shows on project. A `solo.yml` `icon:` is resolved against the root (`ProjectView.icon`) and loaded into the sidebar avatar via the `project_icon` command (capped, image-only `data:` URL), with a name-initial monogram fallback. Pulled into v1 with the project-grouped sidebar (user decision 2026-06-20). |
 
 ## B. Process supervision (Phase 3)
 
@@ -131,7 +131,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 
 | ID | Feature | Src | Phase | Target | Verify |
 |----|---------|-----|------:|--------|--------|
-| I1 | Sidebar process tree grouped Agents/Terminals/Commands (collapse persists, reorder) | 🟡 | 5,11 | v1 | Grouped tree renders |
+| I1 | Sidebar process tree grouped by project → Agents/Terminals/Commands (collapse persists per project, reorder) | 🟡 | 5,11 | v1 | Grouped tree renders. Each opened project is a collapsible node (icon + name + running count + per-project bulk controls) over its non-empty kind subgroups; collapse persists per project and per subgroup. Reorder (drag) → Phase 11. |
 | I2 | Command palette (`Ctrl+K`) | ✅ | 11 | v1 | Run any action |
 | I3 | Jump palette (`Ctrl+E`) + attention jump (`Ctrl+Shift+E`) | ✅ | 11 | later | Jump to a destination |
 | I4 | `soloist://` deep links | ✅ | 11 | later | Link opens target |

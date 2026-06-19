@@ -9,8 +9,15 @@
 
 ## Current state
 
-- **Overall:** **Phase 5 (Dashboard UI) — `Done — pending verify`.** Latest: a fourth 2026-06-19 session
-  **built A10 (command auto-detection) — now v1, code-complete** (opening a folder with no `solo.yml`
+- **Overall:** **Phase 5 (Dashboard UI) — `Done — pending verify`.** Latest (2026-06-20): **projects became
+  a first-class feature** — a **project-grouped sidebar** (each opened project a collapsible node: icon +
+  name + running count + per-project bulk controls, over its non-empty kind subgroups), a single-sourced
+  **project read-model** (`ProjectView`/`ProjectOpened`, durable in SQLite; `load_project` now persists the
+  `solo.yml name:` it previously dropped), **A13 project icons pulled into v1** (capped `project_icon` data
+  URL + monogram fallback), and **session restore on launch** (durable projects re-register *resting*, so the
+  sidebar isn't empty across runs). Gate **186 (Rust 145 / UI 41)**. Commits moved to a dedicated branch (see
+  the top Decisions entry). _Runtime verification is the user's (restart `just dev`)._ A prior fourth
+  2026-06-19 session **built A10 (command auto-detection) — now v1, code-complete** (opening a folder with no `solo.yml`
   auto-creates one from detected commands, with a friendly confirmation), **finished the deferred
   adversarial review** of the Phase-5 follow-up (applied 2 fixes; recorded the rest), and added a **full
   `solo.yml` reference** to `README.md`. Gate **green: 174 — Rust 138 / UI 36**. See the top "fourth
@@ -171,6 +178,49 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Projects became a first-class feature — project-grouped sidebar + read-model + restore (2026-06-20)
+- **Why:** the user opened a folder, got a `solo.yml`, but **saw no project** in the sidebar. Root cause
+  (traced, not assumed): the sidebar grouped only by **process kind** (Agents/Terminals/Commands) with **no
+  project tier**, and `load_project` **dropped the `solo.yml` `name:`** (`projects.add(root, None, None)`),
+  so there was no project identity to show. The pipeline (detect → register → `ProcessSpawned` → render)
+  was sound — the gap was structural/presentational. Fixed end to end.
+- **Core (C1) — project read-model, single-sourced.** `ProjectView { id, name, root, icon }` projects the
+  durable `ProjectRecord` (name = `solo.yml name:` → folder fallback; icon resolved against root); projects
+  stay **durable in SQLite** (no in-memory project state — corrected a first-draft design after the user
+  flagged "we have sqlite"). `Projects::views()`, `Facade::projects_snapshot()` (CQRS query), and a new
+  `DomainEvent::ProjectOpened` (delta) added; `load_project` now **persists the resolved name/icon** and
+  announces the open. Commits `9b38a0f` (read-model + name), `ea69a73` (icon path).
+- **A13 (project icon) pulled into v1 (user directive 2026-06-20).** `project_icon` Tauri command reads a
+  project's icon into a capped (512 KiB), image-extension-only `data:` URL the avatar renders; monogram
+  fallback otherwise. CSP already allows `img-src data:`; no asset-protocol widening (least-privilege).
+  Commit `8252b1c`. `base64` (already transitive) declared directly — `Cargo.lock` +1 line, brotli pins
+  untouched. plan/02 A13 → **v1**.
+- **Session restore on launch (register-only).** The app re-registers every durable project's commands on
+  startup so the sidebar **shows your projects across runs**, but **resting** — `Facade::restore_projects`
+  shares `load_project`'s register path (`open_and_register`) and **skips `start_all`**, so launching never
+  spawns a process. Fixes "absolutely nothing in the sidebar" on launch. Commit `caa8b35`. (Auto-start-on-
+  launch deliberately **not** done — safe default; offer it as a follow-up if the user wants Solo-style resume.)
+- **UI (via `/impeccable` + shadcn + tauri skills).** Project-grouped sidebar: each opened project is a
+  collapsible node (Avatar monogram/icon + Title-type name + `running/total` count in mono + **per-project**
+  bulk controls) over its **non-empty** kind subgroups (empty Agents/Terminals hidden — kills the prior
+  noise). `groupByProject` **omits process-less projects** (so a stale durable project never shows as an
+  empty node). Bulk moved from the global toolbar into each project header, scoped by id — **fixes the
+  `processes[0].project` bug** (tracked review finding #1). New: `Avatar` primitive (radix-ui), `useProjectIcon`,
+  per-project+kind collapse state. Commit `6ababf1`. Drove the design through `/impeccable craft` (shape brief
+  confirmed by the user) against `DESIGN.md`; reused `Button`/`Collapsible`/`ProcessControls`/`ProcessRow`.
+- **Gate green: `just lint && just test` → 186 (Rust 145 / UI 41).** clippy `-D warnings`, rustfmt, tsc,
+  ESLint, Prettier, dep-direction + file-size guards all pass. New honest tests: core (ProjectView name/icon
+  resolution, `load_project` persists name + emits `ProjectOpened`, `projects_snapshot`, restore-without-start),
+  app (`icon_mime` allow-list), UI (`groupByProject`, `runningCount`, `mergeProject`, project-tier render).
+- **Skills used (CLAUDE.md §5):** `tauri-calling-rust` (the `project_list`/`project_icon` commands),
+  `shadcn` (Avatar composition, reuse primitives, `cn()`/semantic tokens), `/impeccable craft` (the sidebar
+  design against `DESIGN.md`).
+- **Open / not done this session:** **runtime verification is the user's** (a `just dev` restart so the
+  Rust restore rebuilds): on launch the sidebar should now show opened projects (resting); opening a folder
+  with a `solo.yml icon:` should show the icon. Stray untracked `solo.yml` (root + `crates/`) and
+  `processes.webp` (a Solo reference screenshot — clean-room: do **not** commit) left in place. **A13 icon
+  rendering not yet observed at runtime.** Plan file: `~/.claude/plans/jaunty-sauteeing-giraffe.md`.
 
 ### A10 command auto-detection BUILT (v1) + deferred review finished — fourth session (2026-06-19)
 - **Scope:** built A10 (the immediate next work), then finished the STEP-4 adversarial review of the
@@ -1306,7 +1356,16 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-0. **Confirm Phase 5 + A10 at runtime, then flip Phase 5 to `Verified` (user-only — needs a desktop
+0. **Verify the project-grouped sidebar at runtime (user-only — restart `just dev` so the Rust restore
+   rebuilds; the commits live on a dedicated branch, see Decisions).** Observe, with evidence: (a) on
+   **launch**, previously-opened projects reappear in the sidebar — each a collapsible **project node**
+   (icon/monogram + name + `running/total`) over its non-empty kind subgroups — **resting** (nothing
+   auto-started); (b) **Open project** → a folder with a `solo.yml` → its project node + commands appear;
+   (c) a project whose `solo.yml` sets `icon:` shows that **image** in the avatar (A13), else the monogram;
+   (d) the **per-project** bulk controls (Start all / Restart running / Stop all) act only on that project;
+   (e) empty Agents/Terminals subgroups are **hidden**. If a project shows but is empty or an icon is
+   missing, report it. Baseline: gate **186 (Rust 145 / UI 41)**.
+0a. **Confirm Phase 5 + A10 at runtime, then flip Phase 5 to `Verified` (user-only — needs a desktop
    `just dev`, host `DISPLAY=:0`).** Observe, with evidence: (a) launch with no project → empty state;
    **Open project** → pick a folder **with** a `solo.yml` → its stack populates; (b) **A10:** pick a folder
    **without** a `solo.yml` (e.g. a Node/Cargo/Procfile project) → a `solo.yml` is created and the friendly
@@ -1320,9 +1379,10 @@ review's one should-fix + the mechanical nits:
    modules + 4 stub crates stay; **leave** the stray root `package-lock.json` — do not rm/gitignore/stage;
    the 0-byte root `solo.yml` is gone — not recreated, see Decisions).
 0b. **Tracked review findings (from the STEP-4 review; address when their area is next touched, none v1-
-   blocking):** (1) `useProcesses.projectId = processes[0]?.project` is wrong for **multiple** loaded
-   projects (unordered `HashMap` snapshot) — fix with **project-switch (Phase 11)** by persisting
-   `ProjectLoad.id`. (2) `load_project` runs blocking fs on the async command thread — move off-thread per
+   blocking):** (1) ~~`useProcesses.projectId = processes[0]?.project` is wrong for multiple loaded
+   projects~~ — **FIXED 2026-06-20**: bulk ops are now **per-project** (scoped by id in each project header);
+   the single-project `projectId` field is gone. (2) `load_project` runs blocking fs on the async command
+   thread — move off-thread per
    §8 (careful: it also spawns actors). (3) trusting clears `requires_trust` via `refresh()` with no event
    — add a `ProcessTrusted` `DomainEvent` (§5.6) to kill the snapshot race. (4) `project_load` path not
    validated (trusted webview; gate still blocks exec). (5) `auto_start_candidates` skips
