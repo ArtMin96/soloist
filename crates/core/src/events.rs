@@ -46,13 +46,15 @@ pub enum DomainEvent {
     },
     /// A process left the registry.
     ProcessRemoved { id: ProcessId },
-    /// A project was opened: its durable id, resolved display name, and root. Lets
-    /// adapters add the project to their read model live, without re-querying the
-    /// snapshot. Carries the same display identity as [`crate::projects::ProjectView`].
+    /// A project was opened: its durable id, resolved display name, root, and resolved
+    /// icon path (if any). Lets adapters add the project to their read model live,
+    /// without re-querying the snapshot. Carries the same display identity as
+    /// [`crate::projects::ProjectView`].
     ProjectOpened {
         id: ProjectId,
         name: String,
         root: PathBuf,
+        icon: Option<PathBuf>,
     },
     /// A project's `solo.yml` changed on disk. Carries the add/update/remove/rename
     /// diff, whether any added/updated command now needs (re-)trust, and the detail of

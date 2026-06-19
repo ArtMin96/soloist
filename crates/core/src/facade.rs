@@ -113,6 +113,7 @@ impl Facade {
             id: view.id,
             name: view.name.clone(),
             root: view.root.clone(),
+            icon: view.icon.clone(),
         });
         for (name, spec) in &config.processes {
             self.supervisor

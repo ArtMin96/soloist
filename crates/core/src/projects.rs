@@ -65,21 +65,26 @@ impl Projects {
 /// A project's display identity for the UI read model — a projection of the durable
 /// [`ProjectRecord`]. [`name`](Self::name) is always a human label: the `solo.yml`
 /// `name:` when set, otherwise the project folder's name, so the sidebar can title a
-/// project even when its config names none.
+/// project even when its config names none. [`icon`](Self::icon) is the `solo.yml`
+/// `icon:` resolved to an absolute path (the adapter loads the image), or `None`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ProjectView {
     pub id: ProjectId,
     pub name: String,
     pub root: PathBuf,
+    pub icon: Option<PathBuf>,
 }
 
 impl ProjectView {
-    /// Projects a durable record into its display identity, resolving the name.
+    /// Projects a durable record into its display identity, resolving the name and the
+    /// icon path. A relative `icon:` is resolved against the project root; an absolute
+    /// one is taken as-is (the behaviour of [`Path::join`]).
     pub fn from_record(record: &ProjectRecord) -> Self {
         Self {
             id: record.id,
             name: display_name(record),
             root: record.root.clone(),
+            icon: record.icon.as_ref().map(|icon| record.root.join(icon)),
         }
     }
 }
@@ -166,6 +171,26 @@ mod tests {
             ..blank
         };
         assert_eq!(ProjectView::from_record(&absent).name, "storefront");
+    }
+
+    #[test]
+    fn view_resolves_the_icon_against_the_root() {
+        let with_icon = ProjectRecord {
+            id: ProjectId::from_raw(1),
+            root: PathBuf::from("/projects/app"),
+            name: None,
+            icon: Some(PathBuf::from("assets/icon.png")),
+        };
+        assert_eq!(
+            ProjectView::from_record(&with_icon).icon,
+            Some(PathBuf::from("/projects/app/assets/icon.png"))
+        );
+
+        let no_icon = ProjectRecord {
+            icon: None,
+            ..with_icon
+        };
+        assert_eq!(ProjectView::from_record(&no_icon).icon, None);
     }
 
     #[test]
