@@ -13,10 +13,10 @@ use tokio::sync::broadcast::error::RecvError;
 use crate::config::ProcessSpec;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::{PtySize, SpawnSpec};
+use crate::ports::{CorePorts, PtySize, SpawnSpec};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::testing::{
-    FakeOrphanControl, FakeRuntimeState, FakeSpawner, FakeTrustRepo, MockClock,
+    FakeOrphanControl, FakeProjectRepo, FakeRuntimeState, FakeSpawner, FakeTrustRepo, MockClock,
     RecordingLockReleaser,
 };
 
@@ -42,15 +42,17 @@ pub(crate) fn harness(spawner: FakeSpawner) -> Harness {
     let clock = MockClock::new();
     let runtime = Arc::new(FakeRuntimeState::new());
     let orphans = Arc::new(FakeOrphanControl::new());
-    let sup = Supervisor::new(
+    let ports = CorePorts::builder(
         Arc::new(spawner),
         Arc::new(clock.clone()),
         trust.clone(),
-        Arc::new(locks.clone()),
-        runtime.clone(),
-        orphans.clone(),
-        bus,
-    );
+        Arc::new(FakeProjectRepo::new()),
+    )
+    .locks(Arc::new(locks.clone()))
+    .runtime(runtime.clone())
+    .orphan_control(orphans.clone())
+    .build();
+    let sup = Supervisor::new(&ports, bus);
     Harness {
         sup,
         trust,

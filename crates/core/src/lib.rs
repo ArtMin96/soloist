@@ -51,10 +51,10 @@ pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};
 pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{
-    Clock, ExitFuture, ExitStatus, LockReleaser, NoopLockReleaser, NoopOrphanControl,
-    NoopRuntimeState, OrphanControl, OrphanRecord, ProcessControl, ProcessSpawner, ProjectRecord,
-    ProjectRepo, PtyIo, PtySize, RuntimeState, RuntimeStateError, SpawnError, SpawnSpec, Spawned,
-    Store, StoreError, TokioClock, TrustRepo,
+    Clock, CorePorts, CorePortsBuilder, ExitFuture, ExitStatus, LockReleaser, NoopLockReleaser,
+    NoopOrphanControl, NoopRuntimeState, OrphanControl, OrphanRecord, ProcessControl,
+    ProcessSpawner, ProjectRecord, ProjectRepo, PtyIo, PtySize, RuntimeState, RuntimeStateError,
+    SpawnError, SpawnSpec, Spawned, Store, StoreError, TokioClock, TrustRepo,
 };
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView};
 pub use projects::{ProjectError, Projects};

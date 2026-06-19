@@ -12,7 +12,7 @@ mod pty_bridge;
 use std::sync::Arc;
 
 use serde::Serialize;
-use soloist_core::{Facade, NoopRuntimeState, RuntimeState, Store, TokioClock};
+use soloist_core::{CorePorts, Facade, NoopRuntimeState, RuntimeState, Store, TokioClock};
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use soloist_store::{FileRuntimeState, SqliteStore};
 use tauri::{AppHandle, Emitter, Manager};
@@ -62,13 +62,18 @@ fn build_facade() -> Facade {
     };
 
     // One SQLite store backs the trust and project repositories the façade needs.
+    // The lock releaser is unset here, so it defaults to its `Noop` port (coordination
+    // lands in C6); the runtime-state and orphan-control adapters are wired for adoption.
     Facade::new(
-        Arc::new(PtyProcessSpawner),
-        Arc::new(TokioClock),
-        store.clone(),
-        store,
-        runtime,
-        Arc::new(PgidOrphanControl),
+        CorePorts::builder(
+            Arc::new(PtyProcessSpawner),
+            Arc::new(TokioClock),
+            store.clone(),
+            store,
+        )
+        .runtime(runtime)
+        .orphan_control(Arc::new(PgidOrphanControl))
+        .build(),
     )
 }
 

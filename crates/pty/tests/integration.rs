@@ -12,9 +12,8 @@ use nix::errno::Errno;
 use nix::sys::signal::killpg;
 use nix::unistd::Pid;
 use soloist_core::{
-    DomainEvent, Facade, Hash, NoopOrphanControl, NoopRuntimeState, OrphanControl, ProcStatus,
-    ProcessSpawner, ProjectId, ProjectRecord, ProjectRepo, PtySize, SpawnSpec, StoreError,
-    TokioClock, TrustRepo,
+    CorePorts, DomainEvent, Facade, Hash, OrphanControl, ProcStatus, ProcessSpawner, ProjectId,
+    ProjectRecord, ProjectRepo, PtySize, SpawnSpec, StoreError, TokioClock, TrustRepo,
 };
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use tokio::sync::broadcast::error::RecvError;
@@ -250,12 +249,13 @@ async fn orphan_control_tracks_a_group_until_it_dies() {
 #[tokio::test]
 async fn facade_runs_the_full_thread_with_real_spawner_and_clock() {
     let facade = Facade::new(
-        Arc::new(PtyProcessSpawner),
-        Arc::new(TokioClock),
-        Arc::new(NoTrust),
-        Arc::new(NoProjects),
-        Arc::new(NoopRuntimeState),
-        Arc::new(NoopOrphanControl),
+        CorePorts::builder(
+            Arc::new(PtyProcessSpawner),
+            Arc::new(TokioClock),
+            Arc::new(NoTrust),
+            Arc::new(NoProjects),
+        )
+        .build(),
     );
     let mut events = facade.subscribe();
 

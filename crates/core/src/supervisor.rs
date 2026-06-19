@@ -29,8 +29,8 @@ use crate::events::{DomainEvent, EventBus};
 use crate::hash::Hash;
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{
-    Clock, LockReleaser, OrphanControl, ProcessSpawner, PtySize, RuntimeState, SpawnSpec, Spawned,
-    StoreError, TrustRepo,
+    Clock, CorePorts, LockReleaser, OrphanControl, ProcessSpawner, PtySize, RuntimeState,
+    SpawnSpec, Spawned, StoreError, TrustRepo,
 };
 use crate::process::{ProcStatus, ProcessView};
 use crate::terminal::{PtyChunk, PtyInput, RenderedScreen, Terminals};
@@ -71,27 +71,18 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
-    /// Builds a supervisor over the given ports and event bus. The bus is shared with
-    /// the façade so adapters see process events alongside config events. `runtime`
-    /// persists running process groups and `orphan_control` operates on them for
-    /// orphan adoption.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        spawner: Arc<dyn ProcessSpawner>,
-        clock: Arc<dyn Clock>,
-        trust: Arc<dyn TrustRepo>,
-        locks: Arc<dyn LockReleaser>,
-        runtime: Arc<dyn RuntimeState>,
-        orphan_control: Arc<dyn OrphanControl>,
-        bus: EventBus,
-    ) -> Self {
+    /// Builds a supervisor from the core port set, reading the ports it owns. The bus is
+    /// shared with the façade so adapters see process events alongside config events;
+    /// `runtime` persists running process groups and `orphan_control` operates on them
+    /// for orphan adoption.
+    pub fn new(ports: &CorePorts, bus: EventBus) -> Self {
         Self {
-            spawner,
-            clock,
-            trust,
-            locks,
-            runtime,
-            orphan_control,
+            spawner: ports.spawner.clone(),
+            clock: ports.clock.clone(),
+            trust: ports.trust.clone(),
+            locks: ports.locks.clone(),
+            runtime: ports.runtime.clone(),
+            orphan_control: ports.orphan_control.clone(),
             bus,
             registry: Registry::default(),
             terminals: Terminals::default(),

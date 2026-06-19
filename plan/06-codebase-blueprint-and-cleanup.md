@@ -139,7 +139,7 @@ trigger that tells you to reach for it. Use a pattern when its trigger fires —
 | **Repository** | `store` (`ProjectRepo`/`TrustRepo`/…); future Todo/Scratchpad/Kv/Lock repos | durable aggregate → one focused trait per aggregate, SQLite behind it |
 | **Newtype + closed enum** | `ids.rs`, `process.rs` | a domain id/state → newtype/enum, never a bare `String`/`int` |
 | **Null Object** | `Noop{LockReleaser,RuntimeState,OrphanControl}` in `ports.rs` | a **driven** subsystem is optional → ship a `Noop` default so the core runs without the real adapter (§8) |
-| **Parameter Object / Builder** | **to add (R3)** — a `CorePorts` struct for `Facade::new` | a constructor passes >4 collaborators (`too_many_arguments`) → group them in a struct/builder |
+| **Parameter Object / Builder** | `core::ports::CorePorts` + `CorePortsBuilder` — the port set for `Facade::new`/`Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) → group them in a struct/builder |
 | **Registry** | **to add** — MCP tool registry (P8), agent-tool defs (P7) | a growing set of "one of many" handlers → register entries, don't extend a giant `match` |
 | **Strategy** | **to add** — per-provider idle heuristics (P7), per-agent-tool launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
 | **Optimistic concurrency** | **to add** — scratchpad/todo `expected_revision` (P9) | concurrent writers to one durable record → revision guard, reject stale writes |
@@ -370,17 +370,21 @@ core has **zero** knowledge of them, and the dependency-direction guard (K7) mak
 **Driven adapters (optional subsystems the core calls) use the Null Object pattern.** A subsystem the core
 *uses* but that may be absent (lock releaser, runtime-state/orphan adoption, file watcher, notifier,
 summarizer) is a **port with a `Noop` default**. The core always holds *a* `Arc<dyn Port>`; if the real
-adapter isn't wired, it holds the `Noop`. This is why `Facade::new` can take `NoopLockReleaser` today and
-why `build_facade` degrades runtime-state to `NoopRuntimeState` when the data dir is unavailable — the
-supervisor never branches on "is coordination present?", it just calls `release_all` and the `Noop`
-swallows it. New optional subsystems follow the same shape (§5.2 step 1).
+adapter isn't wired, it holds the `Noop`. The port set is bundled in **`core::ports::CorePorts`** (a
+parameter object, R3) whose **builder defaults the optional subsystems to their `Noop` port**: the lock
+releaser defaults to `NoopLockReleaser` (coordination lands in C6), and `build_facade` degrades
+runtime-state to `NoopRuntimeState` when the data dir is unavailable — the supervisor never branches on
+"is coordination present?", it just calls `release_all` and the `Noop` swallows it. A future optional port
+is **one field on `CorePorts`** with a `Noop` default, so existing composition roots and tests are
+untouched (§5.2 step 1).
 
 **The composition root is the single place these choices are made.** `crates/app/src/lib.rs::build_facade`
-is the one function that picks real-vs-`Noop` adapters and assembles the `Facade`. There is **exactly one
-composition root per binary** (the app; later, `soloist-mcp` has its own minimal one). Rules:
-- No other code constructs adapters or decides real-vs-fake — they receive an assembled `Facade`/`Ports`.
-- Optional subsystems absent from the root fall back to their `Noop` port; the app still launches.
-- Tests are "alternate composition roots": they assemble the `Facade` from `core::testing` fakes (§6).
+is the one function that picks real-vs-`Noop` adapters, assembles a **`CorePorts`** (via its builder), and
+hands it to `Facade::new`. There is **exactly one composition root per binary** (the app; later,
+`soloist-mcp` has its own minimal one). Rules:
+- No other code constructs adapters or decides real-vs-fake — they receive an assembled `Facade`/`CorePorts`.
+- Optional subsystems absent from the builder fall back to their `Noop` port; the app still launches.
+- Tests are "alternate composition roots": they assemble a `CorePorts` from `core::testing` fakes (§6).
 
 The payoff: a subsystem can be added, removed, or swapped by editing one crate's membership + the
 composition root, with the type system and CI proving the rest of the app is untouched.

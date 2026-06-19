@@ -130,7 +130,7 @@ Reach for a pattern when its **trigger** fires — not preemptively (YAGNI).
 | **Repository** | `store` repos; future Todo/Scratchpad/Kv/Lock | a durable aggregate → one focused trait, SQLite behind it |
 | **Newtype + closed enum** | `ids.rs`, `process.rs` | a domain id/state → never a bare `String`/`int` |
 | **Null Object** | `Noop{LockReleaser,RuntimeState,OrphanControl}` | a **driven** subsystem is optional → ship a `Noop` so core runs without the real adapter |
-| **Parameter Object / Builder** | *to add (R3)* — `CorePorts` for `Facade::new` | a constructor passes >4 collaborators (`too_many_arguments`) |
+| **Parameter Object / Builder** | `core::ports::CorePorts` (+ `CorePortsBuilder`) — the port set for `Facade::new`/`Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) |
 | **Registry** | *to add* — MCP tool registry (P8), agent-tool defs (P7) | a growing set of "one of many" handlers → register, don't extend a giant `match` |
 | **Strategy** | *to add* — per-provider idle heuristics (P7), per-agent launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
 | **Optimistic concurrency** | *to add* — scratchpad/todo `expected_revision` (P9) | concurrent writers to one durable record → revision guard |

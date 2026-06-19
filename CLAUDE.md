@@ -530,8 +530,10 @@ you think a change needs to break one, stop and surface it (§12):
   `Noop*` default. The core always holds *a* port and never branches on "is it present?". Add new optional
   subsystems the same way (`plan/06` §5.2).
 - **One composition root per binary.** `crates/app/src/lib.rs::build_facade` is the **only** place real-vs-
-  `Noop` adapters are chosen and the `Facade` is assembled. No other code constructs adapters. Tests are
-  alternate composition roots built from `core::testing` fakes.
+  `Noop` adapters are chosen; it assembles a **`core::ports::CorePorts`** (via its builder, which defaults
+  the optional driven subsystems to their `Noop` port) and hands it to `Facade::new`. No other code
+  constructs adapters. A future port is **one field on `CorePorts`**, not another constructor argument.
+  Tests are alternate composition roots that build a `CorePorts` from `core::testing` fakes.
 - **Single source of truth, everywhere.** Every status/kind/event/command/limit/path is defined **once**
   (Rust enum in `core`; the TS mirror in **one** `domain.ts`; one command/event-name constant per side).
   Shared **test fakes** live once in `core::testing` (reused cross-crate via its `testing` feature — see the

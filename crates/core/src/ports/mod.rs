@@ -19,6 +19,10 @@ use tokio::sync::mpsc;
 use crate::hash::Hash;
 use crate::ids::{ProcessId, ProjectId};
 
+mod bundle;
+
+pub use bundle::{CorePorts, CorePortsBuilder};
+
 // ───────────────────────────── ProcessSpawner ──────────────────────────────
 
 /// The character dimensions of a pseudo-terminal. The child reads these from its

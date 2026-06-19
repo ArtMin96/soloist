@@ -8,17 +8,13 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
 use crate::config::ConfigEngine;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::{
-    Clock, NoopLockReleaser, OrphanControl, ProcessSpawner, ProjectRepo, PtySize, RuntimeState,
-    SpawnSpec, TrustRepo,
-};
+use crate::ports::{CorePorts, PtySize, SpawnSpec};
 use crate::process::{ProcessKind, ProcessView};
 use crate::projects::Projects;
 use crate::supervisor::{Registration, Supervisor};
@@ -45,28 +41,15 @@ pub struct Facade {
 }
 
 impl Facade {
-    /// Builds a façade over the given port adapters (real ones in the app, fakes in
-    /// tests). The trust repository is shared by the supervisor's trust gate, the
-    /// trust store, and the config sync engine, so all three agree on what is trusted.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        spawner: Arc<dyn ProcessSpawner>,
-        clock: Arc<dyn Clock>,
-        trust: Arc<dyn TrustRepo>,
-        projects: Arc<dyn ProjectRepo>,
-        runtime: Arc<dyn RuntimeState>,
-        orphan_control: Arc<dyn OrphanControl>,
-    ) -> Self {
+    /// Builds a façade over the given core port set (real adapters in the app, fakes in
+    /// tests). The trust repository is shared by the supervisor's trust gate, the trust
+    /// store, and the config sync engine, so all three agree on what is trusted.
+    pub fn new(ports: CorePorts) -> Self {
         let bus = EventBus::new(EVENT_BUFFER);
-        let supervisor = Supervisor::new(
-            spawner,
-            clock,
-            trust.clone(),
-            Arc::new(NoopLockReleaser),
-            runtime,
-            orphan_control,
-            bus.clone(),
-        );
+        let supervisor = Supervisor::new(&ports, bus.clone());
+        let CorePorts {
+            trust, projects, ..
+        } = ports;
         Self {
             supervisor,
             projects: Projects::new(projects),
@@ -131,22 +114,24 @@ impl Facade {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::{NoopOrphanControl, NoopRuntimeState, TokioClock};
+    use crate::ports::{TokioClock, TrustRepo};
     use crate::process::ProcStatus;
     use crate::supervisor::SupervisorError;
     use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTrustRepo};
     use std::path::Path;
+    use std::sync::Arc;
     use tokio::sync::broadcast::error::RecvError;
 
     fn facade(spawner: FakeSpawner) -> (Facade, Arc<FakeTrustRepo>) {
         let trust = Arc::new(FakeTrustRepo::new());
         let facade = Facade::new(
-            Arc::new(spawner),
-            Arc::new(TokioClock),
-            trust.clone(),
-            Arc::new(FakeProjectRepo::new()),
-            Arc::new(NoopRuntimeState),
-            Arc::new(NoopOrphanControl),
+            CorePorts::builder(
+                Arc::new(spawner),
+                Arc::new(TokioClock),
+                trust.clone(),
+                Arc::new(FakeProjectRepo::new()),
+            )
+            .build(),
         );
         (facade, trust)
     }
