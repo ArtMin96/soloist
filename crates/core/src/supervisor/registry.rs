@@ -36,6 +36,7 @@ struct Managed {
     project_root: PathBuf,
     trust_variant: Option<Hash>,
     auto_start: bool,
+    auto_restart: bool,
     handle: Option<ActorHandle>,
 }
 
@@ -45,6 +46,7 @@ pub(crate) struct EntryInfo {
     pub(crate) project: ProjectId,
     pub(crate) status: ProcStatus,
     pub(crate) trust_variant: Option<Hash>,
+    pub(crate) auto_restart: bool,
     pub(crate) launch: SpawnSpec,
 }
 
@@ -70,6 +72,7 @@ impl Registry {
         project_root: PathBuf,
         trust_variant: Option<Hash>,
         auto_start: bool,
+        auto_restart: bool,
     ) {
         let mut guard = lock(&self.inner);
         guard.insert(
@@ -80,6 +83,7 @@ impl Registry {
                 project_root,
                 trust_variant,
                 auto_start,
+                auto_restart,
                 handle: None,
             },
         );
@@ -124,6 +128,7 @@ impl Registry {
             project: entry.view.project,
             status: entry.view.status,
             trust_variant: entry.trust_variant,
+            auto_restart: entry.auto_restart,
             launch: entry.launch.clone(),
         })
     }

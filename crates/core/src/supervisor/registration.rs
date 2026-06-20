@@ -25,6 +25,9 @@ pub struct Registration {
     /// which the user launches directly) is never trust-gated.
     pub trust_variant: Option<Hash>,
     pub auto_start: bool,
+    /// Whether the restart policy relaunches this command after an unexpected exit. From
+    /// [`ProcessSpec::auto_restart`]; always `false` for a launched terminal or agent.
+    pub auto_restart: bool,
 }
 
 impl Registration {
@@ -49,6 +52,7 @@ impl Registration {
             project_root: root.to_path_buf(),
             trust_variant: Some(spec.variant_hash()),
             auto_start: spec.auto_start,
+            auto_restart: spec.auto_restart,
         }
     }
 
@@ -71,6 +75,7 @@ impl Registration {
             project_root,
             trust_variant: None,
             auto_start: false,
+            auto_restart: false,
         }
     }
 }

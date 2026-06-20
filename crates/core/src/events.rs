@@ -44,6 +44,15 @@ pub enum DomainEvent {
     },
     /// A process left the registry.
     ProcessRemoved { id: ProcessId },
+    /// The restart policy is relaunching a crashed `auto_restart` command. `attempt` is
+    /// its position in the current rate-limit window (1 = the first restart). The status
+    /// also moves `Crashed -> Starting`; this delta additionally carries the attempt
+    /// count for the "restarting (k/N)" affordance and crash notifications.
+    RestartScheduled { id: ProcessId, attempt: u32 },
+    /// The restart policy gave up on a command that crashed too fast, too often (the
+    /// 10-restarts-in-60s gate): it is held in [`ProcStatus::RestartExhausted`] until the
+    /// user restarts it. Distinct from the status delta so notifications can fire on it.
+    RestartExhausted { id: ProcessId },
     /// A project was opened (or its set of projects changed). Carries the project's id; an
     /// adapter re-reads the project read model ([`crate::projects::ProjectView`], which
     /// resolves name and icon together) rather than carrying that display state on the event.

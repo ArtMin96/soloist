@@ -25,7 +25,7 @@ use super::{Registration, Supervisor};
 pub(crate) const PROJECT: ProjectId = ProjectId::from_raw(1);
 
 pub(crate) struct Harness {
-    pub(crate) sup: Supervisor,
+    pub(crate) sup: Arc<Supervisor>,
     pub(crate) trust: Arc<FakeTrustRepo>,
     pub(crate) locks: RecordingLockReleaser,
     pub(crate) clock: MockClock,
@@ -52,7 +52,7 @@ pub(crate) fn harness(spawner: FakeSpawner) -> Harness {
     .runtime(runtime.clone())
     .orphan_control(orphans.clone())
     .build();
-    let sup = Supervisor::new(&ports, bus);
+    let sup = Arc::new(Supervisor::new(&ports, bus));
     Harness {
         sup,
         trust,
@@ -79,6 +79,19 @@ pub(crate) fn command_spec(command: &str, auto_start: bool) -> ProcessSpec {
         working_dir: None,
         auto_start,
         auto_restart: false,
+        restart_when_changed: Vec::new(),
+        env: BTreeMap::new(),
+    }
+}
+
+/// A trust-gated command that auto-restarts after a crash but does not auto-start — the
+/// fixture the restart-policy tests register.
+pub(crate) fn auto_restart_spec(command: &str) -> ProcessSpec {
+    ProcessSpec {
+        command: command.into(),
+        working_dir: None,
+        auto_start: false,
+        auto_restart: true,
         restart_when_changed: Vec::new(),
         env: BTreeMap::new(),
     }

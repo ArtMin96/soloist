@@ -6,7 +6,9 @@
 //! like "restart" or "is this command trusted" is implemented exactly once. Adapters
 //! translate requests in and project the read model out; they hold no business state.
 
+use std::future::Future;
 use std::path::Path;
+use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
@@ -26,7 +28,7 @@ const EVENT_BUFFER: usize = 1024;
 /// The integration façade (context C8). Cheap to share as Tauri-managed state.
 pub struct Facade {
     bus: EventBus,
-    supervisor: Supervisor,
+    supervisor: Arc<Supervisor>,
     projects: Projects,
     trust: TrustStore,
     config: ConfigEngine,
@@ -38,7 +40,7 @@ impl Facade {
     /// store, and the config sync engine, so all three agree on what is trusted.
     pub fn new(ports: CorePorts) -> Self {
         let bus = EventBus::new(EVENT_BUFFER);
-        let supervisor = Supervisor::new(&ports, bus.clone());
+        let supervisor = Arc::new(Supervisor::new(&ports, bus.clone()));
         let CorePorts {
             trust, projects, ..
         } = ports;
@@ -64,7 +66,14 @@ impl Facade {
 
     /// The process supervisor (C2) — start/stop/restart and bulk operations.
     pub fn supervisor(&self) -> &Supervisor {
-        &self.supervisor
+        self.supervisor.as_ref()
+    }
+
+    /// The self-healing reactor loop (crash auto-restart, C2), returned for the
+    /// composition root to spawn once on its runtime. It runs until the facade is
+    /// dropped; the supervisor's restart policy drives it.
+    pub fn self_healing_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        self.supervisor.self_healing_loop()
     }
 
     /// The project registry (C1).

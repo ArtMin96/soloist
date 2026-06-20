@@ -19,6 +19,7 @@ mod bulk;
 mod reconcile;
 mod registration;
 mod registry;
+mod restart;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -37,6 +38,7 @@ use crate::terminal::{PtyChunk, PtyInput, RenderedScreen, Terminals};
 
 use actor::{ActorMsg, ActorPorts, OrphanIdentity};
 use registry::{ActorHandle, Registry};
+use restart::RestartPolicy;
 
 pub use bulk::StartSummary;
 pub use registration::Registration;
@@ -68,6 +70,7 @@ pub struct Supervisor {
     bus: EventBus,
     registry: Registry,
     terminals: Terminals,
+    restart_policy: RestartPolicy,
 }
 
 impl Supervisor {
@@ -86,6 +89,7 @@ impl Supervisor {
             bus,
             registry: Registry::default(),
             terminals: Terminals::default(),
+            restart_policy: RestartPolicy::default(),
         }
     }
 
@@ -105,6 +109,7 @@ impl Supervisor {
             project_root,
             trust_variant,
             auto_start,
+            auto_restart,
         } = registration;
         let requires_trust = self.requires_trust(project, trust_variant.as_ref());
         let view = ProcessView {
@@ -116,8 +121,14 @@ impl Supervisor {
             exit_code: None,
             requires_trust,
         };
-        self.registry
-            .add(view, launch, project_root, trust_variant, auto_start);
+        self.registry.add(
+            view,
+            launch,
+            project_root,
+            trust_variant,
+            auto_start,
+            auto_restart,
+        );
         self.bus.publish(DomainEvent::ProcessSpawned {
             id,
             project,
@@ -158,6 +169,9 @@ impl Supervisor {
             return Ok(());
         }
         self.guard_trust(info.project, info.trust_variant.as_ref())?;
+        // A user-initiated start is an explicit retry: clear any crash-restart history so
+        // a previously exhausted command starts with a fresh rate-limit window.
+        self.restart_policy.forget(id);
         self.launch_actor(id, info.launch, None);
         Ok(())
     }
@@ -184,6 +198,9 @@ impl Supervisor {
             .describe(id)
             .ok_or(SupervisorError::NotFound(id))?;
         self.guard_trust(info.project, info.trust_variant.as_ref())?;
+        // A user-initiated restart is an explicit retry — reset crash tracking, as a stop
+        // would (the auto-restart path relaunches directly and never clears).
+        self.restart_policy.forget(id);
         if info.status.is_active() {
             if let Some(mailbox) = self.registry.mailbox(id) {
                 let _ = mailbox.try_send(ActorMsg::Restart);
@@ -198,6 +215,9 @@ impl Supervisor {
     /// children leak on app quit (the deterministic-shutdown contract). Wired into the
     /// Tauri shell's exit event so a normal quit reaps every process group.
     pub async fn shutdown(&self) {
+        // Stop the restart policy first so a crash during teardown is never auto-restarted
+        // (D11): the children we are about to reap must not be relaunched.
+        self.restart_policy.begin_shutdown();
         let mut joins = Vec::new();
         for id in self.registry.with_live_actor() {
             if let Some(ActorHandle { mailbox, join }) = self.registry.take_handle(id) {

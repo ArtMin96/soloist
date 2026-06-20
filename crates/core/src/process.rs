@@ -53,7 +53,8 @@ impl ProcStatus {
     /// impossible edge (e.g. `Stopped -> Running` without `Starting`) is rejected
     /// rather than silently applied. Reaching [`ProcStatus::Crashed`] from any live
     /// state is allowed because a supervised panic or unexpected exit can occur at
-    /// any point in the lifecycle.
+    /// any point in the lifecycle. `Crashed -> RestartExhausted` is the restart policy
+    /// holding a command that has crashed too fast, too often (the rate-limit gate).
     pub fn transition(self, to: ProcStatus) -> Result<ProcStatus, IllegalTransition> {
         use ProcStatus::*;
         let allowed = matches!(
@@ -67,6 +68,7 @@ impl ProcStatus {
                 | (Restarting, Starting)
                 | (Stopping, Stopped)
                 | (Crashed, Starting)
+                | (Crashed, RestartExhausted)
                 | (RestartExhausted, Starting)
         ) || (matches!(self, Starting | Running | Stopping | Restarting)
             && to == Crashed);
@@ -145,6 +147,23 @@ mod tests {
         }
         // ...but not from a terminal/resting state.
         assert!(ProcStatus::Stopped.transition(ProcStatus::Crashed).is_err());
+    }
+
+    #[test]
+    fn a_crashed_process_can_become_restart_exhausted() {
+        // The restart policy holds a too-often-crashing command in RestartExhausted;
+        // the only inbound edge is from Crashed, never from a live or resting state.
+        assert_eq!(
+            ProcStatus::Crashed.transition(ProcStatus::RestartExhausted),
+            Ok(ProcStatus::RestartExhausted)
+        );
+        for other in [
+            ProcStatus::Running,
+            ProcStatus::Starting,
+            ProcStatus::Stopped,
+        ] {
+            assert!(other.transition(ProcStatus::RestartExhausted).is_err());
+        }
     }
 
     #[test]
