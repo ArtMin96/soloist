@@ -43,7 +43,7 @@ headless-testable and is the mechanical guarantee behind *"remove MCP → app st
 | `core` | domain | C1–C8, ports (traits), domain types, event bus, `Facade` | `tokio`/`serde`/`thiserror`/`vte` — **never** an adapter crate | live (C1–C3, C8) |
 | `store` | driven adapter | SQLite: `Store`/`ProjectRepo`/`TrustRepo`/`RuntimeState` + migrations | `core`, `rusqlite` | live |
 | `pty` | driven adapter | `ProcessSpawner`/`PtyIo`/`ProcessControl`/`OrphanControl` over `portable-pty`+`nix` | `core`, `portable-pty`, `nix` | live |
-| `sys` | driven adapter | `MetricsProbe` (CPU/mem over `sysinfo`) + `PortProbe` (discovery over `/proc`) — monitoring C5 | `core`, `sysinfo` | live |
+| `sys` | driven adapter | `MetricsProbe` (CPU/mem) + `PortProbe` (discovery), both over `/proc`; `FileWatcher` over `notify` — monitoring C5 | `core`, `notify`, `libc` | live |
 | `app` | driving + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `sys`, `httpapi`, `tauri` | live |
 | `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | stub → P8 |
 | `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | stub → P10 |

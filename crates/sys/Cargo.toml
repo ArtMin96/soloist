@@ -1,6 +1,6 @@
 [package]
 name = "soloist-sys"
-description = "OS adapters for Soloist (CPU/memory via sysinfo, /proc-based port discovery, and notify-based file watching), behind the core's driven ports."
+description = "OS adapters for Soloist (CPU/memory and port discovery over /proc, and notify-based file watching), behind the core's driven ports."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,8 +10,9 @@ repository.workspace = true
 
 [dependencies]
 soloist-core = { path = "../core" }
-# Only the process/CPU/memory surface — drop disk/network/component code to stay small.
-sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+# CPU/memory and port discovery read `/proc` directly; `libc` is only for `sysconf`
+# (clock ticks per second, page size) when converting those readings to seconds and bytes.
+libc = "0.2"
 # Recursive filesystem watching for file-watch restarts. Default features off: on Linux the
 # inotify backend is unconditional, so this drops the macOS backend and the unused
 # crossbeam-channel delivery path (we use the closure callback), keeping the bundle small.
