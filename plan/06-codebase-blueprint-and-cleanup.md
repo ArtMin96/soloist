@@ -350,10 +350,28 @@ are **R-phases** (refactor), orthogonal to the build phases.
   `KNOWN-DIVERGENCES.md` only if a genuinely new intentional divergence was introduced (none this cleanup).
 - **Done when:** docs match the tree; `PROGRESS.md` reflects the cleanup; all gates green.
 
+### R7 — Finish migrating driven ports into their bounded contexts (pending)
+- **The drift:** the "a bounded context owns its own port" decision (2026-06-20, §5.2) is applied to the
+  newer domains — `metrics`, `portscan`, `filewatch`, and `notify` each define their port + `Noop` in their
+  own module — but the **older driven ports still live in the shared `core/ports/mod.rs`**, now a partial
+  god-file mixing several contexts: `ProcessSpawner`/`PtyIo`/`ProcessControl`/`Spawned`/`SpawnSpec`/`PtySize`/
+  `ExitStatus`/`SpawnError` (C2/C3), `Store`/`ProjectRepo`/`TrustRepo`/`ProjectRecord`/`StoreError` (C1),
+  `LockReleaser` (C6), `RuntimeState`/`OrphanControl`/`OrphanRecord` (C2 orphan adoption), `Summarizer` (C4).
+  This is an **internal consistency drift, not a Solo-behavior divergence** (so not a `KNOWN-DIVERGENCES.md`
+  entry).
+- Migrate each into its bounded-context module (with its `Noop` default), leaving `ports/` to hold only the
+  genuinely cross-cutting `Clock`/`TokioClock` and the `CorePorts` bundle/builder. `CorePorts` imports each
+  domain's port (exactly as it already does for `metrics`/`portscan`/`filewatch`/`notify`); keep the `lib.rs`
+  re-exports stable so adapters are unaffected. Update the §4 Null-Object row (it still cites
+  `Noop{LockReleaser,RuntimeState,OrphanControl}` in `ports/mod.rs`) when done.
+- **Done when:** `ports/mod.rs` holds only the cross-cutting primitive(s) + the bundle; each driven port lives
+  with its context; dep-direction + file-size guards green; `just lint && just test` green with no test-count
+  change.
+
 **Sequencing rationale:** R0 sets the bar and the file-size signal; R1 makes the later phases' tests cheap
 to keep honest; R2/R3/R4 are the structural edits (smallest blast radius first: split, then the constructor,
-then scaffolding removal); R5 is best done after the structure settles; R6 closes the ledger. Each is a
-single reviewable commit.
+then scaffolding removal); R5 is best done after the structure settles; R6 closes the ledger. R7 (pending)
+finishes the port-ownership migration the newer domains established. Each is a single reviewable commit.
 
 ---
 

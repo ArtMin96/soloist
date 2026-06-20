@@ -6,6 +6,7 @@
 //! `DomainEvent` stream to the webview as Tauri events. The UI renders the read model.
 
 mod commands;
+mod notifier;
 mod pty_bridge;
 
 use std::sync::Arc;
@@ -18,6 +19,7 @@ use soloist_sys::{NotifyFileWatcher, ProcPortProbe, SysinfoMetricsProbe};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::broadcast::error::RecvError;
 
+use notifier::TauriNotifier;
 use pty_bridge::PtyBridge;
 
 /// The webview event name carrying every serialized [`soloist_core::DomainEvent`].
@@ -38,8 +40,9 @@ fn app_info() -> AppInfo {
 }
 
 /// Builds the façade over the real adapters, degrading to an in-memory store if the
-/// durable location is unavailable so the app still launches.
-fn build_facade() -> Facade {
+/// durable location is unavailable so the app still launches. Takes the [`AppHandle`] so the
+/// desktop notifier can show toasts through the Tauri notification plugin.
+fn build_facade(app: AppHandle) -> Facade {
     let store = Arc::new(match SqliteStore::open_default() {
         Ok(store) => store,
         Err(err) => {
@@ -64,8 +67,9 @@ fn build_facade() -> Facade {
     // One SQLite store backs the trust and project repositories the façade needs.
     // The lock releaser is unset here, so it defaults to its `Noop` port (coordination
     // lands in C6); the runtime-state and orphan-control adapters are wired for adoption,
-    // the metrics probe reads CPU/memory via sysinfo, the port probe reads /proc, and the
-    // file watcher reports filesystem changes via notify.
+    // the metrics probe reads CPU/memory via sysinfo, the port probe reads /proc, the
+    // file watcher reports filesystem changes via notify, and the notifier shows desktop
+    // toasts via the Tauri notification plugin.
     Facade::new(
         CorePorts::builder(
             Arc::new(PtyProcessSpawner),
@@ -78,6 +82,7 @@ fn build_facade() -> Facade {
         .metrics(Arc::new(SysinfoMetricsProbe::new()))
         .port_probe(Arc::new(ProcPortProbe::new()))
         .file_watcher(Arc::new(NotifyFileWatcher::new()))
+        .notifier(Arc::new(TauriNotifier::new(app)))
         .build(),
     )
 }
@@ -103,9 +108,12 @@ fn forward_events(app: AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(build_facade())
+        .plugin(tauri_plugin_notification::init())
         .manage(PtyBridge::default())
         .setup(|app| {
+            // Build the façade here (not in the builder chain) so the desktop notifier can
+            // capture the AppHandle, then register it as managed state for the commands.
+            app.manage(build_facade(app.handle().clone()));
             forward_events(app.handle().clone());
             // Start the self-healing reactor: it watches the core event stream and
             // relaunches crashed auto_restart commands within the documented rate limit
@@ -117,6 +125,9 @@ pub fn run() {
             // Start the port scanner: it discovers each running group's listening ports and
             // reflects them on the read model (also weakly held, also self-supervised).
             tauri::async_runtime::spawn(app.state::<Facade>().port_scanner_loop());
+            // Start the notification reactor: it shows a desktop toast on a crash or an
+            // exhausted auto-restart via the notification plugin (also weakly held).
+            tauri::async_runtime::spawn(app.state::<Facade>().notifications_loop());
             // Re-register previously-opened projects so they reappear in the sidebar on
             // launch (resting — restore never starts a process); the UI seeds from the
             // resulting snapshots.

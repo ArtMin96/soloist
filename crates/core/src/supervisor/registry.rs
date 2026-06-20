@@ -133,6 +133,14 @@ impl Registry {
         lock(&self.inner).get(&id).and_then(|entry| entry.pgid)
     }
 
+    /// The display label of a process by id, `None` if it is no longer registered — what the
+    /// notification reactor names a toast after.
+    pub(crate) fn label_of(&self, id: ProcessId) -> Option<String> {
+        lock(&self.inner)
+            .get(&id)
+            .map(|entry| entry.view.label.clone())
+    }
+
     /// Updates a process's readiness gate to ready/not-ready, but only while it is still on
     /// the `pgid` the wait is probing. Returns whether it changed (so the caller announces
     /// only real transitions). Guarding on the group closes the race where a process stops
