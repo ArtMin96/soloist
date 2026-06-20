@@ -92,3 +92,32 @@ hypothetical grid-in-core design is that `get_process_output` of a cursor-addres
 line-approximate rather than grid-exact. Revisit (→🟢) if a consumer needs grid-exact rendered text
 inside the core; a cell-grid model can be added behind the same buffer interface without touching
 callers.
+
+---
+
+## D-4 — File-watch default ignore list is our own 🟢
+
+**Introduced:** Phase 6 (Monitoring / file-watch restarts).
+
+**Solo (ref `plan/05` §4):** file-watch restart watches the project directory recursively for
+create/modify events, debounces them, and restarts on a matching `restart_when_changed` glob. The
+docs explicitly note **no documented ignore list** ("❓ No documented ignore-list
+(`.git`/`node_modules`). We add sensible default ignores.").
+
+**Soloist:** a change inside any of `.git`, `node_modules`, `target`, `dist`, `.venv` (matched by
+directory name at any depth, relative to the project root) never triggers a restart, **even if a
+configured glob would otherwise match it** (the ignore is checked before the glob). The set lives in
+one place — `core::filewatch::policy::DEFAULT_IGNORES`.
+
+**Rationale:** these are the version-control, dependency, and build-output trees that churn
+constantly (a `cargo build` rewrites all of `target/`, `npm install` rewrites `node_modules/`). Left
+unignored, an ordinary build would fire a restart storm — the documented debounce coalesces a burst
+but not a steady stream of writes across seconds. Ignoring them by default makes file-watch usable
+without every project having to hand-exclude them. Because Solo documents *no* list, this is a
+gap-filling decision (it could differ from whatever Solo does internally), so it is recorded here.
+
+**Effect on parity:** D6 (touch a watched file → one debounced restart) and D7 (editing an ignored
+path → no restart) verify exactly as the matrix specifies. The only way to observe a difference from
+a hypothetical "watch everything" design is to put a `restart_when_changed` glob *inside* an ignored
+directory and expect a restart — which we deliberately suppress. Revisit if a user needs to watch
+inside one of these directories; the fix is a per-command opt-out, not removing the safe default.

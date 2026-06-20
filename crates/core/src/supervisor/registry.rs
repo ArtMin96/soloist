@@ -37,6 +37,9 @@ struct Managed {
     trust_variant: Option<Hash>,
     auto_start: bool,
     auto_restart: bool,
+    /// Globs (relative to `project_root`) whose changes file-watch-restart this command.
+    /// Empty for terminals, agents, and commands that declare no `restart_when_changed`.
+    restart_when_changed: Vec<String>,
     handle: Option<ActorHandle>,
     /// The leader pgid of the running OS process group, while one is live. Recorded by the
     /// actor after spawn and cleared when the child is reaped, so monitoring can sample the
@@ -69,6 +72,7 @@ pub struct Registry {
 
 impl Registry {
     /// Records a freshly registered (stopped) process.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn add(
         &self,
         view: ProcessView,
@@ -77,6 +81,7 @@ impl Registry {
         trust_variant: Option<Hash>,
         auto_start: bool,
         auto_restart: bool,
+        restart_when_changed: Vec<String>,
     ) {
         let mut guard = lock(&self.inner);
         guard.insert(
@@ -88,6 +93,7 @@ impl Registry {
                 trust_variant,
                 auto_start,
                 auto_restart,
+                restart_when_changed,
                 handle: None,
                 pgid: None,
             },
@@ -351,6 +357,27 @@ impl Registry {
             .collect()
     }
 
+    /// Every `Command` that declares `restart_when_changed` globs, as `(id, project_root,
+    /// globs)` — the file-watch reactor's watch and match inputs. Terminals, agents, and
+    /// commands with no globs are omitted (they are never file-watched). Trust is not checked
+    /// here; the reactor's restart re-checks it (fail-closed), as the crash policy does.
+    pub(crate) fn watch_commands(&self) -> Vec<(ProcessId, PathBuf, Vec<String>)> {
+        let guard = lock(&self.inner);
+        guard
+            .values()
+            .filter(|entry| {
+                entry.view.kind == ProcessKind::Command && !entry.restart_when_changed.is_empty()
+            })
+            .map(|entry| {
+                (
+                    entry.view.id,
+                    entry.project_root.clone(),
+                    entry.restart_when_changed.clone(),
+                )
+            })
+            .collect()
+    }
+
     /// A cloned snapshot of every process view — the read model adapters render.
     pub fn snapshot(&self) -> Vec<ProcessView> {
         lock(&self.inner)
@@ -387,7 +414,15 @@ mod tests {
             env: BTreeMap::new(),
             size: PtySize::default(),
         };
-        registry.add(view, launch, PathBuf::from("/"), None, false, false);
+        registry.add(
+            view,
+            launch,
+            PathBuf::from("/"),
+            None,
+            false,
+            false,
+            Vec::new(),
+        );
         registry.set_status(id, status, None);
         (registry, id)
     }

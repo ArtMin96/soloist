@@ -115,6 +115,10 @@ pub fn run() {
             // Start the port scanner: it discovers each running group's listening ports and
             // reflects them on the read model (also weakly held, also self-supervised).
             tauri::async_runtime::spawn(app.state::<Facade>().port_scanner_loop());
+            // Start the file-watch reactor: it restarts a trusted command when a watched file
+            // changes (also weakly held, ends when the bus closes). Inert until the real file
+            // watcher is wired in `build_facade`; it watches nothing under the default.
+            tauri::async_runtime::spawn(app.state::<Facade>().file_watch_loop());
             // Re-register previously-opened projects so they reappear in the sidebar on
             // launch (resting — restore never starts a process); the UI seeds from the
             // resulting snapshots.

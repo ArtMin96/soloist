@@ -32,6 +32,15 @@ impl Debouncer {
         self.pending = true;
     }
 
+    /// The instant the pending trigger becomes due (its quiet window elapses), or `None`
+    /// when nothing is pending. Lets a caller sleep exactly until the next action instead of
+    /// polling on a fixed interval.
+    pub fn due_at(&self) -> Option<Instant> {
+        self.last_trigger
+            .filter(|_| self.pending)
+            .map(|last| last + self.quiet)
+    }
+
     /// Returns `true` exactly once after the quiet window elapses since the last
     /// trigger with at least one trigger pending, then resets until the next
     /// trigger. `saturating_duration_since` keeps a non-monotonic instant from

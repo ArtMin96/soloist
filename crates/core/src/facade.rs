@@ -15,6 +15,7 @@ use tokio::sync::broadcast;
 
 use crate::config::ConfigEngine;
 use crate::events::{DomainEvent, EventBus};
+use crate::filewatch::{FileWatcher, WatchReactor};
 use crate::ids::{ProcessId, ProjectId};
 use crate::metrics::{MetricsProbe, MetricsSampler};
 use crate::ports::{Clock, CorePorts, StoreError};
@@ -34,6 +35,7 @@ pub struct Facade {
     clock: Arc<dyn Clock>,
     metrics: Arc<dyn MetricsProbe>,
     port_probe: Arc<dyn PortProbe>,
+    file_watcher: Arc<dyn FileWatcher>,
     supervisor: Arc<Supervisor>,
     projects: Projects,
     trust: TrustStore,
@@ -51,6 +53,7 @@ impl Facade {
             clock,
             metrics,
             port_probe,
+            file_watcher,
             trust,
             projects,
             ..
@@ -60,6 +63,7 @@ impl Facade {
             clock,
             metrics,
             port_probe,
+            file_watcher,
             projects: Projects::new(projects),
             trust: TrustStore::new(trust.clone()),
             config: ConfigEngine::new(trust, bus.clone()),
@@ -116,6 +120,22 @@ impl Facade {
             self.clock.clone(),
             self.port_probe.clone(),
             self.bus.clone(),
+            Arc::downgrade(&self.supervisor),
+        )
+        .run()
+    }
+
+    /// The file-watch reactor loop (monitoring C5), returned for the composition root to spawn
+    /// once on its runtime. It watches each trusted, file-watched command's project root and,
+    /// on a matching change, restarts that command (debounced) via the supervisor — reusing
+    /// one restart behaviour. Watches the supervisor weakly and ends when the bus closes (app
+    /// shutdown). With the default [`crate::filewatch::NoopFileWatcher`] it watches nothing,
+    /// so the real `notify` adapter is chosen in the composition root.
+    pub fn file_watch_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        WatchReactor::new(
+            self.clock.clone(),
+            self.file_watcher.clone(),
+            &self.bus,
             Arc::downgrade(&self.supervisor),
         )
         .run()

@@ -28,6 +28,10 @@ pub struct Registration {
     /// Whether the restart policy relaunches this command after an unexpected exit. From
     /// [`ProcessSpec::auto_restart`]; always `false` for a launched terminal or agent.
     pub auto_restart: bool,
+    /// Globs (relative to the project root) whose changes restart this command, from
+    /// [`ProcessSpec::restart_when_changed`]; always empty for a launched terminal or agent
+    /// (only `solo.yml` commands are file-watched).
+    pub restart_when_changed: Vec<String>,
 }
 
 impl Registration {
@@ -53,6 +57,7 @@ impl Registration {
             trust_variant: Some(spec.variant_hash()),
             auto_start: spec.auto_start,
             auto_restart: spec.auto_restart,
+            restart_when_changed: spec.restart_when_changed.clone(),
         }
     }
 
@@ -76,6 +81,7 @@ impl Registration {
             trust_variant: None,
             auto_start: false,
             auto_restart: false,
+            restart_when_changed: Vec::new(),
         }
     }
 }

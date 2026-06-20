@@ -111,6 +111,7 @@ impl Supervisor {
             trust_variant,
             auto_start,
             auto_restart,
+            restart_when_changed,
         } = registration;
         let requires_trust = self.requires_trust(project, trust_variant.as_ref());
         let view = ProcessView {
@@ -131,6 +132,7 @@ impl Supervisor {
             trust_variant,
             auto_start,
             auto_restart,
+            restart_when_changed,
         );
         self.bus.publish(DomainEvent::ProcessSpawned {
             id,

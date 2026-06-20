@@ -324,11 +324,6 @@ impl OrphanControl for NoopOrphanControl {
 
 // ───────────── Ports realized in later phases (contracts only) ──────────────
 
-/// Watches the filesystem and emits debounced create/modify events for configured
-/// globs, relative to the project root, with sensible default ignores. Methods are
-/// added when the file-watch feature lands.
-pub trait FileWatcher: Send + Sync {}
-
 /// Emits best-effort desktop notifications. Must never block or panic the core; a
 /// missing notification backend degrades silently. Methods are added when the
 /// notification feature lands.

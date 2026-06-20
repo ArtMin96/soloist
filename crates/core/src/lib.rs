@@ -23,6 +23,7 @@ pub mod coordination;
 pub mod debounce;
 pub mod events;
 pub mod facade;
+pub mod filewatch;
 pub mod hash;
 pub mod identity;
 pub mod idle;
@@ -51,6 +52,7 @@ pub use config::{
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{Facade, TrustCommandError};
+pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};

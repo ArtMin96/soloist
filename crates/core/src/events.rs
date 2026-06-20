@@ -72,6 +72,10 @@ pub enum DomainEvent {
     /// 10-restarts-in-60s gate): it is held in [`ProcStatus::RestartExhausted`] until the
     /// user restarts it. Distinct from the status delta so notifications can fire on it.
     RestartExhausted { id: ProcessId },
+    /// A command was restarted because a watched file changed (the file-watch policy). The
+    /// status also cycles through the usual restart deltas; this discrete signal lets the UI
+    /// distinguish a file-watch restart (a banner/notification) from a crash or user restart.
+    FileRestart { id: ProcessId },
     /// A project was opened (or its set of projects changed). Carries the project's id; an
     /// adapter re-reads the project read model ([`crate::projects::ProjectView`], which
     /// resolves name and icon together) rather than carrying that display state on the event.
