@@ -117,8 +117,9 @@ export type DomainEvent =
     }
   | { type: "ProcessRemoved"; id: number }
   // A periodic CPU/memory reading for a running process, sampled across its whole group.
-  // cpu_pct is per-core (a busy multi-threaded process can exceed 100); rss is bytes.
-  // Emitted ~1 Hz; consumers coalesce it (never a per-tick re-render).
+  // cpu_pct is normalised to the whole machine (100 = every core busy, never above); rss is
+  // the group's memory in bytes, shared pages counted once. Emitted ~1 Hz; consumers
+  // coalesce it (never a per-tick re-render).
   | { type: "MetricsTick"; id: number; cpu_pct: number; rss: number }
   // A process's set of bound (listening) TCP ports changed — discovered while it runs,
   // emptied when it stops. The new sorted set is carried so the read model updates without

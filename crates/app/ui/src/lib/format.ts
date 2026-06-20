@@ -1,8 +1,8 @@
 // Formatting for the at-a-glance process telemetry — CPU, memory, ports — rendered in the
 // monospace data face so digits align. Pure functions, unit-tested directly.
 
-/** A per-core CPU percentage as a compact integer, e.g. 4 -> "4%". A busy multi-threaded
- *  process can exceed 100%. */
+/** A whole-machine CPU percentage as a compact integer, e.g. 4 -> "4%". Normalised so 100%
+ *  is every core busy; it never exceeds 100. */
 export function formatCpu(pct: number): string {
   return `${Math.round(pct)}%`;
 }

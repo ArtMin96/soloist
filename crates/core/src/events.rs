@@ -45,9 +45,10 @@ pub enum DomainEvent {
     /// A process left the registry.
     ProcessRemoved { id: ProcessId },
     /// A periodic CPU/memory reading for a running process, sampled across its whole
-    /// process group. `cpu_pct` is per-core (a busy multi-threaded process can exceed
-    /// 100); `rss` is resident memory in bytes. Emitted on the sampler's interval, not on
-    /// every state change — adapters coalesce it (no per-tick re-render). A single late
+    /// process group. `cpu_pct` is normalised to the whole machine (100 = every core busy,
+    /// never above); `rss` is the group's memory in bytes, shared pages counted once.
+    /// Emitted on the sampler's interval, not on every state change — adapters coalesce it
+    /// (no per-tick re-render). A single late
     /// reading may arrive just after a process stops (sampled before it exited); it carries
     /// no view state, so consumers simply ignore one for a process no longer running.
     MetricsTick {

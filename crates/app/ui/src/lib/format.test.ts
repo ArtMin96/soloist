@@ -7,8 +7,8 @@ describe("formatCpu", () => {
     expect(formatCpu(3.6)).toBe("4%");
   });
 
-  it("keeps multi-core values above 100%", () => {
-    expect(formatCpu(240.2)).toBe("240%");
+  it("rounds a near-saturated reading up to 100%", () => {
+    expect(formatCpu(99.6)).toBe("100%");
   });
 });
 

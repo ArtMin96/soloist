@@ -1,11 +1,9 @@
 import type { DomainEvent } from "@/domain";
 
-// A coalesced CPU/memory reading for one process (bytes for rss; cpu_pct is per-core, so a
-// busy multi-threaded process can exceed 100).
-export interface ProcessMetrics {
-  cpu_pct: number;
-  rss: number;
-}
+// A coalesced CPU/memory reading for one process, derived from the MetricsTick payload so its
+// shape has a single source. cpu_pct is whole-machine (100 = every core busy, never above);
+// rss is the group's memory in bytes (shared pages counted once).
+export type ProcessMetrics = Pick<Extract<DomainEvent, { type: "MetricsTick" }>, "cpu_pct" | "rss">;
 
 // The event-derived signals the process list reads but the core does not keep on
 // ProcessView: the latest CPU/memory reading per process (from MetricsTick, ~1 Hz per running

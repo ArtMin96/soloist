@@ -2,7 +2,7 @@
 //!
 //! Defined here, in the metrics context, rather than in the shared port layer — a new
 //! metric or a new probe shape is a change confined to this domain. The adapter
-//! (`crates/sys`, over `sysinfo`) implements [`MetricsProbe`]; the core never reads the OS
+//! (`crates/sys`, over `/proc`) implements [`MetricsProbe`]; the core never reads the OS
 //! directly.
 
 use std::collections::HashMap;
@@ -10,12 +10,15 @@ use std::collections::HashMap;
 /// A point-in-time CPU and memory reading for one managed process group.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ProcessMetrics {
-    /// Aggregate CPU utilization across the group, as a percentage. **Per-core** (the
-    /// `htop` convention): a group saturating one core reads ~100, two cores ~200, so a
-    /// busy multi-threaded process is not clipped at 100. Never negative.
+    /// Aggregate CPU utilization across the group, normalised to the **whole machine**: 100
+    /// means every core is busy, so the value never exceeds 100 (not the per-core `htop`
+    /// convention, where a build across many cores would read several hundred percent).
+    /// Never negative.
     pub cpu_pct: f32,
-    /// Aggregate resident set size — physical RAM in use across the group — in bytes.
-    /// Excludes swapped-out memory.
+    /// The group's memory footprint in bytes, with shared pages (a shared interpreter or
+    /// compiler binary, shared libraries) counted **once** across the group rather than
+    /// once per process — so many processes sharing a binary are not multiplied into an
+    /// implausible total. Excludes swapped-out memory.
     pub rss: u64,
 }
 
@@ -25,11 +28,10 @@ pub struct ProcessMetrics {
 /// is **stateful**: it samples every requested group in **one pass** per call (refreshing
 /// its OS view once) rather than once per group, and the caller drives the cadence via the
 /// [`crate::ports::Clock`]. A group is identified by its leader `pgid` (each process spawns
-/// into a fresh group whose leader pid is the pgid); the reading aggregates the leader and
-/// its **process subtree** (descendants by parent). That is an approximation of the OS
-/// process group: a descendant that reparents to init (a double-fork) escapes the subtree
-/// and is not counted — acceptable for the aggregate CPU/RSS figure, and the only option
-/// where the OS view does not expose the group. Best-effort: a group with no live member is
+/// into a fresh group whose leader pid is the pgid); the reading aggregates the **exact
+/// process-group membership** (every process whose group is `pgid`, read from `/proc`), so a
+/// descendant that reparents to init (a double-fork) keeps its group and is still counted.
+/// Best-effort: a group with no live member is
 /// **omitted** from the result (so a just-exited group never reports a misleading 0), and
 /// the probe never blocks or panics the core — a missing reading is a missing entry. Note
 /// this differs from [`crate::portscan::PortProbe`], which keeps an empty entry for a group

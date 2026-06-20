@@ -31,3 +31,8 @@ Thumbs.db
 *.swp
 *~
 .idea/
+
+# ---- Solo reference material / local scratch (clean-room — never commit) ----
+/solo.yml
+/crates/solo.yml
+/processes.webp

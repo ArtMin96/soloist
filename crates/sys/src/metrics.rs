@@ -124,7 +124,10 @@ fn cpu_percent(delta_ticks: u64, clk_tck: f64, elapsed_secs: f64, cores: f64) ->
         return 0.0;
     }
     let cpu_secs = delta_ticks as f64 / clk_tck;
-    ((cpu_secs / elapsed_secs / cores) * 100.0) as f32
+    // Clamp to the whole-machine ceiling: coarse tick granularity over a short interval can
+    // credit a hair more CPU-time than the interval physically allows, which would read just
+    // over 100 — the convention caps there.
+    ((cpu_secs / elapsed_secs / cores) * 100.0).min(100.0) as f32
 }
 
 /// A process's memory in bytes: its proportional set size where the kernel exposes it

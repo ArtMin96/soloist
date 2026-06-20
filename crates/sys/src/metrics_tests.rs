@@ -30,3 +30,11 @@ fn the_first_interval_reads_zero() {
     // No elapsed time yet (the priming sample) yields 0 rather than a divide-by-zero.
     assert_eq!(cpu_percent(500, CLK_TCK, 0.0, 8.0), 0.0);
 }
+
+#[test]
+fn a_reading_over_the_ceiling_is_clamped_to_one_hundred() {
+    // Tick quantisation can briefly credit more CPU-time than the interval allows; the
+    // whole-machine convention caps the result at 100 rather than reporting an impossible
+    // figure above it.
+    assert_eq!(cpu_percent(16 * 100, CLK_TCK, 1.0, 8.0), 100.0);
+}
