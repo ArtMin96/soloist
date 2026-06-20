@@ -1,4 +1,4 @@
-//! File-watch restarts (D6/D7): restart a command when a watched file changes.
+//! File-watch restarts: restart a command when a watched file changes.
 //!
 //! Like the metrics and portscan domains, this context owns *how file-watching works* — the
 //! OS read it depends on ([`FileWatcher`], the port it defines for itself) and the policy

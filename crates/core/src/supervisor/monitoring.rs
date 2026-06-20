@@ -1,17 +1,18 @@
-//! The monitoring read-model surface: the thin accessors the C5 samplers and reactors reach
-//! C2 through.
+//! The monitoring read-model surface: the thin accessors the metrics/port samplers, the
+//! readiness wait, and the file-watch reactor reach C2 through.
 //!
-//! The metrics and port-discovery samplers, the readiness wait, and the file-watch reactor
-//! live in the monitoring domain; they touch the process registry only through these methods,
-//! so C2 stays the single owner of the [`crate::process::ProcessView`] while C5 drives the
-//! sampling. Each monitoring mutation is guarded by the process group it was taken against, so
-//! a reading that lands after the group ended is dropped rather than resurrecting state on a
-//! resting process.
+//! Those samplers and the file-watch reactor live in their own domains (`crate::metrics`,
+//! `crate::portscan`, `crate::filewatch`); they touch the process registry only through these
+//! methods, so C2 stays the single owner of the [`crate::process::ProcessView`] while the
+//! monitoring domains drive the sampling and restarts. Each monitoring mutation is guarded by
+//! the process group it was taken against, so a reading that lands after the group ended is
+//! dropped rather than resurrecting state on a resting process.
 
 use std::path::PathBuf;
 
 use crate::events::DomainEvent;
 use crate::ids::ProcessId;
+use crate::process::ProcStatus;
 
 use super::Supervisor;
 
@@ -70,12 +71,18 @@ impl Supervisor {
             .collect()
     }
 
-    /// Restarts `id` because a watched file changed, announcing a [`DomainEvent::FileRestart`]
-    /// on success. Delegates to [`Supervisor::restart`] (the same trust gate and crash-tracking
-    /// reset a user restart gets) — the file-watch reactor's single effect, so restart is never
-    /// reimplemented. A refused restart (untrusted command, fail-closed; or removed) announces
-    /// nothing.
+    /// Reloads `id` because a watched file changed, announcing a [`DomainEvent::FileRestart`]
+    /// on success. File-watch only reloads a **running** command: a change while it is resting
+    /// (stopped, crashed, exhausted, or never started) does nothing, so an edit never
+    /// resurrects a command the user stopped nor starts a restored-but-resting one — starting a
+    /// resting command stays the user's explicit action. A running command is cycled by
+    /// delegating to [`Supervisor::restart`] (the same trust gate and crash-tracking reset a
+    /// user restart gets), so restart is never reimplemented. Best-effort: a command that stops
+    /// in the same instant may still cycle, which is harmless.
     pub(crate) fn file_restart(&self, id: ProcessId) {
+        if !self.registry.status(id).is_some_and(ProcStatus::is_active) {
+            return;
+        }
         if self.restart(id).is_ok() {
             self.bus.publish(DomainEvent::FileRestart { id });
         }

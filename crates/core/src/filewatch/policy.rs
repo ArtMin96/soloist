@@ -13,9 +13,9 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use crate::ids::ProcessId;
 
 /// Directories whose contents never trigger a file-watch restart, regardless of the globs.
-/// Solo's ignore list is undocumented (`plan/05` §4); this is our decision, recorded in
-/// `KNOWN-DIVERGENCES.md`. These are the build/VCS/dependency trees that change constantly
-/// and would otherwise cause restart storms.
+/// Solo documents no ignore list, so this default set is ours: the build, VCS, and dependency
+/// trees that churn constantly (a `cargo build` rewrites `target/`, `npm install` rewrites
+/// `node_modules/`) and would otherwise cause restart storms.
 pub(crate) const DEFAULT_IGNORES: [&str; 5] = [".git", "node_modules", "target", "dist", ".venv"];
 
 /// Compiles a command's `restart_when_changed` globs into a matcher, or `None` when the list

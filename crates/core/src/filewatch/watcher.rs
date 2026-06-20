@@ -6,8 +6,7 @@ use std::path::PathBuf;
 
 use tokio::sync::mpsc;
 
-/// Watches project directories for the filesystem changes that drive file-watch restarts
-/// (D6).
+/// Watches project directories for the filesystem changes that drive file-watch restarts.
 ///
 /// An implementation watches a project root **recursively** for create/modify events and
 /// forwards each changed **absolute** path to the `changes` channel. All matching,

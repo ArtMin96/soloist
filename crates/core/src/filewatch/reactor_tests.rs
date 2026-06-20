@@ -13,7 +13,7 @@ use crate::config::ProcessSpec;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{CorePorts, PtySize, SpawnSpec, TrustRepo};
-use crate::process::ProcessKind;
+use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, Supervisor};
 use crate::testing::{FakeFileWatcher, FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock};
 
@@ -82,6 +82,23 @@ fn register_command(s: &Setup, name: &str, globs: &[&str], trusted: bool) -> Pro
     id
 }
 
+/// Starts a registered command and waits until it is `Running`, so a watched change cycles a
+/// live process (file-watch reloads a running command, not a resting one).
+async fn start_running(s: &Setup, id: ProcessId) {
+    s.sup.start(id).expect("start");
+    for _ in 0..50 {
+        yield_many().await;
+        if s.sup
+            .snapshot()
+            .iter()
+            .any(|v| v.id == id && v.status == ProcStatus::Running)
+        {
+            return;
+        }
+    }
+    panic!("the command never reached Running");
+}
+
 fn changed(relative: &str) -> PathBuf {
     Path::new(ROOT).join(relative)
 }
@@ -147,9 +164,10 @@ async fn assert_no_file_restart(s: &mut Setup) {
 }
 
 #[tokio::test]
-async fn a_matching_save_burst_triggers_exactly_one_restart() {
+async fn a_matching_save_burst_to_a_running_command_triggers_exactly_one_restart() {
     let mut s = setup();
     let web = register_command(&s, "Web", &["src/**/*.rs"], true);
+    start_running(&s, web).await;
     start_reactor(&s).await;
 
     // A burst of saves for one logical edit.
@@ -165,9 +183,10 @@ async fn a_matching_save_burst_triggers_exactly_one_restart() {
 }
 
 #[tokio::test]
-async fn an_ignored_or_non_matching_change_does_not_restart() {
+async fn an_ignored_or_non_matching_change_to_a_running_command_does_not_restart() {
     let mut s = setup();
-    register_command(&s, "Web", &["**/*.rs"], true);
+    let web = register_command(&s, "Web", &["**/*.rs"], true);
+    start_running(&s, web).await;
     start_reactor(&s).await;
 
     // Inside an ignored directory (matches the glob, but ignored), and a non-matching file.
@@ -179,9 +198,32 @@ async fn an_ignored_or_non_matching_change_does_not_restart() {
 }
 
 #[tokio::test]
-async fn an_untrusted_command_is_not_restarted() {
+async fn a_change_to_a_stopped_command_does_not_start_it() {
     let mut s = setup();
-    // Watched (command + globs) but never trusted — the restart gate fails closed.
+    // Trusted and watch-eligible, but never started: file-watch reloads a running command and
+    // must not resurrect a resting one (otherwise an edit would start a command the user
+    // stopped, or a restored-but-resting one on launch).
+    let web = register_command(&s, "Web", &["src/**/*.rs"], true);
+    start_reactor(&s).await;
+
+    s.watcher.change(changed("src/app/main.rs"));
+    yield_many().await;
+
+    assert_no_file_restart(&mut s).await;
+    assert!(
+        s.sup
+            .snapshot()
+            .iter()
+            .any(|v| v.id == web && v.status == ProcStatus::Stopped),
+        "the stopped command stays resting after a watched change",
+    );
+}
+
+#[tokio::test]
+async fn an_untrusted_command_is_never_restarted() {
+    let mut s = setup();
+    // Watched (command + globs) but never trusted: it cannot be started, so it is never
+    // running, and a watched change never reloads it (the restart gate also fails closed).
     register_command(&s, "Web", &["src/**/*.rs"], false);
     start_reactor(&s).await;
 

@@ -1,14 +1,15 @@
-//! The file-watch restart policy (D6/D7): a [`Clock`]-driven reactor that turns watched-file
-//! changes into debounced restarts.
+//! The file-watch restart policy: a [`Clock`]-driven reactor that turns watched-file changes
+//! into debounced restarts.
 //!
 //! The reactor consumes raw change events from the [`FileWatcher`] port, matches each changed
-//! path against the watch-eligible commands' globs (the pure [`super::policy`], with the D7
+//! path against the watch-eligible commands' globs (the pure [`super::policy`], with the
 //! default ignores), coalesces a burst into a single restart with the shared
 //! [`crate::debounce::Debouncer`], and routes the restart through the supervisor's existing
 //! [`Supervisor::file_restart`] — so file-watch reuses one restart behaviour (the trust gate
 //! and the crash-tracking reset) rather than reimplementing it. It holds a [`Weak`] reference
 //! to the supervisor and ends when the event bus closes (app shutdown), like the crash
-//! reactor; trusted-only and command-only follow from the watch targets and the restart gate.
+//! reactor; command-only, trusted-only, and running-only all follow from the watch targets
+//! and the restart gate.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -96,8 +97,10 @@ impl WatchReactor {
         loop {
             let next_due = debouncers.values().filter_map(Debouncer::due_at).min();
             tokio::select! {
-                // The bus closing (the facade dropped) is the shutdown signal; events
-                // themselves drive nothing here. Lagging is harmless — matching re-reads.
+                // The event bus is subscribed purely as a shutdown sentinel (mirroring the
+                // self-healing reactor): its closing means the facade dropped, so stop. No
+                // event payload is consumed here — changes arrive on `changes_rx`; a lag is
+                // harmless.
                 result = self.events.recv() => {
                     if matches!(result, Err(RecvError::Closed)) {
                         break;
