@@ -538,9 +538,12 @@ you think a change needs to break one, stop and surface it (§12):
   (Rust enum in `core`; the TS mirror in **one** `domain.ts`; one command/event-name constant per side).
   Shared **test fakes** live once in `core::testing` (reused cross-crate via its `testing` feature — see the
   roadmap), never re-rolled per crate.
-- **Small, single-purpose files; tests inline but honest.** Split a non-test source file at the ~400-line
-  smell (`scripts/check-file-size.sh` signals it). Unit tests stay **inline** (`#[cfg(test)] mod tests`) by
-  project decision — but every test must exercise real behavior and be deletable-on-sight if it doesn't.
+- **Small, single-purpose files; tests in separate files, honest.** Split a non-test source file at the
+  ~400-line smell (`scripts/check-file-size.sh` signals it). New tests live in their **own file**, not merged
+  with the implementation (user directive 2026-06-20, reversing the earlier inline rule): unit tests of
+  private items via `#[cfg(test)] #[path = "x_tests.rs"] mod tests;` (the module stays a child of its parent,
+  so it still reaches private items); adapter integration tests in `tests/`. Inline only when there is no
+  other way. Every test must exercise real behavior and be deletable-on-sight if it doesn't.
 - **Reach for a pattern when its trigger fires, not before.** Use the `plan/06` §4 table: FSM for legal
   state transitions, Registry for a growing set of handlers (MCP tools, agent providers — never a giant
   `match`), Strategy for per-provider behavior, Repository per durable aggregate, Parameter-Object/Builder

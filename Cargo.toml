@@ -4,6 +4,7 @@ members = [
     "crates/core",
     "crates/store",
     "crates/pty",
+    "crates/sys",
     "crates/ipc",
     "crates/httpapi",
     "crates/mcp",

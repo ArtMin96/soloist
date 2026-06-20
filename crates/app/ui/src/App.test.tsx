@@ -24,6 +24,8 @@ const STACK: ProcessView[] = [
     status: "Stopped",
     exit_code: null,
     requires_trust: false,
+    ports: [],
+    ready: "Ungated",
   },
   {
     id: 2,
@@ -33,6 +35,8 @@ const STACK: ProcessView[] = [
     status: "Running",
     exit_code: null,
     requires_trust: false,
+    ports: [],
+    ready: "Ungated",
   },
   {
     id: 3,
@@ -42,6 +46,8 @@ const STACK: ProcessView[] = [
     status: "Stopped",
     exit_code: null,
     requires_trust: true,
+    ports: [],
+    ready: "Ungated",
   },
   {
     id: 4,
@@ -51,6 +57,8 @@ const STACK: ProcessView[] = [
     status: "Running",
     exit_code: null,
     requires_trust: false,
+    ports: [],
+    ready: "Ungated",
   },
 ];
 

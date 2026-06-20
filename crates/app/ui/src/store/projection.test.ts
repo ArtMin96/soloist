@@ -10,6 +10,8 @@ const starting: ProcessView = {
   status: "Starting",
   exit_code: null,
   requires_trust: false,
+  ports: [],
+  ready: "Ungated",
 };
 
 describe("applyEvent", () => {
@@ -67,6 +69,31 @@ describe("applyEvent", () => {
     expect(next.find((process) => process.id === 2)).toEqual(other);
   });
 
+  it("updates the listening ports only on the matching process", () => {
+    const other: ProcessView = { ...starting, id: 2 };
+    const next = applyEvent([starting, other], {
+      type: "PortsChanged",
+      id: 1,
+      ports: [5173, 8080],
+    });
+    expect(next.find((process) => process.id === 1)?.ports).toEqual([5173, 8080]);
+    expect(next.find((process) => process.id === 2)?.ports).toEqual([]);
+  });
+
+  it("maps the readiness event to the gate only on the matching process", () => {
+    const other: ProcessView = { ...starting, id: 2 };
+    const waiting = applyEvent([starting, other], {
+      type: "ReadyStateChanged",
+      id: 1,
+      ready: false,
+    });
+    expect(waiting.find((process) => process.id === 1)?.ready).toBe("Waiting");
+    expect(waiting.find((process) => process.id === 2)?.ready).toBe("Ungated");
+
+    const ready = applyEvent(waiting, { type: "ReadyStateChanged", id: 1, ready: true });
+    expect(ready.find((process) => process.id === 1)?.ready).toBe("Ready");
+  });
+
   it("removes a process", () => {
     const next = applyEvent([starting], { type: "ProcessRemoved", id: 1 });
     expect(next).toEqual([]);
@@ -75,5 +102,8 @@ describe("applyEvent", () => {
   it("leaves the process list untouched for non-process events", () => {
     expect(applyEvent([starting], { type: "TerminalBell", id: 1 })).toEqual([starting]);
     expect(applyEvent([starting], { type: "ProjectOpened", id: 1 })).toEqual([starting]);
+    expect(applyEvent([starting], { type: "MetricsTick", id: 1, cpu_pct: 12, rss: 4096 })).toEqual([
+      starting,
+    ]);
   });
 });

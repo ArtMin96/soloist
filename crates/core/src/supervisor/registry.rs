@@ -15,7 +15,7 @@ use tokio::task::JoinHandle;
 use crate::hash::Hash;
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::SpawnSpec;
-use crate::process::{ProcStatus, ProcessKind, ProcessView};
+use crate::process::{ProcStatus, ProcessKind, ProcessView, Readiness};
 use crate::sync::lock;
 
 use super::actor::{ActorMsg, OrphanIdentity};
@@ -38,6 +38,10 @@ struct Managed {
     auto_start: bool,
     auto_restart: bool,
     handle: Option<ActorHandle>,
+    /// The leader pgid of the running OS process group, while one is live. Recorded by the
+    /// actor after spawn and cleared when the child is reaped, so monitoring can sample the
+    /// group. `None` whenever the process is resting.
+    pgid: Option<i32>,
 }
 
 /// A cloned read of one entry's launch-relevant fields, taken under the lock so the
@@ -85,8 +89,80 @@ impl Registry {
                 auto_start,
                 auto_restart,
                 handle: None,
+                pgid: None,
             },
         );
+    }
+
+    /// Records (or clears) the leader pgid of a process's running OS group. The actor sets
+    /// it after a successful spawn and clears it (`None`) when the child is reaped, so the
+    /// monitoring samplers only ever target a process with a live group. Clearing the group
+    /// also clears its discovered ports — a process with no live group has none.
+    pub(crate) fn set_pgid(&self, id: ProcessId, pgid: Option<i32>) {
+        let mut guard = lock(&self.inner);
+        if let Some(entry) = guard.get_mut(&id) {
+            entry.pgid = pgid;
+            if pgid.is_none() {
+                // A process with no live group has neither discovered ports nor a readiness
+                // gate — clear both so a resting process never shows stale monitoring state.
+                entry.view.ports.clear();
+                entry.view.ready = Readiness::Ungated;
+            }
+        }
+    }
+
+    /// Every process with a live OS group, as `(id, leader pgid)` — the monitoring samplers'
+    /// targets each tick.
+    pub(crate) fn live_groups(&self) -> Vec<(ProcessId, i32)> {
+        let guard = lock(&self.inner);
+        guard
+            .values()
+            .filter_map(|entry| entry.pgid.map(|pgid| (entry.view.id, pgid)))
+            .collect()
+    }
+
+    /// The leader pgid of a single process's live OS group, if it has one (i.e. it is
+    /// running) — used by a port-readiness wait to know which group to probe.
+    pub(crate) fn pgid_of(&self, id: ProcessId) -> Option<i32> {
+        lock(&self.inner).get(&id).and_then(|entry| entry.pgid)
+    }
+
+    /// Updates a process's readiness gate to ready/not-ready, but only while it is still on
+    /// the `pgid` the wait is probing. Returns whether it changed (so the caller announces
+    /// only real transitions). Guarding on the group closes the race where a process stops
+    /// (or restarts onto a new group) mid-wait: a stale update lands on no live group and is
+    /// dropped, never resurrecting readiness on a resting process.
+    pub(crate) fn set_ready(&self, id: ProcessId, pgid: i32, ready: bool) -> bool {
+        let next = if ready {
+            Readiness::Ready
+        } else {
+            Readiness::Waiting
+        };
+        let mut guard = lock(&self.inner);
+        match guard.get_mut(&id) {
+            Some(entry) if entry.pgid == Some(pgid) && entry.view.ready != next => {
+                entry.view.ready = next;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Updates a process's discovered listening ports, but only while it is still on the
+    /// `pgid` that was scanned. Returns whether the set actually changed (so the port
+    /// scanner only announces real changes). Guarding on the group closes the race where a
+    /// process stops (clearing its ports) or restarts mid-scan: the stale reading lands on
+    /// no live group and is dropped, never resurrecting ports on a resting process. The
+    /// ports are stored sorted by the caller.
+    pub(crate) fn set_ports(&self, id: ProcessId, pgid: i32, ports: Vec<u16>) -> bool {
+        let mut guard = lock(&self.inner);
+        match guard.get_mut(&id) {
+            Some(entry) if entry.pgid == Some(pgid) && entry.view.ports != ports => {
+                entry.view.ports = ports;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// The orphan-adoption identity of `id`: its project root and name.
@@ -302,6 +378,8 @@ mod tests {
             status: ProcStatus::Stopped,
             exit_code: None,
             requires_trust: false,
+            ports: Vec::new(),
+            ready: Readiness::Ungated,
         };
         let launch = SpawnSpec {
             command: "x".into(),
@@ -333,5 +411,32 @@ mod tests {
         assert_eq!(registry.status(id), Some(ProcStatus::RestartExhausted));
         // Idempotent: once held, a second call is a no-op (no spurious re-exhaust).
         assert!(!registry.exhaust_if_crashed(id));
+    }
+
+    #[test]
+    fn a_monitoring_update_after_the_group_ends_is_dropped() {
+        // While running, the process is on a known group and accepts monitoring updates.
+        let (registry, id) = registry_holding(ProcStatus::Running);
+        registry.set_pgid(id, Some(4242));
+        assert!(registry.set_ports(id, 4242, vec![8080]));
+        assert!(registry.set_ready(id, 4242, false));
+
+        // The child is reaped: the group ends, clearing ports and readiness.
+        registry.set_pgid(id, None);
+
+        // A scan or wait that began before the stop now lands late, still carrying the old
+        // pgid. It must be dropped — a resting process never resurrects ports or readiness.
+        assert!(!registry.set_ports(id, 4242, vec![8080]));
+        assert!(!registry.set_ready(id, 4242, true));
+        let view = registry
+            .snapshot()
+            .into_iter()
+            .find(|v| v.id == id)
+            .unwrap();
+        assert!(
+            view.ports.is_empty(),
+            "ports stay cleared after the group ends"
+        );
+        assert_eq!(view.ready, Readiness::Ungated);
     }
 }

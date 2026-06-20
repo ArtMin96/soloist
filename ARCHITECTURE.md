@@ -43,7 +43,8 @@ headless-testable and is the mechanical guarantee behind *"remove MCP → app st
 | `core` | domain | C1–C8, ports (traits), domain types, event bus, `Facade` | `tokio`/`serde`/`thiserror`/`vte` — **never** an adapter crate | live (C1–C3, C8) |
 | `store` | driven adapter | SQLite: `Store`/`ProjectRepo`/`TrustRepo`/`RuntimeState` + migrations | `core`, `rusqlite` | live |
 | `pty` | driven adapter | `ProcessSpawner`/`PtyIo`/`ProcessControl`/`OrphanControl` over `portable-pty`+`nix` | `core`, `portable-pty`, `nix` | live |
-| `app` | driving + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `httpapi`, `tauri` | live |
+| `sys` | driven adapter | `MetricsProbe` (CPU/mem over `sysinfo`) + `PortProbe` (discovery over `/proc`) — monitoring C5 | `core`, `sysinfo` | live |
+| `app` | driving + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `sys`, `httpapi`, `tauri` | live |
 | `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | stub → P8 |
 | `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | stub → P10 |
 | `cli` | driving adapter | `soloist` CLI = thin HTTP client | `ipc`, `clap` (not `core`) | stub → P10 |
@@ -66,7 +67,7 @@ adapter. Adapters hold **no** business state and make **no** domain decisions.
 | **C2** Process Supervision | `supervisor/` `process` `orphans` | registry, `ProcStatus` FSM, start/stop/restart, bulk ops, orphan reconcile | live (P3) |
 | **C3** Terminal I/O | `terminal/` | PTY read loop, rendered+raw buffers, OSC parse, attach replay | live (P4) |
 | **C4** Agents & Idle | `agents` `idle` | agent-tool defs, launch, 5-state idle FSM, optional summary | placeholder → P7 |
-| **C5** Monitoring | `metrics` `portscan` | CPU/mem sampling, `/proc` port discovery, readiness | placeholder → P6 |
+| **C5** Monitoring | `metrics/` `portscan/` | CPU/mem sampling, `/proc` port discovery, readiness | live (P6: D1/D2/D3) |
 | **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | placeholder → P9 |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
 | **C8** Integration façade | `facade` `identity` | the public command/query API; MCP identity & effective scope | live (`facade`) |
@@ -172,8 +173,12 @@ module into per-concern submodules under `testing/`).
 ## 6. Cleanup roadmap (R-phases — each ends `just lint && just test` green)
 
 The tree is at build-Phase 5 (`Done — pending verify`). The cleanup is sequenced as small reviewable
-commits that don't blindly regress verified-pending code. **Decisions locked:** tests stay **inline** (trim,
-don't relocate); the empty core modules **and** the 4 stub crates **stay** as documented placeholders.
+commits that don't blindly regress verified-pending code. **Decisions:** new tests live in **separate files**
+(unit tests of private items via `#[cfg(test)] #[path = "x_tests.rs"] mod tests;`; adapter integration in
+`tests/`) — this reversed the earlier "tests inline" rule (user directive, P6); existing inline tests are
+migrated opportunistically. A bounded **context may own its own port** (e.g. `core/metrics/probe.rs`,
+`core/portscan/probe.rs`) rather than the shared `ports/` module, so a new probe/metric is confined to its
+domain. The 4 stub crates **stay** as documented placeholders.
 
 **Status (2026-06-19): R0–R6 are all complete** — see `PROGRESS.md` for per-phase commits/evidence. The
 table below is the record of the executed cleanup.

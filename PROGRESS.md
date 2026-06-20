@@ -10,11 +10,16 @@
 ## Current state
 
 - **Overall:** **Phase 6 (Monitoring / self-healing) — `In progress`; Phase 5 (Dashboard UI) — `Done —
-  pending verify`.** Newest (2026-06-20): **Phase 6 begun** — the **crash auto-restart policy** (D4 + D11)
-  landed as a pure-core, mock-clock-tested slice (`90d51ac`): a self-healing reactor (C2,
-  `supervisor/restart.rs`) caps restarts at **10/60 s → `RestartExhausted`**, disabled during shutdown,
-  reusing the launch primitive + trust gate (gate **194 = Rust 154 / UI 40** after the review fixes
-  below; the slice committed at 193). See the top Decisions entry.
+  pending verify`.** Newest (2026-06-20): **the OS-probe slice — D1 CPU/mem + D2 port discovery + D3 readiness**,
+  then an **adversarial review pass** (fixed a ports/readiness read-model race, moved the OS reads off the
+  runtime via `spawn_blocking`, switched port discovery to exact process-group membership, made readiness a
+  `Readiness` enum; gate now **213 = Rust 171 / UI 42** — see the review-fixes Decisions entry). Two new **C5
+  monitoring domains** (`core/metrics/`, `core/portscan/`),
+  each owning its own port; self-supervised `Clock`-driven samplers publishing `MetricsTick` / surfacing
+  `ProcessView.ports`; `Facade::wait_for_port` + a `ready` gate (`ProcessView.ready` + `ReadyStateChanged`);
+  the new **`crates/sys`** adapter (sysinfo + `/proc`). Commits `e0fa32e` (D1), `be1711a` (D2), `4b4d930`
+  (D3) on branch `feat/phase-6-monitoring` (PR #8). The prior **crash auto-restart policy** (D4 + D11) merged
+  as PR #7. **Next: D6/D7 file-watch, D8 notifications.** See the top Decisions entry.
   Prior 2026-06-20 work: **projects became
   a first-class feature** — a **project-grouped sidebar** (each opened project a collapsible node: icon +
   name + running count + per-project bulk controls, over its non-empty kind subgroups), a single-sourced
@@ -174,7 +179,7 @@ Status vocabulary: `Not started` · `In progress` · `Done — pending verify` �
 | 3 | Process supervisor (3 subtypes, status FSM, orphans) | **Done — pending verify** | **B1–B8 + A2/A6 delivered + tested.** `Supervisor` (C2) on the Phase-1 actor: mailbox actor (`Stop`/`Restart`), status FSM, graceful SIGTERM→5s→SIGKILL on the **pgroup**, exit classification, panic isolation; **trust gate in core** (A6); login-shell `$SHELL -lc` (A2/B5); bulk ops (B4); stop→lock-release hook (B7). Task 4 (output/log ring) delivered in Phase 4. **B8 orphan adoption (this session):** runtime-state file recording + `reconcile_orphans()` (adopt/surface/prune) + adoption via a synthesized `Spawned` over the existing pgid (liveness poll + killpg), reusing the actor; real adapters `FileRuntimeState` (store) + `PgidOrphanControl` (pty). **Evidence:** core reconcile/adopt/surface/prune + record/forget tests; store `FileRuntimeState` round-trip; pty `is_alive` on a real group. **Pending verify:** the app reconcile-on-launch *call* (Phase 5, after config-registration) + in-GUI bits (Phase 5 Playwright); B7's "clears crash tracking" half (Phase-6). |
 | 4 | PTY & terminal I/O (rendered+raw, input, resize, OSC) | **Done — pending verify** | **C1–C7, C9 v1 delivered (C3 context); PR reviewed + all findings fixed.** Real PTY per process via `portable-pty` (`$SHELL -lc` on the slave; child sees a tty); `pty` adapter rewritten (`PtyProcessSpawner`) keeping pgroup reaping. Core `terminal/` (`ring`/`buffers`/`parser`): bounded raw scrollback (256 KB per-process **+ a 16 MB global aggregate cap**, **C5**) + `vte`-driven rendered `Ring<LogLine>` (5,000 lines, **C4** + folded Task 4) with `\r` overwrite/tab stops; OSC **title**+**bell** → `DomainEvent`s (**C7**); live raw bytes via per-process broadcast. `Supervisor`: `write_stdin`/`resize` (**C3**/**C6**), `attach_pty` (atomic replay+live, **C9**), `pty_scrollback`/`rendered`. **Evidence:** **102 tests** (core 74 / pty 10 / store 12 / UI 6); real-OS pty suite green (`test -t 1`→tty **C1**, `read x`→input echo **C3**, `tput cols`→resize **C6**, group reap/no-survivors hardened against the async-grandchild-reap race). `just lint && just test` green. **Pending verify:** xterm.js terminal pane (**C8** `later` + phase-04 Task 9) → Phase 5 via `/impeccable`; "vim/htop visually render" is the Phase-5/manual check. |
 | 5 | Dashboard UI (sidebar tree, status dots, terminal pane, trust dialog) | **Done — pending verify** | **Update (4th 2026-06-19 session):** **A10 command auto-detection BUILT (now v1, code-complete)** — opening a folder with no `solo.yml` auto-creates one from detected commands (npm/Cargo/Go/Procfile/Make/Just/Compose) via a C1 Registry/Strategy detector set, trust-gated, with a friendly confirmation; full `solo.yml` reference added to README. **Deferred adversarial review FINISHED** (security re-verified sound; 2 fixes applied — `useTrust` apply-after-resolve `b637b50`, atomic `O_EXCL` create `8f8c524`; rest recorded as tracked findings). Gate **green: 174 (Rust 138 / UI 36)**. _(3rd session: silent empty-project-load fixed `72b526e`; project-load runtime-confirmed by the user.)_ — **Interactive core slice:** `DESIGN.md` seeded (`/impeccable`) + approved; full Tauri command/event/PTY-Channel adapter; TS domain mirror re-synced; sidebar tree (I1), color-blind-safe status (shape+color+label), per-row + bulk controls (B2/B3/B4), live status, xterm.js terminal pane (C1–C7 UI), empty/error states. **Follow-up now CODE-COMPLETE (2026-06-19):** mockIPC dashboard test; **orphan dialog (B8 UI)** + `kill_orphan`/`orphans_resolve`; **terminal title/bell → header**; **`Facade::load_project`** wiring; **project-load UI** (`d497241`: `project_load` command + `tauri-plugin-dialog` folder picker + "Open project" affordance + `useProjects`; `demo.rs` removed); **trust review A6/A9** (`45461d0`: `ProcessView.requires_trust` + enriched `ConfigChanged` + `Facade::trust_command` + inline sidebar Trust + `TrustDialog`/`useTrust`). `just lint && just test` green (**132**: Rust **103** / UI **29**). **Pending verify (runtime/manual):** render + a real human click started a process + echoed (2026-06-19, prior); **not yet observed this session** — opening a real `solo.yml` in the GUI, the inline trust path, the B8 dialog; **A9 end-to-end** (dialog on a live yml edit) awaits the **Phase-6 watcher** (emit-tested now); the real-window WebdriverIO/tauri-driver e2e (not Playwright) remains the automated gap. |
-| 6 | Monitoring, restart (10/60s), file-watch, notifications | **In progress** | **Restart-policy slice (D4 + D11) code-complete** (`90d51ac`): a self-healing reactor (C2, `supervisor/restart.rs`) caps crash auto-restart at 10/60s → `RestartExhausted`, disabled during shutdown; reuses the launch primitive + trust gate; threads the existing `auto_restart`; adds the FSM edge `Crashed → RestartExhausted` + `RestartScheduled`/`RestartExhausted` events; closes B7's deferred clear-on-stop. Adversarial review applied 2 race fixes + 2 nits (atomic exhaust, bounded shutdown reap). Gate **194 (Rust 154 / UI 40)**. **Still to build (v1):** D1 CPU/mem, D2 ports, D3 readiness, D6/D7 file-watch, D8 notifications — via a new `crates/sys` adapter (user decision). **Nightly soak test starts running from here.** |
+| 6 | Monitoring, restart (10/60s), file-watch, notifications | **In progress** | **Restart-policy slice (D4 + D11)** code-complete (`90d51ac` + review `9438f66`). **OS-probe slice — D1 + D2 code-complete (2026-06-20):** D1 per-process CPU/mem (`e0fa32e`) — new **C5 metrics domain** (`core/metrics/`, owns its `MetricsProbe` port + `ProcessMetrics`) + self-supervised, mock-clock-tested `MetricsSampler` + `MetricsTick`; **`crates/sys` created** (sysinfo adapter, process-subtree aggregation, per-core CPU%). D2 port discovery (`be1711a`) — **C5 portscan domain** (`core/portscan/`, owns its `PortProbe` port) + `PortScanner` → `ProcessView.ports` + `PortsChanged`; `crates/sys` `ProcPortProbe` reads `/proc` (subtree → socket inodes → `/proc/net/tcp{,6}` LISTEN). Self-supervision extracted to `core/supervision.rs` (shared by both samplers). D3 readiness (`4b4d930`) — `Facade::wait_for_port` (portscan `waiter.rs`, reuses `PortProbe`) polls until the port binds or times out; `ProcessView.ready` (now a `Readiness` enum: `Ungated` / `Waiting` / `Ready`) + `ReadyStateChanged`; the future MCP `wait_for_bound_port` (P8) is the production caller. **Review-fixes pass applied (2026-06-20):** pgid-guarded `set_ports`/`set_ready` (no stale-resurrect race), OS reads via `spawn_blocking`, exact `/proc` process-group membership (not parent-subtree), `Readiness` enum, supervisor read-model accessors split to `supervisor/monitoring.rs`. Gate **213 (Rust 171 / UI 42)**. **Still to build (v1):** D6/D7 file-watch, D8 notifications; + the UI surfacing (Task 5/9, via `/impeccable`). **Nightly soak test starts running from here.** |
 | 7 | Agents & idle detection (5-state FSM, optional summarization) | Not started | Summarization OFF by default |
 | 8 | MCP server core (`soloist-mcp` stdio, scope+identity, tools) | Not started | High-risk |
 | 9 | Coordination layer (scratchpads/todos/timers/leases/kv) | Not started | **v1 scope.** Sequence: durable store → leases/locks → timers/idle-watchers → scratchpads/todos → key-value. High-risk |
@@ -189,6 +194,94 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Adversarial review of the OS-probe slice — fixes applied (2026-06-20)
+- **Independent skeptical review of PR #8 (D1/D2/D3), then every finding fixed.** Gate **213 (Rust 171 /
+  UI 42)**; `just lint && just test` green; monitoring mock-clock tests **40× deterministic**, dep-direction
+  + file-size guards pass; `sysinfo` `memory()`=bytes and the brotli/alloc lock pins confirmed unchanged.
+- **Read-model race closed (was the top bug).** The port scanner read `live_groups()`, did a slow OS read
+  with no lock held, then wrote ports back — so a process that stopped mid-scan could have stale ports
+  (and a spurious `PortsChanged`) resurrected on it, never cleared. `record_ports`/`set_ready` now thread
+  the scanned **pgid**; `registry.set_ports`/`set_ready` apply **only while `entry.pgid == Some(pgid)`** under
+  the one lock, so a late reading on an ended group is dropped. Same guard covers the readiness waiter. New
+  test `a_monitoring_update_after_the_group_ends_is_dropped`.
+- **OS reads moved off the runtime (CLAUDE.md §6/§8).** Both samplers + the waiter's poll now run the
+  blocking `/proc`/`sysinfo` sweep via a new `supervision::run_blocking` (spawn_blocking + `resume_unwind`,
+  so a probe panic still trips the supervised loop's panic-isolation and restarts it).
+- **Exact process-group membership.** The `/proc` port probe now matches by **process-group id**
+  (`/proc/<pid>/stat` pgrp) instead of a parent-subtree walk — simpler *and* catches a reparented
+  (double-forked) descendant the subtree would miss. `sysinfo` metrics keep the subtree (the OS view doesn't
+  expose the group there) with the doc softened to say so. The two probe-contract docs cross-reference their
+  omit-dead vs keep-empty asymmetry.
+- **Readiness is a closed enum** (`Readiness { Ungated, Waiting, Ready }`) replacing the `Option<bool>`
+  tri-state, mirrored in `domain.ts` (the event stays `ready: bool` per the phase spec). Supervisor
+  read-model accessors split into `supervisor/monitoring.rs` (supervisor.rs back under the 400-line smell).
+- **Comment discipline:** removed 5 source citations the slice had introduced (`plan/04 §6`, `plan/05 §7`,
+  `Phase 8`, `K4 precursor`) + a pre-existing `plan/05` citation in `ProjectGroup.tsx` (CLAUDE.md §8).
+
+### OS-probe slice — D1 per-process CPU/mem + D2 port discovery (2026-06-20)
+- **Scope:** the monitoring OS-probe slice. **Two gated commits, each start- and end-green** (`just lint &&
+  just test`). Baseline confirmed **194 (Rust 154 / UI 40)** first; end **207 (Rust 166 / UI 41)**.
+  Branch **`feat/phase-6-monitoring`** (cherry-picked from `main` after PR #7 merged — see below); commits
+  **`e0fa32e` (D1)**, **`be1711a` (D2)**. **`crates/sys` created** this slice (the recorded user decision:
+  no empty scaffolding earlier). Tauri `tauri-calling-frontend` consulted before the app event wiring;
+  `sysinfo` API confirmed via context7 (0.33.1, `ProcessesToUpdate`/`ProcessRefreshKind::nothing().with_cpu()`).
+- **D1 (matrix D1, v1 — `e0fa32e`):** per-process CPU% + RSS, aggregated over the process **group** (matrix
+  D12, per-child breakdown, stays `later`). New **C5 metrics domain** `core/metrics/` (`probe.rs` =
+  `MetricsProbe` + `ProcessMetrics` + `NoopMetricsProbe`; `sampler.rs` = `MetricsSampler`). Self-supervised,
+  `Clock`-driven (~1 s), publishes `DomainEvent::MetricsTick`. Registry tracks each running group's leader
+  pgid; `Supervisor::live_groups()`; `Facade::metrics_sampler_loop()` orchestrates C5 over C2 (C8, no context
+  cycle). `crates/sys` `SysinfoMetricsProbe` over `sysinfo` (`default-features=false, features=["system"]` for
+  size), subtree-by-parent aggregation, **per-core CPU%** (htop convention — documented; flip to total-machine
+  if preferred). **Verify:** mock-clock + `FakeMetricsProbe` headless incl. **sampler self-restarts after a
+  panic** (K4 precursor); real-`sysinfo` integration test (`crates/sys/tests/metrics.rs`) reads a live process
+  and omits a dead group. Runtime "busy `yes` shows moving CPU/idle ~0" is the user's `just dev` check.
+- **D2 (matrix D2, v1 — `be1711a`):** TCP port discovery on `ProcessView.ports`. New **C5 portscan domain**
+  `core/portscan/` (`probe.rs` = `PortProbe` + `NoopPortProbe`; `scanner.rs` = `PortScanner`). The scanner
+  (self-supervised, ~2 s) discovers each running group's listening ports, reflects them on `ProcessView.ports`,
+  and emits `DomainEvent::PortsChanged` only on a real change (dedup); ports clear when the group ends.
+  `Supervisor::record_ports` is the single mutation point. `crates/sys` `ProcPortProbe` reads `/proc` once per
+  tick: process subtree (`/proc/<pid>/stat` ppid) → socket inodes (`/proc/<pid>/fd`) → `/proc/net/tcp{,6}`
+  LISTEN entries; batched across groups. **Verify:** mock-clock scanner tests (discover-then-announce-once
+  dedup; clear-on-stop); real-`/proc` integration test (`crates/sys/tests/portscan.rs`) **discovers a port the
+  test process is actually listening on**. Runtime `python -m http.server` check is the user's.
+- **Self-supervision extracted (DRY):** `core/supervision.rs::supervise()` runs a restartable loop under a
+  panic-isolation boundary with `Clock`-driven exponential backoff; the metrics sampler and port scanner both
+  use it instead of each owning the wrapper. Tested directly (`supervision_tests.rs`).
+- **Architecture decisions this session (user directive — top source of truth §2; supersede prior docs):**
+  1. **A bounded context owns its own port.** The metrics/portscan ports + data types live *in their domain
+     module* (`core/metrics/probe.rs`, `core/portscan/probe.rs`), **not** in the shared `core/ports/mod.rs`.
+     `CorePorts` imports each domain's port. Rationale: adding a new metric/probe is a change confined to its
+     domain, never to a shared god-file. (The older driven ports — `LockReleaser`/`RuntimeState`/… — still sit
+     in `ports/mod.rs`; migrating them is optional future cleanup, not required.)
+  2. **Tests live in their own files**, not merged with the implementation (`#[cfg(test)] #[path =
+     "x_tests.rs"] mod tests;` for private-item unit tests; `tests/` for adapter integration). This
+     **reverses** the prior "tests stay inline" project decision (was CLAUDE.md §16 / `plan/06` §6 / this
+     ledger). Applied to all new code this slice; existing inline tests are migrated opportunistically, not in
+     a big-bang. Docs updated to match (see below).
+  3. **Small single-purpose files**; design patterns where the trigger fires (Ports-&-Adapters with the
+     domain-owned port; Null Object for the `Noop*` defaults; self-supervised reactor for the samplers).
+- **Docs updated to match the decisions:** `ARCHITECTURE.md` (crate table adds `crates/sys`; tests-separated +
+  domain-owned-port notes), `plan/06` §5.2 (port in its domain) + the inline-tests line, `CLAUDE.md` §15/§16
+  (tests-separated). `plan/02` D1/D2 stay v1; D12 stays `later`.
+- **Branch / PR (user directive this session):** the restart-policy work merged as **PR #7** before this slice,
+  so D1/D2 were re-based onto `main` as **`feat/phase-6-monitoring`** and a fresh PR opened (see the PR link in
+  the session summary). Strays left untracked, **never committed**: `solo.yml`, `crates/solo.yml`,
+  `processes.webp` (Solo reference screenshot — clean-room).
+- **D3 readiness DONE this slice (`4b4d930`):** `Facade::wait_for_port(id, port, timeout)` lives in the
+  portscan domain (`waiter.rs`), reusing the `PortProbe`: it polls on the `Clock` until the port binds or
+  times out, re-resolving the group each poll (a process that restarts mid-wait is probed on its new group;
+  one that stops fails fast `NotRunning`). Readiness is a **dimension, not a `ProcStatus`** — `ProcessView.ready:
+  Option<bool>` (None = no gate / Some(false) = Running-but-not-Ready / Some(true) = bound) + `ReadyStateChanged`;
+  `Supervisor::set_ready` is the single mutation point and emits; `set_pgid(None)` clears it on stop. **No new
+  port** (reuses `PortProbe`). The **production caller is the Phase-8 MCP `wait_for_bound_port` tool** — until
+  then the capability + read-model surface are built and tested (mock-clock waiter tests: already-bound,
+  late-bind, timeout, not-running), not yet driven in the GUI. Shared `portscan/test_support.rs` extracted so
+  scanner + waiter tests don't duplicate setup (DRY); `FakePortProbe` made mutable for the late-bind test.
+- **Not done / next:** D6/D7 file-watch (flesh out the `FileWatcher` port + a `notify` adapter, debounced,
+  trusted-only, default ignores), D8 notifications (`Notifier` + `notify-rust`), the nightly soak gate, and the
+  UI surfacing of CPU%/RSS + ports + the "restarting (k/N)"/RestartExhausted/not-ready badges (phase Task 5/9,
+  via `/impeccable`). **Next session should start with: D6/D7 file-watch restarts.**
 
 ### Phase 6 begun — crash auto-restart policy (D4 + D11), the self-healing slice (2026-06-20)
 - **Scope (user-chosen):** the **restart-policy slice first** — pure core, mock-clock-tested, **zero new
@@ -1506,20 +1599,23 @@ review's one should-fix + the mechanical nits:
    — add a `ProcessTrusted` `DomainEvent` (§5.6) to kill the snapshot race. (4) `project_load` path not
    validated (trusted webview; gate still blocks exec). (5) `auto_start_candidates` skips
    `Crashed`/`RestartExhausted` — fold into the start-all-vs-start-auto open thread.
-2. **Continue Phase 6 (restart-policy slice D4 + D11 is DONE — `90d51ac`).** Read `plan/phases/phase-06-*.md`
-   + its matrix rows first. **Next step — D1 CPU/mem (the first OS adapter):** create the new **`crates/sys`**
-   adapter (user-approved) and add a `ProcessProbe` **port** in `core::ports` (with a `Noop` default) over
-   `sysinfo`; the C5 sampler policy (fill the `metrics` placeholder module) samples each process **group**
-   ~1 s, emits `MetricsTick{id,cpu_pct,rss}`, and runs as a **self-supervised** task (build the reusable
-   self-supervised-task helper here, then it's available to retrofit the restart reactor — currently a
-   single robust task per YAGNI). **Then:** D2 port discovery + D3 readiness (`PortProbe` over `/proc`, also
-   in `crates/sys`); D6/D7 the **live `notify` file watcher** driving `ConfigEngine::sync` through the
-   `Debouncer` (single writer per project, off-thread `spawn_blocking`) + glob restart + default ignores;
-   D8 notifications (`notify-rust` notifier + C7, fill the `notify` placeholder). **The nightly soak test
-   starts running from Phase 6** — stand up the soak gate before flipping Phase 6 to `Verified`. Wiring the
-   watcher is what finally makes the **A9** trust dialog fire on a real edit at runtime — verify it then.
-   Invoke the matching `tauri-*` skill (`tauri-calling-frontend`/`tauri-frontend-events`) + `/impeccable`
-   (the CPU/RSS, "restarting k/N", RestartExhausted, "not ready" row surfacing, D9-later) at those steps.
+2. **Continue Phase 6 (D4 + D11 restart-policy DONE `90d51ac`; D1 + D2 + D3 OS-probe DONE — `e0fa32e`/
+   `be1711a`/`4b4d930`, PR #8; `crates/sys` exists; `core/supervision.rs` self-supervision helper exists).**
+   Read `plan/phases/phase-06-*.md` + its matrix rows first. **Next step — D6/D7 file-watch restarts:** flesh
+   out the empty `FileWatcher` port (give it methods + a `Noop`), add a **live `notify` watcher** adapter (in
+   `crates/sys` or a sibling) driving `ConfigEngine::sync` / `supervisor.restart` through the existing
+   `Debouncer` (single writer per project, off-thread `spawn_blocking`), glob-scoped via `globset` (`*` crosses
+   separators), **command-only + trusted-only**, with default ignores (`.git`/`node_modules`/`target`/`dist`/
+   `.venv`); empty/invalid globs → no watcher. **Then:** D8 notifications (`notify-rust` notifier + C7, fill
+   the `notify` placeholder). **The nightly soak test starts running from Phase 6** — stand up the soak gate
+   before flipping Phase 6 to `Verified`. Wiring the watcher is what finally makes the **A9** trust dialog fire
+   on a real edit at runtime — verify it then. Invoke the matching `tauri-*` skill + `/impeccable` (the CPU/RSS,
+   ports, "restarting k/N", RestartExhausted, "not ready" row surfacing — phase Task 5/9) at those steps.
+2-os. **Runtime-verify the OS probes (user, `just dev`).** With evidence: a busy command (`yes >/dev/null`)
+   shows **moving CPU%/RSS** while an idle one sits ~0; a dev server (`python -m http.server`) lists its bound
+   **port** on its row/`ProcessView.ports`; killing the metrics sampler task → it **self-restarts**, app
+   unaffected. (`wait_for_port`/readiness has no GUI trigger until the Phase-8 MCP `wait_for_bound_port` tool;
+   it is covered by mock-clock tests now.) The CPU%/RSS + port UI surfacing is a later `/impeccable` step.
 2a. **Runtime-verify auto-restart (user, `just dev`):** an `auto_restart: true` trusted command that you
    `kill -9` should go Crashed → Starting → Running on its own; one that crashes instantly and repeatedly
    should stop at exactly 10 restarts within 60 s and show `RestartExhausted` (no hot-loop). Desktop

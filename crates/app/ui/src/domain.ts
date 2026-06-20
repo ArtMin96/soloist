@@ -14,6 +14,11 @@ export type ProcStatus =
   | "Stopping"
   | "RestartExhausted";
 
+// Port-readiness gate (mirrors core::Readiness): "Ungated" = no gate active, "Waiting" = a
+// wait_for_port is in effect and the awaited port has not bound (Running but not Ready),
+// "Ready" = the awaited port bound.
+export type Readiness = "Ungated" | "Waiting" | "Ready";
+
 export interface ProcessView {
   id: number;
   project: number;
@@ -24,6 +29,12 @@ export interface ProcessView {
   // True for a trust-gated command whose variant is not yet trusted; the UI blocks its
   // start and offers a trust affordance.
   requires_trust: boolean;
+  // TCP ports the process is currently listening on (discovered while it runs, cleared when
+  // it stops). Empty until discovery finds any.
+  ports: number[];
+  // Port-readiness gate; "Ungated" until a wait_for_port is in effect, and reset to
+  // "Ungated" when the process stops.
+  ready: Readiness;
 }
 
 // Rendered output snapshot (escape sequences applied to plain text) — the Logs source.
@@ -105,6 +116,17 @@ export type DomainEvent =
       exit_code: number | null;
     }
   | { type: "ProcessRemoved"; id: number }
+  // A periodic CPU/memory reading for a running process, sampled across its whole group.
+  // cpu_pct is per-core (a busy multi-threaded process can exceed 100); rss is bytes.
+  // Emitted ~1 Hz; consumers coalesce it (never a per-tick re-render).
+  | { type: "MetricsTick"; id: number; cpu_pct: number; rss: number }
+  // A process's set of bound (listening) TCP ports changed — discovered while it runs,
+  // emptied when it stops. The new sorted set is carried so the read model updates without
+  // a snapshot round-trip; also reflected on ProcessView.ports.
+  | { type: "PortsChanged"; id: number; ports: number[] }
+  // A process's readiness changed while a port wait is active: false = Running but the
+  // awaited port has not bound yet, true = it bound. Reflected on ProcessView.ready.
+  | { type: "ReadyStateChanged"; id: number; ready: boolean }
   // The restart policy is relaunching a crashed auto_restart command; `attempt` is its
   // position in the rate-limit window (the status also moves Crashed -> Starting).
   | { type: "RestartScheduled"; id: number; attempt: number }

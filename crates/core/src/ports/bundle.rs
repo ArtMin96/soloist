@@ -4,6 +4,9 @@
 
 use std::sync::Arc;
 
+use crate::metrics::{MetricsProbe, NoopMetricsProbe};
+use crate::portscan::{NoopPortProbe, PortProbe};
+
 use super::{
     Clock, LockReleaser, NoopLockReleaser, NoopOrphanControl, NoopRuntimeState, OrphanControl,
     ProcessSpawner, ProjectRepo, RuntimeState, TrustRepo,
@@ -13,10 +16,11 @@ use super::{
 /// core's constructors take one value, and adding a future port is one field here
 /// rather than another argument threaded through every call site. The required adapters
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
-/// driven subsystems (`locks`, `runtime`, `orphan_control`) default to their `Noop`
-/// port via [`CorePorts::builder`], so a new optional port never forces every existing
-/// composition root to change. The composition root (`app::build_facade`) is the one
-/// place these are chosen; tests assemble it from `crate::testing` fakes.
+/// driven subsystems (`locks`, `runtime`, `orphan_control`, `metrics`, `port_probe`)
+/// default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
+/// forces every existing composition root to change. The composition root
+/// (`app::build_facade`) is the one place these are chosen; tests assemble it from
+/// `crate::testing` fakes.
 pub struct CorePorts {
     pub(crate) spawner: Arc<dyn ProcessSpawner>,
     pub(crate) clock: Arc<dyn Clock>,
@@ -25,6 +29,8 @@ pub struct CorePorts {
     pub(crate) locks: Arc<dyn LockReleaser>,
     pub(crate) runtime: Arc<dyn RuntimeState>,
     pub(crate) orphan_control: Arc<dyn OrphanControl>,
+    pub(crate) metrics: Arc<dyn MetricsProbe>,
+    pub(crate) port_probe: Arc<dyn PortProbe>,
 }
 
 impl CorePorts {
@@ -45,6 +51,8 @@ impl CorePorts {
                 locks: Arc::new(NoopLockReleaser),
                 runtime: Arc::new(NoopRuntimeState),
                 orphan_control: Arc::new(NoopOrphanControl),
+                metrics: Arc::new(NoopMetricsProbe),
+                port_probe: Arc::new(NoopPortProbe),
             },
         }
     }
@@ -73,6 +81,20 @@ impl CorePortsBuilder {
     /// [`NoopOrphanControl`]).
     pub fn orphan_control(mut self, orphan_control: Arc<dyn OrphanControl>) -> Self {
         self.ports.orphan_control = orphan_control;
+        self
+    }
+
+    /// Overrides the CPU/memory probe the metrics sampler reads (monitoring C5; defaults
+    /// to [`NoopMetricsProbe`], which produces no readings).
+    pub fn metrics(mut self, metrics: Arc<dyn MetricsProbe>) -> Self {
+        self.ports.metrics = metrics;
+        self
+    }
+
+    /// Overrides the port probe the port scanner reads (monitoring C5; defaults to
+    /// [`NoopPortProbe`], which discovers nothing).
+    pub fn port_probe(mut self, port_probe: Arc<dyn PortProbe>) -> Self {
+        self.ports.port_probe = port_probe;
         self
     }
 

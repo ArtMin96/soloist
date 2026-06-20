@@ -21,6 +21,8 @@ const PROCESS: ProcessView = {
   status: "Running",
   exit_code: null,
   requires_trust: false,
+  ports: [],
+  ready: "Ungated",
 };
 
 const noop = () => {};

@@ -9,13 +9,16 @@
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::broadcast;
 
 use crate::config::ConfigEngine;
 use crate::events::{DomainEvent, EventBus};
-use crate::ids::ProjectId;
-use crate::ports::{CorePorts, StoreError};
+use crate::ids::{ProcessId, ProjectId};
+use crate::metrics::{MetricsProbe, MetricsSampler};
+use crate::ports::{Clock, CorePorts, StoreError};
+use crate::portscan::{self, PortProbe, PortScanner, WaitForPortError};
 use crate::process::ProcessView;
 use crate::projects::{LoadProjectError, ProjectLoad, ProjectService, ProjectView, Projects};
 use crate::supervisor::Supervisor;
@@ -28,6 +31,9 @@ const EVENT_BUFFER: usize = 1024;
 /// The integration façade (context C8). Cheap to share as Tauri-managed state.
 pub struct Facade {
     bus: EventBus,
+    clock: Arc<dyn Clock>,
+    metrics: Arc<dyn MetricsProbe>,
+    port_probe: Arc<dyn PortProbe>,
     supervisor: Arc<Supervisor>,
     projects: Projects,
     trust: TrustStore,
@@ -42,10 +48,18 @@ impl Facade {
         let bus = EventBus::new(EVENT_BUFFER);
         let supervisor = Arc::new(Supervisor::new(&ports, bus.clone()));
         let CorePorts {
-            trust, projects, ..
+            clock,
+            metrics,
+            port_probe,
+            trust,
+            projects,
+            ..
         } = ports;
         Self {
             supervisor,
+            clock,
+            metrics,
+            port_probe,
             projects: Projects::new(projects),
             trust: TrustStore::new(trust.clone()),
             config: ConfigEngine::new(trust, bus.clone()),
@@ -74,6 +88,58 @@ impl Facade {
     /// dropped; the supervisor's restart policy drives it.
     pub fn self_healing_loop(&self) -> impl Future<Output = ()> + Send + 'static {
         self.supervisor.self_healing_loop()
+    }
+
+    /// The metrics sampler loop (monitoring C5), returned for the composition root to spawn
+    /// once on its runtime. It samples each running process group on an interval and
+    /// publishes a [`DomainEvent::MetricsTick`] per group, watching the supervisor weakly so
+    /// it ends when the facade is dropped. Self-supervised: a panicking sample is isolated
+    /// and the loop restarts. With the default [`crate::metrics::NoopMetricsProbe`] it emits
+    /// nothing — the real CPU/memory adapter is chosen in the composition root.
+    pub fn metrics_sampler_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        MetricsSampler::new(
+            self.clock.clone(),
+            self.metrics.clone(),
+            self.bus.clone(),
+            Arc::downgrade(&self.supervisor),
+        )
+        .run()
+    }
+
+    /// The port-discovery scanner loop (monitoring C5), returned for the composition root to
+    /// spawn once on its runtime. It discovers each running process group's listening ports,
+    /// reflects them on [`ProcessView::ports`], and publishes [`DomainEvent::PortsChanged`]
+    /// on a real change. Watches the supervisor weakly and is self-supervised, like the
+    /// metrics sampler. With the default [`crate::portscan::NoopPortProbe`] it finds nothing.
+    pub fn port_scanner_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        PortScanner::new(
+            self.clock.clone(),
+            self.port_probe.clone(),
+            self.bus.clone(),
+            Arc::downgrade(&self.supervisor),
+        )
+        .run()
+    }
+
+    /// Waits until process `id` is listening on `port`, or times out — port readiness (C5).
+    /// While waiting the process reads Running-but-not-Ready ([`ProcessView::ready`] =
+    /// `Readiness::Waiting`); on bind, `Readiness::Ready`. One method behind the Facade, so
+    /// the MCP/HTTP/CLI callers share the behaviour.
+    pub async fn wait_for_port(
+        &self,
+        id: ProcessId,
+        port: u16,
+        timeout: Duration,
+    ) -> Result<(), WaitForPortError> {
+        portscan::wait_for_port(
+            self.supervisor.clone(),
+            self.port_probe.clone(),
+            self.clock.clone(),
+            id,
+            port,
+            timeout,
+        )
+        .await
     }
 
     /// The project registry (C1).

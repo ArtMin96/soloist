@@ -16,6 +16,7 @@
 mod actor;
 mod adopt;
 mod bulk;
+mod monitoring;
 mod reconcile;
 mod registration;
 mod registry;
@@ -33,7 +34,7 @@ use crate::ports::{
     Clock, CorePorts, LockReleaser, OrphanControl, ProcessSpawner, PtySize, RuntimeState,
     SpawnSpec, Spawned, StoreError, TrustRepo,
 };
-use crate::process::{ProcStatus, ProcessView};
+use crate::process::{ProcStatus, ProcessView, Readiness};
 use crate::terminal::{PtyChunk, PtyInput, RenderedScreen, Terminals};
 
 use actor::{ActorMsg, ActorPorts, OrphanIdentity};
@@ -120,6 +121,8 @@ impl Supervisor {
             status: ProcStatus::Stopped,
             exit_code: None,
             requires_trust,
+            ports: Vec::new(),
+            ready: Readiness::Ungated,
         };
         self.registry.add(
             view,

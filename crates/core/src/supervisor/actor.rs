@@ -176,8 +176,10 @@ async fn run(
         } = spawned;
         let pgid = pid.map(|raw| raw as i32);
         // Record the running group before announcing Running, so a crash immediately
-        // after the announcement still leaves a reconcilable runtime-state record.
+        // after the announcement still leaves a reconcilable runtime-state record. The
+        // same pgid is recorded in the registry so monitoring can sample the live group.
         record_orphan(&runtime, &identity, &launch, pgid).await;
+        registry.set_pgid(id, pgid);
         advance(&registry, &bus, id, &mut status, ProcStatus::Running, None);
 
         // Once the child closes its output the branch is disabled (its `recv` would
@@ -202,6 +204,9 @@ async fn run(
                 }
             }
         };
+        // The current child is exiting or about to be stopped — drop it as a sampling
+        // target. A restart re-records the fresh group's pgid on the next iteration.
+        registry.set_pgid(id, None);
 
         match outcome {
             Outcome::Exited(exit_status) => {

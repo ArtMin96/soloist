@@ -44,6 +44,25 @@ pub enum DomainEvent {
     },
     /// A process left the registry.
     ProcessRemoved { id: ProcessId },
+    /// A periodic CPU/memory reading for a running process, sampled across its whole
+    /// process group. `cpu_pct` is per-core (a busy multi-threaded process can exceed
+    /// 100); `rss` is resident memory in bytes. Emitted on the sampler's interval, not on
+    /// every state change — adapters coalesce it (no per-tick re-render). A single late
+    /// reading may arrive just after a process stops (sampled before it exited); it carries
+    /// no view state, so consumers simply ignore one for a process no longer running.
+    MetricsTick {
+        id: ProcessId,
+        cpu_pct: f32,
+        rss: u64,
+    },
+    /// A process's set of bound (listening) TCP ports changed — discovered while it runs,
+    /// emptied when it stops. The new sorted set is carried so adapters update the read
+    /// model without a snapshot round-trip; it is also reflected on [`ProcessView::ports`].
+    PortsChanged { id: ProcessId, ports: Vec<u16> },
+    /// A process's readiness changed while a port wait is in effect: `false` = Running but
+    /// the awaited port has not bound yet ("Running but not Ready"), `true` = it bound. Only
+    /// fired while a readiness gate is active; reflected on [`ProcessView::ready`].
+    ReadyStateChanged { id: ProcessId, ready: bool },
     /// The restart policy is relaunching a crashed `auto_restart` command. `attempt` is
     /// its position in the current rate-limit window (1 = the first restart). The status
     /// also moves `Crashed -> Starting`; this delta additionally carries the attempt

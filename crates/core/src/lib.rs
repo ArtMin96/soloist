@@ -38,6 +38,7 @@ pub mod supervisor;
 pub mod terminal;
 pub mod trust;
 
+mod supervision;
 mod sync;
 
 #[cfg(any(test, feature = "testing"))]
@@ -52,6 +53,7 @@ pub use events::{DomainEvent, EventBus};
 pub use facade::{Facade, TrustCommandError};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};
+pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{
     Clock, CorePorts, CorePortsBuilder, ExitFuture, ExitStatus, LockReleaser, NoopLockReleaser,
@@ -59,7 +61,8 @@ pub use ports::{
     ProcessSpawner, ProjectRecord, ProjectRepo, PtyIo, PtySize, RuntimeState, RuntimeStateError,
     SpawnError, SpawnSpec, Spawned, Store, StoreError, TokioClock, TrustRepo,
 };
-pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView};
+pub use portscan::{wait_for_port, NoopPortProbe, PortProbe, PortScanner, WaitForPortError};
+pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView, Readiness};
 pub use projects::{
     LoadProjectError, ProjectError, ProjectLoad, ProjectService, ProjectView, Projects,
 };
