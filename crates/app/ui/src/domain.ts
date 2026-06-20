@@ -133,6 +133,9 @@ export type DomainEvent =
   // The restart policy gave up after too many restarts in the window; the command is held
   // in RestartExhausted until the user restarts it.
   | { type: "RestartExhausted"; id: number }
+  // A command was restarted because a watched file changed; the status also cycles through
+  // the usual restart deltas, so this is the discrete signal for a file-watch banner.
+  | { type: "FileRestart"; id: number }
   // A project was opened/changed. The UI re-reads the rendered project snapshot on this
   // (which carries each project's loaded icon); it doesn't consume the event's domain fields.
   | { type: "ProjectOpened"; id: number }

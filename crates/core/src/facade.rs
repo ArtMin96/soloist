@@ -8,6 +8,7 @@
 
 use std::future::Future;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,8 +16,10 @@ use tokio::sync::broadcast;
 
 use crate::config::ConfigEngine;
 use crate::events::{DomainEvent, EventBus};
+use crate::filewatch::{FileWatcher, WatchReactor};
 use crate::ids::{ProcessId, ProjectId};
 use crate::metrics::{MetricsProbe, MetricsSampler};
+use crate::notify::{NotificationReactor, Notifier};
 use crate::ports::{Clock, CorePorts, StoreError};
 use crate::portscan::{self, PortProbe, PortScanner, WaitForPortError};
 use crate::process::ProcessView;
@@ -34,6 +37,9 @@ pub struct Facade {
     clock: Arc<dyn Clock>,
     metrics: Arc<dyn MetricsProbe>,
     port_probe: Arc<dyn PortProbe>,
+    file_watcher: Arc<dyn FileWatcher>,
+    notifier: Arc<dyn Notifier>,
+    notifications_enabled: Arc<AtomicBool>,
     supervisor: Arc<Supervisor>,
     projects: Projects,
     trust: TrustStore,
@@ -51,6 +57,8 @@ impl Facade {
             clock,
             metrics,
             port_probe,
+            file_watcher,
+            notifier,
             trust,
             projects,
             ..
@@ -60,6 +68,10 @@ impl Facade {
             clock,
             metrics,
             port_probe,
+            file_watcher,
+            notifier,
+            // Notifications are on by default; the user can silence them at runtime.
+            notifications_enabled: Arc::new(AtomicBool::new(true)),
             projects: Projects::new(projects),
             trust: TrustStore::new(trust.clone()),
             config: ConfigEngine::new(trust, bus.clone()),
@@ -119,6 +131,48 @@ impl Facade {
             Arc::downgrade(&self.supervisor),
         )
         .run()
+    }
+
+    /// The file-watch reactor loop (monitoring C5), returned for the composition root to spawn
+    /// once on its runtime. It watches each trusted, file-watched command's project root and,
+    /// on a matching change, restarts that command (debounced) via the supervisor — reusing
+    /// one restart behaviour. Watches the supervisor weakly and ends when the bus closes (app
+    /// shutdown). With the default [`crate::filewatch::NoopFileWatcher`] it watches nothing,
+    /// so the real `notify` adapter is chosen in the composition root.
+    pub fn file_watch_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        WatchReactor::new(
+            self.clock.clone(),
+            self.file_watcher.clone(),
+            &self.bus,
+            Arc::downgrade(&self.supervisor),
+        )
+        .run()
+    }
+
+    /// The notification reactor loop (notifications C7), returned for the composition root to
+    /// spawn once on its runtime. It shows a desktop toast on a crash or an exhausted
+    /// auto-restart (honouring the global on/off), watching the supervisor weakly so it ends
+    /// when the facade is dropped. With the default [`crate::notify::NoopNotifier`] it shows
+    /// nothing — the real desktop adapter is chosen in the composition root.
+    pub fn notifications_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        NotificationReactor::new(
+            self.notifier.clone(),
+            self.notifications_enabled.clone(),
+            &self.bus,
+            Arc::downgrade(&self.supervisor),
+        )
+        .run()
+    }
+
+    /// Turns desktop notifications on or off globally — the single switch the notification
+    /// reactor honours, so the UI, MCP, and CLI all toggle the same flag.
+    pub fn set_notifications_enabled(&self, enabled: bool) {
+        self.notifications_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    /// Whether desktop notifications are currently enabled.
+    pub fn notifications_enabled(&self) -> bool {
+        self.notifications_enabled.load(Ordering::Relaxed)
     }
 
     /// Waits until process `id` is listening on `port`, or times out — port readiness (C5).

@@ -346,6 +346,7 @@ Each gap is something Solo does NOT publicly document; we choose and own the ans
 | Stop signal semantics | SIGTERM to process group → 5s grace → SIGKILL |
 | `env` precedence | process `env` > captured `-ilc` shell env > app env |
 | File-watch ignores | default-ignore `.git`, `node_modules`, `target`, `dist`, `.venv` |
+| File-watch on a non-running command | reload a *running* command only; a change while it is stopped/crashed/exhausted does nothing (never resurrects a user-stopped or restored-resting command) |
 | Lease lock TTL | explicit TTL + renew; auto-release on bound-process close |
 | Auto-summarization model | optional; use user's configured agent CLI headless, else disabled |
 | MCP param schemas | clean-room JSON Schemas, documented per tool |

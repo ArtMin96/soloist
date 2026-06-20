@@ -29,8 +29,8 @@ the PTY library are all **adapters** plugged into **ports** (Rust traits). The c
             ╚═══════┬───────────────┬───────────┬───────────┬─────────────╝
                     ▼               ▼           ▼           ▼
             ┌──────────────── adapters (driven by the core) ─────────────┐
-            │  ProcessSpawner(PTY)  Clock  FileWatcher  Notifier  Store   │
-            │  (portable-pty)      (tokio) (notify)   (libnotify) (SQLite)│
+            │  ProcessSpawner(PTY)  Clock  FileWatcher  Notifier      Store │
+            │  (portable-pty)    (tokio)  (notify)  (Tauri plugin) (SQLite)│
             └────────────────────────────────────────────────────────────┘
 ```
 
@@ -46,7 +46,7 @@ without touching logic.
 | `ProcessSpawner` (spawn into PTY+pgroup, write, resize, kill) | `portable-pty` + `nix` | in-memory fake child |
 | `Clock` (now, sleep, intervals) | `tokio::time` | deterministic mock clock |
 | `FileWatcher` | `notify` | scripted event source |
-| `Notifier` (desktop toast) | `notify-rust` | recording spy |
+| `Notifier` (desktop toast) | Tauri notification plugin (in the `app` adapter) | recording spy |
 | `Store` (durable repos §7) | SQLite (`rusqlite`/`sqlx`) | in-memory SQLite / fakes |
 | `Summarizer` (agent idle summary) | user's agent CLI headless | canned responses |
 | `EventSink` (emit to UI/MCP) | Tauri emit / MCP push | channel collector |

@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
+use crate::filewatch::{FileWatcher, NoopFileWatcher};
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
+use crate::notify::{NoopNotifier, Notifier};
 use crate::portscan::{NoopPortProbe, PortProbe};
 
 use super::{
@@ -16,8 +18,8 @@ use super::{
 /// core's constructors take one value, and adding a future port is one field here
 /// rather than another argument threaded through every call site. The required adapters
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
-/// driven subsystems (`locks`, `runtime`, `orphan_control`, `metrics`, `port_probe`)
-/// default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
+/// driven subsystems (`locks`, `runtime`, `orphan_control`, `metrics`, `port_probe`,
+/// `file_watcher`, `notifier`) default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
 /// forces every existing composition root to change. The composition root
 /// (`app::build_facade`) is the one place these are chosen; tests assemble it from
 /// `crate::testing` fakes.
@@ -31,6 +33,8 @@ pub struct CorePorts {
     pub(crate) orphan_control: Arc<dyn OrphanControl>,
     pub(crate) metrics: Arc<dyn MetricsProbe>,
     pub(crate) port_probe: Arc<dyn PortProbe>,
+    pub(crate) file_watcher: Arc<dyn FileWatcher>,
+    pub(crate) notifier: Arc<dyn Notifier>,
 }
 
 impl CorePorts {
@@ -53,6 +57,8 @@ impl CorePorts {
                 orphan_control: Arc::new(NoopOrphanControl),
                 metrics: Arc::new(NoopMetricsProbe),
                 port_probe: Arc::new(NoopPortProbe),
+                file_watcher: Arc::new(NoopFileWatcher),
+                notifier: Arc::new(NoopNotifier),
             },
         }
     }
@@ -95,6 +101,20 @@ impl CorePortsBuilder {
     /// [`NoopPortProbe`], which discovers nothing).
     pub fn port_probe(mut self, port_probe: Arc<dyn PortProbe>) -> Self {
         self.ports.port_probe = port_probe;
+        self
+    }
+
+    /// Overrides the file watcher the file-watch reactor reads (monitoring C5; defaults to
+    /// [`NoopFileWatcher`], which watches nothing — so the reactor never restarts).
+    pub fn file_watcher(mut self, file_watcher: Arc<dyn FileWatcher>) -> Self {
+        self.ports.file_watcher = file_watcher;
+        self
+    }
+
+    /// Overrides the desktop notifier the notification reactor shows toasts through
+    /// (notifications C7; defaults to [`NoopNotifier`], which shows nothing).
+    pub fn notifier(mut self, notifier: Arc<dyn Notifier>) -> Self {
+        self.ports.notifier = notifier;
         self
     }
 
