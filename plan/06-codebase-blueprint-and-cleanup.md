@@ -100,7 +100,7 @@ do). Inside it:
 - **`mod.rs`/`<context>.rs` (the root)** — the context's *published surface*: its public types and the thin
   orchestrating methods. Keep it small; it re-exports submodules. Target ≤ ~250 lines of code.
 - **one submodule per cohesive concern** — e.g. `supervisor/{registry, actor, adopt}`. A submodule does
-  one thing and owns its own inline tests.
+  one thing and owns its tests in a sibling `*_tests.rs` file (`#[cfg(test)] #[path = …] mod tests;`).
 - **types vs behavior** — closed enums + newtypes + FSM transition functions live with the smallest unit
   that owns them; they are `pub` only as far as needed.
 - **the ~400-line split smell** (`CLAUDE.md` §15, counting *non-test* lines): when a `.rs` crosses it,
@@ -161,12 +161,16 @@ DRY, and the dependency rule intact. These *are* the "how future sessions archit
 2. If it has states, express transitions as FSM functions returning `Result<_, IllegalTransition>`.
 3. If it needs OS/time/IO, take it through an **existing port**; add a new port only if none fits (§5.2).
 4. Emit a `DomainEvent` if adapters must observe the change; extend the projection (§5.6) on the TS side.
-5. Add inline unit tests using `core::testing` fakes + `MockClock` (no real time, no real OS).
+5. Add unit tests in a **separate file** (`#[cfg(test)] #[path = "x_tests.rs"] mod tests;`) using
+   `core::testing` fakes + `MockClock` (no real time, no real OS).
 6. Expose it to adapters by adding (or reusing) **one** `Facade` method — never per-adapter logic.
 
 ### 5.2 Add a new port + driven adapter (e.g. metrics sampler, file watcher)
-1. Define the **trait** in `core::ports` with a doc comment stating its contract; add a `Noop` default if
-   the subsystem is optional (so the app runs without it — §8).
+1. Define the **trait** with a doc comment stating its contract, **in the bounded context that depends on
+   it** (e.g. `core::metrics::probe`, `core::portscan::probe`) — a context owns its own port and data types,
+   so a new metric/probe is confined to that domain rather than a shared god-file. (A genuinely cross-cutting
+   port may still live in `core::ports`.) Add a `Noop` default if the subsystem is optional (so the app runs
+   without it — §8); `CorePorts` imports the port from wherever its domain defines it.
 2. Implement the trait in the **right adapter crate** (`store` for durable, `pty` for OS/process, or a new
    adapter crate if it's a genuinely new technology — justify a new crate against the size budget, `04` §10).
 3. Wire it in the **composition root** (`app::build_facade`, §8) — pass the real adapter; tests pass a fake.
@@ -272,8 +276,8 @@ The rules to **hold**:
 adapters) reuse the **one** fake set via `soloist-core = { path = "../core", features = ["testing"] }` in
 their `[dev-dependencies]` instead of re-rolling fakes. The fakes live in per-concern submodules under
 `core::testing/` (`clock`/`spawner`/`repos`/`runtime_state`/`lock_releaser`/`fixtures`, split in R5); the
-feature is off by default, so they never compile into a production build. Tests stay inline per the project
-decision — this changed *who can reach the fakes*, not *where tests live*.
+feature is off by default, so they never compile into a production build. (This `testing`-feature change is
+about *who can reach the fakes*; see §7 for the current *where tests live* decision.)
 
 ---
 
@@ -284,8 +288,11 @@ sequenced so no phase regresses that code blindly: every phase **starts and ends
 test` green** (current baseline **106 tests**), changes one concern, and is independently reviewable. These
 are **R-phases** (refactor), orthogonal to the build phases.
 
-> **Decisions already locked by the user (2026-06-18):** tests stay **inline** (trim, don't relocate); the
-> empty core modules **and** the four stub adapter crates **stay** as documented placeholders (§3.1).
+> **Decisions by the user:** new tests live in **separate files** — unit tests of private items via
+> `#[cfg(test)] #[path = "x_tests.rs"] mod tests;` (the module stays a child of its parent, so it still
+> reaches private items), and adapter integration tests in `tests/` (2026-06-20 directive, **reversing** the
+> earlier 2026-06-18 "tests inline" rule; existing inline tests are migrated opportunistically). The empty
+> core modules **and** the four stub adapter crates **stay** as documented placeholders (§3.1).
 
 > **Status (2026-06-19): R0–R6 are all complete.** Commits: R0 `ea4bad1` · R1 `4c80eb7` · R2 `c04859a` ·
 > R3 `71eafac` · R4 `65cf819` · R5 `3f07350` · R6 (this convergence). See `PROGRESS.md` for per-phase
@@ -424,5 +431,5 @@ Behavior lives in a **bounded context** in `crates/core`, behind **ports**, expo
 the **single composition root** (`app::build_facade`), so any one can be absent without breaking the app.
 Every concept is defined **once** (Rust enums in `core`, the TS mirror in `domain.ts`); shared test fakes
 live once in `core::testing`. Reach for a design pattern when its **trigger** (§4) fires, not before. Files
-stay **small and single-purpose**; tests stay **inline but honest**. When in doubt, follow the recipe in §5;
+stay **small and single-purpose**; tests live in **separate files** and stay **honest**. When in doubt, follow the recipe in §5;
 when the recipe and a higher doc disagree, the higher doc wins and this file is fixed.
