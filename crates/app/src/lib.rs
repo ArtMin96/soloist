@@ -14,7 +14,7 @@ use serde::Serialize;
 use soloist_core::{CorePorts, Facade, NoopRuntimeState, RuntimeState, Store, TokioClock};
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use soloist_store::{FileRuntimeState, SqliteStore};
-use soloist_sys::{ProcPortProbe, SysinfoMetricsProbe};
+use soloist_sys::{NotifyFileWatcher, ProcPortProbe, SysinfoMetricsProbe};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::broadcast::error::RecvError;
 
@@ -64,7 +64,8 @@ fn build_facade() -> Facade {
     // One SQLite store backs the trust and project repositories the façade needs.
     // The lock releaser is unset here, so it defaults to its `Noop` port (coordination
     // lands in C6); the runtime-state and orphan-control adapters are wired for adoption,
-    // the metrics probe reads CPU/memory via sysinfo, and the port probe reads /proc.
+    // the metrics probe reads CPU/memory via sysinfo, the port probe reads /proc, and the
+    // file watcher reports filesystem changes via notify.
     Facade::new(
         CorePorts::builder(
             Arc::new(PtyProcessSpawner),
@@ -76,6 +77,7 @@ fn build_facade() -> Facade {
         .orphan_control(Arc::new(PgidOrphanControl))
         .metrics(Arc::new(SysinfoMetricsProbe::new()))
         .port_probe(Arc::new(ProcPortProbe::new()))
+        .file_watcher(Arc::new(NotifyFileWatcher::new()))
         .build(),
     )
 }
@@ -119,11 +121,10 @@ pub fn run() {
             // launch (resting — restore never starts a process); the UI seeds from the
             // resulting snapshots.
             app.state::<Facade>().restore_projects();
-            // Start the file-watch reactor last: it reads the watch-eligible commands once at
-            // startup, so it must run after restore has registered them. It reloads a running
-            // watched command when a file changes (weakly held, ends when the bus closes).
-            // Inert until the real file watcher is wired in `build_facade` — it watches nothing
-            // under the default.
+            // Start the file-watch reactor last: it reads the restored commands at startup, so
+            // it must run after restore has registered them, then re-syncs on each project
+            // open. It reloads a running watched command when a matching file changes via the
+            // notify watcher wired in `build_facade` (weakly held, ends when the bus closes).
             tauri::async_runtime::spawn(app.state::<Facade>().file_watch_loop());
             Ok(())
         })

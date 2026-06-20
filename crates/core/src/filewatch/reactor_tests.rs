@@ -234,6 +234,40 @@ async fn an_untrusted_command_is_never_restarted() {
 }
 
 #[tokio::test]
+async fn a_project_opened_after_startup_is_watched() {
+    let mut s = setup();
+    // The reactor starts with no watch-eligible commands, so it watches nothing.
+    spawn_reactor(&s);
+    yield_many().await;
+    assert!(
+        s.watcher.watched().is_empty(),
+        "there is nothing to watch at startup",
+    );
+
+    // A command registered after startup — as opening a project does — becomes watch
+    // eligible; the reactor only learns of it when the open is announced.
+    let web = register_command(&s, "Web", &["src/**/*.rs"], true);
+    start_running(&s, web).await;
+    s.bus.publish(DomainEvent::ProjectOpened { id: PROJECT });
+
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+        if !s.watcher.watched().is_empty() {
+            break;
+        }
+    }
+    assert!(
+        !s.watcher.watched().is_empty(),
+        "the project opened after startup is now watched",
+    );
+
+    // A matching change to it now restarts it, proving the re-watch is live.
+    s.watcher.change(changed("src/app/main.rs"));
+    yield_many().await;
+    assert_eq!(next_file_restart(&mut s).await, web);
+}
+
+#[tokio::test]
 async fn a_terminal_or_a_glob_less_command_is_not_watched() {
     let s = setup();
     // A terminal (never file-watched) and a command with no globs — neither is eligible.
