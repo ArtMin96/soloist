@@ -9,7 +9,7 @@ import { TrustDialog } from "@/components/TrustDialog";
 import { useAppInfo } from "@/store/useAppInfo";
 import { useOrphans } from "@/store/useOrphans";
 import { useProcesses } from "@/store/useProcesses";
-import { useProjects } from "@/store/useProjects";
+import { useProjects } from "@/store/projects";
 import { useTrust } from "@/store/useTrust";
 
 // The dashboard shell: a top bar of stack controls, the process tree, and the selected

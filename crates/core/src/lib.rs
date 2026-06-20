@@ -49,7 +49,7 @@ pub use config::{
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
-pub use facade::{Facade, LoadProjectError, ProjectLoad, TrustCommandError};
+pub use facade::{Facade, TrustCommandError};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};
 pub use orphans::{OrphanInfo, OrphanReport};
@@ -60,7 +60,9 @@ pub use ports::{
     SpawnError, SpawnSpec, Spawned, Store, StoreError, TokioClock, TrustRepo,
 };
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView};
-pub use projects::{ProjectError, ProjectView, Projects};
+pub use projects::{
+    LoadProjectError, ProjectError, ProjectLoad, ProjectService, ProjectView, Projects,
+};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};
 pub use terminal::{LogLine, PtyChunk, RenderedScreen};
 pub use trust::{Trust, TrustStore};

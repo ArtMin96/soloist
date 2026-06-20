@@ -15,8 +15,11 @@
   **project read-model** (`ProjectView`/`ProjectOpened`, durable in SQLite; `load_project` now persists the
   `solo.yml name:` it previously dropped), **A13 project icons pulled into v1** (capped `project_icon` data
   URL + monogram fallback), and **session restore on launch** (durable projects re-register *resting*, so the
-  sidebar isn't empty across runs). Gate **186 (Rust 145 / UI 41)**. Commits moved to a dedicated branch (see
-  the top Decisions entry). _Runtime verification is the user's (restart `just dev`)._ A prior fourth
+  sidebar isn't empty across runs), then **consolidated into a single Projects domain/module** (backend
+  `core/projects/` + a `ProjectService` lifecycle; frontend `store/projects/`; the icon now arrives inside
+  the project read-model (resolved like the name) instead of a separate `project_icon` call — see the top
+  Decisions entry). Gate **186 (Rust 146 / UI 40)**. Commits moved to a dedicated branch (see the top
+  Decisions entry). _Runtime verification is the user's (restart `just dev`)._ A prior fourth
   2026-06-19 session **built A10 (command auto-detection) — now v1, code-complete** (opening a folder with no `solo.yml`
   auto-creates one from detected commands, with a friendly confirmation), **finished the deferred
   adversarial review** of the Phase-5 follow-up (applied 2 fixes; recorded the rest), and added a **full
@@ -178,6 +181,54 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Projects consolidated into a single trusted domain/module — backend + frontend (2026-06-20, later)
+- **Why (user directive, top source of truth §2):** "fully refactor until we have a single trusted source
+  'Projects' domain/module … project consumers are not going to define how projects should work. They are
+  just consuming from projects domain." And: the icon must not be separate functionality — "name, icon, …
+  should be DTO-like. No separate." Diagnosis (verified by reading, not assumed): the project **lifecycle**
+  (open/restore) lived in `Facade`; the icon **policy** (allow-list + cap) in the Tauri adapter; the
+  project↔process **join + visibility**, the **monogram**, and the **collapse-key** formats in the generic
+  grouping module and the components; and the icon was fetched by a **second** IPC call (`project_icon`) + a
+  `useProjectIcon` hook — consumers were defining how projects work.
+- **Backend — one `core/projects/` module owns everything project (C1).** Split `projects.rs` into
+  `projects/{registry,view,service}.rs` + `mod.rs`: `registry` (`Projects` over `ProjectRepo`), `view`
+  (`ProjectView` — the display read-model), **`service` (`ProjectService` — the open/restore lifecycle +
+  `ProjectLoad`/`LoadProjectError`, moved out of `Facade`)**. `Facade::load_project`/`restore_projects` are
+  now 1-line delegations to a `ProjectService` it assembles from the contexts it owns; the Facade defines
+  nothing about how a project opens.
+- **Icon is resolved exactly like the name — a plain field of the read-model, no separate anything**
+  (second user pass: "the icon is still separate … it's the same as the project name"). `ProjectView`
+  carries `name: String` and `icon: Option<String>`, **both resolved in one place, `ProjectView::from_record`
+  (`view.rs`)**: `display_name(record)` for the name, `render_icon(record)` for the icon (resolve the
+  `solo.yml icon:` path → allow-list + size-cap → `data:` URL). `project_list` returns plain
+  `Vec<ProjectView>` — there is **no** `WireProject` DTO, **no** `read_icon_data_url`/`icon_mime` adapter
+  helper, **no** `core/projects/icon.rs`, **no** `project_icon` command, **no** `useProjectIcon` hook. The
+  webview renders `project.icon` directly, just like `project.name`. **`base64` moved app → core** (a pure
+  algorithm, like the existing `sha2`; dep-direction guard still green — core is framework-free). A live
+  open arrives as a slimmed **`ProjectOpened { id }`** event (no display state on the event), which the
+  store treats as a trigger to re-read the snapshot (the `mergeProject` delta-fold is gone).
+- **Frontend — one `store/projects/` module** (`{useProjects, tree, view, index}.ts`): the store
+  (read-model + open + notice), the project↔process **tree** projection (`groupByProject`/`runningCount`/
+  `ProjectTree`), and the **view helpers** consumers reuse (`monogram`, `projectCollapseKey`,
+  `kindCollapseKey`). `store/grouping.ts` keeps only process-kind grouping; `Sidebar`/`ProjectGroup`/`App`
+  import from `@/store/projects` and only render. Added `isRunning` to `lib/status.ts` (kills the
+  `"Running"` magic string in the running count).
+- **Behavior change (user-directed): the sidebar now shows an opened project even with zero processes** (an
+  empty node, "No commands yet"), so the user always sees what they opened. `groupByProject` no longer
+  drops process-less projects; the test asserts the empty node. plan/05 §286 documents the grouped tree but
+  not empty-project visibility, so this is a UI decision, not a Solo-behavior divergence.
+- **Gate green: `just lint && just test` → 186 (Rust 146 / UI 40)** — fmt, clippy `-D warnings`, tsc,
+  ESLint, Prettier, **dep-direction** (core framework-free *with* `base64`, like `sha2`) + **file-size**
+  guards all pass. From the pre-refactor 186 (Rust 145 / UI 41): UI −1 (2 `mergeProject` fold tests → 1
+  refetch-on-open test); Rust +1 (the icon-policy test folded into `view.rs`, which gained icon
+  render/skip/oversize tests). **Honest test note:** the new `useProjects` refetch test surfaced — and now
+  guards against — a re-subscribe churn when the caller passes an *unstable* error callback; production
+  passes a stable `store.reportError` (a `useCallback`), like `useProcesses`.
+- **Not done this session (the user's to verify, `just dev` restart):** on launch the sidebar shows opened
+  projects (resting); opening a folder with a `solo.yml icon:` shows the icon rendered in-DTO; an opened
+  folder with no commands shows an empty project node. Stray untracked `solo.yml` (root + `crates/`) and
+  `processes.webp` (Solo reference screenshot — clean-room: do **not** commit) left in place.
 
 ### Projects became a first-class feature — project-grouped sidebar + read-model + restore (2026-06-20)
 - **Why:** the user opened a folder, got a `solo.yml`, but **saw no project** in the sidebar. Root cause

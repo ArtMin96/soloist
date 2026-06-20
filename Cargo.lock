@@ -3116,7 +3116,6 @@ dependencies = [
 name = "soloist-app"
 version = "0.1.0"
 dependencies = [
- "base64 0.21.7",
  "serde",
  "soloist-core",
  "soloist-httpapi",
@@ -3141,6 +3140,7 @@ name = "soloist-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.21.7",
  "indexmap 2.14.0",
  "serde",
  "serde_norway",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { onDomainEvent, openProjectDirectory, projectList, projectLoad } from "@/api";
-import type { DomainEvent, ProjectLoad, ProjectView } from "@/domain";
+import type { ProjectLoad, ProjectView } from "@/domain";
 
 export interface ProjectStore {
   /** The opened projects, most-recently-opened first; the sidebar groups the tree by these. */
@@ -9,24 +9,6 @@ export interface ProjectStore {
   open: () => void;
   /** A plain-language note about the last open (auto-created config, or no commands). */
   notice: string | null;
-}
-
-type ProjectOpened = Extract<DomainEvent, { type: "ProjectOpened" }>;
-
-// Upserts an opened project into the read model, newest first (matching the durable
-// registry's order). Pure, so the fold is unit-testable without the event stream.
-export function mergeProject(projects: ProjectView[], opened: ProjectOpened): ProjectView[] {
-  const view: ProjectView = {
-    id: opened.id,
-    name: opened.name,
-    root: opened.root,
-    icon: opened.icon,
-  };
-  const existing = projects.findIndex((project) => project.id === view.id);
-  if (existing === -1) return [view, ...projects];
-  const next = projects.slice();
-  next[existing] = view;
-  return next;
 }
 
 // The leaf name of a path, for naming the folder in a notice ("/home/dev/app" → "app").
@@ -53,22 +35,26 @@ function noticeFor(folder: string, { created, processes }: ProjectLoad): string 
 }
 
 // The projects store: the opened-project read model plus the action that loads one. Seeds
-// from a snapshot then folds `ProjectOpened` deltas (snapshot-then-deltas, like
-// `useProcesses`); the process events that loading triggers repopulate the process read
+// from the rendered project snapshot, then re-reads it whenever a project opens
+// (snapshot-then-trigger — the snapshot already carries each project's loaded icon, so there
+// is no separate icon fetch). The process events a load triggers repopulate the process read
 // model elsewhere. Each load's facts (auto-created config, declared-command count) become a
 // `notice` so opening a folder is never silent; failures surface on the shared error sink.
 export function useProjects(reportError: (reason: unknown) => void): ProjectStore {
   const [projects, setProjects] = useState<ProjectView[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const refresh = useCallback(() => {
+    projectList().then(setProjects).catch(reportError);
+  }, [reportError]);
+
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    // Subscribe before the snapshot read, so an open between the two is not lost.
+    // Subscribe before the snapshot read, so an open between the two is not missed; a
+    // `ProjectOpened` just signals "projects changed" and we re-read the rendered snapshot.
     onDomainEvent((event) => {
-      if (event.type === "ProjectOpened") {
-        setProjects((prev) => mergeProject(prev, event));
-      }
+      if (event.type === "ProjectOpened") refresh();
     })
       .then((stopListening) => {
         if (cancelled) {
@@ -76,14 +62,14 @@ export function useProjects(reportError: (reason: unknown) => void): ProjectStor
           return;
         }
         unlisten = stopListening;
-        projectList().then(setProjects).catch(reportError);
+        refresh();
       })
       .catch(reportError);
     return () => {
       cancelled = true;
       unlisten?.();
     };
-  }, [reportError]);
+  }, [refresh, reportError]);
 
   const open = useCallback(() => {
     openProjectDirectory()

@@ -1,7 +1,7 @@
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
-import { groupByProject } from "@/store/grouping";
+import { groupByProject, kindCollapseKey, projectCollapseKey } from "@/store/projects";
 import { useCollapseState } from "@/store/useCollapseState";
-import type { ProcessKind, ProcessView, ProjectView } from "@/domain";
+import type { ProcessView, ProjectView } from "@/domain";
 
 interface SidebarProps {
   projects: ProjectView[];
@@ -35,8 +35,6 @@ export function Sidebar({
 }: SidebarProps) {
   const trees = groupByProject(processes, projects);
   const [collapsed, setCollapsed] = useCollapseState();
-  const projectKey = (id: number) => `project:${id}`;
-  const kindKey = (id: number, kind: ProcessKind) => `kind:${id}:${kind}`;
 
   return (
     <nav
@@ -47,10 +45,12 @@ export function Sidebar({
         <div key={tree.project.id} className={index > 0 ? "mt-1 border-t pt-1" : undefined}>
           <ProjectGroup
             tree={tree}
-            open={!collapsed[projectKey(tree.project.id)]}
-            onOpenChange={(open) => setCollapsed(projectKey(tree.project.id), !open)}
-            kindOpen={(kind) => !collapsed[kindKey(tree.project.id, kind)]}
-            onKindOpenChange={(kind, open) => setCollapsed(kindKey(tree.project.id, kind), !open)}
+            open={!collapsed[projectCollapseKey(tree.project.id)]}
+            onOpenChange={(open) => setCollapsed(projectCollapseKey(tree.project.id), !open)}
+            kindOpen={(kind) => !collapsed[kindCollapseKey(tree.project.id, kind)]}
+            onKindOpenChange={(kind, open) =>
+              setCollapsed(kindCollapseKey(tree.project.id, kind), !open)
+            }
             selectedId={selectedId}
             onSelect={onSelect}
             onStart={onStart}

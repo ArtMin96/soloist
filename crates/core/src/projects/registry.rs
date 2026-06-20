@@ -1,19 +1,15 @@
-//! The project registry: the set of workspace roots Soloist manages.
-//!
-//! A project is a filesystem folder. Its durable identity is its **canonical**
-//! absolute path, so the same workspace is one project however its path was written
-//! (symlinks, `.`/`..`, trailing slash). The durable [`ProjectId`] is assigned by
-//! the store and is stable across runs — which is what lets trust persist.
+//! The durable project registry: the set of workspace roots Soloist manages.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
-
-use serde::Serialize;
 
 use crate::ids::ProjectId;
 use crate::ports::{ProjectRecord, ProjectRepo, StoreError};
+use crate::projects::ProjectView;
 
-/// Registry over the durable [`ProjectRepo`].
+/// Registry over the durable [`ProjectRepo`]. A project is a filesystem folder whose
+/// durable identity is its canonical absolute path; the store assigns a stable
+/// [`ProjectId`] from that path, which is what lets trust persist across runs.
 pub struct Projects {
     repo: Arc<dyn ProjectRepo>,
 }
@@ -62,53 +58,6 @@ impl Projects {
     }
 }
 
-/// A project's display identity for the UI read model — a projection of the durable
-/// [`ProjectRecord`]. [`name`](Self::name) is always a human label: the `solo.yml`
-/// `name:` when set, otherwise the project folder's name, so the sidebar can title a
-/// project even when its config names none. [`icon`](Self::icon) is the `solo.yml`
-/// `icon:` resolved to an absolute path (the adapter loads the image), or `None`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ProjectView {
-    pub id: ProjectId,
-    pub name: String,
-    pub root: PathBuf,
-    pub icon: Option<PathBuf>,
-}
-
-impl ProjectView {
-    /// Projects a durable record into its display identity, resolving the name and the
-    /// icon path. A relative `icon:` is resolved against the project root; an absolute
-    /// one is taken as-is (the behaviour of [`Path::join`]).
-    pub fn from_record(record: &ProjectRecord) -> Self {
-        Self {
-            id: record.id,
-            name: display_name(record),
-            root: record.root.clone(),
-            icon: record.icon.as_ref().map(|icon| record.root.join(icon)),
-        }
-    }
-}
-
-/// A project's display name: its `solo.yml` `name:` if set and non-blank, else the
-/// final component of its (canonical, absolute) root path — falling back to the whole
-/// path only for a root with no final component.
-fn display_name(record: &ProjectRecord) -> String {
-    record
-        .name
-        .as_deref()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(|| {
-            record
-                .root
-                .file_name()
-                .unwrap_or(record.root.as_os_str())
-                .to_string_lossy()
-                .into_owned()
-        })
-}
-
 /// Why adding a project failed.
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -147,50 +96,6 @@ mod tests {
             .add(Path::new("/no/such/path/soloist-test"), None, None)
             .unwrap_err();
         assert!(matches!(err, ProjectError::Root { .. }));
-    }
-
-    #[test]
-    fn view_name_prefers_config_name_then_falls_back_to_the_folder() {
-        // A blank or absent name falls back to the root's final component; a real name wins.
-        let blank = ProjectRecord {
-            id: ProjectId::from_raw(1),
-            root: PathBuf::from("/projects/storefront"),
-            name: Some("   ".to_string()),
-            icon: None,
-        };
-        assert_eq!(ProjectView::from_record(&blank).name, "storefront");
-
-        let named = ProjectRecord {
-            name: Some("Storefront".to_string()),
-            ..blank.clone()
-        };
-        assert_eq!(ProjectView::from_record(&named).name, "Storefront");
-
-        let absent = ProjectRecord {
-            name: None,
-            ..blank
-        };
-        assert_eq!(ProjectView::from_record(&absent).name, "storefront");
-    }
-
-    #[test]
-    fn view_resolves_the_icon_against_the_root() {
-        let with_icon = ProjectRecord {
-            id: ProjectId::from_raw(1),
-            root: PathBuf::from("/projects/app"),
-            name: None,
-            icon: Some(PathBuf::from("assets/icon.png")),
-        };
-        assert_eq!(
-            ProjectView::from_record(&with_icon).icon,
-            Some(PathBuf::from("/projects/app/assets/icon.png"))
-        );
-
-        let no_icon = ProjectRecord {
-            icon: None,
-            ..with_icon
-        };
-        assert_eq!(ProjectView::from_record(&no_icon).icon, None);
     }
 
     #[test]

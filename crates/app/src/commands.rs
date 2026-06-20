@@ -10,7 +10,6 @@
 
 use std::path::Path;
 
-use base64::Engine as _;
 use soloist_core::{Facade, ProcessId, ProcessView, ProjectId, ProjectLoad, ProjectView};
 use tauri::ipc::Channel;
 use tauri::State;
@@ -24,52 +23,12 @@ pub async fn proc_list(facade: State<'_, Facade>) -> Result<Vec<ProcessView>, St
     Ok(facade.snapshot())
 }
 
-/// The project read model — every opened project's display identity. The snapshot
-/// half of snapshot-then-deltas for projects; live opens arrive as `ProjectOpened`.
+/// The project read model — every opened project's display identity, name and icon already
+/// resolved by the core. The snapshot half of snapshot-then-deltas for projects; a live open
+/// arrives as a `ProjectOpened` event that prompts the UI to re-read this.
 #[tauri::command]
 pub async fn project_list(facade: State<'_, Facade>) -> Result<Vec<ProjectView>, String> {
     facade.projects_snapshot().map_err(|err| err.to_string())
-}
-
-/// The largest project icon the webview will load — generous for a sidebar avatar, but
-/// a ceiling on what a stray `icon:` path can pull into memory and over the IPC bridge.
-const MAX_ICON_BYTES: u64 = 512 * 1024;
-
-/// Reads a project's icon into a `data:` URL the webview renders in an `<img>`, or
-/// `None` when the path is missing, unreadable, oversized, or not a known image type.
-/// `path` comes from the project read model (`ProjectView.icon`, resolved by the core);
-/// the extension allow-list and the size cap keep it from streaming an arbitrary file.
-#[tauri::command]
-pub async fn project_icon(path: String) -> Result<Option<String>, String> {
-    Ok(read_icon_data_url(Path::new(&path)))
-}
-
-fn read_icon_data_url(path: &Path) -> Option<String> {
-    let mime = icon_mime(path)?;
-    let meta = std::fs::metadata(path).ok()?;
-    if !meta.is_file() || meta.len() > MAX_ICON_BYTES {
-        return None;
-    }
-    let bytes = std::fs::read(path).ok()?;
-    Some(format!(
-        "data:{mime};base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    ))
-}
-
-/// The image MIME type for a file extension, or `None` for anything not a renderable
-/// image — the allow-list bounding what [`project_icon`] will serve.
-fn icon_mime(path: &Path) -> Option<&'static str> {
-    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
-        "png" => Some("image/png"),
-        "jpg" | "jpeg" => Some("image/jpeg"),
-        "webp" => Some("image/webp"),
-        "gif" => Some("image/gif"),
-        "svg" => Some("image/svg+xml"),
-        "ico" => Some("image/x-icon"),
-        "bmp" => Some("image/bmp"),
-        _ => None,
-    }
 }
 
 /// Loads a project from a folder path: auto-creates a `solo.yml` from detected commands
@@ -223,19 +182,4 @@ pub async fn orphans_resolve(pgids: Vec<i32>, facade: State<'_, Facade>) -> Resu
         facade.supervisor().kill_orphan(pgid);
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn icon_mime_allows_only_known_image_types() {
-        assert_eq!(icon_mime(Path::new("assets/icon.png")), Some("image/png"));
-        assert_eq!(icon_mime(Path::new("ICON.SVG")), Some("image/svg+xml"));
-        assert_eq!(icon_mime(Path::new("logo.jpeg")), Some("image/jpeg"));
-        // A non-image path (e.g. the config itself) and an extensionless file are refused.
-        assert_eq!(icon_mime(Path::new("solo.yml")), None);
-        assert_eq!(icon_mime(Path::new("Makefile")), None);
-    }
 }

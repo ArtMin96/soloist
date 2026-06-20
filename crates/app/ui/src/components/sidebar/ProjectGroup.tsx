@@ -3,8 +3,7 @@ import { Collapsible } from "radix-ui";
 import { ProcessGroup } from "@/components/sidebar/ProcessGroup";
 import { ProjectControls } from "@/components/sidebar/ProjectControls";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useProjectIcon } from "@/store/useProjectIcon";
-import type { ProjectTree } from "@/store/grouping";
+import { monogram, type ProjectTree } from "@/store/projects";
 import type { ProcessKind } from "@/domain";
 
 interface ProjectGroupProps {
@@ -45,8 +44,6 @@ export function ProjectGroup({
   onStopAll,
 }: ProjectGroupProps) {
   const { project, kinds, count } = tree;
-  const iconSrc = useProjectIcon(project.icon);
-  const initial = project.name.trim().charAt(0).toUpperCase() || "?";
 
   return (
     <Collapsible.Root open={open} onOpenChange={onOpenChange} className="select-none">
@@ -57,8 +54,8 @@ export function ProjectGroup({
             className="size-3 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/trigger:rotate-90"
           />
           <Avatar>
-            {iconSrc && <AvatarImage src={iconSrc} alt="" />}
-            <AvatarFallback>{initial}</AvatarFallback>
+            {project.icon && <AvatarImage src={project.icon} alt="" />}
+            <AvatarFallback>{monogram(project.name)}</AvatarFallback>
           </Avatar>
           <span className="min-w-0 flex-1 truncate text-[0.9375rem] font-[550] tracking-[-0.005em] text-foreground">
             {project.name}
@@ -80,20 +77,24 @@ export function ProjectGroup({
       </div>
       <Collapsible.Content>
         <div className="mt-0.5 flex flex-col gap-0.5 pb-0.5 pl-3">
-          {kinds.map((group) => (
-            <ProcessGroup
-              key={group.kind}
-              group={group}
-              open={kindOpen(group.kind)}
-              onOpenChange={(value) => onKindOpenChange(group.kind, value)}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              onStart={onStart}
-              onStop={onStop}
-              onRestart={onRestart}
-              onTrust={onTrust}
-            />
-          ))}
+          {kinds.length === 0 ? (
+            <p className="px-1 py-1 text-[0.6875rem] text-muted-foreground/70">No commands yet</p>
+          ) : (
+            kinds.map((group) => (
+              <ProcessGroup
+                key={group.kind}
+                group={group}
+                open={kindOpen(group.kind)}
+                onOpenChange={(value) => onKindOpenChange(group.kind, value)}
+                selectedId={selectedId}
+                onSelect={onSelect}
+                onStart={onStart}
+                onStop={onStop}
+                onRestart={onRestart}
+                onTrust={onTrust}
+              />
+            ))
+          )}
         </div>
       </Collapsible.Content>
     </Collapsible.Root>

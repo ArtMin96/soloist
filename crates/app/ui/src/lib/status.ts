@@ -45,6 +45,11 @@ export const STATUS: Record<ProcStatus, StatusDisplay> = {
   },
 };
 
+/** Whether a process is currently running (the steady green state, not in-flight). */
+export function isRunning(status: ProcStatus): boolean {
+  return status === "Running";
+}
+
 /** Whether a process currently has a live owning actor (mirrors core `is_active`). */
 export function isActive(status: ProcStatus): boolean {
   return (

@@ -13,7 +13,6 @@ name = "soloist"
 path = "src/main.rs"
 
 [dependencies]
-base64 = "0.21"
 serde = { version = "1.0.228", features = ["derive"] }
 soloist-core = { path = "../core" }
 soloist-httpapi = { path = "../httpapi" }

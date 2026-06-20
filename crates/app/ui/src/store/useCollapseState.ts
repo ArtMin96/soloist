@@ -13,9 +13,9 @@ function load(): CollapseMap {
 }
 
 // Per-section collapse state for the sidebar, persisted across launches and keyed by an
-// opaque string so the tree can collapse at either level — a project (`project:<id>`) or
-// one of its kind subgroups (`kind:<id>:<Kind>`). A key absent from the map is expanded,
-// so a freshly opened project shows its processes by default.
+// opaque string the caller supplies (the projects module owns the key shapes, so the tree
+// can collapse at either the project or the subgroup level). A key absent from the map is
+// expanded, so a freshly opened project shows its processes by default.
 export function useCollapseState(): [CollapseMap, (key: string, collapsed: boolean) => void] {
   const [collapsed, setCollapsed] = useState<CollapseMap>(load);
   const set = useCallback((key: string, value: boolean) => {

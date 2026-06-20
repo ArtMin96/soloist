@@ -17,16 +17,10 @@ export function procList(): Promise<ProcessView[]> {
   return invoke<ProcessView[]>("proc_list");
 }
 
-// The project read model — every opened project's display identity. Seeds the sidebar's
-// project tree; live opens arrive as `ProjectOpened` domain events.
+// The project read model — every opened project's identity with its icon already rendered
+// (a data: URL). Seeds the sidebar's project tree; a `ProjectOpened` event prompts a re-read.
 export function projectList(): Promise<ProjectView[]> {
   return invoke<ProjectView[]>("project_list");
-}
-
-// Reads a project's icon (a resolved absolute path from `ProjectView.icon`) into a data:
-// URL for an <img>, or null when absent/unreadable/too large/not an image.
-export function projectIcon(path: string): Promise<string | null> {
-  return invoke<string | null>("project_icon", { path });
 }
 
 // Opens the native folder picker for a project root (the directory holding solo.yml).
