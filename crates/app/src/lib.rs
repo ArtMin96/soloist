@@ -101,6 +101,10 @@ pub fn run() {
         .manage(PtyBridge::default())
         .setup(|app| {
             forward_events(app.handle().clone());
+            // Start the self-healing reactor: it watches the core event stream and
+            // relaunches crashed auto_restart commands within the documented rate limit
+            // (the future holds only a weak reference and ends when the app shuts down).
+            tauri::async_runtime::spawn(app.state::<Facade>().self_healing_loop());
             // Re-register previously-opened projects so they reappear in the sidebar on
             // launch (resting — restore never starts a process); the UI seeds from the
             // resulting snapshots.

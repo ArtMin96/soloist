@@ -105,6 +105,12 @@ export type DomainEvent =
       exit_code: number | null;
     }
   | { type: "ProcessRemoved"; id: number }
+  // The restart policy is relaunching a crashed auto_restart command; `attempt` is its
+  // position in the rate-limit window (the status also moves Crashed -> Starting).
+  | { type: "RestartScheduled"; id: number; attempt: number }
+  // The restart policy gave up after too many restarts in the window; the command is held
+  // in RestartExhausted until the user restarts it.
+  | { type: "RestartExhausted"; id: number }
   // A project was opened/changed. The UI re-reads the rendered project snapshot on this
   // (which carries each project's loaded icon); it doesn't consume the event's domain fields.
   | { type: "ProjectOpened"; id: number }

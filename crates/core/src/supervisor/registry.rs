@@ -36,6 +36,7 @@ struct Managed {
     project_root: PathBuf,
     trust_variant: Option<Hash>,
     auto_start: bool,
+    auto_restart: bool,
     handle: Option<ActorHandle>,
 }
 
@@ -45,6 +46,7 @@ pub(crate) struct EntryInfo {
     pub(crate) project: ProjectId,
     pub(crate) status: ProcStatus,
     pub(crate) trust_variant: Option<Hash>,
+    pub(crate) auto_restart: bool,
     pub(crate) launch: SpawnSpec,
 }
 
@@ -70,6 +72,7 @@ impl Registry {
         project_root: PathBuf,
         trust_variant: Option<Hash>,
         auto_start: bool,
+        auto_restart: bool,
     ) {
         let mut guard = lock(&self.inner);
         guard.insert(
@@ -80,6 +83,7 @@ impl Registry {
                 project_root,
                 trust_variant,
                 auto_start,
+                auto_restart,
                 handle: None,
             },
         );
@@ -124,6 +128,7 @@ impl Registry {
             project: entry.view.project,
             status: entry.view.status,
             trust_variant: entry.trust_variant,
+            auto_restart: entry.auto_restart,
             launch: entry.launch.clone(),
         })
     }
@@ -169,6 +174,27 @@ impl Registry {
         entry.view.status = next;
         entry.view.exit_code = None;
         Some(from)
+    }
+
+    /// Atomically holds a still-crashed process in [`ProcStatus::RestartExhausted`]: if it
+    /// is currently `Crashed`, transitions it and returns `true`; otherwise leaves it
+    /// untouched and returns `false`. Because the FSM permits `RestartExhausted` from no
+    /// state but `Crashed`, a concurrent user start/restart (now `Starting` or running) is
+    /// never clobbered — the transition simply fails. The caller publishes the status
+    /// delta after this returns, as with [`Registry::begin_launch`].
+    pub(crate) fn exhaust_if_crashed(&self, id: ProcessId) -> bool {
+        let mut guard = lock(&self.inner);
+        let Some(entry) = guard.get_mut(&id) else {
+            return false;
+        };
+        match entry.view.status.transition(ProcStatus::RestartExhausted) {
+            Ok(next) => {
+                entry.view.status = next;
+                entry.view.exit_code = None;
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     /// Stores the handle of a freshly launched actor.
@@ -255,5 +281,57 @@ impl Registry {
             .values()
             .map(|entry| entry.view.clone())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ids::ProjectId;
+    use crate::ports::PtySize;
+    use std::collections::BTreeMap;
+
+    fn registry_holding(status: ProcStatus) -> (Registry, ProcessId) {
+        let registry = Registry::default();
+        let id = ProcessId::next();
+        let view = ProcessView {
+            id,
+            project: ProjectId::from_raw(1),
+            kind: ProcessKind::Command,
+            label: "x".into(),
+            status: ProcStatus::Stopped,
+            exit_code: None,
+            requires_trust: false,
+        };
+        let launch = SpawnSpec {
+            command: "x".into(),
+            working_dir: PathBuf::from("/"),
+            env: BTreeMap::new(),
+            size: PtySize::default(),
+        };
+        registry.add(view, launch, PathBuf::from("/"), None, false, false);
+        registry.set_status(id, status, None);
+        (registry, id)
+    }
+
+    #[test]
+    fn exhaust_holds_only_a_crashed_process() {
+        // The exhaust edge is legal from Crashed alone, so the atomic guard refuses every
+        // other state — a concurrent user restart is never clobbered into RestartExhausted.
+        for resting in [
+            ProcStatus::Stopped,
+            ProcStatus::Starting,
+            ProcStatus::Running,
+        ] {
+            let (registry, id) = registry_holding(resting);
+            assert!(!registry.exhaust_if_crashed(id));
+            assert_eq!(registry.status(id), Some(resting));
+        }
+
+        let (registry, id) = registry_holding(ProcStatus::Crashed);
+        assert!(registry.exhaust_if_crashed(id));
+        assert_eq!(registry.status(id), Some(ProcStatus::RestartExhausted));
+        // Idempotent: once held, a second call is a no-op (no spurious re-exhaust).
+        assert!(!registry.exhaust_if_crashed(id));
     }
 }
