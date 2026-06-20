@@ -101,11 +101,16 @@ pub fn run() {
         .manage(PtyBridge::default())
         .setup(|app| {
             forward_events(app.handle().clone());
+            // Re-register previously-opened projects so they reappear in the sidebar on
+            // launch (resting — restore never starts a process); the UI seeds from the
+            // resulting snapshots.
+            app.state::<Facade>().restore_projects();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
             commands::proc_list,
+            commands::project_list,
             commands::project_load,
             commands::config_trust,
             commands::proc_start,

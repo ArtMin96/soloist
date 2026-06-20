@@ -1,17 +1,15 @@
-//! The project registry: the set of workspace roots Soloist manages.
-//!
-//! A project is a filesystem folder. Its durable identity is its **canonical**
-//! absolute path, so the same workspace is one project however its path was written
-//! (symlinks, `.`/`..`, trailing slash). The durable [`ProjectId`] is assigned by
-//! the store and is stable across runs — which is what lets trust persist.
+//! The durable project registry: the set of workspace roots Soloist manages.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::ids::ProjectId;
 use crate::ports::{ProjectRecord, ProjectRepo, StoreError};
+use crate::projects::ProjectView;
 
-/// Registry over the durable [`ProjectRepo`].
+/// Registry over the durable [`ProjectRepo`]. A project is a filesystem folder whose
+/// durable identity is its canonical absolute path; the store assigns a stable
+/// [`ProjectId`] from that path, which is what lets trust persist across runs.
 pub struct Projects {
     repo: Arc<dyn ProjectRepo>,
 }
@@ -45,6 +43,13 @@ impl Projects {
     /// One project by id, `None` if absent.
     pub fn get(&self, id: ProjectId) -> Result<Option<ProjectRecord>, StoreError> {
         self.repo.get(id)
+    }
+
+    /// The display projection of every known project, most-recently-added first — the
+    /// project read model the UI groups its process tree by (snapshot half of
+    /// snapshot-then-deltas; paired with [`crate::events::DomainEvent::ProjectOpened`]).
+    pub fn views(&self) -> Result<Vec<ProjectView>, StoreError> {
+        Ok(self.list()?.iter().map(ProjectView::from_record).collect())
     }
 
     /// Removes a project (and, by cascade in the store, its trust records).
@@ -91,6 +96,19 @@ mod tests {
             .add(Path::new("/no/such/path/soloist-test"), None, None)
             .unwrap_err();
         assert!(matches!(err, ProjectError::Root { .. }));
+    }
+
+    #[test]
+    fn views_project_the_known_records() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let projects = Projects::new(Arc::new(FakeProjectRepo::new()));
+        let record = projects.add(dir.path(), Some("App"), None).expect("add");
+
+        let views = projects.views().expect("views");
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].id, record.id);
+        assert_eq!(views[0].name, "App");
+        assert_eq!(views[0].root, record.root);
     }
 
     #[test]

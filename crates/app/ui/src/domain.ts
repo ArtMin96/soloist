@@ -75,6 +75,17 @@ export interface ProjectLoad {
   created: boolean;
 }
 
+// A project's display identity (the `project_list` query): its durable id, resolved name
+// (solo.yml `name:` or folder), root, and a ready-to-render icon — a `data:` URL the backend
+// loaded from the project's `icon:` (null when none), so name and icon arrive as one shape
+// with no separate icon request. The sidebar groups the process tree by project using this.
+export interface ProjectView {
+  id: number;
+  name: string;
+  root: string;
+  icon: string | null;
+}
+
 // Mirrors the core's `DomainEvent` (serde `tag = "type"`).
 export type DomainEvent =
   | {
@@ -94,6 +105,9 @@ export type DomainEvent =
       exit_code: number | null;
     }
   | { type: "ProcessRemoved"; id: number }
+  // A project was opened/changed. The UI re-reads the rendered project snapshot on this
+  // (which carries each project's loaded icon); it doesn't consume the event's domain fields.
+  | { type: "ProjectOpened"; id: number }
   | {
       type: "ConfigChanged";
       project: number;

@@ -44,6 +44,10 @@ pub enum DomainEvent {
     },
     /// A process left the registry.
     ProcessRemoved { id: ProcessId },
+    /// A project was opened (or its set of projects changed). Carries the project's id; an
+    /// adapter re-reads the project read model ([`crate::projects::ProjectView`], which
+    /// resolves name and icon together) rather than carrying that display state on the event.
+    ProjectOpened { id: ProjectId },
     /// A project's `solo.yml` changed on disk. Carries the add/update/remove/rename
     /// diff, whether any added/updated command now needs (re-)trust, and the detail of
     /// each command awaiting trust (so the review dialog can show what will run). Sync

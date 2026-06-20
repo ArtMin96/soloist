@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use soloist_core::{Facade, ProcessId, ProcessView, ProjectId, ProjectLoad};
+use soloist_core::{Facade, ProcessId, ProcessView, ProjectId, ProjectLoad, ProjectView};
 use tauri::ipc::Channel;
 use tauri::State;
 use tokio::sync::broadcast::error::RecvError;
@@ -21,6 +21,14 @@ use crate::pty_bridge::PtyBridge;
 #[tauri::command]
 pub async fn proc_list(facade: State<'_, Facade>) -> Result<Vec<ProcessView>, String> {
     Ok(facade.snapshot())
+}
+
+/// The project read model — every opened project's display identity, name and icon already
+/// resolved by the core. The snapshot half of snapshot-then-deltas for projects; a live open
+/// arrives as a `ProjectOpened` event that prompts the UI to re-read this.
+#[tauri::command]
+pub async fn project_list(facade: State<'_, Facade>) -> Result<Vec<ProjectView>, String> {
+    facade.projects_snapshot().map_err(|err| err.to_string())
 }
 
 /// Loads a project from a folder path: auto-creates a `solo.yml` from detected commands

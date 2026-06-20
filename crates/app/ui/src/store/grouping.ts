@@ -17,7 +17,9 @@ export interface ProcessGroup {
 }
 
 // Buckets processes into the three subtype groups, preserving registry order within each
-// group and the fixed group order. Pure — no view concerns, unit-testable.
+// group and the fixed group order. Pure — no view concerns, unit-testable. The project tier
+// (which project owns which processes) is the projects module's concern; this is purely the
+// process-kind grouping used within a project node.
 export function groupByKind(processes: ProcessView[]): ProcessGroup[] {
   return GROUP_ORDER.map((kind) => ({
     kind,

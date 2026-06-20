@@ -14,8 +14,6 @@ import type { ProcessView } from "@/domain";
 
 export interface ProcessStore {
   processes: ProcessView[];
-  /** The project the loaded stack belongs to; `null` before anything loads. */
-  projectId: number | null;
   error: string | null;
   /** Surface a failure on the shared error banner (also used by sibling stores). */
   reportError: (reason: unknown) => void;
@@ -24,9 +22,10 @@ export interface ProcessStore {
   start: (id: number) => void;
   stop: (id: number) => void;
   restart: (id: number) => void;
-  startAll: () => void;
-  stopAll: () => void;
-  restartRunning: () => void;
+  /** Bulk operations are scoped to a project so each project's header controls its own stack. */
+  startAll: (project: number) => void;
+  stopAll: (project: number) => void;
+  restartRunning: (project: number) => void;
 }
 
 // The process read model: the single place the UI gets process data and the actions that
@@ -43,21 +42,16 @@ export function useProcesses(): ProcessStore {
     procList().then(setProcesses).catch(fail);
   }, [fail]);
 
-  const projectId = processes[0]?.project ?? null;
-
   const start = useCallback((id: number) => void procStart(id).catch(fail), [fail]);
   const stop = useCallback((id: number) => void procStop(id).catch(fail), [fail]);
   const restart = useCallback((id: number) => void procRestart(id).catch(fail), [fail]);
 
-  const startAll = useCallback(() => {
-    if (projectId !== null) void stackStart(projectId).catch(fail);
-  }, [projectId, fail]);
-  const stopAll = useCallback(() => {
-    if (projectId !== null) void stackStop(projectId).catch(fail);
-  }, [projectId, fail]);
-  const restartRunning = useCallback(() => {
-    if (projectId !== null) void stackRestartRunning(projectId).catch(fail);
-  }, [projectId, fail]);
+  const startAll = useCallback((project: number) => void stackStart(project).catch(fail), [fail]);
+  const stopAll = useCallback((project: number) => void stackStop(project).catch(fail), [fail]);
+  const restartRunning = useCallback(
+    (project: number) => void stackRestartRunning(project).catch(fail),
+    [fail],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -82,7 +76,6 @@ export function useProcesses(): ProcessStore {
 
   return {
     processes,
-    projectId,
     error,
     reportError: fail,
     clearError,
