@@ -17,5 +17,5 @@ tokio = { version = "1", features = ["rt", "sync"] }
 
 [dev-dependencies]
 soloist-core = { path = "../core", features = ["testing"] }
-tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 tempfile = "3"

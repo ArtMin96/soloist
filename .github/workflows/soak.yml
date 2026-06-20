@@ -1,0 +1,33 @@
+name: Nightly soak
+
+# The longevity leak gate. It runs the soak tests (real fixture processes driven through the
+# supervisor) that the fast per-change CI skips because they are #[ignore]d. Scheduled runs
+# use the latest commit on the default branch, so this activates once merged to main;
+# workflow_dispatch runs it on demand from any branch.
+on:
+  schedule:
+    # 04:00 UTC daily.
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  soak:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The soak crate (soloist-pty + soloist-core) needs no system libraries — no WebKit,
+      # no OpenSSL — so the GUI dependencies the bundle/smoke jobs install are not needed here.
+      #
+      # --test-threads=1 is required, not cosmetic: each soak test measures this whole
+      # process's file-descriptor, thread, and task counts, so the tests must run one at a
+      # time or they would pollute each other's baselines.
+      - name: Run the longevity soak
+        run: cargo test -p soloist-pty --test soak --locked -- --ignored --nocapture --test-threads=1
