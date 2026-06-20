@@ -67,7 +67,7 @@ adapter. Adapters hold **no** business state and make **no** domain decisions.
 | **C2** Process Supervision | `supervisor/` `process` `orphans` | registry, `ProcStatus` FSM, start/stop/restart, bulk ops, orphan reconcile | live (P3) |
 | **C3** Terminal I/O | `terminal/` | PTY read loop, rendered+raw buffers, OSC parse, attach replay | live (P4) |
 | **C4** Agents & Idle | `agents` `idle` | agent-tool defs, launch, 5-state idle FSM, optional summary | placeholder → P7 |
-| **C5** Monitoring | `metrics/` `portscan/` | CPU/mem sampling, `/proc` port discovery, readiness | live (P6: D1/D2; D3 next) |
+| **C5** Monitoring | `metrics/` `portscan/` | CPU/mem sampling, `/proc` port discovery, readiness | live (P6: D1/D2/D3) |
 | **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | placeholder → P9 |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
 | **C8** Integration façade | `facade` `identity` | the public command/query API; MCP identity & effective scope | live (`facade`) |
