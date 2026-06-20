@@ -44,6 +44,15 @@ pub enum DomainEvent {
     },
     /// A process left the registry.
     ProcessRemoved { id: ProcessId },
+    /// A periodic CPU/memory reading for a running process, sampled across its whole
+    /// process group. `cpu_pct` is per-core (a busy multi-threaded process can exceed
+    /// 100); `rss` is resident memory in bytes. Emitted on the sampler's interval, not on
+    /// every state change — adapters coalesce it (no per-tick re-render).
+    MetricsTick {
+        id: ProcessId,
+        cpu_pct: f32,
+        rss: u64,
+    },
     /// The restart policy is relaunching a crashed `auto_restart` command. `attempt` is
     /// its position in the current rate-limit window (1 = the first restart). The status
     /// also moves `Crashed -> Starting`; this delta additionally carries the attempt

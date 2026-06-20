@@ -4,6 +4,8 @@
 
 use std::sync::Arc;
 
+use crate::metrics::{MetricsProbe, NoopMetricsProbe};
+
 use super::{
     Clock, LockReleaser, NoopLockReleaser, NoopOrphanControl, NoopRuntimeState, OrphanControl,
     ProcessSpawner, ProjectRepo, RuntimeState, TrustRepo,
@@ -25,6 +27,7 @@ pub struct CorePorts {
     pub(crate) locks: Arc<dyn LockReleaser>,
     pub(crate) runtime: Arc<dyn RuntimeState>,
     pub(crate) orphan_control: Arc<dyn OrphanControl>,
+    pub(crate) metrics: Arc<dyn MetricsProbe>,
 }
 
 impl CorePorts {
@@ -45,6 +48,7 @@ impl CorePorts {
                 locks: Arc::new(NoopLockReleaser),
                 runtime: Arc::new(NoopRuntimeState),
                 orphan_control: Arc::new(NoopOrphanControl),
+                metrics: Arc::new(NoopMetricsProbe),
             },
         }
     }
@@ -73,6 +77,13 @@ impl CorePortsBuilder {
     /// [`NoopOrphanControl`]).
     pub fn orphan_control(mut self, orphan_control: Arc<dyn OrphanControl>) -> Self {
         self.ports.orphan_control = orphan_control;
+        self
+    }
+
+    /// Overrides the CPU/memory probe the metrics sampler reads (monitoring C5; defaults
+    /// to [`NoopMetricsProbe`], which produces no readings).
+    pub fn metrics(mut self, metrics: Arc<dyn MetricsProbe>) -> Self {
+        self.ports.metrics = metrics;
         self
     }
 

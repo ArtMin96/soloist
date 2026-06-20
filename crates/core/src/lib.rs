@@ -52,6 +52,7 @@ pub use events::{DomainEvent, EventBus};
 pub use facade::{Facade, TrustCommandError};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};
+pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{
     Clock, CorePorts, CorePortsBuilder, ExitFuture, ExitStatus, LockReleaser, NoopLockReleaser,

@@ -38,6 +38,10 @@ struct Managed {
     auto_start: bool,
     auto_restart: bool,
     handle: Option<ActorHandle>,
+    /// The leader pgid of the running OS process group, while one is live. Recorded by the
+    /// actor after spawn and cleared when the child is reaped, so monitoring can sample the
+    /// group. `None` whenever the process is resting.
+    pgid: Option<i32>,
 }
 
 /// A cloned read of one entry's launch-relevant fields, taken under the lock so the
@@ -85,8 +89,29 @@ impl Registry {
                 auto_start,
                 auto_restart,
                 handle: None,
+                pgid: None,
             },
         );
+    }
+
+    /// Records (or clears) the leader pgid of a process's running OS group. The actor sets
+    /// it after a successful spawn and clears it (`None`) when the child is reaped, so the
+    /// metrics sampler only ever targets a process with a live group.
+    pub(crate) fn set_pgid(&self, id: ProcessId, pgid: Option<i32>) {
+        let mut guard = lock(&self.inner);
+        if let Some(entry) = guard.get_mut(&id) {
+            entry.pgid = pgid;
+        }
+    }
+
+    /// Every process with a live OS group, as `(id, leader pgid)` — the metrics sampler's
+    /// targets each tick.
+    pub(crate) fn live_groups(&self) -> Vec<(ProcessId, i32)> {
+        let guard = lock(&self.inner);
+        guard
+            .values()
+            .filter_map(|entry| entry.pgid.map(|pgid| (entry.view.id, pgid)))
+            .collect()
     }
 
     /// The orphan-adoption identity of `id`: its project root and name.

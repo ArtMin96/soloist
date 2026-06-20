@@ -98,6 +98,13 @@ impl Supervisor {
         self.registry.snapshot()
     }
 
+    /// Every running process with a live OS process group, as `(id, leader pgid)`. The
+    /// metrics sampler (C5) reads this each tick to know what to sample; the supervisor
+    /// (C2) stays the single owner of which processes are live.
+    pub fn metrics_targets(&self) -> Vec<(ProcessId, i32)> {
+        self.registry.live_groups()
+    }
+
     /// Registers a process as `Stopped` without starting it, announcing it on the bus.
     pub fn register(&self, registration: Registration) -> ProcessId {
         let id = ProcessId::next();

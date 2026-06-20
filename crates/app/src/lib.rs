@@ -14,6 +14,7 @@ use serde::Serialize;
 use soloist_core::{CorePorts, Facade, NoopRuntimeState, RuntimeState, Store, TokioClock};
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use soloist_store::{FileRuntimeState, SqliteStore};
+use soloist_sys::SysinfoMetricsProbe;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::broadcast::error::RecvError;
 
@@ -62,7 +63,8 @@ fn build_facade() -> Facade {
 
     // One SQLite store backs the trust and project repositories the façade needs.
     // The lock releaser is unset here, so it defaults to its `Noop` port (coordination
-    // lands in C6); the runtime-state and orphan-control adapters are wired for adoption.
+    // lands in C6); the runtime-state and orphan-control adapters are wired for adoption,
+    // and the metrics probe reads CPU/memory from the OS via sysinfo.
     Facade::new(
         CorePorts::builder(
             Arc::new(PtyProcessSpawner),
@@ -72,6 +74,7 @@ fn build_facade() -> Facade {
         )
         .runtime(runtime)
         .orphan_control(Arc::new(PgidOrphanControl))
+        .metrics(Arc::new(SysinfoMetricsProbe::new()))
         .build(),
     )
 }
@@ -105,6 +108,9 @@ pub fn run() {
             // relaunches crashed auto_restart commands within the documented rate limit
             // (the future holds only a weak reference and ends when the app shuts down).
             tauri::async_runtime::spawn(app.state::<Facade>().self_healing_loop());
+            // Start the metrics sampler: it samples each running process group on its
+            // interval and publishes CPU/memory ticks (also weakly held, also self-supervised).
+            tauri::async_runtime::spawn(app.state::<Facade>().metrics_sampler_loop());
             // Re-register previously-opened projects so they reappear in the sidebar on
             // launch (resting — restore never starts a process); the UI seeds from the
             // resulting snapshots.

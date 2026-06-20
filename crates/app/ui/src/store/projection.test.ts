@@ -75,5 +75,8 @@ describe("applyEvent", () => {
   it("leaves the process list untouched for non-process events", () => {
     expect(applyEvent([starting], { type: "TerminalBell", id: 1 })).toEqual([starting]);
     expect(applyEvent([starting], { type: "ProjectOpened", id: 1 })).toEqual([starting]);
+    expect(applyEvent([starting], { type: "MetricsTick", id: 1, cpu_pct: 12, rss: 4096 })).toEqual([
+      starting,
+    ]);
   });
 });

@@ -15,7 +15,8 @@ use tokio::sync::broadcast;
 use crate::config::ConfigEngine;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProjectId;
-use crate::ports::{CorePorts, StoreError};
+use crate::metrics::{MetricsProbe, MetricsSampler};
+use crate::ports::{Clock, CorePorts, StoreError};
 use crate::process::ProcessView;
 use crate::projects::{LoadProjectError, ProjectLoad, ProjectService, ProjectView, Projects};
 use crate::supervisor::Supervisor;
@@ -28,6 +29,8 @@ const EVENT_BUFFER: usize = 1024;
 /// The integration façade (context C8). Cheap to share as Tauri-managed state.
 pub struct Facade {
     bus: EventBus,
+    clock: Arc<dyn Clock>,
+    metrics: Arc<dyn MetricsProbe>,
     supervisor: Arc<Supervisor>,
     projects: Projects,
     trust: TrustStore,
@@ -42,10 +45,16 @@ impl Facade {
         let bus = EventBus::new(EVENT_BUFFER);
         let supervisor = Arc::new(Supervisor::new(&ports, bus.clone()));
         let CorePorts {
-            trust, projects, ..
+            clock,
+            metrics,
+            trust,
+            projects,
+            ..
         } = ports;
         Self {
             supervisor,
+            clock,
+            metrics,
             projects: Projects::new(projects),
             trust: TrustStore::new(trust.clone()),
             config: ConfigEngine::new(trust, bus.clone()),
@@ -74,6 +83,22 @@ impl Facade {
     /// dropped; the supervisor's restart policy drives it.
     pub fn self_healing_loop(&self) -> impl Future<Output = ()> + Send + 'static {
         self.supervisor.self_healing_loop()
+    }
+
+    /// The metrics sampler loop (monitoring C5), returned for the composition root to spawn
+    /// once on its runtime. It samples each running process group on an interval and
+    /// publishes a [`DomainEvent::MetricsTick`] per group, watching the supervisor weakly so
+    /// it ends when the facade is dropped. Self-supervised: a panicking sample is isolated
+    /// and the loop restarts. With the default [`crate::metrics::NoopMetricsProbe`] it emits
+    /// nothing — the real CPU/memory adapter is chosen in the composition root.
+    pub fn metrics_sampler_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        MetricsSampler::new(
+            self.clock.clone(),
+            self.metrics.clone(),
+            self.bus.clone(),
+            Arc::downgrade(&self.supervisor),
+        )
+        .run()
     }
 
     /// The project registry (C1).

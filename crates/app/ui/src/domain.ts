@@ -105,6 +105,10 @@ export type DomainEvent =
       exit_code: number | null;
     }
   | { type: "ProcessRemoved"; id: number }
+  // A periodic CPU/memory reading for a running process, sampled across its whole group.
+  // cpu_pct is per-core (a busy multi-threaded process can exceed 100); rss is bytes.
+  // Emitted ~1 Hz; consumers coalesce it (never a per-tick re-render).
+  | { type: "MetricsTick"; id: number; cpu_pct: number; rss: number }
   // The restart policy is relaunching a crashed auto_restart command; `attempt` is its
   // position in the rate-limit window (the status also moves Crashed -> Starting).
   | { type: "RestartScheduled"; id: number; attempt: number }
