@@ -57,6 +57,10 @@ pub enum DomainEvent {
     /// emptied when it stops. The new sorted set is carried so adapters update the read
     /// model without a snapshot round-trip; it is also reflected on [`ProcessView::ports`].
     PortsChanged { id: ProcessId, ports: Vec<u16> },
+    /// A process's readiness changed while a port wait is in effect: `false` = Running but
+    /// the awaited port has not bound yet ("Running but not Ready"), `true` = it bound. Only
+    /// fired while a readiness gate is active; reflected on [`ProcessView::ready`].
+    ReadyStateChanged { id: ProcessId, ready: bool },
     /// The restart policy is relaunching a crashed `auto_restart` command. `attempt` is
     /// its position in the current rate-limit window (1 = the first restart). The status
     /// also moves `Crashed -> Starting`; this delta additionally carries the attempt

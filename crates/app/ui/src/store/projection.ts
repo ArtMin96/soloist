@@ -22,6 +22,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
           exit_code: null,
           requires_trust: event.requires_trust,
           ports: [],
+          ready: null,
         },
       ];
     case "ProcessStatusChanged":
@@ -33,6 +34,10 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "PortsChanged":
       return processes.map((process) =>
         process.id === event.id ? { ...process, ports: event.ports } : process,
+      );
+    case "ReadyStateChanged":
+      return processes.map((process) =>
+        process.id === event.id ? { ...process, ready: event.ready } : process,
       );
     case "ProcessRemoved":
       return processes.filter((process) => process.id !== event.id);

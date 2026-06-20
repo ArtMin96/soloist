@@ -112,6 +112,25 @@ impl Supervisor {
         self.registry.set_ports(id, ports)
     }
 
+    /// The leader pgid of a running process's group, if it has one — what a port-readiness
+    /// wait (C5) probes. `None` for a resting process.
+    pub fn pgid_of(&self, id: ProcessId) -> Option<i32> {
+        self.registry.pgid_of(id)
+    }
+
+    /// Records a process's readiness gate and announces a real change as
+    /// [`DomainEvent::ReadyStateChanged`]. The single mutation point for the readiness read
+    /// model — the port-readiness wait (C5) routes through here so C2 owns the [`ProcessView`].
+    /// Clearing the gate (`None`, on stop) is silent; the accompanying status change covers it.
+    pub fn set_ready(&self, id: ProcessId, ready: Option<bool>) {
+        if self.registry.set_ready(id, ready) {
+            if let Some(ready) = ready {
+                self.bus
+                    .publish(DomainEvent::ReadyStateChanged { id, ready });
+            }
+        }
+    }
+
     /// Registers a process as `Stopped` without starting it, announcing it on the bus.
     pub fn register(&self, registration: Registration) -> ProcessId {
         let id = ProcessId::next();
@@ -135,6 +154,7 @@ impl Supervisor {
             exit_code: None,
             requires_trust,
             ports: Vec::new(),
+            ready: None,
         };
         self.registry.add(
             view,

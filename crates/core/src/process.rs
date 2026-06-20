@@ -87,7 +87,9 @@ impl ProcStatus {
 /// while running, or when terminated by a signal); `requires_trust` is true for a
 /// trust-gated command whose variant is not yet trusted (the UI blocks its start);
 /// `ports` are the TCP ports the process is currently listening on, discovered while it
-/// runs and cleared when its group ends (empty until discovery finds any).
+/// runs and cleared when its group ends (empty until discovery finds any); `ready` is the
+/// readiness gate — `None` when none is active, `Some(false)` while a `wait_for_port` is
+/// waiting (Running but not Ready), `Some(true)` once the awaited port bound.
 #[derive(Clone, Debug, Serialize)]
 pub struct ProcessView {
     pub id: ProcessId,
@@ -98,6 +100,7 @@ pub struct ProcessView {
     pub exit_code: Option<i32>,
     pub requires_trust: bool,
     pub ports: Vec<u16>,
+    pub ready: Option<bool>,
 }
 
 #[cfg(test)]

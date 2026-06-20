@@ -12,6 +12,7 @@ function process(id: number, kind: ProcessView["kind"], label: string): ProcessV
     exit_code: null,
     requires_trust: false,
     ports: [],
+    ready: null,
   };
 }
 

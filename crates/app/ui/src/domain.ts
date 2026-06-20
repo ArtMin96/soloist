@@ -27,6 +27,9 @@ export interface ProcessView {
   // TCP ports the process is currently listening on (discovered while it runs, cleared when
   // it stops). Empty until discovery finds any.
   ports: number[];
+  // Readiness gate: null when none is active, false while a wait_for_port is waiting
+  // (Running but not Ready), true once the awaited port bound. Cleared (null) when it stops.
+  ready: boolean | null;
 }
 
 // Rendered output snapshot (escape sequences applied to plain text) — the Logs source.
@@ -116,6 +119,9 @@ export type DomainEvent =
   // emptied when it stops. The new sorted set is carried so the read model updates without
   // a snapshot round-trip; also reflected on ProcessView.ports.
   | { type: "PortsChanged"; id: number; ports: number[] }
+  // A process's readiness changed while a port wait is active: false = Running but the
+  // awaited port has not bound yet, true = it bound. Reflected on ProcessView.ready.
+  | { type: "ReadyStateChanged"; id: number; ready: boolean }
   // The restart policy is relaunching a crashed auto_restart command; `attempt` is its
   // position in the rate-limit window (the status also moves Crashed -> Starting).
   | { type: "RestartScheduled"; id: number; attempt: number }

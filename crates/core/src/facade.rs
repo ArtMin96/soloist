@@ -9,15 +9,16 @@
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::broadcast;
 
 use crate::config::ConfigEngine;
 use crate::events::{DomainEvent, EventBus};
-use crate::ids::ProjectId;
+use crate::ids::{ProcessId, ProjectId};
 use crate::metrics::{MetricsProbe, MetricsSampler};
 use crate::ports::{Clock, CorePorts, StoreError};
-use crate::portscan::{PortProbe, PortScanner};
+use crate::portscan::{self, PortProbe, PortScanner, WaitForPortError};
 use crate::process::ProcessView;
 use crate::projects::{LoadProjectError, ProjectLoad, ProjectService, ProjectView, Projects};
 use crate::supervisor::Supervisor;
@@ -118,6 +119,27 @@ impl Facade {
             Arc::downgrade(&self.supervisor),
         )
         .run()
+    }
+
+    /// Waits until process `id` is listening on `port`, or times out — port readiness (C5,
+    /// ref plan/05 §7 `wait_for_bound_port`). While waiting the process reads
+    /// Running-but-not-Ready ([`ProcessView::ready`] = `Some(false)`); on bind, `Some(true)`.
+    /// One method behind the Facade, so the future MCP/HTTP/CLI callers share the behaviour.
+    pub async fn wait_for_port(
+        &self,
+        id: ProcessId,
+        port: u16,
+        timeout: Duration,
+    ) -> Result<(), WaitForPortError> {
+        portscan::wait_for_port(
+            self.supervisor.clone(),
+            self.port_probe.clone(),
+            self.clock.clone(),
+            id,
+            port,
+            timeout,
+        )
+        .await
     }
 
     /// The project registry (C1).

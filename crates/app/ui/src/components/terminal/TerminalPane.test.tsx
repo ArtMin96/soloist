@@ -22,6 +22,7 @@ const PROCESS: ProcessView = {
   exit_code: null,
   requires_trust: false,
   ports: [],
+  ready: null,
 };
 
 const noop = () => {};

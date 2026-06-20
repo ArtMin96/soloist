@@ -103,7 +103,10 @@ impl Registry {
         if let Some(entry) = guard.get_mut(&id) {
             entry.pgid = pgid;
             if pgid.is_none() {
+                // A process with no live group has neither discovered ports nor a readiness
+                // gate — clear both so a resting process never shows stale monitoring state.
                 entry.view.ports.clear();
+                entry.view.ready = None;
             }
         }
     }
@@ -116,6 +119,25 @@ impl Registry {
             .values()
             .filter_map(|entry| entry.pgid.map(|pgid| (entry.view.id, pgid)))
             .collect()
+    }
+
+    /// The leader pgid of a single process's live OS group, if it has one (i.e. it is
+    /// running) — used by a port-readiness wait to know which group to probe.
+    pub(crate) fn pgid_of(&self, id: ProcessId) -> Option<i32> {
+        lock(&self.inner).get(&id).and_then(|entry| entry.pgid)
+    }
+
+    /// Updates a process's readiness gate, returning whether it changed (so the caller only
+    /// announces real transitions).
+    pub(crate) fn set_ready(&self, id: ProcessId, ready: Option<bool>) -> bool {
+        let mut guard = lock(&self.inner);
+        match guard.get_mut(&id) {
+            Some(entry) if entry.view.ready != ready => {
+                entry.view.ready = ready;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Updates a process's discovered listening ports, returning whether the set actually
@@ -346,6 +368,7 @@ mod tests {
             exit_code: None,
             requires_trust: false,
             ports: Vec::new(),
+            ready: None,
         };
         let launch = SpawnSpec {
             command: "x".into(),

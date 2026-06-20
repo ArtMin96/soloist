@@ -9,6 +9,11 @@
 
 mod probe;
 mod scanner;
+mod waiter;
+
+#[cfg(test)]
+mod test_support;
 
 pub use probe::{NoopPortProbe, PortProbe};
 pub use scanner::PortScanner;
+pub use waiter::{wait_for_port, WaitForPortError};
