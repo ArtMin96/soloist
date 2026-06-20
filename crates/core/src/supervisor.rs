@@ -99,6 +99,13 @@ impl Supervisor {
         self.registry.snapshot()
     }
 
+    /// The display label of a process by id, `None` if it is no longer registered. A focused
+    /// read for consumers (the notification reactor) that need one label, not the whole
+    /// snapshot.
+    pub fn label_of(&self, id: ProcessId) -> Option<String> {
+        self.registry.label_of(id)
+    }
+
     /// Registers a process as `Stopped` without starting it, announcing it on the bus.
     pub fn register(&self, registration: Registration) -> ProcessId {
         let id = ProcessId::next();

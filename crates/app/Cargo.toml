@@ -22,6 +22,7 @@ soloist-store = { path = "../store" }
 soloist-sys = { path = "../sys" }
 tauri = { version = "2.11.2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 tokio = { version = "1", features = ["sync"] }
 
 [build-dependencies]

@@ -56,6 +56,7 @@ pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, 
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
+pub use notify::{NoopNotifier, Notification, NotificationReactor, Notifier};
 pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{
     Clock, CorePorts, CorePortsBuilder, ExitFuture, ExitStatus, LockReleaser, NoopLockReleaser,
