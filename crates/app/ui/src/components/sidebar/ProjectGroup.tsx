@@ -25,8 +25,8 @@ interface ProjectGroupProps {
 
 // One project in the sidebar: a collapsible header (icon + name + running count + bulk
 // controls) over its non-empty kind subgroups. The project is the top-level context and
-// the subtype groups nest under it (DESIGN.md / plan/05); empty subgroups are not rendered,
-// so a command-only project shows just its commands.
+// the subtype groups nest under it; empty subgroups are not rendered, so a command-only
+// project shows just its commands.
 export function ProjectGroup({
   tree,
   open,

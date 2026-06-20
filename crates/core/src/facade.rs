@@ -121,10 +121,10 @@ impl Facade {
         .run()
     }
 
-    /// Waits until process `id` is listening on `port`, or times out — port readiness (C5,
-    /// ref plan/05 §7 `wait_for_bound_port`). While waiting the process reads
-    /// Running-but-not-Ready ([`ProcessView::ready`] = `Some(false)`); on bind, `Some(true)`.
-    /// One method behind the Facade, so the future MCP/HTTP/CLI callers share the behaviour.
+    /// Waits until process `id` is listening on `port`, or times out — port readiness (C5).
+    /// While waiting the process reads Running-but-not-Ready ([`ProcessView::ready`] =
+    /// `Readiness::Waiting`); on bind, `Readiness::Ready`. One method behind the Facade, so
+    /// the MCP/HTTP/CLI callers share the behaviour.
     pub async fn wait_for_port(
         &self,
         id: ProcessId,

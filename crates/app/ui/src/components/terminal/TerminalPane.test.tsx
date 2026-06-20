@@ -22,7 +22,7 @@ const PROCESS: ProcessView = {
   exit_code: null,
   requires_trust: false,
   ports: [],
-  ready: null,
+  ready: "Ungated",
 };
 
 const noop = () => {};

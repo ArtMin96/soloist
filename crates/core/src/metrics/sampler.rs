@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use crate::events::{DomainEvent, EventBus};
 use crate::ports::Clock;
-use crate::supervision::supervise;
+use crate::supervision::{run_blocking, supervise};
 use crate::supervisor::Supervisor;
 
 use super::MetricsProbe;
@@ -77,7 +77,9 @@ impl MetricsSampler {
                 continue;
             }
             let pgids: Vec<i32> = targets.iter().map(|(_, pgid)| *pgid).collect();
-            let readings = self.probe.sample(&pgids);
+            // Read the OS off the runtime so a slow sweep never stalls a worker thread.
+            let probe = self.probe.clone();
+            let readings = run_blocking(move || probe.sample(&pgids)).await;
             for (id, pgid) in targets {
                 if let Some(metrics) = readings.get(&pgid) {
                     self.bus.publish(DomainEvent::MetricsTick {

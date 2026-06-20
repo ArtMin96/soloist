@@ -11,7 +11,7 @@ const starting: ProcessView = {
   exit_code: null,
   requires_trust: false,
   ports: [],
-  ready: null,
+  ready: "Ungated",
 };
 
 describe("applyEvent", () => {
@@ -80,15 +80,18 @@ describe("applyEvent", () => {
     expect(next.find((process) => process.id === 2)?.ports).toEqual([]);
   });
 
-  it("updates the readiness gate only on the matching process", () => {
+  it("maps the readiness event to the gate only on the matching process", () => {
     const other: ProcessView = { ...starting, id: 2 };
-    const next = applyEvent([starting, other], {
+    const waiting = applyEvent([starting, other], {
       type: "ReadyStateChanged",
       id: 1,
       ready: false,
     });
-    expect(next.find((process) => process.id === 1)?.ready).toBe(false);
-    expect(next.find((process) => process.id === 2)?.ready).toBeNull();
+    expect(waiting.find((process) => process.id === 1)?.ready).toBe("Waiting");
+    expect(waiting.find((process) => process.id === 2)?.ready).toBe("Ungated");
+
+    const ready = applyEvent(waiting, { type: "ReadyStateChanged", id: 1, ready: true });
+    expect(ready.find((process) => process.id === 1)?.ready).toBe("Ready");
   });
 
   it("removes a process", () => {

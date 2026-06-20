@@ -14,6 +14,11 @@ export type ProcStatus =
   | "Stopping"
   | "RestartExhausted";
 
+// Port-readiness gate (mirrors core::Readiness): "Ungated" = no gate active, "Waiting" = a
+// wait_for_port is in effect and the awaited port has not bound (Running but not Ready),
+// "Ready" = the awaited port bound.
+export type Readiness = "Ungated" | "Waiting" | "Ready";
+
 export interface ProcessView {
   id: number;
   project: number;
@@ -27,9 +32,9 @@ export interface ProcessView {
   // TCP ports the process is currently listening on (discovered while it runs, cleared when
   // it stops). Empty until discovery finds any.
   ports: number[];
-  // Readiness gate: null when none is active, false while a wait_for_port is waiting
-  // (Running but not Ready), true once the awaited port bound. Cleared (null) when it stops.
-  ready: boolean | null;
+  // Port-readiness gate; "Ungated" until a wait_for_port is in effect, and reset to
+  // "Ungated" when the process stops.
+  ready: Readiness;
 }
 
 // Rendered output snapshot (escape sequences applied to plain text) — the Logs source.

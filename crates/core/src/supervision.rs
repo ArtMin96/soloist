@@ -1,4 +1,4 @@
-//! Keeping an internal background task alive (plan/04 §6).
+//! Keeping an internal background task alive.
 //!
 //! The monitoring samplers (metrics, port discovery, and later the file watcher) are
 //! long-running loops that must survive a transient fault. [`supervise`] runs such a loop
@@ -43,6 +43,23 @@ where
             // The task was cancelled (the runtime is shutting down) — stop supervising.
             Err(_) => break,
         }
+    }
+}
+
+/// Runs a blocking OS read on the blocking thread pool, so a periodic sampler never stalls
+/// a runtime worker on a `/proc` or `sysinfo` sweep. A panic inside the read is re-raised
+/// on the caller (the supervised loop), so [`supervise`] isolates and restarts it exactly
+/// as for any other loop panic.
+pub(crate) async fn run_blocking<T, F>(read: F) -> T
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    match tokio::task::spawn_blocking(read).await {
+        Ok(value) => value,
+        // A blocking task cannot be cancelled, so a join error is always a panic; re-raise
+        // it here so the supervised loop's panic-isolation boundary catches and restarts it.
+        Err(join_err) => std::panic::resume_unwind(join_err.into_panic()),
     }
 }
 

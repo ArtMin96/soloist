@@ -1,11 +1,14 @@
 //! The CPU/memory probe over `sysinfo`: the OS read behind the core's `MetricsProbe`.
 //!
 //! A managed process spawns into a fresh process group whose leader pid is the group's
-//! pgid; this probe aggregates the leader and its descendants (its process subtree) into
-//! one reading, so a dev server whose work happens in child processes reports real usage.
-//! It holds a persistent `sysinfo::System` because CPU% is a delta between successive
-//! refreshes — the caller (the core sampler) drives the cadence; this refreshes once per
-//! call across every requested group.
+//! pgid; this probe aggregates the leader and its descendants (its process subtree, by
+//! parent) into one reading, so a dev server whose work happens in child processes reports
+//! real usage. The subtree is an approximation of the OS process group — a descendant that
+//! reparents to init (a double-fork) escapes it — because `sysinfo` does not expose the
+//! process group; it is good enough for the aggregate CPU/RSS figure. It holds a persistent
+//! `sysinfo::System` because CPU% is a delta between successive refreshes — the caller (the
+//! core sampler) drives the cadence; this refreshes once per call across every requested
+//! group.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;

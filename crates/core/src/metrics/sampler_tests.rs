@@ -143,7 +143,7 @@ async fn a_running_process_is_sampled_each_tick() {
 #[tokio::test]
 async fn the_sampler_restarts_itself_after_a_panic() {
     // The probe panics on its first sample, then behaves — proving the sampling loop is
-    // panic-isolated and restarted, so monitoring recovers on its own (the K4 precursor).
+    // panic-isolated and restarted, so monitoring recovers on its own.
     let mut s = setup();
     let id = terminal(&s.sup);
     s.sup.start(id).expect("start");

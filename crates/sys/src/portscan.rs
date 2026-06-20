@@ -1,12 +1,15 @@
 //! Port discovery over `/proc`: the OS read behind the core's `PortProbe`.
 //!
-//! For each requested group (its leader pid), it walks the process subtree, collects the
-//! socket inodes those processes hold open (`/proc/<pid>/fd/*` → `socket:[inode]`), and
-//! joins them to the LISTEN-state entries in `/proc/net/tcp{,6}` to recover the bound
-//! ports. The `/proc` snapshot (process tree + listening sockets) is read **once per call**
-//! and reused across every group, so a scan tick costs a single sweep.
+//! For each requested group (its leader pid, which is the group's pgid), it finds the
+//! processes whose process group is that pgid, collects the socket inodes those processes
+//! hold open (`/proc/<pid>/fd/*` → `socket:[inode]`), and joins them to the LISTEN-state
+//! entries in `/proc/net/tcp{,6}` to recover the bound ports. Membership is read straight
+//! from each task's process group (`/proc/<pid>/stat`), so a descendant that reparents to
+//! init is still counted — unlike a parent-tree walk, which it would escape. The `/proc`
+//! snapshot (group membership + listening sockets) is read **once per call** and reused
+//! across every group, so a scan tick costs a single sweep.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 
 use soloist_core::PortProbe;
@@ -29,26 +32,30 @@ impl PortProbe for ProcPortProbe {
         if groups.is_empty() {
             return HashMap::new();
         }
-        // Read the process tree and the listening-socket table once, then resolve each group
-        // against them.
-        let (live, children) = process_tree();
+        // Read group membership and the listening-socket table once, then resolve each
+        // requested group against them.
+        let members_by_group = group_members();
         let ports_by_inode = listening_ports_by_inode();
         groups
             .iter()
-            .map(|&leader| {
-                let pids = subtree(&live, &children, leader);
-                (leader, ports_for_pids(&pids, &ports_by_inode))
+            .map(|&pgid| {
+                let pids = members_by_group
+                    .get(&pgid)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                (pgid, ports_for_pids(pids, &ports_by_inode))
             })
             .collect()
     }
 }
 
-/// Reads `/proc` once into the set of live pids and a parent → children adjacency map.
-fn process_tree() -> (HashSet<i32>, HashMap<i32, Vec<i32>>) {
-    let mut live = HashSet::new();
-    let mut children: HashMap<i32, Vec<i32>> = HashMap::new();
+/// One `/proc` sweep into a process-group → member-pids map, reading each task's group from
+/// `/proc/<pid>/stat`. Membership is exact: a reparented descendant keeps its group, so it
+/// is still attributed to the right group.
+fn group_members() -> HashMap<i32, Vec<i32>> {
+    let mut by_group: HashMap<i32, Vec<i32>> = HashMap::new();
     let Ok(entries) = fs::read_dir("/proc") else {
-        return (live, children);
+        return by_group;
     };
     for entry in entries.flatten() {
         let Some(pid) = entry
@@ -58,45 +65,27 @@ fn process_tree() -> (HashSet<i32>, HashMap<i32, Vec<i32>>) {
         else {
             continue;
         };
-        live.insert(pid);
-        if let Some(ppid) = read_ppid(pid) {
-            children.entry(ppid).or_default().push(pid);
+        if let Some(pgrp) = read_pgrp(pid) {
+            by_group.entry(pgrp).or_default().push(pid);
         }
     }
-    (live, children)
+    by_group
 }
 
-/// The parent pid of `pid` from `/proc/<pid>/stat`. The `comm` field can contain spaces and
-/// parentheses, so fields are read after the final `)`: there they are `state ppid pgrp …`.
-fn read_ppid(pid: i32) -> Option<i32> {
+/// The process-group id of `pid` from `/proc/<pid>/stat`. The `comm` field can contain
+/// spaces and parentheses, so fields are read after the final `)`: there they are
+/// `state ppid pgrp …`, so `pgrp` is the third.
+fn read_pgrp(pid: i32) -> Option<i32> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_comm = stat.rsplit_once(')')?.1;
     let mut fields = after_comm.split_whitespace();
     let _state = fields.next()?;
+    let _ppid = fields.next()?;
     fields.next()?.parse::<i32>().ok()
 }
 
-/// The set of pids in the subtree rooted at `leader` (inclusive), or empty if the leader is
-/// no longer live (the group has exited).
-fn subtree(live: &HashSet<i32>, children: &HashMap<i32, Vec<i32>>, leader: i32) -> HashSet<i32> {
-    if !live.contains(&leader) {
-        return HashSet::new();
-    }
-    let mut seen = HashSet::new();
-    let mut stack = vec![leader];
-    while let Some(pid) = stack.pop() {
-        if !seen.insert(pid) {
-            continue;
-        }
-        if let Some(kids) = children.get(&pid) {
-            stack.extend(kids.iter().copied());
-        }
-    }
-    seen
-}
-
 /// The sorted, de-duplicated ports the given pids' open sockets are listening on.
-fn ports_for_pids(pids: &HashSet<i32>, ports_by_inode: &HashMap<u64, u16>) -> Vec<u16> {
+fn ports_for_pids(pids: &[i32], ports_by_inode: &HashMap<u64, u16>) -> Vec<u16> {
     let mut ports: Vec<u16> = pids
         .iter()
         .flat_map(|&pid| socket_inodes(pid))

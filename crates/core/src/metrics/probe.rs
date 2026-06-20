@@ -26,8 +26,14 @@ pub struct ProcessMetrics {
 /// its OS view once) rather than once per group, and the caller drives the cadence via the
 /// [`crate::ports::Clock`]. A group is identified by its leader `pgid` (each process spawns
 /// into a fresh group whose leader pid is the pgid); the reading aggregates the leader and
-/// its descendants. Best-effort: a group with no live member is omitted from the result,
-/// and the probe never blocks or panics the core — a missing reading is a missing entry.
+/// its **process subtree** (descendants by parent). That is an approximation of the OS
+/// process group: a descendant that reparents to init (a double-fork) escapes the subtree
+/// and is not counted — acceptable for the aggregate CPU/RSS figure, and the only option
+/// where the OS view does not expose the group. Best-effort: a group with no live member is
+/// **omitted** from the result (so a just-exited group never reports a misleading 0), and
+/// the probe never blocks or panics the core — a missing reading is a missing entry. Note
+/// this differs from [`crate::portscan::PortProbe`], which keeps an empty entry for a group
+/// it finds no ports on (so the scanner can clear them).
 pub trait MetricsProbe: Send + Sync {
     /// Samples each group in `groups` (by leader `pgid`) in one pass, returning a reading
     /// per group that still has a live member; groups with none are omitted.

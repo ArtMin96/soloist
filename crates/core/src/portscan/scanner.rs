@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use crate::events::{DomainEvent, EventBus};
 use crate::ports::Clock;
-use crate::supervision::supervise;
+use crate::supervision::{run_blocking, supervise};
 use crate::supervisor::Supervisor;
 
 use super::PortProbe;
@@ -69,12 +69,16 @@ impl PortScanner {
                 continue;
             }
             let pgids: Vec<i32> = targets.iter().map(|(_, pgid)| *pgid).collect();
-            let mut discovered = self.probe.listening_ports(&pgids);
+            // Read the OS off the runtime so a slow sweep never stalls a worker thread.
+            let probe = self.probe.clone();
+            let mut discovered = run_blocking(move || probe.listening_ports(&pgids)).await;
             for (id, pgid) in targets {
                 let ports = discovered.remove(&pgid).unwrap_or_default();
-                // Record through the supervisor (the single mutation point) and announce
-                // only a real change, so the read model never churns on an unchanged scan.
-                if supervisor.record_ports(id, ports.clone()) {
+                // Record through the supervisor (the single mutation point), scoped to the
+                // group just scanned, and announce only a real change — so a process that
+                // stopped mid-scan never has stale ports written back, and the read model
+                // never churns on an unchanged scan.
+                if supervisor.record_ports(id, pgid, ports.clone()) {
                     self.bus.publish(DomainEvent::PortsChanged { id, ports });
                 }
             }

@@ -16,6 +16,7 @@
 mod actor;
 mod adopt;
 mod bulk;
+mod monitoring;
 mod reconcile;
 mod registration;
 mod registry;
@@ -33,7 +34,7 @@ use crate::ports::{
     Clock, CorePorts, LockReleaser, OrphanControl, ProcessSpawner, PtySize, RuntimeState,
     SpawnSpec, Spawned, StoreError, TrustRepo,
 };
-use crate::process::{ProcStatus, ProcessView};
+use crate::process::{ProcStatus, ProcessView, Readiness};
 use crate::terminal::{PtyChunk, PtyInput, RenderedScreen, Terminals};
 
 use actor::{ActorMsg, ActorPorts, OrphanIdentity};
@@ -98,39 +99,6 @@ impl Supervisor {
         self.registry.snapshot()
     }
 
-    /// Every running process with a live OS process group, as `(id, leader pgid)`. The
-    /// monitoring samplers (C5 — metrics and port discovery) read this each tick to know
-    /// what to probe; the supervisor (C2) stays the single owner of which processes are live.
-    pub fn live_groups(&self) -> Vec<(ProcessId, i32)> {
-        self.registry.live_groups()
-    }
-
-    /// Records a process's freshly discovered listening ports, returning whether the set
-    /// changed. The single mutation point for the port read model — the port scanner (C5)
-    /// routes through here so C2 stays the owner of the [`ProcessView`].
-    pub fn record_ports(&self, id: ProcessId, ports: Vec<u16>) -> bool {
-        self.registry.set_ports(id, ports)
-    }
-
-    /// The leader pgid of a running process's group, if it has one — what a port-readiness
-    /// wait (C5) probes. `None` for a resting process.
-    pub fn pgid_of(&self, id: ProcessId) -> Option<i32> {
-        self.registry.pgid_of(id)
-    }
-
-    /// Records a process's readiness gate and announces a real change as
-    /// [`DomainEvent::ReadyStateChanged`]. The single mutation point for the readiness read
-    /// model — the port-readiness wait (C5) routes through here so C2 owns the [`ProcessView`].
-    /// Clearing the gate (`None`, on stop) is silent; the accompanying status change covers it.
-    pub fn set_ready(&self, id: ProcessId, ready: Option<bool>) {
-        if self.registry.set_ready(id, ready) {
-            if let Some(ready) = ready {
-                self.bus
-                    .publish(DomainEvent::ReadyStateChanged { id, ready });
-            }
-        }
-    }
-
     /// Registers a process as `Stopped` without starting it, announcing it on the bus.
     pub fn register(&self, registration: Registration) -> ProcessId {
         let id = ProcessId::next();
@@ -154,7 +122,7 @@ impl Supervisor {
             exit_code: None,
             requires_trust,
             ports: Vec::new(),
-            ready: None,
+            ready: Readiness::Ungated,
         };
         self.registry.add(
             view,

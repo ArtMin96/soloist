@@ -12,6 +12,7 @@ use tokio::task::JoinHandle;
 use crate::events::DomainEvent;
 use crate::ids::ProcessId;
 use crate::portscan::test_support::{running_process, setup, terminal, view_of, ADVANCE_STEP};
+use crate::process::Readiness;
 use crate::testing::FakePortProbe;
 
 use super::{wait_for_port, WaitForPortError};
@@ -65,7 +66,7 @@ async fn resolves_immediately_when_the_port_is_already_bound() {
     .await
     .expect("an already-bound port resolves");
 
-    assert_eq!(view_of(&s.sup, id).ready, Some(true));
+    assert_eq!(view_of(&s.sup, id).ready, Readiness::Ready);
     // Ready went straight to true — no spurious "not ready" flicker first.
     assert_eq!(drain_ready(&mut s.rx, id), vec![true]);
 }
@@ -85,17 +86,22 @@ async fn waits_not_ready_then_resolves_when_the_port_binds() {
         Duration::from_secs(60),
     ));
 
-    // The wait announces Running-but-not-Ready and parks on its poll.
-    for _ in 0..16 {
+    // The wait announces Running-but-not-Ready and parks on its poll. The `/proc` check now
+    // hops to the blocking pool, so spin until the gate flips rather than assuming a fixed
+    // yield count.
+    for _ in 0..1000 {
+        if view_of(&s.sup, id).ready == Readiness::Waiting {
+            break;
+        }
         tokio::task::yield_now().await;
     }
-    assert_eq!(view_of(&s.sup, id).ready, Some(false));
+    assert_eq!(view_of(&s.sup, id).ready, Readiness::Waiting);
     assert_eq!(drain_ready(&mut s.rx, id), vec![false]);
 
     // The server binds; the next poll sees it and the wait resolves Ready.
     probe.set(vec![PORT]);
     drive(task, &s.clock).await.expect("resolves once bound");
-    assert_eq!(view_of(&s.sup, id).ready, Some(true));
+    assert_eq!(view_of(&s.sup, id).ready, Readiness::Ready);
     assert_eq!(drain_ready(&mut s.rx, id), vec![true]);
 }
 
@@ -116,7 +122,7 @@ async fn times_out_when_the_port_never_binds() {
 
     assert_eq!(drive(task, &s.clock).await, Err(WaitForPortError::Timeout));
     // The process is still Running but stays not-ready — the gate reflects the failed wait.
-    assert_eq!(view_of(&s.sup, id).ready, Some(false));
+    assert_eq!(view_of(&s.sup, id).ready, Readiness::Waiting);
 }
 
 #[tokio::test]
@@ -135,5 +141,5 @@ async fn errors_when_the_process_is_not_running() {
     .await;
 
     assert_eq!(result, Err(WaitForPortError::NotRunning));
-    assert_eq!(view_of(&s.sup, id).ready, None);
+    assert_eq!(view_of(&s.sup, id).ready, Readiness::Ungated);
 }

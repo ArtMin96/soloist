@@ -1,18 +1,18 @@
-//! Port readiness: wait until a process binds an expected port (ref plan/05 §7
-//! `wait_for_bound_port`).
+//! Port readiness: wait until a process binds an expected port.
 //!
 //! Polls the [`PortProbe`] on the [`Clock`] until the awaited port appears among the
 //! process group's listening ports, or the timeout elapses. While waiting, the process's
-//! readiness gate reads `Some(false)` (Running but not Ready); on bind it becomes
-//! `Some(true)`. The OS read is the portscan adapter's; the timing is core policy
-//! (mock-clock testable). The Facade exposes this as `wait_for_port`; the future MCP
-//! `wait_for_bound_port` tool (Phase 8) is the production caller.
+//! readiness gate reads [`Readiness::Waiting`] (Running but not Ready); on bind it becomes
+//! [`Readiness::Ready`]. The OS read is the portscan adapter's; the timing is core policy
+//! (mock-clock testable). The Facade exposes this as `wait_for_port`; the MCP
+//! `wait_for_bound_port` tool is the production caller once it lands.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::ids::ProcessId;
 use crate::ports::Clock;
+use crate::supervision::run_blocking;
 use crate::supervisor::Supervisor;
 
 use super::PortProbe;
@@ -50,14 +50,14 @@ pub async fn wait_for_port(
         let Some(pgid) = supervisor.pgid_of(id) else {
             return Err(WaitForPortError::NotRunning);
         };
-        if is_bound(probe.as_ref(), pgid, port) {
-            supervisor.set_ready(id, Some(true));
+        if is_bound(probe.clone(), pgid, port).await {
+            supervisor.set_ready(id, pgid, true);
             return Ok(());
         }
         if !announced_waiting {
             // Mark Running-but-not-Ready only once we know it isn't already bound, so an
             // already-listening process never flickers through "not ready".
-            supervisor.set_ready(id, Some(false));
+            supervisor.set_ready(id, pgid, false);
             announced_waiting = true;
         }
         if clock.now() >= deadline {
@@ -67,12 +67,16 @@ pub async fn wait_for_port(
     }
 }
 
-/// Whether `pgid`'s group currently lists `port` among its listening ports.
-fn is_bound(probe: &dyn PortProbe, pgid: i32, port: u16) -> bool {
-    probe
-        .listening_ports(&[pgid])
-        .get(&pgid)
-        .is_some_and(|ports| ports.contains(&port))
+/// Whether `pgid`'s group currently lists `port` among its listening ports. The `/proc`
+/// read runs on the blocking pool so a poll never stalls a runtime worker.
+async fn is_bound(probe: Arc<dyn PortProbe>, pgid: i32, port: u16) -> bool {
+    run_blocking(move || {
+        probe
+            .listening_ports(&[pgid])
+            .get(&pgid)
+            .is_some_and(|ports| ports.contains(&port))
+    })
+    .await
 }
 
 #[cfg(test)]
