@@ -53,6 +53,10 @@ pub enum DomainEvent {
         cpu_pct: f32,
         rss: u64,
     },
+    /// A process's set of bound (listening) TCP ports changed — discovered while it runs,
+    /// emptied when it stops. The new sorted set is carried so adapters update the read
+    /// model without a snapshot round-trip; it is also reflected on [`ProcessView::ports`].
+    PortsChanged { id: ProcessId, ports: Vec<u16> },
     /// The restart policy is relaunching a crashed `auto_restart` command. `attempt` is
     /// its position in the current rate-limit window (1 = the first restart). The status
     /// also moves `Crashed -> Starting`; this delta additionally carries the attempt

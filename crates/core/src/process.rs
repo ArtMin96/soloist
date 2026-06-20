@@ -85,7 +85,9 @@ impl ProcStatus {
 /// behaviour — the authoritative state lives in the owning actor and registry. The
 /// `project` scopes it; `exit_code` is the most recent terminal exit code (`None`
 /// while running, or when terminated by a signal); `requires_trust` is true for a
-/// trust-gated command whose variant is not yet trusted (the UI blocks its start).
+/// trust-gated command whose variant is not yet trusted (the UI blocks its start);
+/// `ports` are the TCP ports the process is currently listening on, discovered while it
+/// runs and cleared when its group ends (empty until discovery finds any).
 #[derive(Clone, Debug, Serialize)]
 pub struct ProcessView {
     pub id: ProcessId,
@@ -95,6 +97,7 @@ pub struct ProcessView {
     pub status: ProcStatus,
     pub exit_code: Option<i32>,
     pub requires_trust: bool,
+    pub ports: Vec<u16>,
 }
 
 #[cfg(test)]

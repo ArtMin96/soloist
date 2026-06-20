@@ -96,15 +96,19 @@ impl Registry {
 
     /// Records (or clears) the leader pgid of a process's running OS group. The actor sets
     /// it after a successful spawn and clears it (`None`) when the child is reaped, so the
-    /// metrics sampler only ever targets a process with a live group.
+    /// monitoring samplers only ever target a process with a live group. Clearing the group
+    /// also clears its discovered ports — a process with no live group has none.
     pub(crate) fn set_pgid(&self, id: ProcessId, pgid: Option<i32>) {
         let mut guard = lock(&self.inner);
         if let Some(entry) = guard.get_mut(&id) {
             entry.pgid = pgid;
+            if pgid.is_none() {
+                entry.view.ports.clear();
+            }
         }
     }
 
-    /// Every process with a live OS group, as `(id, leader pgid)` — the metrics sampler's
+    /// Every process with a live OS group, as `(id, leader pgid)` — the monitoring samplers'
     /// targets each tick.
     pub(crate) fn live_groups(&self) -> Vec<(ProcessId, i32)> {
         let guard = lock(&self.inner);
@@ -112,6 +116,20 @@ impl Registry {
             .values()
             .filter_map(|entry| entry.pgid.map(|pgid| (entry.view.id, pgid)))
             .collect()
+    }
+
+    /// Updates a process's discovered listening ports, returning whether the set actually
+    /// changed (so the port scanner only announces real changes). The ports are stored
+    /// sorted by the caller; a no-op update returns `false`.
+    pub(crate) fn set_ports(&self, id: ProcessId, ports: Vec<u16>) -> bool {
+        let mut guard = lock(&self.inner);
+        match guard.get_mut(&id) {
+            Some(entry) if entry.view.ports != ports => {
+                entry.view.ports = ports;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// The orphan-adoption identity of `id`: its project root and name.
@@ -327,6 +345,7 @@ mod tests {
             status: ProcStatus::Stopped,
             exit_code: None,
             requires_trust: false,
+            ports: Vec::new(),
         };
         let launch = SpawnSpec {
             command: "x".into(),

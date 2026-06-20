@@ -99,10 +99,17 @@ impl Supervisor {
     }
 
     /// Every running process with a live OS process group, as `(id, leader pgid)`. The
-    /// metrics sampler (C5) reads this each tick to know what to sample; the supervisor
-    /// (C2) stays the single owner of which processes are live.
-    pub fn metrics_targets(&self) -> Vec<(ProcessId, i32)> {
+    /// monitoring samplers (C5 — metrics and port discovery) read this each tick to know
+    /// what to probe; the supervisor (C2) stays the single owner of which processes are live.
+    pub fn live_groups(&self) -> Vec<(ProcessId, i32)> {
         self.registry.live_groups()
+    }
+
+    /// Records a process's freshly discovered listening ports, returning whether the set
+    /// changed. The single mutation point for the port read model — the port scanner (C5)
+    /// routes through here so C2 stays the owner of the [`ProcessView`].
+    pub fn record_ports(&self, id: ProcessId, ports: Vec<u16>) -> bool {
+        self.registry.set_ports(id, ports)
     }
 
     /// Registers a process as `Stopped` without starting it, announcing it on the bus.
@@ -127,6 +134,7 @@ impl Supervisor {
             status: ProcStatus::Stopped,
             exit_code: None,
             requires_trust,
+            ports: Vec::new(),
         };
         self.registry.add(
             view,

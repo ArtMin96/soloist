@@ -38,6 +38,7 @@ pub mod supervisor;
 pub mod terminal;
 pub mod trust;
 
+mod supervision;
 mod sync;
 
 #[cfg(any(test, feature = "testing"))]
@@ -60,6 +61,7 @@ pub use ports::{
     ProcessSpawner, ProjectRecord, ProjectRepo, PtyIo, PtySize, RuntimeState, RuntimeStateError,
     SpawnError, SpawnSpec, Spawned, Store, StoreError, TokioClock, TrustRepo,
 };
+pub use portscan::{NoopPortProbe, PortProbe, PortScanner};
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView};
 pub use projects::{
     LoadProjectError, ProjectError, ProjectLoad, ProjectService, ProjectView, Projects,

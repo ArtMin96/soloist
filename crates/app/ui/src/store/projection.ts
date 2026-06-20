@@ -21,6 +21,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
           status: event.status,
           exit_code: null,
           requires_trust: event.requires_trust,
+          ports: [],
         },
       ];
     case "ProcessStatusChanged":
@@ -28,6 +29,10 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
         process.id === event.id
           ? { ...process, status: event.to, exit_code: event.exit_code }
           : process,
+      );
+    case "PortsChanged":
+      return processes.map((process) =>
+        process.id === event.id ? { ...process, ports: event.ports } : process,
       );
     case "ProcessRemoved":
       return processes.filter((process) => process.id !== event.id);

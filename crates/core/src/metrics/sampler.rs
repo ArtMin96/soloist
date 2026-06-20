@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use crate::events::{DomainEvent, EventBus};
 use crate::ports::Clock;
+use crate::supervision::supervise;
 use crate::supervisor::Supervisor;
 
 use super::MetricsProbe;
@@ -23,13 +24,6 @@ use super::MetricsProbe;
 /// rate at ~1 Hz — comfortably within the UI's ~2 Hz coalescing budget — without polling
 /// the OS more than monitoring needs.
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
-
-/// The first delay before the sampling loop is restarted after it dies.
-const INITIAL_RESTART_BACKOFF: Duration = Duration::from_millis(200);
-
-/// The ceiling the restart backoff doubles up to, so a persistently failing loop retries
-/// at a steady, bounded cadence rather than ever faster or ever slower.
-const MAX_RESTART_BACKOFF: Duration = Duration::from_secs(5);
 
 /// Samples live process groups on an interval and publishes their CPU/memory readings.
 /// Cloneable so the supervising [`MetricsSampler::run`] can hand a fresh copy to each
@@ -60,25 +54,11 @@ impl MetricsSampler {
     }
 
     /// Runs the sampler until the supervisor is dropped, supervising the inner sampling
-    /// loop: if it panics, isolate the fault, back off, and restart it. Returned for the
-    /// composition root to spawn once on its runtime.
+    /// loop so a panicking sample is isolated and restarted (see [`supervise`]). Returned
+    /// for the composition root to spawn once on its runtime.
     pub async fn run(self) {
-        let mut backoff = INITIAL_RESTART_BACKOFF;
-        loop {
-            let inner = self.clone();
-            match tokio::spawn(inner.sample_loop()).await {
-                // The loop returned on its own — the supervisor was dropped (app shutdown).
-                Ok(()) => break,
-                Err(join_err) if join_err.is_panic() => {
-                    // Isolate the panic and restart after a bounded backoff, so monitoring
-                    // recovers without taking the app down.
-                    self.clock.sleep(backoff).await;
-                    backoff = (backoff * 2).min(MAX_RESTART_BACKOFF);
-                }
-                // The task was cancelled (the runtime is shutting down) — stop supervising.
-                Err(_) => break,
-            }
-        }
+        let clock = self.clock.clone();
+        supervise(clock, move || self.clone().sample_loop()).await;
     }
 
     /// The sampling loop itself: tick, read the live groups' metrics, publish a tick each.
@@ -89,7 +69,7 @@ impl MetricsSampler {
             let Some(supervisor) = self.supervisor.upgrade() else {
                 return;
             };
-            let targets = supervisor.metrics_targets();
+            let targets = supervisor.live_groups();
             // Drop the strong reference before the OS read, so the loop never keeps the
             // supervisor (and the app) alive across a sample.
             drop(supervisor);

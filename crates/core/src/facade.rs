@@ -17,6 +17,7 @@ use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProjectId;
 use crate::metrics::{MetricsProbe, MetricsSampler};
 use crate::ports::{Clock, CorePorts, StoreError};
+use crate::portscan::{PortProbe, PortScanner};
 use crate::process::ProcessView;
 use crate::projects::{LoadProjectError, ProjectLoad, ProjectService, ProjectView, Projects};
 use crate::supervisor::Supervisor;
@@ -31,6 +32,7 @@ pub struct Facade {
     bus: EventBus,
     clock: Arc<dyn Clock>,
     metrics: Arc<dyn MetricsProbe>,
+    port_probe: Arc<dyn PortProbe>,
     supervisor: Arc<Supervisor>,
     projects: Projects,
     trust: TrustStore,
@@ -47,6 +49,7 @@ impl Facade {
         let CorePorts {
             clock,
             metrics,
+            port_probe,
             trust,
             projects,
             ..
@@ -55,6 +58,7 @@ impl Facade {
             supervisor,
             clock,
             metrics,
+            port_probe,
             projects: Projects::new(projects),
             trust: TrustStore::new(trust.clone()),
             config: ConfigEngine::new(trust, bus.clone()),
@@ -95,6 +99,21 @@ impl Facade {
         MetricsSampler::new(
             self.clock.clone(),
             self.metrics.clone(),
+            self.bus.clone(),
+            Arc::downgrade(&self.supervisor),
+        )
+        .run()
+    }
+
+    /// The port-discovery scanner loop (monitoring C5), returned for the composition root to
+    /// spawn once on its runtime. It discovers each running process group's listening ports,
+    /// reflects them on [`ProcessView::ports`], and publishes [`DomainEvent::PortsChanged`]
+    /// on a real change. Watches the supervisor weakly and is self-supervised, like the
+    /// metrics sampler. With the default [`crate::portscan::NoopPortProbe`] it finds nothing.
+    pub fn port_scanner_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        PortScanner::new(
+            self.clock.clone(),
+            self.port_probe.clone(),
             self.bus.clone(),
             Arc::downgrade(&self.supervisor),
         )

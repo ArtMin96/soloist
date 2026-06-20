@@ -10,6 +10,7 @@ const starting: ProcessView = {
   status: "Starting",
   exit_code: null,
   requires_trust: false,
+  ports: [],
 };
 
 describe("applyEvent", () => {
@@ -65,6 +66,17 @@ describe("applyEvent", () => {
     expect(changed?.status).toBe("Crashed");
     expect(changed?.exit_code).toBe(3);
     expect(next.find((process) => process.id === 2)).toEqual(other);
+  });
+
+  it("updates the listening ports only on the matching process", () => {
+    const other: ProcessView = { ...starting, id: 2 };
+    const next = applyEvent([starting, other], {
+      type: "PortsChanged",
+      id: 1,
+      ports: [5173, 8080],
+    });
+    expect(next.find((process) => process.id === 1)?.ports).toEqual([5173, 8080]);
+    expect(next.find((process) => process.id === 2)?.ports).toEqual([]);
   });
 
   it("removes a process", () => {

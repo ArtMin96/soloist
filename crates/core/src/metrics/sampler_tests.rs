@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
@@ -16,9 +17,14 @@ use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, Supervisor};
 use crate::testing::{FakeMetricsProbe, FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock};
 
-use super::{MetricsSampler, MAX_RESTART_BACKOFF, SAMPLE_INTERVAL};
+use super::{MetricsSampler, SAMPLE_INTERVAL};
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);
+
+/// A clock step generous enough to fire whichever single timer is pending each round — a
+/// sample interval or a restart backoff — so the sampler is driven without knowing the
+/// supervision backoff bound.
+const ADVANCE_STEP: Duration = Duration::from_secs(10);
 
 /// A running supervisor plus the bus the sampler publishes on and the clock it ticks on
 /// — a minimal composition for sampler tests (the supervisor's own harness is private to
@@ -90,7 +96,7 @@ async fn next_metrics_tick(
     id: ProcessId,
 ) -> (f32, u64) {
     for _ in 0..200 {
-        clock.advance(MAX_RESTART_BACKOFF + SAMPLE_INTERVAL);
+        clock.advance(ADVANCE_STEP);
         for _ in 0..16 {
             tokio::task::yield_now().await;
         }
