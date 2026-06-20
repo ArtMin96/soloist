@@ -24,7 +24,7 @@ use crate::ids::ProcessId;
 use crate::process::ProcStatus;
 use crate::sync::lock;
 
-use super::{apply_transition, Supervisor};
+use super::Supervisor;
 
 /// The maximum automatic restarts allowed within [`WINDOW`] before a command is held in
 /// [`ProcStatus::RestartExhausted`] — the documented crash-restart gate.
@@ -78,8 +78,9 @@ impl RestartWindow {
 
 /// The crash auto-restart policy: per-process rate-limit windows plus a shutdown latch.
 /// Cloneable; all clones share one state so the supervisor and its reactor agree. The
-/// window map is bounded by the number of live processes — an entry is dropped when its
-/// process stops, exits cleanly, or leaves the registry.
+/// window map holds at most one entry per process and stays bounded — an entry is dropped
+/// as soon as a process stops, exits cleanly, is held exhausted, or is restarted by the
+/// user.
 #[derive(Clone, Default)]
 pub(crate) struct RestartPolicy {
     inner: Arc<State>,
@@ -165,19 +166,21 @@ impl Supervisor {
                 RestartOutcome::Restarted { attempt }
             }
             RestartDecision::Exhaust => {
-                // Transition from the *current* status: if a concurrent user restart has
-                // moved it off Crashed, the edge is illegal and this is a safe no-op.
-                let current = self.registry.status(id).unwrap_or(ProcStatus::Crashed);
-                let settled = apply_transition(
-                    &self.registry,
-                    &self.bus,
-                    id,
-                    current,
-                    ProcStatus::RestartExhausted,
-                    None,
-                );
-                if settled == ProcStatus::RestartExhausted {
+                // Hold the command exhausted only if it is still crashed. The check and the
+                // transition happen under one registry lock, so a user restart that
+                // concurrently moved it off Crashed is left to run rather than clobbered,
+                // and the exhausted event fires exactly once — on the real transition.
+                if self.registry.exhaust_if_crashed(id) {
+                    self.bus.publish(DomainEvent::ProcessStatusChanged {
+                        id,
+                        from: ProcStatus::Crashed,
+                        to: ProcStatus::RestartExhausted,
+                        exit_code: None,
+                    });
                     self.bus.publish(DomainEvent::RestartExhausted { id });
+                    // The window has done its job; drop it so a held-exhausted process
+                    // keeps no lingering crash history.
+                    self.restart_policy.forget(id);
                     RestartOutcome::Exhausted
                 } else {
                     RestartOutcome::NotEligible

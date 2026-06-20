@@ -215,18 +215,27 @@ impl Supervisor {
     /// children leak on app quit (the deterministic-shutdown contract). Wired into the
     /// Tauri shell's exit event so a normal quit reaps every process group.
     pub async fn shutdown(&self) {
-        // Stop the restart policy first so a crash during teardown is never auto-restarted
-        // (D11): the children we are about to reap must not be relaunched.
+        // Latch the policy closed first so no crash during teardown is auto-restarted: the
+        // children we are about to reap must not be relaunched.
         self.restart_policy.begin_shutdown();
-        let mut joins = Vec::new();
-        for id in self.registry.with_live_actor() {
-            if let Some(ActorHandle { mailbox, join }) = self.registry.take_handle(id) {
-                let _ = mailbox.try_send(ActorMsg::Stop);
-                joins.push(join);
+        // Reap in passes until none remain. A crash whose auto-restart check slipped in
+        // just before the latch became visible can still spawn one last actor while we
+        // reap; the latch stops the reactor from launching any further, so the set is
+        // finite and this converges.
+        loop {
+            let mut joins = Vec::new();
+            for id in self.registry.with_live_actor() {
+                if let Some(ActorHandle { mailbox, join }) = self.registry.take_handle(id) {
+                    let _ = mailbox.try_send(ActorMsg::Stop);
+                    joins.push(join);
+                }
             }
-        }
-        for join in joins {
-            let _ = join.await;
+            if joins.is_empty() {
+                break;
+            }
+            for join in joins {
+                let _ = join.await;
+            }
         }
     }
 
