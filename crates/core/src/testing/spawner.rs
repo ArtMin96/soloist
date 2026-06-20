@@ -40,9 +40,14 @@ enum Behavior {
     PanicsAfterRunning,
     /// Exits on its own immediately with a fixed status.
     ExitsImmediately(ExitStatus),
-    /// Emits the given output chunks, then exits cleanly — drives the actor's PTY
-    /// output drain into the terminal buffers without a real process.
-    StreamsThenExits(Vec<Vec<u8>>),
+    /// Emits the given output chunks, then exits with `exit` — drives the actor's PTY
+    /// output drain into the terminal buffers without a real process. A clean `exit`
+    /// stops the process; a non-zero one crashes it (so its output is the "last crash
+    /// output" a relaunch retains).
+    Streams {
+        chunks: Vec<Vec<u8>>,
+        exit: ExitStatus,
+    },
 }
 
 /// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is chosen
@@ -94,7 +99,28 @@ impl FakeSpawner {
     /// actor drains output into the per-process terminal buffers.
     pub fn streams_then_exits(chunks: Vec<Vec<u8>>) -> Self {
         Self {
-            behavior: Behavior::StreamsThenExits(chunks),
+            behavior: Behavior::Streams {
+                chunks,
+                exit: ExitStatus {
+                    code: Some(0),
+                    signal: None,
+                },
+            },
+        }
+    }
+
+    /// A child that emits `chunks` on its PTY, then crashes with `code`. Used to prove a
+    /// relaunch retains the previous run's output (the "last crash output") and marks a
+    /// restart boundary before the new run's.
+    pub fn streams_then_crashes(chunks: Vec<Vec<u8>>, code: i32) -> Self {
+        Self {
+            behavior: Behavior::Streams {
+                chunks,
+                exit: ExitStatus {
+                    code: Some(code),
+                    signal: None,
+                },
+            },
         }
     }
 }
@@ -149,18 +175,14 @@ impl ProcessSpawner for FakeSpawner {
                     io: Box::new(NoopPtyIo),
                 })
             }
-            Behavior::StreamsThenExits(chunks) => {
+            Behavior::Streams { chunks, exit } => {
                 let (tx, output) = mpsc::channel(chunks.len().max(1));
                 for chunk in chunks {
                     let _ = tx.try_send(chunk.clone());
                 }
                 drop(tx);
-                let exit: ExitFuture = Box::pin(async {
-                    ExitStatus {
-                        code: Some(0),
-                        signal: None,
-                    }
-                });
+                let status = *exit;
+                let exit: ExitFuture = Box::pin(async move { status });
                 Ok(Spawned {
                     pid: Some(7),
                     output,

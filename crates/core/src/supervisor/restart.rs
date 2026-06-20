@@ -334,6 +334,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_crash_auto_restart_keeps_the_last_output_and_marks_the_boundary() {
+        // A trusted auto_restart command that prints, then crashes, on every launch. The
+        // crash path spawns a fresh actor, which must reuse the terminal buffers — so
+        // after the first auto-restart the first run's output is still there, with a
+        // restart banner before the second run's — the "keep last crash output" guarantee
+        // on the path (crash → new actor) that previously wiped the buffer.
+        let mut h = harness(FakeSpawner::streams_then_crashes(
+            vec![b"boom\n".to_vec()],
+            1,
+        ));
+        let id = register_trusted_auto_restart(&h);
+        tokio::spawn(h.sup.self_healing_loop());
+        h.sup.start(id).expect("start");
+
+        // Wait until the second relaunch is scheduled: by then runs one and two have each
+        // streamed their output and crashed, so the buffer holds both, separated by a
+        // banner — without racing the per-run output drains.
+        loop {
+            match h.rx.recv().await {
+                Ok(DomainEvent::RestartScheduled { id: got, attempt }) if got == id => {
+                    if attempt >= 2 {
+                        break;
+                    }
+                }
+                Ok(DomainEvent::RestartExhausted { id: got }) if got == id => {
+                    panic!("exhausted before the second restart")
+                }
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => panic!("event bus closed"),
+            }
+        }
+
+        let rendered = h.sup.rendered(id).expect("rendered");
+        let runs = rendered
+            .lines
+            .iter()
+            .filter(|line| line.contains("boom"))
+            .count();
+        let banners = rendered
+            .lines
+            .iter()
+            .filter(|line| line.contains("restarted"))
+            .count();
+        assert!(runs >= 2, "each run's output is retained: {rendered:?}");
+        assert!(
+            banners >= 1,
+            "a restart banner separates the runs: {rendered:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn shutdown_disables_auto_restart() {
         // An otherwise-eligible (trusted, auto_restart) command is not relaunched once the
         // app is shutting down — quitting must not resurrect the children it is reaping.

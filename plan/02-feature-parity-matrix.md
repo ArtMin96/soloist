@@ -61,7 +61,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | D2 | Port discovery (`get_process_ports`) | ✅ | 6 | v1 | Dev server's port listed |
 | D3 | Readiness (`wait_for_bound_port`) | ✅ | 6 | v1 | Block until port binds |
 | D4 | Crash auto-restart, rate-limited **10/60s → exhausted** | ✅ | 6 | v1 | Repeated crash pauses after 10 |
-| D5 | Restart banner + last crash output retained | ✅ | 6 | later | Banner appears before new output |
+| D5 | Restart banner + last crash output retained | ✅ | 6 | v1 | Banner appears before new output |
 | D6 | File-watch restart (debounced, recursive, trusted-only) | ✅ | 6 | v1 | Touch watched file → 1 restart |
 | D7 | File-watch default ignores (`.git`,`node_modules`,…) | ❓ | 6 | v1 | Editing ignored path → no restart |
 | D8 | Native desktop notifications (crash/attention) | ✅ | 6 | v1 | Crash → libnotify toast |
