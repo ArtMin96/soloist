@@ -22,6 +22,12 @@ test:
     cargo test --workspace
     pnpm -C {{ui}} test
 
+# Run the longevity soak — the leak gate. These tests are #[ignore]d (the regular `test`
+# recipe and per-change CI skip them) and run nightly in CI. Serialized because each test
+# measures the whole process's file-descriptor, thread, and task counts.
+soak:
+    cargo test -p soloist-pty --test soak -- --ignored --nocapture --test-threads=1
+
 # Run every lint, format, type, and architecture gate.
 lint:
     cargo fmt --check

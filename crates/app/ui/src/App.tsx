@@ -10,6 +10,7 @@ import { useAppInfo } from "@/store/useAppInfo";
 import { useOrphans } from "@/store/useOrphans";
 import { useProcesses } from "@/store/useProcesses";
 import { useProjects } from "@/store/projects";
+import { SignalsProvider } from "@/store/SignalsProvider";
 import { useTrust } from "@/store/useTrust";
 
 // The dashboard shell: a top bar of stack controls, the process tree, and the selected
@@ -35,60 +36,62 @@ export default function App() {
   );
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
-      <Toolbar
-        appName={info?.name ?? "Soloist"}
-        appVersion={info?.version}
-        onOpenProject={projects.open}
-      />
-      {store.error && <ErrorBanner message={store.error} onDismiss={store.clearError} />}
-      <div className="flex min-h-0 flex-1">
-        <Sidebar
-          projects={projects.projects}
-          processes={store.processes}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          onStart={store.start}
-          onStop={store.stop}
-          onRestart={store.restart}
-          onTrust={trustById}
-          onStartAll={store.startAll}
-          onRestartRunning={store.restartRunning}
-          onStopAll={store.stopAll}
+    <SignalsProvider>
+      <div className="flex h-screen flex-col bg-background text-foreground">
+        <Toolbar
+          appName={info?.name ?? "Soloist"}
+          appVersion={info?.version}
+          onOpenProject={projects.open}
         />
-        <main className="min-w-0 flex-1">
-          {selected ? (
-            <TerminalPane
-              key={selected.id}
-              process={selected}
-              onStart={() => store.start(selected.id)}
-              onStop={() => store.stop(selected.id)}
-              onRestart={() => store.restart(selected.id)}
-              onTrust={() => trustById(selected.id)}
-            />
-          ) : (
-            <EmptyState
-              hasProcesses={store.processes.length > 0}
-              onOpenProject={projects.open}
-              notice={projects.notice}
-            />
-          )}
-        </main>
+        {store.error && <ErrorBanner message={store.error} onDismiss={store.clearError} />}
+        <div className="flex min-h-0 flex-1">
+          <Sidebar
+            projects={projects.projects}
+            processes={store.processes}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onStart={store.start}
+            onStop={store.stop}
+            onRestart={store.restart}
+            onTrust={trustById}
+            onStartAll={store.startAll}
+            onRestartRunning={store.restartRunning}
+            onStopAll={store.stopAll}
+          />
+          <main className="min-w-0 flex-1">
+            {selected ? (
+              <TerminalPane
+                key={selected.id}
+                process={selected}
+                onStart={() => store.start(selected.id)}
+                onStop={() => store.stop(selected.id)}
+                onRestart={() => store.restart(selected.id)}
+                onTrust={() => trustById(selected.id)}
+              />
+            ) : (
+              <EmptyState
+                hasProcesses={store.processes.length > 0}
+                onOpenProject={projects.open}
+                notice={projects.notice}
+              />
+            )}
+          </main>
+        </div>
+        <OrphanDialog
+          orphans={orphans.orphans}
+          onKillOne={orphans.killOne}
+          onKillAll={orphans.killAll}
+          onLeave={orphans.leave}
+        />
+        <TrustDialog
+          review={trust.review}
+          onTrustCommand={(name) => {
+            if (trust.review) trust.trust(trust.review.project, name);
+          }}
+          onTrustAll={trust.trustAll}
+          onDismiss={trust.dismiss}
+        />
       </div>
-      <OrphanDialog
-        orphans={orphans.orphans}
-        onKillOne={orphans.killOne}
-        onKillAll={orphans.killAll}
-        onLeave={orphans.leave}
-      />
-      <TrustDialog
-        review={trust.review}
-        onTrustCommand={(name) => {
-          if (trust.review) trust.trust(trust.review.project, name);
-        }}
-        onTrustAll={trust.trustAll}
-        onDismiss={trust.dismiss}
-      />
-    </div>
+    </SignalsProvider>
   );
 }

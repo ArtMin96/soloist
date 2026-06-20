@@ -1,6 +1,8 @@
 import { ProcessControls } from "@/components/ProcessControls";
+import { ProcessMeta } from "@/components/sidebar/ProcessMeta";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { cn } from "@/lib/utils";
+import { useSignal } from "@/store/signalsContext";
 import type { ProcessView } from "@/domain";
 
 interface ProcessRowProps {
@@ -26,6 +28,11 @@ export function ProcessRow({
   onRestart,
   onTrust,
 }: ProcessRowProps) {
+  const { metrics, attempt } = useSignal(process.id);
+  // Controls are always present for the selected row and for an untrusted command (so its
+  // trust affordance stays visible); otherwise they reveal on hover/focus, replacing the
+  // at-rest telemetry.
+  const showControls = selected || process.requires_trust;
   return (
     <div
       role="option"
@@ -53,22 +60,47 @@ export function ProcessRow({
       )}
       <StatusIndicator status={process.status} showLabel={false} />
       <span className="min-w-0 flex-1 truncate">{process.label}</span>
+      {/* The right zone stacks at-rest telemetry under the controls in one grid cell, so the
+          cell keeps the width of whichever is wider and the name never reflows on hover. */}
       <div
-        className={cn(
-          "shrink-0 opacity-0 transition-opacity",
-          "group-hover/row:opacity-100 group-focus-within/row:opacity-100",
-          (selected || process.requires_trust) && "opacity-100",
-        )}
+        className="relative grid shrink-0 items-center justify-items-end"
+        style={{ gridTemplateAreas: "'stack'" }}
       >
-        <ProcessControls
-          status={process.status}
-          size="icon-xs"
-          onStart={onStart}
-          onStop={onStop}
-          onRestart={onRestart}
-          requiresTrust={process.requires_trust}
-          onTrust={onTrust}
-        />
+        <div
+          style={{ gridArea: "stack" }}
+          className={cn(
+            "pointer-events-none transition-opacity",
+            "group-hover/row:opacity-0 group-focus-within/row:opacity-0",
+            showControls && "opacity-0",
+          )}
+        >
+          <ProcessMeta
+            status={process.status}
+            ready={process.ready}
+            ports={process.ports}
+            metrics={metrics}
+            attempt={attempt}
+          />
+        </div>
+        <div
+          style={{ gridArea: "stack" }}
+          className={cn(
+            "pointer-events-none opacity-0 transition-opacity",
+            "group-hover/row:pointer-events-auto group-hover/row:opacity-100",
+            "group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100",
+            showControls && "pointer-events-auto opacity-100",
+          )}
+        >
+          <ProcessControls
+            status={process.status}
+            size="icon-xs"
+            onStart={onStart}
+            onStop={onStop}
+            onRestart={onRestart}
+            requiresTrust={process.requires_trust}
+            onTrust={onTrust}
+          />
+        </div>
       </div>
     </div>
   );

@@ -14,6 +14,8 @@ use std::fs;
 
 use soloist_core::PortProbe;
 
+use crate::proc::group_members;
+
 /// The `/proc/net/tcp{,6}` connection-state code for a listening socket.
 const TCP_LISTEN: &str = "0A";
 
@@ -47,41 +49,6 @@ impl PortProbe for ProcPortProbe {
             })
             .collect()
     }
-}
-
-/// One `/proc` sweep into a process-group → member-pids map, reading each task's group from
-/// `/proc/<pid>/stat`. Membership is exact: a reparented descendant keeps its group, so it
-/// is still attributed to the right group.
-fn group_members() -> HashMap<i32, Vec<i32>> {
-    let mut by_group: HashMap<i32, Vec<i32>> = HashMap::new();
-    let Ok(entries) = fs::read_dir("/proc") else {
-        return by_group;
-    };
-    for entry in entries.flatten() {
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<i32>().ok())
-        else {
-            continue;
-        };
-        if let Some(pgrp) = read_pgrp(pid) {
-            by_group.entry(pgrp).or_default().push(pid);
-        }
-    }
-    by_group
-}
-
-/// The process-group id of `pid` from `/proc/<pid>/stat`. The `comm` field can contain
-/// spaces and parentheses, so fields are read after the final `)`: there they are
-/// `state ppid pgrp …`, so `pgrp` is the third.
-fn read_pgrp(pid: i32) -> Option<i32> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let after_comm = stat.rsplit_once(')')?.1;
-    let mut fields = after_comm.split_whitespace();
-    let _state = fields.next()?;
-    let _ppid = fields.next()?;
-    fields.next()?.parse::<i32>().ok()
 }
 
 /// The sorted, de-duplicated ports the given pids' open sockets are listening on.
