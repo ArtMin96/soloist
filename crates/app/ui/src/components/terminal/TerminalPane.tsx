@@ -1,7 +1,7 @@
 import { Bell } from "lucide-react";
 import { ProcessControls } from "@/components/ProcessControls";
+import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessMeta } from "@/components/sidebar/ProcessMeta";
-import { StatusIndicator } from "@/components/StatusIndicator";
 import { useTerminal } from "@/components/terminal/useTerminal";
 import { useTerminalChrome } from "@/components/terminal/useTerminalChrome";
 import { useSignal } from "@/store/signalsContext";
@@ -21,7 +21,7 @@ interface TerminalPaneProps {
 export function TerminalPane({ process, onStart, onStop, onRestart, onTrust }: TerminalPaneProps) {
   const { hostRef, state } = useTerminal(process);
   const { title, ringing } = useTerminalChrome(process.id);
-  const { metrics, attempt } = useSignal(process.id);
+  const { metrics, attempt, activity } = useSignal(process.id);
 
   return (
     <section className="flex h-full min-w-0 flex-col bg-background">
@@ -29,7 +29,7 @@ export function TerminalPane({ process, onStart, onStop, onRestart, onTrust }: T
         <span className="truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">
           {title ?? process.label}
         </span>
-        <StatusIndicator status={process.status} />
+        <ProcessIndicator process={process} activity={activity} />
         <ProcessMeta
           status={process.status}
           ready={process.ready}

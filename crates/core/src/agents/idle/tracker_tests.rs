@@ -18,7 +18,10 @@ fn observe_classifies_a_tracked_agent() {
     let tracker = IdleTracker::new();
     let id = ProcessId::next();
     tracker.track(id, AgentKind::Claude);
-    assert_eq!(tracker.observe(id, &output(20)), Some(AgentActivity::Working));
+    assert_eq!(
+        tracker.observe(id, &output(20)),
+        Some(AgentActivity::Working)
+    );
 }
 
 #[test]

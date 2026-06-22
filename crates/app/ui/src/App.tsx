@@ -6,6 +6,7 @@ import { OrphanDialog } from "@/components/OrphanDialog";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
 import { Toolbar } from "@/components/Toolbar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { TrustDialog } from "@/components/TrustDialog";
 import { useAgents } from "@/store/useAgents";
 import { useAppInfo } from "@/store/useAppInfo";
@@ -70,70 +71,72 @@ export default function App() {
 
   return (
     <SignalsProvider>
-      <div className="flex h-screen flex-col bg-background text-foreground">
-        <Toolbar
-          appName={info?.name ?? "Soloist"}
-          appVersion={info?.version}
-          onOpenProject={projects.open}
-          onLaunchAgent={openPicker}
-        />
-        {store.error && <ErrorBanner message={store.error} onDismiss={store.clearError} />}
-        <div className="flex min-h-0 flex-1">
-          <Sidebar
-            projects={projects.projects}
-            processes={store.processes}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onStart={store.start}
-            onStop={store.stop}
-            onRestart={store.restart}
-            onTrust={trustById}
-            onStartAll={store.startAll}
-            onRestartRunning={store.restartRunning}
-            onStopAll={store.stopAll}
+      <TooltipProvider delayDuration={400}>
+        <div className="flex h-screen flex-col bg-background text-foreground">
+          <Toolbar
+            appName={info?.name ?? "Soloist"}
+            appVersion={info?.version}
+            onOpenProject={projects.open}
+            onLaunchAgent={openPicker}
           />
-          <main className="min-w-0 flex-1">
-            {selected ? (
-              <TerminalPane
-                key={selected.id}
-                process={selected}
-                onStart={() => store.start(selected.id)}
-                onStop={() => store.stop(selected.id)}
-                onRestart={() => store.restart(selected.id)}
-                onTrust={() => trustById(selected.id)}
-              />
-            ) : (
-              <EmptyState
-                hasProcesses={store.processes.length > 0}
-                onOpenProject={projects.open}
-                notice={projects.notice}
-              />
-            )}
-          </main>
+          {store.error && <ErrorBanner message={store.error} onDismiss={store.clearError} />}
+          <div className="flex min-h-0 flex-1">
+            <Sidebar
+              projects={projects.projects}
+              processes={store.processes}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onStart={store.start}
+              onStop={store.stop}
+              onRestart={store.restart}
+              onTrust={trustById}
+              onStartAll={store.startAll}
+              onRestartRunning={store.restartRunning}
+              onStopAll={store.stopAll}
+            />
+            <main className="min-w-0 flex-1">
+              {selected ? (
+                <TerminalPane
+                  key={selected.id}
+                  process={selected}
+                  onStart={() => store.start(selected.id)}
+                  onStop={() => store.stop(selected.id)}
+                  onRestart={() => store.restart(selected.id)}
+                  onTrust={() => trustById(selected.id)}
+                />
+              ) : (
+                <EmptyState
+                  hasProcesses={store.processes.length > 0}
+                  onOpenProject={projects.open}
+                  notice={projects.notice}
+                />
+              )}
+            </main>
+          </div>
+          <OrphanDialog
+            orphans={orphans.orphans}
+            onKillOne={orphans.killOne}
+            onKillAll={orphans.killAll}
+            onLeave={orphans.leave}
+          />
+          <TrustDialog
+            review={trust.review}
+            onTrustCommand={(name) => {
+              if (trust.review) trust.trust(trust.review.project, name);
+            }}
+            onTrustAll={trust.trustAll}
+            onDismiss={trust.dismiss}
+          />
+          <AgentPicker
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            tools={agents.tools}
+            projects={projects.projects}
+            activeProjectId={selected?.project ?? null}
+            onLaunch={onLaunchAgent}
+          />
         </div>
-        <OrphanDialog
-          orphans={orphans.orphans}
-          onKillOne={orphans.killOne}
-          onKillAll={orphans.killAll}
-          onLeave={orphans.leave}
-        />
-        <TrustDialog
-          review={trust.review}
-          onTrustCommand={(name) => {
-            if (trust.review) trust.trust(trust.review.project, name);
-          }}
-          onTrustAll={trust.trustAll}
-          onDismiss={trust.dismiss}
-        />
-        <AgentPicker
-          open={pickerOpen}
-          onOpenChange={setPickerOpen}
-          tools={agents.tools}
-          projects={projects.projects}
-          activeProjectId={selected?.project ?? null}
-          onLaunch={onLaunchAgent}
-        />
-      </div>
+      </TooltipProvider>
     </SignalsProvider>
   );
 }

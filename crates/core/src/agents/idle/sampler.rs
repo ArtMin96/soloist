@@ -74,7 +74,8 @@ impl IdleSampler {
                 .map(|view| (view.id, view.status))
                 .collect();
             // Forget agents that have left the registry, so the tracker never outgrows it.
-            self.tracker.retain_live(&status_by_id.keys().copied().collect());
+            self.tracker
+                .retain_live(&status_by_id.keys().copied().collect());
             for id in self.tracker.tracked() {
                 match status_by_id.get(&id) {
                     // A running agent is reclassified from its current terminal signals.

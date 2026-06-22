@@ -131,6 +131,11 @@ export interface DetectedTool {
   installed: boolean;
 }
 
+// The five-state agent activity (mirrors core::agents::AgentActivity), derived from an agent's
+// terminal output by a per-provider heuristic. It answers "busy or available?" (Working/Thinking
+// vs Idle) and "does it need a human?" (Permission/Error, the attention states).
+export type AgentActivity = "Idle" | "Permission" | "Thinking" | "Working" | "Error";
+
 // Mirrors the core's `DomainEvent` (serde `tag = "type"`).
 export type DomainEvent =
   | {
@@ -183,6 +188,9 @@ export type DomainEvent =
     }
   | { type: "TerminalTitleChanged"; id: number; title: string }
   | { type: "TerminalBell"; id: number }
+  // An agent's activity changed (the five-state idle FSM). Edge-triggered (only on a
+  // transition), so the agent's row updates without polling; Permission/Error raise attention.
+  | { type: "AgentActivityChanged"; id: number; state: AgentActivity }
   | { type: "OrphansFound"; orphans: OrphanInfo[] };
 
 export interface AppInfo {

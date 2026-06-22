@@ -3,8 +3,7 @@
 //! "quiet ≠ done" correctness of idle detection is pinned down.
 
 use super::{
-    strategy_for, AgentActivity, AgentKind, AgentMemory, TerminalActivity,
-    IDLE_AFTER_QUIET_SAMPLES,
+    strategy_for, AgentActivity, AgentKind, AgentMemory, TerminalActivity, IDLE_AFTER_QUIET_SAMPLES,
 };
 
 /// Builds a terminal-signals snapshot from its parts.
@@ -39,7 +38,11 @@ fn output_delta_goes_idle_after_a_quiet_window() {
     // A brief pause holds Working (settling)...
     for _ in 0..IDLE_AFTER_QUIET_SAMPLES - 1 {
         activity = strategy.classify(&mut memory, &signals(10, None, &[]), activity);
-        assert_eq!(activity, AgentActivity::Working, "still settling, not yet idle");
+        assert_eq!(
+            activity,
+            AgentActivity::Working,
+            "still settling, not yet idle"
+        );
     }
     // ...then idle once quiet long enough.
     activity = strategy.classify(&mut memory, &signals(10, None, &[]), activity);
@@ -92,7 +95,11 @@ fn title_stability_works_while_the_title_changes_then_idles_when_stable() {
     );
     let mut activity = AgentActivity::Working;
     for _ in 0..IDLE_AFTER_QUIET_SAMPLES {
-        activity = strategy.classify(&mut memory, &signals(0, Some("building 2/3"), &[]), activity);
+        activity = strategy.classify(
+            &mut memory,
+            &signals(0, Some("building 2/3"), &[]),
+            activity,
+        );
     }
     assert_eq!(activity, AgentActivity::Idle);
 }

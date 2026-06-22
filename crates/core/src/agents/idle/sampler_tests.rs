@@ -15,8 +15,8 @@ use crate::agents::{AgentActivity, AgentKind, IdleSampler, IdleTracker};
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{CorePorts, PtySize, SpawnSpec};
-use crate::process::ProcessKind;
 use crate::process::ProcStatus;
+use crate::process::ProcessKind;
 use crate::supervisor::{Registration, Supervisor};
 use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock};
 

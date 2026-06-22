@@ -43,7 +43,11 @@ impl IdleTracker {
 
     /// Feeds a running agent its latest terminal signals; returns the new activity if it
     /// changed (the edge to emit). A no-op (returns `None`) for an untracked id.
-    pub(super) fn observe(&self, id: ProcessId, signals: &TerminalActivity) -> Option<AgentActivity> {
+    pub(super) fn observe(
+        &self,
+        id: ProcessId,
+        signals: &TerminalActivity,
+    ) -> Option<AgentActivity> {
         lock(&self.agents)
             .get_mut(&id)
             .and_then(|classifier| classifier.observe(signals))

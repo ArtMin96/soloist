@@ -1,6 +1,6 @@
 import { ProcessControls } from "@/components/ProcessControls";
+import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessMeta } from "@/components/sidebar/ProcessMeta";
-import { StatusIndicator } from "@/components/StatusIndicator";
 import { cn } from "@/lib/utils";
 import { useSignal } from "@/store/signalsContext";
 import type { ProcessView } from "@/domain";
@@ -28,7 +28,7 @@ export function ProcessRow({
   onRestart,
   onTrust,
 }: ProcessRowProps) {
-  const { metrics, attempt } = useSignal(process.id);
+  const { metrics, attempt, activity } = useSignal(process.id);
   // Controls are always present for the selected row and for an untrusted command (so its
   // trust affordance stays visible); otherwise they reveal on hover/focus, replacing the
   // at-rest telemetry.
@@ -58,7 +58,7 @@ export function ProcessRow({
           className="absolute top-1 bottom-1 left-0 w-0.5 rounded-full bg-sidebar-primary"
         />
       )}
-      <StatusIndicator status={process.status} showLabel={false} />
+      <ProcessIndicator process={process} activity={activity} showLabel={false} />
       <span className="min-w-0 flex-1 truncate">{process.label}</span>
       {/* The right zone stacks at-rest telemetry under the controls in one grid cell, so the
           cell keeps the width of whichever is wider and the name never reflows on hover. */}
