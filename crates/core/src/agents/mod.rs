@@ -7,10 +7,12 @@
 //! real adapters. Launching agents and the 5-state idle FSM build on these types.
 
 mod detect;
+pub mod idle;
 mod repo;
 mod tool;
 
 pub use detect::{DetectedTool, NoopVersionProbe, VersionProbe};
+pub use idle::{AgentActivity, IdleSampler, IdleTracker};
 pub use repo::{AgentToolRepo, NoopAgentToolRepo};
 pub use tool::{AgentKind, AgentTool, PromptMode};
 

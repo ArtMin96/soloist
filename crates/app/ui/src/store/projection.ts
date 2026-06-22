@@ -3,8 +3,8 @@ import type { DomainEvent, ProcessView } from "@/domain";
 // Pure read-model projection: fold one core event into the process list. Holds no
 // business logic — the core stays authoritative; this only mirrors its deltas, which
 // keeps it trivially unit-testable. Events that don't change the process list (config
-// sync, terminal title/bell, orphans, restart notices, metrics ticks) leave it untouched;
-// their consumers subscribe elsewhere. A restart's status move arrives as
+// sync, terminal title/bell, orphans, restart notices, metrics ticks, agent activity) leave
+// it untouched; their consumers subscribe elsewhere. A restart's status move arrives as
 // ProcessStatusChanged; RestartScheduled/RestartExhausted are the discrete signals
 // notifications subscribe to; MetricsTick feeds a coalesced CPU/memory view, not the list.
 export function applyEvent(processes: ProcessView[], event: DomainEvent): ProcessView[] {
@@ -51,6 +51,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "ConfigChanged":
     case "TerminalTitleChanged":
     case "TerminalBell":
+    case "AgentActivityChanged":
     case "OrphansFound":
       return processes;
   }

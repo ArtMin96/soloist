@@ -12,6 +12,7 @@
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+use crate::agents::AgentActivity;
 use crate::config::{ConfigSync, TrustReviewCommand};
 use crate::ids::{ProcessId, ProjectId};
 use crate::orphans::OrphanInfo;
@@ -96,6 +97,10 @@ pub enum DomainEvent {
     TerminalTitleChanged { id: ProcessId, title: String },
     /// A process rang the terminal bell (`BEL`). Drives attention notifications.
     TerminalBell { id: ProcessId },
+    /// An agent process's activity changed (the five-state idle FSM). Emitted only on a
+    /// transition (edge-triggered), so adapters update the agent's row without polling.
+    /// `Permission` and `Error` are attention states and raise a notification.
+    AgentActivityChanged { id: ProcessId, state: AgentActivity },
     /// Reconciliation found leftover process groups from a previous run that match no
     /// known command, awaiting a user Kill / Kill All / Leave decision surfaced by the
     /// UI. The core only reports them; it neither kills nor keeps them on its own.

@@ -11,7 +11,8 @@ export interface StatusDisplay {
   glyph: string;
   /** Tailwind text-color utility for the glyph, bound to a `--status-*` token. */
   toneClass: string;
-  /** In-flight states; the row's controls disable while one holds. */
+  /** An in-flight state — the indicator pulses its glyph (reduced-motion: no pulse).
+   *  Shared by the agent-activity display, where Thinking pulses the same way. */
   transitional: boolean;
 }
 

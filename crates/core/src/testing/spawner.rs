@@ -48,6 +48,10 @@ enum Behavior {
         chunks: Vec<Vec<u8>>,
         exit: ExitStatus,
     },
+    /// Emits the given output chunks, then stays alive until killed — a process that
+    /// produced output and remains running, for exercising the idle classifier (output is
+    /// in the buffers while the process is still `Running`).
+    StreamsThenStaysAlive { chunks: Vec<Vec<u8>> },
 }
 
 /// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is chosen
@@ -123,6 +127,15 @@ impl FakeSpawner {
             },
         }
     }
+
+    /// A child that emits `chunks` on its PTY, then stays running until killed — output is
+    /// captured in the terminal buffers while the process remains `Running`, for exercising
+    /// the agent idle classifier.
+    pub fn streams_then_stays_alive(chunks: Vec<Vec<u8>>) -> Self {
+        Self {
+            behavior: Behavior::StreamsThenStaysAlive { chunks },
+        }
+    }
 }
 
 /// A closed PTY output channel: the receiver yields nothing and reports EOF at once.
@@ -188,6 +201,29 @@ impl ProcessSpawner for FakeSpawner {
                     output,
                     exit,
                     control: Box::new(NoopControl),
+                    io: Box::new(NoopPtyIo),
+                })
+            }
+            Behavior::StreamsThenStaysAlive { chunks } => {
+                let (tx, output) = mpsc::channel(chunks.len().max(1));
+                for chunk in chunks {
+                    let _ = tx.try_send(chunk.clone());
+                }
+                // Close the output stream (EOF) but leave the child running: it exits only
+                // when killed, like a long-lived process that has gone quiet.
+                drop(tx);
+                let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
+                let control = Box::new(OneshotControl {
+                    exit_tx: Mutex::new(Some(exit_tx)),
+                    dies_on: DiesOn::Kill,
+                });
+                let exit: ExitFuture =
+                    Box::pin(async move { exit_rx.await.unwrap_or_else(|_| killed_by(SIGKILL)) });
+                Ok(Spawned {
+                    pid: Some(424243),
+                    output,
+                    exit,
+                    control,
                     io: Box::new(NoopPtyIo),
                 })
             }

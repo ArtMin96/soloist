@@ -14,6 +14,7 @@ use std::sync::{Arc, Weak};
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
+use crate::agents::AgentActivity;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProcessId;
 use crate::process::ProcStatus;
@@ -67,9 +68,10 @@ impl NotificationReactor {
         }
     }
 
-    /// The toast a given event warrants, or `None` if it needs none. For v1 the attention
-    /// events are a crash and an exhausted auto-restart; both resolve the process label, so a
-    /// process gone from the registry yields no toast.
+    /// The toast a given event warrants, or `None` if it needs none. The attention events
+    /// are a crash, an exhausted auto-restart, and an agent that needs the user (a permission
+    /// prompt or an error); each resolves the process label, so a process gone from the
+    /// registry yields no toast.
     fn compose(&self, event: &DomainEvent) -> Option<Notification> {
         match event {
             DomainEvent::ProcessStatusChanged {
@@ -83,6 +85,20 @@ impl NotificationReactor {
             DomainEvent::RestartExhausted { id } => Some(Notification {
                 title: format!("{} stopped", self.label_of(*id)?),
                 body: "Auto-restart gave up after too many crashes.".into(),
+            }),
+            DomainEvent::AgentActivityChanged {
+                id,
+                state: AgentActivity::Permission,
+            } => Some(Notification {
+                title: format!("{} needs your input", self.label_of(*id)?),
+                body: "The agent is waiting for permission.".into(),
+            }),
+            DomainEvent::AgentActivityChanged {
+                id,
+                state: AgentActivity::Error,
+            } => Some(Notification {
+                title: format!("{} hit an error", self.label_of(*id)?),
+                body: "The agent reported an error.".into(),
             }),
             _ => None,
         }

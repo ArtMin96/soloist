@@ -121,3 +121,43 @@ path → no restart) verify exactly as the matrix specifies. The only way to obs
 a hypothetical "watch everything" design is to put a `restart_when_changed` glob *inside* an ignored
 directory and expect a restart — which we deliberately suppress. Revisit if a user needs to watch
 inside one of these directories; the fix is a per-command opt-out, not removing the safe default.
+
+## D-5 — Agent idle-detection thresholds & cues are our own approximation 🟡
+
+**Introduced:** Phase 7 (Agents & idle detection, E5).
+
+**Solo (ref `plan/05` §6):** documents the five activity states (`IDLE`/`PERMISSION`/`THINKING`/
+`WORKING`/`ERROR`) and the *signal* each provider family is read from — Claude/OpenCode from visible
+output, Codex/Amp from OSC-title stability, Gemini from OSC-title status. It does **not** document the
+exact quiet window, the strings that mark a permission prompt, or the title keywords that map to a
+status.
+
+**Soloist:** the per-provider heuristic shapes (output-delta, title-stability, title-status) follow
+Solo's documented signals, but the thresholds and patterns are our own, in one place each:
+- **Quiet window:** idle after `IDLE_AFTER_QUIET_SAMPLES = 3` consecutive unchanged samples at the
+  ~1 Hz idle sampler (≈3 s). A brief pause holds the previous state rather than flapping.
+- **Permission cues** (`core::agents::idle::permission`): a small set of strong, model-agnostic
+  approval idioms (`(y/n)`, "do you want to proceed", "allow this action", …), scanned only over the
+  last few rendered lines, and only once the agent's output has **settled** (a terminal still
+  producing output reads as `Working`, so a just-printed or just-answered prompt lingering in the tail
+  is not misread as a live block). Deliberately conservative — it prefers a **missed** permission to a
+  false one, because a wrong `Permission` would tell a fire-when-idle workflow the agent is blocked
+  when it is free (or the reverse). The bare word "permission" is intentionally not a cue, so an
+  ordinary "permission denied" error line is not mistaken for a prompt.
+- **Title-status keywords** (`core::agents::idle::strategy`): generic thinking/working/error
+  substrings mapped to activities for the title-status provider.
+
+Copilot/Kimi/Generic have no documented heuristic, so they default to the most universal signal,
+visible output.
+
+**Rationale:** the heuristic is inherently fuzzy ("a quiet terminal is not always completed work",
+`plan/05` §6), and the precise values Solo uses are unobservable. Isolating each in a single named
+constant or module keeps it fixture-tested and easy to tune. The activity signal only *informs*
+(notifications now, fire-when-idle timers in Phase 9); it never auto-acts, so an occasional
+misclassification degrades gracefully.
+
+**Effect on parity:** E5 ("state tracks a real agent") holds — a real agent transitions to `WORKING`
+under output, `IDLE` when quiet, and `PERMISSION` on a recognised prompt. A difference from Solo would
+only show as a different quiet-window latency or a permission prompt phrased outside our cue set
+(reported as `WORKING`/`IDLE` rather than `PERMISSION`). Revisit the cue set as real agent CLIs are
+observed; it is the most likely thing to tune.
