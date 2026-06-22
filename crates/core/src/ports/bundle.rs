@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use crate::agents::{AgentToolRepo, NoopAgentToolRepo, NoopVersionProbe, VersionProbe};
 use crate::filewatch::{FileWatcher, NoopFileWatcher};
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
 use crate::notify::{NoopNotifier, Notifier};
@@ -19,7 +20,8 @@ use super::{
 /// rather than another argument threaded through every call site. The required adapters
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
 /// driven subsystems (`locks`, `runtime`, `orphan_control`, `metrics`, `port_probe`,
-/// `file_watcher`, `notifier`) default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
+/// `file_watcher`, `notifier`, `agent_tools`, `version_probe`) default to their `Noop`
+/// port via [`CorePorts::builder`], so a new optional port never
 /// forces every existing composition root to change. The composition root
 /// (`app::build_facade`) is the one place these are chosen; tests assemble it from
 /// `crate::testing` fakes.
@@ -35,6 +37,8 @@ pub struct CorePorts {
     pub(crate) port_probe: Arc<dyn PortProbe>,
     pub(crate) file_watcher: Arc<dyn FileWatcher>,
     pub(crate) notifier: Arc<dyn Notifier>,
+    pub(crate) agent_tools: Arc<dyn AgentToolRepo>,
+    pub(crate) version_probe: Arc<dyn VersionProbe>,
 }
 
 impl CorePorts {
@@ -59,6 +63,8 @@ impl CorePorts {
                 port_probe: Arc::new(NoopPortProbe),
                 file_watcher: Arc::new(NoopFileWatcher),
                 notifier: Arc::new(NoopNotifier),
+                agent_tools: Arc::new(NoopAgentToolRepo),
+                version_probe: Arc::new(NoopVersionProbe),
             },
         }
     }
@@ -115,6 +121,21 @@ impl CorePortsBuilder {
     /// (notifications C7; defaults to [`NoopNotifier`], which shows nothing).
     pub fn notifier(mut self, notifier: Arc<dyn Notifier>) -> Self {
         self.ports.notifier = notifier;
+        self
+    }
+
+    /// Overrides the durable agent-tool registry (agents C4; defaults to
+    /// [`NoopAgentToolRepo`], an empty registry). The real adapter (SQLite) seeds the
+    /// built-in providers on first run.
+    pub fn agent_tools(mut self, agent_tools: Arc<dyn AgentToolRepo>) -> Self {
+        self.ports.agent_tools = agent_tools;
+        self
+    }
+
+    /// Overrides the `--version` probe used to auto-detect installed agent CLIs (agents C4;
+    /// defaults to [`NoopVersionProbe`], which detects nothing).
+    pub fn version_probe(mut self, version_probe: Arc<dyn VersionProbe>) -> Self {
+        self.ports.version_probe = version_probe;
         self
     }
 

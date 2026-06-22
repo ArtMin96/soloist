@@ -1,12 +1,12 @@
 //! Versioned, idempotent SQLite migrations for the durable store.
 
 use rusqlite::Connection;
-use soloist_core::StoreError;
+use soloist_core::{AgentTool, StoreError};
 
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 2;
+pub(crate) const SCHEMA_VERSION: i64 = 3;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -51,9 +51,38 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         .map_err(sql_err)?;
     }
 
+    if version < 3 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS agent_tools (
+                 name       TEXT PRIMARY KEY,
+                 position   INTEGER NOT NULL,
+                 definition TEXT NOT NULL
+             );",
+        )
+        .map_err(sql_err)?;
+        seed_builtin_agent_tools(conn)?;
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
+    }
+    Ok(())
+}
+
+/// Seeds the built-in agent providers into a fresh `agent_tools` table, preserving their
+/// canonical order via `position`. The definition is the tool's JSON, so the persisted shape
+/// is exactly the domain type and cannot drift from it. `INSERT OR IGNORE` keeps the step
+/// idempotent and never clobbers a tool the user has since edited under the same name.
+fn seed_builtin_agent_tools(conn: &Connection) -> Result<(), StoreError> {
+    for (position, tool) in AgentTool::builtin_defaults().iter().enumerate() {
+        let definition = serde_json::to_string(tool)
+            .map_err(|err| StoreError::Backend(format!("serialize agent tool: {err}")))?;
+        conn.execute(
+            "INSERT OR IGNORE INTO agent_tools (name, position, definition) VALUES (?1, ?2, ?3)",
+            (&tool.name, position as i64, &definition),
+        )
+        .map_err(sql_err)?;
     }
     Ok(())
 }
@@ -76,7 +105,7 @@ mod tests {
             "migration must advance a fresh database to the current schema version"
         );
 
-        for table in ["meta", "projects", "trust"] {
+        for table in ["meta", "projects", "trust", "agent_tools"] {
             let exists = conn
                 .query_row(
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -86,6 +115,16 @@ mod tests {
                 .is_ok();
             assert!(exists, "migration must create the `{table}` table");
         }
+
+        // The built-in agent providers are seeded on the fresh database.
+        let seeded: i64 = conn
+            .query_row("SELECT COUNT(*) FROM agent_tools", [], |row| row.get(0))
+            .expect("count seeded agent tools");
+        assert_eq!(
+            seeded,
+            AgentTool::builtin_defaults().len() as i64,
+            "migration must seed the built-in agent providers"
+        );
 
         // Re-running over an already-current database touches nothing (idempotent steps).
         migrate(&conn).expect("re-running migrate on a current database is a no-op");
