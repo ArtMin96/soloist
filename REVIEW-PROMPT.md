@@ -62,4 +62,9 @@ If any doc contradicts another, STOP and surface it — never resolve a contradi
 
 - This is a **read-and-verify** prompt: it runs the gates and inspects the diff, but proposes rather than
   applies changes. Tell it to fix once you've agreed on the findings.
+- **Invocable equivalent: `/soloist-review [target]`** (`.claude/skills/soloist-review/`). The slash command
+  is the expanded version of this prompt — same read-and-verify contract, plus first-class checks for domain
+  boundaries & separation, duplication/DRY, and security gaps, and it **consults the project's `tauri-*`
+  skills** before judging any Tauri surface. Prefer it in a fresh session; keep this paste-block for when you
+  want to drop the methodology inline.
 - For a deep multi-agent cloud review of a branch or PR, `/code-review ultra` is the heavier alternative.
