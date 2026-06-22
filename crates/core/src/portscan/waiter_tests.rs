@@ -13,7 +13,7 @@ use crate::events::DomainEvent;
 use crate::ids::ProcessId;
 use crate::portscan::test_support::{running_process, setup, terminal, view_of, ADVANCE_STEP};
 use crate::process::Readiness;
-use crate::testing::FakePortProbe;
+use crate::testing::{next_matching, FakePortProbe};
 
 use super::{wait_for_port, WaitForPortError};
 
@@ -86,17 +86,22 @@ async fn waits_not_ready_then_resolves_when_the_port_binds() {
         Duration::from_secs(60),
     ));
 
-    // The wait announces Running-but-not-Ready and parks on its poll. The `/proc` check now
-    // hops to the blocking pool, so spin until the gate flips rather than assuming a fixed
-    // yield count.
-    for _ in 0..1000 {
-        if view_of(&s.sup, id).ready == Readiness::Waiting {
-            break;
+    // The wait announces Running-but-not-Ready and parks on its poll. The `/proc` check hops
+    // to the blocking pool, so await the announcement on the bus rather than polling the view
+    // on a yield budget (which CPU contention can outrun). `set_ready` updates the read model
+    // before publishing, so the gate already reads Waiting once the event arrives.
+    match next_matching(
+        &mut s.rx,
+        |e| matches!(e, DomainEvent::ReadyStateChanged { id: got, .. } if *got == id),
+    )
+    .await
+    {
+        DomainEvent::ReadyStateChanged { ready, .. } => {
+            assert!(!ready, "the wait announces Running-but-not-Ready first");
         }
-        tokio::task::yield_now().await;
+        other => unreachable!("awaited a ReadyStateChanged, got {other:?}"),
     }
     assert_eq!(view_of(&s.sup, id).ready, Readiness::Waiting);
-    assert_eq!(drain_ready(&mut s.rx, id), vec![false]);
 
     // The server binds; the next poll sees it and the wait resolves Ready.
     probe.set(vec![PORT]);

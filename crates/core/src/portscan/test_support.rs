@@ -8,14 +8,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::broadcast;
-use tokio::sync::broadcast::error::RecvError;
 
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{CorePorts, PtySize, SpawnSpec};
 use crate::process::{ProcStatus, ProcessKind, ProcessView};
 use crate::supervisor::{Registration, Supervisor};
-use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock};
+use crate::testing::{wait_all, FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock};
 
 pub(crate) const PROJECT: ProjectId = ProjectId::from_raw(1);
 
@@ -71,26 +70,8 @@ pub(crate) fn terminal(sup: &Supervisor) -> ProcessId {
 pub(crate) async fn running_process(s: &mut Setup) -> ProcessId {
     let id = terminal(&s.sup);
     s.sup.start(id).expect("start");
-    wait_for_status(&mut s.rx, id, ProcStatus::Running).await;
+    wait_all(&mut s.rx, &[id], ProcStatus::Running).await;
     id
-}
-
-pub(crate) async fn wait_for_status(
-    rx: &mut broadcast::Receiver<DomainEvent>,
-    id: ProcessId,
-    target: ProcStatus,
-) {
-    loop {
-        match rx.recv().await {
-            Ok(DomainEvent::ProcessStatusChanged { id: got, to, .. })
-                if got == id && to == target =>
-            {
-                return
-            }
-            Ok(_) | Err(RecvError::Lagged(_)) => continue,
-            Err(RecvError::Closed) => panic!("event bus closed"),
-        }
-    }
 }
 
 pub(crate) fn view_of(sup: &Supervisor, id: ProcessId) -> ProcessView {

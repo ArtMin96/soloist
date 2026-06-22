@@ -3,12 +3,11 @@
 //! helpers its tests reuse. Lives in one place so every submodule's `#[cfg(test)] mod
 //! tests` builds against the same fixtures rather than re-rolling them.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
-use tokio::sync::broadcast::error::RecvError;
 
 use crate::config::ProcessSpec;
 use crate::events::{DomainEvent, EventBus};
@@ -21,6 +20,10 @@ use crate::testing::{
 };
 
 use super::{Registration, Supervisor};
+
+// The event-stream waiters live once in `crate::testing`; the supervisor's submodule tests
+// reach them through this scaffolding alongside the supervisor-specific fixtures.
+pub(crate) use crate::testing::{next_change, next_to, wait_all};
 
 pub(crate) const PROJECT: ProjectId = ProjectId::from_raw(1);
 
@@ -104,39 +107,6 @@ pub(crate) fn terminal(sup: &Supervisor, command: &str) -> ProcessId {
         "shell",
         spawn_spec(command),
     ))
-}
-
-pub(crate) async fn next_to(rx: &mut broadcast::Receiver<DomainEvent>) -> ProcStatus {
-    next_change(rx).await.0
-}
-
-pub(crate) async fn next_change(
-    rx: &mut broadcast::Receiver<DomainEvent>,
-) -> (ProcStatus, Option<i32>) {
-    loop {
-        match rx.recv().await {
-            Ok(DomainEvent::ProcessStatusChanged { to, exit_code, .. }) => return (to, exit_code),
-            Ok(_) | Err(RecvError::Lagged(_)) => continue,
-            Err(RecvError::Closed) => panic!("event bus closed"),
-        }
-    }
-}
-
-pub(crate) async fn wait_all(
-    rx: &mut broadcast::Receiver<DomainEvent>,
-    ids: &[ProcessId],
-    target: ProcStatus,
-) {
-    let mut remaining: HashSet<ProcessId> = ids.iter().copied().collect();
-    while !remaining.is_empty() {
-        match rx.recv().await {
-            Ok(DomainEvent::ProcessStatusChanged { id, to, .. }) if to == target => {
-                remaining.remove(&id);
-            }
-            Ok(_) | Err(RecvError::Lagged(_)) => {}
-            Err(RecvError::Closed) => panic!("event bus closed"),
-        }
-    }
 }
 
 pub(crate) fn status_of(sup: &Supervisor, id: ProcessId) -> ProcStatus {

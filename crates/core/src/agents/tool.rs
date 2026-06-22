@@ -45,6 +45,11 @@ pub enum PromptMode {
 /// A configured agent tool: a launchable CLI with the arguments appended on every launch and
 /// its prompt convention. Built-in providers are seeded by [`AgentTool::builtin_defaults`];
 /// the user can add or edit tools. `name` is the unique registry key and display label.
+///
+/// This is persisted as its own JSON (the store's `agent_tools.definition` column), so the
+/// durable encoding is exactly this type. A field added in a later build must therefore carry
+/// `#[serde(default)]` (or a migration must backfill it) so rows written by an earlier build
+/// still deserialize.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentTool {
     /// The unique display name and registry key (e.g. `"Claude"`).

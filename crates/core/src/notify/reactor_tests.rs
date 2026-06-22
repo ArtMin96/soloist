@@ -17,7 +17,6 @@ use crate::process::ProcStatus;
 use crate::supervisor::{Registration, Supervisor};
 use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock, RecordingNotifier};
 
-use super::Notification;
 use super::NotificationReactor;
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);
@@ -88,21 +87,6 @@ async fn yield_many() {
     }
 }
 
-/// Waits until at least `n` toasts have been shown, returning them; panics if they never are.
-async fn shown_at_least(s: &Setup, n: usize) -> Vec<Notification> {
-    for _ in 0..50 {
-        yield_many().await;
-        let shown = s.notifier.shown();
-        if shown.len() >= n {
-            return shown;
-        }
-    }
-    panic!(
-        "expected at least {n} notification(s), saw {}",
-        s.notifier.shown().len()
-    );
-}
-
 fn crashed(id: ProcessId) -> DomainEvent {
     DomainEvent::ProcessStatusChanged {
         id,
@@ -120,7 +104,7 @@ async fn a_crash_shows_a_toast_naming_the_process() {
 
     s.bus.publish(crashed(web));
 
-    let shown = shown_at_least(&s, 1).await;
+    let shown = s.notifier.wait_until_shown(1).await;
     assert_eq!(shown[0].title, "Web crashed");
 }
 
@@ -132,7 +116,7 @@ async fn an_exhausted_auto_restart_shows_a_toast() {
 
     s.bus.publish(DomainEvent::RestartExhausted { id: worker });
 
-    let shown = shown_at_least(&s, 1).await;
+    let shown = s.notifier.wait_until_shown(1).await;
     assert_eq!(shown[0].title, "Worker stopped");
 }
 
