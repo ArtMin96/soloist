@@ -271,6 +271,75 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Performance optimization — research pass, measurement tooling & evidence-based backlog (2026-06-23, user-directed, cross-cutting)
+**This is a cross-cutting performance pass at the user's explicit direction — it does NOT change the
+active phase (Phase 8, MCP) or any phase's status, and the Phase-8 / Phase-6 "Next session should start
+with" pointers above stand unchanged.** User directive: optimize performance/responsiveness over time
+*without breaking anything*; keep the app clean and working (the stated top priority); drive all perf work
+through the Tauri skills + official docs / valid sources; no assumption, no fabrication; **append to this
+ledger, never overwrite it.**
+
+- **Process followed (now codified as a CLAUDE.md rule).** Loaded five Tauri skills —
+  `tauri-performance-optimization`, `tauri-binary-size`, `tauri-calling-frontend`, `tauri-process-model`,
+  `tauri-configuration` — plus official-doc + web research (the Tauri v2 size doc's `removeUnusedCommands`
+  semantics; WebKitGTK-on-Linux jank notes; `rollup-plugin-visualizer` maintenance/compat). Ran a
+  read-only Rust hot-path audit and read the frontend 60 fps path. Grounded the pass in `plan/00` (vision),
+  `plan/04` (longevity), `plan/05` (identity), `plan/06` (blueprint) and the §6 budget / §8 longevity
+  invariants — per the user's reminder not to tunnel on perf and ignore what the app is / where it heads.
+- **CLAUDE.md — performance-workflow rule added (the "add the rule" directive):** §6 gained a
+  **"Doing a performance pass — the workflow (MANDATORY)"** block: skills + valid sources first (never
+  memory); measure before *and* after (`just bloat`, `just bundle-size`, the soak gate, webview
+  devtools); stay in adapters / the composition root, never the pure `core`, never weaken a cap / test /
+  typed boundary for a micro-win; and an explicit **locked-non-changes** checklist. (The "append to this
+  ledger" instruction was a session-only directive, per the user — not codified as a permanent rule.)
+- **Applied safe, verified code win (behavior-identical):** `core::terminal::buffers::RawScrollback::to_vec`
+  now bulk-copies the ring's two `as_slices()` halves via `extend_from_slice` instead of a byte-by-byte
+  `iter().copied().collect()` — the up-to-256 KB raw-scrollback replay on **every** PTY attach is now two
+  memcpys, not N byte-pushes. Proven behavior-identical by the existing `raw()`-asserting tests
+  (`rendered_strips_escapes_while_raw_keeps_them`, `the_raw_scrollback_never_exceeds_its_byte_cap`, the
+  global-budget tests). No port/boundary/test changed.
+- **Measurement tooling (zero behavior change — "measure first" made a one-command habit):** `just bloat`
+  (cargo-bloat on the release app binary; a tool, **not** a Cargo dep), `just bundle-size` (real
+  `.deb`/`.AppImage` + frontend `dist` per-asset bytes), `just ui-analyze` (frontend treemap →
+  `dist/bundle-stats.html`). Added the **maintained** `rollup-plugin-visualizer` 7.0.1 as a **dev-only**
+  dep, wired into `vite.config.ts` **gated behind `ANALYZE`** so a normal build is byte-identical
+  (verified: no stats file without the flag; 809 KB treemap with it; `pnpm-lock.yaml` re-synced).
+- **First measured baseline (real numbers, not fabricated — frontend, dev `pnpm build`):** a single JS
+  chunk **697.51 kB (gzip 200.06 kB)**, CSS **56.60 kB (gzip 10.54 kB)**, fonts ~76 kB woff2. Rolldown
+  itself warns the JS chunk exceeds 500 kB and suggests `import()` code-splitting — concrete evidence for
+  the §6 "lazy-load / code-split" target (xterm.js, cmdk, radix-ui, lucide are all eagerly bundled today).
+- **Evidence-based performance backlog (measure-first; mapped to the phase built to measure it — do NOT
+  apply blindly):**
+
+  | Item | Where | Severity | Why deferred / next step |
+  |------|-------|----------|--------------------------|
+  | Code-split / lazy-load the frontend bundle (xterm.js, cmdk) | `crates/app/ui` | Med (measured: 697 kB chunk) | Phase 12 — act from the `just ui-analyze` treemap once bundle size is measured for real |
+  | `/proc` full-sweep + duplicate per-member `stat` read each sampler tick | `crates/sys/src/{proc,metrics,portscan}.rs` | Med (CPU; scales w/ machine PID count) | Sweep is **correctness-required** (double-forked descendants keep their pgrp; no `/proc/<pgid>/members`); the duplicate member read is low-ROI vs the DRY/clarity cost. Measure idle CPU in the Phase-13 soak before acting |
+  | PTY chunk path: 3 alloc/copies per chunk (`Vec`→`Arc` realloc, `Arc`→`Vec` at the IPC boundary) | `crates/pty/src/lib.rs`, `core/src/terminal.rs`, `app/src/commands.rs` | Med (high-throughput only) | Needs a throughput benchmark; the step-2 fix changes the `ProcessSpawner` output channel type + ripples through tests. Measure first |
+  | `opt-level` 3 → `"s"`/`"z"` (size vs speed) | `Cargo.toml [profile.release]` | — (size) | A **Phase-12 measured** decision (`just bundle-size` before/after); not a blind flip. `LTO`+`codegen-units=1`+`strip` already on |
+  | `removeUnusedCommands: true` | `crates/app/tauri.conf.json` | — (size) | Strips command handlers absent from the ACL; needs **every** app command added to a capability **and** a user-only `just dev` runtime verify before it's safe. `tauri@2.4+` available (we're on 2.11.2) |
+  | `rendered()` clones all 5 000 lines per query | `core/src/terminal/buffers.rs` | Low | Only on an explicit `get_process_output`, not a hot path; act only if a caller polls it |
+  | signals `new Map()` per `MetricsTick` (O(N)/tick) | `crates/app/ui/src/store/signals.ts` | Low (scale only) | Fine at current scale; revisit if the "hundreds of processes" target is exercised |
+
+- **Locked non-changes — confirmed and NOT touched (deliberate per §3 / `Cargo.toml`):** `panic = "unwind"`
+  (the supervisor catches task panics for fault isolation — `panic = "abort"` would break it, despite the
+  generic skill advice), `freezePrototype = false` (true breaks xterm.js → blank window), the `Cargo.lock`
+  brotli pins, release `opt-level` (the size-vs-speed call is Phase-12), and `removeUnusedCommands` (see
+  backlog).
+- **Gate: `just lint && just test` green.** `cargo fmt` + `clippy --workspace --all-targets -D warnings`
+  clean across all 9 crates; dep-direction guard green (core stays framework-free); UI typecheck / ESLint /
+  Prettier clean; Rust workspace tests + **UI 77/77** pass; vitest re-confirmed green with the modified
+  `vite.config.ts`. The file-size advisory (`facade.rs` 446 / `registry.rs` 404) is **pre-existing**
+  (`plan/06` §7 split roadmap), untouched this pass.
+- **Flagged (pre-existing, not created here, left alone):** `git status` shows an untracked directory
+  `.claude/skills/tauri-performance-optimization\n/` (a stray trailing-newline name). I did not create it
+  and left it untouched — the working skill loaded from the correct path; worth a cleanup look.
+- **Next perf steps (these do NOT disturb the Phase-8 pointer above):** at Phase 12, measure the real
+  `.deb`/`.AppImage` via `just bundle-size`, then decide `opt-level` and code-split the 697 kB frontend
+  chunk (lazy-load xterm/cmdk) using the `just ui-analyze` treemap; at Phase 13 (soak), measure idle
+  RSS/CPU and only then weigh the `/proc` sampler sweep + the PTY 3-copy chunk path (both want the soak
+  number first).
+
 ### Phase 8 session 1 — review-fix pass (2026-06-23, `feat/phase-8-mcp-skeleton`)
 Independent `/soloist-review` of PR #16 returned **fix-then-ship**; every finding + nit applied this session
 and the gate re-run green. No locked decision touched; the read-only tool surface is unchanged in behaviour

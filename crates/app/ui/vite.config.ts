@@ -3,11 +3,25 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { visualizer } from "rollup-plugin-visualizer";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
+// Set ANALYZE=1 (see `just ui-analyze`) to emit dist/bundle-stats.html, a treemap of what
+// fills the frontend bundle. Empty by default, so a normal build stays byte-identical.
+const bundleReport = process.env.ANALYZE
+  ? [
+      visualizer({
+        filename: "dist/bundle-stats.html",
+        template: "treemap",
+        gzipSize: true,
+        brotliSize: true,
+      }),
+    ]
+  : [];
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), ...bundleReport],
   resolve: {
     alias: { "@": path.resolve(dir, "./src") },
   },

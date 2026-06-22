@@ -262,6 +262,33 @@ rotting; this section keeps it small and quick.
   avoid needless clones/allocations in hot paths (the PTY read loop, event fan-out); pool SQLite
   connections; sample metrics on an interval, not per event. **No speculative micro-optimization** that
   costs clarity without evidence — profile, then optimize the proven hot spot.
+- **Doing a performance pass — the workflow (MANDATORY whenever you set out to optimize speed, size,
+  CPU, memory, or responsiveness).** Treat it like any other discipline: process before edits.
+  1. **Skills + valid sources first, never memory.** Invoke the matching Tauri skills *before* you touch
+     anything — `tauri-performance-optimization`, `tauri-binary-size`, `tauri-calling-frontend` /
+     `tauri-ipc` (the Channel/event hot path), `tauri-process-model`, `tauri-configuration`,
+     `tauri-linux-packaging` (§5) — and confirm every API / flag / config against the official docs
+     (`tauri.app/llms.txt`, `code.claude.com/llms.txt`) or `context7` (§4). Do real research from
+     **valid, current sources** for anything the skills/docs don't cover. **No assumption, no
+     fabrication** — an unverified optimization is not an optimization.
+  2. **Measure before you change anything, and after.** Profile the *proven* hot spot first: `just
+     bloat` (cargo-bloat — what fills the Rust binary), `just bundle-size` (the real `.deb` /
+     `.AppImage` + frontend `dist` bytes), the nightly soak (§8) for RSS / FD / task drift, and the
+     webview devtools for frontend repaints. A change with no before/after number is speculative and is
+     rejected. Record the numbers in `PROGRESS.md`; never guess one.
+  3. **Stay inside the architecture and the budget.** Performance lives in **adapters** and the
+     composition root, almost never in the pure `core` (§8); keep the hexagonal layering, the bounded
+     caps, and backpressure intact. Correctness and clarity outrank speed — never weaken a test, a cap,
+     or a typed boundary for a micro-win, and don't pull a `later` / packaging-or-longevity-phase
+     measured decision forward to save time.
+  4. **Locked non-changes — do NOT "optimize" these; they are deliberate (cross-check §3 +
+     `PROGRESS.md` before touching any build/runtime knob).** `panic = "unwind"` stays — the supervisor
+     catches task panics for fault isolation, so `panic = "abort"` would break it; `freezePrototype`
+     stays `false` — `true` breaks xterm.js (blank window); the `Cargo.lock` brotli pins stay; release
+     `opt-level` (size-vs-speed) is a **measured packaging-phase** decision, not a blind flip;
+     `removeUnusedCommands` is only safe once every app command is in the ACL **and** a runtime verify
+     (user-only) confirms the IPC surface still works. When unsure whether a lever is locked, stop and
+     ask (§12) — don't silently change it.
 
 ---
 

@@ -110,8 +110,14 @@ impl RawScrollback {
         self.budget.sub(n);
     }
 
+    /// The scrollback as a contiguous byte vector for verbatim replay. The ring's storage
+    /// may be split in two, so it bulk-copies the halves in order rather than byte by byte.
     fn to_vec(&self) -> Vec<u8> {
-        self.bytes.iter().copied().collect()
+        let (head, tail) = self.bytes.as_slices();
+        let mut out = Vec::with_capacity(head.len() + tail.len());
+        out.extend_from_slice(head);
+        out.extend_from_slice(tail);
+        out
     }
 
     fn is_empty(&self) -> bool {
