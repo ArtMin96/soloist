@@ -42,6 +42,16 @@ impl Agents {
         self.tools.list()
     }
 
+    /// The configured tool with this unique `name`, or `None` if no tool is registered under
+    /// it. The lookup the launch path uses to resolve a picker selection to its definition.
+    pub fn tool(&self, name: &str) -> Result<Option<AgentTool>, StoreError> {
+        Ok(self
+            .tools
+            .list()?
+            .into_iter()
+            .find(|tool| tool.name == name))
+    }
+
     /// Each configured tool paired with whether its CLI appears installed, by probing
     /// `<command> --version`. A [`AgentKind::Generic`] tool is never probed (it is
     /// user-configured) and so reports not-installed. The probes run **off** the async

@@ -5,7 +5,15 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppInfo, DomainEvent, ProcessView, ProjectLoad, ProjectView } from "@/domain";
+import type {
+  AgentTool,
+  AppInfo,
+  DetectedTool,
+  DomainEvent,
+  ProcessView,
+  ProjectLoad,
+  ProjectView,
+} from "@/domain";
 
 const DOMAIN_EVENT = "domain-event";
 
@@ -40,6 +48,24 @@ export function projectLoad(path: string): Promise<ProjectLoad> {
 // model clears the command's blocked state; callers re-read the snapshot to reflect it.
 export function configTrust(project: number, name: string): Promise<void> {
   return invoke<void>("config_trust", { project, name });
+}
+
+// Every configured agent tool, for the launch picker to render instantly (no probing).
+export function agentList(): Promise<AgentTool[]> {
+  return invoke<AgentTool[]>("agent_list");
+}
+
+// Each configured tool paired with whether its CLI appears installed (probes `--version`).
+// Slower than `agentList`, so the picker lists first and fills in detection when this resolves.
+export function agentDetect(): Promise<DetectedTool[]> {
+  return invoke<DetectedTool[]>("agent_detect");
+}
+
+// Launches an agent tool as an interactive Agent process in `project` and starts it,
+// resolving to its process id. `extraArgs` are appended for this one launch ("agent with
+// flags"); pass [] for a plain launch.
+export function agentLaunch(project: number, tool: string, extraArgs: string[]): Promise<number> {
+  return invoke<number>("agent_launch", { project, tool, extraArgs });
 }
 
 export function procStart(id: number): Promise<void> {

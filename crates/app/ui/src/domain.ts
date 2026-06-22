@@ -97,6 +97,40 @@ export interface ProjectView {
   icon: string | null;
 }
 
+// The agent CLI providers Soloist knows out of the box (mirrors core::AgentKind), plus
+// "Generic" for any other CLI the user configures.
+export type AgentKind =
+  | "Claude"
+  | "Codex"
+  | "Amp"
+  | "Gemini"
+  | "OpenCode"
+  | "Copilot"
+  | "Kimi"
+  | "Generic";
+
+// How a Generic tool receives its prompt (mirrors core::PromptMode); ignored for built-in
+// providers, which follow their own conventions.
+export type PromptMode = "Stdin" | "AppendedArg";
+
+// A configured agent tool (mirrors core::AgentTool): a launchable CLI, the args appended on
+// every launch, and its prompt convention. `name` is the unique key and display label.
+export interface AgentTool {
+  name: string;
+  command: string;
+  default_args: string[];
+  kind: AgentKind;
+  prompt_mode: PromptMode;
+}
+
+// A configured tool paired with whether its CLI appears installed (mirrors core::DetectedTool)
+// — the result of `--version` auto-detection. Tools outside the probe set (Copilot, Kimi,
+// Generic) always report installed: false. The picker badges installed tools as launchable.
+export interface DetectedTool {
+  tool: AgentTool;
+  installed: boolean;
+}
+
 // Mirrors the core's `DomainEvent` (serde `tag = "type"`).
 export type DomainEvent =
   | {

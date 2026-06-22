@@ -6,6 +6,7 @@
 //! like "restart" or "is this command trusted" is implemented exactly once. Adapters
 //! translate requests in and project the read model out; they hold no business state.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,11 +22,11 @@ use crate::filewatch::{FileWatcher, WatchReactor};
 use crate::ids::{ProcessId, ProjectId};
 use crate::metrics::{MetricsProbe, MetricsSampler};
 use crate::notify::{NotificationReactor, Notifier};
-use crate::ports::{Clock, CorePorts, StoreError};
+use crate::ports::{Clock, CorePorts, PtySize, SpawnSpec, StoreError};
 use crate::portscan::{self, PortProbe, PortScanner, WaitForPortError};
-use crate::process::ProcessView;
+use crate::process::{ProcessKind, ProcessView};
 use crate::projects::{LoadProjectError, ProjectLoad, ProjectService, ProjectView, Projects};
-use crate::supervisor::Supervisor;
+use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::trust::TrustStore;
 
 /// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot
@@ -258,6 +259,55 @@ impl Facade {
         self.supervisor.mark_trusted(project, &spec.variant_hash());
         Ok(())
     }
+
+    /// Launches a configured agent tool as an interactive **Agent** process in a project's
+    /// directory and starts it (E4). Resolves the tool from the registry and the project's
+    /// working directory, composes the tool's command line with `extra_args` for this one
+    /// launch ("agent with flags"), then registers and starts an ungated
+    /// [`ProcessKind::Agent`] on the real PTY — never headless `-p` — so the CLI's own native
+    /// login can run in the terminal pane. Many agents can run concurrently; each call is a
+    /// new process.
+    ///
+    /// Soloist stores or injects **no** agent credential (E8): the spawn carries no env
+    /// overrides, so the agent inherits Soloist's environment unchanged — `$DISPLAY`/`$BROWSER`
+    /// for a loopback-OAuth browser step and any `ANTHROPIC_*` the user set pass straight
+    /// through, and the CLI keeps using whatever auth the user already configured.
+    ///
+    /// One method behind the Facade, so the UI launch picker now and the MCP `spawn_agent`
+    /// tool later launch agents identically. Must run within a `tokio` runtime (starting
+    /// spawns the actor).
+    pub fn launch_agent(
+        &self,
+        project: ProjectId,
+        tool: &str,
+        extra_args: Vec<String>,
+    ) -> Result<ProcessId, LaunchAgentError> {
+        let tool = self
+            .agents
+            .tool(tool)?
+            .ok_or(LaunchAgentError::UnknownTool)?;
+        let root = self
+            .projects
+            .get(project)?
+            .ok_or(LaunchAgentError::UnknownProject)?
+            .root;
+        let spec = SpawnSpec {
+            command: tool.launch_command_line(&extra_args),
+            working_dir: root,
+            // No env overrides: the agent inherits Soloist's environment as-is so its own
+            // native auth flow works untouched (E8). Soloist injects no credential.
+            env: BTreeMap::new(),
+            size: PtySize::default(),
+        };
+        let id = self.supervisor.register(Registration::launched(
+            project,
+            ProcessKind::Agent,
+            tool.name,
+            spec,
+        ));
+        self.supervisor.start(id)?;
+        Ok(id)
+    }
 }
 
 /// Why trusting a command failed: it is not in the loaded config, or the durable trust
@@ -268,6 +318,20 @@ pub enum TrustCommandError {
     NotFound,
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+/// Why launching an agent failed: no tool is registered under that name, the project is not
+/// known, a durable read failed, or the supervisor refused to start the process.
+#[derive(Debug, thiserror::Error)]
+pub enum LaunchAgentError {
+    #[error("no agent tool registered under that name")]
+    UnknownTool,
+    #[error("no such project")]
+    UnknownProject,
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error(transparent)]
+    Supervisor(#[from] SupervisorError),
 }
 
 #[cfg(test)]
@@ -433,6 +497,75 @@ mod tests {
         assert!(matches!(
             facade.trust_command(project.id, "Missing"),
             Err(TrustCommandError::NotFound)
+        ));
+    }
+
+    /// A façade seeded with the built-in agent tools (so `"Claude"` resolves) over an
+    /// in-memory project repo, for the agent-launch path.
+    fn facade_with_tools(spawner: FakeSpawner) -> Facade {
+        use crate::agents::AgentTool;
+        use crate::testing::FakeAgentToolRepo;
+        Facade::new(
+            CorePorts::builder(
+                Arc::new(spawner),
+                Arc::new(TokioClock),
+                Arc::new(FakeTrustRepo::new()),
+                Arc::new(FakeProjectRepo::new()),
+            )
+            .agent_tools(Arc::new(FakeAgentToolRepo::new(
+                AgentTool::builtin_defaults(),
+            )))
+            .build(),
+        )
+    }
+
+    #[tokio::test]
+    async fn launch_agent_registers_and_starts_an_agent_in_the_project() {
+        use crate::process::ProcessKind;
+
+        let facade = facade_with_tools(FakeSpawner::exits_on_terminate());
+        let mut rx = facade.subscribe();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let project = facade.load_project(dir.path()).expect("load");
+
+        let id = facade
+            .launch_agent(project.id, "Claude", Vec::new())
+            .expect("launch");
+
+        // It appears as an ungated Agent-kind process labelled by the tool, and starts.
+        let view = facade
+            .snapshot()
+            .into_iter()
+            .find(|p| p.id == id)
+            .expect("launched agent in snapshot");
+        assert_eq!(view.kind, ProcessKind::Agent);
+        assert_eq!(view.label, "Claude");
+        assert!(
+            !view.requires_trust,
+            "a launched agent is never trust-gated"
+        );
+        wait_for(&mut rx, ProcStatus::Running).await;
+    }
+
+    #[tokio::test]
+    async fn launch_agent_rejects_an_unknown_tool() {
+        let facade = facade_with_tools(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        let project = facade.load_project(dir.path()).expect("load");
+
+        assert!(matches!(
+            facade.launch_agent(project.id, "Nonexistent", Vec::new()),
+            Err(LaunchAgentError::UnknownTool)
+        ));
+    }
+
+    #[tokio::test]
+    async fn launch_agent_rejects_an_unknown_project() {
+        let facade = facade_with_tools(FakeSpawner::exits_on_terminate());
+
+        assert!(matches!(
+            facade.launch_agent(ProjectId::from_raw(9999), "Claude", Vec::new()),
+            Err(LaunchAgentError::UnknownProject)
         ));
     }
 }
