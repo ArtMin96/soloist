@@ -240,6 +240,36 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Review fixes on the Phase-7 PR — flaky reactor tests + discipline nits (2026-06-22, `feat/phase-7-agent-tools`)
+- **Independent review of PR #13 (this branch); the agreed fixes applied. No feature behaviour changed —
+  the agent-tool slice's code is untouched; the fixes are test-stability + discipline.**
+- **Flaky filewatch/notify reactor tests fixed at the root (the headline).** Under full-workspace parallel
+  load the `filewatch::reactor::tests` (and the same-pattern `notify::reactor::tests`) intermittently failed
+  (reproduced **7/40** under CPU load, all at the `start_running` helper). Cause: the helpers waited for an
+  async effect via a **fixed `yield_now` budget** — fine for cooperative effects, but the supervisor actor's
+  path to `Running` depends on blocking work, so a yield budget can exhaust before it completes. The file's
+  docstring also falsely claimed the waits were "deterministic on the mock clock." Fix: the generic
+  event-stream waiters (`next_change`/`next_to`/`wait_all` + a new `next_matching`) moved out of
+  `supervisor/test_support.rs` into **`core::testing` as the one source** (re-exported there for the
+  supervisor's existing callers, so they are unchanged); the filewatch/notify suites now **await** the real
+  signal — `wait_all` for a status transition, `FakeFileWatcher::established()` (new `Notify`) for a watch,
+  `RecordingNotifier::wait_until_shown` (new `Notify`) for a toast, `next_matching` for a `FileRestart` —
+  instead of polling. Cooperative clock-advance retry loops (the debounce window, negative assertions) stay,
+  since the reactor's arming is purely cooperative. Docstrings corrected. **Pre-existing** (the suites are
+  Phase-6 code; not introduced by this PR), but they made the gate non-deterministic.
+- **Discipline nits applied.** New `crates/store/src/agents.rs` tests moved to a sibling
+  `agents_tests.rs` (the 2026-06-20 separate-file directive; matches the core half of this PR).
+  `AgentTool` doc now records the persisted-JSON **field-evolution rule** (`#[serde(default)]`/migration for
+  any later field). `plan/05 §6` now cites the **Copilot/Kimi CLI-command grounding** (`copilot`/`kimi`,
+  web-sourced) so the clean-room trail is complete. This `idle.rs` ledger line corrected (no such file
+  exists yet). **Still deferred to E4 (noted, not defects):** `prompt_mode`/`default_args` are persisted but
+  unconsumed until launch lands, so E3's "defaults applied on launch" is not yet verifiable; the per-tool
+  "tool-type mode (auto-detect/manual)" field (in `plan/05`/phase-07 Task 1, not in matrix E3) is deferred
+  to the editing/launch slice.
+- **Gate after fixes:** `just lint` + `just test` green; the flaky suites re-run under CPU load (40×) with
+  zero failures. Counts unchanged (core 170 / store 15 / sys 15 / pty 9 +3 ignored / UI 60) — refactors and
+  a test-file move, no tests added or removed.
+
 ### Phase 7 begins — agent-tool registry + `--version` auto-detection (E1/E2/E3) (2026-06-22, `feat/phase-7-agent-tools`)
 - **Phase pivot (user directive).** The user directed **Phase 7** while Phase 6 stays **Done — pending
   verify** (its only gap is the user-only runtime acceptance walk, not code). Proceeding on Phase 7 per
@@ -253,8 +283,8 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 - **C4 built to the newer-domain bar (the R7 target), not the old shared-`ports/` shape.** The flat
   `agents.rs` placeholder became a `core/agents/` module folder that **owns its own driven ports**
   (`AgentToolRepo`, `VersionProbe` + their `Noop`s) — mirroring `notify`/`metrics`/`portscan`/`filewatch`
-  rather than adding to the `ports/mod.rs` god-file. `idle.rs` stays a C4 placeholder (the idle FSM is a
-  later slice).
+  rather than adding to the `ports/mod.rs` god-file. The 5-state idle FSM is a later slice — no module
+  exists for it yet (the `agents/` folder is `mod.rs`/`tool.rs`/`repo.rs`/`detect.rs`; idle lands when built).
 - **Persisted shape = the domain type's own JSON (single source).** The store keys `agent_tools` by `name`
   and stores each tool's `serde_json` as the `definition` column (+ `position` for order), so the durable
   encoding cannot drift from `AgentTool`; no per-column mapping, no magic strings. Migration **v3** seeds the
