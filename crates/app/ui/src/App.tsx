@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { AgentPicker } from "@/components/AgentPicker";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { OrphanDialog } from "@/components/OrphanDialog";
@@ -6,6 +7,7 @@ import { Sidebar } from "@/components/sidebar/Sidebar";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
 import { Toolbar } from "@/components/Toolbar";
 import { TrustDialog } from "@/components/TrustDialog";
+import { useAgents } from "@/store/useAgents";
 import { useAppInfo } from "@/store/useAppInfo";
 import { useOrphans } from "@/store/useOrphans";
 import { useProcesses } from "@/store/useProcesses";
@@ -22,7 +24,9 @@ export default function App() {
   const projects = useProjects(store.reportError);
   const trust = useTrust(store.refresh, store.reportError);
   const orphans = useOrphans();
+  const agents = useAgents(store.reportError);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const selected = store.processes.find((process) => process.id === selectedId) ?? null;
 
@@ -35,6 +39,35 @@ export default function App() {
     [store.processes, trust],
   );
 
+  // Open the launch picker, refreshing the tool list each time so detection is current.
+  const { reload: reloadAgents, launch: launchAgent } = agents;
+  const openPicker = useCallback(() => {
+    reloadAgents();
+    setPickerOpen(true);
+  }, [reloadAgents]);
+
+  // Cmd/Ctrl+T opens the picker from anywhere — the keyboard-first launch path.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        openPicker();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openPicker]);
+
+  // Launch an agent and focus its new terminal, so the user lands on the running agent.
+  const onLaunchAgent = useCallback(
+    (project: number, tool: string, extraArgs: string[]) => {
+      void launchAgent(project, tool, extraArgs).then((id) => {
+        if (id !== null) setSelectedId(id);
+      });
+    },
+    [launchAgent],
+  );
+
   return (
     <SignalsProvider>
       <div className="flex h-screen flex-col bg-background text-foreground">
@@ -42,6 +75,7 @@ export default function App() {
           appName={info?.name ?? "Soloist"}
           appVersion={info?.version}
           onOpenProject={projects.open}
+          onLaunchAgent={openPicker}
         />
         {store.error && <ErrorBanner message={store.error} onDismiss={store.clearError} />}
         <div className="flex min-h-0 flex-1">
@@ -90,6 +124,14 @@ export default function App() {
           }}
           onTrustAll={trust.trustAll}
           onDismiss={trust.dismiss}
+        />
+        <AgentPicker
+          open={pickerOpen}
+          onOpenChange={setPickerOpen}
+          tools={agents.tools}
+          projects={projects.projects}
+          activeProjectId={selected?.project ?? null}
+          onLaunch={onLaunchAgent}
         />
       </div>
     </SignalsProvider>

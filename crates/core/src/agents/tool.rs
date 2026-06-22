@@ -67,6 +67,24 @@ pub struct AgentTool {
 }
 
 impl AgentTool {
+    /// The shell command line that launches this tool with `extra_args` for one launch:
+    /// the command, then the default args (appended on every launch), then the per-launch
+    /// extra args, in that order. Each token is POSIX-quoted so it survives the login shell
+    /// (`$SHELL -lc <line>`) as exactly one argument — an arg with spaces or shell
+    /// metacharacters stays a single argument rather than being word-split.
+    ///
+    /// This is the single source for how a tool's command line is composed; the supervisor
+    /// runs the returned line verbatim through the login shell, so PATH and version managers
+    /// still resolve.
+    pub fn launch_command_line(&self, extra_args: &[String]) -> String {
+        std::iter::once(&self.command)
+            .chain(self.default_args.iter())
+            .chain(extra_args.iter())
+            .map(|token| shell_quote(token))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// The built-in agent providers Soloist seeds into the registry on first run. Each
     /// `command` is the provider's conventional CLI name, and default args are empty until
     /// the user adds flags. The first five are the providers Solo documents auto-detecting
@@ -92,6 +110,36 @@ impl AgentTool {
         })
         .collect()
     }
+}
+
+/// Quotes one token for a POSIX shell so it is passed through `$SHELL -lc` as exactly one
+/// argument. A token of only shell-safe characters is returned bare (readable command lines
+/// for ordinary flags); anything else is wrapped in single quotes, with any embedded single
+/// quote rendered as `'\''` (close quote, escaped quote, reopen) — the standard safe form.
+fn shell_quote(token: &str) -> String {
+    /// Characters safe to leave unquoted in a POSIX shell word.
+    fn is_safe(ch: char) -> bool {
+        ch.is_ascii_alphanumeric()
+            || matches!(
+                ch,
+                '%' | '+' | ',' | '-' | '.' | '/' | ':' | '=' | '@' | '_'
+            )
+    }
+
+    if !token.is_empty() && token.chars().all(is_safe) {
+        return token.to_string();
+    }
+    let mut quoted = String::with_capacity(token.len() + 2);
+    quoted.push('\'');
+    for ch in token.chars() {
+        if ch == '\'' {
+            quoted.push_str("'\\''");
+        } else {
+            quoted.push(ch);
+        }
+    }
+    quoted.push('\'');
+    quoted
 }
 
 #[cfg(test)]

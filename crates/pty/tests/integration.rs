@@ -285,6 +285,83 @@ async fn facade_runs_the_full_thread_with_real_spawner_and_clock() {
     assert_eq!(status, Some(ProcStatus::Stopped));
 }
 
+#[tokio::test]
+async fn launch_agent_runs_a_stub_in_the_project_dir_inheriting_the_environment() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use soloist_core::testing::{FakeAgentToolRepo, FakeProjectRepo, FakeTrustRepo};
+    use soloist_core::{AgentKind, AgentTool, ProcessKind, PromptMode};
+
+    // A stub "agent" that records its working dir and inherited $HOME, then exits. It writes
+    // *relative* to its cwd, so the file landing under the project root proves it ran in the
+    // project directory; $HOME proves it inherited Soloist's environment unchanged (E8) — a
+    // login shell never resets HOME, so the child's value is the parent's.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let script = dir.path().join("stub-agent.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nprintf 'CWD=%s\\nHOME=%s\\nREADY\\n' \"$(pwd)\" \"$HOME\" > agent-output.txt\n",
+    )
+    .expect("write stub agent");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod stub");
+
+    let stub = AgentTool {
+        name: "Stub".into(),
+        command: script.to_string_lossy().into_owned(),
+        default_args: Vec::new(),
+        kind: AgentKind::Generic,
+        prompt_mode: PromptMode::AppendedArg,
+    };
+
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(PtyProcessSpawner),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .agent_tools(Arc::new(FakeAgentToolRepo::new(vec![stub])))
+        .build(),
+    );
+    let mut events = facade.subscribe();
+    let project = facade
+        .projects()
+        .add(dir.path(), None, None)
+        .expect("register the project");
+
+    let id = facade
+        .launch_agent(project.id, "Stub", Vec::new())
+        .expect("launch the stub agent");
+
+    // It is an Agent-kind process (Phase 3 subtype), and it runs then exits cleanly.
+    let kind = facade
+        .snapshot()
+        .into_iter()
+        .find(|view| view.id == id)
+        .map(|view| view.kind);
+    assert_eq!(
+        kind,
+        Some(ProcessKind::Agent),
+        "a launched agent is Agent-kind"
+    );
+    wait_for_status(&mut events, ProcStatus::Running).await;
+    wait_for_status(&mut events, ProcStatus::Stopped).await;
+
+    // The output file is read from the canonical project root the launch resolved, so its
+    // presence proves the agent's working directory was the project dir.
+    let output = std::fs::read_to_string(project.root.join("agent-output.txt"))
+        .expect("the stub wrote its output inside the project dir");
+    assert!(
+        output.contains("READY"),
+        "the stub ran to completion: {output:?}"
+    );
+    let home = std::env::var("HOME").expect("HOME is set in the test environment");
+    assert!(
+        output.contains(&format!("HOME={home}")),
+        "the agent inherits Soloist's environment unchanged (E8): {output:?}"
+    );
+}
+
 async fn wait_for_status(events: &mut Receiver<DomainEvent>, target: ProcStatus) {
     let found = timeout(Duration::from_secs(10), async {
         loop {

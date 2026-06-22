@@ -55,7 +55,7 @@ pub use config::{
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
-pub use facade::{Facade, TrustCommandError};
+pub use facade::{Facade, LaunchAgentError, TrustCommandError};
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use ids::{ProcessId, ProjectId};

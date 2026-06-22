@@ -10,7 +10,9 @@
 
 use std::path::Path;
 
-use soloist_core::{Facade, ProcessId, ProcessView, ProjectId, ProjectLoad, ProjectView};
+use soloist_core::{
+    AgentTool, DetectedTool, Facade, ProcessId, ProcessView, ProjectId, ProjectLoad, ProjectView,
+};
 use tauri::ipc::Channel;
 use tauri::State;
 use tokio::sync::broadcast::error::RecvError;
@@ -54,6 +56,41 @@ pub async fn config_trust(
 ) -> Result<(), String> {
     facade
         .trust_command(ProjectId::from_raw(project), &name)
+        .map_err(|err| err.to_string())
+}
+
+/// Every configured agent tool, for the launch picker to render instantly (no probing).
+#[tauri::command]
+pub async fn agent_list(facade: State<'_, Facade>) -> Result<Vec<AgentTool>, String> {
+    facade.agents().list_tools().map_err(|err| err.to_string())
+}
+
+/// Each configured agent tool paired with whether its CLI appears installed, by probing
+/// `<command> --version` off the runtime. The picker badges installed tools; this is slower
+/// than [`agent_list`], so the UI lists first and fills in detection when this resolves.
+#[tauri::command]
+pub async fn agent_detect(facade: State<'_, Facade>) -> Result<Vec<DetectedTool>, String> {
+    facade
+        .agents()
+        .detect_installed()
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Launches an agent tool as an interactive Agent process in a project and starts it,
+/// returning its process id. `extra_args` are appended for this one launch ("agent with
+/// flags"). Routes to the one core launch behaviour, which runs the agent on a real PTY and
+/// passes the environment through so the CLI's own native login works (E4/E8).
+#[tauri::command]
+pub async fn agent_launch(
+    project: u64,
+    tool: String,
+    extra_args: Vec<String>,
+    facade: State<'_, Facade>,
+) -> Result<u64, String> {
+    facade
+        .launch_agent(ProjectId::from_raw(project), &tool, extra_args)
+        .map(|id| id.get())
         .map_err(|err| err.to_string())
 }
 
