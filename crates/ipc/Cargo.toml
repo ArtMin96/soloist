@@ -10,3 +10,12 @@ repository.workspace = true
 
 [dependencies]
 soloist-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# Only the async read/write traits are needed; the adapters create the Unix sockets.
+tokio = { version = "1", default-features = false, features = ["io-util"] }
+
+[dev-dependencies]
+# The framing tests drive an in-memory duplex pipe under a small runtime.
+tokio = { version = "1", default-features = false, features = ["io-util", "macros", "rt"] }

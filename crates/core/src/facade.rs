@@ -19,7 +19,8 @@ use crate::agents::{Agents, IdleSampler, IdleTracker};
 use crate::config::ConfigEngine;
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::{FileWatcher, WatchReactor};
-use crate::ids::{ProcessId, ProjectId};
+use crate::identity::{Identity, IdentityError, Whoami};
+use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::metrics::{MetricsProbe, MetricsSampler};
 use crate::notify::{NotificationReactor, Notifier};
 use crate::ports::{Clock, CorePorts, PtySize, SpawnSpec, StoreError};
@@ -48,6 +49,7 @@ pub struct Facade {
     config: ConfigEngine,
     agents: Agents,
     idle: Arc<IdleTracker>,
+    identity: Identity,
 }
 
 impl Facade {
@@ -83,6 +85,7 @@ impl Facade {
             config: ConfigEngine::new(trust, bus.clone()),
             agents: Agents::new(agent_tools, version_probe),
             idle: Arc::new(IdleTracker::new()),
+            identity: Identity::new(),
             bus,
         }
     }
@@ -328,6 +331,85 @@ impl Facade {
         // interval using its provider's heuristic.
         self.idle.track(id, kind);
         Ok(id)
+    }
+
+    /// Opens an identity session for a new MCP connection (C8). The IPC server holds the
+    /// returned [`SessionId`] for the life of the connection and passes it on every call,
+    /// so each tool acts under the right identity and project scope.
+    pub fn open_session(&self) -> SessionId {
+        self.identity.open()
+    }
+
+    /// Closes an identity session when its connection ends, dropping its state.
+    pub fn close_session(&self, session: SessionId) {
+        self.identity.close(session);
+    }
+
+    /// Binds a session to the supervised process it runs in — the process whose
+    /// [`PROCESS_ID_ENV`](crate::identity::PROCESS_ID_ENV) the agent's MCP client read.
+    /// Fails if no such process is registered.
+    pub fn bind_session_process(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+    ) -> Result<(), IdentityError> {
+        if self.supervisor.label_of(process).is_none() {
+            return Err(IdentityError::UnknownProcess);
+        }
+        self.identity.bind_process(session, process);
+        Ok(())
+    }
+
+    /// Registers an external caller (one with no Soloist-supervised process) under a
+    /// label, so `whoami` can report who it is.
+    pub fn register_agent(&self, session: SessionId, label: String) {
+        self.identity.register_external(session, label);
+    }
+
+    /// Sets a session's effective project scope explicitly. Fails if the project is not
+    /// loaded.
+    pub fn select_project(
+        &self,
+        session: SessionId,
+        project: ProjectId,
+    ) -> Result<(), IdentityError> {
+        if self.projects.get(project)?.is_none() {
+            return Err(IdentityError::UnknownProject);
+        }
+        self.identity.select_project(session, project);
+        Ok(())
+    }
+
+    /// Resolves who a session is and the project its scoped tools act on (the answer to
+    /// the `whoami` tool).
+    pub fn whoami(&self, session: SessionId) -> Whoami {
+        let origin = self.identity.origin(session);
+        Whoami {
+            session,
+            bound_process: origin.process(),
+            effective_project: self.effective_project(session),
+            origin,
+        }
+    }
+
+    /// The project a session's scoped tools act on: its explicit selection, else the
+    /// project owning its bound process, else the sole loaded project when there is
+    /// exactly one — otherwise `None` (ambiguous; a scoped tool must ask the caller to
+    /// `select_project`). Best-effort: a store read error resolves to `None` rather than
+    /// failing `whoami`.
+    pub(crate) fn effective_project(&self, session: SessionId) -> Option<ProjectId> {
+        if let Some(project) = self.identity.selected_project(session) {
+            return Some(project);
+        }
+        if let Some(process) = self.identity.origin(session).process() {
+            if let Some(view) = self.snapshot().into_iter().find(|v| v.id == process) {
+                return Some(view.project);
+            }
+        }
+        match self.projects.list() {
+            Ok(projects) if projects.len() == 1 => projects.first().map(|record| record.id),
+            _ => None,
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::identity::Origin;
 use crate::ids::ProjectId;
 use crate::ports::{TokioClock, TrustRepo};
 use crate::process::ProcStatus;
@@ -228,5 +229,87 @@ async fn launch_agent_rejects_an_unknown_project() {
     assert!(matches!(
         facade.launch_agent(ProjectId::from_raw(9999), "Claude", Vec::new()),
         Err(LaunchAgentError::UnknownProject)
+    ));
+}
+
+#[tokio::test]
+async fn whoami_of_a_fresh_session_is_unbound_and_unscoped() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let session = facade.open_session();
+
+    let who = facade.whoami(session);
+    assert_eq!(who.session, session);
+    assert_eq!(who.origin, Origin::Unbound);
+    assert_eq!(who.bound_process, None);
+    // No project loaded and nothing bound: the scope cannot be resolved.
+    assert_eq!(who.effective_project, None);
+}
+
+#[tokio::test]
+async fn binding_scopes_a_session_to_its_process_project() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let mut rx = facade.subscribe();
+    let project = ProjectId::from_raw(1);
+    let id = facade
+        .supervisor()
+        .register(terminal_registration(project, "term", "sleep 60"));
+    facade
+        .supervisor()
+        .start(id)
+        .expect("ungated terminal starts");
+    wait_for(&mut rx, ProcStatus::Running).await;
+
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, id)
+        .expect("bind to the running process");
+
+    let who = facade.whoami(session);
+    assert_eq!(who.origin, Origin::Process(id));
+    assert_eq!(who.bound_process, Some(id));
+    // The effective project is inferred from the bound process (nothing was selected).
+    assert_eq!(who.effective_project, Some(project));
+}
+
+#[tokio::test]
+async fn binding_an_unknown_process_is_rejected() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let session = facade.open_session();
+    assert!(matches!(
+        facade.bind_session_process(session, ProcessId::from_raw(999)),
+        Err(IdentityError::UnknownProcess)
+    ));
+}
+
+#[tokio::test]
+async fn a_lone_loaded_project_is_the_default_scope() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load");
+
+    // With exactly one project and no explicit selection, it is the effective scope.
+    let session = facade.open_session();
+    assert_eq!(facade.whoami(session).effective_project, Some(project.id));
+}
+
+#[tokio::test]
+async fn scope_is_ambiguous_with_several_projects_until_one_is_selected() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let dir_a = tempfile::tempdir().expect("dir a");
+    let dir_b = tempfile::tempdir().expect("dir b");
+    let a = facade.load_project(dir_a.path()).expect("load a");
+    let b = facade.load_project(dir_b.path()).expect("load b");
+    assert_ne!(a.id, b.id);
+    let session = facade.open_session();
+
+    // Two projects, nothing bound or selected: the scope cannot be inferred.
+    assert_eq!(facade.whoami(session).effective_project, None);
+
+    // Selecting one resolves it; an unknown project is rejected.
+    facade.select_project(session, b.id).expect("select b");
+    assert_eq!(facade.whoami(session).effective_project, Some(b.id));
+    assert!(matches!(
+        facade.select_project(session, ProjectId::from_raw(9999)),
+        Err(IdentityError::UnknownProject)
     ));
 }

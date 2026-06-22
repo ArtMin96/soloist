@@ -47,13 +47,13 @@ builds and runs" (§8).
 | Crate | Kind | Owns | May depend on | Status |
 |-------|------|------|---------------|--------|
 | `core` | domain | C1–C8, ports (traits), domain types, event bus | `tokio`/`serde`/`thiserror`/`vte`/etc. — **never** an adapter crate | live (C1–C3 + C8) |
-| `store` | driven adapter | SQLite impl of `Store`/`ProjectRepo`/`TrustRepo`/`RuntimeState` + migrations | `core`, `rusqlite` | live |
+| `store` | driven adapter | SQLite impl of `Store`/`ProjectRepo`/`TrustRepo`/`RuntimeState` + migrations | `core`, `ipc`, `rusqlite` | live |
 | `pty` | driven adapter | `ProcessSpawner`/`PtyIo`/`ProcessControl`/`OrphanControl` over `portable-pty`+`nix` | `core`, `portable-pty`, `nix` | live |
 | `app` | driving adapter + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `httpapi`, `tauri` | live |
-| `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | stub → P8 |
+| `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | live (P8 skeleton) |
 | `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | stub → P10 |
 | `cli` | driving adapter | `soloist` CLI = thin HTTP client | `ipc`, `clap` (not `core` directly) | stub → P10 |
-| `ipc` | shared contract | app↔mcp UDS transport + request/reply message types | `serde` only | stub → P8 |
+| `ipc` | shared contract | app↔mcp UDS framing + request/reply types + the data-dir/socket path | `core`, `serde`, `tokio` | live (P8) |
 
 **Rules that keep this from rotting:**
 - A new *external integration* (a new way to drive or be driven) is a **new crate or an existing adapter
@@ -61,8 +61,12 @@ builds and runs" (§8).
 - An adapter crate holds **no business state and no business decisions** — it translates a wire format to a
   `Facade` call and a read-model back. If you're writing an `if` about *domain* meaning in an adapter,
   it belongs in a context.
-- `cli` talks to `httpapi` over the wire (it is a *client*), so it depends on `ipc` types, **not** `core`.
-  This is deliberate: the CLI is process-isolated from the engine (`05` §8).
+- `cli` talks to `httpapi` over the wire (it is a *client*), so it depends on the shared `ipc` types, not on
+  the engine. The CLI is process-isolated from the engine at runtime (`05` §8). Note the `ipc` wire types
+  **reuse `core`'s domain types** (ids, `ProcessView`) so the wire shape stays single-source rather than a
+  parallel set of DTOs that could drift — so `ipc`, and thus the CLI, links `core`'s *types* (not its
+  running engine). If the CLI's binary size becomes a concern in Phase 10, split `ipc` into a types-only
+  crate vs a transport crate then; until measured, the single-source win takes precedence.
 
 ---
 

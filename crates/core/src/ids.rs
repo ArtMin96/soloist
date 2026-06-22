@@ -56,6 +56,12 @@ id_newtype!(
     /// Identifies a managed process within a run.
     ProcessId
 );
+id_newtype!(
+    /// Identifies one MCP client session — one connection to the IPC server — within a
+    /// run. Minted per connection; the bound process and selected project that scope a
+    /// session's tool calls are keyed by it.
+    SessionId
+);
 
 #[cfg(test)]
 mod tests {

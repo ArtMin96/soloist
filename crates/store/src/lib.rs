@@ -82,23 +82,11 @@ fn configure(conn: &Connection) -> Result<(), StoreError> {
     migrate::migrate(conn)
 }
 
-/// Resolves the app data directory: `SOLOIST_APP_DATA_DIR`, else `$XDG_DATA_HOME/soloist`,
-/// else `$HOME/.local/share/soloist`.
+/// Resolves the app data directory (`SOLOIST_APP_DATA_DIR`, else `$XDG_DATA_HOME/soloist`,
+/// else `$HOME/.local/share/soloist`). Delegates to the one resolution in [`soloist_ipc`]
+/// so the store's database and the IPC socket always live in the same directory.
 pub fn data_dir() -> Result<PathBuf, StoreError> {
-    if let Some(dir) = std::env::var_os("SOLOIST_APP_DATA_DIR") {
-        return Ok(PathBuf::from(dir));
-    }
-    if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
-        if !xdg.is_empty() {
-            return Ok(PathBuf::from(xdg).join("soloist"));
-        }
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        return Ok(PathBuf::from(home).join(".local/share/soloist"));
-    }
-    Err(StoreError::Backend(
-        "cannot resolve data directory: neither SOLOIST_APP_DATA_DIR nor HOME is set".into(),
-    ))
+    soloist_ipc::data_dir().map_err(|err| StoreError::Backend(err.to_string()))
 }
 
 pub(crate) fn sql_err(err: rusqlite::Error) -> StoreError {

@@ -6,6 +6,8 @@
 //! `DomainEvent` stream to the webview as Tauri events. The UI renders the read model.
 
 mod commands;
+#[cfg(feature = "mcp")]
+mod ipc_server;
 mod notifier;
 mod pty_bridge;
 
@@ -142,6 +144,11 @@ pub fn run() {
             // open. It reloads a running watched command when a matching file changes via the
             // notify watcher wired in `build_facade` (weakly held, ends when the bus closes).
             tauri::async_runtime::spawn(app.state::<Facade>().file_watch_loop());
+            // Start the local IPC server so the soloist-mcp sidecar can drive the core over
+            // a Unix socket. Compiled in only under the `mcp` feature; it degrades to a
+            // logged no-op if the socket cannot be bound, never blocking app launch.
+            #[cfg(feature = "mcp")]
+            tauri::async_runtime::spawn(ipc_server::serve(app.handle().clone()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
