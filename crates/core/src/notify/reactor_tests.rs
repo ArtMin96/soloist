@@ -9,6 +9,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::agents::AgentActivity;
 use crate::config::ProcessSpec;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
@@ -118,6 +119,55 @@ async fn an_exhausted_auto_restart_shows_a_toast() {
 
     let shown = s.notifier.wait_until_shown(1).await;
     assert_eq!(shown[0].title, "Worker stopped");
+}
+
+#[tokio::test]
+async fn an_agent_awaiting_permission_shows_a_toast() {
+    let s = setup();
+    let agent = register(&s, "Claude");
+    spawn_reactor(&s);
+
+    s.bus.publish(DomainEvent::AgentActivityChanged {
+        id: agent,
+        state: AgentActivity::Permission,
+    });
+
+    let shown = s.notifier.wait_until_shown(1).await;
+    assert_eq!(shown[0].title, "Claude needs your input");
+}
+
+#[tokio::test]
+async fn an_agent_error_shows_a_toast() {
+    let s = setup();
+    let agent = register(&s, "Gemini");
+    spawn_reactor(&s);
+
+    s.bus.publish(DomainEvent::AgentActivityChanged {
+        id: agent,
+        state: AgentActivity::Error,
+    });
+
+    let shown = s.notifier.wait_until_shown(1).await;
+    assert_eq!(shown[0].title, "Gemini hit an error");
+}
+
+#[tokio::test]
+async fn a_busy_agent_shows_nothing() {
+    let s = setup();
+    let agent = register(&s, "Claude");
+    spawn_reactor(&s);
+
+    // Working/Idle/Thinking are not attention states — only Permission and Error toast.
+    s.bus.publish(DomainEvent::AgentActivityChanged {
+        id: agent,
+        state: AgentActivity::Working,
+    });
+    yield_many().await;
+
+    assert!(
+        s.notifier.shown().is_empty(),
+        "an agent working warrants no notification",
+    );
 }
 
 #[tokio::test]

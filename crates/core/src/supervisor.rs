@@ -35,7 +35,7 @@ use crate::ports::{
     SpawnSpec, Spawned, StoreError, TrustRepo,
 };
 use crate::process::{ProcStatus, ProcessView, Readiness};
-use crate::terminal::{PtyChunk, PtyInput, RenderedScreen, Terminals};
+use crate::terminal::{PtyChunk, PtyInput, RenderedScreen, TerminalActivity, Terminals};
 
 use actor::{ActorMsg, ActorPorts, OrphanIdentity};
 use registry::{ActorHandle, Registry};
@@ -270,6 +270,13 @@ impl Supervisor {
     /// `None` if the process has never been started.
     pub fn rendered(&self, id: ProcessId) -> Option<RenderedScreen> {
         self.terminals.rendered(id)
+    }
+
+    /// A process's terminal liveness snapshot (output counter, latest title, rendered
+    /// tail), read each sample by the agent idle classifier (C4). `None` if the process
+    /// has never been started.
+    pub fn terminal_activity(&self, id: ProcessId) -> Option<TerminalActivity> {
+        self.terminals.activity(id)
     }
 
     /// Writes bytes (typed text or raw control sequences) to a running process's PTY.

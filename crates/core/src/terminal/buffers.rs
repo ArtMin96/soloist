@@ -138,6 +138,13 @@ pub(crate) struct TerminalBuffers {
     line: Vec<char>,
     cursor: usize,
     parser: Parser,
+    /// A monotonic count of bytes ever ingested — the cheap output-activity signal the
+    /// idle classifier polls (it compares successive values, so the absolute value and a
+    /// relaunch reusing these buffers are both fine).
+    output_seq: u64,
+    /// The most recent OSC terminal title the process set — the signal the title-based
+    /// idle heuristics read.
+    last_title: Option<String>,
 }
 
 impl Default for TerminalBuffers {
@@ -161,6 +168,8 @@ impl TerminalBuffers {
             line: Vec::new(),
             cursor: 0,
             parser: Parser::new(),
+            output_seq: 0,
+            last_title: None,
         }
     }
 
@@ -175,21 +184,44 @@ impl TerminalBuffers {
     /// bytes verbatim; the rendered line model advances over the same bytes.
     pub(crate) fn ingest(&mut self, data: &[u8]) -> Vec<TerminalSignal> {
         self.raw.extend(data);
-        let Self {
-            log,
-            line,
-            cursor,
-            parser,
-            ..
-        } = self;
-        let mut renderer = Renderer {
-            line,
-            cursor,
-            log,
-            signals: Vec::new(),
+        self.output_seq = self.output_seq.saturating_add(data.len() as u64);
+        let signals = {
+            let Self {
+                log,
+                line,
+                cursor,
+                parser,
+                ..
+            } = self;
+            let mut renderer = Renderer {
+                line,
+                cursor,
+                log,
+                signals: Vec::new(),
+            };
+            parser.advance(&mut renderer, data);
+            renderer.signals
         };
-        parser.advance(&mut renderer, data);
-        renderer.signals
+        // Retain the latest title so a poll can read it without replaying the stream.
+        if let Some(title) = signals.iter().rev().find_map(|signal| match signal {
+            TerminalSignal::Title(title) => Some(title.clone()),
+            TerminalSignal::Bell => None,
+        }) {
+            self.last_title = Some(title);
+        }
+        signals
+    }
+
+    /// A monotonic byte count of all output ingested over this process's life — the
+    /// output-activity signal the idle classifier compares between samples.
+    pub(crate) fn output_seq(&self) -> u64 {
+        self.output_seq
+    }
+
+    /// The most recent OSC terminal title set, if any — read by the title-based idle
+    /// heuristics.
+    pub(crate) fn last_title(&self) -> Option<String> {
+        self.last_title.clone()
     }
 
     /// The raw byte scrollback, for verbatim replay to a terminal emulator on attach.

@@ -127,6 +127,9 @@ pub fn run() {
             // Start the port scanner: it discovers each running group's listening ports and
             // reflects them on the read model (also weakly held, also self-supervised).
             tauri::async_runtime::spawn(app.state::<Facade>().port_scanner_loop());
+            // Start the idle sampler: it reclassifies each launched agent's activity from its
+            // terminal output and publishes transitions (also weakly held, also self-supervised).
+            tauri::async_runtime::spawn(app.state::<Facade>().idle_sampler_loop());
             // Start the notification reactor: it shows a desktop toast on a crash or an
             // exhausted auto-restart via the notification plugin (also weakly held).
             tauri::async_runtime::spawn(app.state::<Facade>().notifications_loop());

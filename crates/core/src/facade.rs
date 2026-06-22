@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use tokio::sync::broadcast;
 
-use crate::agents::Agents;
+use crate::agents::{Agents, IdleSampler, IdleTracker};
 use crate::config::ConfigEngine;
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::{FileWatcher, WatchReactor};
@@ -47,6 +47,7 @@ pub struct Facade {
     trust: TrustStore,
     config: ConfigEngine,
     agents: Agents,
+    idle: Arc<IdleTracker>,
 }
 
 impl Facade {
@@ -81,6 +82,7 @@ impl Facade {
             trust: TrustStore::new(trust.clone()),
             config: ConfigEngine::new(trust, bus.clone()),
             agents: Agents::new(agent_tools, version_probe),
+            idle: Arc::new(IdleTracker::new()),
             bus,
         }
     }
@@ -118,6 +120,21 @@ impl Facade {
         MetricsSampler::new(
             self.clock.clone(),
             self.metrics.clone(),
+            self.bus.clone(),
+            Arc::downgrade(&self.supervisor),
+        )
+        .run()
+    }
+
+    /// The agent idle-detection sampler loop (agents C4), returned for the composition root to
+    /// spawn once on its runtime. It reclassifies each launched agent on an interval from its
+    /// terminal output and publishes a [`DomainEvent::AgentActivityChanged`] on a transition,
+    /// watching the supervisor weakly so it ends when the facade is dropped. Self-supervised
+    /// like the other samplers; agents are registered for tracking by [`Facade::launch_agent`].
+    pub fn idle_sampler_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        IdleSampler::new(
+            self.clock.clone(),
+            self.idle.clone(),
             self.bus.clone(),
             Arc::downgrade(&self.supervisor),
         )
@@ -299,6 +316,7 @@ impl Facade {
             env: BTreeMap::new(),
             size: PtySize::default(),
         };
+        let kind = tool.kind;
         let id = self.supervisor.register(Registration::launched(
             project,
             ProcessKind::Agent,
@@ -306,6 +324,9 @@ impl Facade {
             spec,
         ));
         self.supervisor.start(id)?;
+        // Track the agent's idle activity from now on; the idle sampler reclassifies it each
+        // interval using its provider's heuristic.
+        self.idle.track(id, kind);
         Ok(id)
     }
 }
