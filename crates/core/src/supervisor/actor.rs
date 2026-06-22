@@ -16,6 +16,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::events::{DomainEvent, EventBus};
+use crate::identity::PROCESS_ID_ENV;
 use crate::ids::ProcessId;
 use crate::ports::{
     Clock, ExitFuture, ExitStatus, LockReleaser, OrphanRecord, ProcessControl, ProcessSpawner,
@@ -131,12 +132,18 @@ pub(crate) fn spawn(
 /// self-exit, classify it and end.
 async fn run(
     id: ProcessId,
-    launch: SpawnSpec,
+    mut launch: SpawnSpec,
     identity: OrphanIdentity,
     ports: ActorPorts,
     mut mailbox: mpsc::Receiver<ActorMsg>,
     mut initial: Option<Spawned>,
 ) {
+    // Every managed process carries its own id in the environment, so an agent it runs
+    // can bind its MCP session to the process it lives in. Set once here so every spawn
+    // (including each restart) of this process inherits it.
+    launch
+        .env
+        .insert(PROCESS_ID_ENV.to_string(), id.get().to_string());
     let ActorPorts {
         spawner,
         clock,

@@ -106,6 +106,12 @@ impl Supervisor {
         self.registry.label_of(id)
     }
 
+    /// One process's read-model row by id, `None` if it is no longer registered. The focused
+    /// counterpart to [`snapshot`](Self::snapshot) for consumers that need a single process.
+    pub fn view(&self, id: ProcessId) -> Option<ProcessView> {
+        self.registry.view(id)
+    }
+
     /// Registers a process as `Stopped` without starting it, announcing it on the bus.
     pub fn register(&self, registration: Registration) -> ProcessId {
         let id = ProcessId::next();

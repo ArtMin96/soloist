@@ -12,11 +12,20 @@ repository.workspace = true
 name = "soloist"
 path = "src/main.rs"
 
+[features]
+default = ["mcp"]
+# The local MCP/IPC server (the app-side half of the soloist-mcp transport). It links into
+# the app binary, so it is gated at compile time: turning the feature off drops the IPC
+# server adapter and the app's direct soloist-ipc dependency, so the app still builds and
+# runs without it. (The soloist-ipc crate itself stays compiled — the store delegates its
+# data-directory resolution to it — but no IPC server is wired in.)
+mcp = ["dep:soloist-ipc", "tokio/net"]
+
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
 soloist-core = { path = "../core" }
 soloist-httpapi = { path = "../httpapi" }
-soloist-ipc = { path = "../ipc" }
+soloist-ipc = { path = "../ipc", optional = true }
 soloist-pty = { path = "../pty" }
 soloist-store = { path = "../store" }
 soloist-sys = { path = "../sys" }
@@ -24,6 +33,11 @@ tauri = { version = "2.11.2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tokio = { version = "1", features = ["sync"] }
+
+[dev-dependencies]
+soloist-core = { path = "../core", features = ["testing"] }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }
 
 [build-dependencies]
 tauri-build = { version = "2.6.2", features = [] }

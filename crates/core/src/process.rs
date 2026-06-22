@@ -103,7 +103,7 @@ pub enum Readiness {
 /// `ports` are the TCP ports the process is currently listening on, discovered while it
 /// runs and cleared when its group ends (empty until discovery finds any); `ready` is the
 /// [`Readiness`] gate (`Ungated` until a `wait_for_port` is in effect).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessView {
     pub id: ProcessId,
     pub project: ProjectId,

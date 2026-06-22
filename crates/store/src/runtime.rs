@@ -11,8 +11,6 @@ use std::sync::{Mutex, MutexGuard};
 
 use soloist_core::{OrphanRecord, RuntimeState, RuntimeStateError};
 
-use crate::data_dir;
-
 /// The runtime-state file name within the data directory.
 const FILE: &str = "runtime-state.json";
 
@@ -26,7 +24,7 @@ impl FileRuntimeState {
     /// Opens the runtime-state file in the resolved data directory, loading any records
     /// a previous run left behind.
     pub fn open_default() -> Result<Self, RuntimeStateError> {
-        let path = data_dir()
+        let path = soloist_ipc::ensure_data_dir()
             .map_err(|err| RuntimeStateError::Backend(err.to_string()))?
             .join(FILE);
         Ok(Self::at(path))

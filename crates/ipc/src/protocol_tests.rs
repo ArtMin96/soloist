@@ -1,0 +1,112 @@
+use super::*;
+use soloist_core::{
+    Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectView, Readiness,
+    SessionId, Whoami,
+};
+use std::path::PathBuf;
+
+#[test]
+fn requests_round_trip_through_json() {
+    let requests = [
+        IpcRequest::Whoami,
+        IpcRequest::BindSessionProcess {
+            process: ProcessId::from_raw(1),
+        },
+        IpcRequest::RegisterAgent {
+            label: "claude-code".into(),
+        },
+        IpcRequest::SelectProject {
+            project: ProjectId::from_raw(2),
+        },
+        IpcRequest::ListProjects,
+        IpcRequest::GetProjectStatus {
+            project: Some(ProjectId::from_raw(3)),
+        },
+        IpcRequest::GetProjectStatus { project: None },
+        IpcRequest::ListProcesses,
+        IpcRequest::GetProcessStatus {
+            process: ProcessId::from_raw(4),
+        },
+    ];
+    for request in requests {
+        let json = serde_json::to_string(&request).expect("serialize");
+        let back: IpcRequest = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, request);
+    }
+}
+
+#[test]
+fn every_response_variant_round_trips_through_json() {
+    let view = ProcessView {
+        id: ProcessId::from_raw(7),
+        project: ProjectId::from_raw(1),
+        kind: ProcessKind::Terminal,
+        label: "term".into(),
+        status: ProcStatus::Running,
+        exit_code: None,
+        requires_trust: false,
+        ports: Vec::new(),
+        ready: Readiness::Ungated,
+    };
+    let summary = ProjectSummary {
+        id: ProjectId::from_raw(1),
+        name: "storefront".into(),
+        root: PathBuf::from("/projects/storefront"),
+    };
+    // The list variants wrap a sequence; this is what a purely internal tag could not
+    // serialize, so exercising every variant guards the response envelope's tagging.
+    let responses = [
+        IpcResponse::Whoami(Whoami {
+            session: SessionId::from_raw(1),
+            origin: Origin::Unbound,
+            bound_process: None,
+            effective_project: None,
+        }),
+        IpcResponse::Acked,
+        IpcResponse::Projects(vec![summary.clone()]),
+        IpcResponse::ProjectStatus(ProjectStatus {
+            project: summary.clone(),
+            processes: vec![view.clone()],
+        }),
+        IpcResponse::Processes(vec![view.clone()]),
+        IpcResponse::Process(view.clone()),
+    ];
+    for response in responses {
+        let json = serde_json::to_string(&response).expect("serialize");
+        let back: IpcResponse = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, response);
+    }
+}
+
+#[test]
+fn a_typed_error_round_trips() {
+    for error in [
+        IpcError::UnknownProcess,
+        IpcError::UnknownProject,
+        IpcError::NoProjectScope,
+        IpcError::Internal("disk full".into()),
+    ] {
+        let json = serde_json::to_string(&error).expect("serialize");
+        let back: IpcError = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, error);
+    }
+}
+
+#[test]
+fn a_project_summary_drops_the_ui_icon() {
+    // The agent-facing projection keeps identity and root but never the icon data-URL.
+    let view = ProjectView {
+        id: ProjectId::from_raw(5),
+        name: "storefront".into(),
+        root: PathBuf::from("/projects/storefront"),
+        icon: Some("data:image/png;base64,AAAA".into()),
+    };
+    let summary = ProjectSummary::from_view(&view);
+    assert_eq!(summary.id, view.id);
+    assert_eq!(summary.name, view.name);
+    assert_eq!(summary.root, view.root);
+
+    // The serialized shape carries no icon field at all.
+    let json = serde_json::to_string(&summary).expect("serialize");
+    assert!(!json.contains("icon"), "summary must not ship the UI icon");
+}

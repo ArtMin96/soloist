@@ -41,14 +41,14 @@ headless-testable and is the mechanical guarantee behind *"remove MCP → app st
 | Crate | Kind | Owns | May depend on | Status |
 |-------|------|------|---------------|--------|
 | `core` | domain | C1–C8, ports (traits), domain types, event bus, `Facade` | `tokio`/`serde`/`thiserror`/`vte` — **never** an adapter crate | live (C1–C3, C8) |
-| `store` | driven adapter | SQLite: `Store`/`ProjectRepo`/`TrustRepo`/`RuntimeState` + migrations | `core`, `rusqlite` | live |
+| `store` | driven adapter | SQLite: `Store`/`ProjectRepo`/`TrustRepo`/`RuntimeState` + migrations | `core`, `ipc`, `rusqlite` | live |
 | `pty` | driven adapter | `ProcessSpawner`/`PtyIo`/`ProcessControl`/`OrphanControl` over `portable-pty`+`nix` | `core`, `portable-pty`, `nix` | live |
 | `sys` | driven adapter | `MetricsProbe` (CPU/mem) + `PortProbe` (discovery), both over `/proc`; `FileWatcher` over `notify` — monitoring C5 | `core`, `notify`, `libc` | live |
 | `app` | driving + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `sys`, `httpapi`, `tauri` | live |
-| `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | stub → P8 |
+| `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | live (P8 skeleton) |
 | `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | stub → P10 |
 | `cli` | driving adapter | `soloist` CLI = thin HTTP client | `ipc`, `clap` (not `core`) | stub → P10 |
-| `ipc` | shared contract | app↔mcp UDS transport + request/reply types | `serde` only | stub → P8 |
+| `ipc` | shared contract | app↔mcp UDS framing + request/reply types + the data-dir/socket path | `core`, `serde`, `tokio` | live (P8) |
 
 A new external integration is a **new/existing adapter crate** — never logic added to `core` or to another
 adapter. Adapters hold **no** business state and make **no** domain decisions.

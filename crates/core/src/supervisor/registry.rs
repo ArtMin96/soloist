@@ -141,6 +141,13 @@ impl Registry {
             .map(|entry| entry.view.label.clone())
     }
 
+    /// One process's read-model row by id, `None` if it is no longer registered. A focused
+    /// read for consumers that need a single process, so they clone one view rather than the
+    /// whole [`snapshot`](Self::snapshot).
+    pub(crate) fn view(&self, id: ProcessId) -> Option<ProcessView> {
+        lock(&self.inner).get(&id).map(|entry| entry.view.clone())
+    }
+
     /// Updates a process's readiness gate to ready/not-ready, but only while it is still on
     /// the `pgid` the wait is probing. Returns whether it changed (so the caller announces
     /// only real transitions). Guarding on the group closes the race where a process stops
