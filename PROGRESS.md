@@ -102,12 +102,16 @@
   I/O (echo) + control activation — no synthetic XTEST click fired any control this session (likely an
   XWayland/WebKit quirk, unconfirmed; a **real human click** must verify start/echo **before R2**) — and the
   Playwright e2e. See the 2026-06-19 entry + open threads.
-- **Active phase:** **Phase 6 (Monitoring, Auto-Restart & Notifications)** — `Done — pending verify`. **All v1
-  rows are code-complete and gate-green:** D1/D2/D3 OS-probe, D4+D11 restart-policy, D6/D7 file-watch (live
-  `notify` adapter), D8 native notifications, the nightly soak gate + UI surfacing, and **D5 restart banner**
-  (2026-06-21). The only thing between here and `Verified` is the **runtime acceptance walk via `just dev`**
-  (user-only — see "Next session should start with" item 1). Phase 5 also remains `Done — pending verify`
-  (runtime checks are user-only).
+- **Active phase:** **Phase 7 (Agents & Idle Detection, C4)** — `In progress` (started 2026-06-22 per the
+  user's directive). **E1/E2/E3 code-complete** (agent-tool registry + `--version` autodetect, branch
+  `feat/phase-7-agent-tools`, `55b3808`); remaining v1 = **E4** (launch + UI) + **E8**, **E5** (idle FSM);
+  **E6** `later`, **E7** in P9. See the top Decisions entry + "Next session should start with" item A.
+- **Phase 6 (Monitoring, Auto-Restart & Notifications)** — `Done — pending verify` (carried, **not** yet
+  `Verified`). **All v1 rows are code-complete and gate-green:** D1/D2/D3 OS-probe, D4+D11 restart-policy,
+  D6/D7 file-watch (live `notify` adapter), D8 native notifications, the nightly soak gate + UI surfacing, and
+  **D5 restart banner** (2026-06-21). The only thing between here and `Verified` is the **runtime acceptance
+  walk via `just dev`** (user-only — see "Next session should start with" item B1). Phase 5 also remains
+  `Done — pending verify` (runtime checks are user-only).
   **Phase-5 follow-up — now CODE-COMPLETE (2026-06-19 second feature session).** The two remaining pieces
   landed, each a gated single commit: **(1) project-load UI** (`d497241`) — a `project_load` Tauri command →
   `Facade::load_project`, a native folder picker via **`tauri-plugin-dialog`** (`dialog:allow-open`), an "Open
@@ -221,7 +225,7 @@ Status vocabulary: `Not started` · `In progress` · `Done — pending verify` �
 | 4 | PTY & terminal I/O (rendered+raw, input, resize, OSC) | **Done — pending verify** | **C1–C7, C9 v1 delivered (C3 context); PR reviewed + all findings fixed.** Real PTY per process via `portable-pty` (`$SHELL -lc` on the slave; child sees a tty); `pty` adapter rewritten (`PtyProcessSpawner`) keeping pgroup reaping. Core `terminal/` (`ring`/`buffers`/`parser`): bounded raw scrollback (256 KB per-process **+ a 16 MB global aggregate cap**, **C5**) + `vte`-driven rendered `Ring<LogLine>` (5,000 lines, **C4** + folded Task 4) with `\r` overwrite/tab stops; OSC **title**+**bell** → `DomainEvent`s (**C7**); live raw bytes via per-process broadcast. `Supervisor`: `write_stdin`/`resize` (**C3**/**C6**), `attach_pty` (atomic replay+live, **C9**), `pty_scrollback`/`rendered`. **Evidence:** **102 tests** (core 74 / pty 10 / store 12 / UI 6); real-OS pty suite green (`test -t 1`→tty **C1**, `read x`→input echo **C3**, `tput cols`→resize **C6**, group reap/no-survivors hardened against the async-grandchild-reap race). `just lint && just test` green. **Pending verify:** xterm.js terminal pane (**C8** `later` + phase-04 Task 9) → Phase 5 via `/impeccable`; "vim/htop visually render" is the Phase-5/manual check. |
 | 5 | Dashboard UI (sidebar tree, status dots, terminal pane, trust dialog) | **Done — pending verify** | **Update (4th 2026-06-19 session):** **A10 command auto-detection BUILT (now v1, code-complete)** — opening a folder with no `solo.yml` auto-creates one from detected commands (npm/Cargo/Go/Procfile/Make/Just/Compose) via a C1 Registry/Strategy detector set, trust-gated, with a friendly confirmation; full `solo.yml` reference added to README. **Deferred adversarial review FINISHED** (security re-verified sound; 2 fixes applied — `useTrust` apply-after-resolve `b637b50`, atomic `O_EXCL` create `8f8c524`; rest recorded as tracked findings). Gate **green: 174 (Rust 138 / UI 36)**. _(3rd session: silent empty-project-load fixed `72b526e`; project-load runtime-confirmed by the user.)_ — **Interactive core slice:** `DESIGN.md` seeded (`/impeccable`) + approved; full Tauri command/event/PTY-Channel adapter; TS domain mirror re-synced; sidebar tree (I1), color-blind-safe status (shape+color+label), per-row + bulk controls (B2/B3/B4), live status, xterm.js terminal pane (C1–C7 UI), empty/error states. **Follow-up now CODE-COMPLETE (2026-06-19):** mockIPC dashboard test; **orphan dialog (B8 UI)** + `kill_orphan`/`orphans_resolve`; **terminal title/bell → header**; **`Facade::load_project`** wiring; **project-load UI** (`d497241`: `project_load` command + `tauri-plugin-dialog` folder picker + "Open project" affordance + `useProjects`; `demo.rs` removed); **trust review A6/A9** (`45461d0`: `ProcessView.requires_trust` + enriched `ConfigChanged` + `Facade::trust_command` + inline sidebar Trust + `TrustDialog`/`useTrust`). `just lint && just test` green (**132**: Rust **103** / UI **29**). **Pending verify (runtime/manual):** render + a real human click started a process + echoed (2026-06-19, prior); **not yet observed this session** — opening a real `solo.yml` in the GUI, the inline trust path, the B8 dialog; **A9 end-to-end** (dialog on a live yml edit) awaits the **Phase-6 watcher** (emit-tested now); the real-window WebdriverIO/tauri-driver e2e (not Playwright) remains the automated gap. |
 | 6 | Monitoring, restart (10/60s), file-watch, notifications | **Done — pending verify** | **Restart-policy slice (D4 + D11)** code-complete (`90d51ac` + review `9438f66`). **OS-probe slice — D1 + D2 code-complete (2026-06-20):** D1 per-process CPU/mem (`e0fa32e`) — new **C5 metrics domain** (`core/metrics/`, owns its `MetricsProbe` port + `ProcessMetrics`) + self-supervised, mock-clock-tested `MetricsSampler` + `MetricsTick`; **`crates/sys` created** (sysinfo adapter, process-subtree aggregation, per-core CPU%). D2 port discovery (`be1711a`) — **C5 portscan domain** (`core/portscan/`, owns its `PortProbe` port) + `PortScanner` → `ProcessView.ports` + `PortsChanged`; `crates/sys` `ProcPortProbe` reads `/proc` (subtree → socket inodes → `/proc/net/tcp{,6}` LISTEN). Self-supervision extracted to `core/supervision.rs` (shared by both samplers). D3 readiness (`4b4d930`) — `Facade::wait_for_port` (portscan `waiter.rs`, reuses `PortProbe`) polls until the port binds or times out; `ProcessView.ready` (now a `Readiness` enum: `Ungated` / `Waiting` / `Ready`) + `ReadyStateChanged`; the future MCP `wait_for_bound_port` (P8) is the production caller. **Review-fixes pass applied (2026-06-20):** pgid-guarded `set_ports`/`set_ready` (no stale-resurrect race), OS reads via `spawn_blocking`, exact `/proc` process-group membership (not parent-subtree), `Readiness` enum, supervisor read-model accessors split to `supervisor/monitoring.rs`. Gate **213 (Rust 171 / UI 42)**. **D6/D7 file-watch — CORE POLICY code-complete (2026-06-20):** new **C5 `core/filewatch/` domain** (owns its `FileWatcher` port + `Noop`, moved out of the `ports/mod.rs` stub) — pure `policy.rs` (`globset` matching relative to root, `*` crosses separators, **D7 default ignores**), `Clock`-driven `WatchReactor` reusing `core/debounce::Debouncer` → `Supervisor::file_restart` (delegates to the existing `Supervisor::restart`); `DomainEvent::FileRestart` (mirrored FE); `restart_when_changed` threaded `Registration`→`Registry`→`watch_targets()`; wired into `CorePorts` (Noop default) + `Facade::file_watch_loop()` spawned in the composition root (inert under Noop). 12 mock-clock tests; gate **225 (Rust 183 / UI 42)**. Branch `feat/phase-6-file-watch`. **Reviewed + fixed (2026-06-20):** file-watch reloads a *running* command only (no resurrecting a stopped/restored-resting one), `plan/05 §4`/parity-row citations stripped, reactor spawned after restore — see the top Decisions entry. **D6/D7 went LIVE (2026-06-20, `79de1cc`, PR #9):** `NotifyFileWatcher` (recursive `notify`, off-runtime, best-effort) in `crates/sys` + reactor **dynamic re-watch on `ProjectOpened`** (closes the once-at-startup limitation) + `build_facade .file_watcher(...)`; 4 real-inotify integration tests + 1 reactor re-watch test. **D8 native notifications DONE (2026-06-20, stacked branch `feat/phase-6-notifications`):** C7 `core/notify/` domain (owns `Notifier` port + `NoopNotifier` + `NotificationReactor`, global on/off) → desktop toast on crash/restart-exhausted; adapter = **Tauri notification plugin** (`TauriNotifier` in `crates/app`, per user directive — `plan/04` §1 updated); 4 notify mock-bus tests. Gate **234 (Rust 192 / UI 42)**. **Soak gate + UI surfacing + metrics fix DONE (2026-06-20, `feat/phase-6-soak`):** nightly soak (`crates/pty/tests/soak.rs` + `.github/workflows/soak.yml` + `just soak`) — flat fd/thread/task/PID + crash-storm-at-10/60s + sampler self-restart, all green/deterministic; UI surfacing of CPU%/RSS/ports + restarting(k/N)/not-ready/Exhausted (Task 9) via a coalesced `useSignal` context; and a **/proc metrics rewrite** (PSS + whole-machine CPU, `sysinfo` dropped) fixing user-reported 550%/9GB. Gate **Rust (core 160 / sys 14 / pty 9 +soak 3 ignored / store 13) / UI 60**. **D5 restart banner DONE (2026-06-21, `feat/phase-6-restart-banner`):** relaunch retains the terminal scrollback + draws a muted `── restarted ──` banner before new output. Fixed the crash-path buffer wipe + pane freeze — `Terminals::open` now **reuses** an existing process's buffers + live sender on relaunch (fresh input only); `Recorder::mark_restart` injects the banner iff prior output, called once at the actor's spawn-loop top so **one rule** spans crash/file/manual/user-start relaunches; no FE/Tauri change. Banner = dim ANSI raw / plain rendered. matrix D5 `later`→`v1`; plan/05 §12 records the every-relaunch scope decision. Gate **green: Rust core 163 / sys 14 / pty 10 +soak 3 ignored / store 13 / UI 60**. **All v1 code complete; remaining for `Verified` = the runtime acceptance walk via `just dev` (user-only).** Deferred: discrete file-restart row cue + D9/D10 toasts/bell (`later`). **R7 (port-ownership drift) logged** in `plan/06` §7. |
-| 7 | Agents & idle detection (5-state FSM, optional summarization) | Not started | Summarization OFF by default |
+| 7 | Agents & idle detection (5-state FSM, optional summarization) | **In progress** | **E1/E2/E3 code-complete (2026-06-22, `feat/phase-7-agent-tools`, `55b3808`).** New **C4 `core/agents/` context** (promoted from the flat placeholder to a module folder that **owns its own driven ports**, like `notify`/`metrics`): `tool.rs` (closed `AgentKind` {Claude,Codex,Amp,Gemini,OpenCode,Copilot,Kimi,Generic} + `PromptMode` + `AgentTool` + the built-in provider set), `repo.rs` (`AgentToolRepo` durable port + `NoopAgentToolRepo`), `detect.rs` (`VersionProbe` port + `NoopVersionProbe` + `DetectedTool`), `mod.rs` (`Agents` surface: `list_tools` + `detect_installed`, probes run off-runtime via `run_blocking`). **store**: `AgentToolRepo` over SQLite (tool stored as its own JSON → persisted shape can't drift from the domain type); **migration v3** creates `agent_tools` + seeds the built-ins idempotently. **sys**: `CommandVersionProbe` runs `<command> --version` off-runtime, bounded timeout, hung probe killed+reaped. Wired through `CorePorts` (Noop defaults) + `Facade::agents()` + the composition root. **7 built-in tools seeded** (Claude/Codex/Amp/Gemini/OpenCode + Copilot/Kimi); **auto-detection covers the 5 Solo documents probing** — Copilot/Kimi (built-in types) and Generic are outside the probe set and report not-installed. Gate **green: Rust core 170 (+7) / store 15 (+2) / sys 15 (+1) / pty 9 (+3 ignored) / UI 60**. **Remaining v1: E4 (launch + picker UI/agent-with-flags) + E8, E5 (5-state idle FSM + activity UI); E7 completes in P9; E6 (summarization) `later`.** Summarization OFF by default. |
 | 8 | MCP server core (`soloist-mcp` stdio, scope+identity, tools) | Not started | High-risk |
 | 9 | Coordination layer (scratchpads/todos/timers/leases/kv) | Not started | **v1 scope.** Sequence: durable store → leases/locks → timers/idle-watchers → scratchpads/todos → key-value. High-risk |
 | 10 | HTTP API & CLI (`127.0.0.1:24678` + `soloist` CLI) | Not started | |
@@ -235,6 +239,55 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Phase 7 begins — agent-tool registry + `--version` auto-detection (E1/E2/E3) (2026-06-22, `feat/phase-7-agent-tools`)
+- **Phase pivot (user directive).** The user directed **Phase 7** while Phase 6 stays **Done — pending
+  verify** (its only gap is the user-only runtime acceptance walk, not code). Proceeding on Phase 7 per
+  source-of-truth #1 (the user); Phase 6's runtime walk is still owed before it flips to **Verified**.
+- **Phase 7 sliced like Phase 6 was** (a ~5–7-day phase is not one session). User-confirmed first slice =
+  **E1/E2/E3** (registry + autodetect, pure core + store + sys, no UI). Branch `feat/phase-7-agent-tools`
+  off `main`; one feature commit (`55b3808`) + this `docs(progress)`. `just lint && just test` **green**:
+  clippy `-D warnings`, fmt, tsc, ESLint, Prettier, **dep-direction** (core still framework-free — the
+  agents ports live in core; the subprocess probe lives in `crates/sys`) and **file-size** guards all pass.
+  Gate **Rust core 170 (+7) / store 15 (+2) / sys 15 (+1) / pty 9 (+3 ignored) / UI 60**.
+- **C4 built to the newer-domain bar (the R7 target), not the old shared-`ports/` shape.** The flat
+  `agents.rs` placeholder became a `core/agents/` module folder that **owns its own driven ports**
+  (`AgentToolRepo`, `VersionProbe` + their `Noop`s) — mirroring `notify`/`metrics`/`portscan`/`filewatch`
+  rather than adding to the `ports/mod.rs` god-file. `idle.rs` stays a C4 placeholder (the idle FSM is a
+  later slice).
+- **Persisted shape = the domain type's own JSON (single source).** The store keys `agent_tools` by `name`
+  and stores each tool's `serde_json` as the `definition` column (+ `position` for order), so the durable
+  encoding cannot drift from `AgentTool`; no per-column mapping, no magic strings. Migration **v3** seeds the
+  built-ins from `AgentTool::builtin_defaults()` (the one source) idempotently (`INSERT OR IGNORE`, version
+  gate) — a reopen never re-seeds, and a user-edited tool is never clobbered. Seed-data evolution (built-ins
+  changing after install) is intentionally left to the launch/settings slice when editing lands.
+- **Probe is bounded + reaping (longevity §8).** `CommandVersionProbe` runs `<command> --version` off the
+  async runtime (the core calls it via `run_blocking` → `spawn_blocking`), with a 2s default timeout; a hung
+  child is killed and reaped so the probe never leaks a process. The sys test is deterministic — it probes
+  temporary executables (exit 0 / exit 3 / a sleeper for the timeout path), so the result never depends on
+  which agent CLIs the machine has.
+- **Built-in tool set vs auto-detect set, kept distinct (faithful to `05` §6).** Two facts that must not be
+  conflated: the **built-in tool types** (Claude/Codex/Amp/Gemini/OpenCode + Copilot/Kimi + Generic — what you
+  can launch) vs the **documented `--version` auto-detect set** (the five: claude/codex/amp/gemini/opencode).
+  So `AgentTool::builtin_defaults()` seeds **7** providers and `AgentKind::auto_detectable()` returns true for
+  exactly the **5**. **Copilot/Kimi added** (per the user's "add if grounded" directive): their CLI commands
+  were grounded via web search — Copilot CLI = `copilot` (npm `@github/copilot`, GA 2026-02, `--version`
+  confirmed); Kimi CLI = `kimi` (MoonshotAI/kimi-cli) — so this is grounding, not fabrication (§4/§9). They are
+  seeded as launchable built-in tools but stay **outside** the probe set (Solo documents probing only the
+  five; we don't invent that it probes Copilot/Kimi, which also sidesteps the unconfirmed `kimi --version`).
+  Generic is the closed-enum fallback, never probed. No `KNOWN-DIVERGENCES.md` entry — this matches Solo's
+  documented behavior on both axes.
+- **Contradiction surfaced (CLAUDE.md §12), not silently overridden.** A stray root `package-lock.json`
+  (npm lockfile in this pnpm workspace) is present and untracked. I first anchored it in `.gitignore`
+  (matching the existing clean-room stray anchors), then found pointer **0a** explicitly records "leave the
+  stray root `package-lock.json` — do not rm/gitignore/stage" — so I **reverted** the `.gitignore` change to
+  respect the prior decision. It stays **untracked, never committed**. Open question for the user: keep that
+  "don't gitignore" stance, or anchor it like the other strays? (Awaiting the user's call.)
+- **Not done / next:** **E4** — agent launch: `Agents::launch` (Agent-kind process via the supervisor, in
+  the project dir, interactive PTY, env passthrough = **E8**) + the launch picker / "agent with flags" UI
+  (via `/impeccable`; needs a Tauri command + a TS `AgentTool`/`AgentKind` mirror — confirm visual specifics
+  with the user, DESIGN.md is the source of truth). Then **E5** (idle FSM sampler + activity surfacing). The
+  branch is **not pushed / no PR** — awaiting the user's call (see the session summary).
 
 ### D5 restart banner — retain scrollback + draw a banner across relaunches (2026-06-21, `feat/phase-6-restart-banner`)
 - **The last Phase-6 v1 build.** Branch `feat/phase-6-restart-banner` off `main` (PR #11 merged). One feature
@@ -1842,6 +1895,20 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
+**A. (Phase 7, code) Build E4 — agent launch + the launch UI.** Baseline: branch `feat/phase-7-agent-tools`,
+newest `55b3808`; gate **Rust core 170 / store 15 / sys 15 / pty 9 (+3 ignored) / UI 60**. E1/E2/E3 (the
+agent-tool registry + `--version` autodetect) are code-complete on that branch (see the top Decisions entry).
+Next slice: `Agents::launch(project, tool, extra_args)` → registers an **Agent**-kind process via the
+supervisor in the project dir, on the interactive PTY (no `-p`), env passed through (`$DISPLAY`/`BROWSER`/
+`ANTHROPIC_*`) so a not-yet-authenticated CLI completes its **own** native login in-terminal (**E8**;
+Soloist stores/injects no credential). Then the launch picker + "agent with flags" UI **via `/impeccable`**
+(needs a Tauri `agent_launch` command + a TS `AgentTool`/`AgentKind`/`DetectedTool` mirror in `domain.ts` —
+**confirm visual specifics with the user first; DESIGN.md is the source of truth**). Headless integration
+test: launch a stub agent script through the Facade. After E4, **E5** (the 5-state idle FSM sampler +
+activity surfacing); **E6** summarization is `later`; **E7** completes in P9. (Copilot/Kimi are now seeded as
+built-in tools; the **package-lock.json** gitignore question is still open — see Decisions.)
+
+**B. (Phase 6, user-only — still owed)**
 1. **FLIP PHASE 6 → `Verified`: run the Phase-6 runtime acceptance walk via `just dev` (user-only — desktop,
    host `DISPLAY=:0`).** All Phase-6 v1 code is complete (D1–D8, D11, D5, soak gate, UI surfacing). Observe,
    with evidence: (a) a trusted `auto_restart` command you `kill -9` → Crashed → Starting → Running on its own,
