@@ -170,7 +170,7 @@ impl Supervisor {
     }
 
     /// Starts a process. A trust-gated command whose variant is not trusted is refused
-    /// (closing A6: untrusted cannot run by any path). Starting an already-active
+    /// (untrusted cannot run by any path). Starting an already-active
     /// process is a no-op.
     pub fn start(&self, id: ProcessId) -> Result<(), SupervisorError> {
         let info = self

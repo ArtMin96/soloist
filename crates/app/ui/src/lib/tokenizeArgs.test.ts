@@ -25,4 +25,10 @@ describe("tokenizeArgs", () => {
     expect(tokenizeArgs("")).toEqual([]);
     expect(tokenizeArgs("   ")).toEqual([]);
   });
+
+  it("keeps an unmatched quote as a literal character", () => {
+    // A lone apostrophe is not a swallowed delimiter; the token keeps it (the core
+    // re-quotes it safely for the shell).
+    expect(tokenizeArgs("--author O'Brien")).toEqual(["--author", "O'Brien"]);
+  });
 });

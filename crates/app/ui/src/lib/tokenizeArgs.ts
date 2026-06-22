@@ -9,13 +9,21 @@ export function tokenizeArgs(input: string): string[] {
   // Distinguishes an empty quoted token ("") from the gap between tokens.
   let started = false;
 
-  for (const char of input) {
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
     if (quote) {
       if (char === quote) quote = null;
       else current += char;
     } else if (char === '"' || char === "'") {
-      quote = char;
-      started = true;
+      if (input.indexOf(char, i + 1) === -1) {
+        // An unmatched quote is a literal character, not a swallowed delimiter — a value like
+        // O'Brien typed without surrounding quotes keeps its apostrophe.
+        current += char;
+        started = true;
+      } else {
+        quote = char;
+        started = true;
+      }
     } else if (char === " " || char === "\t" || char === "\n") {
       if (started) {
         tokens.push(current);

@@ -80,7 +80,7 @@ pub async fn agent_detect(facade: State<'_, Facade>) -> Result<Vec<DetectedTool>
 /// Launches an agent tool as an interactive Agent process in a project and starts it,
 /// returning its process id. `extra_args` are appended for this one launch ("agent with
 /// flags"). Routes to the one core launch behaviour, which runs the agent on a real PTY and
-/// passes the environment through so the CLI's own native login works (E4/E8).
+/// passes the environment through so the CLI's own native login works.
 #[tauri::command]
 pub async fn agent_launch(
     project: u64,

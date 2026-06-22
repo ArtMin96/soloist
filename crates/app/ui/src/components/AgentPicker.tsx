@@ -4,6 +4,7 @@ import {
   Command,
   CommandDialog,
   CommandEmpty,
+  CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
@@ -132,16 +133,18 @@ function ToolStep({
       />
       <CommandList>
         <CommandEmpty>No agent tools configured.</CommandEmpty>
-        {tools.map(({ tool, installed }) => (
-          <CommandItem key={tool.name} value={tool.name} onSelect={() => onLaunch(tool.name)}>
-            <ToolInitial name={tool.name} />
-            <span className="font-medium">{tool.name}</span>
-            <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-              {tool.command}
-            </code>
-            <InstalledMark installed={installed} />
-          </CommandItem>
-        ))}
+        <CommandGroup>
+          {tools.map(({ tool, installed }) => (
+            <CommandItem key={tool.name} value={tool.name} onSelect={() => onLaunch(tool.name)}>
+              <ToolInitial name={tool.name} />
+              <span className="font-medium">{tool.name}</span>
+              <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                {tool.command}
+              </code>
+              <InstalledMark installed={installed} />
+            </CommandItem>
+          ))}
+        </CommandGroup>
       </CommandList>
       <PickerFooter targetName={targetName}>
         <Hint keys="↵" label="launch" />
@@ -166,18 +169,20 @@ function ProjectStep({
       <CommandInput placeholder="Launch agent in which project?" />
       <CommandList>
         <CommandEmpty>Open a project first to launch an agent.</CommandEmpty>
-        {projects.map((project) => (
-          <CommandItem
-            key={project.id}
-            value={`${project.name} ${project.root}`}
-            onSelect={() => onPick(project.id)}
-          >
-            <span className="font-medium">{project.name}</span>
-            <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-              {project.root}
-            </code>
-          </CommandItem>
-        ))}
+        <CommandGroup>
+          {projects.map((project) => (
+            <CommandItem
+              key={project.id}
+              value={`${project.name} ${project.root}`}
+              onSelect={() => onPick(project.id)}
+            >
+              <span className="font-medium">{project.name}</span>
+              <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                {project.root}
+              </code>
+            </CommandItem>
+          ))}
+        </CommandGroup>
       </CommandList>
       <PickerFooter>
         <Hint keys="↵" label="choose" />

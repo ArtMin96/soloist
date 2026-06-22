@@ -294,7 +294,7 @@ async fn launch_agent_runs_a_stub_in_the_project_dir_inheriting_the_environment(
 
     // A stub "agent" that records its working dir and inherited $HOME, then exits. It writes
     // *relative* to its cwd, so the file landing under the project root proves it ran in the
-    // project directory; $HOME proves it inherited Soloist's environment unchanged (E8) — a
+    // project directory; $HOME proves it inherited Soloist's environment unchanged — a
     // login shell never resets HOME, so the child's value is the parent's.
     let dir = tempfile::tempdir().expect("temp dir");
     let script = dir.path().join("stub-agent.sh");
@@ -358,7 +358,7 @@ async fn launch_agent_runs_a_stub_in_the_project_dir_inheriting_the_environment(
     let home = std::env::var("HOME").expect("HOME is set in the test environment");
     assert!(
         output.contains(&format!("HOME={home}")),
-        "the agent inherits Soloist's environment unchanged (E8): {output:?}"
+        "the agent inherits Soloist's environment unchanged: {output:?}"
     );
 }
 
