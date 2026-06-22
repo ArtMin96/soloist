@@ -165,6 +165,12 @@ All / Leave running**. Historical output from the disconnected window may be unr
   v0.7.1). Solo does **not** install the CLIs. Per-tool config: Name, Command, Default arguments
   (appended every launch), Tool-type mode (auto-detect/manual), Prompt mode for generic (`stdin` or
   appended arg). **Auto-detect probes `--version`** for `claude`, `codex`, `amp`, `gemini`, `opencode`.
+  - 🟡 **CLI commands for the two extra built-in types (our grounding — Solo names the *type*, not the
+    binary).** Copilot CLI = `copilot` (npm `@github/copilot`, GA 2026-02; `--version` confirmed); Kimi
+    CLI = `kimi` (MoonshotAI `kimi-cli`). Grounded by web search, not Solo docs. They are seeded as
+    launchable built-in tools but stay **outside** the `--version` auto-detect set above (Solo documents
+    probing only the five; we do not invent that it probes Copilot/Kimi, which also sidesteps the
+    unconfirmed `kimi --version`).
 - **Launching:** `Cmd+T` picker; right-click → Add agent; "Agent with flags" modal to edit flags for a
   single launch. Agents launch in the selected project's dir; many concurrently.
 - **Idle detection (5 states): `IDLE`, `PERMISSION`, `THINKING`, `WORKING`, `ERROR`.** Heuristics differ

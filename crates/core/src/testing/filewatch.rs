@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 use crate::filewatch::{FileWatcher, NoopWatchHandle, WatchHandle};
 use crate::sync::lock;
@@ -17,6 +17,7 @@ use crate::sync::lock;
 pub struct FakeFileWatcher {
     roots: Mutex<Vec<PathBuf>>,
     sink: Mutex<Option<mpsc::Sender<PathBuf>>>,
+    established: Notify,
 }
 
 impl FakeFileWatcher {
@@ -37,12 +38,20 @@ impl FakeFileWatcher {
     pub fn watched(&self) -> Vec<PathBuf> {
         lock(&self.roots).clone()
     }
+
+    /// Resolves once the reactor has registered at least one watch — a deterministic signal
+    /// to await instead of polling [`watched`], since [`FileWatcher::watch`] notifies here.
+    /// A watch registered before this is awaited is not missed (the notification is retained).
+    pub async fn established(&self) {
+        self.established.notified().await;
+    }
 }
 
 impl FileWatcher for FakeFileWatcher {
     fn watch(&self, root: PathBuf, changes: mpsc::Sender<PathBuf>) -> Box<dyn WatchHandle> {
         lock(&self.roots).push(root);
         *lock(&self.sink) = Some(changes);
+        self.established.notify_one();
         Box::new(NoopWatchHandle)
     }
 }

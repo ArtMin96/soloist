@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use tokio::sync::broadcast;
 
+use crate::agents::Agents;
 use crate::config::ConfigEngine;
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::{FileWatcher, WatchReactor};
@@ -44,6 +45,7 @@ pub struct Facade {
     projects: Projects,
     trust: TrustStore,
     config: ConfigEngine,
+    agents: Agents,
 }
 
 impl Facade {
@@ -61,6 +63,8 @@ impl Facade {
             notifier,
             trust,
             projects,
+            agent_tools,
+            version_probe,
             ..
         } = ports;
         Self {
@@ -75,6 +79,7 @@ impl Facade {
             projects: Projects::new(projects),
             trust: TrustStore::new(trust.clone()),
             config: ConfigEngine::new(trust, bus.clone()),
+            agents: Agents::new(agent_tools, version_probe),
             bus,
         }
     }
@@ -211,6 +216,11 @@ impl Facade {
         &self.config
     }
 
+    /// The agents context (C4): the agent-tool registry and `--version` auto-detection.
+    pub fn agents(&self) -> &Agents {
+        &self.agents
+    }
+
     /// Opens a project end to end — see [`ProjectService::open`]. The Facade owns the
     /// contexts the lifecycle spans; it assembles the service and delegates, so the open
     /// sequence lives in the projects domain rather than being re-implemented here.
@@ -342,6 +352,34 @@ mod tests {
             .set_trusted(project, &spec.variant_hash())
             .expect("trust");
         facade.supervisor().start(id).expect("start once trusted");
+    }
+
+    #[tokio::test]
+    async fn the_facade_exposes_the_agent_registry_and_detection() {
+        use crate::agents::AgentTool;
+        use crate::testing::{FakeAgentToolRepo, FakeVersionProbe};
+
+        let tools = AgentTool::builtin_defaults();
+        let facade = Facade::new(
+            CorePorts::builder(
+                Arc::new(FakeSpawner::exits_on_terminate()),
+                Arc::new(TokioClock),
+                Arc::new(FakeTrustRepo::new()),
+                Arc::new(FakeProjectRepo::new()),
+            )
+            .agent_tools(Arc::new(FakeAgentToolRepo::new(tools.clone())))
+            .version_probe(Arc::new(FakeVersionProbe::new(&["claude"])))
+            .build(),
+        );
+
+        // The registry and auto-detection both route through the one agents context.
+        assert_eq!(facade.agents().list_tools().expect("list"), tools);
+        let detected = facade.agents().detect_installed().await.expect("detect");
+        let claude = detected
+            .iter()
+            .find(|d| d.tool.command == "claude")
+            .expect("claude detected");
+        assert!(claude.installed, "the probed CLI is reported installed");
     }
 
     #[tokio::test]

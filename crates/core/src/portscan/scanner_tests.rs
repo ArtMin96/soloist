@@ -8,11 +8,9 @@ use tokio::sync::broadcast;
 
 use crate::events::DomainEvent;
 use crate::ids::ProcessId;
-use crate::portscan::test_support::{
-    running_process, setup, view_of, wait_for_status, ADVANCE_STEP,
-};
+use crate::portscan::test_support::{running_process, setup, view_of, ADVANCE_STEP};
 use crate::process::ProcStatus;
-use crate::testing::{FakePortProbe, MockClock};
+use crate::testing::{wait_all, FakePortProbe, MockClock};
 
 use super::PortScanner;
 
@@ -104,7 +102,7 @@ async fn ports_clear_when_the_process_stops() {
 
     // Stopping the process ends its group, so its discovered ports are cleared.
     s.sup.stop(id);
-    wait_for_status(&mut s.rx, id, ProcStatus::Stopped).await;
+    wait_all(&mut s.rx, &[id], ProcStatus::Stopped).await;
     assert!(
         view_of(&s.sup, id).ports.is_empty(),
         "a stopped process lists no ports",

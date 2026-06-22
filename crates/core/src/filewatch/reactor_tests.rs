@@ -1,6 +1,9 @@
 //! Behavioural tests for [`WatchReactor`], kept out of the implementation file. They drive a
-//! real [`Supervisor`] over fakes plus a [`FakeFileWatcher`] feeding synthetic change events,
-//! so timing is deterministic on the mock clock with no real filesystem and no real time.
+//! real [`Supervisor`] over fakes plus a [`FakeFileWatcher`] feeding synthetic change events.
+//! Waits are event-driven — they await a status transition on the bus ([`wait_all`]), the
+//! watcher's `established` signal, or a `FileRestart` — and the debounce window is advanced on
+//! the mock clock, so there is no real filesystem, no real time, and no reliance on scheduler
+//! timing (which is what makes a `yield_now` budget flake under load).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -15,7 +18,10 @@ use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{CorePorts, PtySize, SpawnSpec, TrustRepo};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, Supervisor};
-use crate::testing::{FakeFileWatcher, FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock};
+use crate::testing::{
+    next_matching, wait_all, FakeFileWatcher, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
+    MockClock,
+};
 
 use super::WatchReactor;
 
@@ -82,21 +88,11 @@ fn register_command(s: &Setup, name: &str, globs: &[&str], trusted: bool) -> Pro
     id
 }
 
-/// Starts a registered command and waits until it is `Running`, so a watched change cycles a
-/// live process (file-watch reloads a running command, not a resting one).
-async fn start_running(s: &Setup, id: ProcessId) {
+/// Starts a registered command and awaits its `Running` transition on the bus, so a watched
+/// change cycles a live process (file-watch reloads a running command, not a resting one).
+async fn start_running(s: &mut Setup, id: ProcessId) {
     s.sup.start(id).expect("start");
-    for _ in 0..50 {
-        yield_many().await;
-        if s.sup
-            .snapshot()
-            .iter()
-            .any(|v| v.id == id && v.status == ProcStatus::Running)
-        {
-            return;
-        }
-    }
-    panic!("the command never reached Running");
+    wait_all(&mut s.rx, &[id], ProcStatus::Running).await;
 }
 
 fn changed(relative: &str) -> PathBuf {
@@ -122,34 +118,26 @@ fn spawn_reactor(s: &Setup) {
     );
 }
 
-/// Spawns the reactor and waits until it has established a watch (so the fake holds the change
-/// sink). Fails if no watch appears — use [`spawn_reactor`] when none is expected.
+/// Spawns the reactor and awaits its first established watch (so the fake holds the change
+/// sink). Use [`spawn_reactor`] directly when no watch is expected.
 async fn start_reactor(s: &Setup) {
     spawn_reactor(s);
-    for _ in 0..50 {
-        tokio::task::yield_now().await;
-        if !s.watcher.watched().is_empty() {
-            return;
-        }
-    }
-    panic!("the reactor never established a watch");
+    s.watcher.established().await;
 }
 
-/// Advances the clock in steps, draining events, until a `FileRestart` is observed.
+/// Fires the debounce window and awaits the resulting `FileRestart`. Changes must already be
+/// fed; advancing the mock clock past the quiet window wakes the reactor's debounce, which
+/// then restarts the command and emits the event the test awaits.
 async fn next_file_restart(s: &mut Setup) -> ProcessId {
-    for _ in 0..50 {
-        s.clock.advance(STEP);
-        yield_many().await;
-        while let Ok(event) = s.rx.try_recv() {
-            if let DomainEvent::FileRestart { id } = event {
-                return id;
-            }
-        }
+    s.clock.advance(STEP);
+    match next_matching(&mut s.rx, |e| matches!(e, DomainEvent::FileRestart { .. })).await {
+        DomainEvent::FileRestart { id } => id,
+        other => unreachable!("awaited a FileRestart, got {other:?}"),
     }
-    panic!("no FileRestart within the budget");
 }
 
-/// Advances several windows and asserts no `FileRestart` was emitted.
+/// Fires several debounce windows and asserts no `FileRestart` was emitted — the change was
+/// ignored, non-matching, or against a command the policy must not reload.
 async fn assert_no_file_restart(s: &mut Setup) {
     for _ in 0..5 {
         s.clock.advance(STEP);
@@ -167,7 +155,7 @@ async fn assert_no_file_restart(s: &mut Setup) {
 async fn a_matching_save_burst_to_a_running_command_triggers_exactly_one_restart() {
     let mut s = setup();
     let web = register_command(&s, "Web", &["src/**/*.rs"], true);
-    start_running(&s, web).await;
+    start_running(&mut s, web).await;
     start_reactor(&s).await;
 
     // A burst of saves for one logical edit.
@@ -186,7 +174,7 @@ async fn a_matching_save_burst_to_a_running_command_triggers_exactly_one_restart
 async fn an_ignored_or_non_matching_change_to_a_running_command_does_not_restart() {
     let mut s = setup();
     let web = register_command(&s, "Web", &["**/*.rs"], true);
-    start_running(&s, web).await;
+    start_running(&mut s, web).await;
     start_reactor(&s).await;
 
     // Inside an ignored directory (matches the glob, but ignored), and a non-matching file.
@@ -247,15 +235,11 @@ async fn a_project_opened_after_startup_is_watched() {
     // A command registered after startup — as opening a project does — becomes watch
     // eligible; the reactor only learns of it when the open is announced.
     let web = register_command(&s, "Web", &["src/**/*.rs"], true);
-    start_running(&s, web).await;
+    start_running(&mut s, web).await;
     s.bus.publish(DomainEvent::ProjectOpened { id: PROJECT });
 
-    for _ in 0..50 {
-        tokio::task::yield_now().await;
-        if !s.watcher.watched().is_empty() {
-            break;
-        }
-    }
+    // The reactor re-syncs on the open and now establishes the watch for the new command.
+    s.watcher.established().await;
     assert!(
         !s.watcher.watched().is_empty(),
         "the project opened after startup is now watched",

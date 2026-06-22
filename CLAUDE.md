@@ -64,9 +64,7 @@ Run these steps **in order, every session**, before writing code, planning, or a
 If any of those files contradict each other, **stop and surface it** — do not pick silently. The
 source-of-truth order is in §2.
 
-> There is **no knowledge graph / code-review-graph for this repo** (it's pre-code or early code). The
-> parent `~/CLAUDE.md` references graph MCP tools for a *different* project — they do not apply here.
-> Use normal discovery (Glob/Grep/Read) plus LSP for navigation once code exists.
+> Use normal discovery (Glob/Grep/Read) plus LSP for navigation.
 
 ---
 

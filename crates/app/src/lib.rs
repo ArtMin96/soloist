@@ -15,7 +15,7 @@ use serde::Serialize;
 use soloist_core::{CorePorts, Facade, NoopRuntimeState, RuntimeState, Store, TokioClock};
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use soloist_store::{FileRuntimeState, SqliteStore};
-use soloist_sys::{NotifyFileWatcher, ProcMetricsProbe, ProcPortProbe};
+use soloist_sys::{CommandVersionProbe, NotifyFileWatcher, ProcMetricsProbe, ProcPortProbe};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::broadcast::error::RecvError;
 
@@ -64,18 +64,18 @@ fn build_facade(app: AppHandle) -> Facade {
         }
     };
 
-    // One SQLite store backs the trust and project repositories the façade needs.
-    // The lock releaser is unset here, so it defaults to its `Noop` port (coordination
+    // One SQLite store backs the trust, project, and agent-tool repositories the façade
+    // needs. The lock releaser is unset here, so it defaults to its `Noop` port (coordination
     // lands in C6); the runtime-state and orphan-control adapters are wired for adoption,
-    // the metrics probe reads CPU/memory from /proc, the port probe reads /proc, the
-    // file watcher reports filesystem changes via notify, and the notifier shows desktop
-    // toasts via the Tauri notification plugin.
+    // the metrics probe reads CPU/memory from /proc, the port probe reads /proc, the file
+    // watcher reports filesystem changes via notify, the notifier shows desktop toasts via
+    // the Tauri notification plugin, and the version probe auto-detects installed agent CLIs.
     Facade::new(
         CorePorts::builder(
             Arc::new(PtyProcessSpawner),
             Arc::new(TokioClock),
             store.clone(),
-            store,
+            store.clone(),
         )
         .runtime(runtime)
         .orphan_control(Arc::new(PgidOrphanControl))
@@ -83,6 +83,8 @@ fn build_facade(app: AppHandle) -> Facade {
         .port_probe(Arc::new(ProcPortProbe::new()))
         .file_watcher(Arc::new(NotifyFileWatcher::new()))
         .notifier(Arc::new(TauriNotifier::new(app)))
+        .agent_tools(store)
+        .version_probe(Arc::new(CommandVersionProbe::new()))
         .build(),
     )
 }

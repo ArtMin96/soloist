@@ -45,6 +45,10 @@ mod sync;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
+pub use agents::{
+    AgentKind, AgentTool, AgentToolRepo, Agents, DetectedTool, NoopAgentToolRepo, NoopVersionProbe,
+    PromptMode, VersionProbe,
+};
 pub use config::{
     ConfigEngine, ConfigError, ConfigSync, ProcessSpec, Rename, SoloYml, SyncError,
     TrustReviewCommand,
