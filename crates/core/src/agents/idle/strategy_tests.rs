@@ -50,15 +50,53 @@ fn output_delta_goes_idle_after_a_quiet_window() {
 }
 
 #[test]
-fn output_delta_reports_permission_on_a_prompt_even_when_quiet() {
+fn output_delta_reports_permission_once_output_settles_on_a_prompt() {
     let strategy = strategy_for(AgentKind::Claude);
     let mut memory = AgentMemory::default();
-    // Output is quiet (same seq) but a prompt sits at the tail: Permission, not Idle — the
-    // distinction the whole five-state design exists to make.
-    let observed = signals(10, None, &["Do you want to proceed? (y/n)"]);
+    let prompt = signals(10, None, &["Do you want to proceed? (y/n)"]);
+    // The prompt's output first arrives, so the agent is still producing: Working...
     assert_eq!(
-        strategy.classify(&mut memory, &observed, AgentActivity::Idle),
+        strategy.classify(&mut memory, &prompt, AgentActivity::Working),
+        AgentActivity::Working
+    );
+    // ...then output settles on the prompt and it reads as Permission, not Idle — the
+    // distinction the whole five-state design exists to make.
+    assert_eq!(
+        strategy.classify(&mut memory, &prompt, AgentActivity::Working),
         AgentActivity::Permission
+    );
+}
+
+#[test]
+fn output_delta_holds_working_while_output_flows_past_a_lingering_prompt() {
+    // After the user answers, the prompt text can linger in the tail for a sample or two
+    // while the agent resumes. Output is flowing, so it stays Working — never a stale
+    // Permission, which would wrongly tell a fire-when-idle workflow the agent is blocked.
+    let strategy = strategy_for(AgentKind::Claude);
+    let mut memory = AgentMemory::default();
+    let tail = &["Do you want to proceed? (y/n)"];
+    // Settle on the prompt: the first sample is Working, the second (quiet) is Permission.
+    strategy.classify(
+        &mut memory,
+        &signals(10, None, tail),
+        AgentActivity::Working,
+    );
+    assert_eq!(
+        strategy.classify(
+            &mut memory,
+            &signals(10, None, tail),
+            AgentActivity::Working
+        ),
+        AgentActivity::Permission
+    );
+    // The user answers; output resumes while the cue still lingers in the tail → Working.
+    assert_eq!(
+        strategy.classify(
+            &mut memory,
+            &signals(25, None, tail),
+            AgentActivity::Permission
+        ),
+        AgentActivity::Working
     );
 }
 

@@ -224,12 +224,10 @@ impl Terminals {
     pub(crate) fn activity(&self, id: ProcessId) -> Option<TerminalActivity> {
         lock(&self.inner).get(&id).map(|channel| {
             let buffers = lock(&channel.buffers);
-            let lines = buffers.rendered().lines;
-            let tail_start = lines.len().saturating_sub(ACTIVITY_TAIL_LINES);
             TerminalActivity {
                 output_seq: buffers.output_seq(),
                 title: buffers.last_title(),
-                tail: lines[tail_start..].to_vec(),
+                tail: buffers.tail(ACTIVITY_TAIL_LINES),
             }
         })
     }

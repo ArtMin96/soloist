@@ -138,10 +138,12 @@ Solo's documented signals, but the thresholds and patterns are our own, in one p
   ~1 Hz idle sampler (≈3 s). A brief pause holds the previous state rather than flapping.
 - **Permission cues** (`core::agents::idle::permission`): a small set of strong, model-agnostic
   approval idioms (`(y/n)`, "do you want to proceed", "allow this action", …), scanned only over the
-  last few rendered lines. Deliberately conservative — it prefers a **missed** permission to a false
-  one, because a wrong `Permission` would tell a fire-when-idle workflow the agent is blocked when it
-  is free (or the reverse). The bare word "permission" is intentionally not a cue, so an ordinary
-  "permission denied" error line is not mistaken for a prompt.
+  last few rendered lines, and only once the agent's output has **settled** (a terminal still
+  producing output reads as `Working`, so a just-printed or just-answered prompt lingering in the tail
+  is not misread as a live block). Deliberately conservative — it prefers a **missed** permission to a
+  false one, because a wrong `Permission` would tell a fire-when-idle workflow the agent is blocked
+  when it is free (or the reverse). The bare word "permission" is intentionally not a cue, so an
+  ordinary "permission denied" error line is not mistaken for a prompt.
 - **Title-status keywords** (`core::agents::idle::strategy`): generic thinking/working/error
   substrings mapped to activities for the title-status provider.
 

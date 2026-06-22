@@ -58,8 +58,8 @@ pub(super) trait IdleStrategy: Sync {
 }
 
 /// Visible-output heuristic (Claude, OpenCode, and the default for providers with no
-/// documented heuristic): output flowing means working; a blocking prompt at the tail means
-/// permission; quiet for a few samples means idle.
+/// documented heuristic): output flowing means working; once output settles, a blocking
+/// prompt at the tail means permission, and continued quiet means idle.
 struct OutputDelta;
 
 impl IdleStrategy for OutputDelta {
@@ -69,18 +69,22 @@ impl IdleStrategy for OutputDelta {
         signals: &TerminalActivity,
         current: AgentActivity,
     ) -> AgentActivity {
-        // A blocking prompt is quiet but *not* done — its own state, checked first so it is
-        // never misread as idle. Reset the quiet count so idle must be re-earned after it.
-        if looks_like_permission_prompt(&signals.tail) {
-            memory.last_output_seq = signals.output_seq;
-            memory.quiet_samples = 0;
-            return AgentActivity::Permission;
-        }
         let produced = signals.output_seq != memory.last_output_seq;
         memory.last_output_seq = signals.output_seq;
         if produced {
+            // Output is flowing, so the agent is working — even if a just-printed or
+            // just-answered permission prompt still lingers in the tail. A real block is
+            // recognised only once output settles (below), so resumed work is never misread
+            // as a stale permission prompt.
             memory.quiet_samples = 0;
             return AgentActivity::Working;
+        }
+        // Output has settled. A blocking prompt at the tail now means the agent is waiting
+        // on the user — quiet but *not* done — so it is checked before idle and never read
+        // as available. Reset the quiet count so idle must be re-earned after it.
+        if looks_like_permission_prompt(&signals.tail) {
+            memory.quiet_samples = 0;
+            return AgentActivity::Permission;
         }
         if memory.note_quiet() {
             AgentActivity::Idle

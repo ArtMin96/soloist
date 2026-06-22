@@ -68,6 +68,14 @@ impl IdleSampler {
             let Some(supervisor) = self.supervisor.upgrade() else {
                 return;
             };
+            let tracked = self.tracker.tracked();
+            // Until an agent is launched there is nothing to classify or prune, so skip the
+            // supervisor snapshot entirely. Drop the strong reference first, so an empty tick
+            // never keeps the supervisor — and the app — alive across the sleep.
+            if tracked.is_empty() {
+                drop(supervisor);
+                continue;
+            }
             let status_by_id: HashMap<ProcessId, ProcStatus> = supervisor
                 .snapshot()
                 .into_iter()
@@ -76,7 +84,7 @@ impl IdleSampler {
             // Forget agents that have left the registry, so the tracker never outgrows it.
             self.tracker
                 .retain_live(&status_by_id.keys().copied().collect());
-            for id in self.tracker.tracked() {
+            for id in tracked {
                 match status_by_id.get(&id) {
                     // A running agent is reclassified from its current terminal signals.
                     Some(ProcStatus::Running) => {

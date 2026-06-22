@@ -35,6 +35,13 @@ impl<T> Ring<T> {
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.items.iter()
     }
+
+    /// Iterates over the most recent `n` retained items, oldest first (fewer than `n` if
+    /// the ring holds fewer). Reads the tail without copying the whole buffer.
+    pub fn tail(&self, n: usize) -> impl Iterator<Item = &T> {
+        let skip = self.items.len().saturating_sub(n);
+        self.items.iter().skip(skip)
+    }
 }
 
 #[cfg(test)]

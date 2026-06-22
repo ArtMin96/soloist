@@ -243,6 +243,23 @@ impl TerminalBuffers {
         }
         RenderedScreen { lines }
     }
+
+    /// The most recent `n` rendered lines, oldest first — the committed log tail plus the
+    /// in-progress line (where a not-yet-newline-terminated prompt sits). Reads only the
+    /// tail rather than cloning the whole scrollback, for the idle classifier's frequent
+    /// polling.
+    pub(crate) fn tail(&self, n: usize) -> Vec<String> {
+        if n == 0 {
+            return Vec::new();
+        }
+        let has_partial = !self.line.is_empty();
+        let from_log = if has_partial { n - 1 } else { n };
+        let mut lines: Vec<String> = self.log.tail(from_log).map(|l| l.text.clone()).collect();
+        if has_partial {
+            lines.push(self.line.iter().collect());
+        }
+        lines
+    }
 }
 
 #[cfg(test)]
