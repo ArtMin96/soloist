@@ -113,6 +113,10 @@ impl RawScrollback {
     fn to_vec(&self) -> Vec<u8> {
         self.bytes.iter().copied().collect()
     }
+
+    fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
 }
 
 impl Drop for RawScrollback {
@@ -191,6 +195,12 @@ impl TerminalBuffers {
     /// The raw byte scrollback, for verbatim replay to a terminal emulator on attach.
     pub(crate) fn raw(&self) -> Vec<u8> {
         self.raw.to_vec()
+    }
+
+    /// Whether any output has been recorded yet. Used to decide whether a relaunch
+    /// should mark a restart boundary: there is nothing to separate on the first run.
+    pub(crate) fn has_output(&self) -> bool {
+        !self.raw.is_empty()
     }
 
     /// The rendered output: every retained scrollback line plus the in-progress line.

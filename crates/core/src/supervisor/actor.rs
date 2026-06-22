@@ -154,6 +154,11 @@ async fn run(
     let mut status = ProcStatus::Starting;
 
     loop {
+        // If this process already has output from a previous run — an in-place restart
+        // looping here, or a fresh actor reusing the buffers after a crash auto-restart —
+        // mark the boundary so the kept output is divided from the new run's. A no-op on
+        // the first run, when there is nothing to separate.
+        recorder.mark_restart();
         // The first iteration of an adopted process uses the pre-built handle over its
         // existing process group; every spawn (and every restart) creates a fresh child.
         let spawned = match initial.take() {

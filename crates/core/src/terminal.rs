@@ -24,6 +24,12 @@ use crate::sync::lock;
 
 use buffers::{ScrollbackBudget, TerminalBuffers};
 
+/// A muted separator written into a process's terminal stream when it restarts, so the
+/// retained output of the previous run is visually divided from the new run's. Styled
+/// dim (ANSI faint) to match the calm dashboard surface; the rendered projection that
+/// logs and MCP read keeps only its plain text (`──────────  restarted  ──────────`).
+const RESTART_BANNER: &str = "\r\n\x1b[2m──────────  restarted  ──────────\x1b[0m\r\n";
+
 /// Input channel depth: typed bytes and resizes buffered before the sender awaits.
 /// Bounded so a paste burst applies backpressure instead of growing without limit.
 const INPUT_CAPACITY: usize = 256;
@@ -103,6 +109,22 @@ impl Recorder {
         let _ = self.live.send(PtyChunk::from(chunk));
         signals
     }
+
+    /// Marks a restart boundary in the output stream. When the process already has
+    /// output retained from a previous run, writes a [`RESTART_BANNER`] into the buffers
+    /// and the live stream so the kept output is divided from the new run's; a no-op on
+    /// the first run, when there is nothing to separate. The banner is appended and
+    /// published under one lock, with the same atomicity against [`Terminals::attach`]
+    /// that [`Recorder::record`] guarantees.
+    pub(crate) fn mark_restart(&self) {
+        let mut buffers = lock(&self.buffers);
+        if !buffers.has_output() {
+            return;
+        }
+        let banner = RESTART_BANNER.as_bytes();
+        buffers.ingest(banner);
+        let _ = self.live.send(PtyChunk::from(banner.to_vec()));
+    }
 }
 
 /// The registry of live terminal channels, keyed by process. Cloneable; all clones
@@ -117,26 +139,33 @@ pub(crate) struct Terminals {
 }
 
 impl Terminals {
-    /// Opens a fresh terminal channel for `id`, registering the viewer-facing half and
-    /// returning the actor-facing half. Replaces any prior channel for `id`.
+    /// Opens the terminal channel for `id`'s owning actor, returning the actor-facing
+    /// half. A first launch creates fresh buffers and a fresh live broadcast; a
+    /// *relaunch* — the same process restarting, including a crash auto-restart that
+    /// spawns a new actor — reuses the existing buffers and live sender, so the output
+    /// history survives the restart and an attached viewer stays subscribed across it.
+    /// Only the input channel, whose receiver the previous actor owned, is replaced.
     pub(crate) fn open(&self, id: ProcessId) -> ActorTerminal {
         let (input_tx, input_rx) = mpsc::channel(INPUT_CAPACITY);
-        let (live_tx, _live_rx) = broadcast::channel(LIVE_CAPACITY);
-        let buffers = Arc::new(Mutex::new(TerminalBuffers::shared(self.budget.clone())));
-        lock(&self.inner).insert(
+        let mut channels = lock(&self.inner);
+        let (live, buffers) = match channels.get(&id) {
+            Some(existing) => (existing.live.clone(), existing.buffers.clone()),
+            None => (
+                broadcast::channel(LIVE_CAPACITY).0,
+                Arc::new(Mutex::new(TerminalBuffers::shared(self.budget.clone()))),
+            ),
+        };
+        channels.insert(
             id,
             TerminalChannel {
                 input: input_tx,
-                live: live_tx.clone(),
+                live: live.clone(),
                 buffers: buffers.clone(),
             },
         );
         ActorTerminal {
             input: input_rx,
-            recorder: Recorder {
-                live: live_tx,
-                buffers,
-            },
+            recorder: Recorder { live, buffers },
         }
     }
 
@@ -170,3 +199,7 @@ impl Terminals {
             .map(|c| lock(&c.buffers).rendered())
     }
 }
+
+#[cfg(test)]
+#[path = "terminal_tests.rs"]
+mod tests;

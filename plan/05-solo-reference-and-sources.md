@@ -347,6 +347,7 @@ Each gap is something Solo does NOT publicly document; we choose and own the ans
 | `env` precedence | process `env` > captured `-ilc` shell env > app env |
 | File-watch ignores | default-ignore `.git`, `node_modules`, `target`, `dist`, `.venv` |
 | File-watch on a non-running command | reload a *running* command only; a change while it is stopped/crashed/exhausted does nothing (never resurrects a user-stopped or restored-resting command) |
+| Restart banner scope | Solo documents "keep last crash output + restart banner before new output" for *crash* auto-restart. We retain the terminal scrollback and draw the banner on **every** relaunch of a process — crash auto-restart, file-watch restart, manual restart, and a user start after a stop — since the boundary is equally useful and a uniform rule avoids special-casing one trigger. The banner is neutral (`restarted`): the injection point in the terminal stream does not know the cause |
 | Lease lock TTL | explicit TTL + renew; auto-release on bound-process close |
 | Auto-summarization model | optional; use user's configured agent CLI headless, else disabled |
 | MCP param schemas | clean-room JSON Schemas, documented per tool |
