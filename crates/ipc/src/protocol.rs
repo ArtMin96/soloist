@@ -34,8 +34,12 @@ pub enum IpcRequest {
 }
 
 /// A successful reply. The server always returns the variant matching the request.
+///
+/// Adjacently tagged (`{"ok": <variant>, "data": <payload>}`): the list variants wrap a
+/// sequence, which serde cannot serialize under an *internal* tag (there is no map to inject
+/// the tag into), so the payload goes in its own `data` field.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "ok", rename_all = "snake_case")]
+#[serde(tag = "ok", content = "data", rename_all = "snake_case")]
 pub enum IpcResponse {
     /// The resolved identity (answer to [`IpcRequest::Whoami`]).
     Whoami(Whoami),

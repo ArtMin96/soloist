@@ -13,7 +13,7 @@ mod projects;
 mod runtime;
 mod trust;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::Connection;
@@ -48,10 +48,12 @@ impl SqliteStore {
         })
     }
 
-    /// Opens the database at the resolved app data directory (see [`data_dir`]).
+    /// Opens the database in the app data directory, creating that directory (restricted
+    /// to its owner) through the one [`soloist_ipc::ensure_data_dir`] resolution the IPC
+    /// socket also uses, so the database and the socket always share one owner-only home.
     pub fn open_default() -> Result<Self, StoreError> {
-        let path = data_dir()?.join("soloist.db");
-        Self::open(&path)
+        let dir = soloist_ipc::ensure_data_dir().map_err(io_err)?;
+        Self::open(&dir.join("soloist.db"))
     }
 
     /// Opens an ephemeral in-memory database (migrated, foreign keys on, but not
@@ -80,13 +82,6 @@ fn configure(conn: &Connection) -> Result<(), StoreError> {
     conn.pragma_update(None, "foreign_keys", true)
         .map_err(sql_err)?;
     migrate::migrate(conn)
-}
-
-/// Resolves the app data directory (`SOLOIST_APP_DATA_DIR`, else `$XDG_DATA_HOME/soloist`,
-/// else `$HOME/.local/share/soloist`). Delegates to the one resolution in [`soloist_ipc`]
-/// so the store's database and the IPC socket always live in the same directory.
-pub fn data_dir() -> Result<PathBuf, StoreError> {
-    soloist_ipc::data_dir().map_err(|err| StoreError::Backend(err.to_string()))
 }
 
 pub(crate) fn sql_err(err: rusqlite::Error) -> StoreError {

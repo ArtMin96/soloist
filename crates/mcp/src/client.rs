@@ -8,17 +8,26 @@
 
 use std::fmt;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use soloist_core::ProcessId;
 use soloist_ipc::{read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult};
 use tokio::net::UnixStream;
 use tokio::sync::Mutex;
 
+/// How long a single request waits for the app before the connection is treated as wedged.
+/// A backstop against a hung app, not a per-tool deadline: a local request answers in
+/// milliseconds, so this only fires when the app has stopped responding — bounding the call
+/// (and the shared connection behind it) instead of blocking the MCP host forever.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Why a request to the app failed.
 #[derive(Debug)]
 pub enum ClientError {
     /// The app's IPC socket could not be reached — Soloist is not running.
     NotRunning,
+    /// The app did not answer within [`REQUEST_TIMEOUT`].
+    Timeout,
     /// The connection failed mid-request.
     Transport,
     /// The app served the request but returned a typed error.
@@ -31,6 +40,7 @@ impl fmt::Display for ClientError {
             ClientError::NotRunning => {
                 write!(f, "Soloist is not running (could not reach its IPC socket)")
             }
+            ClientError::Timeout => write!(f, "Soloist did not respond in time"),
             ClientError::Transport => write!(f, "lost the connection to Soloist"),
             ClientError::App(err) => write!(f, "{err}"),
         }
@@ -92,15 +102,21 @@ impl AppClient {
     }
 }
 
-/// Writes one request and reads one reply over the stream.
+/// Writes one request and reads one reply over the stream, bounded by [`REQUEST_TIMEOUT`]
+/// so a wedged app surfaces as [`ClientError::Timeout`] rather than hanging the caller.
 async fn exchange(stream: &mut UnixStream, request: &IpcRequest) -> Result<IpcResult, ClientError> {
-    write_frame(stream, request)
+    let io = async {
+        write_frame(stream, request)
+            .await
+            .map_err(|_| ClientError::Transport)?;
+        read_frame::<_, IpcResult>(stream)
+            .await
+            .map_err(|_| ClientError::Transport)?
+            .ok_or(ClientError::Transport)
+    };
+    tokio::time::timeout(REQUEST_TIMEOUT, io)
         .await
-        .map_err(|_| ClientError::Transport)?;
-    read_frame::<_, IpcResult>(stream)
-        .await
-        .map_err(|_| ClientError::Transport)?
-        .ok_or(ClientError::Transport)
+        .map_err(|_| ClientError::Timeout)?
 }
 
 #[cfg(test)]

@@ -1,5 +1,8 @@
 use super::*;
-use soloist_core::{ProcessId, ProjectId, ProjectView};
+use soloist_core::{
+    Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectView, Readiness,
+    SessionId, Whoami,
+};
 use std::path::PathBuf;
 
 #[test]
@@ -29,6 +32,49 @@ fn requests_round_trip_through_json() {
         let json = serde_json::to_string(&request).expect("serialize");
         let back: IpcRequest = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, request);
+    }
+}
+
+#[test]
+fn every_response_variant_round_trips_through_json() {
+    let view = ProcessView {
+        id: ProcessId::from_raw(7),
+        project: ProjectId::from_raw(1),
+        kind: ProcessKind::Terminal,
+        label: "term".into(),
+        status: ProcStatus::Running,
+        exit_code: None,
+        requires_trust: false,
+        ports: Vec::new(),
+        ready: Readiness::Ungated,
+    };
+    let summary = ProjectSummary {
+        id: ProjectId::from_raw(1),
+        name: "storefront".into(),
+        root: PathBuf::from("/projects/storefront"),
+    };
+    // The list variants wrap a sequence; this is what a purely internal tag could not
+    // serialize, so exercising every variant guards the response envelope's tagging.
+    let responses = [
+        IpcResponse::Whoami(Whoami {
+            session: SessionId::from_raw(1),
+            origin: Origin::Unbound,
+            bound_process: None,
+            effective_project: None,
+        }),
+        IpcResponse::Acked,
+        IpcResponse::Projects(vec![summary.clone()]),
+        IpcResponse::ProjectStatus(ProjectStatus {
+            project: summary.clone(),
+            processes: vec![view.clone()],
+        }),
+        IpcResponse::Processes(vec![view.clone()]),
+        IpcResponse::Process(view.clone()),
+    ];
+    for response in responses {
+        let json = serde_json::to_string(&response).expect("serialize");
+        let back: IpcResponse = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, response);
     }
 }
 

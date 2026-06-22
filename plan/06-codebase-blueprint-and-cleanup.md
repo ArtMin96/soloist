@@ -49,7 +49,8 @@ builds and runs" (§8).
 | `core` | domain | C1–C8, ports (traits), domain types, event bus | `tokio`/`serde`/`thiserror`/`vte`/etc. — **never** an adapter crate | live (C1–C3 + C8) |
 | `store` | driven adapter | SQLite impl of `Store`/`ProjectRepo`/`TrustRepo`/`RuntimeState` + migrations | `core`, `ipc`, `rusqlite` | live |
 | `pty` | driven adapter | `ProcessSpawner`/`PtyIo`/`ProcessControl`/`OrphanControl` over `portable-pty`+`nix` | `core`, `portable-pty`, `nix` | live |
-| `app` | driving adapter + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `httpapi`, `tauri` | live |
+| `sys` | driven adapter | `MetricsProbe` (CPU/mem) + `PortProbe` (discovery) over `/proc`; `FileWatcher` over `notify` — monitoring C5 | `core`, `notify`, `libc` | live |
+| `app` | driving adapter + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `sys`, `httpapi`, `tauri` | live |
 | `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | live (P8 skeleton) |
 | `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | stub → P10 |
 | `cli` | driving adapter | `soloist` CLI = thin HTTP client | `ipc`, `clap` (not `core` directly) | stub → P10 |

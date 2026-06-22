@@ -101,6 +101,13 @@ impl Facade {
         self.supervisor.snapshot()
     }
 
+    /// One process's read-model row by id, `None` if it is no longer registered — the
+    /// single-process read, so a caller after one process clones one row, not the whole
+    /// [`snapshot`](Self::snapshot).
+    pub fn process_view(&self, id: ProcessId) -> Option<ProcessView> {
+        self.supervisor.view(id)
+    }
+
     /// The process supervisor (C2) — start/stop/restart and bulk operations.
     pub fn supervisor(&self) -> &Supervisor {
         self.supervisor.as_ref()
@@ -402,7 +409,7 @@ impl Facade {
             return Some(project);
         }
         if let Some(process) = self.identity.origin(session).process() {
-            if let Some(view) = self.snapshot().into_iter().find(|v| v.id == process) {
+            if let Some(view) = self.process_view(process) {
                 return Some(view.project);
             }
         }

@@ -9,7 +9,7 @@
 
 use soloist_core::{Facade, IdentityError, ProjectId, SessionId};
 use soloist_ipc::{
-    read_frame, socket_path, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult,
+    ensure_socket_path, read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult,
     ProjectStatus, ProjectSummary,
 };
 use tauri::{AppHandle, Manager};
@@ -19,16 +19,15 @@ use tokio::net::{UnixListener, UnixStream};
 /// logged no-op if the socket cannot be resolved or bound, so a packaging or permissions
 /// problem disables MCP rather than taking down the app (graceful degradation).
 pub async fn serve(app: AppHandle) {
-    let path = match socket_path() {
+    // Resolves the socket path and creates its owner-only data directory in one step — the
+    // single resolution the store shares, so the socket and database keep one private home.
+    let path = match ensure_socket_path() {
         Ok(path) => path,
         Err(err) => {
-            eprintln!("soloist: MCP IPC disabled (cannot resolve socket path: {err})");
+            eprintln!("soloist: MCP IPC disabled (cannot prepare the socket directory: {err})");
             return;
         }
     };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
     // A leftover socket from a previous run would make bind fail; the path is ours to clear.
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
@@ -98,9 +97,7 @@ fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest) -> I
         IpcRequest::GetProjectStatus { project } => project_status(facade, session, project),
         IpcRequest::ListProcesses => Ok(IpcResponse::Processes(facade.snapshot())),
         IpcRequest::GetProcessStatus { process } => facade
-            .snapshot()
-            .into_iter()
-            .find(|view| view.id == process)
+            .process_view(process)
             .map(IpcResponse::Process)
             .ok_or(IpcError::UnknownProcess),
     }

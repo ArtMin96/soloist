@@ -44,3 +44,25 @@ async fn a_request_reports_not_running_when_nothing_listens() {
         .expect_err("there is no server");
     assert!(matches!(err, ClientError::NotRunning));
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_request_times_out_when_the_app_never_answers() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let listener = UnixListener::bind(&socket).expect("bind");
+    // A wedged app: it accepts the connection but never replies. The paused clock auto-
+    // advances to the request timeout, so the assertion is deterministic, not wall-clock.
+    let server = tokio::spawn(async move {
+        let (_stream, _addr) = listener.accept().await.expect("accept");
+        std::future::pending::<()>().await;
+    });
+
+    let client = AppClient::new(None, socket);
+    let err = client
+        .request(IpcRequest::Whoami)
+        .await
+        .expect_err("a silent app must time out");
+    assert!(matches!(err, ClientError::Timeout));
+
+    server.abort();
+}

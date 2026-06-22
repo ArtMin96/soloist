@@ -38,6 +38,20 @@ struct ProjectArg {
     project: Option<u64>,
 }
 
+/// Arguments for selecting the session's project scope.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SelectProjectArg {
+    /// The id of the project to scope this session's tools to, from `list_projects`.
+    project: u64,
+}
+
+/// Arguments for registering an external caller.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct RegisterAgentArg {
+    /// A short label identifying the calling agent (e.g. `claude-code`), reported by `whoami`.
+    label: String,
+}
+
 #[tool_router]
 impl SoloistMcp {
     /// Builds the handler over a client connection to the app.
@@ -54,6 +68,41 @@ impl SoloistMcp {
     async fn whoami(&self) -> Result<CallToolResult, ErrorData> {
         match self.client.request(IpcRequest::Whoami).await {
             Ok(IpcResponse::Whoami(who)) => structured(&who),
+            Ok(_) => Err(unexpected()),
+            Err(err) => Err(app_error(&err)),
+        }
+    }
+
+    #[tool(
+        description = "Register this MCP session as an external caller under a label, so `whoami` reports who is calling. For agents Soloist did not launch."
+    )]
+    async fn register_agent(
+        &self,
+        Parameters(RegisterAgentArg { label }): Parameters<RegisterAgentArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self
+            .client
+            .request(IpcRequest::RegisterAgent { label })
+            .await
+        {
+            Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => Err(app_error(&err)),
+        }
+    }
+
+    #[tool(
+        description = "Set the project this session's scoped tools act on, by its id from `list_projects`."
+    )]
+    async fn select_project(
+        &self,
+        Parameters(SelectProjectArg { project }): Parameters<SelectProjectArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::SelectProject {
+            project: ProjectId::from_raw(project),
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Acked) => acked(),
             Ok(_) => Err(unexpected()),
             Err(err) => Err(app_error(&err)),
         }
@@ -120,6 +169,11 @@ fn structured<T: Serialize>(value: &T) -> Result<CallToolResult, ErrorData> {
         .map_err(|err| ErrorData::internal_error(err.to_string(), None))
 }
 
+/// A structured acknowledgement for a state-setting tool (register / select).
+fn acked() -> Result<CallToolResult, ErrorData> {
+    structured(&serde_json::json!({ "ok": true }))
+}
+
 /// Maps a client error to an MCP tool error the agent can read.
 fn app_error(err: &ClientError) -> ErrorData {
     ErrorData::internal_error(err.to_string(), None)
@@ -129,3 +183,7 @@ fn app_error(err: &ClientError) -> ErrorData {
 fn unexpected() -> ErrorData {
     ErrorData::internal_error("the app returned an unexpected response".to_string(), None)
 }
+
+#[cfg(test)]
+#[path = "server_tests.rs"]
+mod tests;
