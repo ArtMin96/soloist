@@ -1,6 +1,8 @@
 use super::*;
 use soloist_core::testing::{terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
-use soloist_core::{CorePorts, DomainEvent, Origin, ProcStatus, ProcessId, TokioClock};
+use soloist_core::{
+    CorePorts, DomainEvent, Origin, ProcStatus, ProcessId, StartSummary, TokioClock,
+};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
@@ -273,6 +275,193 @@ async fn list_agent_tools_routes_to_the_registry() {
         handle_request(&facade, session, IpcRequest::ListAgentTools).await,
         Ok(IpcResponse::AgentTools(_))
     ));
+}
+
+#[tokio::test]
+async fn bulk_commands_without_scope_are_refused() {
+    let facade = facade();
+    let session = facade.open_session();
+    for request in [
+        IpcRequest::StartAllCommands,
+        IpcRequest::StopAllCommands,
+        IpcRequest::RestartAllCommands,
+    ] {
+        assert_eq!(
+            handle_request(&facade, session, request).await,
+            Err(IpcError::NoProjectScope)
+        );
+    }
+}
+
+#[tokio::test]
+async fn bulk_start_in_scope_returns_a_summary() {
+    let facade = facade();
+    let session = facade.open_session();
+    // Only a terminal is in scope, so the bulk command start finds nothing to start.
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::StartAllCommands).await,
+        Ok(IpcResponse::BulkStarted(StartSummary::default()))
+    );
+}
+
+#[tokio::test]
+async fn bulk_stop_in_scope_reports_how_many_were_stopped() {
+    let facade = facade();
+    let session = facade.open_session();
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::StopAllCommands).await,
+        Ok(IpcResponse::BulkStopped(0))
+    );
+}
+
+#[tokio::test]
+async fn bulk_restart_in_scope_is_acked() {
+    let facade = facade();
+    let session = facade.open_session();
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::RestartAllCommands).await,
+        Ok(IpcResponse::Acked)
+    );
+}
+
+#[tokio::test]
+async fn output_reads_for_an_unknown_process_are_refused() {
+    let facade = facade();
+    let session = facade.open_session();
+    let unknown = ProcessId::from_raw(999);
+    for request in [
+        IpcRequest::GetProcessOutput {
+            process: unknown,
+            lines: None,
+        },
+        IpcRequest::GetProcessRawOutput { process: unknown },
+        IpcRequest::SearchOutput {
+            process: unknown,
+            query: "x".into(),
+            limit: None,
+        },
+        IpcRequest::GetProcessPorts { process: unknown },
+        IpcRequest::FlushTerminalPerf { process: unknown },
+    ] {
+        assert_eq!(
+            handle_request(&facade, session, request).await,
+            Err(IpcError::UnknownProcess)
+        );
+    }
+}
+
+#[tokio::test]
+async fn reading_a_registered_processs_output_and_ports() {
+    let facade = facade();
+    let session = facade.open_session();
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    // Registered but never started: output is empty (not an error), and it has no ports.
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::GetProcessOutput {
+                process: id,
+                lines: None,
+            },
+        )
+        .await,
+        Ok(IpcResponse::Lines(Vec::new()))
+    );
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::GetProcessPorts { process: id }
+        )
+        .await,
+        Ok(IpcResponse::Ports(Vec::new()))
+    );
+    // flush_terminal_perf is a no-op that confirms a known process.
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::FlushTerminalPerf { process: id },
+        )
+        .await,
+        Ok(IpcResponse::Acked)
+    );
+}
+
+#[tokio::test]
+async fn clear_output_in_scope_is_acked_and_out_of_scope_is_refused() {
+    let facade = facade();
+    let session = facade.open_session();
+    let here = scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
+    let elsewhere = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(2),
+        "elsewhere",
+        "sleep 60",
+    ));
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::ClearOutput { process: here }).await,
+        Ok(IpcResponse::Acked)
+    );
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::ClearOutput { process: elsewhere },
+        )
+        .await,
+        Err(IpcError::OutOfScope)
+    );
+}
+
+#[tokio::test]
+async fn services_list_without_scope_is_refused_and_filters_to_commands_in_scope() {
+    let facade = facade();
+    let session = facade.open_session();
+    // Unscoped: ambiguous, refused.
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::ServicesList).await,
+        Err(IpcError::NoProjectScope)
+    );
+    // Scoped to a project whose only process is a terminal: a terminal is not a service, so
+    // the list is empty (routing + the command filter, exercised via the app router).
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "shell");
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::ServicesList).await,
+        Ok(IpcResponse::Processes(Vec::new()))
+    );
+}
+
+#[tokio::test]
+async fn wait_for_bound_port_on_a_resting_process_reports_not_running() {
+    let facade = facade();
+    let session = facade.open_session();
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    // The process never started, so it has no group to bind a port — resolved at once, no wait.
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::WaitForBoundPort {
+                process: id,
+                port: 3000,
+                timeout_ms: Some(50),
+            },
+        )
+        .await,
+        Ok(IpcResponse::PortWait(PortWaitOutcome::NotRunning))
+    );
 }
 
 #[tokio::test]

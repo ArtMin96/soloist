@@ -1,6 +1,7 @@
 //! `soloist-mcp`: the stdio MCP server. A thin, stateless adapter that forwards tool calls
 //! to the running Soloist app over local IPC, scoped to one identity session.
 
+mod args;
 mod client;
 mod server;
 

@@ -227,6 +227,44 @@ impl Terminals {
             .map(|c| lock(&c.buffers).tail(lines))
     }
 
+    /// Up to `limit` rendered lines of `id`'s output containing `query`. `None` if the
+    /// process has never started.
+    pub(crate) fn search_rendered(
+        &self,
+        id: ProcessId,
+        query: &str,
+        limit: usize,
+    ) -> Option<Vec<String>> {
+        lock(&self.inner)
+            .get(&id)
+            .map(|c| lock(&c.buffers).search_rendered(query, limit))
+    }
+
+    /// Up to `limit` raw output lines of `id` containing `query`. `None` if the process has
+    /// never started.
+    pub(crate) fn search_raw(
+        &self,
+        id: ProcessId,
+        query: &str,
+        limit: usize,
+    ) -> Option<Vec<String>> {
+        lock(&self.inner)
+            .get(&id)
+            .map(|c| lock(&c.buffers).search_raw(query, limit))
+    }
+
+    /// Clears `id`'s output buffers (rendered and raw) without touching the process or its
+    /// PTY. Returns whether the process had a terminal to clear.
+    pub(crate) fn clear(&self, id: ProcessId) -> bool {
+        match lock(&self.inner).get(&id) {
+            Some(channel) => {
+                lock(&channel.buffers).clear();
+                true
+            }
+            None => false,
+        }
+    }
+
     /// `id`'s terminal liveness snapshot for agent idle classification (C4). Reads the
     /// output counter, latest title, and rendered tail under one lock. `None` if the
     /// process has never been started.

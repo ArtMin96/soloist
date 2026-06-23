@@ -161,3 +161,36 @@ under output, `IDLE` when quiet, and `PERMISSION` on a recognised prompt. A diff
 only show as a different quiet-window latency or a permission prompt phrased outside our cue set
 (reported as `WORKING`/`IDLE` rather than `PERMISSION`). Revisit the cue set as real agent CLIs are
 observed; it is the most likely thing to tune.
+
+---
+
+## D-6 — MCP cross-project scope isolation is not yet authenticated (lands in F13) 🟡
+
+**Introduced:** Phase 8 (MCP server core); resolves with **F13** (binding/scope authenticity), a
+later Phase 8 session.
+
+**Solo (ref `plan/05` §7/§12):** Solo exposes project-scoped MCP tools and an effective-project
+scope, but does **not** document how it authenticates a session's binding to a process/project —
+itself a recorded gap (`plan/05` §12).
+
+**Soloist:** the effective-project scope is resolved from `select_project` (any *loaded* project) or
+`bind_session_process` (any *existing* process); neither verifies that the calling MCP client
+actually runs in that process. The scoped **action** tools (F6 process control, F8 bulk,
+`clear_output`, F11 `spawn_agent`) enforce that scope, but because the scope itself is self-asserted,
+a client on the local (same-user, `0700`) IPC socket with **≥2 projects open** can scope to a sibling
+project and act on it. The trust gate still refuses *starting* an untrusted command in any project,
+but `stop_all_commands` / `restart_all_commands` / `clear_output` are not trust-gated, so a forged
+scope can stop or clear another project's processes. With **0 or 1** project open the effective
+project is unambiguous and there is no cross-project surface.
+
+**Rationale:** the authenticating check — read the connecting peer's credentials (`SO_PEERCRED`) and
+match its process group to the bound process's group — is a self-contained adapter slice (F13) the
+owner sequenced *after* the tool fan-out, so the tools and their scope gate land first and the
+authenticity check lands once, over all of them, rather than per session. Until then the exposure is
+bounded: local same-user only (the socket is `0700`), and only across projects the same user has open
+at once. This is a build-sequencing deferral (cf. D-2), not a permanent design choice.
+
+**Effect on parity:** F3 (effective project scope) and F13 (a tool cannot touch another project) are
+**partially** delivered — scope is enforced *given* an authentic binding, but the binding is not yet
+authenticated, so F13's cross-project isolation guarantee is not met for the action tools. F13 closes
+it; this entry is removed (→🟢) when the peer-credential → process-group check lands.

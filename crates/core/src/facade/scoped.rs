@@ -1,8 +1,8 @@
-//! Session-scoped process actions (context C8) — the action surface a remote caller
-//! (MCP today, the HTTP API later) drives.
+//! Session-scoped process actions and queries (context C8) — the surface a remote caller
+//! (MCP today, the HTTP API later) drives within its effective project.
 //!
-//! Each method enforces the calling session's **effective-project scope** before routing
-//! to the one supervisor behaviour: a tool can act only on a process within its project,
+//! Each method resolves the calling session's **effective-project scope** before routing
+//! to the one supervisor behaviour: an action can touch only a process within its project,
 //! and the trust gate in C2 still refuses an untrusted command. The Tauri UI
 //! calls the supervisor directly because the local user is not scope-limited; these methods
 //! add scope on top for callers that are. Scope is resolved here, in the core, so every
@@ -11,9 +11,10 @@
 use std::time::Duration;
 
 use super::{Facade, LaunchAgentError};
-use crate::ids::{ProcessId, SessionId};
+use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::ports::StoreError;
-use crate::supervisor::SupervisorError;
+use crate::process::ProcessView;
+use crate::supervisor::{StartSummary, SupervisorError};
 
 /// How many trailing rendered lines `send_input`'s `wait_ms` snapshot returns — a bounded
 /// tail (about a screenful), never the whole scrollback, so the reply stays small.
@@ -145,6 +146,65 @@ impl Facade {
         Ok(self.launch_agent(project, tool, extra_args)?)
     }
 
+    /// Starts every trusted command in the session's effective project, regardless of
+    /// `auto_start` — the scoped `start_all_commands` tool. Returns what started and what was
+    /// skipped as untrusted. Distinct from the dashboard's auto-start path; an untrusted
+    /// command is reported, never run.
+    pub fn start_all_commands(
+        &self,
+        session: SessionId,
+    ) -> Result<StartSummary, ScopedActionError> {
+        let project = self.scope(session)?;
+        Ok(self.supervisor().start_all_commands(project)?)
+    }
+
+    /// Gracefully stops every running command in the session's effective project (leaving
+    /// agents and terminals running), returning how many were messaged.
+    pub fn stop_all_commands(&self, session: SessionId) -> Result<usize, ScopedActionError> {
+        let project = self.scope(session)?;
+        Ok(self.supervisor().stop_all_commands(project))
+    }
+
+    /// Restarts every trusted command in the session's effective project — running ones
+    /// cycle, resting ones start — bringing the command set up fresh. Untrusted skipped.
+    pub fn restart_all_commands(&self, session: SessionId) -> Result<(), ScopedActionError> {
+        let project = self.scope(session)?;
+        self.supervisor().restart_all_commands(project)?;
+        Ok(())
+    }
+
+    /// Clears one in-scope process's output buffers (rendered and raw) without stopping it
+    /// or touching its PTY. A scoped action — unlike the open output *reads*, clearing
+    /// mutates what every viewer sees, so it is confined to the session's project. Returns
+    /// whether the process had a terminal to clear.
+    pub fn clear_output(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+    ) -> Result<bool, ScopedActionError> {
+        self.require_in_scope(session, process)?;
+        Ok(self.supervisor().clear_output(process))
+    }
+
+    /// The services of the session's effective project: its command processes with their
+    /// status, discovered ports, and readiness (the [`ProcessView`] read model). Scoped to
+    /// the project so a caller sees only its own services; agents and terminals are omitted.
+    pub fn services_list(&self, session: SessionId) -> Result<Vec<ProcessView>, ScopedActionError> {
+        let project = self.scope(session)?;
+        Ok(self
+            .snapshot()
+            .into_iter()
+            .filter(|view| view.is_command_in(project))
+            .collect())
+    }
+
+    /// Resolves the session's effective project for a project-wide action, or
+    /// `NoProjectScope` when none is selected, bound, or singular.
+    fn scope(&self, session: SessionId) -> Result<ProjectId, ScopedActionError> {
+        self.effective_project(session)
+            .ok_or(ScopedActionError::NoProjectScope)
+    }
+
     /// The scope guard: the process must exist and belong to the session's effective project.
     /// Returns `OutOfScope` rather than hiding a cross-project process, since the read tools
     /// already expose every process unfiltered (open by design).
@@ -156,10 +216,7 @@ impl Facade {
         let view = self
             .process_view(process)
             .ok_or(ScopedActionError::UnknownProcess)?;
-        let scope = self
-            .effective_project(session)
-            .ok_or(ScopedActionError::NoProjectScope)?;
-        if view.project != scope {
+        if view.project != self.scope(session)? {
             return Err(ScopedActionError::OutOfScope);
         }
         Ok(())

@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use soloist_core::{
     AgentTool, IdentityError, LaunchAgentError, ProcessId, ProcessView, ProjectId, ProjectView,
-    ScopedActionError, SpawnAgentError, Whoami,
+    ScopedActionError, SpawnAgentError, StartSummary, Whoami,
 };
 
 /// A request from an IPC client to the running app. The server resolves identity and
@@ -54,6 +54,45 @@ pub enum IpcRequest {
     },
     /// Every configured agent tool that `spawn_agent` can launch (not scope-filtered).
     ListAgentTools,
+    /// Start every trusted command in the session's effective project (trust-gated).
+    StartAllCommands,
+    /// Gracefully stop every running command in the session's effective project.
+    StopAllCommands,
+    /// Restart every trusted command in the session's effective project (trust-gated).
+    RestartAllCommands,
+    /// A process's recent rendered output, bounded to `lines` (server default when omitted).
+    GetProcessOutput {
+        process: ProcessId,
+        lines: Option<usize>,
+    },
+    /// A process's raw byte output (control sequences included), bounded by the byte cap.
+    GetProcessRawOutput { process: ProcessId },
+    /// Rendered output lines of a process matching `query`, bounded to `limit`.
+    SearchOutput {
+        process: ProcessId,
+        query: String,
+        limit: Option<usize>,
+    },
+    /// Raw output lines of a process matching `query`, bounded to `limit`.
+    SearchRawOutput {
+        process: ProcessId,
+        query: String,
+        limit: Option<usize>,
+    },
+    /// Clear a process's output buffers (not its PTY), scoped to the session's project.
+    ClearOutput { process: ProcessId },
+    /// Flush a process's terminal-perf buffer (a no-op in Soloist; confirms the process).
+    FlushTerminalPerf { process: ProcessId },
+    /// A process's discovered listening ports.
+    GetProcessPorts { process: ProcessId },
+    /// The command processes (services) of the session's effective project.
+    ServicesList,
+    /// Wait until a process binds `port`, or `timeout_ms` elapses (server-bounded).
+    WaitForBoundPort {
+        process: ProcessId,
+        port: u16,
+        timeout_ms: Option<u64>,
+    },
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -84,6 +123,33 @@ pub enum IpcResponse {
     Spawned(ProcessId),
     /// Every configured agent tool (answer to [`IpcRequest::ListAgentTools`]).
     AgentTools(Vec<AgentTool>),
+    /// A bulk start succeeded; the payload reports what started and what was skipped as
+    /// untrusted (answer to [`IpcRequest::StartAllCommands`]).
+    BulkStarted(StartSummary),
+    /// A bulk stop succeeded; the payload is how many running commands were messaged
+    /// (answer to [`IpcRequest::StopAllCommands`]).
+    BulkStopped(usize),
+    /// Rendered output lines — the answer to a get-output or search request.
+    Lines(Vec<String>),
+    /// A process's raw byte output, decoded lossily as UTF-8 (control sequences included).
+    RawOutput(String),
+    /// A process's discovered listening ports (answer to [`IpcRequest::GetProcessPorts`]).
+    Ports(Vec<u16>),
+    /// The outcome of a port-readiness wait (answer to [`IpcRequest::WaitForBoundPort`]).
+    PortWait(PortWaitOutcome),
+}
+
+/// How a [`IpcRequest::WaitForBoundPort`] resolved — a structured answer, not an error: a
+/// timeout is the wait reporting "not bound yet", which the caller can act on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PortWaitOutcome {
+    /// The port is bound and the process now reads ready.
+    Bound,
+    /// The port did not bind within the (bounded) timeout.
+    TimedOut,
+    /// The process is not running, so it has no group that could bind a port.
+    NotRunning,
 }
 
 /// The agent-facing projection of a project: its identity and root, without the UI's

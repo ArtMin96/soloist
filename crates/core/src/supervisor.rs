@@ -291,6 +291,29 @@ impl Supervisor {
         self.terminals.activity(id)
     }
 
+    /// Up to `limit` rendered output lines of `id` containing `query`. `None` if the
+    /// process has never been started.
+    pub fn search_output(&self, id: ProcessId, query: &str, limit: usize) -> Option<Vec<String>> {
+        self.terminals.search_rendered(id, query, limit)
+    }
+
+    /// Up to `limit` raw output lines of `id` containing `query`. `None` if the process has
+    /// never been started.
+    pub fn search_raw_output(
+        &self,
+        id: ProcessId,
+        query: &str,
+        limit: usize,
+    ) -> Option<Vec<String>> {
+        self.terminals.search_raw(id, query, limit)
+    }
+
+    /// Clears `id`'s output buffers (rendered and raw) without stopping the process or
+    /// touching its PTY. Returns whether the process had a terminal to clear.
+    pub fn clear_output(&self, id: ProcessId) -> bool {
+        self.terminals.clear(id)
+    }
+
     /// Writes bytes (typed text or raw control sequences) to a running process's PTY.
     /// Returns [`SupervisorError::NotFound`] for a process with no terminal; input to a
     /// process that has since stopped is delivered best-effort and dropped.

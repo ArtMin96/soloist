@@ -110,6 +110,12 @@ impl RawScrollback {
         self.budget.sub(n);
     }
 
+    /// Discards all retained bytes, releasing them from the shared budget.
+    fn clear(&mut self) {
+        self.budget.sub(self.bytes.len());
+        self.bytes.clear();
+    }
+
     /// The scrollback as a contiguous byte vector for verbatim replay. The ring's storage
     /// may be split in two, so it bulk-copies the halves in order rather than byte by byte.
     fn to_vec(&self) -> Vec<u8> {
@@ -266,136 +272,56 @@ impl TerminalBuffers {
         }
         lines
     }
+
+    /// Up to `limit` rendered lines containing `query` (a case-sensitive substring),
+    /// oldest first. Scans the committed scrollback by reference and the in-progress line
+    /// last, cloning only the matches, so a search never copies the whole buffer.
+    pub(crate) fn search_rendered(&self, query: &str, limit: usize) -> Vec<String> {
+        let mut matches: Vec<String> = self
+            .log
+            .iter()
+            .map(|l| l.text.as_str())
+            .filter(|line| line.contains(query))
+            .take(limit)
+            .map(str::to_owned)
+            .collect();
+        // The in-progress line (not yet newline-terminated) is part of the visible output.
+        if matches.len() < limit && !self.line.is_empty() {
+            let line: String = self.line.iter().collect();
+            if line.contains(query) {
+                matches.push(line);
+            }
+        }
+        matches
+    }
+
+    /// Up to `limit` raw output lines containing `query`, oldest first. Unlike the rendered
+    /// search, this materializes the raw scrollback once — bounded, since the scrollback is
+    /// byte-capped — then decodes it lossily and splits on newlines, so a match keeps the
+    /// control sequences around it; bounded by `limit` so the reply stays small even on a
+    /// busy process.
+    pub(crate) fn search_raw(&self, query: &str, limit: usize) -> Vec<String> {
+        let raw = self.raw.to_vec();
+        String::from_utf8_lossy(&raw)
+            .split('\n')
+            .filter(|line| line.contains(query))
+            .take(limit)
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// Empties both output views — the raw scrollback (releasing its budget), the rendered
+    /// log, and the in-progress line — without touching the running process or its PTY. The
+    /// monotonic output counter and last title are left intact so idle detection, which
+    /// compares successive counter values, is unaffected.
+    pub(crate) fn clear(&mut self) {
+        self.raw.clear();
+        self.log.clear();
+        self.line.clear();
+        self.cursor = 0;
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Buffers over an effectively unbounded global budget, so a test exercises the
-    /// per-process caps in isolation.
-    fn buffers(raw_cap: usize, log_cap: usize) -> TerminalBuffers {
-        TerminalBuffers::new(
-            raw_cap,
-            log_cap,
-            Arc::new(ScrollbackBudget::new(usize::MAX)),
-        )
-    }
-
-    fn ingest(buffers: &mut TerminalBuffers, bytes: &[u8]) -> Vec<TerminalSignal> {
-        buffers.ingest(bytes)
-    }
-
-    #[test]
-    fn rendered_strips_escapes_while_raw_keeps_them() {
-        let mut b = TerminalBuffers::default();
-        // A red "hi" followed by a reset, then a newline.
-        let stream = b"\x1b[31mhi\x1b[0m\n";
-        ingest(&mut b, stream);
-
-        // Rendered text has the colour escapes applied (removed); raw keeps them.
-        assert_eq!(b.rendered().lines, vec!["hi".to_string()]);
-        assert_eq!(b.raw(), stream.to_vec());
-    }
-
-    #[test]
-    fn carriage_return_overwrites_in_place_like_a_progress_bar() {
-        let mut b = TerminalBuffers::default();
-        ingest(&mut b, b"50%\r100%\n");
-        // The second write overwrote the first on the same line.
-        assert_eq!(b.rendered().lines, vec!["100%".to_string()]);
-    }
-
-    #[test]
-    fn the_log_ring_never_exceeds_its_cap() {
-        // A tiny rendered cap so eviction is observable.
-        let mut b = buffers(64 * 1024, 3);
-        for n in 0..10 {
-            ingest(&mut b, format!("line {n}\n").as_bytes());
-        }
-        // Only the last three lines are retained.
-        assert_eq!(
-            b.rendered().lines,
-            vec!["line 7", "line 8", "line 9"]
-                .into_iter()
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn tail_returns_at_most_the_requested_recent_lines() {
-        let mut b = TerminalBuffers::default();
-        for n in 0..10 {
-            ingest(&mut b, format!("line {n}\n").as_bytes());
-        }
-        // Bounded: never more than asked, and it is the most recent slice.
-        assert_eq!(
-            b.tail(3),
-            vec!["line 7", "line 8", "line 9"]
-                .into_iter()
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        );
-        // Asking for more than exist returns only what exists, never padding.
-        assert_eq!(b.tail(100).len(), 10);
-        // Zero lines is empty, not the whole buffer.
-        assert!(b.tail(0).is_empty());
-    }
-
-    #[test]
-    fn the_raw_scrollback_never_exceeds_its_byte_cap() {
-        let mut b = buffers(8, 5_000);
-        ingest(&mut b, b"0123456789");
-        // Capped to the most recent 8 bytes.
-        assert_eq!(b.raw(), b"23456789".to_vec());
-    }
-
-    #[test]
-    fn the_global_budget_bounds_total_raw_bytes_across_buffers() {
-        let budget = Arc::new(ScrollbackBudget::new(16));
-        let mut a = TerminalBuffers::new(1024, 5_000, budget.clone());
-        let mut b = TerminalBuffers::new(1024, 5_000, budget.clone());
-        // Neither hits its own 1 KB cap, but the shared 16-byte global cap forces the
-        // writers to shed oldest bytes so the aggregate never exceeds it.
-        ingest(&mut a, &[b'a'; 10]);
-        ingest(&mut b, &[b'b'; 10]);
-        assert!(
-            a.raw().len() + b.raw().len() <= 16,
-            "aggregate raw bytes stay within the global budget"
-        );
-    }
-
-    #[test]
-    fn dropping_a_buffer_frees_its_bytes_from_the_global_budget() {
-        let budget = Arc::new(ScrollbackBudget::new(1_000));
-        let mut a = TerminalBuffers::new(1024, 5_000, budget.clone());
-        ingest(&mut a, &[b'x'; 100]);
-        assert_eq!(budget.total.load(Ordering::Relaxed), 100);
-        drop(a);
-        assert_eq!(
-            budget.total.load(Ordering::Relaxed),
-            0,
-            "a dropped buffer releases its bytes"
-        );
-    }
-
-    #[test]
-    fn an_osc_title_and_a_bell_surface_as_signals() {
-        let mut b = TerminalBuffers::default();
-        // OSC title set (BEL-terminated), printable text, then a standalone bell.
-        let signals = ingest(&mut b, b"\x1b]0;my title\x07ding\x07");
-        assert!(signals
-            .iter()
-            .any(|s| matches!(s, TerminalSignal::Title(t) if t == "my title")));
-        // Exactly one bell: the OSC's BEL terminator is consumed as the string
-        // terminator, not rung; only the standalone BEL after "ding" rings.
-        assert_eq!(
-            signals
-                .iter()
-                .filter(|s| matches!(s, TerminalSignal::Bell))
-                .count(),
-            1
-        );
-    }
-}
+#[path = "buffers_tests.rs"]
+mod tests;

@@ -1,7 +1,7 @@
 use super::*;
 use soloist_core::{
     AgentKind, AgentTool, Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId,
-    ProjectView, PromptMode, Readiness, SessionId, Whoami,
+    ProjectView, PromptMode, Readiness, SessionId, StartSummary, Whoami,
 };
 use std::path::PathBuf;
 
@@ -51,6 +51,46 @@ fn requests_round_trip_through_json() {
             extra_args: vec!["--model".into(), "opus".into()],
         },
         IpcRequest::ListAgentTools,
+        IpcRequest::StartAllCommands,
+        IpcRequest::StopAllCommands,
+        IpcRequest::RestartAllCommands,
+        IpcRequest::GetProcessOutput {
+            process: ProcessId::from_raw(10),
+            lines: Some(50),
+        },
+        IpcRequest::GetProcessRawOutput {
+            process: ProcessId::from_raw(11),
+        },
+        IpcRequest::SearchOutput {
+            process: ProcessId::from_raw(12),
+            query: "error".into(),
+            limit: Some(10),
+        },
+        IpcRequest::SearchRawOutput {
+            process: ProcessId::from_raw(13),
+            query: "warn".into(),
+            limit: None,
+        },
+        IpcRequest::ClearOutput {
+            process: ProcessId::from_raw(14),
+        },
+        IpcRequest::FlushTerminalPerf {
+            process: ProcessId::from_raw(15),
+        },
+        IpcRequest::GetProcessPorts {
+            process: ProcessId::from_raw(16),
+        },
+        IpcRequest::ServicesList,
+        IpcRequest::WaitForBoundPort {
+            process: ProcessId::from_raw(17),
+            port: 3000,
+            timeout_ms: Some(5000),
+        },
+        IpcRequest::WaitForBoundPort {
+            process: ProcessId::from_raw(18),
+            port: 8080,
+            timeout_ms: None,
+        },
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -105,11 +145,33 @@ fn every_response_variant_round_trips_through_json() {
             kind: AgentKind::Claude,
             prompt_mode: PromptMode::AppendedArg,
         }]),
+        IpcResponse::BulkStarted(StartSummary {
+            started: vec![ProcessId::from_raw(3), ProcessId::from_raw(4)],
+            skipped_untrusted: vec![ProcessId::from_raw(5)],
+        }),
+        IpcResponse::BulkStopped(2),
+        IpcResponse::Lines(vec!["error: boom".into(), "error: bang".into()]),
+        IpcResponse::RawOutput("\u{1b}[31merror\u{1b}[0m".into()),
+        IpcResponse::Ports(vec![3000, 8080]),
+        IpcResponse::PortWait(PortWaitOutcome::Bound),
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");
         let back: IpcResponse = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, response);
+    }
+}
+
+#[test]
+fn every_port_wait_outcome_round_trips() {
+    for outcome in [
+        PortWaitOutcome::Bound,
+        PortWaitOutcome::TimedOut,
+        PortWaitOutcome::NotRunning,
+    ] {
+        let json = serde_json::to_string(&outcome).expect("serialize");
+        let back: PortWaitOutcome = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, outcome);
     }
 }
 
