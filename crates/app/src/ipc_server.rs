@@ -129,6 +129,15 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .await
             .map(IpcResponse::InputSent)
             .map_err(IpcError::from),
+        IpcRequest::SpawnAgent { tool, extra_args } => facade
+            .spawn_agent(session, &tool, extra_args)
+            .map(IpcResponse::Spawned)
+            .map_err(IpcError::from),
+        IpcRequest::ListAgentTools => facade
+            .agents()
+            .list_tools()
+            .map(IpcResponse::AgentTools)
+            .map_err(|err| IpcError::Internal(err.to_string())),
     }
 }
 

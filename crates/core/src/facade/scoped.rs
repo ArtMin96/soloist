@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use super::Facade;
+use super::{Facade, LaunchAgentError};
 use crate::ids::{ProcessId, SessionId};
 use crate::ports::StoreError;
 use crate::supervisor::SupervisorError;
@@ -43,6 +43,18 @@ pub enum ScopedActionError {
     /// A durable read failed while resolving scope.
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+/// Why spawning a worker agent over a scoped session failed: no project is in scope, or the
+/// underlying launch failed (unknown tool, unknown project, store, or supervisor).
+#[derive(Debug, thiserror::Error)]
+pub enum SpawnAgentError {
+    /// The session has no project in scope to spawn the worker into.
+    #[error("no project is in scope; select one first")]
+    NoProjectScope,
+    /// The launch itself failed — see [`LaunchAgentError`].
+    #[error(transparent)]
+    Launch(#[from] LaunchAgentError),
 }
 
 impl From<SupervisorError> for ScopedActionError {
@@ -113,6 +125,24 @@ impl Facade {
             .supervisor()
             .rendered_tail(process, INPUT_TAIL_LINES)
             .map(|lines| lines.join("\n")))
+    }
+
+    /// Spawns a configured agent tool as a worker in the session's effective project and
+    /// starts it, returning its process id — the E7 path (a lead agent spawning a worker over
+    /// MCP). Reuses [`Facade::launch_agent`] for the one launch behaviour; the worker always
+    /// lands in the caller's own project (the resolved scope), so it can never spawn into
+    /// another and needs no project argument. The new agent auto-binds via the injected
+    /// `SOLOIST_PROCESS_ID`. Must run within a `tokio` runtime (starting spawns the actor).
+    pub fn spawn_agent(
+        &self,
+        session: SessionId,
+        tool: &str,
+        extra_args: Vec<String>,
+    ) -> Result<ProcessId, SpawnAgentError> {
+        let project = self
+            .effective_project(session)
+            .ok_or(SpawnAgentError::NoProjectScope)?;
+        Ok(self.launch_agent(project, tool, extra_args)?)
     }
 
     /// The F13 guard: the process must exist and belong to the session's effective project.

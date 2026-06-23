@@ -32,7 +32,7 @@ use crate::trust::TrustStore;
 
 mod scoped;
 
-pub use scoped::ScopedActionError;
+pub use scoped::{ScopedActionError, SpawnAgentError};
 
 /// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot
 /// (see [`crate::events`]) rather than growing memory without limit.

@@ -412,6 +412,71 @@ async fn launch_agent_runs_a_stub_in_the_project_dir_inheriting_the_environment(
     );
 }
 
+#[tokio::test]
+async fn spawn_agent_launches_a_worker_in_the_sessions_project() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use soloist_core::testing::{FakeAgentToolRepo, FakeProjectRepo, FakeTrustRepo};
+    use soloist_core::{AgentKind, AgentTool, ProcessKind, PromptMode};
+
+    // The E7 path end to end: a session selects a project, then spawn_agent (the scoped
+    // wrapper over launch_agent) starts the worker in that project on a real PTY.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let script = dir.path().join("stub-agent.sh");
+    std::fs::write(&script, "#!/bin/sh\nprintf 'WORKER-READY\\n'\n").expect("write stub agent");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod stub");
+
+    let stub = AgentTool {
+        name: "Stub".into(),
+        command: script.to_string_lossy().into_owned(),
+        default_args: Vec::new(),
+        kind: AgentKind::Generic,
+        prompt_mode: PromptMode::AppendedArg,
+    };
+
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(PtyProcessSpawner),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .agent_tools(Arc::new(FakeAgentToolRepo::new(vec![stub])))
+        .build(),
+    );
+    let mut events = facade.subscribe();
+    let project = facade
+        .projects()
+        .add(dir.path(), None, None)
+        .expect("register the project");
+
+    let session = facade.open_session();
+    facade
+        .select_project(session, project.id)
+        .expect("scope the session to the project");
+
+    let id = facade
+        .spawn_agent(session, "Stub", Vec::new())
+        .expect("spawn the worker agent");
+
+    let view = facade
+        .snapshot()
+        .into_iter()
+        .find(|view| view.id == id)
+        .expect("the worker is registered");
+    assert_eq!(
+        view.kind,
+        ProcessKind::Agent,
+        "a spawned worker is Agent-kind"
+    );
+    assert_eq!(
+        view.project, project.id,
+        "the worker lands in the session's project"
+    );
+    wait_for_status(&mut events, ProcStatus::Running).await;
+    wait_for_status(&mut events, ProcStatus::Stopped).await;
+}
+
 async fn wait_for_status(events: &mut Receiver<DomainEvent>, target: ProcStatus) {
     let found = timeout(Duration::from_secs(10), async {
         loop {

@@ -51,6 +51,16 @@ struct SendInputArg {
     wait_ms: Option<u64>,
 }
 
+/// Arguments for spawning a worker agent.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SpawnAgentArg {
+    /// The name of a configured agent tool to launch, as listed by `list_agent_tools`.
+    tool: String,
+    /// Extra command-line flags appended for this one launch ("agent with flags"). Optional.
+    #[serde(default)]
+    extra_args: Vec<String>,
+}
+
 /// Arguments for selecting the session's project scope.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct SelectProjectArg {
@@ -242,6 +252,30 @@ impl SoloistMcp {
         };
         match self.client.request(request).await {
             Ok(IpcResponse::InputSent(tail)) => structured(&serde_json::json!({ "tail": tail })),
+            Ok(_) => Err(unexpected()),
+            Err(err) => Err(app_error(&err)),
+        }
+    }
+
+    #[tool(
+        description = "Spawn a configured agent tool as a worker in this session's project and start it. Use `list_agent_tools` for the available names. Returns the new process id."
+    )]
+    async fn spawn_agent(
+        &self,
+        Parameters(SpawnAgentArg { tool, extra_args }): Parameters<SpawnAgentArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::SpawnAgent { tool, extra_args };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Spawned(id)) => structured(&serde_json::json!({ "process": id })),
+            Ok(_) => Err(unexpected()),
+            Err(err) => Err(app_error(&err)),
+        }
+    }
+
+    #[tool(description = "List the configured agent tools that `spawn_agent` can launch.")]
+    async fn list_agent_tools(&self) -> Result<CallToolResult, ErrorData> {
+        match self.client.request(IpcRequest::ListAgentTools).await {
+            Ok(IpcResponse::AgentTools(tools)) => structured(&tools),
             Ok(_) => Err(unexpected()),
             Err(err) => Err(app_error(&err)),
         }

@@ -9,7 +9,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    IdentityError, ProcessId, ProcessView, ProjectId, ProjectView, ScopedActionError, Whoami,
+    AgentTool, IdentityError, LaunchAgentError, ProcessId, ProcessView, ProjectId, ProjectView,
+    ScopedActionError, SpawnAgentError, Whoami,
 };
 
 /// A request from an IPC client to the running app. The server resolves identity and
@@ -46,6 +47,13 @@ pub enum IpcRequest {
         input: String,
         wait_ms: Option<u64>,
     },
+    /// Spawn a configured agent tool as a worker in the session's effective project, by name.
+    SpawnAgent {
+        tool: String,
+        extra_args: Vec<String>,
+    },
+    /// Every configured agent tool that `spawn_agent` can launch (not scope-filtered).
+    ListAgentTools,
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -72,6 +80,10 @@ pub enum IpcResponse {
     Stopped(bool),
     /// Input was written; the rendered tail when `wait_ms` was given, else `None`.
     InputSent(Option<String>),
+    /// An agent worker was spawned and started; the payload is its new process id.
+    Spawned(ProcessId),
+    /// Every configured agent tool (answer to [`IpcRequest::ListAgentTools`]).
+    AgentTools(Vec<AgentTool>),
 }
 
 /// The agent-facing projection of a project: its identity and root, without the UI's
@@ -120,6 +132,9 @@ pub enum IpcError {
     /// An action targeted a command that is not trusted to run in this project.
     #[error("command is not trusted to run in this project")]
     Untrusted,
+    /// No agent tool is registered under the requested name.
+    #[error("no agent tool is registered under that name")]
+    UnknownTool,
     /// The app failed to serve the request (e.g. a durable read failed).
     #[error("the app could not serve the request: {0}")]
     Internal(String),
@@ -143,6 +158,26 @@ impl From<ScopedActionError> for IpcError {
             ScopedActionError::OutOfScope => IpcError::OutOfScope,
             ScopedActionError::Untrusted => IpcError::Untrusted,
             ScopedActionError::Store(err) => IpcError::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<LaunchAgentError> for IpcError {
+    fn from(err: LaunchAgentError) -> Self {
+        match err {
+            LaunchAgentError::UnknownTool => IpcError::UnknownTool,
+            LaunchAgentError::UnknownProject => IpcError::UnknownProject,
+            LaunchAgentError::Store(err) => IpcError::Internal(err.to_string()),
+            LaunchAgentError::Supervisor(err) => IpcError::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<SpawnAgentError> for IpcError {
+    fn from(err: SpawnAgentError) -> Self {
+        match err {
+            SpawnAgentError::NoProjectScope => IpcError::NoProjectScope,
+            SpawnAgentError::Launch(err) => err.into(),
         }
     }
 }

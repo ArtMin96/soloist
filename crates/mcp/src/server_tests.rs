@@ -1,5 +1,8 @@
 use super::*;
-use soloist_core::{Origin, ProcStatus, ProcessKind, ProcessView, Readiness, SessionId, Whoami};
+use soloist_core::{
+    AgentKind, AgentTool, Origin, ProcStatus, ProcessKind, ProcessView, PromptMode, Readiness,
+    SessionId, Whoami,
+};
 use soloist_ipc::{read_frame, write_frame, IpcError, IpcResult};
 use std::path::PathBuf;
 use tokio::net::UnixListener;
@@ -247,6 +250,53 @@ async fn send_input_without_a_wait_returns_a_null_tail() {
         .await
         .expect("send_input succeeds");
     assert_eq!(structured_of(result), serde_json::json!({ "tail": null }));
+}
+
+#[tokio::test]
+async fn spawn_agent_threads_its_arguments_through_and_returns_the_process_id() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SpawnAgent { tool, extra_args }
+            if tool == "Claude" && extra_args == ["--model", "opus"] =>
+        {
+            Ok(IpcResponse::Spawned(ProcessId::from_raw(42)))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .spawn_agent(Parameters(SpawnAgentArg {
+            tool: "Claude".into(),
+            extra_args: vec!["--model".into(), "opus".into()],
+        }))
+        .await
+        .expect("spawn_agent succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "process": 42 }));
+}
+
+#[tokio::test]
+async fn list_agent_tools_projects_the_configured_tools() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let tool = AgentTool {
+        name: "Claude".into(),
+        command: "claude".into(),
+        default_args: Vec::new(),
+        kind: AgentKind::Claude,
+        prompt_mode: PromptMode::AppendedArg,
+    };
+    let canned = tool.clone();
+    spawn_fake_app(socket.clone(), move |_request| {
+        Ok(IpcResponse::AgentTools(vec![canned.clone()]))
+    });
+
+    let result = handler(socket)
+        .list_agent_tools()
+        .await
+        .expect("list_agent_tools succeeds");
+    let back: Vec<AgentTool> = serde_json::from_value(structured_of(result)).expect("decode tools");
+    assert_eq!(back, vec![tool]);
 }
 
 #[tokio::test]

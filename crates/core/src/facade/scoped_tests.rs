@@ -135,6 +135,32 @@ async fn send_input_enforces_scope() {
     ));
 }
 
+#[test]
+fn spawn_agent_without_a_project_in_scope_is_refused() {
+    let (facade, _trust) = facade();
+    let session = facade.open_session();
+    assert!(matches!(
+        facade.spawn_agent(session, "Claude", Vec::new()),
+        Err(SpawnAgentError::NoProjectScope)
+    ));
+}
+
+#[test]
+fn spawn_agent_with_an_unknown_tool_is_refused() {
+    let (facade, _trust) = facade();
+    // Bind to a process so a project is in scope; the tool name still does not exist (the
+    // default facade registers no agent tools).
+    let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, id)
+        .expect("scope to project 1");
+    assert!(matches!(
+        facade.spawn_agent(session, "NoSuchTool", Vec::new()),
+        Err(SpawnAgentError::Launch(LaunchAgentError::UnknownTool))
+    ));
+}
+
 #[tokio::test]
 async fn an_untrusted_command_in_scope_is_refused() {
     let (facade, trust) = facade();

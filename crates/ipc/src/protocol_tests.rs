@@ -1,7 +1,7 @@
 use super::*;
 use soloist_core::{
-    Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectView, Readiness,
-    SessionId, Whoami,
+    AgentKind, AgentTool, Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId,
+    ProjectView, PromptMode, Readiness, SessionId, Whoami,
 };
 use std::path::PathBuf;
 
@@ -46,6 +46,11 @@ fn requests_round_trip_through_json() {
             input: "\u{3}".into(),
             wait_ms: None,
         },
+        IpcRequest::SpawnAgent {
+            tool: "Claude".into(),
+            extra_args: vec!["--model".into(), "opus".into()],
+        },
+        IpcRequest::ListAgentTools,
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -92,6 +97,14 @@ fn every_response_variant_round_trips_through_json() {
         IpcResponse::Stopped(true),
         IpcResponse::InputSent(Some("$ ls\nfile.txt".into())),
         IpcResponse::InputSent(None),
+        IpcResponse::Spawned(ProcessId::from_raw(12)),
+        IpcResponse::AgentTools(vec![AgentTool {
+            name: "Claude".into(),
+            command: "claude".into(),
+            default_args: Vec::new(),
+            kind: AgentKind::Claude,
+            prompt_mode: PromptMode::AppendedArg,
+        }]),
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");
@@ -135,6 +148,23 @@ fn core_action_errors_map_to_the_wire_error() {
     assert_eq!(
         IpcError::from(ScopedActionError::Untrusted),
         IpcError::Untrusted
+    );
+}
+
+#[test]
+fn core_spawn_errors_map_to_the_wire_error() {
+    use soloist_core::{LaunchAgentError, SpawnAgentError};
+    assert_eq!(
+        IpcError::from(SpawnAgentError::NoProjectScope),
+        IpcError::NoProjectScope
+    );
+    assert_eq!(
+        IpcError::from(SpawnAgentError::Launch(LaunchAgentError::UnknownTool)),
+        IpcError::UnknownTool
+    );
+    assert_eq!(
+        IpcError::from(LaunchAgentError::UnknownProject),
+        IpcError::UnknownProject
     );
 }
 

@@ -247,6 +247,35 @@ async fn sending_input_without_a_wait_returns_no_tail() {
 }
 
 #[tokio::test]
+async fn spawning_an_agent_without_scope_is_refused() {
+    let facade = facade();
+    let session = facade.open_session();
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::SpawnAgent {
+                tool: "Claude".into(),
+                extra_args: Vec::new(),
+            },
+        )
+        .await,
+        Err(IpcError::NoProjectScope)
+    );
+}
+
+#[tokio::test]
+async fn list_agent_tools_routes_to_the_registry() {
+    let facade = facade();
+    let session = facade.open_session();
+    // The default fakes register no tools; routing is what we assert, not the contents.
+    assert!(matches!(
+        handle_request(&facade, session, IpcRequest::ListAgentTools).await,
+        Ok(IpcResponse::AgentTools(_))
+    ));
+}
+
+#[tokio::test]
 async fn an_action_on_another_projects_process_maps_to_out_of_scope() {
     let facade = facade();
     let session = facade.open_session();
