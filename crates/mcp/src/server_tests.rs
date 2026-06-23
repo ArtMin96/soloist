@@ -1,11 +1,20 @@
 use super::*;
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::CallToolResult;
 use soloist_core::{
-    AgentKind, AgentTool, Origin, ProcStatus, ProcessKind, ProcessView, PromptMode, Readiness,
-    SessionId, StartSummary, Whoami,
+    AgentKind, AgentTool, Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId,
+    PromptMode, Readiness, SessionId, StartSummary, Whoami,
 };
-use soloist_ipc::{read_frame, write_frame, IpcError, IpcResult};
+use soloist_ipc::{
+    read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome,
+};
 use std::path::PathBuf;
 use tokio::net::UnixListener;
+
+use crate::args::{
+    OutputArg, ProcessArg, RenameArg, SearchArg, SelectProjectArg, SendInputArg, SpawnAgentArg,
+    WaitForPortArg,
+};
 
 /// Spawns a fake app on `socket` that answers each request via `respond` until the client
 /// disconnects, so a test drives the real [`SoloistMcp`] handler through the real IPC
