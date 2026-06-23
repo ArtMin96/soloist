@@ -397,13 +397,16 @@ are **R-phases** (refactor), orthogonal to the build phases.
   sub-router — never a giant flat block. (The rmcp module doc documents two other shapes — a single
   `#[tool_router]` block "for small servers", and one `ToolBase`/`AsyncTool` struct per tool "when business
   logic becomes larger"; the latter was rejected for now because it would change the per-tool return/output
-  model and risk a non-identical schema surface for 31 thin forwarders — YAGNI until a category block itself
+  model and risk a non-identical schema surface for 28 thin forwarders — YAGNI until a category block itself
   outgrows the smell.)
 - **Done (2026-06-23):** `server.rs` 546 → 46 non-test lines; the seven `tools/<category>.rs` files are each
-  ≤151 lines; the tool surface is unchanged (asserted by the unchanged `server_tests.rs`, **31 mcp tests, no
-  count change**); the comprehensive `server_tests.rs` was kept as the one surface-invariance guard rather than
-  fragmented into vanity per-category test files (§15). `just lint && just test` green; `mcp/src/server.rs` no
-  longer an outlier (only the pre-existing `core/src/supervisor.rs` 401 remains).
+  ≤151 lines; the movement commit changed no behaviour and no test count. A review then added one
+  surface-invariance test to the kept-whole `server_tests.rs` (not fragmented into vanity per-category files,
+  §15): `served_router_exposes_exactly_the_expected_tool_surface` asserts the composed `tool_router.list_all()`
+  equals an independent list of the 28 tool names — so a category sub-router dropped from `new`'s `Add`
+  composition, or a tool name colliding across category files (`ToolRouter::add_route` silently overwrites),
+  fails CI instead of shipping (mcp 31 → 32; proven by a mutation test). `just lint && just test` green;
+  `mcp/src/server.rs` no longer an outlier (only the pre-existing `core/src/supervisor.rs` 401 remains).
 
 **Sequencing rationale:** R0 sets the bar and the file-size signal; R1 makes the later phases' tests cheap
 to keep honest; R2/R3/R4 are the structural edits (smallest blast radius first: split, then the constructor,
