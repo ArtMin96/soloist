@@ -422,6 +422,49 @@ async fn clear_output_in_scope_is_acked_and_out_of_scope_is_refused() {
 }
 
 #[tokio::test]
+async fn services_list_without_scope_is_refused_and_filters_to_commands_in_scope() {
+    let facade = facade();
+    let session = facade.open_session();
+    // Unscoped: ambiguous, refused.
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::ServicesList).await,
+        Err(IpcError::NoProjectScope)
+    );
+    // Scoped to a project whose only process is a terminal: a terminal is not a service, so
+    // the list is empty (routing + the command filter, exercised via the app router).
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "shell");
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::ServicesList).await,
+        Ok(IpcResponse::Processes(Vec::new()))
+    );
+}
+
+#[tokio::test]
+async fn wait_for_bound_port_on_a_resting_process_reports_not_running() {
+    let facade = facade();
+    let session = facade.open_session();
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    // The process never started, so it has no group to bind a port — resolved at once, no wait.
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::WaitForBoundPort {
+                process: id,
+                port: 3000,
+                timeout_ms: Some(50),
+            },
+        )
+        .await,
+        Ok(IpcResponse::PortWait(PortWaitOutcome::NotRunning))
+    );
+}
+
+#[tokio::test]
 async fn an_action_on_another_projects_process_maps_to_out_of_scope() {
     let facade = facade();
     let session = facade.open_session();

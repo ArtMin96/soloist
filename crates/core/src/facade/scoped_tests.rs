@@ -255,6 +255,33 @@ fn trusted_command_in(
     id
 }
 
+#[test]
+fn services_list_returns_only_the_in_scope_projects_commands() {
+    let (facade, trust) = facade();
+    let command = trusted_command_in(&facade, &trust, ProjectId::from_raw(1), "Web");
+    // A terminal in the same project is not a service; a command in another project is out
+    // of scope. Neither must appear.
+    terminal_in(&facade, ProjectId::from_raw(1), "shell");
+    trusted_command_in(&facade, &trust, ProjectId::from_raw(2), "Other");
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, command)
+        .expect("scope to project 1");
+
+    let services = facade
+        .services_list(session)
+        .expect("an in-scope services list");
+    let ids: Vec<_> = services.iter().map(|view| view.id).collect();
+    assert_eq!(ids, vec![command], "only the in-scope project's commands");
+
+    // Unscoped, the query is ambiguous and refused like the other scoped operations.
+    let unscoped = facade.open_session();
+    assert!(matches!(
+        facade.services_list(unscoped),
+        Err(ScopedActionError::NoProjectScope)
+    ));
+}
+
 #[tokio::test]
 async fn start_all_commands_acts_only_on_the_in_scope_project() {
     let (facade, trust) = facade();

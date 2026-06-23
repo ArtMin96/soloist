@@ -85,6 +85,14 @@ pub enum IpcRequest {
     FlushTerminalPerf { process: ProcessId },
     /// A process's discovered listening ports.
     GetProcessPorts { process: ProcessId },
+    /// The command processes (services) of the session's effective project.
+    ServicesList,
+    /// Wait until a process binds `port`, or `timeout_ms` elapses (server-bounded).
+    WaitForBoundPort {
+        process: ProcessId,
+        port: u16,
+        timeout_ms: Option<u64>,
+    },
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -127,6 +135,21 @@ pub enum IpcResponse {
     RawOutput(String),
     /// A process's discovered listening ports (answer to [`IpcRequest::GetProcessPorts`]).
     Ports(Vec<u16>),
+    /// The outcome of a port-readiness wait (answer to [`IpcRequest::WaitForBoundPort`]).
+    PortWait(PortWaitOutcome),
+}
+
+/// How a [`IpcRequest::WaitForBoundPort`] resolved — a structured answer, not an error: a
+/// timeout is the wait reporting "not bound yet", which the caller can act on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PortWaitOutcome {
+    /// The port is bound and the process now reads ready.
+    Bound,
+    /// The port did not bind within the (bounded) timeout.
+    TimedOut,
+    /// The process is not running, so it has no group that could bind a port.
+    NotRunning,
 }
 
 /// The agent-facing projection of a project: its identity and root, without the UI's

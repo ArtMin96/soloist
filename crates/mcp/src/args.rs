@@ -77,3 +77,15 @@ pub(crate) struct SearchArg {
     /// The most matches to return. Omit for the server default; the app caps it.
     pub(crate) limit: Option<usize>,
 }
+
+/// Arguments for waiting until a process binds a port.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct WaitForPortArg {
+    /// The id of the process to watch, as returned by `list_processes`.
+    pub(crate) process: u64,
+    /// The localhost port to wait for the process to start listening on.
+    pub(crate) port: u16,
+    /// How long to wait, in milliseconds. Omit for the server default; the app caps it well
+    /// under the request timeout, returning `bound: false` if the port has not bound by then.
+    pub(crate) timeout_ms: Option<u64>,
+}

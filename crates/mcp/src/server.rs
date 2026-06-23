@@ -18,9 +18,10 @@ use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
     OutputArg, ProcessArg, ProjectArg, RegisterAgentArg, SearchArg, SelectProjectArg, SendInputArg,
-    SpawnAgentArg,
+    SpawnAgentArg, WaitForPortArg,
 };
 use crate::client::{AppClient, ClientError};
+use soloist_ipc::PortWaitOutcome;
 
 /// The Soloist MCP server: a stateless front over the app, holding one client connection.
 #[derive(Clone)]
@@ -403,6 +404,56 @@ impl SoloistMcp {
             Ok(IpcResponse::Ports(ports)) => structured(&serde_json::json!({ "ports": ports })),
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "List the services (command processes) of this session's project with their status, detected ports, and readiness."
+    )]
+    async fn services_list(&self) -> Result<CallToolResult, ErrorData> {
+        match self.client.request(IpcRequest::ServicesList).await {
+            Ok(IpcResponse::Processes(services)) => {
+                structured(&serde_json::json!({ "services": services }))
+            }
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Wait until a process is listening on a port, then return. Returns `bound: true` on success, or `bound: false` with a reason if it times out or the process is not running. Use to wait for a dev server before acting on it."
+    )]
+    async fn wait_for_bound_port(
+        &self,
+        Parameters(WaitForPortArg {
+            process,
+            port,
+            timeout_ms,
+        }): Parameters<WaitForPortArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::WaitForBoundPort {
+            process: ProcessId::from_raw(process),
+            port,
+            timeout_ms,
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::PortWait(outcome)) => structured(&port_wait_json(outcome)),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+}
+
+/// Projects a port-wait outcome to the agent-facing JSON: `bound` plus, when it did not
+/// bind, the reason the model can act on.
+fn port_wait_json(outcome: PortWaitOutcome) -> serde_json::Value {
+    match outcome {
+        PortWaitOutcome::Bound => serde_json::json!({ "bound": true }),
+        PortWaitOutcome::TimedOut => {
+            serde_json::json!({ "bound": false, "reason": "timed_out" })
+        }
+        PortWaitOutcome::NotRunning => {
+            serde_json::json!({ "bound": false, "reason": "not_running" })
         }
     }
 }

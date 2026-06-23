@@ -460,6 +460,71 @@ async fn clear_output_acks() {
 }
 
 #[tokio::test]
+async fn services_list_projects_the_services() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let view = sample_view(7);
+    let canned = view.clone();
+    spawn_fake_app(socket.clone(), move |request| match request {
+        IpcRequest::ServicesList => Ok(IpcResponse::Processes(vec![canned.clone()])),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .services_list()
+        .await
+        .expect("services_list succeeds");
+    let services = structured_of(result);
+    let back: Vec<ProcessView> =
+        serde_json::from_value(services["services"].clone()).expect("decode services");
+    assert_eq!(back, vec![view]);
+}
+
+#[tokio::test]
+async fn wait_for_bound_port_projects_a_bound_outcome() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::WaitForBoundPort { port: 3000, .. } => {
+            Ok(IpcResponse::PortWait(PortWaitOutcome::Bound))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .wait_for_bound_port(Parameters(WaitForPortArg {
+            process: 5,
+            port: 3000,
+            timeout_ms: None,
+        }))
+        .await
+        .expect("wait_for_bound_port succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "bound": true }));
+}
+
+#[tokio::test]
+async fn wait_for_bound_port_projects_a_timeout_reason() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |_request| {
+        Ok(IpcResponse::PortWait(PortWaitOutcome::TimedOut))
+    });
+
+    let result = handler(socket)
+        .wait_for_bound_port(Parameters(WaitForPortArg {
+            process: 5,
+            port: 3000,
+            timeout_ms: Some(100),
+        }))
+        .await
+        .expect("wait_for_bound_port succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "bound": false, "reason": "timed_out" })
+    );
+}
+
+#[tokio::test]
 async fn a_refused_action_becomes_a_tool_execution_error() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");

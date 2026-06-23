@@ -80,6 +80,17 @@ fn requests_round_trip_through_json() {
         IpcRequest::GetProcessPorts {
             process: ProcessId::from_raw(16),
         },
+        IpcRequest::ServicesList,
+        IpcRequest::WaitForBoundPort {
+            process: ProcessId::from_raw(17),
+            port: 3000,
+            timeout_ms: Some(5000),
+        },
+        IpcRequest::WaitForBoundPort {
+            process: ProcessId::from_raw(18),
+            port: 8080,
+            timeout_ms: None,
+        },
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -142,11 +153,25 @@ fn every_response_variant_round_trips_through_json() {
         IpcResponse::Lines(vec!["error: boom".into(), "error: bang".into()]),
         IpcResponse::RawOutput("\u{1b}[31merror\u{1b}[0m".into()),
         IpcResponse::Ports(vec![3000, 8080]),
+        IpcResponse::PortWait(PortWaitOutcome::Bound),
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");
         let back: IpcResponse = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, response);
+    }
+}
+
+#[test]
+fn every_port_wait_outcome_round_trips() {
+    for outcome in [
+        PortWaitOutcome::Bound,
+        PortWaitOutcome::TimedOut,
+        PortWaitOutcome::NotRunning,
+    ] {
+        let json = serde_json::to_string(&outcome).expect("serialize");
+        let back: PortWaitOutcome = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, outcome);
     }
 }
 

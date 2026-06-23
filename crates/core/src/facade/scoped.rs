@@ -1,8 +1,8 @@
-//! Session-scoped process actions (context C8) — the action surface a remote caller
-//! (MCP today, the HTTP API later) drives.
+//! Session-scoped process actions and queries (context C8) — the surface a remote caller
+//! (MCP today, the HTTP API later) drives within its effective project.
 //!
-//! Each method enforces the calling session's **effective-project scope** before routing
-//! to the one supervisor behaviour: a tool can act only on a process within its project,
+//! Each method resolves the calling session's **effective-project scope** before routing
+//! to the one supervisor behaviour: an action can touch only a process within its project,
 //! and the trust gate in C2 still refuses an untrusted command. The Tauri UI
 //! calls the supervisor directly because the local user is not scope-limited; these methods
 //! add scope on top for callers that are. Scope is resolved here, in the core, so every
@@ -13,6 +13,7 @@ use std::time::Duration;
 use super::{Facade, LaunchAgentError};
 use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::ports::StoreError;
+use crate::process::{ProcessKind, ProcessView};
 use crate::supervisor::{StartSummary, SupervisorError};
 
 /// How many trailing rendered lines `send_input`'s `wait_ms` snapshot returns — a bounded
@@ -183,6 +184,18 @@ impl Facade {
     ) -> Result<bool, ScopedActionError> {
         self.require_in_scope(session, process)?;
         Ok(self.supervisor().clear_output(process))
+    }
+
+    /// The services of the session's effective project: its command processes with their
+    /// status, discovered ports, and readiness (the [`ProcessView`] read model). Scoped to
+    /// the project so a caller sees only its own services; agents and terminals are omitted.
+    pub fn services_list(&self, session: SessionId) -> Result<Vec<ProcessView>, ScopedActionError> {
+        let project = self.scope(session)?;
+        Ok(self
+            .snapshot()
+            .into_iter()
+            .filter(|view| view.project == project && view.kind == ProcessKind::Command)
+            .collect())
     }
 
     /// Resolves the session's effective project for a project-wide action, or
