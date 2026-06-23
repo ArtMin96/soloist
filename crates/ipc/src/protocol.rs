@@ -26,6 +26,8 @@ pub enum IpcRequest {
     RegisterAgent { label: String },
     /// Set this session's effective project scope.
     SelectProject { project: ProjectId },
+    /// Set this session's informational selected-process hint (reported by `whoami`).
+    SelectProcess { process: ProcessId },
     /// Every loaded project (not scope-filtered).
     ListProjects,
     /// One project with its processes; the effective scope when `project` is omitted.
@@ -40,6 +42,10 @@ pub enum IpcRequest {
     StopProcess { process: ProcessId },
     /// Restart one process, scoped to the session's effective project (trust-gated).
     RestartProcess { process: ProcessId },
+    /// Rename one process's display label, scoped to the session's effective project.
+    RenameProcess { process: ProcessId, label: String },
+    /// Stop and remove one process from the registry, scoped to the session's effective project.
+    CloseProcess { process: ProcessId },
     /// Write input to one process's PTY (text or raw control bytes), scoped to the session.
     /// With `wait_ms`, the app waits then returns the rendered tail.
     SendInput {

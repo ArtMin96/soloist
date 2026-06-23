@@ -76,6 +76,30 @@ impl Facade {
         Ok(())
     }
 
+    /// Records a session's selected process — an informational default-target hint reported by
+    /// `whoami`. Unlike [`select_project`](Self::select_project) it confers no scope or
+    /// authority: every scoped tool takes an explicit process id, so the selection is a
+    /// convenience marker, not a gate, and needs no peer-group authentication. It is still
+    /// confined to the caller's effective project, though: a process outside scope is reported
+    /// as [`UnknownProcess`](IdentityError::UnknownProcess), indistinguishable from one that
+    /// does not exist, so selecting can never confirm the existence of another project's
+    /// processes. Fails `UnknownProcess` when the process is not in the session's scope.
+    pub fn select_process(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+    ) -> Result<(), IdentityError> {
+        let in_scope = self
+            .effective_project(session)
+            .zip(self.process_view(process))
+            .is_some_and(|(scope, view)| view.project == scope);
+        if !in_scope {
+            return Err(IdentityError::UnknownProcess);
+        }
+        self.identity.select_process(session, process);
+        Ok(())
+    }
+
     /// Resolves who a session is and the project its scoped tools act on (the answer to
     /// the `whoami` tool).
     pub fn whoami(&self, session: SessionId) -> Whoami {
@@ -83,6 +107,12 @@ impl Facade {
         Whoami {
             session,
             bound_process: origin.process(),
+            // Drop a selection whose process has since left the registry (e.g. it was closed),
+            // so `whoami` never echoes a dangling id.
+            selected_process: self
+                .identity
+                .selected_process(session)
+                .filter(|process| self.process_view(*process).is_some()),
             effective_project: self.effective_project(session),
             origin,
         }

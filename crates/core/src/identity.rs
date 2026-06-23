@@ -60,6 +60,10 @@ impl Origin {
 struct Session {
     origin: Origin,
     selected_project: Option<ProjectId>,
+    /// An informational default-target hint the caller selected, reported by `whoami`. Unlike
+    /// `selected_project` it confers no scope or authority — every scoped tool takes an
+    /// explicit process id — so it is never reconciled against `peer_pgid`.
+    selected_process: Option<ProcessId>,
     peer_pgid: Option<i32>,
 }
 
@@ -71,6 +75,10 @@ pub struct Whoami {
     pub session: SessionId,
     pub origin: Origin,
     pub bound_process: Option<ProcessId>,
+    /// The process the caller selected as an informational default target, if any. Confers no
+    /// scope or authority (see [`Identity::select_process`]); reported only so a caller can
+    /// confirm its selection.
+    pub selected_process: Option<ProcessId>,
     pub effective_project: Option<ProjectId>,
 }
 
@@ -144,6 +152,12 @@ impl Identity {
         self.update(session, |s| s.selected_project = Some(project));
     }
 
+    /// Records the session's selected default-target process. Informational only — it sets no
+    /// scope and is not reconciled against the peer group.
+    pub fn select_process(&self, session: SessionId, process: ProcessId) {
+        self.update(session, |s| s.selected_process = Some(process));
+    }
+
     /// Drops a session's state when its connection ends.
     pub fn close(&self, session: SessionId) {
         lock(&self.sessions).remove(&session);
@@ -162,6 +176,13 @@ impl Identity {
         lock(&self.sessions)
             .get(&session)
             .and_then(|s| s.selected_project)
+    }
+
+    /// The default-target process a session selected, if any — reported by `whoami`.
+    pub fn selected_process(&self, session: SessionId) -> Option<ProcessId> {
+        lock(&self.sessions)
+            .get(&session)
+            .and_then(|s| s.selected_process)
     }
 
     /// The connecting peer's process group recorded for a session ([`None`] if unknown or the

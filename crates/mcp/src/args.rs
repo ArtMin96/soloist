@@ -33,6 +33,15 @@ pub(crate) struct SendInputArg {
     pub(crate) wait_ms: Option<u64>,
 }
 
+/// Arguments for renaming a process.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct RenameArg {
+    /// The id of the process to rename, as returned by `list_processes`.
+    pub(crate) process: u64,
+    /// The new display label for the process.
+    pub(crate) label: String,
+}
+
 /// Arguments for spawning a worker agent.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub(crate) struct SpawnAgentArg {

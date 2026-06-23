@@ -118,6 +118,10 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .select_project(session, project)
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
+        IpcRequest::SelectProcess { process } => facade
+            .select_process(session, process)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
         IpcRequest::ListProjects => Ok(IpcResponse::Projects(project_summaries(facade)?)),
         IpcRequest::GetProjectStatus { project } => project_status(facade, session, project),
         IpcRequest::ListProcesses => Ok(IpcResponse::Processes(facade.snapshot())),
@@ -135,6 +139,15 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .map_err(IpcError::from),
         IpcRequest::RestartProcess { process } => facade
             .restart_process(session, process)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::RenameProcess { process, label } => facade
+            .rename_process(session, process, label)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::CloseProcess { process } => facade
+            .close_process(session, process)
+            .await
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
         IpcRequest::SendInput {

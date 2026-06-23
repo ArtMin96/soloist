@@ -298,6 +298,64 @@ async fn binding_a_process_the_caller_does_not_run_in_is_refused() {
 }
 
 #[tokio::test]
+async fn selecting_an_in_scope_process_records_it_for_whoami() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    // An authentic bind gives the session an effective project to scope the selection to.
+    let session = authentic_session(&facade, id, TEST_PEER_PGID);
+    facade
+        .bind_session_process(session, id)
+        .expect("an authentic bind establishes the session's scope");
+
+    // Informational only: confers no authority — just a default-target hint whoami echoes.
+    facade
+        .select_process(session, id)
+        .expect("select an in-scope process");
+    assert_eq!(facade.whoami(session).selected_process, Some(id));
+}
+
+#[tokio::test]
+async fn selecting_an_out_of_scope_process_is_refused() {
+    // A session scoped to one project cannot select — and so cannot confirm the existence of —
+    // a process in another project: an out-of-scope id is reported exactly like an unknown one.
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let here = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "here",
+        "sleep 60",
+    ));
+    let elsewhere = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(2),
+        "elsewhere",
+        "sleep 60",
+    ));
+    let session = authentic_session(&facade, here, TEST_PEER_PGID);
+    facade
+        .bind_session_process(session, here)
+        .expect("an authentic bind establishes the session's scope");
+
+    assert!(matches!(
+        facade.select_process(session, elsewhere),
+        Err(IdentityError::UnknownProcess)
+    ));
+    assert_eq!(facade.whoami(session).selected_process, None);
+}
+
+#[tokio::test]
+async fn selecting_an_unknown_process_is_rejected() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let session = facade.open_session(None);
+    assert!(matches!(
+        facade.select_process(session, ProcessId::from_raw(999)),
+        Err(IdentityError::UnknownProcess)
+    ));
+}
+
+#[tokio::test]
 async fn a_lone_loaded_project_is_the_default_scope() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
     let dir = tempfile::tempdir().expect("temp dir");

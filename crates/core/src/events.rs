@@ -45,6 +45,10 @@ pub enum DomainEvent {
     },
     /// A process left the registry.
     ProcessRemoved { id: ProcessId },
+    /// A process's display label changed. The new label is carried so adapters update the
+    /// row without a snapshot round-trip; trust (keyed on the command variant) and identity
+    /// are unaffected — the label is display-only.
+    ProcessRenamed { id: ProcessId, label: String },
     /// A periodic CPU/memory reading for a running process, sampled across its whole
     /// process group. `cpu_pct` is normalised to the whole machine (100 = every core busy,
     /// never above); `rss` is the group's memory in bytes, shared pages counted once.

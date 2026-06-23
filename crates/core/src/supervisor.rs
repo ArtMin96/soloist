@@ -26,6 +26,8 @@ mod terminal_io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use tokio::task::JoinHandle;
+
 use crate::events::{DomainEvent, EventBus};
 use crate::hash::Hash;
 use crate::ids::{ProcessId, ProjectId};
@@ -244,6 +246,40 @@ impl Supervisor {
         Ok(())
     }
 
+    /// Renames a process's display label, announcing the change so adapters update its row.
+    /// The label is display-only: it never affects trust (keyed on the command variant) or
+    /// identity/scope. Returns [`SupervisorError::NotFound`] if the process is no longer
+    /// registered.
+    pub fn rename(&self, id: ProcessId, label: String) -> Result<(), SupervisorError> {
+        if !self.registry.set_label(id, label.clone()) {
+            return Err(SupervisorError::NotFound(id));
+        }
+        self.bus.publish(DomainEvent::ProcessRenamed { id, label });
+        Ok(())
+    }
+
+    /// Stops a process and removes it from the registry entirely — the one path that forgets
+    /// a managed process, unlike [`stop`](Self::stop), which leaves it resting. The entry is
+    /// removed up front, atomically taking any live actor handle; its group is then reaped
+    /// (messaged to stop, then awaited) before [`DomainEvent::ProcessRemoved`] is announced,
+    /// so no child is abandoned. Removing the entry *first* is what keeps that safe under a
+    /// concurrent crash: once the id is gone the self-healing loop's relaunch finds no entry
+    /// (`begin_launch` returns `None`), so a crash mid-close cannot resurrect a child that the
+    /// removal would then orphan. `ProcessRemoved` also drops the process's crash history
+    /// (single source). Returns [`SupervisorError::NotFound`] if it is no longer registered.
+    pub async fn close(&self, id: ProcessId) -> Result<(), SupervisorError> {
+        let Some(handle) = self.registry.remove_returning_handle(id) else {
+            return Err(SupervisorError::NotFound(id));
+        };
+        // Reap a live actor's group — the single-process form of `shutdown`'s reap step. The
+        // entry is already gone, so no relaunch can re-enter the registry behind us.
+        if let Some(handle) = handle {
+            let _ = signal_stop(handle).await;
+        }
+        self.bus.publish(DomainEvent::ProcessRemoved { id });
+        Ok(())
+    }
+
     /// Stops every live process across all projects and awaits each actor's exit, so no
     /// children leak on app quit (the deterministic-shutdown contract). Wired into the
     /// Tauri shell's exit event so a normal quit reaps every process group.
@@ -258,9 +294,8 @@ impl Supervisor {
         loop {
             let mut joins = Vec::new();
             for id in self.registry.with_live_actor() {
-                if let Some(ActorHandle { mailbox, join }) = self.registry.take_handle(id) {
-                    let _ = mailbox.try_send(ActorMsg::Stop);
-                    joins.push(join);
+                if let Some(handle) = self.registry.take_handle(id) {
+                    joins.push(signal_stop(handle));
                 }
             }
             if joins.is_empty() {
@@ -327,6 +362,16 @@ impl Supervisor {
     }
 }
 
+/// Messages a live actor to stop and hands back its join handle to await — the shared reap
+/// step behind [`Supervisor::close`] (which awaits the one) and [`Supervisor::shutdown`]
+/// (which messages every actor, then awaits them together). Best-effort and tolerant: a full
+/// mailbox is ignored and awaiting an already-finished actor returns at once.
+fn signal_stop(handle: ActorHandle) -> JoinHandle<()> {
+    let ActorHandle { mailbox, join } = handle;
+    let _ = mailbox.try_send(ActorMsg::Stop);
+    join
+}
+
 /// Applies one FSM transition and, when legal, updates the registry and publishes the
 /// delta. Shared by the supervisor (reading `from` from the registry) and the actor
 /// (passing its own local status mirror). An illegal transition is refused — the
@@ -356,6 +401,9 @@ pub(crate) fn apply_transition(
 
 #[cfg(test)]
 mod test_support;
+
+#[cfg(test)]
+mod lifecycle_tests;
 
 #[cfg(test)]
 mod tests {

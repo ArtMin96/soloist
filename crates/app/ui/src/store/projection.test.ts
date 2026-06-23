@@ -99,6 +99,17 @@ describe("applyEvent", () => {
     expect(next).toEqual([]);
   });
 
+  it("renames only the matching process", () => {
+    const other: ProcessView = { ...starting, id: 2 };
+    const next = applyEvent([starting, other], {
+      type: "ProcessRenamed",
+      id: 1,
+      label: "renamed",
+    });
+    expect(next.find((process) => process.id === 1)?.label).toBe("renamed");
+    expect(next.find((process) => process.id === 2)?.label).toBe("web");
+  });
+
   it("leaves the process list untouched for non-process events", () => {
     expect(applyEvent([starting], { type: "TerminalBell", id: 1 })).toEqual([starting]);
     expect(applyEvent([starting], { type: "ProjectOpened", id: 1 })).toEqual([starting]);

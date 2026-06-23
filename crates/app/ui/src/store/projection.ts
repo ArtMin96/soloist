@@ -43,6 +43,10 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
       );
     case "ProcessRemoved":
       return processes.filter((process) => process.id !== event.id);
+    case "ProcessRenamed":
+      return processes.map((process) =>
+        process.id === event.id ? { ...process, label: event.label } : process,
+      );
     case "MetricsTick":
     case "RestartScheduled":
     case "RestartExhausted":

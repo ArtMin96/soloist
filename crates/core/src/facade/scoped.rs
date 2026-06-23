@@ -104,6 +104,34 @@ impl Facade {
         Ok(())
     }
 
+    /// Renames one in-scope process's display label. A scoped action — the label is shared
+    /// read-model state every viewer sees — so it is confined to the session's project.
+    /// Ungated by trust: a rename runs nothing.
+    pub fn rename_process(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+        label: String,
+    ) -> Result<(), ScopedActionError> {
+        self.require_in_scope(session, process)?;
+        self.supervisor().rename(process, label)?;
+        Ok(())
+    }
+
+    /// Closes one in-scope process: stops and reaps it, then removes it from the registry. A
+    /// scoped action confined to the session's project. Async because it awaits the group's
+    /// reap before the process is forgotten, so no child is abandoned. Ungated by trust:
+    /// stopping and forgetting a process runs nothing.
+    pub async fn close_process(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+    ) -> Result<(), ScopedActionError> {
+        self.require_in_scope(session, process)?;
+        self.supervisor().close(process).await?;
+        Ok(())
+    }
+
     /// Writes input to an in-scope process's PTY — UTF-8 text, including control characters,
     /// sent verbatim (include `\r` to submit a line, `\u{3}` for Ctrl-C). When `wait` is set, waits
     /// up to [`MAX_INPUT_WAIT`] for the process to react, then returns the rendered terminal
