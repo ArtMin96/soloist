@@ -1,6 +1,8 @@
 use super::*;
 use soloist_core::testing::{terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
-use soloist_core::{CorePorts, DomainEvent, Origin, ProcStatus, ProcessId, TokioClock};
+use soloist_core::{
+    CorePorts, DomainEvent, Origin, ProcStatus, ProcessId, StartSummary, TokioClock,
+};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
@@ -273,6 +275,56 @@ async fn list_agent_tools_routes_to_the_registry() {
         handle_request(&facade, session, IpcRequest::ListAgentTools).await,
         Ok(IpcResponse::AgentTools(_))
     ));
+}
+
+#[tokio::test]
+async fn bulk_commands_without_scope_are_refused() {
+    let facade = facade();
+    let session = facade.open_session();
+    for request in [
+        IpcRequest::StartAllCommands,
+        IpcRequest::StopAllCommands,
+        IpcRequest::RestartAllCommands,
+    ] {
+        assert_eq!(
+            handle_request(&facade, session, request).await,
+            Err(IpcError::NoProjectScope)
+        );
+    }
+}
+
+#[tokio::test]
+async fn bulk_start_in_scope_returns_a_summary() {
+    let facade = facade();
+    let session = facade.open_session();
+    // Only a terminal is in scope, so the bulk command start finds nothing to start.
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::StartAllCommands).await,
+        Ok(IpcResponse::BulkStarted(StartSummary::default()))
+    );
+}
+
+#[tokio::test]
+async fn bulk_stop_in_scope_reports_how_many_were_stopped() {
+    let facade = facade();
+    let session = facade.open_session();
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::StopAllCommands).await,
+        Ok(IpcResponse::BulkStopped(0))
+    );
+}
+
+#[tokio::test]
+async fn bulk_restart_in_scope_is_acked() {
+    let facade = facade();
+    let session = facade.open_session();
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::RestartAllCommands).await,
+        Ok(IpcResponse::Acked)
+    );
 }
 
 #[tokio::test]

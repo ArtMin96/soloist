@@ -1,7 +1,7 @@
 use super::*;
 use soloist_core::{
     AgentKind, AgentTool, Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId,
-    ProjectView, PromptMode, Readiness, SessionId, Whoami,
+    ProjectView, PromptMode, Readiness, SessionId, StartSummary, Whoami,
 };
 use std::path::PathBuf;
 
@@ -51,6 +51,9 @@ fn requests_round_trip_through_json() {
             extra_args: vec!["--model".into(), "opus".into()],
         },
         IpcRequest::ListAgentTools,
+        IpcRequest::StartAllCommands,
+        IpcRequest::StopAllCommands,
+        IpcRequest::RestartAllCommands,
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -105,6 +108,11 @@ fn every_response_variant_round_trips_through_json() {
             kind: AgentKind::Claude,
             prompt_mode: PromptMode::AppendedArg,
         }]),
+        IpcResponse::BulkStarted(StartSummary {
+            started: vec![ProcessId::from_raw(3), ProcessId::from_raw(4)],
+            skipped_untrusted: vec![ProcessId::from_raw(5)],
+        }),
+        IpcResponse::BulkStopped(2),
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");

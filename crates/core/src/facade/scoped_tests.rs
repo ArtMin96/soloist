@@ -214,6 +214,76 @@ fn spawn_agent_with_an_unknown_tool_is_refused() {
     ));
 }
 
+#[test]
+fn bulk_commands_without_a_project_in_scope_are_refused() {
+    let (facade, _trust) = facade();
+    // A process exists, but the unbound session has no project in scope, so a project-wide
+    // bulk action is ambiguous — every bulk entry point refuses it the same way.
+    terminal_in(&facade, ProjectId::from_raw(1), "term");
+    let session = facade.open_session();
+    assert!(matches!(
+        facade.start_all_commands(session),
+        Err(ScopedActionError::NoProjectScope)
+    ));
+    assert!(matches!(
+        facade.stop_all_commands(session),
+        Err(ScopedActionError::NoProjectScope)
+    ));
+    assert!(matches!(
+        facade.restart_all_commands(session),
+        Err(ScopedActionError::NoProjectScope)
+    ));
+}
+
+/// Registers a trusted command in `project` and returns its id — a startable command the
+/// bulk-scope tests target.
+fn trusted_command_in(
+    facade: &Facade,
+    trust: &FakeTrustRepo,
+    project: ProjectId,
+    name: &str,
+) -> ProcessId {
+    let config = parse("processes:\n  Web:\n    command: npm run dev\n").expect("parse");
+    let spec = config.processes.get("Web").cloned().expect("Web");
+    let id =
+        facade
+            .supervisor()
+            .register(Registration::command(project, Path::new("/p"), name, &spec));
+    trust
+        .set_trusted(project, &spec.variant_hash())
+        .expect("trust the command");
+    id
+}
+
+#[tokio::test]
+async fn start_all_commands_acts_only_on_the_in_scope_project() {
+    let (facade, trust) = facade();
+    let mut rx = facade.subscribe();
+    let here = trusted_command_in(&facade, &trust, ProjectId::from_raw(1), "Here");
+    let elsewhere = trusted_command_in(&facade, &trust, ProjectId::from_raw(2), "Elsewhere");
+    let session = facade.open_session();
+    // Binding to a process in project 1 puts that project in scope (the projects registry is
+    // empty in this fake, so a process binding is how the scope is resolved here).
+    facade
+        .bind_session_process(session, here)
+        .expect("scope to project 1");
+
+    let summary = facade
+        .start_all_commands(session)
+        .expect("an in-scope bulk start");
+    assert_eq!(
+        summary.started,
+        vec![here],
+        "only the in-scope project's command starts"
+    );
+    wait_for(&mut rx, ProcStatus::Running).await;
+    assert_eq!(
+        facade.process_view(elsewhere).expect("registered").status,
+        ProcStatus::Stopped,
+        "the other project's command is untouched"
+    );
+}
+
 #[tokio::test]
 async fn an_untrusted_command_in_scope_is_refused() {
     let (facade, trust) = facade();

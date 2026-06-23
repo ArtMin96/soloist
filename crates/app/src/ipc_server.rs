@@ -138,6 +138,18 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .list_tools()
             .map(IpcResponse::AgentTools)
             .map_err(|err| IpcError::Internal(err.to_string())),
+        IpcRequest::StartAllCommands => facade
+            .start_all_commands(session)
+            .map(IpcResponse::BulkStarted)
+            .map_err(IpcError::from),
+        IpcRequest::StopAllCommands => facade
+            .stop_all_commands(session)
+            .map(IpcResponse::BulkStopped)
+            .map_err(IpcError::from),
+        IpcRequest::RestartAllCommands => facade
+            .restart_all_commands(session)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
     }
 }
 

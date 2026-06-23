@@ -281,6 +281,41 @@ impl SoloistMcp {
             Err(err) => app_error(&err),
         }
     }
+
+    #[tool(
+        description = "Start every trusted command in this session's project (whatever its auto-start setting). Returns the ids that started and any skipped as untrusted. Agents and terminals are untouched."
+    )]
+    async fn start_all_commands(&self) -> Result<CallToolResult, ErrorData> {
+        match self.client.request(IpcRequest::StartAllCommands).await {
+            Ok(IpcResponse::BulkStarted(summary)) => structured(&summary),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Gracefully stop every running command in this session's project. Leaves agents and terminals running. Returns how many commands were stopped."
+    )]
+    async fn stop_all_commands(&self) -> Result<CallToolResult, ErrorData> {
+        match self.client.request(IpcRequest::StopAllCommands).await {
+            Ok(IpcResponse::BulkStopped(stopped)) => {
+                structured(&serde_json::json!({ "stopped": stopped }))
+            }
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Restart every trusted command in this session's project, bringing the command set up fresh: running ones cycle, stopped ones start. Untrusted commands are skipped."
+    )]
+    async fn restart_all_commands(&self) -> Result<CallToolResult, ErrorData> {
+        match self.client.request(IpcRequest::RestartAllCommands).await {
+            Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
 }
 
 #[tool_handler(router = self.tool_router)]

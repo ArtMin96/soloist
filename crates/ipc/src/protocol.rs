@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use soloist_core::{
     AgentTool, IdentityError, LaunchAgentError, ProcessId, ProcessView, ProjectId, ProjectView,
-    ScopedActionError, SpawnAgentError, Whoami,
+    ScopedActionError, SpawnAgentError, StartSummary, Whoami,
 };
 
 /// A request from an IPC client to the running app. The server resolves identity and
@@ -54,6 +54,12 @@ pub enum IpcRequest {
     },
     /// Every configured agent tool that `spawn_agent` can launch (not scope-filtered).
     ListAgentTools,
+    /// Start every trusted command in the session's effective project (trust-gated).
+    StartAllCommands,
+    /// Gracefully stop every running command in the session's effective project.
+    StopAllCommands,
+    /// Restart every trusted command in the session's effective project (trust-gated).
+    RestartAllCommands,
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -84,6 +90,12 @@ pub enum IpcResponse {
     Spawned(ProcessId),
     /// Every configured agent tool (answer to [`IpcRequest::ListAgentTools`]).
     AgentTools(Vec<AgentTool>),
+    /// A bulk start succeeded; the payload reports what started and what was skipped as
+    /// untrusted (answer to [`IpcRequest::StartAllCommands`]).
+    BulkStarted(StartSummary),
+    /// A bulk stop succeeded; the payload is how many running commands were messaged
+    /// (answer to [`IpcRequest::StopAllCommands`]).
+    BulkStopped(usize),
 }
 
 /// The agent-facing projection of a project: its identity and root, without the UI's

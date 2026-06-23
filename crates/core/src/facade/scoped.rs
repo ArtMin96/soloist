@@ -11,9 +11,9 @@
 use std::time::Duration;
 
 use super::{Facade, LaunchAgentError};
-use crate::ids::{ProcessId, SessionId};
+use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::ports::StoreError;
-use crate::supervisor::SupervisorError;
+use crate::supervisor::{StartSummary, SupervisorError};
 
 /// How many trailing rendered lines `send_input`'s `wait_ms` snapshot returns — a bounded
 /// tail (about a screenful), never the whole scrollback, so the reply stays small.
@@ -145,6 +145,40 @@ impl Facade {
         Ok(self.launch_agent(project, tool, extra_args)?)
     }
 
+    /// Starts every trusted command in the session's effective project, regardless of
+    /// `auto_start` — the scoped `start_all_commands` tool. Returns what started and what was
+    /// skipped as untrusted. Distinct from the dashboard's auto-start path; an untrusted
+    /// command is reported, never run.
+    pub fn start_all_commands(
+        &self,
+        session: SessionId,
+    ) -> Result<StartSummary, ScopedActionError> {
+        let project = self.scope(session)?;
+        Ok(self.supervisor().start_all_commands(project)?)
+    }
+
+    /// Gracefully stops every running command in the session's effective project (leaving
+    /// agents and terminals running), returning how many were messaged.
+    pub fn stop_all_commands(&self, session: SessionId) -> Result<usize, ScopedActionError> {
+        let project = self.scope(session)?;
+        Ok(self.supervisor().stop_all_commands(project))
+    }
+
+    /// Restarts every trusted command in the session's effective project — running ones
+    /// cycle, resting ones start — bringing the command set up fresh. Untrusted skipped.
+    pub fn restart_all_commands(&self, session: SessionId) -> Result<(), ScopedActionError> {
+        let project = self.scope(session)?;
+        self.supervisor().restart_all_commands(project)?;
+        Ok(())
+    }
+
+    /// Resolves the session's effective project for a project-wide action, or
+    /// `NoProjectScope` when none is selected, bound, or singular.
+    fn scope(&self, session: SessionId) -> Result<ProjectId, ScopedActionError> {
+        self.effective_project(session)
+            .ok_or(ScopedActionError::NoProjectScope)
+    }
+
     /// The scope guard: the process must exist and belong to the session's effective project.
     /// Returns `OutOfScope` rather than hiding a cross-project process, since the read tools
     /// already expose every process unfiltered (open by design).
@@ -156,10 +190,7 @@ impl Facade {
         let view = self
             .process_view(process)
             .ok_or(ScopedActionError::UnknownProcess)?;
-        let scope = self
-            .effective_project(session)
-            .ok_or(ScopedActionError::NoProjectScope)?;
-        if view.project != scope {
+        if view.project != self.scope(session)? {
             return Err(ScopedActionError::OutOfScope);
         }
         Ok(())
