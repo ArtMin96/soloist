@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -142,8 +142,15 @@ pub trait ProcessSpawner: Send + Sync {
 /// backoff, rate limits) is driven by a deterministic mock in tests.
 #[async_trait]
 pub trait Clock: Send + Sync {
-    /// The current instant per this clock.
+    /// The current instant per this clock. Monotonic and process-local — for measuring
+    /// elapsed time (grace windows, debounce, rate limits), never for a persisted deadline.
     fn now(&self) -> Instant;
+    /// The current wall-clock time as Unix milliseconds — a persistable absolute time, unlike
+    /// the monotonic [`now`](Clock::now). Durable, time-based coordination (lease TTLs, and
+    /// later timer deadlines) stores and compares this, so an expiry survives being written to
+    /// disk and read back on a later run. A mock advances it in lockstep with `now`, so those
+    /// paths stay deterministic with no real time elapsed.
+    fn now_unix_millis(&self) -> u64;
     /// Completes after `dur` has elapsed per this clock. A mock clock advances only
     /// when its test explicitly steps it, so no wall-clock time passes.
     async fn sleep(&self, dur: Duration);
@@ -158,6 +165,15 @@ pub struct TokioClock;
 impl Clock for TokioClock {
     fn now(&self) -> Instant {
         Instant::now()
+    }
+
+    fn now_unix_millis(&self) -> u64 {
+        // A clock set before 1970 (`duration_since` errors) reads as the epoch — leases then
+        // expire immediately rather than panicking, which is the safe degradation.
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis() as u64)
+            .unwrap_or(0)
     }
 
     async fn sleep(&self, dur: Duration) {

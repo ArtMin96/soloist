@@ -7,6 +7,7 @@
 pub(crate) mod agent;
 pub(crate) mod bulk;
 pub(crate) mod identity;
+pub(crate) mod lock;
 pub(crate) mod output;
 pub(crate) mod process;
 pub(crate) mod project;

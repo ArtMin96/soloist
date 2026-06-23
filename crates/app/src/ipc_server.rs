@@ -240,6 +240,18 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             };
             Ok(IpcResponse::PortWait(outcome))
         }
+        IpcRequest::LockAcquire { key, ttl_ms } => facade
+            .lock_acquire(session, &key, Duration::from_millis(ttl_ms))
+            .map(IpcResponse::LeaseOutcome)
+            .map_err(IpcError::from),
+        IpcRequest::LockStatus { key } => facade
+            .lock_status(session, &key)
+            .map(IpcResponse::LeaseStatus)
+            .map_err(IpcError::from),
+        IpcRequest::LockRelease { key } => facade
+            .lock_release(session, &key)
+            .map(IpcResponse::LeaseReleased)
+            .map_err(IpcError::from),
     }
 }
 

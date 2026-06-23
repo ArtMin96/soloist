@@ -9,8 +9,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AgentTool, IdentityError, LaunchAgentError, ProcessId, ProcessView, ProjectId, ProjectView,
-    ScopedActionError, SpawnAgentError, StartSummary, Whoami,
+    AcquireOutcome, AgentTool, CoordinationError, IdentityError, LaunchAgentError, LeaseView,
+    ProcessId, ProcessView, ProjectId, ProjectView, ScopedActionError, SpawnAgentError,
+    StartSummary, Whoami,
 };
 
 /// A request from an IPC client to the running app. The server resolves identity and
@@ -99,6 +100,13 @@ pub enum IpcRequest {
         port: u16,
         timeout_ms: Option<u64>,
     },
+    /// Acquire the lease `key` in the session's effective project, owned by its bound process,
+    /// for `ttl_ms` (clamped by the core). Non-blocking: a held key reports its holder.
+    LockAcquire { key: String, ttl_ms: u64 },
+    /// The current holder of the lease `key` in the session's effective project, if any.
+    LockStatus { key: String },
+    /// Release the lease `key` if held by the session's bound process.
+    LockRelease { key: String },
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -143,6 +151,13 @@ pub enum IpcResponse {
     Ports(Vec<u16>),
     /// The outcome of a port-readiness wait (answer to [`IpcRequest::WaitForBoundPort`]).
     PortWait(PortWaitOutcome),
+    /// The outcome of a lease acquire — granted or held by another (answer to
+    /// [`IpcRequest::LockAcquire`]). Reuses the core type so the wire shape cannot drift.
+    LeaseOutcome(AcquireOutcome),
+    /// The current holder of a lease, or `None` if free (answer to [`IpcRequest::LockStatus`]).
+    LeaseStatus(Option<LeaseView>),
+    /// Whether the caller's lease was released (answer to [`IpcRequest::LockRelease`]).
+    LeaseReleased(bool),
 }
 
 /// How a [`IpcRequest::WaitForBoundPort`] resolved — a structured answer, not an error: a
@@ -206,6 +221,9 @@ pub enum IpcError {
     /// A scoped request was made with no project in scope.
     #[error("no project is in scope; select one first")]
     NoProjectScope,
+    /// A coordination action that needs an owning process was made by a session bound to none.
+    #[error("not bound to a process; bind a session before holding a lease")]
+    NoBoundProcess,
     /// The referenced process belongs to a different project than the session's scope.
     #[error("that process belongs to a different project")]
     OutOfScope,
@@ -234,6 +252,7 @@ impl IpcError {
             | IpcError::ForeignProcess
             | IpcError::ForeignProject
             | IpcError::NoProjectScope
+            | IpcError::NoBoundProcess
             | IpcError::OutOfScope
             | IpcError::Untrusted
             | IpcError::UnknownTool => true,
@@ -282,6 +301,16 @@ impl From<SpawnAgentError> for IpcError {
         match err {
             SpawnAgentError::NoProjectScope => IpcError::NoProjectScope,
             SpawnAgentError::Launch(err) => err.into(),
+        }
+    }
+}
+
+impl From<CoordinationError> for IpcError {
+    fn from(err: CoordinationError) -> Self {
+        match err {
+            CoordinationError::NoProjectScope => IpcError::NoProjectScope,
+            CoordinationError::NoBoundProcess => IpcError::NoBoundProcess,
+            CoordinationError::Store(err) => IpcError::Internal(err.to_string()),
         }
     }
 }

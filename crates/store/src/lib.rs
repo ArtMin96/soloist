@@ -7,6 +7,7 @@
 //! binary carries its own engine and needs no system `libsqlite3`.
 
 mod agents;
+mod leases;
 mod meta;
 mod migrate;
 mod projects;

@@ -16,8 +16,16 @@ struct Sleeper {
     waker: oneshot::Sender<()>,
 }
 
+/// A fixed wall-clock starting point so [`MockClock::now_unix_millis`] returns a realistic
+/// absolute time (well after 1970) that a test can reason about. Arbitrary; only the deltas
+/// produced by [`MockClock::advance`] matter to the durable time-based paths.
+const MOCK_WALL_EPOCH_MILLIS: u64 = 1_700_000_000_000;
+
 struct MockState {
     now: Instant,
+    /// Wall-clock millis, advanced in lockstep with `now` so a persisted deadline behaves the
+    /// same as the monotonic clock the rest of the mock drives.
+    wall_millis: u64,
     sleepers: Vec<Sleeper>,
 }
 
@@ -33,6 +41,7 @@ impl MockClock {
         Self {
             state: Arc::new(Mutex::new(MockState {
                 now: Instant::now(),
+                wall_millis: MOCK_WALL_EPOCH_MILLIS,
                 sleepers: Vec::new(),
             })),
         }
@@ -42,6 +51,7 @@ impl MockClock {
     pub fn advance(&self, by: Duration) {
         let mut state = lock(&self.state);
         state.now += by;
+        state.wall_millis += by.as_millis() as u64;
         let now = state.now;
         let mut pending = Vec::new();
         for sleeper in state.sleepers.drain(..) {
@@ -65,6 +75,10 @@ impl Default for MockClock {
 impl Clock for MockClock {
     fn now(&self) -> Instant {
         lock(&self.state).now
+    }
+
+    fn now_unix_millis(&self) -> u64 {
+        lock(&self.state).wall_millis
     }
 
     async fn sleep(&self, dur: Duration) {

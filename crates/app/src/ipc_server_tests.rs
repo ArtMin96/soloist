@@ -1,7 +1,9 @@
 use super::*;
-use soloist_core::testing::{terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
+use soloist_core::testing::{
+    terminal_registration, FakeLockRepo, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
+};
 use soloist_core::{
-    CorePorts, DomainEvent, Origin, ProcStatus, ProcessId, StartSummary, TokioClock,
+    AcquireOutcome, CorePorts, DomainEvent, Origin, ProcStatus, ProcessId, StartSummary, TokioClock,
 };
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -521,6 +523,80 @@ async fn wait_for_bound_port_on_a_resting_process_reports_not_running() {
         )
         .await,
         Ok(IpcResponse::PortWait(PortWaitOutcome::NotRunning))
+    );
+}
+
+#[tokio::test]
+async fn acquiring_a_lease_in_scope_is_granted_then_released() {
+    // The lease store must be wired for the round-trip to persist, so this builds its own facade.
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .lock_repo(Arc::new(FakeLockRepo::new()))
+        .build(),
+    );
+    let session = facade.open_session(Some(PEER_PGID));
+    let owner = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
+
+    match handle_request(
+        &facade,
+        session,
+        IpcRequest::LockAcquire {
+            key: "deploy".into(),
+            ttl_ms: 30_000,
+        },
+    )
+    .await
+    {
+        Ok(IpcResponse::LeaseOutcome(AcquireOutcome::Acquired(view))) => {
+            assert_eq!(view.owner, owner)
+        }
+        other => panic!("expected an acquired lease, got {other:?}"),
+    }
+    match handle_request(
+        &facade,
+        session,
+        IpcRequest::LockStatus {
+            key: "deploy".into(),
+        },
+    )
+    .await
+    {
+        Ok(IpcResponse::LeaseStatus(Some(view))) => assert_eq!(view.owner, owner),
+        other => panic!("expected a held lease, got {other:?}"),
+    }
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::LockRelease {
+                key: "deploy".into(),
+            },
+        )
+        .await,
+        Ok(IpcResponse::LeaseReleased(true))
+    );
+}
+
+#[tokio::test]
+async fn a_lease_action_without_scope_is_refused() {
+    let facade = facade();
+    let session = facade.open_session(Some(PEER_PGID));
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::LockAcquire {
+                key: "deploy".into(),
+                ttl_ms: 30_000,
+            },
+        )
+        .await,
+        Err(IpcError::NoProjectScope)
     );
 }
 

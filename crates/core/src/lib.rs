@@ -53,9 +53,15 @@ pub use config::{
     ConfigEngine, ConfigError, ConfigSync, ProcessSpec, Rename, SoloYml, SyncError,
     TrustReviewCommand,
 };
+pub use coordination::{
+    AcquireOutcome, LeaseReleaser, LeaseView, Leases, LockRepo, NoopLockRepo, StoredLease,
+};
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
-pub use facade::{Facade, LaunchAgentError, ScopedActionError, SpawnAgentError, TrustCommandError};
+pub use facade::{
+    CoordinationError, Facade, LaunchAgentError, ScopedActionError, SpawnAgentError,
+    TrustCommandError,
+};
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, Whoami, PROCESS_ID_ENV};

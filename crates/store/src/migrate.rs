@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 3;
+pub(crate) const SCHEMA_VERSION: i64 = 4;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -63,6 +63,23 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         seed_builtin_agent_tools(conn)?;
     }
 
+    if version < 4 {
+        // Coordination leases: one row per (project, key). `owner` is a per-run process id and
+        // the millis are a persistable wall clock. The project foreign key cascades, so removing a
+        // project drops its leases; launch reconciliation clears whatever a previous run left.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS leases (
+                 project_id           INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 key                  TEXT NOT NULL,
+                 owner                INTEGER NOT NULL,
+                 acquired_unix_millis INTEGER NOT NULL,
+                 expires_unix_millis  INTEGER NOT NULL,
+                 PRIMARY KEY (project_id, key)
+             );",
+        )
+        .map_err(sql_err)?;
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
@@ -105,7 +122,7 @@ mod tests {
             "migration must advance a fresh database to the current schema version"
         );
 
-        for table in ["meta", "projects", "trust", "agent_tools"] {
+        for table in ["meta", "projects", "trust", "agent_tools", "leases"] {
             let exists = conn
                 .query_row(
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",

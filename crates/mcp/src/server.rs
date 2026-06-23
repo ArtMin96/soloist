@@ -33,7 +33,8 @@ impl SoloistMcp {
                 + Self::agent_router()
                 + Self::bulk_router()
                 + Self::output_router()
-                + Self::services_router(),
+                + Self::services_router()
+                + Self::lock_router(),
         }
     }
 }
