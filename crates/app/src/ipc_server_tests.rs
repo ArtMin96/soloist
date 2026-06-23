@@ -184,10 +184,11 @@ async fn binding_an_unknown_process_maps_to_the_wire_error() {
     );
 }
 
-/// The synthetic peer process group shared by these routing tests: every session opens with
-/// it (as a real Unix-socket connection always carries a peer group), and [`scoped_terminal`]
+/// The synthetic peer process group shared by these routing tests — single-sourced from the
+/// core test support so it never drifts from the core's own scope tests. Every session opens
+/// with it (a real Unix-socket connection always carries a peer group), and [`scoped_terminal`]
 /// assigns the same group to the process it binds, so the bind is authentic.
-const PEER_PGID: i32 = 5000;
+use soloist_core::testing::TEST_PEER_PGID as PEER_PGID;
 
 /// Registers a terminal in `project`, gives it the session's peer process group (standing in
 /// for the group a real spawn creates), and binds `session` to it — putting that project in

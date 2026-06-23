@@ -1,10 +1,13 @@
 use super::*;
 use crate::identity::{IdentityError, Origin};
-use crate::ids::{ProjectId, SessionId};
+use crate::ids::ProjectId;
 use crate::ports::{TokioClock, TrustRepo};
 use crate::process::ProcStatus;
 use crate::supervisor::{Registration, SupervisorError};
-use crate::testing::{terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
+use crate::testing::{
+    authentic_session, terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
+    TEST_PEER_PGID,
+};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
@@ -31,15 +34,6 @@ async fn wait_for(rx: &mut broadcast::Receiver<DomainEvent>, target: ProcStatus)
             Err(RecvError::Closed) => panic!("event bus closed"),
         }
     }
-}
-
-/// Opens a session authenticated to `process`, as the UDS adapter would for an MCP client
-/// running inside that process's group: it assigns the process a synthetic live process group
-/// (standing in for a real spawn) and opens a session whose peer shares it. Binding or
-/// selecting that process/its project then passes the façade's authenticity check.
-fn authentic_session(facade: &Facade, process: ProcessId, pgid: i32) -> SessionId {
-    facade.supervisor().assign_test_group(process, pgid);
-    facade.open_session(Some(pgid))
 }
 
 #[tokio::test]
@@ -262,7 +256,7 @@ async fn binding_scopes_a_session_to_its_process_project() {
         .supervisor()
         .register(terminal_registration(project, "term", "sleep 60"));
     // The session's peer runs in this process's group, so binding to it is authentic.
-    let session = authentic_session(&facade, id, 5000);
+    let session = authentic_session(&facade, id, TEST_PEER_PGID);
     facade
         .bind_session_process(session, id)
         .expect("bind to the process the caller runs in");
@@ -295,7 +289,7 @@ async fn binding_a_process_the_caller_does_not_run_in_is_refused() {
         "term",
         "sleep 60",
     ));
-    facade.supervisor().assign_test_group(id, 5000);
+    facade.supervisor().assign_test_group(id, TEST_PEER_PGID);
     let session = facade.open_session(Some(9999)); // a peer group owning no managed process
     assert!(matches!(
         facade.bind_session_process(session, id),
@@ -329,7 +323,7 @@ async fn scope_is_ambiguous_with_several_projects_until_one_is_selected() {
     let in_b = facade
         .supervisor()
         .register(terminal_registration(b.id, "term", "sleep 60"));
-    let session = authentic_session(&facade, in_b, 7000);
+    let session = authentic_session(&facade, in_b, TEST_PEER_PGID);
 
     // Two projects, nothing bound or selected: the scope cannot be inferred.
     assert_eq!(facade.whoami(session).effective_project, None);

@@ -6,7 +6,10 @@ use crate::ports::{Clock, CorePorts, TokioClock, TrustRepo};
 use crate::process::ProcStatus;
 use crate::supervisor::Registration;
 use crate::sync::lock;
-use crate::testing::{terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
+use crate::testing::{
+    authentic_session, terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
+    TEST_PEER_PGID,
+};
 use async_trait::async_trait;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -37,18 +40,12 @@ fn terminal_in(facade: &Facade, project: ProjectId, name: &str) -> ProcessId {
         .register(terminal_registration(project, name, "sleep 60"))
 }
 
-/// A synthetic peer process group for a session authenticated to its bound process — any
-/// value works, since each test builds its own facade and assigns the same group to the
-/// process it scopes to.
-const PEER_PGID: i32 = 5000;
-
 /// Opens a session authenticated to `process` and binds it, as the UDS adapter would for an
-/// MCP client running inside that process's group: it assigns the process a synthetic live
-/// group (standing in for a real spawn) and opens a session whose peer shares it, so the bind
-/// passes the façade's authenticity check. The production scope path, without a real PTY.
+/// MCP client running inside that process's group: [`authentic_session`] puts the caller in
+/// the process's group, then this binds it, so the bind passes the façade's authenticity
+/// check. The production scope path, without a real PTY.
 fn scoped_to(facade: &Facade, process: ProcessId) -> SessionId {
-    facade.supervisor().assign_test_group(process, PEER_PGID);
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = authentic_session(facade, process, TEST_PEER_PGID);
     facade
         .bind_session_process(session, process)
         .expect("an authentic bind to the process the caller runs in");

@@ -13,8 +13,11 @@ use tokio::net::UnixStream;
 /// reported no pid, or it exited before we looked. A `None` peer leaves the session
 /// unauthenticated: it can use the open read tools but cannot bind to a process or select a
 /// project scope (both require a matching home process), so no cross-project surface is
-/// granted. Returns an error only when the peer credentials cannot be read at all, which the
-/// caller treats as a dead connection and drops.
+/// granted. The pid (from `SO_PEERCRED`) and its group are read in two steps; in the rare
+/// case the peer exits and its pid is reused in between, the resolved group is stale and
+/// matches no managed process — a refused bind, never a wrong-scope grant (fail closed).
+/// Returns an error only when the peer credentials cannot be read at all, which the caller
+/// treats as a dead connection and drops.
 pub fn peer_pgid(stream: &UnixStream) -> std::io::Result<Option<i32>> {
     let Some(pid) = stream.peer_cred()?.pid() else {
         return Ok(None);
