@@ -68,7 +68,7 @@ adapter. Adapters hold **no** business state and make **no** domain decisions.
 | **C3** Terminal I/O | `terminal/` | PTY read loop, rendered+raw buffers, OSC parse, attach replay | live (P4) |
 | **C4** Agents & Idle | `agents` `idle` | agent-tool defs, launch, 5-state idle FSM, optional summary | placeholder → P7 |
 | **C5** Monitoring | `metrics/` `portscan/` | CPU/mem sampling, `/proc` port discovery, readiness | live (P6: D1/D2/D3) |
-| **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | placeholder → P9 |
+| **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | live (P9: leases); rest → P9 |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
 | **C8** Integration façade | `facade` `identity` | the public command/query API; MCP identity & effective scope | live (`facade`) |
 
@@ -101,7 +101,8 @@ HTTP behave identically):
   owning process closes** (no stranded locks on crash); state **survives app restart** (SQLite), unlike live
   processes and PTY buffers.
 
-Target design — **C6 is a placeholder until Phase 9**; tool *param schemas* are clean-room/undesigned (`plan/05`
+Target design — **C6 is being built in Phase 9** (leases done: `lock_acquire`/`lock_status`/`lock_release` over the
+`Leases` aggregate + `LockRepo`; scratchpads/todos/timers/kv next); tool *param schemas* are clean-room (`plan/05`
 §12). Full recipe: **`plan/06` §5.8**; data-flow walkthroughs: `plan/01`; tool catalog: `plan/05` §7.
 
 ### Frontend domain split (`crates/app/ui/src`)
@@ -135,7 +136,7 @@ Reach for a pattern when its **trigger** fires — not preemptively (YAGNI).
 | **Registry** | `config::detect::DETECTORS` (C1); the MCP tool router composed from per-category sub-routers (`crates/mcp/src/tools/`, R8); *to add* — agent-tool defs (P7) | a growing set of "one of many" handlers → register, don't extend a giant `match` |
 | **Strategy** | `config::detect::Detector` — one impl per ecosystem (C1); *to add* — per-provider idle heuristics (P7), per-agent launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
 | **Optimistic concurrency** | *to add* — scratchpad/todo `expected_revision` (P9) | concurrent writers to one durable record → revision guard |
-| **Lease / lock** | *to add* — coordination (P9) | cooperative cross-agent intent → TTL + owner `ProcessId`, auto-release on close |
+| **Lease / lock** | `core::coordination::Leases` over `LockRepo` (P9: leases) | cooperative cross-agent intent → TTL + owner `ProcessId`, auto-release on close |
 
 ---
 

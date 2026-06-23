@@ -1,7 +1,7 @@
 use super::*;
 use soloist_core::{
-    AgentKind, AgentTool, Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId,
-    ProjectView, PromptMode, Readiness, SessionId, StartSummary, Whoami,
+    AcquireOutcome, AgentKind, AgentTool, LeaseView, Origin, ProcStatus, ProcessId, ProcessKind,
+    ProcessView, ProjectId, ProjectView, PromptMode, Readiness, SessionId, StartSummary, Whoami,
 };
 use std::path::PathBuf;
 
@@ -101,6 +101,20 @@ fn requests_round_trip_through_json() {
             port: 8080,
             timeout_ms: None,
         },
+        IpcRequest::LockAcquire {
+            key: "deploy".into(),
+            ttl_ms: Some(30_000),
+        },
+        IpcRequest::LockAcquire {
+            key: "deploy".into(),
+            ttl_ms: None,
+        },
+        IpcRequest::LockStatus {
+            key: "deploy".into(),
+        },
+        IpcRequest::LockRelease {
+            key: "deploy".into(),
+        },
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -165,6 +179,23 @@ fn every_response_variant_round_trips_through_json() {
         IpcResponse::RawOutput("\u{1b}[31merror\u{1b}[0m".into()),
         IpcResponse::Ports(vec![3000, 8080]),
         IpcResponse::PortWait(PortWaitOutcome::Bound),
+        IpcResponse::LeaseOutcome(AcquireOutcome::Acquired(LeaseView {
+            key: "deploy".into(),
+            owner: ProcessId::from_raw(7),
+            expires_unix_millis: 1_700_000_030_000,
+        })),
+        IpcResponse::LeaseOutcome(AcquireOutcome::Held(LeaseView {
+            key: "deploy".into(),
+            owner: ProcessId::from_raw(8),
+            expires_unix_millis: 1_700_000_030_000,
+        })),
+        IpcResponse::LeaseStatus(Some(LeaseView {
+            key: "deploy".into(),
+            owner: ProcessId::from_raw(7),
+            expires_unix_millis: 1_700_000_030_000,
+        })),
+        IpcResponse::LeaseStatus(None),
+        IpcResponse::LeaseReleased(true),
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");
@@ -194,6 +225,7 @@ fn a_typed_error_round_trips() {
         IpcError::ForeignProcess,
         IpcError::ForeignProject,
         IpcError::NoProjectScope,
+        IpcError::NoBoundProcess,
         IpcError::OutOfScope,
         IpcError::Untrusted,
         IpcError::UnknownTool,
@@ -215,6 +247,7 @@ fn request_errors_are_distinguished_from_server_errors() {
         IpcError::ForeignProcess,
         IpcError::ForeignProject,
         IpcError::NoProjectScope,
+        IpcError::NoBoundProcess,
         IpcError::OutOfScope,
         IpcError::Untrusted,
         IpcError::UnknownTool,
@@ -263,6 +296,19 @@ fn core_spawn_errors_map_to_the_wire_error() {
     assert_eq!(
         IpcError::from(LaunchAgentError::UnknownProject),
         IpcError::UnknownProject
+    );
+}
+
+#[test]
+fn core_coordination_errors_map_to_the_wire_error() {
+    use soloist_core::CoordinationError;
+    assert_eq!(
+        IpcError::from(CoordinationError::NoProjectScope),
+        IpcError::NoProjectScope
+    );
+    assert_eq!(
+        IpcError::from(CoordinationError::NoBoundProcess),
+        IpcError::NoBoundProcess
     );
 }
 

@@ -16,7 +16,9 @@ mod pty_bridge;
 use std::sync::Arc;
 
 use serde::Serialize;
-use soloist_core::{CorePorts, Facade, NoopRuntimeState, RuntimeState, Store, TokioClock};
+use soloist_core::{
+    CorePorts, Facade, LeaseReleaser, NoopRuntimeState, RuntimeState, Store, TokioClock,
+};
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use soloist_store::{FileRuntimeState, SqliteStore};
 use soloist_sys::{CommandVersionProbe, NotifyFileWatcher, ProcMetricsProbe, ProcPortProbe};
@@ -68,11 +70,11 @@ fn build_facade(app: AppHandle) -> Facade {
         }
     };
 
-    // One SQLite store backs the trust, project, and agent-tool repositories the façade
-    // needs. The lock releaser is unset here, so it defaults to its `Noop` port (coordination
-    // lands in C6); the runtime-state and orphan-control adapters are wired for adoption,
-    // the metrics probe reads CPU/memory from /proc, the port probe reads /proc, the file
-    // watcher reports filesystem changes via notify, the notifier shows desktop toasts via
+    // One SQLite store backs the trust, project, agent-tool, and coordination-lease repositories
+    // the façade needs. The lock releaser drops a closing process's leases (over the same store),
+    // and the lease store persists them; the runtime-state and orphan-control adapters are wired
+    // for adoption, the metrics probe reads CPU/memory from /proc, the port probe reads /proc, the
+    // file watcher reports filesystem changes via notify, the notifier shows desktop toasts via
     // the Tauri notification plugin, and the version probe auto-detects installed agent CLIs.
     Facade::new(
         CorePorts::builder(
@@ -87,8 +89,10 @@ fn build_facade(app: AppHandle) -> Facade {
         .port_probe(Arc::new(ProcPortProbe::new()))
         .file_watcher(Arc::new(NotifyFileWatcher::new()))
         .notifier(Arc::new(TauriNotifier::new(app)))
-        .agent_tools(store)
+        .agent_tools(store.clone())
         .version_probe(Arc::new(CommandVersionProbe::new()))
+        .lock_repo(store.clone())
+        .locks(Arc::new(LeaseReleaser::new(store)))
         .build(),
     )
 }
@@ -120,6 +124,11 @@ pub fn run() {
             // Build the façade here (not in the builder chain) so the desktop notifier can
             // capture the AppHandle, then register it as managed state for the commands.
             app.manage(build_facade(app.handle().clone()));
+            // Clear coordination leases left by a previous run: they are process-owned and per-run
+            // process ids are recycled, so nothing from a fresh launch holds one yet.
+            if let Err(err) = app.state::<Facade>().reconcile_leases() {
+                eprintln!("soloist: could not reconcile stale leases on launch ({err})");
+            }
             forward_events(app.handle().clone());
             // Start the self-healing reactor: it watches the core event stream and
             // relaunches crashed auto_restart commands within the documented rate limit

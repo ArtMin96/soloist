@@ -17,6 +17,7 @@ use tokio::sync::broadcast;
 
 use crate::agents::{Agents, IdleSampler, IdleTracker};
 use crate::config::ConfigEngine;
+use crate::coordination::Leases;
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::{FileWatcher, WatchReactor};
 use crate::identity::Identity;
@@ -30,10 +31,12 @@ use crate::projects::{LoadProjectError, ProjectLoad, ProjectService, ProjectView
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::trust::TrustStore;
 
+mod coordination;
 mod output;
 mod scoped;
 mod session;
 
+pub use coordination::CoordinationError;
 pub use scoped::{ScopedActionError, SpawnAgentError};
 
 /// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot
@@ -56,6 +59,7 @@ pub struct Facade {
     agents: Agents,
     idle: Arc<IdleTracker>,
     identity: Identity,
+    leases: Leases,
 }
 
 impl Facade {
@@ -75,10 +79,12 @@ impl Facade {
             projects,
             agent_tools,
             version_probe,
+            lock_repo,
             ..
         } = ports;
         Self {
             supervisor,
+            leases: Leases::new(lock_repo, clock.clone()),
             clock,
             metrics,
             port_probe,

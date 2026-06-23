@@ -82,7 +82,7 @@ builds and runs" (§8).
 | `terminal/` | **C3 Terminal I/O** | PTY read loop, rendered+raw buffers, OSC parse, attach replay | live (P4) |
 | `agents` · `idle` | **C4 Agents & Idle** | agent-tool defs, launch, 5-state idle FSM, optional summary | **placeholder → P7** |
 | `metrics` · `portscan` | **C5 Monitoring** | CPU/mem sampling, `/proc` port discovery, readiness | **placeholder → P6** |
-| `coordination` | **C6 Coordination** | scratchpads, todos, timers, leases, key-value | **placeholder → P9** |
+| `coordination` | **C6 Coordination** | scratchpads, todos, timers, leases, key-value | live (P9: leases); scratchpads/todos/timers/kv → P9 |
 | `notify` | **C7 Notifications** | crash/attention/idle toasts, unread/bell state | **placeholder → P6** |
 | `facade` · `identity` | **C8 Integration façade** | the public command/query API; MCP identity & effective scope | live (`facade`) / placeholder `identity` → P8 |
 | `events` | cross-cutting | typed `DomainEvent` + `EventBus` (broadcast) | live |
@@ -150,7 +150,7 @@ trigger that tells you to reach for it. Use a pattern when its trigger fires —
 | **Registry** | `config::detect::DETECTORS` (C1, command auto-detection); the MCP tool router composed from per-category sub-routers (`crates/mcp/src/tools/`, R8); **to add** — agent-tool defs (P7) | a growing set of "one of many" handlers → register entries, don't extend a giant `match` |
 | **Strategy** | `config::detect::Detector` — one impl per ecosystem (C1); **to add** — per-provider idle heuristics (P7), per-agent-tool launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
 | **Optimistic concurrency** | **to add** — scratchpad/todo `expected_revision` (P9) | concurrent writers to one durable record → revision guard, reject stale writes |
-| **Lease/lock** | **to add** — coordination locks (P9) | cooperative cross-agent intent → TTL + owner `ProcessId`, auto-release on close |
+| **Lease/lock** | `core::coordination::Leases` over the `LockRepo` port (P9: leases done) | cooperative cross-agent intent → TTL + owner `ProcessId`, auto-release on close (the `LockReleaser` hook) |
 
 Anti-patterns to refuse are fixed in `04` §13. The one most relevant to this app's growth: **a giant
 `match` over tool/provider/endpoint names**. When that set is open-ended, use a Registry or Strategy.

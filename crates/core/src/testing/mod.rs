@@ -2,7 +2,7 @@
 //! the `testing` feature — by adapter-crate tests. A manually-advanced [`MockClock`], a
 //! [`FakeSpawner`] whose children never touch the OS, a [`RecordingLockReleaser`],
 //! in-memory [`FakeRuntimeState`]/[`FakeOrphanControl`] for orphan reconciliation,
-//! [`FakeTrustRepo`]/[`FakeProjectRepo`] standing in for the durable store, a
+//! [`FakeTrustRepo`]/[`FakeProjectRepo`]/[`FakeLockRepo`] standing in for the durable store, a
 //! [`FakeAgentToolRepo`]/[`FakeVersionProbe`] for the agent registry and auto-detection, a
 //! [`FakeMetricsProbe`]/[`FakePortProbe`] reporting fixed CPU-memory/port readings, a
 //! [`FakeFileWatcher`] feeding synthetic filesystem changes, a [`RecordingNotifier`] capturing
@@ -16,6 +16,7 @@
 
 mod agents;
 mod clock;
+mod coordination;
 // Event-stream waiters are used only by the core's own reactor tests, not by the adapter
 // crates that consume the `testing` feature — and they assert via `panic!`, which the core
 // denies outside test builds — so they compile under `cfg(test)` only.
@@ -34,6 +35,7 @@ mod spawner;
 
 pub use agents::{FakeAgentToolRepo, FakeVersionProbe};
 pub use clock::MockClock;
+pub use coordination::FakeLockRepo;
 #[cfg(test)]
 pub use events::{next_change, next_matching, next_to, wait_all};
 pub use filewatch::FakeFileWatcher;

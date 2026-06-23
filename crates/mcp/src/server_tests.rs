@@ -2,8 +2,8 @@ use super::*;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use soloist_core::{
-    AgentKind, AgentTool, Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId,
-    PromptMode, Readiness, SessionId, StartSummary, Whoami,
+    AcquireOutcome, AgentKind, AgentTool, LeaseView, Origin, ProcStatus, ProcessId, ProcessKind,
+    ProcessView, ProjectId, PromptMode, Readiness, SessionId, StartSummary, Whoami,
 };
 use soloist_ipc::{
     read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome,
@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use tokio::net::UnixListener;
 
 use crate::args::{
-    OutputArg, ProcessArg, RenameArg, SearchArg, SelectProjectArg, SendInputArg, SpawnAgentArg,
-    WaitForPortArg,
+    LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, RenameArg, SearchArg, SelectProjectArg,
+    SendInputArg, SpawnAgentArg, WaitForPortArg,
 };
 
 /// Spawns a fake app on `socket` that answers each request via `respond` until the client
@@ -98,6 +98,10 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     // tools/services.rs
     "services_list",
     "wait_for_bound_port",
+    // tools/lock.rs
+    "lock_acquire",
+    "lock_status",
+    "lock_release",
 ];
 
 /// The router [`SoloistMcp::new`] composes from the per-category sub-routers must serve exactly
@@ -682,5 +686,120 @@ async fn a_refused_action_becomes_a_tool_execution_error() {
     assert!(
         json.contains("not trusted"),
         "the refusal reason reaches the model: {json}"
+    );
+}
+
+#[tokio::test]
+async fn lock_acquire_threads_its_arguments_through_and_projects_the_outcome() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::LockAcquire { key, ttl_ms } if key == "deploy" && ttl_ms == Some(30_000) => Ok(
+            IpcResponse::LeaseOutcome(AcquireOutcome::Acquired(LeaseView {
+                key: "deploy".into(),
+                owner: ProcessId::from_raw(7),
+                expires_unix_millis: 1_700_000_030_000,
+            })),
+        ),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .lock_acquire(Parameters(LockAcquireArg {
+            key: "deploy".into(),
+            ttl_ms: Some(30_000),
+        }))
+        .await
+        .expect("lock_acquire succeeds");
+    let back: AcquireOutcome =
+        serde_json::from_value(structured_of(result)).expect("decode acquire outcome");
+    assert!(matches!(back, AcquireOutcome::Acquired(view) if view.owner == ProcessId::from_raw(7)));
+}
+
+#[tokio::test]
+async fn lock_acquire_forwards_an_omitted_ttl_as_none() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // The default and the bounds live in the core, so the handler forwards an omitted ttl as None
+    // rather than inventing one — this succeeds only if it sent exactly that.
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::LockAcquire { key, ttl_ms: None } if key == "deploy" => Ok(
+            IpcResponse::LeaseOutcome(AcquireOutcome::Acquired(LeaseView {
+                key,
+                owner: ProcessId::from_raw(1),
+                expires_unix_millis: 0,
+            })),
+        ),
+        _ => Err(IpcError::Internal("expected an absent ttl".into())),
+    });
+
+    handler(socket)
+        .lock_acquire(Parameters(LockAcquireArg {
+            key: "deploy".into(),
+            ttl_ms: None,
+        }))
+        .await
+        .expect("lock_acquire forwards the absent ttl");
+}
+
+#[tokio::test]
+async fn lock_status_projects_the_holder() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::LockStatus { key } if key == "deploy" => {
+            Ok(IpcResponse::LeaseStatus(Some(LeaseView {
+                key: "deploy".into(),
+                owner: ProcessId::from_raw(7),
+                expires_unix_millis: 1_700_000_030_000,
+            })))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .lock_status(Parameters(LockKeyArg {
+            key: "deploy".into(),
+        }))
+        .await
+        .expect("lock_status succeeds");
+    let holder: LeaseView =
+        serde_json::from_value(structured_of(result)["holder"].clone()).expect("decode holder");
+    assert_eq!(holder.owner, ProcessId::from_raw(7));
+}
+
+#[tokio::test]
+async fn lock_status_reports_a_free_key_as_a_null_holder() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |_request| {
+        Ok(IpcResponse::LeaseStatus(None))
+    });
+
+    let result = handler(socket)
+        .lock_status(Parameters(LockKeyArg { key: "free".into() }))
+        .await
+        .expect("lock_status succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "holder": null }));
+}
+
+#[tokio::test]
+async fn lock_release_reports_whether_the_caller_held_it() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::LockRelease { key } if key == "deploy" => Ok(IpcResponse::LeaseReleased(true)),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .lock_release(Parameters(LockKeyArg {
+            key: "deploy".into(),
+        }))
+        .await
+        .expect("lock_release succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "released": true })
     );
 }

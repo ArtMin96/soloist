@@ -142,6 +142,10 @@ impl Clock for RecordingClock {
         Instant::now()
     }
 
+    fn now_unix_millis(&self) -> u64 {
+        0
+    }
+
     async fn sleep(&self, dur: Duration) {
         *lock(&self.slept) = Some(dur);
     }

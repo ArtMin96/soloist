@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::agents::{AgentToolRepo, NoopAgentToolRepo, NoopVersionProbe, VersionProbe};
+use crate::coordination::{LockRepo, NoopLockRepo};
 use crate::filewatch::{FileWatcher, NoopFileWatcher};
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
 use crate::notify::{NoopNotifier, Notifier};
@@ -19,9 +20,9 @@ use super::{
 /// core's constructors take one value, and adding a future port is one field here
 /// rather than another argument threaded through every call site. The required adapters
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
-/// driven subsystems (`locks`, `runtime`, `orphan_control`, `metrics`, `port_probe`,
-/// `file_watcher`, `notifier`, `agent_tools`, `version_probe`) default to their `Noop`
-/// port via [`CorePorts::builder`], so a new optional port never
+/// driven subsystems (`locks`, `lock_repo`, `runtime`, `orphan_control`, `metrics`,
+/// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`) default to their
+/// `Noop` port via [`CorePorts::builder`], so a new optional port never
 /// forces every existing composition root to change. The composition root
 /// (`app::build_facade`) is the one place these are chosen; tests assemble it from
 /// `crate::testing` fakes.
@@ -31,6 +32,7 @@ pub struct CorePorts {
     pub(crate) trust: Arc<dyn TrustRepo>,
     pub(crate) projects: Arc<dyn ProjectRepo>,
     pub(crate) locks: Arc<dyn LockReleaser>,
+    pub(crate) lock_repo: Arc<dyn LockRepo>,
     pub(crate) runtime: Arc<dyn RuntimeState>,
     pub(crate) orphan_control: Arc<dyn OrphanControl>,
     pub(crate) metrics: Arc<dyn MetricsProbe>,
@@ -57,6 +59,7 @@ impl CorePorts {
                 trust,
                 projects,
                 locks: Arc::new(NoopLockReleaser),
+                lock_repo: Arc::new(NoopLockRepo),
                 runtime: Arc::new(NoopRuntimeState),
                 orphan_control: Arc::new(NoopOrphanControl),
                 metrics: Arc::new(NoopMetricsProbe),
@@ -79,6 +82,14 @@ impl CorePortsBuilder {
     /// Overrides the lock releaser (coordination C6; defaults to [`NoopLockReleaser`]).
     pub fn locks(mut self, locks: Arc<dyn LockReleaser>) -> Self {
         self.ports.locks = locks;
+        self
+    }
+
+    /// Overrides the durable lease store the coordination aggregate persists to (C6; defaults to
+    /// [`NoopLockRepo`], which stores nothing). The real adapter is SQLite, shared with the
+    /// lock releaser so a release is seen by every reader.
+    pub fn lock_repo(mut self, lock_repo: Arc<dyn LockRepo>) -> Self {
+        self.ports.lock_repo = lock_repo;
         self
     }
 

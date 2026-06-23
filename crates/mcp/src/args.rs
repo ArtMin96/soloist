@@ -87,6 +87,23 @@ pub(crate) struct SearchArg {
     pub(crate) limit: Option<usize>,
 }
 
+/// Arguments for acquiring a coordination lease.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct LockAcquireArg {
+    /// The lease key — a name the coordinating agents agree on (e.g. `deploy`). Project-scoped.
+    pub(crate) key: String,
+    /// How long to hold the lease before it auto-expires, in milliseconds. Omit for the server
+    /// default; re-acquire the same key to renew. The app caps it.
+    pub(crate) ttl_ms: Option<u64>,
+}
+
+/// Arguments for a lease lookup or release, by key.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct LockKeyArg {
+    /// The lease key, scoped to the session's project.
+    pub(crate) key: String,
+}
+
 /// Arguments for waiting until a process binds a port.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub(crate) struct WaitForPortArg {
