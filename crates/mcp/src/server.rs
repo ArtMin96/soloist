@@ -17,8 +17,8 @@ use soloist_core::{ProcessId, ProjectId};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
-    OutputArg, ProcessArg, ProjectArg, RegisterAgentArg, SearchArg, SelectProjectArg, SendInputArg,
-    SpawnAgentArg, WaitForPortArg,
+    OutputArg, ProcessArg, ProjectArg, RegisterAgentArg, RenameArg, SearchArg, SelectProjectArg,
+    SendInputArg, SpawnAgentArg, WaitForPortArg,
 };
 use crate::client::{AppClient, ClientError};
 use soloist_ipc::PortWaitOutcome;
@@ -78,6 +78,23 @@ impl SoloistMcp {
     ) -> Result<CallToolResult, ErrorData> {
         let request = IpcRequest::SelectProject {
             project: ProjectId::from_raw(project),
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Note a process as this session's default target, by its id. Informational only — it is reported by `whoami` and confers no scope; every tool still takes an explicit process id."
+    )]
+    async fn select_process(
+        &self,
+        Parameters(ProcessArg { process }): Parameters<ProcessArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::SelectProcess {
+            process: ProcessId::from_raw(process),
         };
         match self.client.request(request).await {
             Ok(IpcResponse::Acked) => acked(),
@@ -180,6 +197,41 @@ impl SoloistMcp {
         Parameters(ProcessArg { process }): Parameters<ProcessArg>,
     ) -> Result<CallToolResult, ErrorData> {
         let request = IpcRequest::RestartProcess {
+            process: ProcessId::from_raw(process),
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Rename one process's display label by its id. Display-only: it does not affect trust or what the process runs. Acts only within the session's project."
+    )]
+    async fn rename_process(
+        &self,
+        Parameters(RenameArg { process, label }): Parameters<RenameArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::RenameProcess {
+            process: ProcessId::from_raw(process),
+            label,
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Stop one process and remove it from Soloist entirely by its id (its terminal scrollback is discarded). Use stop_process to stop without removing. Acts only within the session's project."
+    )]
+    async fn close_process(
+        &self,
+        Parameters(ProcessArg { process }): Parameters<ProcessArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::CloseProcess {
             process: ProcessId::from_raw(process),
         };
         match self.client.request(request).await {

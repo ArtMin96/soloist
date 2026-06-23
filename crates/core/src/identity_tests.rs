@@ -6,6 +6,7 @@ fn a_fresh_session_is_unbound_with_no_selection() {
     let session = identity.open(None);
     assert_eq!(identity.origin(session), Origin::Unbound);
     assert_eq!(identity.selected_project(session), None);
+    assert_eq!(identity.selected_process(session), None);
 }
 
 #[test]
@@ -44,6 +45,15 @@ fn selecting_records_the_project() {
     let project = ProjectId::from_raw(3);
     identity.select_project(session, project);
     assert_eq!(identity.selected_project(session), Some(project));
+}
+
+#[test]
+fn selecting_records_the_process() {
+    let identity = Identity::new();
+    let session = identity.open(None);
+    let process = ProcessId::from_raw(5);
+    identity.select_process(session, process);
+    assert_eq!(identity.selected_process(session), Some(process));
 }
 
 #[test]

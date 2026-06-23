@@ -161,6 +161,19 @@ impl Registry {
         lock(&self.inner).get(&id).map(|entry| entry.view.clone())
     }
 
+    /// Renames a process's display label, returning whether it was still registered. The
+    /// label is display-only: the launch spec, trust variant, and live group are untouched.
+    pub(crate) fn set_label(&self, id: ProcessId, label: String) -> bool {
+        let mut guard = lock(&self.inner);
+        match guard.get_mut(&id) {
+            Some(entry) => {
+                entry.view.label = label;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Updates a process's readiness gate to ready/not-ready, but only while it is still on
     /// the `pgid` the wait is probing. Returns whether it changed (so the caller announces
     /// only real transitions). Guarding on the group closes the race where a process stops
@@ -329,6 +342,13 @@ impl Registry {
     pub(crate) fn take_handle(&self, id: ProcessId) -> Option<ActorHandle> {
         let mut guard = lock(&self.inner);
         guard.get_mut(&id).and_then(|entry| entry.handle.take())
+    }
+
+    /// Removes a process from the registry entirely — the one path that forgets a managed
+    /// process, unlike a stop, which leaves it resting. The caller ([`Supervisor::close`])
+    /// reaps any live actor first, so a removed entry never abandons a running child.
+    pub(crate) fn remove(&self, id: ProcessId) {
+        lock(&self.inner).remove(&id);
     }
 
     /// Every process that still holds an actor handle — the shutdown set. Messaging

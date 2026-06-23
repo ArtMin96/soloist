@@ -56,6 +56,7 @@ async fn whoami_projects_the_resolved_identity() {
         session: SessionId::from_raw(1),
         origin: Origin::Unbound,
         bound_process: None,
+        selected_process: None,
         effective_project: None,
     };
     let canned = who.clone();
@@ -219,6 +220,65 @@ async fn restart_process_threads_the_id_through_and_acks() {
         .restart_process(Parameters(ProcessArg { process: 5 }))
         .await
         .expect("restart succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "ok": true }));
+}
+
+#[tokio::test]
+async fn rename_process_threads_its_arguments_through_and_acks() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::RenameProcess { process, label }
+            if process == ProcessId::from_raw(5) && label == "worker" =>
+        {
+            Ok(IpcResponse::Acked)
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .rename_process(Parameters(RenameArg {
+            process: 5,
+            label: "worker".into(),
+        }))
+        .await
+        .expect("rename succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "ok": true }));
+}
+
+#[tokio::test]
+async fn close_process_threads_the_id_through_and_acks() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::CloseProcess { process } if process == ProcessId::from_raw(5) => {
+            Ok(IpcResponse::Acked)
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .close_process(Parameters(ProcessArg { process: 5 }))
+        .await
+        .expect("close succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "ok": true }));
+}
+
+#[tokio::test]
+async fn select_process_threads_the_id_through_and_acks() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SelectProcess { process } if process == ProcessId::from_raw(5) => {
+            Ok(IpcResponse::Acked)
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .select_process(Parameters(ProcessArg { process: 5 }))
+        .await
+        .expect("select succeeds");
     assert_eq!(structured_of(result), serde_json::json!({ "ok": true }));
 }
 

@@ -298,6 +298,33 @@ async fn binding_a_process_the_caller_does_not_run_in_is_refused() {
 }
 
 #[tokio::test]
+async fn selecting_a_process_records_it_for_whoami() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    let session = facade.open_session(None);
+
+    // Informational only: no peer authentication, no scope conferred — whoami just echoes it.
+    facade
+        .select_process(session, id)
+        .expect("select an existing process");
+    assert_eq!(facade.whoami(session).selected_process, Some(id));
+}
+
+#[tokio::test]
+async fn selecting_an_unknown_process_is_rejected() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let session = facade.open_session(None);
+    assert!(matches!(
+        facade.select_process(session, ProcessId::from_raw(999)),
+        Err(IdentityError::UnknownProcess)
+    ));
+}
+
+#[tokio::test]
 async fn a_lone_loaded_project_is_the_default_scope() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
     let dir = tempfile::tempdir().expect("temp dir");

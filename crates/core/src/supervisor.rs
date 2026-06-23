@@ -244,6 +244,40 @@ impl Supervisor {
         Ok(())
     }
 
+    /// Renames a process's display label, announcing the change so adapters update its row.
+    /// The label is display-only: it never affects trust (keyed on the command variant) or
+    /// identity/scope. Returns [`SupervisorError::NotFound`] if the process is no longer
+    /// registered.
+    pub fn rename(&self, id: ProcessId, label: String) -> Result<(), SupervisorError> {
+        if !self.registry.set_label(id, label.clone()) {
+            return Err(SupervisorError::NotFound(id));
+        }
+        self.bus.publish(DomainEvent::ProcessRenamed { id, label });
+        Ok(())
+    }
+
+    /// Stops a process and removes it from the registry entirely — the one path that forgets
+    /// a managed process, unlike [`stop`](Self::stop), which leaves it resting. A live process
+    /// is messaged to stop and its actor awaited, so its group is reaped before the entry is
+    /// dropped (no orphaned children); a resting one is simply removed. Emits
+    /// [`DomainEvent::ProcessRemoved`], on which the self-healing loop drops the process's
+    /// crash history (single source). Returns [`SupervisorError::NotFound`] if it is no longer
+    /// registered.
+    pub async fn close(&self, id: ProcessId) -> Result<(), SupervisorError> {
+        if self.registry.status(id).is_none() {
+            return Err(SupervisorError::NotFound(id));
+        }
+        // Reap a live actor's group before forgetting it — the single-process form of
+        // `shutdown`'s reap step: message Stop, then await the actor's exit.
+        if let Some(ActorHandle { mailbox, join }) = self.registry.take_handle(id) {
+            let _ = mailbox.try_send(ActorMsg::Stop);
+            let _ = join.await;
+        }
+        self.registry.remove(id);
+        self.bus.publish(DomainEvent::ProcessRemoved { id });
+        Ok(())
+    }
+
     /// Stops every live process across all projects and awaits each actor's exit, so no
     /// children leak on app quit (the deterministic-shutdown contract). Wired into the
     /// Tauri shell's exit event so a normal quit reaps every process group.
@@ -356,6 +390,9 @@ pub(crate) fn apply_transition(
 
 #[cfg(test)]
 mod test_support;
+
+#[cfg(test)]
+mod lifecycle_tests;
 
 #[cfg(test)]
 mod tests {

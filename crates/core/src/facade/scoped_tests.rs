@@ -355,3 +355,58 @@ async fn an_untrusted_command_in_scope_is_refused() {
         .start_process(session, id)
         .expect("starts once trusted");
 }
+
+#[test]
+fn rename_process_enforces_scope() {
+    let (facade, _trust) = facade();
+    let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
+    let elsewhere = terminal_in(&facade, ProjectId::from_raw(2), "elsewhere");
+    let session = scoped_to(&facade, here);
+
+    // In scope: the relabel lands on the read model (no trust gate — a rename runs nothing).
+    facade
+        .rename_process(session, here, "renamed".into())
+        .expect("an in-scope rename");
+    assert_eq!(
+        facade.process_view(here).expect("registered").label,
+        "renamed"
+    );
+
+    // Out of scope: refused by the shared scope guard, leaving the label untouched.
+    assert!(matches!(
+        facade.rename_process(session, elsewhere, "x".into()),
+        Err(ScopedActionError::OutOfScope)
+    ));
+    assert_eq!(
+        facade.process_view(elsewhere).expect("registered").label,
+        "elsewhere"
+    );
+}
+
+#[tokio::test]
+async fn close_process_enforces_scope() {
+    let (facade, _trust) = facade();
+    let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
+    let elsewhere = terminal_in(&facade, ProjectId::from_raw(2), "elsewhere");
+    let session = scoped_to(&facade, here);
+
+    // Out of scope: refused before anything is removed.
+    assert!(matches!(
+        facade.close_process(session, elsewhere).await,
+        Err(ScopedActionError::OutOfScope)
+    ));
+    assert!(
+        facade.process_view(elsewhere).is_some(),
+        "a refused close removes nothing"
+    );
+
+    // In scope (a resting process): removed from the registry entirely.
+    facade
+        .close_process(session, here)
+        .await
+        .expect("an in-scope close");
+    assert!(
+        facade.process_view(here).is_none(),
+        "an in-scope close forgets the process"
+    );
+}

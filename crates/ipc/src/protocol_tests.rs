@@ -18,6 +18,9 @@ fn requests_round_trip_through_json() {
         IpcRequest::SelectProject {
             project: ProjectId::from_raw(2),
         },
+        IpcRequest::SelectProcess {
+            process: ProcessId::from_raw(19),
+        },
         IpcRequest::ListProjects,
         IpcRequest::GetProjectStatus {
             project: Some(ProjectId::from_raw(3)),
@@ -35,6 +38,13 @@ fn requests_round_trip_through_json() {
         },
         IpcRequest::RestartProcess {
             process: ProcessId::from_raw(7),
+        },
+        IpcRequest::RenameProcess {
+            process: ProcessId::from_raw(20),
+            label: "worker".into(),
+        },
+        IpcRequest::CloseProcess {
+            process: ProcessId::from_raw(21),
         },
         IpcRequest::SendInput {
             process: ProcessId::from_raw(8),
@@ -124,6 +134,7 @@ fn every_response_variant_round_trips_through_json() {
             session: SessionId::from_raw(1),
             origin: Origin::Unbound,
             bound_process: None,
+            selected_process: None,
             effective_project: None,
         }),
         IpcResponse::Acked,

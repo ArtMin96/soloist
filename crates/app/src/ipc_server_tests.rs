@@ -234,6 +234,57 @@ async fn stopping_an_idle_in_scope_process_reports_it_was_not_running() {
 }
 
 #[tokio::test]
+async fn renaming_an_in_scope_process_is_acked() {
+    let facade = facade();
+    let session = facade.open_session(Some(PEER_PGID));
+    let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::RenameProcess {
+                process: id,
+                label: "renamed".into(),
+            },
+        )
+        .await,
+        Ok(IpcResponse::Acked)
+    );
+    assert_eq!(
+        facade.process_view(id).expect("registered").label,
+        "renamed"
+    );
+}
+
+#[tokio::test]
+async fn closing_an_in_scope_process_removes_it() {
+    let facade = facade();
+    let session = facade.open_session(Some(PEER_PGID));
+    let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
+    // Never started, so close is a pure removal — acked, and the process leaves the registry.
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::CloseProcess { process: id }).await,
+        Ok(IpcResponse::Acked)
+    );
+    assert!(facade.process_view(id).is_none());
+}
+
+#[tokio::test]
+async fn selecting_a_process_is_acked_and_reported_by_whoami() {
+    let facade = facade();
+    let session = facade.open_session(Some(PEER_PGID));
+    let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::SelectProcess { process: id }).await,
+        Ok(IpcResponse::Acked)
+    );
+    match handle_request(&facade, session, IpcRequest::Whoami).await {
+        Ok(IpcResponse::Whoami(who)) => assert_eq!(who.selected_process, Some(id)),
+        other => panic!("expected a whoami reply, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn sending_input_without_a_wait_returns_no_tail() {
     let facade = facade();
     let mut rx = facade.subscribe();
@@ -488,6 +539,11 @@ async fn an_action_on_another_projects_process_maps_to_out_of_scope() {
         IpcRequest::StartProcess { process: elsewhere },
         IpcRequest::StopProcess { process: elsewhere },
         IpcRequest::RestartProcess { process: elsewhere },
+        IpcRequest::RenameProcess {
+            process: elsewhere,
+            label: "x".into(),
+        },
+        IpcRequest::CloseProcess { process: elsewhere },
         IpcRequest::SendInput {
             process: elsewhere,
             input: "x".into(),
