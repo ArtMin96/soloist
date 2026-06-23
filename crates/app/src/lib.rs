@@ -9,6 +9,8 @@ mod commands;
 #[cfg(feature = "mcp")]
 mod ipc_server;
 mod notifier;
+#[cfg(feature = "mcp")]
+mod peer_cred;
 mod pty_bridge;
 
 use std::sync::Arc;

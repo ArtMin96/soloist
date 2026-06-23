@@ -99,7 +99,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | F10 | Services tools (`services_list`,`wait_for_bound_port`) | ✅ | 8 | v1 | Discover + wait for port |
 | F11 | Agent/terminal tools (`spawn_process`,`spawn_agent`,`list_agent_tools`) | ✅ | 8 | v1 | Spawn a terminal/agent |
 | F12 | Setup/support (`help`,`submit_solo_feedback`,`setup_agent_integration`) | ✅ | 8 | later | `setup_agent_integration` writes CLAUDE.md |
-| F13 | Action tools honor trust + scope | ✅❓ | 8 | v1 | Untrusted action refused |
+| F13 | Action tools honor trust + scope (scope authenticated via peer `SO_PEERCRED` → process group) | ✅❓ | 8 | v1 | Untrusted action refused; forged bind/select to a sibling project refused (`ForeignProcess`/`ForeignProject`) |
 | F14 | Prompt-template MCP tools (list/read/create/update/delete/export; default off) | 🟡 | 8 | later | Tool group toggles on; round-trips a template |
 
 ## G. Coordination layer (Phase 9)

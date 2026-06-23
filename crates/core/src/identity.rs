@@ -47,12 +47,20 @@ impl Origin {
     }
 }
 
-/// The mutable state of one session: who the caller is and the project it explicitly
-/// selected (if any).
+/// The mutable state of one session: who the caller *claims* to be, the project it
+/// explicitly selected (if any), and the transport-authenticated process group of the
+/// connecting peer.
+///
+/// `peer_pgid` is the one fact the caller cannot forge: the transport adapter reads it from
+/// the kernel (`SO_PEERCRED` on the Unix socket) and supplies it at [`Identity::open`]. The
+/// façade reconciles a self-asserted bind/select against it, so a session can only scope to a
+/// process it actually runs in. `None` means the transport could not authenticate the peer
+/// (no live cross-project surface is granted to such a session — see the façade gates).
 #[derive(Clone, Debug, Default)]
 struct Session {
     origin: Origin,
     selected_project: Option<ProjectId>,
+    peer_pgid: Option<i32>,
 }
 
 /// What a session resolves to: its caller [`Origin`], the process it is bound to (if
@@ -73,9 +81,18 @@ pub enum IdentityError {
     /// `bind_session_process` named a process that is not in the registry.
     #[error("no such process")]
     UnknownProcess,
+    /// `bind_session_process` named a process the caller does not run in — its connecting
+    /// peer's process group does not match the process's group, so the binding is not
+    /// authentic. An agent must bind to its own injected `SOLOIST_PROCESS_ID`.
+    #[error("that process is not yours to bind")]
+    ForeignProcess,
     /// `select_project` named a project that is not loaded.
     #[error("no such project")]
     UnknownProject,
+    /// `select_project` named a project the caller does not run in — no process in the
+    /// caller's own process group belongs to it, so the scope would not be authentic.
+    #[error("you are not running in that project")]
+    ForeignProject,
     /// The project store could not be read.
     #[error(transparent)]
     Store(#[from] StoreError),
@@ -96,10 +113,19 @@ impl Identity {
         Self::default()
     }
 
-    /// Opens a fresh session for a new MCP connection and returns its id.
-    pub fn open(&self) -> SessionId {
+    /// Opens a fresh session for a new MCP connection and returns its id. `peer_pgid` is the
+    /// connecting peer's process group, read from the kernel by the transport adapter (`None`
+    /// when the transport cannot authenticate the peer); the façade matches a bind/select
+    /// against it so the session can only scope to a process it actually runs in.
+    pub fn open(&self, peer_pgid: Option<i32>) -> SessionId {
         let id = SessionId::next();
-        lock(&self.sessions).insert(id, Session::default());
+        lock(&self.sessions).insert(
+            id,
+            Session {
+                peer_pgid,
+                ..Session::default()
+            },
+        );
         id
     }
 
@@ -136,6 +162,13 @@ impl Identity {
         lock(&self.sessions)
             .get(&session)
             .and_then(|s| s.selected_project)
+    }
+
+    /// The connecting peer's process group recorded for a session ([`None`] if unknown or the
+    /// transport could not authenticate it) — the unforgeable fact the façade matches a
+    /// bind/select against.
+    pub fn peer_pgid(&self, session: SessionId) -> Option<i32> {
+        lock(&self.sessions).get(&session).and_then(|s| s.peer_pgid)
     }
 
     /// Applies `f` to a session's state, creating the entry if the session was never
