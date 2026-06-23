@@ -1,6 +1,6 @@
 use super::*;
-use crate::identity::Origin;
-use crate::ids::ProjectId;
+use crate::identity::{IdentityError, Origin};
+use crate::ids::{ProjectId, SessionId};
 use crate::ports::{TokioClock, TrustRepo};
 use crate::process::ProcStatus;
 use crate::supervisor::{Registration, SupervisorError};
