@@ -172,6 +172,19 @@ impl Facade {
         Ok(())
     }
 
+    /// Clears one in-scope process's output buffers (rendered and raw) without stopping it
+    /// or touching its PTY. A scoped action — unlike the open output *reads*, clearing
+    /// mutates what every viewer sees, so it is confined to the session's project. Returns
+    /// whether the process had a terminal to clear.
+    pub fn clear_output(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+    ) -> Result<bool, ScopedActionError> {
+        self.require_in_scope(session, process)?;
+        Ok(self.supervisor().clear_output(process))
+    }
+
     /// Resolves the session's effective project for a project-wide action, or
     /// `NoProjectScope` when none is selected, bound, or singular.
     fn scope(&self, session: SessionId) -> Result<ProjectId, ScopedActionError> {

@@ -150,6 +150,42 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .restart_all_commands(session)
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
+        IpcRequest::GetProcessOutput { process, lines } => facade
+            .process_output(process, lines)
+            .map(IpcResponse::Lines)
+            .ok_or(IpcError::UnknownProcess),
+        IpcRequest::GetProcessRawOutput { process } => facade
+            .process_raw_output(process)
+            .map(|bytes| IpcResponse::RawOutput(String::from_utf8_lossy(&bytes).into_owned()))
+            .ok_or(IpcError::UnknownProcess),
+        IpcRequest::SearchOutput {
+            process,
+            query,
+            limit,
+        } => facade
+            .search_output(process, &query, limit)
+            .map(IpcResponse::Lines)
+            .ok_or(IpcError::UnknownProcess),
+        IpcRequest::SearchRawOutput {
+            process,
+            query,
+            limit,
+        } => facade
+            .search_raw_output(process, &query, limit)
+            .map(IpcResponse::Lines)
+            .ok_or(IpcError::UnknownProcess),
+        IpcRequest::ClearOutput { process } => facade
+            .clear_output(session, process)
+            .map(|_| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::FlushTerminalPerf { process } => facade
+            .flush_terminal_perf(process)
+            .then_some(IpcResponse::Acked)
+            .ok_or(IpcError::UnknownProcess),
+        IpcRequest::GetProcessPorts { process } => facade
+            .process_ports(process)
+            .map(IpcResponse::Ports)
+            .ok_or(IpcError::UnknownProcess),
     }
 }
 

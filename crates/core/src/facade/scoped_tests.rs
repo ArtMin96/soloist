@@ -284,6 +284,30 @@ async fn start_all_commands_acts_only_on_the_in_scope_project() {
     );
 }
 
+#[test]
+fn clear_output_enforces_scope() {
+    let (facade, _trust) = facade();
+    let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
+    let elsewhere = terminal_in(&facade, ProjectId::from_raw(2), "elsewhere");
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, here)
+        .expect("scope to project 1");
+    // In scope: the action is allowed. The process never started, so there is no terminal
+    // to clear, reported as false — but the call is permitted, not refused.
+    assert!(
+        !facade
+            .clear_output(session, here)
+            .expect("an in-scope clear"),
+        "a never-started process has no terminal to clear"
+    );
+    // Out of scope: refused by the shared scope guard, like the other scoped actions.
+    assert!(matches!(
+        facade.clear_output(session, elsewhere),
+        Err(ScopedActionError::OutOfScope)
+    ));
+}
+
 #[tokio::test]
 async fn an_untrusted_command_in_scope_is_refused() {
     let (facade, trust) = facade();

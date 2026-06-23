@@ -11,11 +11,15 @@ use std::sync::Arc;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, Content, ErrorData};
-use rmcp::{schemars, tool, tool_handler, tool_router, ServerHandler};
-use serde::{Deserialize, Serialize};
+use rmcp::{tool, tool_handler, tool_router, ServerHandler};
+use serde::Serialize;
 use soloist_core::{ProcessId, ProjectId};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
+use crate::args::{
+    OutputArg, ProcessArg, ProjectArg, RegisterAgentArg, SearchArg, SelectProjectArg, SendInputArg,
+    SpawnAgentArg,
+};
 use crate::client::{AppClient, ClientError};
 
 /// The Soloist MCP server: a stateless front over the app, holding one client connection.
@@ -23,57 +27,6 @@ use crate::client::{AppClient, ClientError};
 pub struct SoloistMcp {
     client: Arc<AppClient>,
     tool_router: ToolRouter<Self>,
-}
-
-/// Arguments for a single-process tool.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct ProcessArg {
-    /// The id of the process, as returned by `list_processes`.
-    process: u64,
-}
-
-/// Arguments for a project-scoped tool.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct ProjectArg {
-    /// The id of the project. Omit to use the session's effective project scope.
-    project: Option<u64>,
-}
-
-/// Arguments for writing input to a process.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct SendInputArg {
-    /// The id of the process to write to, as returned by `list_processes`.
-    process: u64,
-    /// The text to write to the process's input, as UTF-8. Control characters are sent
-    /// verbatim — e.g. a trailing carriage return to submit a line, or 0x03 for Ctrl-C.
-    input: String,
-    /// Optionally wait this many milliseconds after writing, then return the rendered
-    /// terminal tail so you can see the effect. Capped by the app; omit to return at once.
-    wait_ms: Option<u64>,
-}
-
-/// Arguments for spawning a worker agent.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct SpawnAgentArg {
-    /// The name of a configured agent tool to launch, as listed by `list_agent_tools`.
-    tool: String,
-    /// Extra command-line flags appended for this one launch ("agent with flags"). Optional.
-    #[serde(default)]
-    extra_args: Vec<String>,
-}
-
-/// Arguments for selecting the session's project scope.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct SelectProjectArg {
-    /// The id of the project to scope this session's tools to, from `list_projects`.
-    project: u64,
-}
-
-/// Arguments for registering an external caller.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct RegisterAgentArg {
-    /// A short label identifying the calling agent (e.g. `claude-code`), reported by `whoami`.
-    label: String,
 }
 
 #[tool_router]
@@ -312,6 +265,142 @@ impl SoloistMcp {
     async fn restart_all_commands(&self) -> Result<CallToolResult, ErrorData> {
         match self.client.request(IpcRequest::RestartAllCommands).await {
             Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Read a process's recent rendered terminal output (escape sequences applied) as lines, most recent last. Use `lines` to bound how many; omit for the server default."
+    )]
+    async fn get_process_output(
+        &self,
+        Parameters(OutputArg { process, lines }): Parameters<OutputArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::GetProcessOutput {
+            process: ProcessId::from_raw(process),
+            lines,
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Lines(lines)) => structured(&serde_json::json!({ "output": lines })),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Read a process's raw terminal output including control sequences, decoded as UTF-8. For when you need the bytes a terminal emulator would see; use `get_process_output` for plain text."
+    )]
+    async fn get_process_raw_output(
+        &self,
+        Parameters(ProcessArg { process }): Parameters<ProcessArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::GetProcessRawOutput {
+            process: ProcessId::from_raw(process),
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::RawOutput(raw)) => structured(&serde_json::json!({ "output": raw })),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Find rendered output lines of a process containing a substring (case-sensitive). Returns the matching lines, in order, bounded by `limit`."
+    )]
+    async fn search_output(
+        &self,
+        Parameters(SearchArg {
+            process,
+            query,
+            limit,
+        }): Parameters<SearchArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::SearchOutput {
+            process: ProcessId::from_raw(process),
+            query,
+            limit,
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Lines(matches)) => {
+                structured(&serde_json::json!({ "matches": matches }))
+            }
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Find raw output lines of a process containing a substring (case-sensitive), control sequences included. Returns the matching lines, in order, bounded by `limit`."
+    )]
+    async fn search_raw_output(
+        &self,
+        Parameters(SearchArg {
+            process,
+            query,
+            limit,
+        }): Parameters<SearchArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::SearchRawOutput {
+            process: ProcessId::from_raw(process),
+            query,
+            limit,
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Lines(matches)) => {
+                structured(&serde_json::json!({ "matches": matches }))
+            }
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Clear a process's output buffers (the rendered and raw scrollback Soloist keeps), without stopping the process or touching its terminal. Acts only within the session's project."
+    )]
+    async fn clear_output(
+        &self,
+        Parameters(ProcessArg { process }): Parameters<ProcessArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::ClearOutput {
+            process: ProcessId::from_raw(process),
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Flush a process's terminal output for performance. A no-op in Soloist — the output you read is always current — kept for tool compatibility."
+    )]
+    async fn flush_terminal_perf(
+        &self,
+        Parameters(ProcessArg { process }): Parameters<ProcessArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::FlushTerminalPerf {
+            process: ProcessId::from_raw(process),
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "List the localhost ports a process is currently listening on (its detected dev-server ports)."
+    )]
+    async fn get_process_ports(
+        &self,
+        Parameters(ProcessArg { process }): Parameters<ProcessArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::GetProcessPorts {
+            process: ProcessId::from_raw(process),
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Ports(ports)) => structured(&serde_json::json!({ "ports": ports })),
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }

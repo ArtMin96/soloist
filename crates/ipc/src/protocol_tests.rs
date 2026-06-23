@@ -54,6 +54,32 @@ fn requests_round_trip_through_json() {
         IpcRequest::StartAllCommands,
         IpcRequest::StopAllCommands,
         IpcRequest::RestartAllCommands,
+        IpcRequest::GetProcessOutput {
+            process: ProcessId::from_raw(10),
+            lines: Some(50),
+        },
+        IpcRequest::GetProcessRawOutput {
+            process: ProcessId::from_raw(11),
+        },
+        IpcRequest::SearchOutput {
+            process: ProcessId::from_raw(12),
+            query: "error".into(),
+            limit: Some(10),
+        },
+        IpcRequest::SearchRawOutput {
+            process: ProcessId::from_raw(13),
+            query: "warn".into(),
+            limit: None,
+        },
+        IpcRequest::ClearOutput {
+            process: ProcessId::from_raw(14),
+        },
+        IpcRequest::FlushTerminalPerf {
+            process: ProcessId::from_raw(15),
+        },
+        IpcRequest::GetProcessPorts {
+            process: ProcessId::from_raw(16),
+        },
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -113,6 +139,9 @@ fn every_response_variant_round_trips_through_json() {
             skipped_untrusted: vec![ProcessId::from_raw(5)],
         }),
         IpcResponse::BulkStopped(2),
+        IpcResponse::Lines(vec!["error: boom".into(), "error: bang".into()]),
+        IpcResponse::RawOutput("\u{1b}[31merror\u{1b}[0m".into()),
+        IpcResponse::Ports(vec![3000, 8080]),
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");

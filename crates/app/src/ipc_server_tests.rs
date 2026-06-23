@@ -328,6 +328,100 @@ async fn bulk_restart_in_scope_is_acked() {
 }
 
 #[tokio::test]
+async fn output_reads_for_an_unknown_process_are_refused() {
+    let facade = facade();
+    let session = facade.open_session();
+    let unknown = ProcessId::from_raw(999);
+    for request in [
+        IpcRequest::GetProcessOutput {
+            process: unknown,
+            lines: None,
+        },
+        IpcRequest::GetProcessRawOutput { process: unknown },
+        IpcRequest::SearchOutput {
+            process: unknown,
+            query: "x".into(),
+            limit: None,
+        },
+        IpcRequest::GetProcessPorts { process: unknown },
+        IpcRequest::FlushTerminalPerf { process: unknown },
+    ] {
+        assert_eq!(
+            handle_request(&facade, session, request).await,
+            Err(IpcError::UnknownProcess)
+        );
+    }
+}
+
+#[tokio::test]
+async fn reading_a_registered_processs_output_and_ports() {
+    let facade = facade();
+    let session = facade.open_session();
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    // Registered but never started: output is empty (not an error), and it has no ports.
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::GetProcessOutput {
+                process: id,
+                lines: None,
+            },
+        )
+        .await,
+        Ok(IpcResponse::Lines(Vec::new()))
+    );
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::GetProcessPorts { process: id }
+        )
+        .await,
+        Ok(IpcResponse::Ports(Vec::new()))
+    );
+    // flush_terminal_perf is a no-op that confirms a known process.
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::FlushTerminalPerf { process: id },
+        )
+        .await,
+        Ok(IpcResponse::Acked)
+    );
+}
+
+#[tokio::test]
+async fn clear_output_in_scope_is_acked_and_out_of_scope_is_refused() {
+    let facade = facade();
+    let session = facade.open_session();
+    let here = scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
+    let elsewhere = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(2),
+        "elsewhere",
+        "sleep 60",
+    ));
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::ClearOutput { process: here }).await,
+        Ok(IpcResponse::Acked)
+    );
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::ClearOutput { process: elsewhere },
+        )
+        .await,
+        Err(IpcError::OutOfScope)
+    );
+}
+
+#[tokio::test]
 async fn an_action_on_another_projects_process_maps_to_out_of_scope() {
     let facade = facade();
     let session = facade.open_session();

@@ -42,6 +42,11 @@ impl<T> Ring<T> {
         let skip = self.items.len().saturating_sub(n);
         self.items.iter().skip(skip)
     }
+
+    /// Discards every retained item, leaving the ring empty (its capacity unchanged).
+    pub fn clear(&mut self) {
+        self.items.clear();
+    }
 }
 
 #[cfg(test)]

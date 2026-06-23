@@ -30,6 +30,7 @@ use crate::projects::{LoadProjectError, ProjectLoad, ProjectService, ProjectView
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::trust::TrustStore;
 
+mod output;
 mod scoped;
 
 pub use scoped::{ScopedActionError, SpawnAgentError};

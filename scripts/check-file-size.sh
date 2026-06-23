@@ -13,9 +13,13 @@ set -uo pipefail
 THRESHOLD="${FILE_SIZE_THRESHOLD:-400}"
 
 # Tracked sources only (git already ignores target/, node_modules/, dist/), minus test
-# files: integration tests live under a `tests/` dir, unit tests are `*.test.ts(x)`.
+# files: integration tests live under a `tests/` dir, unit tests are `*.test.ts(x)`, and
+# Rust unit tests in their own file follow the `*_tests.rs` separate-file convention
+# (CLAUDE.md §16) — all are test code, exempt from the code-size smell like the inline
+# `#[cfg(test)]` modules are.
 mapfile -t files < <(git ls-files '*.rs' '*.ts' '*.tsx' \
   | grep -vE '(^|/)tests/' \
+  | grep -vE '_tests\.rs$' \
   | grep -vE '\.test\.(ts|tsx)$')
 
 # Non-test line count: for Rust, everything before the first `#[cfg(test)]` attribute

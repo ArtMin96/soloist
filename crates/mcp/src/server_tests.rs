@@ -373,6 +373,93 @@ async fn restart_all_commands_acks() {
 }
 
 #[tokio::test]
+async fn get_process_output_projects_the_lines() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::GetProcessOutput {
+            process,
+            lines: Some(50),
+        } if process == ProcessId::from_raw(5) => {
+            Ok(IpcResponse::Lines(vec!["line a".into(), "line b".into()]))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .get_process_output(Parameters(OutputArg {
+            process: 5,
+            lines: Some(50),
+        }))
+        .await
+        .expect("get_process_output succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "output": ["line a", "line b"] })
+    );
+}
+
+#[tokio::test]
+async fn search_output_threads_the_query_and_projects_matches() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SearchOutput { query, .. } if query == "error" => {
+            Ok(IpcResponse::Lines(vec!["error: boom".into()]))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .search_output(Parameters(SearchArg {
+            process: 5,
+            query: "error".into(),
+            limit: None,
+        }))
+        .await
+        .expect("search_output succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "matches": ["error: boom"] })
+    );
+}
+
+#[tokio::test]
+async fn get_process_ports_projects_the_ports() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::GetProcessPorts { .. } => Ok(IpcResponse::Ports(vec![3000, 8080])),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .get_process_ports(Parameters(ProcessArg { process: 5 }))
+        .await
+        .expect("get_process_ports succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "ports": [3000, 8080] })
+    );
+}
+
+#[tokio::test]
+async fn clear_output_acks() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::ClearOutput { .. } => Ok(IpcResponse::Acked),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .clear_output(Parameters(ProcessArg { process: 5 }))
+        .await
+        .expect("clear_output succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "ok": true }));
+}
+
+#[tokio::test]
 async fn a_refused_action_becomes_a_tool_execution_error() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");

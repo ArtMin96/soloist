@@ -60,6 +60,31 @@ pub enum IpcRequest {
     StopAllCommands,
     /// Restart every trusted command in the session's effective project (trust-gated).
     RestartAllCommands,
+    /// A process's recent rendered output, bounded to `lines` (server default when omitted).
+    GetProcessOutput {
+        process: ProcessId,
+        lines: Option<usize>,
+    },
+    /// A process's raw byte output (control sequences included), bounded by the byte cap.
+    GetProcessRawOutput { process: ProcessId },
+    /// Rendered output lines of a process matching `query`, bounded to `limit`.
+    SearchOutput {
+        process: ProcessId,
+        query: String,
+        limit: Option<usize>,
+    },
+    /// Raw output lines of a process matching `query`, bounded to `limit`.
+    SearchRawOutput {
+        process: ProcessId,
+        query: String,
+        limit: Option<usize>,
+    },
+    /// Clear a process's output buffers (not its PTY), scoped to the session's project.
+    ClearOutput { process: ProcessId },
+    /// Flush a process's terminal-perf buffer (a no-op in Soloist; confirms the process).
+    FlushTerminalPerf { process: ProcessId },
+    /// A process's discovered listening ports.
+    GetProcessPorts { process: ProcessId },
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -96,6 +121,12 @@ pub enum IpcResponse {
     /// A bulk stop succeeded; the payload is how many running commands were messaged
     /// (answer to [`IpcRequest::StopAllCommands`]).
     BulkStopped(usize),
+    /// Rendered output lines — the answer to a get-output or search request.
+    Lines(Vec<String>),
+    /// A process's raw byte output, decoded lossily as UTF-8 (control sequences included).
+    RawOutput(String),
+    /// A process's discovered listening ports (answer to [`IpcRequest::GetProcessPorts`]).
+    Ports(Vec<u16>),
 }
 
 /// The agent-facing projection of a project: its identity and root, without the UI's
