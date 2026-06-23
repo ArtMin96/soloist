@@ -189,6 +189,14 @@ pub enum IpcError {
     /// The referenced project is not loaded.
     #[error("no such project")]
     UnknownProject,
+    /// `bind_session_process` named a process the caller does not run in — the binding is not
+    /// authentic. An agent must bind to its own injected `SOLOIST_PROCESS_ID`.
+    #[error("that process is not yours to bind")]
+    ForeignProcess,
+    /// `select_project` named a project the caller does not run in — the scope would not be
+    /// authentic.
+    #[error("you are not running in that project")]
+    ForeignProject,
     /// A scoped request was made with no project in scope.
     #[error("no project is in scope; select one first")]
     NoProjectScope,
@@ -217,6 +225,8 @@ impl IpcError {
         match self {
             IpcError::UnknownProcess
             | IpcError::UnknownProject
+            | IpcError::ForeignProcess
+            | IpcError::ForeignProject
             | IpcError::NoProjectScope
             | IpcError::OutOfScope
             | IpcError::Untrusted
@@ -230,7 +240,9 @@ impl From<IdentityError> for IpcError {
     fn from(err: IdentityError) -> Self {
         match err {
             IdentityError::UnknownProcess => IpcError::UnknownProcess,
+            IdentityError::ForeignProcess => IpcError::ForeignProcess,
             IdentityError::UnknownProject => IpcError::UnknownProject,
+            IdentityError::ForeignProject => IpcError::ForeignProject,
             IdentityError::Store(err) => IpcError::Internal(err.to_string()),
         }
     }

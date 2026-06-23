@@ -310,10 +310,16 @@ async fn send_input_writes_to_the_pty_and_returns_the_rendered_tail() {
     facade.supervisor().start(id).expect("cat starts");
     wait_for_status(&mut events, ProcStatus::Running).await;
 
-    let session = facade.open_session();
+    // Authenticate the session against the running process's real OS group, the way the UDS
+    // adapter authenticates an MCP client from its peer credentials.
+    let pgid = facade
+        .supervisor()
+        .pgid_of(id)
+        .expect("a running process has a live group");
+    let session = facade.open_session(Some(pgid));
     facade
         .bind_session_process(session, id)
-        .expect("scope the session to the running process");
+        .expect("scope the session to the running process it shares a group with");
 
     // The wait is generous so the echo is recorded before the snapshot; cat echoes at once.
     let tail = facade
@@ -450,10 +456,9 @@ async fn spawn_agent_launches_a_worker_in_the_sessions_project() {
         .add(dir.path(), None, None)
         .expect("register the project");
 
-    let session = facade.open_session();
-    facade
-        .select_project(session, project.id)
-        .expect("scope the session to the project");
+    // Exactly one project is loaded, so it is the session's unambiguous effective scope
+    // without an explicit selection — the single-project default a worker spawns into.
+    let session = facade.open_session(None);
 
     let id = facade
         .spawn_agent(session, "Stub", Vec::new())

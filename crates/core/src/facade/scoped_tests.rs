@@ -37,6 +37,24 @@ fn terminal_in(facade: &Facade, project: ProjectId, name: &str) -> ProcessId {
         .register(terminal_registration(project, name, "sleep 60"))
 }
 
+/// A synthetic peer process group for a session authenticated to its bound process — any
+/// value works, since each test builds its own facade and assigns the same group to the
+/// process it scopes to.
+const PEER_PGID: i32 = 5000;
+
+/// Opens a session authenticated to `process` and binds it, as the UDS adapter would for an
+/// MCP client running inside that process's group: it assigns the process a synthetic live
+/// group (standing in for a real spawn) and opens a session whose peer shares it, so the bind
+/// passes the façade's authenticity check. The production scope path, without a real PTY.
+fn scoped_to(facade: &Facade, process: ProcessId) -> SessionId {
+    facade.supervisor().assign_test_group(process, PEER_PGID);
+    let session = facade.open_session(Some(PEER_PGID));
+    facade
+        .bind_session_process(session, process)
+        .expect("an authentic bind to the process the caller runs in");
+    session
+}
+
 async fn wait_for(rx: &mut broadcast::Receiver<DomainEvent>, target: ProcStatus) {
     loop {
         match rx.recv().await {
@@ -53,12 +71,9 @@ async fn an_in_scope_process_starts_and_stops() {
     let mut rx = facade.subscribe();
     let project = ProjectId::from_raw(1);
     let id = terminal_in(&facade, project, "term");
-    let session = facade.open_session();
-    // Binding to the process puts its project in scope, the same way a Soloist-launched
-    // agent's session resolves its project from the process it runs in.
-    facade
-        .bind_session_process(session, id)
-        .expect("bind to the registered process");
+    // The session's peer runs in the process's group, the same way a Soloist-launched agent's
+    // session resolves its project from the process it runs in.
+    let session = scoped_to(&facade, id);
 
     facade
         .start_process(session, id)
@@ -75,7 +90,7 @@ async fn an_in_scope_process_starts_and_stops() {
 #[test]
 fn an_unknown_process_is_refused() {
     let (facade, _trust) = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(None);
     assert!(matches!(
         facade.start_process(session, ProcessId::from_raw(999)),
         Err(ScopedActionError::UnknownProcess)
@@ -88,7 +103,7 @@ fn acting_without_a_project_in_scope_is_refused() {
     // The process exists, so the guard passes the existence check, but the unbound session
     // has no project loaded, selected, or bound — its scope is ambiguous.
     let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
-    let session = facade.open_session();
+    let session = facade.open_session(None);
     assert!(matches!(
         facade.start_process(session, id),
         Err(ScopedActionError::NoProjectScope)
@@ -100,10 +115,7 @@ fn another_projects_process_is_out_of_scope() {
     let (facade, _trust) = facade();
     let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
     let elsewhere = terminal_in(&facade, ProjectId::from_raw(2), "elsewhere");
-    let session = facade.open_session();
-    facade
-        .bind_session_process(session, here)
-        .expect("scope to project 1");
+    let session = scoped_to(&facade, here);
 
     // The guard is shared by every action, so start, stop, and restart all refuse it.
     assert!(matches!(
@@ -152,10 +164,7 @@ async fn send_input_clamps_an_excessive_wait() {
     );
     let mut rx = facade.subscribe();
     let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
-    let session = facade.open_session();
-    facade
-        .bind_session_process(session, id)
-        .expect("scope to the process");
+    let session = scoped_to(&facade, id);
     facade
         .start_process(session, id)
         .expect("an in-scope start");
@@ -175,10 +184,7 @@ async fn send_input_enforces_scope() {
     let (facade, _trust) = facade();
     let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
     let elsewhere = terminal_in(&facade, ProjectId::from_raw(2), "elsewhere");
-    let session = facade.open_session();
-    facade
-        .bind_session_process(session, here)
-        .expect("scope to project 1");
+    let session = scoped_to(&facade, here);
     // send_input shares the one scope guard, so a cross-project target is refused too.
     assert!(matches!(
         facade
@@ -191,7 +197,7 @@ async fn send_input_enforces_scope() {
 #[test]
 fn spawn_agent_without_a_project_in_scope_is_refused() {
     let (facade, _trust) = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(None);
     assert!(matches!(
         facade.spawn_agent(session, "Claude", Vec::new()),
         Err(SpawnAgentError::NoProjectScope)
@@ -201,13 +207,10 @@ fn spawn_agent_without_a_project_in_scope_is_refused() {
 #[test]
 fn spawn_agent_with_an_unknown_tool_is_refused() {
     let (facade, _trust) = facade();
-    // Bind to a process so a project is in scope; the tool name still does not exist (the
-    // default facade registers no agent tools).
+    // Scope to a process's project so a project is in scope; the tool name still does not
+    // exist (the default facade registers no agent tools).
     let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
-    let session = facade.open_session();
-    facade
-        .bind_session_process(session, id)
-        .expect("scope to project 1");
+    let session = scoped_to(&facade, id);
     assert!(matches!(
         facade.spawn_agent(session, "NoSuchTool", Vec::new()),
         Err(SpawnAgentError::Launch(LaunchAgentError::UnknownTool))
@@ -220,7 +223,7 @@ fn bulk_commands_without_a_project_in_scope_are_refused() {
     // A process exists, but the unbound session has no project in scope, so a project-wide
     // bulk action is ambiguous — every bulk entry point refuses it the same way.
     terminal_in(&facade, ProjectId::from_raw(1), "term");
-    let session = facade.open_session();
+    let session = facade.open_session(None);
     assert!(matches!(
         facade.start_all_commands(session),
         Err(ScopedActionError::NoProjectScope)
@@ -263,10 +266,7 @@ fn services_list_returns_only_the_in_scope_projects_commands() {
     // of scope. Neither must appear.
     terminal_in(&facade, ProjectId::from_raw(1), "shell");
     trusted_command_in(&facade, &trust, ProjectId::from_raw(2), "Other");
-    let session = facade.open_session();
-    facade
-        .bind_session_process(session, command)
-        .expect("scope to project 1");
+    let session = scoped_to(&facade, command);
 
     let services = facade
         .services_list(session)
@@ -275,7 +275,7 @@ fn services_list_returns_only_the_in_scope_projects_commands() {
     assert_eq!(ids, vec![command], "only the in-scope project's commands");
 
     // Unscoped, the query is ambiguous and refused like the other scoped operations.
-    let unscoped = facade.open_session();
+    let unscoped = facade.open_session(None);
     assert!(matches!(
         facade.services_list(unscoped),
         Err(ScopedActionError::NoProjectScope)
@@ -288,12 +288,10 @@ async fn start_all_commands_acts_only_on_the_in_scope_project() {
     let mut rx = facade.subscribe();
     let here = trusted_command_in(&facade, &trust, ProjectId::from_raw(1), "Here");
     let elsewhere = trusted_command_in(&facade, &trust, ProjectId::from_raw(2), "Elsewhere");
-    let session = facade.open_session();
-    // Binding to a process in project 1 puts that project in scope (the projects registry is
-    // empty in this fake, so a process binding is how the scope is resolved here).
-    facade
-        .bind_session_process(session, here)
-        .expect("scope to project 1");
+    // The caller runs in a process in project 1, so binding resolves that project as its scope
+    // (the projects registry is empty in this fake, so a process binding is how scope resolves
+    // here).
+    let session = scoped_to(&facade, here);
 
     let summary = facade
         .start_all_commands(session)
@@ -316,10 +314,7 @@ fn clear_output_enforces_scope() {
     let (facade, _trust) = facade();
     let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
     let elsewhere = terminal_in(&facade, ProjectId::from_raw(2), "elsewhere");
-    let session = facade.open_session();
-    facade
-        .bind_session_process(session, here)
-        .expect("scope to project 1");
+    let session = scoped_to(&facade, here);
     // In scope: the action is allowed. The process never started, so there is no terminal
     // to clear, reported as false — but the call is permitted, not refused.
     assert!(
@@ -347,10 +342,7 @@ async fn an_untrusted_command_in_scope_is_refused() {
         "Web",
         &spec,
     ));
-    let session = facade.open_session();
-    facade
-        .bind_session_process(session, id)
-        .expect("scope to the command's project");
+    let session = scoped_to(&facade, id);
 
     // In scope, but the trust gate in C2 still refuses an untrusted command.
     assert!(matches!(

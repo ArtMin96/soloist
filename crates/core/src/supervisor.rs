@@ -112,6 +112,22 @@ impl Supervisor {
         self.registry.view(id)
     }
 
+    /// The managed process whose live OS group leader is `pgid`, if any — the home process of
+    /// a caller whose connecting peer runs in that group. The identity gate uses it to
+    /// authenticate a session's binding and project scope against the kernel-reported peer
+    /// process group, so a caller can only scope to its own process tree.
+    pub fn process_at_pgid(&self, pgid: i32) -> Option<ProcessId> {
+        self.registry.process_at_pgid(pgid)
+    }
+
+    /// Test-only: assigns a synthetic live process group to a registered process, standing in
+    /// for the group a real spawn would create, so identity/scope tests can authenticate a
+    /// session to the process without spinning up a real PTY. Never compiled into a release.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn assign_test_group(&self, id: ProcessId, pgid: i32) {
+        self.registry.set_pgid(id, Some(pgid));
+    }
+
     /// Registers a process as `Stopped` without starting it, announcing it on the bus.
     pub fn register(&self, registration: Registration) -> ProcessId {
         let id = ProcessId::next();

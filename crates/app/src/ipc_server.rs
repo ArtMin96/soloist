@@ -9,6 +9,7 @@
 
 use std::time::Duration;
 
+use crate::peer_cred;
 use soloist_core::{Facade, ProjectId, SessionId, WaitForPortError};
 use soloist_ipc::{
     ensure_socket_path, read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult,
@@ -63,10 +64,23 @@ pub async fn serve(app: AppHandle) {
     }
 }
 
-/// Serves one client connection: opens an identity session, answers framed requests until
-/// the peer disconnects, then closes the session so its scope and binding are forgotten.
+/// Serves one client connection: reads the connecting peer's process group, opens an identity
+/// session bound to it, answers framed requests until the peer disconnects, then closes the
+/// session so its scope and binding are forgotten. The peer group is what authenticates a
+/// session's project scope — the core matches it to the managed process the caller runs in —
+/// so a client cannot bind to or act on a sibling project it does not run in. A connection
+/// whose peer credentials cannot be read at all is dropped (fail closed).
 async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
-    let session = app.state::<Facade>().open_session();
+    let peer_pgid = match peer_cred::peer_pgid(&stream) {
+        Ok(peer_pgid) => peer_pgid,
+        Err(err) => {
+            eprintln!(
+                "soloist: MCP IPC dropped a connection (cannot read peer credentials: {err})"
+            );
+            return;
+        }
+    };
+    let session = app.state::<Facade>().open_session(peer_pgid);
     loop {
         let request: IpcRequest = match read_frame(&mut stream).await {
             Ok(Some(request)) => request,

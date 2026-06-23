@@ -164,33 +164,37 @@ observed; it is the most likely thing to tune.
 
 ---
 
-## D-6 — MCP cross-project scope isolation is not yet authenticated (lands in F13) 🟡
+## D-6 — MCP cross-project scope isolation is authenticated (F13) 🟢 RESOLVED
 
-**Introduced:** Phase 8 (MCP server core); resolves with **F13** (binding/scope authenticity), a
-later Phase 8 session.
+**Introduced:** Phase 8 (MCP server core), as a build-sequencing deferral. **Resolved:** Phase 8,
+**F13** (binding/scope authenticity).
 
-**Solo (ref `plan/05` §7/§12):** Solo exposes project-scoped MCP tools and an effective-project
-scope, but does **not** document how it authenticates a session's binding to a process/project —
-itself a recorded gap (`plan/05` §12).
+**The deferral (now closed):** the scoped MCP **action** tools (F6 process control, F8 bulk,
+`clear_output`, F11 `spawn_agent`) enforce an effective-project scope, but for sessions 1–3 that scope
+was *self-asserted* — `bind_session_process` accepted any *existing* process and `select_project` any
+*loaded* project, neither verifying the caller ran there. With **≥2 projects open** a client on the
+local (same-user, `0700`) socket could scope to a sibling project and stop/restart/clear it
+(`stop_all_commands` / `restart_all_commands` / `clear_output` are not trust-gated). The tool fan-out
+was sequenced first so the authenticity check could land once, over all of them.
 
-**Soloist:** the effective-project scope is resolved from `select_project` (any *loaded* project) or
-`bind_session_process` (any *existing* process); neither verifies that the calling MCP client
-actually runs in that process. The scoped **action** tools (F6 process control, F8 bulk,
-`clear_output`, F11 `spawn_agent`) enforce that scope, but because the scope itself is self-asserted,
-a client on the local (same-user, `0700`) IPC socket with **≥2 projects open** can scope to a sibling
-project and act on it. The trust gate still refuses *starting* an untrusted command in any project,
-but `stop_all_commands` / `restart_all_commands` / `clear_output` are not trust-gated, so a forged
-scope can stop or clear another project's processes. With **0 or 1** project open the effective
-project is unambiguous and there is no cross-project surface.
+**The check (F13):** the IPC adapter reads the connecting peer's kernel credentials
+(`SO_PEERCRED` → pid → its process group) per connection and hands the core the peer's process
+**group**; the core matches it to the managed process the caller runs in. `bind_session_process` is
+refused (`ForeignProcess`) unless the bound process's group leader is the peer's group, and
+`select_project` is refused (`ForeignProject`) unless a process in the caller's own group belongs to
+the target project. Because a Soloist-launched agent's `soloist-mcp` child inherits the agent's
+process group — the very group the supervisor recorded for that managed process — the legitimate
+auto-bind matches, while a forged binding to a sibling project's process does not. The OS credential
+detail lives only in the adapter (`crates/app/src/peer_cred.rs`); the core compares plain
+process-group ids, so the dependency rule holds.
 
-**Rationale:** the authenticating check — read the connecting peer's credentials (`SO_PEERCRED`) and
-match its process group to the bound process's group — is a self-contained adapter slice (F13) the
-owner sequenced *after* the tool fan-out, so the tools and their scope gate land first and the
-authenticity check lands once, over all of them, rather than per session. Until then the exposure is
-bounded: local same-user only (the socket is `0700`), and only across projects the same user has open
-at once. This is a build-sequencing deferral (cf. D-2), not a permanent design choice.
+**Residual (accepted, documented as policy — not a divergence):** when exactly **one** project is
+loaded, an **external** caller (`register_agent`, no managed process in its group) still acts on that
+sole project via the unambiguous single-project default — identical to the local user's own authority
+on the `0700` socket, and with no sibling to cross into. With **≥2** projects open such a caller has
+no authenticated scope and the scoped mutating tools refuse. This external-caller policy is recorded
+in `plan/05` §12 (MCP session↔process binding authenticity).
 
 **Effect on parity:** F3 (effective project scope) and F13 (a tool cannot touch another project) are
-**partially** delivered — scope is enforced *given* an authentic binding, but the binding is not yet
-authenticated, so F13's cross-project isolation guarantee is not met for the action tools. F13 closes
-it; this entry is removed (→🟢) when the peer-credential → process-group check lands.
+**delivered** — the scope is now authenticated, so the cross-project isolation guarantee holds for the
+action tools. Tests prove a forged bind/select to a sibling project is refused.

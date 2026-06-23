@@ -133,6 +133,17 @@ impl Registry {
         lock(&self.inner).get(&id).and_then(|entry| entry.pgid)
     }
 
+    /// The managed process whose live OS group leader is `pgid`, if any — the caller's *home*
+    /// process. Each managed process is its own group leader (a unique pgid), so at most one
+    /// matches. The identity check resolves a connecting peer's process group to the process
+    /// it runs in, so a session can only bind to (and scope within) its own process tree.
+    pub(crate) fn process_at_pgid(&self, pgid: i32) -> Option<ProcessId> {
+        lock(&self.inner)
+            .values()
+            .find(|entry| entry.pgid == Some(pgid))
+            .map(|entry| entry.view.id)
+    }
+
     /// The display label of a process by id, `None` if it is no longer registered — what the
     /// notification reactor names a toast after.
     pub(crate) fn label_of(&self, id: ProcessId) -> Option<String> {

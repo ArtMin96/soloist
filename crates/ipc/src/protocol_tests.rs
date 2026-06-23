@@ -180,6 +180,8 @@ fn a_typed_error_round_trips() {
     for error in [
         IpcError::UnknownProcess,
         IpcError::UnknownProject,
+        IpcError::ForeignProcess,
+        IpcError::ForeignProject,
         IpcError::NoProjectScope,
         IpcError::OutOfScope,
         IpcError::Untrusted,
@@ -199,6 +201,8 @@ fn request_errors_are_distinguished_from_server_errors() {
     for error in [
         IpcError::UnknownProcess,
         IpcError::UnknownProject,
+        IpcError::ForeignProcess,
+        IpcError::ForeignProject,
         IpcError::NoProjectScope,
         IpcError::OutOfScope,
         IpcError::Untrusted,
@@ -259,8 +263,16 @@ fn core_identity_errors_map_to_the_wire_error() {
         IpcError::UnknownProcess
     );
     assert_eq!(
+        IpcError::from(IdentityError::ForeignProcess),
+        IpcError::ForeignProcess
+    );
+    assert_eq!(
         IpcError::from(IdentityError::UnknownProject),
         IpcError::UnknownProject
+    );
+    assert_eq!(
+        IpcError::from(IdentityError::ForeignProject),
+        IpcError::ForeignProject
     );
 }
 

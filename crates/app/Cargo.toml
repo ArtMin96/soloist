@@ -16,12 +16,13 @@ path = "src/main.rs"
 default = ["mcp"]
 # The local MCP/IPC server (the app-side half of the soloist-mcp transport). It links into
 # the app binary, so it is gated at compile time: turning the feature off drops the IPC
-# server adapter and the app's direct soloist-ipc dependency, so the app still builds and
-# runs without it. (The soloist-ipc crate itself stays compiled — the store delegates its
-# data-directory resolution to it — but no IPC server is wired in.)
-mcp = ["dep:soloist-ipc", "tokio/net"]
+# server adapter, its peer-credential dependency, and the app's direct soloist-ipc dependency,
+# so the app still builds and runs without it. (The soloist-ipc crate itself stays compiled —
+# the store delegates its data-directory resolution to it — but no IPC server is wired in.)
+mcp = ["dep:soloist-ipc", "dep:nix", "tokio/net"]
 
 [dependencies]
+nix = { version = "0.29", features = ["process"], optional = true }
 serde = { version = "1.0.228", features = ["derive"] }
 soloist-core = { path = "../core" }
 soloist-httpapi = { path = "../httpapi" }

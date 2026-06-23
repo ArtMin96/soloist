@@ -33,6 +33,15 @@ async fn wait_for(rx: &mut broadcast::Receiver<DomainEvent>, target: ProcStatus)
     }
 }
 
+/// Opens a session authenticated to `process`, as the UDS adapter would for an MCP client
+/// running inside that process's group: it assigns the process a synthetic live process group
+/// (standing in for a real spawn) and opens a session whose peer shares it. Binding or
+/// selecting that process/its project then passes the façade's authenticity check.
+fn authentic_session(facade: &Facade, process: ProcessId, pgid: i32) -> SessionId {
+    facade.supervisor().assign_test_group(process, pgid);
+    facade.open_session(Some(pgid))
+}
+
 #[tokio::test]
 async fn the_facade_registers_starts_and_stops_a_process() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
@@ -235,7 +244,7 @@ async fn launch_agent_rejects_an_unknown_project() {
 #[tokio::test]
 async fn whoami_of_a_fresh_session_is_unbound_and_unscoped() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
-    let session = facade.open_session();
+    let session = facade.open_session(None);
 
     let who = facade.whoami(session);
     assert_eq!(who.session, session);
@@ -248,21 +257,15 @@ async fn whoami_of_a_fresh_session_is_unbound_and_unscoped() {
 #[tokio::test]
 async fn binding_scopes_a_session_to_its_process_project() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
-    let mut rx = facade.subscribe();
     let project = ProjectId::from_raw(1);
     let id = facade
         .supervisor()
         .register(terminal_registration(project, "term", "sleep 60"));
-    facade
-        .supervisor()
-        .start(id)
-        .expect("ungated terminal starts");
-    wait_for(&mut rx, ProcStatus::Running).await;
-
-    let session = facade.open_session();
+    // The session's peer runs in this process's group, so binding to it is authentic.
+    let session = authentic_session(&facade, id, 5000);
     facade
         .bind_session_process(session, id)
-        .expect("bind to the running process");
+        .expect("bind to the process the caller runs in");
 
     let who = facade.whoami(session);
     assert_eq!(who.origin, Origin::Process(id));
@@ -274,10 +277,29 @@ async fn binding_scopes_a_session_to_its_process_project() {
 #[tokio::test]
 async fn binding_an_unknown_process_is_rejected() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
-    let session = facade.open_session();
+    let session = facade.open_session(None);
     assert!(matches!(
         facade.bind_session_process(session, ProcessId::from_raw(999)),
         Err(IdentityError::UnknownProcess)
+    ));
+}
+
+#[tokio::test]
+async fn binding_a_process_the_caller_does_not_run_in_is_refused() {
+    // The process exists, but the session's peer runs in a different group (it never spawned
+    // this one), so the binding is not authentic — a forged bind is refused before scope is
+    // ever set, closing the cross-project hole at the source.
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    facade.supervisor().assign_test_group(id, 5000);
+    let session = facade.open_session(Some(9999)); // a peer group owning no managed process
+    assert!(matches!(
+        facade.bind_session_process(session, id),
+        Err(IdentityError::ForeignProcess)
     ));
 }
 
@@ -287,8 +309,9 @@ async fn a_lone_loaded_project_is_the_default_scope() {
     let dir = tempfile::tempdir().expect("temp dir");
     let project = facade.load_project(dir.path()).expect("load");
 
-    // With exactly one project and no explicit selection, it is the effective scope.
-    let session = facade.open_session();
+    // With exactly one project and no explicit selection, it is the effective scope — the
+    // unambiguous single-project default, granted even to an unauthenticated peer.
+    let session = facade.open_session(None);
     assert_eq!(facade.whoami(session).effective_project, Some(project.id));
 }
 
@@ -300,16 +323,27 @@ async fn scope_is_ambiguous_with_several_projects_until_one_is_selected() {
     let a = facade.load_project(dir_a.path()).expect("load a");
     let b = facade.load_project(dir_b.path()).expect("load b");
     assert_ne!(a.id, b.id);
-    let session = facade.open_session();
+    // The caller runs in a process in project b (its peer group owns it), so b is the project
+    // it can authentically select. It is not bound, so the scope is still unresolved until it
+    // selects.
+    let in_b = facade
+        .supervisor()
+        .register(terminal_registration(b.id, "term", "sleep 60"));
+    let session = authentic_session(&facade, in_b, 7000);
 
     // Two projects, nothing bound or selected: the scope cannot be inferred.
     assert_eq!(facade.whoami(session).effective_project, None);
 
-    // Selecting one resolves it; an unknown project is rejected.
+    // It can select its own project; an unknown project is rejected, and a sibling it does not
+    // run in is refused as foreign — the authenticity check on the select path.
     facade.select_project(session, b.id).expect("select b");
     assert_eq!(facade.whoami(session).effective_project, Some(b.id));
     assert!(matches!(
         facade.select_project(session, ProjectId::from_raw(9999)),
         Err(IdentityError::UnknownProject)
+    ));
+    assert!(matches!(
+        facade.select_project(session, a.id),
+        Err(IdentityError::ForeignProject)
     ));
 }

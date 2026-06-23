@@ -347,9 +347,12 @@ impl Facade {
 
     /// Opens an identity session for a new MCP connection (C8). The IPC server holds the
     /// returned [`SessionId`] for the life of the connection and passes it on every call,
-    /// so each tool acts under the right identity and project scope.
-    pub fn open_session(&self) -> SessionId {
-        self.identity.open()
+    /// so each tool acts under the right identity and project scope. `peer_pgid` is the
+    /// connecting peer's process group, read from the kernel by the transport adapter
+    /// (`None` when it cannot authenticate the peer); a bind or project selection is matched
+    /// against it, so a session can only scope to a process it actually runs in.
+    pub fn open_session(&self, peer_pgid: Option<i32>) -> SessionId {
+        self.identity.open(peer_pgid)
     }
 
     /// Closes an identity session when its connection ends, dropping its state.
@@ -359,7 +362,11 @@ impl Facade {
 
     /// Binds a session to the supervised process it runs in — the process whose
     /// [`PROCESS_ID_ENV`](crate::identity::PROCESS_ID_ENV) the agent's MCP client read.
-    /// Fails if no such process is registered.
+    /// Fails [`UnknownProcess`](IdentityError::UnknownProcess) if no such process is
+    /// registered, or [`ForeignProcess`](IdentityError::ForeignProcess) if the binding is not
+    /// authentic — the caller's connecting peer does not run in that process's group. The
+    /// authenticity check is what makes the effective-project scope trustworthy: a client on
+    /// the local socket cannot bind to a sibling project's process it does not run in.
     pub fn bind_session_process(
         &self,
         session: SessionId,
@@ -367,6 +374,9 @@ impl Facade {
     ) -> Result<(), IdentityError> {
         if self.supervisor.label_of(process).is_none() {
             return Err(IdentityError::UnknownProcess);
+        }
+        if self.home_process(session) != Some(process) {
+            return Err(IdentityError::ForeignProcess);
         }
         self.identity.bind_process(session, process);
         Ok(())
@@ -378,8 +388,11 @@ impl Facade {
         self.identity.register_external(session, label);
     }
 
-    /// Sets a session's effective project scope explicitly. Fails if the project is not
-    /// loaded.
+    /// Sets a session's effective project scope explicitly. Fails
+    /// [`UnknownProject`](IdentityError::UnknownProject) if the project is not loaded, or
+    /// [`ForeignProject`](IdentityError::ForeignProject) if the caller does not run in it —
+    /// no process in the caller's own process group belongs to it. A session can therefore
+    /// only select a project it actually runs in, never a sibling on the shared local socket.
     pub fn select_project(
         &self,
         session: SessionId,
@@ -388,8 +401,30 @@ impl Facade {
         if self.projects.get(project)?.is_none() {
             return Err(IdentityError::UnknownProject);
         }
+        if self.home_project(session) != Some(project) {
+            return Err(IdentityError::ForeignProject);
+        }
         self.identity.select_project(session, project);
         Ok(())
+    }
+
+    /// The managed process the session's connecting peer runs in (its *home* process),
+    /// resolved from the kernel-reported peer process group via the supervisor — the
+    /// unforgeable basis for authenticating a bind or a project selection. `None` when the
+    /// transport supplied no peer group, or no live managed process owns it (an external
+    /// caller, or a stale group).
+    fn home_process(&self, session: SessionId) -> Option<ProcessId> {
+        self.identity
+            .peer_pgid(session)
+            .and_then(|pgid| self.supervisor.process_at_pgid(pgid))
+    }
+
+    /// The project the session's home process belongs to — the only project a caller can
+    /// authentically select. `None` when the caller has no home process.
+    fn home_project(&self, session: SessionId) -> Option<ProjectId> {
+        self.home_process(session)
+            .and_then(|id| self.process_view(id))
+            .map(|view| view.project)
     }
 
     /// Resolves who a session is and the project its scoped tools act on (the answer to

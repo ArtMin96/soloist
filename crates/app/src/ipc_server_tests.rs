@@ -35,7 +35,7 @@ async fn wait_for(rx: &mut broadcast::Receiver<DomainEvent>, target: ProcStatus)
 #[tokio::test]
 async fn whoami_routes_to_the_identity_session() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     match handle_request(&facade, session, IpcRequest::Whoami).await {
         Ok(IpcResponse::Whoami(who)) => {
             assert_eq!(who.session, session);
@@ -48,7 +48,7 @@ async fn whoami_routes_to_the_identity_session() {
 #[tokio::test]
 async fn register_agent_acks_and_whoami_reflects_the_label() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     assert_eq!(
         handle_request(
             &facade,
@@ -71,7 +71,7 @@ async fn register_agent_acks_and_whoami_reflects_the_label() {
 #[tokio::test]
 async fn list_processes_returns_the_registered_processes() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     let id = facade.supervisor().register(terminal_registration(
         ProjectId::from_raw(1),
         "term",
@@ -89,7 +89,7 @@ async fn list_processes_returns_the_registered_processes() {
 #[tokio::test]
 async fn get_process_status_returns_a_registered_process() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     let id = facade.supervisor().register(terminal_registration(
         ProjectId::from_raw(1),
         "term",
@@ -110,7 +110,7 @@ async fn get_process_status_returns_a_registered_process() {
 #[tokio::test]
 async fn get_process_status_reports_unknown_for_a_missing_id() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     assert_eq!(
         handle_request(
             &facade,
@@ -127,7 +127,7 @@ async fn get_process_status_reports_unknown_for_a_missing_id() {
 #[tokio::test]
 async fn list_projects_is_empty_without_any_loaded() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     assert_eq!(
         handle_request(&facade, session, IpcRequest::ListProjects).await,
         Ok(IpcResponse::Projects(Vec::new()))
@@ -137,7 +137,7 @@ async fn list_projects_is_empty_without_any_loaded() {
 #[tokio::test]
 async fn project_status_without_scope_is_refused() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     // No project loaded, bound, or selected: an unscoped status request is ambiguous.
     assert_eq!(
         handle_request(
@@ -153,7 +153,7 @@ async fn project_status_without_scope_is_refused() {
 #[tokio::test]
 async fn project_status_for_an_unknown_project_is_refused() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     assert_eq!(
         handle_request(
             &facade,
@@ -170,7 +170,7 @@ async fn project_status_for_an_unknown_project_is_refused() {
 #[tokio::test]
 async fn binding_an_unknown_process_maps_to_the_wire_error() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     assert_eq!(
         handle_request(
             &facade,
@@ -184,8 +184,15 @@ async fn binding_an_unknown_process_maps_to_the_wire_error() {
     );
 }
 
-/// Registers a terminal in `project` and binds `session` to it, putting that project in
-/// scope — the setup every action-routing test shares.
+/// The synthetic peer process group shared by these routing tests: every session opens with
+/// it (as a real Unix-socket connection always carries a peer group), and [`scoped_terminal`]
+/// assigns the same group to the process it binds, so the bind is authentic.
+const PEER_PGID: i32 = 5000;
+
+/// Registers a terminal in `project`, gives it the session's peer process group (standing in
+/// for the group a real spawn creates), and binds `session` to it — putting that project in
+/// scope the way a Soloist-launched agent's session does. The setup every action-routing test
+/// shares.
 fn scoped_terminal(
     facade: &Facade,
     session: SessionId,
@@ -195,16 +202,17 @@ fn scoped_terminal(
     let id = facade
         .supervisor()
         .register(terminal_registration(project, name, "sleep 60"));
+    facade.supervisor().assign_test_group(id, PEER_PGID);
     facade
         .bind_session_process(session, id)
-        .expect("bind to the registered process");
+        .expect("an authentic bind to the process the caller runs in");
     id
 }
 
 #[tokio::test]
 async fn starting_an_in_scope_process_is_acked() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     assert_eq!(
         handle_request(&facade, session, IpcRequest::StartProcess { process: id }).await,
@@ -215,7 +223,7 @@ async fn starting_an_in_scope_process_is_acked() {
 #[tokio::test]
 async fn stopping_an_idle_in_scope_process_reports_it_was_not_running() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     // Never started, so the stop finds nothing live — the bool the agent reads back.
     assert_eq!(
@@ -228,7 +236,7 @@ async fn stopping_an_idle_in_scope_process_reports_it_was_not_running() {
 async fn sending_input_without_a_wait_returns_no_tail() {
     let facade = facade();
     let mut rx = facade.subscribe();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     facade.supervisor().start(id).expect("terminal starts");
     wait_for(&mut rx, ProcStatus::Running).await;
@@ -251,7 +259,7 @@ async fn sending_input_without_a_wait_returns_no_tail() {
 #[tokio::test]
 async fn spawning_an_agent_without_scope_is_refused() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     assert_eq!(
         handle_request(
             &facade,
@@ -269,7 +277,7 @@ async fn spawning_an_agent_without_scope_is_refused() {
 #[tokio::test]
 async fn list_agent_tools_routes_to_the_registry() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     // The default fakes register no tools; routing is what we assert, not the contents.
     assert!(matches!(
         handle_request(&facade, session, IpcRequest::ListAgentTools).await,
@@ -280,7 +288,7 @@ async fn list_agent_tools_routes_to_the_registry() {
 #[tokio::test]
 async fn bulk_commands_without_scope_are_refused() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     for request in [
         IpcRequest::StartAllCommands,
         IpcRequest::StopAllCommands,
@@ -296,7 +304,7 @@ async fn bulk_commands_without_scope_are_refused() {
 #[tokio::test]
 async fn bulk_start_in_scope_returns_a_summary() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     // Only a terminal is in scope, so the bulk command start finds nothing to start.
     scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     assert_eq!(
@@ -308,7 +316,7 @@ async fn bulk_start_in_scope_returns_a_summary() {
 #[tokio::test]
 async fn bulk_stop_in_scope_reports_how_many_were_stopped() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     assert_eq!(
         handle_request(&facade, session, IpcRequest::StopAllCommands).await,
@@ -319,7 +327,7 @@ async fn bulk_stop_in_scope_reports_how_many_were_stopped() {
 #[tokio::test]
 async fn bulk_restart_in_scope_is_acked() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     assert_eq!(
         handle_request(&facade, session, IpcRequest::RestartAllCommands).await,
@@ -330,7 +338,7 @@ async fn bulk_restart_in_scope_is_acked() {
 #[tokio::test]
 async fn output_reads_for_an_unknown_process_are_refused() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     let unknown = ProcessId::from_raw(999);
     for request in [
         IpcRequest::GetProcessOutput {
@@ -356,7 +364,7 @@ async fn output_reads_for_an_unknown_process_are_refused() {
 #[tokio::test]
 async fn reading_a_registered_processs_output_and_ports() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     let id = facade.supervisor().register(terminal_registration(
         ProjectId::from_raw(1),
         "term",
@@ -399,7 +407,7 @@ async fn reading_a_registered_processs_output_and_ports() {
 #[tokio::test]
 async fn clear_output_in_scope_is_acked_and_out_of_scope_is_refused() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     let here = scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
     let elsewhere = facade.supervisor().register(terminal_registration(
         ProjectId::from_raw(2),
@@ -424,7 +432,7 @@ async fn clear_output_in_scope_is_acked_and_out_of_scope_is_refused() {
 #[tokio::test]
 async fn services_list_without_scope_is_refused_and_filters_to_commands_in_scope() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     // Unscoped: ambiguous, refused.
     assert_eq!(
         handle_request(&facade, session, IpcRequest::ServicesList).await,
@@ -442,7 +450,7 @@ async fn services_list_without_scope_is_refused_and_filters_to_commands_in_scope
 #[tokio::test]
 async fn wait_for_bound_port_on_a_resting_process_reports_not_running() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     let id = facade.supervisor().register(terminal_registration(
         ProjectId::from_raw(1),
         "term",
@@ -467,7 +475,7 @@ async fn wait_for_bound_port_on_a_resting_process_reports_not_running() {
 #[tokio::test]
 async fn an_action_on_another_projects_process_maps_to_out_of_scope() {
     let facade = facade();
-    let session = facade.open_session();
+    let session = facade.open_session(Some(PEER_PGID));
     // The session is scoped to project 1; the target lives in project 2.
     scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
     let elsewhere = facade.supervisor().register(terminal_registration(
