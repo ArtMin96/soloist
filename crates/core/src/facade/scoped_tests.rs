@@ -1,0 +1,247 @@
+use super::*;
+use crate::config::parse;
+use crate::events::DomainEvent;
+use crate::ids::ProjectId;
+use crate::ports::{Clock, CorePorts, TokioClock, TrustRepo};
+use crate::process::ProcStatus;
+use crate::supervisor::Registration;
+use crate::sync::lock;
+use crate::testing::{terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
+use async_trait::async_trait;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tokio::sync::broadcast;
+use tokio::sync::broadcast::error::RecvError;
+
+/// A façade over in-memory fakes, sharing the trust repo so a test can grant trust.
+fn facade() -> (Facade, Arc<FakeTrustRepo>) {
+    let trust = Arc::new(FakeTrustRepo::new());
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            trust.clone(),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .build(),
+    );
+    (facade, trust)
+}
+
+/// Registers a terminal in `project` and returns its id. A terminal is ungated, so it is
+/// the simplest process to exercise the scope guard with.
+fn terminal_in(facade: &Facade, project: ProjectId, name: &str) -> ProcessId {
+    facade
+        .supervisor()
+        .register(terminal_registration(project, name, "sleep 60"))
+}
+
+async fn wait_for(rx: &mut broadcast::Receiver<DomainEvent>, target: ProcStatus) {
+    loop {
+        match rx.recv().await {
+            Ok(DomainEvent::ProcessStatusChanged { to, .. }) if to == target => return,
+            Ok(_) | Err(RecvError::Lagged(_)) => continue,
+            Err(RecvError::Closed) => panic!("event bus closed"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_in_scope_process_starts_and_stops() {
+    let (facade, _trust) = facade();
+    let mut rx = facade.subscribe();
+    let project = ProjectId::from_raw(1);
+    let id = terminal_in(&facade, project, "term");
+    let session = facade.open_session();
+    // Binding to the process puts its project in scope, the same way a Soloist-launched
+    // agent's session resolves its project from the process it runs in.
+    facade
+        .bind_session_process(session, id)
+        .expect("bind to the registered process");
+
+    facade
+        .start_process(session, id)
+        .expect("an in-scope terminal starts");
+    wait_for(&mut rx, ProcStatus::Running).await;
+
+    assert!(
+        facade.stop_process(session, id).expect("in-scope stop"),
+        "a running process reports it was live"
+    );
+    wait_for(&mut rx, ProcStatus::Stopped).await;
+}
+
+#[test]
+fn an_unknown_process_is_refused() {
+    let (facade, _trust) = facade();
+    let session = facade.open_session();
+    assert!(matches!(
+        facade.start_process(session, ProcessId::from_raw(999)),
+        Err(ScopedActionError::UnknownProcess)
+    ));
+}
+
+#[test]
+fn acting_without_a_project_in_scope_is_refused() {
+    let (facade, _trust) = facade();
+    // The process exists, so the guard passes the existence check, but the unbound session
+    // has no project loaded, selected, or bound — its scope is ambiguous.
+    let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
+    let session = facade.open_session();
+    assert!(matches!(
+        facade.start_process(session, id),
+        Err(ScopedActionError::NoProjectScope)
+    ));
+}
+
+#[test]
+fn another_projects_process_is_out_of_scope() {
+    let (facade, _trust) = facade();
+    let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
+    let elsewhere = terminal_in(&facade, ProjectId::from_raw(2), "elsewhere");
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, here)
+        .expect("scope to project 1");
+
+    // The guard is shared by every action, so start, stop, and restart all refuse it.
+    assert!(matches!(
+        facade.start_process(session, elsewhere),
+        Err(ScopedActionError::OutOfScope)
+    ));
+    assert!(matches!(
+        facade.stop_process(session, elsewhere),
+        Err(ScopedActionError::OutOfScope)
+    ));
+    assert!(matches!(
+        facade.restart_process(session, elsewhere),
+        Err(ScopedActionError::OutOfScope)
+    ));
+}
+
+/// A clock that records the duration it was asked to sleep and returns at once, so a test
+/// asserts `send_input` clamped the wait with no real time passing.
+#[derive(Clone, Default)]
+struct RecordingClock {
+    slept: Arc<Mutex<Option<Duration>>>,
+}
+
+#[async_trait]
+impl Clock for RecordingClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    async fn sleep(&self, dur: Duration) {
+        *lock(&self.slept) = Some(dur);
+    }
+}
+
+#[tokio::test]
+async fn send_input_clamps_an_excessive_wait() {
+    let clock = RecordingClock::default();
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(clock.clone()),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .build(),
+    );
+    let mut rx = facade.subscribe();
+    let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, id)
+        .expect("scope to the process");
+    facade
+        .start_process(session, id)
+        .expect("an in-scope start");
+    wait_for(&mut rx, ProcStatus::Running).await;
+
+    // A wait far beyond the cap is clamped to MAX_INPUT_WAIT before the clock ever sleeps, so a
+    // remote caller cannot tie up the request (and the connection behind it) with a huge value.
+    facade
+        .send_input(session, id, b"x".to_vec(), Some(Duration::from_secs(3600)))
+        .await
+        .expect("send_input succeeds");
+    assert_eq!(*lock(&clock.slept), Some(MAX_INPUT_WAIT));
+}
+
+#[tokio::test]
+async fn send_input_enforces_scope() {
+    let (facade, _trust) = facade();
+    let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
+    let elsewhere = terminal_in(&facade, ProjectId::from_raw(2), "elsewhere");
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, here)
+        .expect("scope to project 1");
+    // send_input shares the one scope guard, so a cross-project target is refused too.
+    assert!(matches!(
+        facade
+            .send_input(session, elsewhere, b"x".to_vec(), None)
+            .await,
+        Err(ScopedActionError::OutOfScope)
+    ));
+}
+
+#[test]
+fn spawn_agent_without_a_project_in_scope_is_refused() {
+    let (facade, _trust) = facade();
+    let session = facade.open_session();
+    assert!(matches!(
+        facade.spawn_agent(session, "Claude", Vec::new()),
+        Err(SpawnAgentError::NoProjectScope)
+    ));
+}
+
+#[test]
+fn spawn_agent_with_an_unknown_tool_is_refused() {
+    let (facade, _trust) = facade();
+    // Bind to a process so a project is in scope; the tool name still does not exist (the
+    // default facade registers no agent tools).
+    let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, id)
+        .expect("scope to project 1");
+    assert!(matches!(
+        facade.spawn_agent(session, "NoSuchTool", Vec::new()),
+        Err(SpawnAgentError::Launch(LaunchAgentError::UnknownTool))
+    ));
+}
+
+#[tokio::test]
+async fn an_untrusted_command_in_scope_is_refused() {
+    let (facade, trust) = facade();
+    let config = parse("processes:\n  Web:\n    command: npm run dev\n").expect("parse");
+    let spec = config.processes.get("Web").cloned().expect("Web");
+    let project = ProjectId::from_raw(1);
+    let id = facade.supervisor().register(Registration::command(
+        project,
+        Path::new("/p"),
+        "Web",
+        &spec,
+    ));
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, id)
+        .expect("scope to the command's project");
+
+    // In scope, but the trust gate in C2 still refuses an untrusted command.
+    assert!(matches!(
+        facade.start_process(session, id),
+        Err(ScopedActionError::Untrusted)
+    ));
+
+    // Once trusted, the same scoped call starts it — proving the guard is not the blocker.
+    trust
+        .set_trusted(project, &spec.variant_hash())
+        .expect("trust the command");
+    facade
+        .start_process(session, id)
+        .expect("starts once trusted");
+}

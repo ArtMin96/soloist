@@ -286,6 +286,56 @@ async fn facade_runs_the_full_thread_with_real_spawner_and_clock() {
 }
 
 #[tokio::test]
+async fn send_input_writes_to_the_pty_and_returns_the_rendered_tail() {
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(PtyProcessSpawner),
+            Arc::new(TokioClock),
+            Arc::new(NoTrust),
+            Arc::new(NoProjects),
+        )
+        .build(),
+    );
+    let mut events = facade.subscribe();
+
+    // `cat` echoes its input back to the terminal, so the rendered tail reflects what we
+    // sent — a true end-to-end check of the write plus the wait_ms snapshot on a real PTY.
+    let id = facade
+        .supervisor()
+        .register(soloist_core::testing::terminal_registration(
+            ProjectId::from_raw(1),
+            "echo",
+            "cat",
+        ));
+    facade.supervisor().start(id).expect("cat starts");
+    wait_for_status(&mut events, ProcStatus::Running).await;
+
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, id)
+        .expect("scope the session to the running process");
+
+    // The wait is generous so the echo is recorded before the snapshot; cat echoes at once.
+    let tail = facade
+        .send_input(
+            session,
+            id,
+            b"marco-polo\r".to_vec(),
+            Some(Duration::from_millis(750)),
+        )
+        .await
+        .expect("send_input succeeds")
+        .expect("a tail is returned when waiting");
+    assert!(
+        tail.contains("marco-polo"),
+        "the echoed input appears in the rendered tail: {tail:?}"
+    );
+
+    assert!(facade.supervisor().stop(id), "stop finds the process");
+    wait_for_status(&mut events, ProcStatus::Stopped).await;
+}
+
+#[tokio::test]
 async fn launch_agent_runs_a_stub_in_the_project_dir_inheriting_the_environment() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -333,7 +383,7 @@ async fn launch_agent_runs_a_stub_in_the_project_dir_inheriting_the_environment(
         .launch_agent(project.id, "Stub", Vec::new())
         .expect("launch the stub agent");
 
-    // It is an Agent-kind process (Phase 3 subtype), and it runs then exits cleanly.
+    // It is an Agent-kind process, and it runs then exits cleanly.
     let kind = facade
         .snapshot()
         .into_iter()
@@ -360,6 +410,71 @@ async fn launch_agent_runs_a_stub_in_the_project_dir_inheriting_the_environment(
         output.contains(&format!("HOME={home}")),
         "the agent inherits Soloist's environment unchanged: {output:?}"
     );
+}
+
+#[tokio::test]
+async fn spawn_agent_launches_a_worker_in_the_sessions_project() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use soloist_core::testing::{FakeAgentToolRepo, FakeProjectRepo, FakeTrustRepo};
+    use soloist_core::{AgentKind, AgentTool, ProcessKind, PromptMode};
+
+    // End to end: a session selects a project, then spawn_agent (the scoped
+    // wrapper over launch_agent) starts the worker in that project on a real PTY.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let script = dir.path().join("stub-agent.sh");
+    std::fs::write(&script, "#!/bin/sh\nprintf 'WORKER-READY\\n'\n").expect("write stub agent");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod stub");
+
+    let stub = AgentTool {
+        name: "Stub".into(),
+        command: script.to_string_lossy().into_owned(),
+        default_args: Vec::new(),
+        kind: AgentKind::Generic,
+        prompt_mode: PromptMode::AppendedArg,
+    };
+
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(PtyProcessSpawner),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .agent_tools(Arc::new(FakeAgentToolRepo::new(vec![stub])))
+        .build(),
+    );
+    let mut events = facade.subscribe();
+    let project = facade
+        .projects()
+        .add(dir.path(), None, None)
+        .expect("register the project");
+
+    let session = facade.open_session();
+    facade
+        .select_project(session, project.id)
+        .expect("scope the session to the project");
+
+    let id = facade
+        .spawn_agent(session, "Stub", Vec::new())
+        .expect("spawn the worker agent");
+
+    let view = facade
+        .snapshot()
+        .into_iter()
+        .find(|view| view.id == id)
+        .expect("the worker is registered");
+    assert_eq!(
+        view.kind,
+        ProcessKind::Agent,
+        "a spawned worker is Agent-kind"
+    );
+    assert_eq!(
+        view.project, project.id,
+        "the worker lands in the session's project"
+    );
+    wait_for_status(&mut events, ProcStatus::Running).await;
+    wait_for_status(&mut events, ProcStatus::Stopped).await;
 }
 
 async fn wait_for_status(events: &mut Receiver<DomainEvent>, target: ProcStatus) {

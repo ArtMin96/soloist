@@ -7,7 +7,9 @@
 //! the HTTP API share one behaviour and the read model projects back. The server holds no
 //! business state.
 
-use soloist_core::{Facade, IdentityError, ProjectId, SessionId};
+use std::time::Duration;
+
+use soloist_core::{Facade, ProjectId, SessionId};
 use soloist_ipc::{
     ensure_socket_path, read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult,
     ProjectStatus, ProjectSummary,
@@ -66,7 +68,7 @@ async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
                 break;
             }
         };
-        let reply = handle_request(app.state::<Facade>().inner(), session, request);
+        let reply = handle_request(app.state::<Facade>().inner(), session, request).await;
         if let Err(err) = write_frame(&mut stream, &reply).await {
             eprintln!("soloist: MCP IPC write error: {err}");
             break;
@@ -77,14 +79,15 @@ async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
 
 /// Routes one request to the single matching [`Facade`] method and projects the result
 /// back. The only place the IPC wire meets the core — and it adds no domain logic of its
-/// own (identity, scope, and the trust gate all live in the core).
-fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest) -> IpcResult {
+/// own (identity, scope, and the trust gate all live in the core). Async because some
+/// behaviours (e.g. `send_input` with a wait) await the core.
+async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest) -> IpcResult {
     match request {
         IpcRequest::Whoami => Ok(IpcResponse::Whoami(facade.whoami(session))),
         IpcRequest::BindSessionProcess { process } => facade
             .bind_session_process(session, process)
             .map(|()| IpcResponse::Acked)
-            .map_err(into_ipc_error),
+            .map_err(IpcError::from),
         IpcRequest::RegisterAgent { label } => {
             facade.register_agent(session, label);
             Ok(IpcResponse::Acked)
@@ -92,7 +95,7 @@ fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest) -> I
         IpcRequest::SelectProject { project } => facade
             .select_project(session, project)
             .map(|()| IpcResponse::Acked)
-            .map_err(into_ipc_error),
+            .map_err(IpcError::from),
         IpcRequest::ListProjects => Ok(IpcResponse::Projects(project_summaries(facade)?)),
         IpcRequest::GetProjectStatus { project } => project_status(facade, session, project),
         IpcRequest::ListProcesses => Ok(IpcResponse::Processes(facade.snapshot())),
@@ -100,6 +103,41 @@ fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest) -> I
             .process_view(process)
             .map(IpcResponse::Process)
             .ok_or(IpcError::UnknownProcess),
+        IpcRequest::StartProcess { process } => facade
+            .start_process(session, process)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::StopProcess { process } => facade
+            .stop_process(session, process)
+            .map(IpcResponse::Stopped)
+            .map_err(IpcError::from),
+        IpcRequest::RestartProcess { process } => facade
+            .restart_process(session, process)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::SendInput {
+            process,
+            input,
+            wait_ms,
+        } => facade
+            .send_input(
+                session,
+                process,
+                input.into_bytes(),
+                wait_ms.map(Duration::from_millis),
+            )
+            .await
+            .map(IpcResponse::InputSent)
+            .map_err(IpcError::from),
+        IpcRequest::SpawnAgent { tool, extra_args } => facade
+            .spawn_agent(session, &tool, extra_args)
+            .map(IpcResponse::Spawned)
+            .map_err(IpcError::from),
+        IpcRequest::ListAgentTools => facade
+            .agents()
+            .list_tools()
+            .map(IpcResponse::AgentTools)
+            .map_err(|err| IpcError::Internal(err.to_string())),
     }
 }
 
@@ -137,15 +175,6 @@ fn project_status(facade: &Facade, session: SessionId, project: Option<ProjectId
         project: ProjectSummary::from_view(&view),
         processes,
     }))
-}
-
-/// Maps a core identity error to its wire form.
-fn into_ipc_error(err: IdentityError) -> IpcError {
-    match err {
-        IdentityError::UnknownProcess => IpcError::UnknownProcess,
-        IdentityError::UnknownProject => IpcError::UnknownProject,
-        IdentityError::Store(err) => IpcError::Internal(err.to_string()),
-    }
 }
 
 #[cfg(test)]

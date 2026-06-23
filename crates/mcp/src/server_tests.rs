@@ -1,5 +1,8 @@
 use super::*;
-use soloist_core::{Origin, ProcStatus, ProcessKind, ProcessView, Readiness, SessionId, Whoami};
+use soloist_core::{
+    AgentKind, AgentTool, Origin, ProcStatus, ProcessKind, ProcessView, PromptMode, Readiness,
+    SessionId, Whoami,
+};
 use soloist_ipc::{read_frame, write_frame, IpcError, IpcResult};
 use std::path::PathBuf;
 use tokio::net::UnixListener;
@@ -123,15 +126,34 @@ async fn select_project_acknowledges() {
 }
 
 #[tokio::test]
-async fn a_typed_app_error_becomes_a_tool_error() {
+async fn a_request_error_becomes_a_tool_execution_error() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
     spawn_fake_app(socket.clone(), |_request| Err(IpcError::UnknownProcess));
 
+    // A request-caused error is a tool-execution error (isError: true) the model can read
+    // and self-correct on — not a protocol error it cannot recover from.
     let result = handler(socket)
         .get_process_status(Parameters(ProcessArg { process: 99 }))
+        .await
+        .expect("a request error is a tool result, not a protocol error");
+    assert_eq!(result.is_error, Some(true));
+}
+
+#[tokio::test]
+async fn a_server_error_stays_a_protocol_error() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // A server-side failure is not something the model can fix by adjusting parameters, so it
+    // surfaces as a protocol error rather than a tool-execution error.
+    spawn_fake_app(socket.clone(), |_request| {
+        Err(IpcError::Internal("disk full".into()))
+    });
+
+    let result = handler(socket)
+        .start_process(Parameters(ProcessArg { process: 5 }))
         .await;
-    assert!(result.is_err(), "an app error must surface as a tool error");
+    assert!(result.is_err(), "a server error is a protocol error");
 }
 
 #[tokio::test]
@@ -143,4 +165,175 @@ async fn a_wrong_shaped_reply_is_a_protocol_error() {
 
     let result = handler(socket).whoami().await;
     assert!(result.is_err(), "a mismatched reply must be rejected");
+}
+
+#[tokio::test]
+async fn start_process_threads_the_id_through_and_acks() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::StartProcess { process } if process == ProcessId::from_raw(5) => {
+            Ok(IpcResponse::Acked)
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .start_process(Parameters(ProcessArg { process: 5 }))
+        .await
+        .expect("start succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "ok": true }));
+}
+
+#[tokio::test]
+async fn stop_process_reports_whether_it_was_running() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::StopProcess { .. } => Ok(IpcResponse::Stopped(true)),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .stop_process(Parameters(ProcessArg { process: 5 }))
+        .await
+        .expect("stop succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "was_running": true })
+    );
+}
+
+#[tokio::test]
+async fn restart_process_threads_the_id_through_and_acks() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::RestartProcess { process } if process == ProcessId::from_raw(5) => {
+            Ok(IpcResponse::Acked)
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .restart_process(Parameters(ProcessArg { process: 5 }))
+        .await
+        .expect("restart succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "ok": true }));
+}
+
+#[tokio::test]
+async fn send_input_threads_its_arguments_through_and_returns_the_tail() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SendInput {
+            process,
+            input,
+            wait_ms,
+        } if process == ProcessId::from_raw(5) && input == "ls\r" && wait_ms == Some(200) => {
+            Ok(IpcResponse::InputSent(Some("$ ls\nfile.txt".into())))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .send_input(Parameters(SendInputArg {
+            process: 5,
+            input: "ls\r".into(),
+            wait_ms: Some(200),
+        }))
+        .await
+        .expect("send_input succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "tail": "$ ls\nfile.txt" })
+    );
+}
+
+#[tokio::test]
+async fn send_input_without_a_wait_returns_a_null_tail() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SendInput { .. } => Ok(IpcResponse::InputSent(None)),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .send_input(Parameters(SendInputArg {
+            process: 5,
+            input: "x".into(),
+            wait_ms: None,
+        }))
+        .await
+        .expect("send_input succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "tail": null }));
+}
+
+#[tokio::test]
+async fn spawn_agent_threads_its_arguments_through_and_returns_the_process_id() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SpawnAgent { tool, extra_args }
+            if tool == "Claude" && extra_args == ["--model", "opus"] =>
+        {
+            Ok(IpcResponse::Spawned(ProcessId::from_raw(42)))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .spawn_agent(Parameters(SpawnAgentArg {
+            tool: "Claude".into(),
+            extra_args: vec!["--model".into(), "opus".into()],
+        }))
+        .await
+        .expect("spawn_agent succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "process": 42 }));
+}
+
+#[tokio::test]
+async fn list_agent_tools_projects_the_configured_tools() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let tool = AgentTool {
+        name: "Claude".into(),
+        command: "claude".into(),
+        default_args: Vec::new(),
+        kind: AgentKind::Claude,
+        prompt_mode: PromptMode::AppendedArg,
+    };
+    let canned = tool.clone();
+    spawn_fake_app(socket.clone(), move |_request| {
+        Ok(IpcResponse::AgentTools(vec![canned.clone()]))
+    });
+
+    let result = handler(socket)
+        .list_agent_tools()
+        .await
+        .expect("list_agent_tools succeeds");
+    let back: Vec<AgentTool> = serde_json::from_value(structured_of(result)).expect("decode tools");
+    assert_eq!(back, vec![tool]);
+}
+
+#[tokio::test]
+async fn a_refused_action_becomes_a_tool_execution_error() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // The core refused the action (untrusted / out of scope); the agent must see it as an
+    // actionable tool error carrying the reason, so it can ask the user to trust the command.
+    spawn_fake_app(socket.clone(), |_request| Err(IpcError::Untrusted));
+
+    let result = handler(socket)
+        .start_process(Parameters(ProcessArg { process: 5 }))
+        .await
+        .expect("a refusal is a tool result, not a protocol error");
+    assert_eq!(result.is_error, Some(true));
+    let json = serde_json::to_string(&result).expect("serialize result");
+    assert!(
+        json.contains("not trusted"),
+        "the refusal reason reaches the model: {json}"
+    );
 }

@@ -30,6 +30,10 @@ use crate::projects::{LoadProjectError, ProjectLoad, ProjectService, ProjectView
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::trust::TrustStore;
 
+mod scoped;
+
+pub use scoped::{ScopedActionError, SpawnAgentError};
+
 /// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot
 /// (see [`crate::events`]) rather than growing memory without limit.
 const EVENT_BUFFER: usize = 1024;

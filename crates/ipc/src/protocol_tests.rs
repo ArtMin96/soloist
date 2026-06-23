@@ -1,7 +1,7 @@
 use super::*;
 use soloist_core::{
-    Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectView, Readiness,
-    SessionId, Whoami,
+    AgentKind, AgentTool, Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId,
+    ProjectView, PromptMode, Readiness, SessionId, Whoami,
 };
 use std::path::PathBuf;
 
@@ -27,6 +27,30 @@ fn requests_round_trip_through_json() {
         IpcRequest::GetProcessStatus {
             process: ProcessId::from_raw(4),
         },
+        IpcRequest::StartProcess {
+            process: ProcessId::from_raw(5),
+        },
+        IpcRequest::StopProcess {
+            process: ProcessId::from_raw(6),
+        },
+        IpcRequest::RestartProcess {
+            process: ProcessId::from_raw(7),
+        },
+        IpcRequest::SendInput {
+            process: ProcessId::from_raw(8),
+            input: "ls\r".into(),
+            wait_ms: Some(200),
+        },
+        IpcRequest::SendInput {
+            process: ProcessId::from_raw(9),
+            input: "\u{3}".into(),
+            wait_ms: None,
+        },
+        IpcRequest::SpawnAgent {
+            tool: "Claude".into(),
+            extra_args: vec!["--model".into(), "opus".into()],
+        },
+        IpcRequest::ListAgentTools,
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -70,6 +94,17 @@ fn every_response_variant_round_trips_through_json() {
         }),
         IpcResponse::Processes(vec![view.clone()]),
         IpcResponse::Process(view.clone()),
+        IpcResponse::Stopped(true),
+        IpcResponse::InputSent(Some("$ ls\nfile.txt".into())),
+        IpcResponse::InputSent(None),
+        IpcResponse::Spawned(ProcessId::from_raw(12)),
+        IpcResponse::AgentTools(vec![AgentTool {
+            name: "Claude".into(),
+            command: "claude".into(),
+            default_args: Vec::new(),
+            kind: AgentKind::Claude,
+            prompt_mode: PromptMode::AppendedArg,
+        }]),
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");
@@ -84,12 +119,87 @@ fn a_typed_error_round_trips() {
         IpcError::UnknownProcess,
         IpcError::UnknownProject,
         IpcError::NoProjectScope,
+        IpcError::OutOfScope,
+        IpcError::Untrusted,
+        IpcError::UnknownTool,
         IpcError::Internal("disk full".into()),
     ] {
         let json = serde_json::to_string(&error).expect("serialize");
         let back: IpcError = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, error);
     }
+}
+
+#[test]
+fn request_errors_are_distinguished_from_server_errors() {
+    // The one classifier every adapter reuses: a request-caused refusal is actionable
+    // feedback (MCP `isError: true`, HTTP 4xx); a server failure is not (protocol error, 5xx).
+    for error in [
+        IpcError::UnknownProcess,
+        IpcError::UnknownProject,
+        IpcError::NoProjectScope,
+        IpcError::OutOfScope,
+        IpcError::Untrusted,
+        IpcError::UnknownTool,
+    ] {
+        assert!(error.is_request_error(), "{error} is request-caused");
+    }
+    assert!(
+        !IpcError::Internal("disk full".into()).is_request_error(),
+        "a server failure is not request-caused"
+    );
+}
+
+#[test]
+fn core_action_errors_map_to_the_wire_error() {
+    use soloist_core::ScopedActionError;
+    // The single place core action errors become wire errors, so every adapter agrees.
+    assert_eq!(
+        IpcError::from(ScopedActionError::UnknownProcess),
+        IpcError::UnknownProcess
+    );
+    assert_eq!(
+        IpcError::from(ScopedActionError::NoProjectScope),
+        IpcError::NoProjectScope
+    );
+    assert_eq!(
+        IpcError::from(ScopedActionError::OutOfScope),
+        IpcError::OutOfScope
+    );
+    assert_eq!(
+        IpcError::from(ScopedActionError::Untrusted),
+        IpcError::Untrusted
+    );
+}
+
+#[test]
+fn core_spawn_errors_map_to_the_wire_error() {
+    use soloist_core::{LaunchAgentError, SpawnAgentError};
+    assert_eq!(
+        IpcError::from(SpawnAgentError::NoProjectScope),
+        IpcError::NoProjectScope
+    );
+    assert_eq!(
+        IpcError::from(SpawnAgentError::Launch(LaunchAgentError::UnknownTool)),
+        IpcError::UnknownTool
+    );
+    assert_eq!(
+        IpcError::from(LaunchAgentError::UnknownProject),
+        IpcError::UnknownProject
+    );
+}
+
+#[test]
+fn core_identity_errors_map_to_the_wire_error() {
+    use soloist_core::IdentityError;
+    assert_eq!(
+        IpcError::from(IdentityError::UnknownProcess),
+        IpcError::UnknownProcess
+    );
+    assert_eq!(
+        IpcError::from(IdentityError::UnknownProject),
+        IpcError::UnknownProject
+    );
 }
 
 #[test]
