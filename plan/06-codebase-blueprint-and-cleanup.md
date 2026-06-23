@@ -109,9 +109,9 @@ do). Inside it:
 - **types vs behavior** — closed enums + newtypes + FSM transition functions live with the smallest unit
   that owns them; they are `pub` only as far as needed.
 - **the ~400-line split smell** (`CLAUDE.md` §15, counting *non-test* lines): when a `.rs` crosses it,
-  split by concern. (`supervisor.rs` was split into `supervisor/` submodules in R2 and `core::testing` into
-  `testing/` submodules in R5; the one current outlier is `mcp/src/server.rs` — the single `#[tool_router]`
-  block grew past the smell as the MCP tool set filled out, the deliberate **R8** split, §7.)
+  split by concern. (`supervisor.rs` was split into `supervisor/` submodules in R2, `core::testing` into
+  `testing/` submodules in R5, and `mcp/src/server.rs` into per-category `tools/<category>.rs` sub-routers in
+  R8 — see §7.)
 
 ### 3.3 Frontend (`crates/app/ui/src`) — the placement map
 
@@ -147,7 +147,7 @@ trigger that tells you to reach for it. Use a pattern when its trigger fires —
 | **Newtype + closed enum** | `ids.rs`, `process.rs` | a domain id/state → newtype/enum, never a bare `String`/`int` |
 | **Null Object** | `Noop{LockReleaser,RuntimeState,OrphanControl}` in `ports/mod.rs` | a **driven** subsystem is optional → ship a `Noop` default so the core runs without the real adapter (§8) |
 | **Parameter Object / Builder** | `core::ports::CorePorts` + `CorePortsBuilder` — the port set for `Facade::new`/`Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) → group them in a struct/builder |
-| **Registry** | `config::detect::DETECTORS` (C1, command auto-detection); **to add** — MCP tool registry (P8), agent-tool defs (P7) | a growing set of "one of many" handlers → register entries, don't extend a giant `match` |
+| **Registry** | `config::detect::DETECTORS` (C1, command auto-detection); the MCP tool router composed from per-category sub-routers (`crates/mcp/src/tools/`, R8); **to add** — agent-tool defs (P7) | a growing set of "one of many" handlers → register entries, don't extend a giant `match` |
 | **Strategy** | `config::detect::Detector` — one impl per ecosystem (C1); **to add** — per-provider idle heuristics (P7), per-agent-tool launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
 | **Optimistic concurrency** | **to add** — scratchpad/todo `expected_revision` (P9) | concurrent writers to one durable record → revision guard, reject stale writes |
 | **Lease/lock** | **to add** — coordination locks (P9) | cooperative cross-agent intent → TTL + owner `ProcessId`, auto-release on close |
@@ -185,9 +185,13 @@ DRY, and the dependency rule intact. These *are* the "how future sessions archit
    stubs are methods-less on purpose until their phase).
 
 ### 5.3 Add an MCP tool (Phase 8+)
-1. The tool is a **thin handler in `crates/mcp`**: parse params (clean-room JSON Schema, `04`/`09`), call **one
-   `Facade` method**, map the result to the MCP wire type. No domain logic in the handler.
-2. Register it in the mcp crate's **tool registry** (Registry pattern) — do not grow a hand-written match.
+1. The tool is a **thin handler** in the matching `crates/mcp/src/tools/<category>.rs` sub-router (a `#[tool]`
+   method on `SoloistMcp`): parse params (clean-room JSON Schema from a struct in `args.rs`, `04`/`09`), call
+   **one `Facade` method** over the IPC client, map the result via a `tools::reply` helper. No domain logic in
+   the handler.
+2. It joins its category's `#[tool_router(router = …)]` block — a new category is a new `tools/<category>.rs`
+   file added to the `Self::…_router() + …` composition in `SoloistMcp::new` (Registry/composition, R8 §7).
+   Never grow a single flat block or a hand-written match.
 3. If the behavior doesn't exist on the `Facade` yet, add it via §5.1 first, then call it. The tool is a
    *caller*, never an *owner*, of behavior.
 4. Honor the **trust gate + effective scope in the core** (not the handler): the `Facade` method enforces
@@ -374,32 +378,40 @@ are **R-phases** (refactor), orthogonal to the build phases.
   with its context; dep-direction + file-size guards green; `just lint && just test` green with no test-count
   change.
 
-### R8 — Split the MCP tool router by logical category (pending)
-- **The drift:** `mcp/src/server.rs` is **one** `#[tool_router]` block holding every tool (546 non-test lines,
-  over the smell) — the file-size guard's sole current outlier. It grew there as the tool set filled out across
-  the Phase-8 sessions; a single flat block is harder to extend, navigate, and reuse helpers across as more
-  tools land. This is an **internal structure drift, not a Solo-behavior divergence** (so not a
-  `KNOWN-DIVERGENCES.md` entry). The tool **surface stays byte-identical** — this is pure code movement.
-- **The pattern:** split the tools into one `impl SoloistMcp` block **per logical category** — identity/session,
-  project, process, bulk, output, services, agent — each in its own `mcp/src/tools/<category>.rs` file with a
-  named, `pub(crate)` sub-router (`#[tool_router(router = process_router, vis = "pub(crate)")]`, the rmcp 1.7
-  attribute, verified against the vendored source). `SoloistMcp::new` composes them with rmcp's
-  `std::ops::Add` for `ToolRouter` (`Self::identity_router() + Self::process_router() + …`). The shared reply
-  helpers (`structured`/`acked`/`app_error`/`unexpected`/`port_wait_json`) move to one `mcp/src/tools/reply.rs`
-  (or `tools/mod.rs`), reused by every category — single-source, DRY. `server.rs` keeps only the struct, the
-  router composition in `new`, and the `ServerHandler` impl. This is the **Registry/composition** shape `04`
-  §6 / ARCHITECTURE §3 anticipate for "a growing set of one-of-many handlers" (the MCP tool registry), so a new
-  tool lands in its category file and is added to that one sub-router — never a giant flat block.
-- **Done when:** no `mcp` source file exceeds the smell; the tool list (names + schemas) is unchanged (assert
-  via the existing `server_tests.rs`); each category file owns its tools and tests; `just lint && just test`
-  green with no test-count change.
+### R8 — Split the MCP tool router by logical category (done)
+- **The drift (resolved):** `mcp/src/server.rs` was **one** `#[tool_router]` block holding every tool (546
+  non-test lines, over the smell) — the file-size guard's sole outlier. A single flat block is harder to extend,
+  navigate, and reuse helpers across as more tools land (Phase 9 adds ~50). This was an **internal structure
+  drift, not a Solo-behavior divergence** (so no `KNOWN-DIVERGENCES.md` entry). The tool **surface is
+  byte-identical** — pure code movement.
+- **The pattern (chosen after verifying the rmcp 1.7 API against the vendored source):** the tools are split
+  into one `impl SoloistMcp` block **per logical category** — identity, project, process, agent, bulk, output,
+  services — each in its own `mcp/src/tools/<category>.rs` file with a named, `pub(crate)` sub-router
+  (`#[tool_router(router = process_router, vis = "pub(crate)")]`). `SoloistMcp::new` composes them with rmcp's
+  `std::ops::Add` for `ToolRouter` (`Self::identity_router() + Self::project_router() + …`). The shared reply
+  helpers (`structured`/`acked`/`app_error`/`unexpected`) live in one `mcp/src/tools/reply.rs`, reused by every
+  category — single-source, DRY (`port_wait_json` stays a private helper beside its sole caller in
+  `tools/services.rs`). `server.rs` keeps only the struct, the router composition in `new`, and the
+  `ServerHandler` impl. This is the **Registry/composition** shape `04` §6 / ARCHITECTURE §3 name for "a growing
+  set of one-of-many handlers" (the MCP tool registry), so a new tool lands in its category file and its
+  sub-router — never a giant flat block. (The rmcp module doc documents two other shapes — a single
+  `#[tool_router]` block "for small servers", and one `ToolBase`/`AsyncTool` struct per tool "when business
+  logic becomes larger"; the latter was rejected for now because it would change the per-tool return/output
+  model and risk a non-identical schema surface for 31 thin forwarders — YAGNI until a category block itself
+  outgrows the smell.)
+- **Done (2026-06-23):** `server.rs` 546 → 46 non-test lines; the seven `tools/<category>.rs` files are each
+  ≤151 lines; the tool surface is unchanged (asserted by the unchanged `server_tests.rs`, **31 mcp tests, no
+  count change**); the comprehensive `server_tests.rs` was kept as the one surface-invariance guard rather than
+  fragmented into vanity per-category test files (§15). `just lint && just test` green; `mcp/src/server.rs` no
+  longer an outlier (only the pre-existing `core/src/supervisor.rs` 401 remains).
 
 **Sequencing rationale:** R0 sets the bar and the file-size signal; R1 makes the later phases' tests cheap
 to keep honest; R2/R3/R4 are the structural edits (smallest blast radius first: split, then the constructor,
 then scaffolding removal); R5 is best done after the structure settles; R6 closes the ledger. R7 (pending)
-finishes the port-ownership migration the newer domains established. R8 (pending) splits the MCP tool router by
-category once the tool set has stabilised (deferred from Phase-8 session 5 by the user, to keep that slice
-small). Each is a single reviewable commit.
+finishes the port-ownership migration the newer domains established. R8 (done) split the MCP tool router by
+category once the tool set had stabilised (deferred from Phase-8 session 5 by the user, to keep that slice
+small; executed before Phase 9 so its ~50 coordination tools land in category sub-routers, not a flat block).
+Each is a single reviewable commit.
 
 ---
 
