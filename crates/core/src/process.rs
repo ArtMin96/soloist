@@ -116,6 +116,15 @@ pub struct ProcessView {
     pub ready: Readiness,
 }
 
+impl ProcessView {
+    /// Whether this is a `Command` process belonging to `project` — the one predicate behind
+    /// the command-bulk registry queries and the scoped services listing, so the kind+project
+    /// test never drifts between them.
+    pub(crate) fn is_command_in(&self, project: ProjectId) -> bool {
+        self.project == project && self.kind == ProcessKind::Command
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

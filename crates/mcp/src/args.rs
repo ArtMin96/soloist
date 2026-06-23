@@ -87,5 +87,7 @@ pub(crate) struct WaitForPortArg {
     pub(crate) port: u16,
     /// How long to wait, in milliseconds. Omit for the server default; the app caps it well
     /// under the request timeout, returning `bound: false` if the port has not bound by then.
+    /// While waiting, this call holds the session's connection, so other tool calls on the
+    /// same session queue behind it until it returns.
     pub(crate) timeout_ms: Option<u64>,
 }

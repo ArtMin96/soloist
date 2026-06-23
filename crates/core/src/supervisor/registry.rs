@@ -358,11 +358,7 @@ impl Registry {
         let guard = lock(&self.inner);
         guard
             .values()
-            .filter(|entry| {
-                entry.view.project == project
-                    && entry.view.kind == ProcessKind::Command
-                    && entry.view.status.is_active()
-            })
+            .filter(|entry| entry.view.is_command_in(project) && entry.view.status.is_active())
             .map(|entry| entry.view.id)
             .collect()
     }
@@ -373,9 +369,7 @@ impl Registry {
         let guard = lock(&self.inner);
         guard
             .values()
-            .filter(|entry| {
-                entry.view.project == project && entry.view.kind == ProcessKind::Command
-            })
+            .filter(|entry| entry.view.is_command_in(project))
             .map(|entry| entry.view.id)
             .collect()
     }
@@ -405,8 +399,7 @@ impl Registry {
         guard
             .values()
             .filter(|entry| {
-                entry.view.project == project
-                    && entry.view.kind == ProcessKind::Command
+                entry.view.is_command_in(project)
                     && entry.view.status == ProcStatus::Stopped
                     && (!auto_start_only || entry.auto_start)
             })

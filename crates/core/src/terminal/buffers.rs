@@ -295,9 +295,11 @@ impl TerminalBuffers {
         matches
     }
 
-    /// Up to `limit` raw output lines containing `query`, oldest first. The raw bytes are
-    /// decoded lossily and split on newlines, so a match keeps the control sequences around
-    /// it; bounded by `limit` so the reply stays small even on a busy process.
+    /// Up to `limit` raw output lines containing `query`, oldest first. Unlike the rendered
+    /// search, this materializes the raw scrollback once — bounded, since the scrollback is
+    /// byte-capped — then decodes it lossily and splits on newlines, so a match keeps the
+    /// control sequences around it; bounded by `limit` so the reply stays small even on a
+    /// busy process.
     pub(crate) fn search_raw(&self, query: &str, limit: usize) -> Vec<String> {
         let raw = self.raw.to_vec();
         String::from_utf8_lossy(&raw)

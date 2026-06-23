@@ -275,6 +275,39 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Phase 8 session 3 — independent review-fix pass (2026-06-23)
+PR #18 (the F8/F9/F10 tools) was independently reviewed against the architecture/discipline/security
+contracts; gates were re-run green and the findings applied. No tool behaviour changed except the new
+output byte cap.
+
+- **Output payloads are now byte-bounded, not just count-bounded.** `process_output`/`search_output`
+  (`core/facade/output.rs`) capped rendered replies by line/match **count** only; a rendered line is
+  capped at 64 KiB and a reply can hold thousands, so a process emitting many long lines could produce
+  a multi-MB reply that exceeds the 8 MiB IPC frame and **drops the MCP connection**. Added one
+  `within_reply_budget` helper enforcing a `MAX_REPLY_BYTES = 1 MiB` total (keeping the newest lines for
+  a tail, the earliest for a match list), well under the frame; the raw reads were already bounded by
+  the 256 KiB raw scrollback. +4 unit tests (`facade/output_tests.rs`).
+- **Single-sourced the kind+project predicate.** The "is a `Command` in this project" test appeared in
+  four filters (three registry queries + `services_list`); extracted to `ProcessView::is_command_in`
+  (`core/process.rs`) and applied everywhere (`registry.rs` 450→443).
+- **Cross-project scope-authenticity gap recorded (B1).** The scoped **action** tools rest on
+  `select_project`/`bind_session_process`, which authorize any *loaded* project / any *existing* process
+  without verifying the caller runs there — so with ≥2 projects open on the same-user `0700` socket a
+  client can scope to a sibling project and `stop_all_commands`/`clear_output` it (neither is
+  trust-gated). The authenticity check is the deferred **F13** work; the now-false "MCP tools are
+  read-only, crosses no boundary" rationale in `plan/05` §12 was corrected and the deferral recorded as
+  **`KNOWN-DIVERGENCES.md` D-6** (resolves when F13's peer-credential → process-group check lands).
+  Owner-decided this session: document + track, do **not** pull F13 forward.
+- **Doc nits:** `terminal/buffers.rs::search_raw` doc now states it materializes the (byte-capped) raw
+  scrollback once (unlike the by-reference rendered search); `wait_for_bound_port`'s arg doc
+  (`mcp/src/args.rs`) notes it holds the session's connection while waiting. `mcp/src/server.rs` (494)
+  left as the tracked `plan/06` §7 split-candidate (the one `#[tool_router]` block is irreducible
+  without sub-routers).
+
+**Gate re-green: `just lint` + `just test` exit 0 — core 240 (+4 output byte-budget) / ipc 13 / app 24 /
+mcp 28 / store 15 / sys 5 (+10) / pty 12 (+3 ign) / UI 77;** clippy `-D warnings`, rustfmt,
+dependency-direction, and the file-size guard (advisory only) all green.
+
 ### Phase 8 session 3 — v1 MCP tools: bulk, output, services (F8/F9/F10) (2026-06-23)
 Branch **`feat/phase-8-mcp-bulk-output`** off `main` (HEAD `69c56da`; PR #17 confirmed merged before
 branching). Three small, independently-reviewable, gate-green commits, each a thin `crates/mcp` handler →

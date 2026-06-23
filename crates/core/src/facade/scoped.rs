@@ -13,7 +13,7 @@ use std::time::Duration;
 use super::{Facade, LaunchAgentError};
 use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::ports::StoreError;
-use crate::process::{ProcessKind, ProcessView};
+use crate::process::ProcessView;
 use crate::supervisor::{StartSummary, SupervisorError};
 
 /// How many trailing rendered lines `send_input`'s `wait_ms` snapshot returns — a bounded
@@ -194,7 +194,7 @@ impl Facade {
         Ok(self
             .snapshot()
             .into_iter()
-            .filter(|view| view.project == project && view.kind == ProcessKind::Command)
+            .filter(|view| view.is_command_in(project))
             .collect())
     }
 
