@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use crate::agents::{AgentToolRepo, NoopAgentToolRepo, NoopVersionProbe, VersionProbe};
-use crate::coordination::{LockRepo, NoopLockRepo};
+use crate::coordination::{LockRepo, NoopLockRepo, NoopTimerRepo, TimerRepo};
 use crate::filewatch::{FileWatcher, NoopFileWatcher};
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
 use crate::notify::{NoopNotifier, Notifier};
@@ -20,7 +20,7 @@ use super::{
 /// core's constructors take one value, and adding a future port is one field here
 /// rather than another argument threaded through every call site. The required adapters
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
-/// driven subsystems (`locks`, `lock_repo`, `runtime`, `orphan_control`, `metrics`,
+/// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `runtime`, `orphan_control`, `metrics`,
 /// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`) default to their
 /// `Noop` port via [`CorePorts::builder`], so a new optional port never
 /// forces every existing composition root to change. The composition root
@@ -33,6 +33,7 @@ pub struct CorePorts {
     pub(crate) projects: Arc<dyn ProjectRepo>,
     pub(crate) locks: Arc<dyn LockReleaser>,
     pub(crate) lock_repo: Arc<dyn LockRepo>,
+    pub(crate) timer_repo: Arc<dyn TimerRepo>,
     pub(crate) runtime: Arc<dyn RuntimeState>,
     pub(crate) orphan_control: Arc<dyn OrphanControl>,
     pub(crate) metrics: Arc<dyn MetricsProbe>,
@@ -60,6 +61,7 @@ impl CorePorts {
                 projects,
                 locks: Arc::new(NoopLockReleaser),
                 lock_repo: Arc::new(NoopLockRepo),
+                timer_repo: Arc::new(NoopTimerRepo),
                 runtime: Arc::new(NoopRuntimeState),
                 orphan_control: Arc::new(NoopOrphanControl),
                 metrics: Arc::new(NoopMetricsProbe),
@@ -90,6 +92,14 @@ impl CorePortsBuilder {
     /// lock releaser so a release is seen by every reader.
     pub fn lock_repo(mut self, lock_repo: Arc<dyn LockRepo>) -> Self {
         self.ports.lock_repo = lock_repo;
+        self
+    }
+
+    /// Overrides the durable timer store the coordination scheduler persists to (C6; defaults to
+    /// [`NoopTimerRepo`], which stores nothing, so no timer ever fires). The real adapter is
+    /// SQLite, the same store backing every other durable repository.
+    pub fn timer_repo(mut self, timer_repo: Arc<dyn TimerRepo>) -> Self {
+        self.ports.timer_repo = timer_repo;
         self
     }
 

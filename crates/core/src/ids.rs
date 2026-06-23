@@ -62,6 +62,13 @@ id_newtype!(
     /// session's tool calls are keyed by it.
     SessionId
 );
+id_newtype!(
+    /// Identifies a coordination timer (context C6) within a run. The durable store assigns
+    /// it on creation and reconstructs it via [`from_raw`](TimerId::from_raw) when reading a
+    /// row back. Like a lease, a timer is process-owned and per-run, so a value is meaningful
+    /// only within the run that created it (launch reconciliation clears the table).
+    TimerId
+);
 
 #[cfg(test)]
 mod tests {

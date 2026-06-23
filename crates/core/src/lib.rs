@@ -54,7 +54,9 @@ pub use config::{
     TrustReviewCommand,
 };
 pub use coordination::{
-    AcquireOutcome, LeaseReleaser, LeaseView, Leases, LockRepo, NoopLockRepo, StoredLease,
+    AcquireOutcome, FireCond, IdleMode, LeaseReleaser, LeaseView, Leases, LockRepo, NewTimer,
+    NoopLockRepo, NoopTimerRepo, SetWhenIdleOutcome, StoredLease, StoredTimer, TimerRepo,
+    TimerScheduler, TimerStatus, TimerView, Timers,
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
@@ -65,7 +67,7 @@ pub use facade::{
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, Whoami, PROCESS_ID_ENV};
-pub use ids::{ProcessId, ProjectId, SessionId};
+pub use ids::{ProcessId, ProjectId, SessionId, TimerId};
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use notify::{NoopNotifier, Notification, NotificationReactor, Notifier};
 pub use orphans::{OrphanInfo, OrphanReport};

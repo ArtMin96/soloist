@@ -42,6 +42,13 @@ impl Classifier {
         }
     }
 
+    /// The activity last reported for this agent, or `None` before its first sample. A snapshot
+    /// read (not edge-triggered) so a caller can ask "is this agent idle right now?" — used to
+    /// report whether a fire-when-idle timer's condition is already met at set time.
+    pub(super) fn current(&self) -> Option<AgentActivity> {
+        self.current
+    }
+
     /// Resets to the pre-sample state, so an agent that stopped and is relaunched re-emits
     /// its first activity. Called while the agent is not running.
     pub(super) fn reset(&mut self) {

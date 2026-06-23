@@ -35,7 +35,7 @@ mod spawner;
 
 pub use agents::{FakeAgentToolRepo, FakeVersionProbe};
 pub use clock::MockClock;
-pub use coordination::FakeLockRepo;
+pub use coordination::{FakeLockRepo, FakeTimerRepo};
 #[cfg(test)]
 pub use events::{next_change, next_matching, next_to, wait_all};
 pub use filewatch::FakeFileWatcher;

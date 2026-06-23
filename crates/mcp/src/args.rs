@@ -104,6 +104,34 @@ pub(crate) struct LockKeyArg {
     pub(crate) key: String,
 }
 
+/// Arguments for setting a plain timer.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TimerSetArg {
+    /// The text delivered to your bound process as a fresh, submitted turn when the timer fires.
+    pub(crate) body: String,
+    /// Fire this many milliseconds from now. Omit to fire as soon as possible; the app caps it.
+    pub(crate) after_ms: Option<u64>,
+}
+
+/// Arguments for a fire-when-idle timer.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TimerFireWhenIdleArg {
+    /// The text delivered to your bound process as a fresh turn when the watched agents go idle.
+    pub(crate) body: String,
+    /// The ids of the processes to watch for idle (from `list_processes`) — e.g. workers you spawned.
+    pub(crate) processes: Vec<u64>,
+    /// A max-wait backstop in milliseconds: fire even if they never go idle. Omit for the app's
+    /// default; the app caps it.
+    pub(crate) max_wait_ms: Option<u64>,
+}
+
+/// Arguments for a timer-management tool, by id.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TimerArg {
+    /// The id of the timer, as returned by `timer_set` / `timer_fire_when_idle_*` or `timer_list`.
+    pub(crate) timer: u64,
+}
+
 /// Arguments for waiting until a process binds a port.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub(crate) struct WaitForPortArg {
