@@ -1,11 +1,21 @@
 use super::*;
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::CallToolResult;
 use soloist_core::{
-    AgentKind, AgentTool, Origin, ProcStatus, ProcessKind, ProcessView, PromptMode, Readiness,
-    SessionId, StartSummary, Whoami,
+    AgentKind, AgentTool, Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId,
+    PromptMode, Readiness, SessionId, StartSummary, Whoami,
 };
-use soloist_ipc::{read_frame, write_frame, IpcError, IpcResult};
+use soloist_ipc::{
+    read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome,
+};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use tokio::net::UnixListener;
+
+use crate::args::{
+    OutputArg, ProcessArg, RenameArg, SearchArg, SelectProjectArg, SendInputArg, SpawnAgentArg,
+    WaitForPortArg,
+};
 
 /// Spawns a fake app on `socket` that answers each request via `respond` until the client
 /// disconnects, so a test drives the real [`SoloistMcp`] handler through the real IPC
@@ -46,6 +56,77 @@ fn sample_view(id: u64) -> ProcessView {
         ports: Vec::new(),
         ready: Readiness::Ungated,
     }
+}
+
+/// The tool surface the MCP server is meant to expose, as an explicit list — one entry per
+/// `#[tool]`, grouped by the category file that defines it. This is the single source of the
+/// *intended* surface, kept deliberately separate from the router that produces the *actual*
+/// surface, so the assertion below compares two independent things rather than restating one.
+const EXPECTED_TOOL_SURFACE: &[&str] = &[
+    // tools/identity.rs
+    "whoami",
+    "register_agent",
+    "select_project",
+    "select_process",
+    // tools/project.rs
+    "list_projects",
+    "get_project_status",
+    // tools/process.rs
+    "list_processes",
+    "get_process_status",
+    "start_process",
+    "stop_process",
+    "restart_process",
+    "rename_process",
+    "close_process",
+    "send_input",
+    // tools/agent.rs
+    "spawn_agent",
+    "list_agent_tools",
+    // tools/bulk.rs
+    "start_all_commands",
+    "stop_all_commands",
+    "restart_all_commands",
+    // tools/output.rs
+    "get_process_output",
+    "get_process_raw_output",
+    "search_output",
+    "search_raw_output",
+    "clear_output",
+    "flush_terminal_perf",
+    "get_process_ports",
+    // tools/services.rs
+    "services_list",
+    "wait_for_bound_port",
+];
+
+/// The router [`SoloistMcp::new`] composes from the per-category sub-routers must serve exactly
+/// the intended surface. This guards the split itself: a category sub-router left out of the
+/// `+` composition, a tool name colliding across two category files (`ToolRouter::add_route` is
+/// a map insert that silently overwrites), or an accidental add/rename all change what the
+/// served router reports — drift the per-tool behaviour tests cannot catch, because they invoke
+/// the tool methods directly without going through the composed router.
+#[test]
+fn served_router_exposes_exactly_the_expected_tool_surface() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    // `list_all` reads the statically composed router; no IPC connection is opened, so the
+    // socket path is never touched.
+    let served: BTreeSet<String> = handler(dir.path().join("soloist-ipc.sock"))
+        .tool_router
+        .list_all()
+        .into_iter()
+        .map(|tool| tool.name.into_owned())
+        .collect();
+
+    let expected: BTreeSet<String> = EXPECTED_TOOL_SURFACE
+        .iter()
+        .map(|name| name.to_string())
+        .collect();
+
+    assert_eq!(
+        served, expected,
+        "the served MCP tool surface drifted from the intended set"
+    );
 }
 
 #[tokio::test]

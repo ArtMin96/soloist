@@ -178,6 +178,7 @@ slightly uncertain. (Verified reachable 2026-06-14.)
 | Source | URL | Use it for |
 |--------|-----|-----------|
 | **Claude Code / Agent SDK / API** | `https://code.claude.com/llms.txt` | MCP server & tool authoring, hooks, subagents, the Agent SDK, CLI behavior, best practices. `WebFetch` the index, then follow the specific doc link. |
+| **MCP protocol spec** | `https://modelcontextprotocol.io/docs/*` | The Model Context Protocol *itself* — tool/resource/prompt schemas, transports (stdio/HTTP), lifecycle, capabilities, the error model. The authority for **protocol** questions when building or changing the MCP domain (`crates/mcp`, `soloist-mcp`); pair it with `code.claude.com` (client behavior) and the `rmcp` crate docs (the Rust implementation, via `context7`). |
 | **Tauri (v2)** | `https://tauri.app/llms.txt` | `tauri.conf.json`, commands/IPC, capabilities & permissions, bundling (`.deb`/`.AppImage`), updater, sidecar/external binaries, security model. `WebFetch` the index, follow the v2 link. |
 
 **Rules:**
@@ -192,6 +193,10 @@ slightly uncertain. (Verified reachable 2026-06-14.)
 - **Never fabricate** Solo behavior, an API signature, a version number, or a benchmark/footprint
   figure. Unknown → look it up, or mark it a documented gap (clean-room rule, §9). "Probably" is not a
   source.
+- **Read the whole definition before you judge it — never conclude from a slice.** When a claim rests on
+  what some code *does* (a function body, a macro, a trait impl, a config schema), read it **in full**. A
+  truncated `grep`/`sed`/`head` view that cuts a function off mid-body has produced confident-but-wrong
+  findings; if you only saw part of it, you don't yet know what it does. No assumption substitutes for the read.
 
 ---
 
@@ -218,7 +223,9 @@ before building; debugging before fixing), then implementation skills.
   thrash when a terminal is firing output.
 - **Tauri work → use the project-local `tauri-*` skill suite (MANDATORY), backed by the official docs.**
   This repo ships ~40 dedicated Tauri skills under `.claude/skills/tauri-*`. **Before writing any Tauri
-  code, invoke the skill that matches the task**, follow it, and confirm specifics against
+  code, invoke the skill that matches the task** — and **every** skill matching a surface the change
+  actually touches (e.g. IPC *and* capabilities *and* packaging), not one generic skill loaded as a token
+  gesture — follow it, and confirm specifics against
   `tauri.app/llms.txt` + the `context7` Tauri v2 docs (§4). Quick map:
   scaffold/config/architecture → `tauri-project-setup`, `tauri-configuration`, `tauri-architecture`,
   `tauri-process-model`; IPC, commands & events → `tauri-ipc`, `tauri-calling-rust`,
@@ -234,7 +241,9 @@ before building; debugging before fixing), then implementation skills.
   `tauri-code-signing`. (The macOS/iOS/Android/Windows distribution skills exist but are **out of
   scope** per D2 — Linux x86_64 only.)
 - **MCP server work → invoke `mcp-builder`.** Phase 8 builds `soloist-mcp`; invoke the `mcp-builder`
-  skill and cross-check the MCP docs from `code.claude.com/llms.txt` (§4).
+  skill and cross-check against the **MCP protocol spec at `modelcontextprotocol.io/docs/*`** +
+  `code.claude.com/llms.txt` + the `rmcp` crate docs via `context7` (§4) — protocol questions go to the
+  spec, not memory.
 - **Always re-check what's available at session start.** Skills evolve and new ones get installed. If a
   skill clearly fits the task at hand, you must use it (per the global skills rule) — don't reinvent
   what a skill already encodes.
@@ -460,6 +469,8 @@ will not know what happened.
 | "An unbounded buffer is fine for now" | Every unbounded thing is a future crash. Cap it. |
 | "One more npm dep won't hurt the size" | It might. Justify it against the size budget (§6). |
 | "Solo probably does X" | Probably ≠ documented. Check `05`; if absent, it's a recorded gap. |
+| "I grepped/sed'd a slice — it clearly does X" | A truncated read misleads. Read the whole definition before judging (§4). |
+| "I'll `#[ignore]`/skip this failing test for now" | Skipping to dodge a red is weakening a test (§12/§15). Fix the cause. |
 | "I'll mark this phase done; the soak test can come later" | Done means v1 rows + acceptance + tests green. |
 | "I'll pull this nice `later` feature into v1" | Don't gold-plate. v1 is the matrix's v1 rows. |
 | "I'll finish and skip the `PROGRESS.md` update" | Handoff failed. The next session is now blind. |
@@ -522,14 +533,22 @@ and every phase; a change that violates one is **not done**.
   component. Pure reducers are unit-tested; components stay declarative.
 - **Tests test behaviour, not vanity.** Every test exercises real business logic or a real flow and can
   fail for a real reason. **No** placeholder/empty tests, **no** tautological asserts, **no** test
-  written only to turn a check green or that pretends to cover something it doesn't. If a module has
-  nothing meaningful to test yet, it has **no** test yet — that's honest. Delete pretend tests on sight.
+  written only to turn a check green or that pretends to cover something it doesn't. **Never**
+  `#[ignore]`, skip, or comment out a test to dodge a red — fix the cause, or report it red (§12). A test
+  worth keeping should fail if you reintroduce the bug it guards (sanity-check a new guard with a quick
+  mutation). If a module has nothing meaningful to test yet, it has **no** test yet — that's honest.
+  Delete pretend tests on sight.
 - **No unnecessary code or comments.** Doc comments on public items (§8) and the rare comment explaining
   a *non-obvious* decision — nothing else. No dead code, no speculative abstraction (YAGNI), no comment
   that restates the code. Less code that works beats more code that impresses.
-- **Built to change safely.** Prefer the design that survives the next phase touching it: typed
-  boundaries, exhaustive `match`, ports over concretions, names that say what they mean. Optimize for the
-  reader six months from now.
+- **Built to change safely, and to scale.** Prefer the design that survives the next phase touching it:
+  typed boundaries, exhaustive `match`, ports over concretions, names that say what they mean. Optimize
+  for the reader six months from now, and for the surface that's 10× bigger (a growing handler set is a
+  Registry, not a longer `match` — §16). Assume a feature may later be **added, swapped, or removed**:
+  keep it pluggable behind a port so dropping it is removing a crate/field, not surgery (§16). Keep
+  tunables (limits, timeouts, paths, default policies) as named values in **one** place so they can be
+  promoted to configuration (settings / `solo.yml`) without touching call sites — don't pre-build config
+  you don't need yet (YAGNI), just don't hardcode in a way that blocks it later.
 
 ---
 
