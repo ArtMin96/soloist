@@ -17,6 +17,16 @@
   **`feat/phase-8-mcp-binding-auth`** off `main` (`b8b2cb5` + a `facade/session.rs` discipline extraction
   `20e4e71`); gate green; **open + merge its PR next.** See the top Decisions entry + corrected "Next
   session" item A.
+- **Review-fix pass on PR #19 (2026-06-23):** an independent review of the F13 branch confirmed the
+  security fix (forged bind/select refused; scope authenticated) and ran the gates green; the discipline
+  nits it raised were applied. Test helpers single-sourced — `authentic_session` + `TEST_PEER_PGID` now
+  live once in `core::testing` and the core/app identity tests reuse them (no per-file duplicate);
+  `peer_cred::peer_pgid` gained a fail-closed note on the pid→group read; and the two files this branch
+  grew past the ~400-line smell were split by pure code movement — the supervisor's terminal output/input
+  surface to `supervisor/terminal_io.rs` and the registry's project-scoped queries to
+  `supervisor/registry/queries.rs`, so both drop under the smell (only the pre-existing `mcp/server.rs`
+  494 remains, tracked in `plan/06` §7). No behaviour change: `just lint` + `just test` green, same counts
+  (core 242 / ipc 13 / app 25 / mcp 28 / store 15 / sys 15 / pty 13 / UI 77).
 - **Overall:** **Phase 7 (Agents & idle detection) — `Verified` (all v1 rows E1–E5, E8; user-confirmed at
   runtime 2026-06-22). Phase 8 (MCP server core) is the active phase: session 1 — the MCP walking skeleton
   (rmcp stdio → IPC/UDS → app → `Facade`; identity/scope + 7 read/identity tools; F1/F3/F4 + read F5/F6) —
