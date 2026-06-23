@@ -1,4 +1,5 @@
-//! The rmcp server handler: the read-only tools, each a thin call to one IPC request.
+//! The rmcp server handler: each tool a thin call to one IPC request — read and action
+//! tools alike.
 //!
 //! Tool *names* mirror Solo for interop, but the parameter schemas are clean-room — derived
 //! from the argument structs here. No domain logic lives in a tool: each forwards to the app,
@@ -9,7 +10,7 @@ use std::sync::Arc;
 
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ErrorData};
+use rmcp::model::{CallToolResult, Content, ErrorData};
 use rmcp::{schemars, tool, tool_handler, tool_router, ServerHandler};
 use serde::{Deserialize, Serialize};
 use soloist_core::{ProcessId, ProjectId};
@@ -43,7 +44,7 @@ struct ProjectArg {
 struct SendInputArg {
     /// The id of the process to write to, as returned by `list_processes`.
     process: u64,
-    /// The bytes to write to the process's input, as text. Control characters are sent
+    /// The text to write to the process's input, as UTF-8. Control characters are sent
     /// verbatim — e.g. a trailing carriage return to submit a line, or 0x03 for Ctrl-C.
     input: String,
     /// Optionally wait this many milliseconds after writing, then return the rendered
@@ -92,7 +93,7 @@ impl SoloistMcp {
         match self.client.request(IpcRequest::Whoami).await {
             Ok(IpcResponse::Whoami(who)) => structured(&who),
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 
@@ -110,7 +111,7 @@ impl SoloistMcp {
         {
             Ok(IpcResponse::Acked) => acked(),
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 
@@ -127,7 +128,7 @@ impl SoloistMcp {
         match self.client.request(request).await {
             Ok(IpcResponse::Acked) => acked(),
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 
@@ -136,7 +137,7 @@ impl SoloistMcp {
         match self.client.request(IpcRequest::ListProjects).await {
             Ok(IpcResponse::Projects(projects)) => structured(&projects),
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 
@@ -153,7 +154,7 @@ impl SoloistMcp {
         match self.client.request(request).await {
             Ok(IpcResponse::ProjectStatus(status)) => structured(&status),
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 
@@ -162,7 +163,7 @@ impl SoloistMcp {
         match self.client.request(IpcRequest::ListProcesses).await {
             Ok(IpcResponse::Processes(processes)) => structured(&processes),
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 
@@ -177,7 +178,7 @@ impl SoloistMcp {
         match self.client.request(request).await {
             Ok(IpcResponse::Process(view)) => structured(&view),
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 
@@ -194,7 +195,7 @@ impl SoloistMcp {
         match self.client.request(request).await {
             Ok(IpcResponse::Acked) => acked(),
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 
@@ -213,7 +214,7 @@ impl SoloistMcp {
                 structured(&serde_json::json!({ "was_running": was_running }))
             }
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 
@@ -230,12 +231,12 @@ impl SoloistMcp {
         match self.client.request(request).await {
             Ok(IpcResponse::Acked) => acked(),
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 
     #[tool(
-        description = "Write input to a process's terminal (typed text or raw control bytes). With wait_ms, returns the rendered terminal tail after waiting, so you can see the effect. Acts only within the session's project."
+        description = "Write input to a process's terminal as UTF-8 text, including control characters (a trailing carriage return submits a line; 0x03 is Ctrl-C). With wait_ms, returns the rendered terminal tail after waiting, so you can see the effect. Acts only within the session's project."
     )]
     async fn send_input(
         &self,
@@ -253,7 +254,7 @@ impl SoloistMcp {
         match self.client.request(request).await {
             Ok(IpcResponse::InputSent(tail)) => structured(&serde_json::json!({ "tail": tail })),
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 
@@ -268,7 +269,7 @@ impl SoloistMcp {
         match self.client.request(request).await {
             Ok(IpcResponse::Spawned(id)) => structured(&serde_json::json!({ "process": id })),
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 
@@ -277,7 +278,7 @@ impl SoloistMcp {
         match self.client.request(IpcRequest::ListAgentTools).await {
             Ok(IpcResponse::AgentTools(tools)) => structured(&tools),
             Ok(_) => Err(unexpected()),
-            Err(err) => Err(app_error(&err)),
+            Err(err) => app_error(&err),
         }
     }
 }
@@ -297,9 +298,18 @@ fn acked() -> Result<CallToolResult, ErrorData> {
     structured(&serde_json::json!({ "ok": true }))
 }
 
-/// Maps a client error to an MCP tool error the agent can read.
-fn app_error(err: &ClientError) -> ErrorData {
-    ErrorData::internal_error(err.to_string(), None)
+/// Maps a failed request to the agent-visible failure, per the MCP error model. A
+/// request-caused refusal (untrusted, out of scope, no project selected, unknown
+/// process/project/tool) becomes a tool-execution error (`isError: true`) — actionable
+/// feedback the model can self-correct on. A transport or server failure (app down, timeout,
+/// internal) stays a protocol error, which the model is less likely to recover from.
+fn app_error(err: &ClientError) -> Result<CallToolResult, ErrorData> {
+    match err {
+        ClientError::App(app) if app.is_request_error() => {
+            Ok(CallToolResult::error(vec![Content::text(app.to_string())]))
+        }
+        _ => Err(ErrorData::internal_error(err.to_string(), None)),
+    }
 }
 
 /// The app returned a response of the wrong shape — a protocol mismatch, not a user error.

@@ -126,15 +126,34 @@ async fn select_project_acknowledges() {
 }
 
 #[tokio::test]
-async fn a_typed_app_error_becomes_a_tool_error() {
+async fn a_request_error_becomes_a_tool_execution_error() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
     spawn_fake_app(socket.clone(), |_request| Err(IpcError::UnknownProcess));
 
+    // A request-caused error is a tool-execution error (isError: true) the model can read
+    // and self-correct on — not a protocol error it cannot recover from.
     let result = handler(socket)
         .get_process_status(Parameters(ProcessArg { process: 99 }))
+        .await
+        .expect("a request error is a tool result, not a protocol error");
+    assert_eq!(result.is_error, Some(true));
+}
+
+#[tokio::test]
+async fn a_server_error_stays_a_protocol_error() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // A server-side failure is not something the model can fix by adjusting parameters, so it
+    // surfaces as a protocol error rather than a tool-execution error.
+    spawn_fake_app(socket.clone(), |_request| {
+        Err(IpcError::Internal("disk full".into()))
+    });
+
+    let result = handler(socket)
+        .start_process(Parameters(ProcessArg { process: 5 }))
         .await;
-    assert!(result.is_err(), "an app error must surface as a tool error");
+    assert!(result.is_err(), "a server error is a protocol error");
 }
 
 #[tokio::test]
@@ -300,17 +319,21 @@ async fn list_agent_tools_projects_the_configured_tools() {
 }
 
 #[tokio::test]
-async fn a_refused_action_surfaces_as_a_tool_error() {
+async fn a_refused_action_becomes_a_tool_execution_error() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
-    // The core refused the action (untrusted / out of scope); the agent must see an error.
+    // The core refused the action (untrusted / out of scope); the agent must see it as an
+    // actionable tool error carrying the reason, so it can ask the user to trust the command.
     spawn_fake_app(socket.clone(), |_request| Err(IpcError::Untrusted));
 
     let result = handler(socket)
         .start_process(Parameters(ProcessArg { process: 5 }))
-        .await;
+        .await
+        .expect("a refusal is a tool result, not a protocol error");
+    assert_eq!(result.is_error, Some(true));
+    let json = serde_json::to_string(&result).expect("serialize result");
     assert!(
-        result.is_err(),
-        "a refused action must surface as a tool error"
+        json.contains("not trusted"),
+        "the refusal reason reaches the model: {json}"
     );
 }

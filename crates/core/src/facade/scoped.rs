@@ -2,8 +2,8 @@
 //! (MCP today, the HTTP API later) drives.
 //!
 //! Each method enforces the calling session's **effective-project scope** before routing
-//! to the one supervisor behaviour: a tool can act only on a process within its project
-//! (parity F13), and the trust gate in C2 still refuses an untrusted command. The Tauri UI
+//! to the one supervisor behaviour: a tool can act only on a process within its project,
+//! and the trust gate in C2 still refuses an untrusted command. The Tauri UI
 //! calls the supervisor directly because the local user is not scope-limited; these methods
 //! add scope on top for callers that are. Scope is resolved here, in the core, so every
 //! remote adapter inherits the identical guarantee instead of re-checking it per adapter.
@@ -34,7 +34,7 @@ pub enum ScopedActionError {
     /// The session has no project in scope to act within (none selected, bound, or singular).
     #[error("no project is in scope; select one first")]
     NoProjectScope,
-    /// The process exists but belongs to a different project than the session's scope (F13).
+    /// The process exists but belongs to a different project than the session's scope.
     #[error("that process belongs to a different project")]
     OutOfScope,
     /// The command is not trusted to run in this project (the C2 trust gate refused it).
@@ -70,7 +70,7 @@ impl From<SupervisorError> for ScopedActionError {
 }
 
 impl Facade {
-    /// Starts one process for a scoped session, after confirming it is in scope (F13). The
+    /// Starts one process for a scoped session, after confirming it is in scope. The
     /// trust gate in the supervisor still applies, so an untrusted command is refused.
     pub fn start_process(
         &self,
@@ -103,8 +103,8 @@ impl Facade {
         Ok(())
     }
 
-    /// Writes input to an in-scope process's PTY — typed text or raw control bytes, sent
-    /// verbatim (include `\r` to submit a line, `\u{3}` for Ctrl-C). When `wait` is set, waits
+    /// Writes input to an in-scope process's PTY — UTF-8 text, including control characters,
+    /// sent verbatim (include `\r` to submit a line, `\u{3}` for Ctrl-C). When `wait` is set, waits
     /// up to [`MAX_INPUT_WAIT`] for the process to react, then returns the rendered terminal
     /// tail so the caller sees the effect; without it, returns `None` immediately. The clock
     /// is injected, so a test drives the wait without real time passing.
@@ -128,8 +128,8 @@ impl Facade {
     }
 
     /// Spawns a configured agent tool as a worker in the session's effective project and
-    /// starts it, returning its process id — the E7 path (a lead agent spawning a worker over
-    /// MCP). Reuses [`Facade::launch_agent`] for the one launch behaviour; the worker always
+    /// starts it, returning its process id — a lead agent spawning a worker over MCP. Reuses
+    /// [`Facade::launch_agent`] for the one launch behaviour; the worker always
     /// lands in the caller's own project (the resolved scope), so it can never spawn into
     /// another and needs no project argument. The new agent auto-binds via the injected
     /// `SOLOIST_PROCESS_ID`. Must run within a `tokio` runtime (starting spawns the actor).
@@ -145,7 +145,7 @@ impl Facade {
         Ok(self.launch_agent(project, tool, extra_args)?)
     }
 
-    /// The F13 guard: the process must exist and belong to the session's effective project.
+    /// The scope guard: the process must exist and belong to the session's effective project.
     /// Returns `OutOfScope` rather than hiding a cross-project process, since the read tools
     /// already expose every process unfiltered (open by design).
     fn require_in_scope(

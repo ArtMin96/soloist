@@ -2,12 +2,15 @@ use super::*;
 use crate::config::parse;
 use crate::events::DomainEvent;
 use crate::ids::ProjectId;
-use crate::ports::{CorePorts, TokioClock, TrustRepo};
+use crate::ports::{Clock, CorePorts, TokioClock, TrustRepo};
 use crate::process::ProcStatus;
 use crate::supervisor::Registration;
+use crate::sync::lock;
 use crate::testing::{terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
+use async_trait::async_trait;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -115,6 +118,56 @@ fn another_projects_process_is_out_of_scope() {
         facade.restart_process(session, elsewhere),
         Err(ScopedActionError::OutOfScope)
     ));
+}
+
+/// A clock that records the duration it was asked to sleep and returns at once, so a test
+/// asserts `send_input` clamped the wait with no real time passing.
+#[derive(Clone, Default)]
+struct RecordingClock {
+    slept: Arc<Mutex<Option<Duration>>>,
+}
+
+#[async_trait]
+impl Clock for RecordingClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    async fn sleep(&self, dur: Duration) {
+        *lock(&self.slept) = Some(dur);
+    }
+}
+
+#[tokio::test]
+async fn send_input_clamps_an_excessive_wait() {
+    let clock = RecordingClock::default();
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(clock.clone()),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .build(),
+    );
+    let mut rx = facade.subscribe();
+    let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, id)
+        .expect("scope to the process");
+    facade
+        .start_process(session, id)
+        .expect("an in-scope start");
+    wait_for(&mut rx, ProcStatus::Running).await;
+
+    // A wait far beyond the cap is clamped to MAX_INPUT_WAIT before the clock ever sleeps, so a
+    // remote caller cannot tie up the request (and the connection behind it) with a huge value.
+    facade
+        .send_input(session, id, b"x".to_vec(), Some(Duration::from_secs(3600)))
+        .await
+        .expect("send_input succeeds");
+    assert_eq!(*lock(&clock.slept), Some(MAX_INPUT_WAIT));
 }
 
 #[tokio::test]

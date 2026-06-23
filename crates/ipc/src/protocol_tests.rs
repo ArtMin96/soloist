@@ -121,12 +121,33 @@ fn a_typed_error_round_trips() {
         IpcError::NoProjectScope,
         IpcError::OutOfScope,
         IpcError::Untrusted,
+        IpcError::UnknownTool,
         IpcError::Internal("disk full".into()),
     ] {
         let json = serde_json::to_string(&error).expect("serialize");
         let back: IpcError = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, error);
     }
+}
+
+#[test]
+fn request_errors_are_distinguished_from_server_errors() {
+    // The one classifier every adapter reuses: a request-caused refusal is actionable
+    // feedback (MCP `isError: true`, HTTP 4xx); a server failure is not (protocol error, 5xx).
+    for error in [
+        IpcError::UnknownProcess,
+        IpcError::UnknownProject,
+        IpcError::NoProjectScope,
+        IpcError::OutOfScope,
+        IpcError::Untrusted,
+        IpcError::UnknownTool,
+    ] {
+        assert!(error.is_request_error(), "{error} is request-caused");
+    }
+    assert!(
+        !IpcError::Internal("disk full".into()).is_request_error(),
+        "a server failure is not request-caused"
+    );
 }
 
 #[test]

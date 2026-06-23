@@ -383,7 +383,7 @@ async fn launch_agent_runs_a_stub_in_the_project_dir_inheriting_the_environment(
         .launch_agent(project.id, "Stub", Vec::new())
         .expect("launch the stub agent");
 
-    // It is an Agent-kind process (Phase 3 subtype), and it runs then exits cleanly.
+    // It is an Agent-kind process, and it runs then exits cleanly.
     let kind = facade
         .snapshot()
         .into_iter()
@@ -419,7 +419,7 @@ async fn spawn_agent_launches_a_worker_in_the_sessions_project() {
     use soloist_core::testing::{FakeAgentToolRepo, FakeProjectRepo, FakeTrustRepo};
     use soloist_core::{AgentKind, AgentTool, ProcessKind, PromptMode};
 
-    // The E7 path end to end: a session selects a project, then spawn_agent (the scoped
+    // End to end: a session selects a project, then spawn_agent (the scoped
     // wrapper over launch_agent) starts the worker in that project on a real PTY.
     let dir = tempfile::tempdir().expect("temp dir");
     let script = dir.path().join("stub-agent.sh");

@@ -324,6 +324,26 @@ mod tests {
     }
 
     #[test]
+    fn tail_returns_at_most_the_requested_recent_lines() {
+        let mut b = TerminalBuffers::default();
+        for n in 0..10 {
+            ingest(&mut b, format!("line {n}\n").as_bytes());
+        }
+        // Bounded: never more than asked, and it is the most recent slice.
+        assert_eq!(
+            b.tail(3),
+            vec!["line 7", "line 8", "line 9"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        );
+        // Asking for more than exist returns only what exists, never padding.
+        assert_eq!(b.tail(100).len(), 10);
+        // Zero lines is empty, not the whole buffer.
+        assert!(b.tail(0).is_empty());
+    }
+
+    #[test]
     fn the_raw_scrollback_never_exceeds_its_byte_cap() {
         let mut b = buffers(8, 5_000);
         ingest(&mut b, b"0123456789");

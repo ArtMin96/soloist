@@ -140,6 +140,26 @@ pub enum IpcError {
     Internal(String),
 }
 
+impl IpcError {
+    /// Whether the request itself caused the failure — a business-logic refusal or bad
+    /// input the caller can act on (unknown target, out of scope, untrusted, no scope in
+    /// place) — as opposed to a server-side failure. Each adapter maps the two classes to
+    /// its own convention from this one place: an MCP tool returns a request error as a
+    /// tool-execution error (`isError: true`) the model can self-correct on, and a server
+    /// error as a protocol error; a future HTTP API maps them to 4xx vs 5xx.
+    pub fn is_request_error(&self) -> bool {
+        match self {
+            IpcError::UnknownProcess
+            | IpcError::UnknownProject
+            | IpcError::NoProjectScope
+            | IpcError::OutOfScope
+            | IpcError::Untrusted
+            | IpcError::UnknownTool => true,
+            IpcError::Internal(_) => false,
+        }
+    }
+}
+
 impl From<IdentityError> for IpcError {
     fn from(err: IdentityError) -> Self {
         match err {
