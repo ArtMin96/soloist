@@ -41,6 +41,12 @@ impl IdleTracker {
         lock(&self.agents).keys().copied().collect()
     }
 
+    /// The activity last classified for `id`, or `None` if it is untracked or not yet sampled. A
+    /// snapshot read the façade uses to report whether a fire-when-idle timer is already satisfied.
+    pub fn activity(&self, id: ProcessId) -> Option<AgentActivity> {
+        lock(&self.agents).get(&id).and_then(Classifier::current)
+    }
+
     /// Feeds a running agent its latest terminal signals; returns the new activity if it
     /// changed (the edge to emit). A no-op (returns `None`) for an untracked id.
     pub(super) fn observe(

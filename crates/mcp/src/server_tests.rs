@@ -2,8 +2,9 @@ use super::*;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, LeaseView, Origin, ProcStatus, ProcessId, ProcessKind,
-    ProcessView, ProjectId, PromptMode, Readiness, SessionId, StartSummary, Whoami,
+    AcquireOutcome, AgentKind, AgentTool, FireCond, LeaseView, Origin, ProcStatus, ProcessId,
+    ProcessKind, ProcessView, ProjectId, PromptMode, Readiness, SessionId, SetWhenIdleOutcome,
+    StartSummary, TimerId, TimerStatus, TimerView, Whoami,
 };
 use soloist_ipc::{
     read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome,
@@ -14,7 +15,7 @@ use tokio::net::UnixListener;
 
 use crate::args::{
     LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, RenameArg, SearchArg, SelectProjectArg,
-    SendInputArg, SpawnAgentArg, WaitForPortArg,
+    SendInputArg, SpawnAgentArg, TimerArg, TimerFireWhenIdleArg, TimerSetArg, WaitForPortArg,
 };
 
 /// Spawns a fake app on `socket` that answers each request via `respond` until the client
@@ -102,6 +103,14 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "lock_acquire",
     "lock_status",
     "lock_release",
+    // tools/timer.rs
+    "timer_set",
+    "timer_fire_when_idle_any",
+    "timer_fire_when_idle_all",
+    "timer_cancel",
+    "timer_pause",
+    "timer_resume",
+    "timer_list",
 ];
 
 /// The router [`SoloistMcp::new`] composes from the per-category sub-routers must serve exactly
@@ -802,4 +811,196 @@ async fn lock_release_reports_whether_the_caller_held_it() {
         structured_of(result),
         serde_json::json!({ "released": true })
     );
+}
+
+/// A sample armed timer for the response-projection tests.
+fn sample_timer(id: u64) -> TimerView {
+    TimerView {
+        id: TimerId::from_raw(id),
+        body: "resume work".into(),
+        fire: FireCond::At,
+        status: TimerStatus::Armed,
+        deadline_unix_millis: 1_700_000_005_000,
+    }
+}
+
+#[tokio::test]
+async fn timer_set_threads_its_arguments_through_and_projects_the_timer() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TimerSet { body, after_ms }
+            if body == "resume work" && after_ms == Some(5_000) =>
+        {
+            Ok(IpcResponse::TimerArmed(sample_timer(3)))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .timer_set(Parameters(TimerSetArg {
+            body: "resume work".into(),
+            after_ms: Some(5_000),
+        }))
+        .await
+        .expect("timer_set succeeds");
+    let back: TimerView = serde_json::from_value(structured_of(result)).expect("decode timer");
+    assert_eq!(back.id, TimerId::from_raw(3));
+}
+
+#[tokio::test]
+async fn timer_fire_when_idle_all_threads_the_processes_and_projects_the_outcome() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TimerFireWhenIdleAll {
+            body,
+            processes,
+            max_wait_ms,
+        } if body == "all done"
+            && processes == vec![ProcessId::from_raw(2), ProcessId::from_raw(3)]
+            && max_wait_ms == Some(60_000) =>
+        {
+            Ok(IpcResponse::TimerWhenIdle(SetWhenIdleOutcome {
+                timer: TimerView {
+                    id: TimerId::from_raw(9),
+                    body,
+                    fire: FireCond::WhenIdleAll {
+                        watched: processes.clone(),
+                    },
+                    status: TimerStatus::Armed,
+                    deadline_unix_millis: 0,
+                },
+                already_idle: false,
+                waiting_on: processes,
+            }))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .timer_fire_when_idle_all(Parameters(TimerFireWhenIdleArg {
+            body: "all done".into(),
+            processes: vec![2, 3],
+            max_wait_ms: Some(60_000),
+        }))
+        .await
+        .expect("timer_fire_when_idle_all succeeds");
+    let back: SetWhenIdleOutcome =
+        serde_json::from_value(structured_of(result)).expect("decode outcome");
+    assert!(!back.already_idle);
+    assert_eq!(
+        back.waiting_on,
+        vec![ProcessId::from_raw(2), ProcessId::from_raw(3)]
+    );
+}
+
+#[tokio::test]
+async fn timer_fire_when_idle_any_uses_the_any_request_variant() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TimerFireWhenIdleAny { processes, .. }
+            if processes == vec![ProcessId::from_raw(4)] =>
+        {
+            Ok(IpcResponse::TimerWhenIdle(SetWhenIdleOutcome {
+                timer: sample_timer(1),
+                already_idle: true,
+                waiting_on: Vec::new(),
+            }))
+        }
+        _ => Err(IpcError::Internal("expected the any variant".into())),
+    });
+
+    let result = handler(socket)
+        .timer_fire_when_idle_any(Parameters(TimerFireWhenIdleArg {
+            body: "one done".into(),
+            processes: vec![4],
+            max_wait_ms: None,
+        }))
+        .await
+        .expect("timer_fire_when_idle_any succeeds");
+    let back: SetWhenIdleOutcome =
+        serde_json::from_value(structured_of(result)).expect("decode outcome");
+    assert!(back.already_idle, "the any-outcome is projected");
+}
+
+#[tokio::test]
+async fn timer_cancel_reports_whether_it_was_cancelled() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TimerCancel { timer } if timer == TimerId::from_raw(5) => {
+            Ok(IpcResponse::TimerChanged(true))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .timer_cancel(Parameters(TimerArg { timer: 5 }))
+        .await
+        .expect("timer_cancel succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "cancelled": true })
+    );
+}
+
+#[tokio::test]
+async fn timer_pause_reports_whether_it_was_paused() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TimerPause { timer } if timer == TimerId::from_raw(5) => {
+            Ok(IpcResponse::TimerChanged(true))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .timer_pause(Parameters(TimerArg { timer: 5 }))
+        .await
+        .expect("timer_pause succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "paused": true }));
+}
+
+#[tokio::test]
+async fn timer_resume_reports_whether_it_was_resumed() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TimerResume { timer } if timer == TimerId::from_raw(5) => {
+            Ok(IpcResponse::TimerChanged(false))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .timer_resume(Parameters(TimerArg { timer: 5 }))
+        .await
+        .expect("timer_resume succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "resumed": false })
+    );
+}
+
+#[tokio::test]
+async fn timer_list_projects_the_timers() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let timer = sample_timer(3);
+    let canned = timer.clone();
+    spawn_fake_app(socket.clone(), move |request| match request {
+        IpcRequest::TimerList => Ok(IpcResponse::Timers(vec![canned.clone()])),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .timer_list()
+        .await
+        .expect("timer_list succeeds");
+    let back: Vec<TimerView> =
+        serde_json::from_value(structured_of(result)["timers"].clone()).expect("decode timers");
+    assert_eq!(back, vec![timer]);
 }

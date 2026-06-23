@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use soloist_core::{
     AcquireOutcome, AgentTool, CoordinationError, IdentityError, LaunchAgentError, LeaseView,
-    ProcessId, ProcessView, ProjectId, ProjectView, ScopedActionError, SpawnAgentError,
-    StartSummary, Whoami,
+    ProcessId, ProcessView, ProjectId, ProjectView, ScopedActionError, SetWhenIdleOutcome,
+    SpawnAgentError, StartSummary, TimerId, TimerView, Whoami,
 };
 
 /// A request from an IPC client to the running app. The server resolves identity and
@@ -108,6 +108,31 @@ pub enum IpcRequest {
     LockStatus { key: String },
     /// Release the lease `key` if held by the session's bound process.
     LockRelease { key: String },
+    /// Arm a timer owned by the session's bound process that delivers `body` to it as a fresh
+    /// turn after `after_ms` (immediately when omitted). The default/ceiling live in the core.
+    TimerSet { body: String, after_ms: Option<u64> },
+    /// Arm a timer that delivers `body` when **any** of `processes` is idle, or `max_wait_ms`
+    /// elapses (the core's default backstop when omitted).
+    TimerFireWhenIdleAny {
+        body: String,
+        processes: Vec<ProcessId>,
+        max_wait_ms: Option<u64>,
+    },
+    /// Arm a timer that delivers `body` when **every** one of `processes` is idle, or
+    /// `max_wait_ms` elapses (the core's default backstop when omitted).
+    TimerFireWhenIdleAll {
+        body: String,
+        processes: Vec<ProcessId>,
+        max_wait_ms: Option<u64>,
+    },
+    /// Cancel a timer the session's bound process owns.
+    TimerCancel { timer: TimerId },
+    /// Pause a timer the session's bound process owns.
+    TimerPause { timer: TimerId },
+    /// Resume a paused timer the session's bound process owns.
+    TimerResume { timer: TimerId },
+    /// Every timer the session's bound process owns.
+    TimerList,
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -159,6 +184,17 @@ pub enum IpcResponse {
     LeaseStatus(Option<LeaseView>),
     /// Whether the caller's lease was released (answer to [`IpcRequest::LockRelease`]).
     LeaseReleased(bool),
+    /// A timer was armed (answer to [`IpcRequest::TimerSet`]). Reuses the core view so the wire
+    /// shape cannot drift.
+    TimerArmed(TimerView),
+    /// A fire-when-idle timer was armed, with whether its condition is already met and which
+    /// processes it is still waiting on (answer to the `TimerFireWhenIdle*` requests).
+    TimerWhenIdle(SetWhenIdleOutcome),
+    /// Whether a timer-management action affected a timer (answer to [`IpcRequest::TimerCancel`],
+    /// [`IpcRequest::TimerPause`], and [`IpcRequest::TimerResume`]).
+    TimerChanged(bool),
+    /// Every timer the caller owns (answer to [`IpcRequest::TimerList`]).
+    Timers(Vec<TimerView>),
 }
 
 /// How a [`IpcRequest::WaitForBoundPort`] resolved — a structured answer, not an error: a

@@ -68,7 +68,7 @@ adapter. Adapters hold **no** business state and make **no** domain decisions.
 | **C3** Terminal I/O | `terminal/` | PTY read loop, rendered+raw buffers, OSC parse, attach replay | live (P4) |
 | **C4** Agents & Idle | `agents` `idle` | agent-tool defs, launch, 5-state idle FSM, optional summary | placeholder → P7 |
 | **C5** Monitoring | `metrics/` `portscan/` | CPU/mem sampling, `/proc` port discovery, readiness | live (P6: D1/D2/D3) |
-| **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | live (P9: leases); rest → P9 |
+| **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | live (P9: leases + timers); rest → P9 |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
 | **C8** Integration façade | `facade` `identity` | the public command/query API; MCP identity & effective scope | live (`facade`) |
 
@@ -102,7 +102,9 @@ HTTP behave identically):
   processes and PTY buffers.
 
 Target design — **C6 is being built in Phase 9** (leases done: `lock_acquire`/`lock_status`/`lock_release` over the
-`Leases` aggregate + `LockRepo`; scratchpads/todos/timers/kv next); tool *param schemas* are clean-room (`plan/05`
+`Leases` aggregate + `LockRepo`; **timers done**: `timer_set` / `timer_fire_when_idle_any`/`_all` / `timer_cancel`
+/`_pause`/`_resume`/`_list` over the `Timers` aggregate + `TimerRepo` + a `Clock`-driven `TimerScheduler` that fires a
+body to its owner as a fresh turn; scratchpads/todos/kv next); tool *param schemas* are clean-room (`plan/05`
 §12). Full recipe: **`plan/06` §5.8**; data-flow walkthroughs: `plan/01`; tool catalog: `plan/05` §7.
 
 ### Frontend domain split (`crates/app/ui/src`)

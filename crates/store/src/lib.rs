@@ -12,6 +12,7 @@ mod meta;
 mod migrate;
 mod projects;
 mod runtime;
+mod timers;
 mod trust;
 
 use std::path::Path;

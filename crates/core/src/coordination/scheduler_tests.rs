@@ -1,0 +1,364 @@
+//! Behavioural tests for [`TimerScheduler`], kept out of the implementation file. They drive a
+//! real [`Supervisor`] over fakes and the mock clock, so timing is deterministic with no real time
+//! elapsed: a deadline timer fires and delivers its body as a fresh turn; a fire-when-idle-all
+//! timer fires only once every watched process is idle; a backstop fires a stuck wait; pausing
+//! suspends firing; and a closing owner's timers are dropped.
+
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::sync::broadcast;
+use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::Notify;
+
+use crate::agents::AgentActivity;
+use crate::coordination::{IdleMode, TimerRepo, Timers};
+use crate::events::{DomainEvent, EventBus};
+use crate::ids::{ProcessId, ProjectId, TimerId};
+use crate::ports::{CorePorts, PtySize, SpawnSpec};
+use crate::process::{ProcStatus, ProcessKind};
+use crate::supervisor::{Registration, Supervisor};
+use crate::sync::lock;
+use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTimerRepo, FakeTrustRepo, MockClock};
+
+const PROJECT: ProjectId = ProjectId::from_raw(1);
+
+/// How many times to yield to the runtime after an action, letting the spawned scheduler loop (and
+/// any process actor) make progress before the assertion — the deterministic stand-in for waiting.
+const YIELDS: usize = 64;
+
+struct Harness {
+    sup: Arc<Supervisor>,
+    timers: Timers,
+    repo: Arc<FakeTimerRepo>,
+    clock: MockClock,
+    bus: EventBus,
+}
+
+fn harness(spawner: FakeSpawner) -> Harness {
+    let bus = EventBus::new(256);
+    let clock = MockClock::new();
+    let repo = Arc::new(FakeTimerRepo::new());
+    let ports = CorePorts::builder(
+        Arc::new(spawner),
+        Arc::new(clock.clone()),
+        Arc::new(FakeTrustRepo::new()),
+        Arc::new(FakeProjectRepo::new()),
+    )
+    .build();
+    let sup = Arc::new(Supervisor::new(&ports, bus.clone()));
+    let timers = Timers::new(
+        repo.clone(),
+        Arc::new(clock.clone()),
+        Arc::new(Notify::new()),
+    );
+    Harness {
+        sup,
+        timers,
+        repo,
+        clock,
+        bus,
+    }
+}
+
+impl Harness {
+    /// Registers and starts a long-lived agent process, returning its id once it is Running.
+    async fn running_process(&self) -> ProcessId {
+        let id = self.sup.register(Registration::launched(
+            PROJECT,
+            ProcessKind::Agent,
+            "Claude",
+            SpawnSpec {
+                command: "claude".into(),
+                working_dir: PathBuf::from("/"),
+                env: BTreeMap::new(),
+                size: PtySize::default(),
+            },
+        ));
+        self.sup.start(id).expect("start");
+        wait_for_running(&mut self.bus.subscribe(), id).await;
+        id
+    }
+
+    fn spawn_scheduler(&self) {
+        tokio::spawn(
+            self.timers
+                .scheduler(self.bus.clone(), Arc::downgrade(&self.sup))
+                .run(),
+        );
+    }
+
+    /// Whether the timer is still armed (counting down) — the observable of "not yet fired".
+    fn armed(&self, id: TimerId) -> bool {
+        self.repo
+            .armed()
+            .expect("armed")
+            .iter()
+            .any(|timer| timer.id == id)
+    }
+
+    /// Whether the timer still exists at all (armed or paused), regardless of state.
+    fn exists(&self, owner: ProcessId, id: TimerId) -> bool {
+        self.repo
+            .list(owner)
+            .expect("list")
+            .iter()
+            .any(|timer| timer.id == id)
+    }
+}
+
+async fn wait_for_running(rx: &mut broadcast::Receiver<DomainEvent>, id: ProcessId) {
+    loop {
+        match rx.recv().await {
+            Ok(DomainEvent::ProcessStatusChanged { id: got, to, .. })
+                if got == id && to == ProcStatus::Running =>
+            {
+                return
+            }
+            Ok(_) | Err(RecvError::Lagged(_)) => continue,
+            Err(RecvError::Closed) => panic!("event bus closed"),
+        }
+    }
+}
+
+/// Yields to the runtime repeatedly so the spawned scheduler (and process actors) can run.
+async fn settle() {
+    for _ in 0..YIELDS {
+        tokio::task::yield_now().await;
+    }
+}
+
+/// Advances the clock and yields until `pred` holds, or fails after a bounded budget — for the
+/// deadline-driven paths.
+async fn advance_until<F: Fn() -> bool>(clock: &MockClock, step: Duration, pred: F) {
+    for _ in 0..400 {
+        clock.advance(step);
+        settle().await;
+        if pred() {
+            return;
+        }
+    }
+    panic!("condition not met within the budget");
+}
+
+/// Yields until `pred` holds without advancing time, or fails after a bounded budget — for the
+/// event-driven (idle/removal) paths, where advancing the clock could trip an unrelated backstop.
+async fn settle_until<F: Fn() -> bool>(pred: F) {
+    for _ in 0..400 {
+        settle().await;
+        if pred() {
+            return;
+        }
+    }
+    panic!("condition not met within the budget");
+}
+
+#[tokio::test]
+async fn an_at_timer_fires_at_its_deadline_and_delivers_the_body_as_a_fresh_turn() {
+    let (spawner, recorder) = FakeSpawner::records_input();
+    let h = harness(spawner);
+    let owner = h.running_process().await;
+    h.spawn_scheduler();
+    settle().await;
+
+    let view = h
+        .timers
+        .set(
+            PROJECT,
+            owner,
+            "resume work".into(),
+            Some(Duration::from_secs(5)),
+        )
+        .expect("set");
+
+    // Before the deadline it has not fired.
+    settle().await;
+    assert!(h.armed(view.id), "the timer waits until its deadline");
+
+    // Past the deadline it fires: claimed from the store and delivered to the owner with a trailing
+    // carriage return, so the agent receives it as a submitted fresh turn.
+    advance_until(&h.clock, Duration::from_secs(10), || {
+        lock(&recorder).as_slice() == b"resume work\r"
+    })
+    .await;
+    assert!(!h.exists(owner, view.id), "a fired timer is gone");
+}
+
+#[tokio::test]
+async fn fire_when_idle_all_fires_only_when_every_watched_process_is_idle() {
+    let h = harness(FakeSpawner::exits_on_kill());
+    let owner = h.running_process().await;
+    let first = h.running_process().await;
+    let second = h.running_process().await;
+    h.spawn_scheduler();
+    settle().await;
+
+    let view = h
+        .timers
+        .set_when_idle(
+            PROJECT,
+            owner,
+            "all done".into(),
+            vec![first, second],
+            IdleMode::All,
+            Some(Duration::from_secs(3600)),
+        )
+        .expect("set");
+    settle().await;
+    assert!(h.armed(view.id), "running workers are not idle yet");
+
+    // One worker idle is not enough for an all-timer.
+    h.bus.publish(DomainEvent::AgentActivityChanged {
+        id: first,
+        state: AgentActivity::Idle,
+    });
+    settle().await;
+    assert!(h.armed(view.id), "one of two idle does not satisfy `all`");
+
+    // Both idle: the timer fires.
+    h.bus.publish(DomainEvent::AgentActivityChanged {
+        id: second,
+        state: AgentActivity::Idle,
+    });
+    settle_until(|| !h.armed(view.id)).await;
+}
+
+#[tokio::test]
+async fn fire_when_idle_any_fires_as_soon_as_one_watched_process_is_idle() {
+    let h = harness(FakeSpawner::exits_on_kill());
+    let owner = h.running_process().await;
+    let first = h.running_process().await;
+    let second = h.running_process().await;
+    h.spawn_scheduler();
+    settle().await;
+
+    let view = h
+        .timers
+        .set_when_idle(
+            PROJECT,
+            owner,
+            "one done".into(),
+            vec![first, second],
+            IdleMode::Any,
+            Some(Duration::from_secs(3600)),
+        )
+        .expect("set");
+    settle().await;
+    assert!(h.armed(view.id));
+
+    h.bus.publish(DomainEvent::AgentActivityChanged {
+        id: second,
+        state: AgentActivity::Idle,
+    });
+    settle_until(|| !h.armed(view.id)).await;
+}
+
+#[tokio::test]
+async fn a_non_idle_transition_does_not_fire_a_fire_when_idle_timer() {
+    let h = harness(FakeSpawner::exits_on_kill());
+    let owner = h.running_process().await;
+    let worker = h.running_process().await;
+    h.spawn_scheduler();
+    settle().await;
+
+    let view = h
+        .timers
+        .set_when_idle(
+            PROJECT,
+            owner,
+            "go".into(),
+            vec![worker],
+            IdleMode::All,
+            Some(Duration::from_secs(3600)),
+        )
+        .expect("set");
+
+    // A Working transition is not idle — the timer keeps waiting.
+    h.bus.publish(DomainEvent::AgentActivityChanged {
+        id: worker,
+        state: AgentActivity::Working,
+    });
+    settle().await;
+    assert!(h.armed(view.id), "a working worker does not fire the timer");
+}
+
+#[tokio::test]
+async fn the_max_wait_backstop_fires_even_if_no_process_goes_idle() {
+    let h = harness(FakeSpawner::exits_on_kill());
+    let owner = h.running_process().await;
+    let worker = h.running_process().await;
+    h.spawn_scheduler();
+    settle().await;
+
+    let view = h
+        .timers
+        .set_when_idle(
+            PROJECT,
+            owner,
+            "give up".into(),
+            vec![worker],
+            IdleMode::All,
+            Some(Duration::from_secs(3)),
+        )
+        .expect("set");
+    settle().await;
+    assert!(h.armed(view.id));
+
+    // The worker never goes idle; the backstop fires the timer anyway.
+    advance_until(&h.clock, Duration::from_secs(5), || !h.armed(view.id)).await;
+}
+
+#[tokio::test]
+async fn a_paused_timer_does_not_fire_at_its_deadline_until_resumed() {
+    let h = harness(FakeSpawner::exits_on_kill());
+    let owner = h.running_process().await;
+
+    let view = h
+        .timers
+        .set(PROJECT, owner, "ping".into(), Some(Duration::from_secs(5)))
+        .expect("set");
+    assert!(h.timers.pause(view.id, owner).expect("pause"));
+    h.spawn_scheduler();
+    settle().await;
+
+    // Past the original deadline, the paused timer still has not fired.
+    h.clock.advance(Duration::from_secs(60));
+    settle().await;
+    assert!(
+        h.exists(owner, view.id) && !h.armed(view.id),
+        "a paused timer is retained but never fired"
+    );
+
+    // Resuming re-arms it; it then fires.
+    assert!(h.timers.resume(view.id, owner).expect("resume"));
+    advance_until(&h.clock, Duration::from_secs(10), || {
+        !h.exists(owner, view.id)
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn closing_the_owner_drops_its_timers() {
+    let h = harness(FakeSpawner::exits_on_kill());
+    let owner = h.running_process().await;
+    h.spawn_scheduler();
+    settle().await;
+
+    let view = h
+        .timers
+        .set(
+            PROJECT,
+            owner,
+            "ping".into(),
+            Some(Duration::from_secs(3600)),
+        )
+        .expect("set");
+    settle().await;
+    assert!(h.exists(owner, view.id));
+
+    // The owner closes: the scheduler sees the removal and drops the timers it owned.
+    h.bus.publish(DomainEvent::ProcessRemoved { id: owner });
+    settle_until(|| !h.exists(owner, view.id)).await;
+}

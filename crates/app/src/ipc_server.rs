@@ -10,7 +10,7 @@
 use std::time::Duration;
 
 use crate::peer_cred;
-use soloist_core::{Facade, ProjectId, SessionId, WaitForPortError};
+use soloist_core::{Facade, IdleMode, ProjectId, SessionId, WaitForPortError};
 use soloist_ipc::{
     ensure_socket_path, read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult,
     PortWaitOutcome, ProjectStatus, ProjectSummary,
@@ -251,6 +251,54 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
         IpcRequest::LockRelease { key } => facade
             .lock_release(session, &key)
             .map(IpcResponse::LeaseReleased)
+            .map_err(IpcError::from),
+        IpcRequest::TimerSet { body, after_ms } => facade
+            .timer_set(session, body, after_ms.map(Duration::from_millis))
+            .map(IpcResponse::TimerArmed)
+            .map_err(IpcError::from),
+        IpcRequest::TimerFireWhenIdleAny {
+            body,
+            processes,
+            max_wait_ms,
+        } => facade
+            .timer_fire_when_idle(
+                session,
+                body,
+                processes,
+                IdleMode::Any,
+                max_wait_ms.map(Duration::from_millis),
+            )
+            .map(IpcResponse::TimerWhenIdle)
+            .map_err(IpcError::from),
+        IpcRequest::TimerFireWhenIdleAll {
+            body,
+            processes,
+            max_wait_ms,
+        } => facade
+            .timer_fire_when_idle(
+                session,
+                body,
+                processes,
+                IdleMode::All,
+                max_wait_ms.map(Duration::from_millis),
+            )
+            .map(IpcResponse::TimerWhenIdle)
+            .map_err(IpcError::from),
+        IpcRequest::TimerCancel { timer } => facade
+            .timer_cancel(session, timer)
+            .map(IpcResponse::TimerChanged)
+            .map_err(IpcError::from),
+        IpcRequest::TimerPause { timer } => facade
+            .timer_pause(session, timer)
+            .map(IpcResponse::TimerChanged)
+            .map_err(IpcError::from),
+        IpcRequest::TimerResume { timer } => facade
+            .timer_resume(session, timer)
+            .map(IpcResponse::TimerChanged)
+            .map_err(IpcError::from),
+        IpcRequest::TimerList => facade
+            .timer_list(session)
+            .map(IpcResponse::Timers)
             .map_err(IpcError::from),
     }
 }

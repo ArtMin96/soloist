@@ -1,7 +1,8 @@
 use super::*;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, LeaseView, Origin, ProcStatus, ProcessId, ProcessKind,
-    ProcessView, ProjectId, ProjectView, PromptMode, Readiness, SessionId, StartSummary, Whoami,
+    AcquireOutcome, AgentKind, AgentTool, FireCond, LeaseView, Origin, ProcStatus, ProcessId,
+    ProcessKind, ProcessView, ProjectId, ProjectView, PromptMode, Readiness, SessionId,
+    SetWhenIdleOutcome, StartSummary, TimerId, TimerStatus, TimerView, Whoami,
 };
 use std::path::PathBuf;
 
@@ -115,6 +116,34 @@ fn requests_round_trip_through_json() {
         IpcRequest::LockRelease {
             key: "deploy".into(),
         },
+        IpcRequest::TimerSet {
+            body: "ping".into(),
+            after_ms: Some(5_000),
+        },
+        IpcRequest::TimerSet {
+            body: "now".into(),
+            after_ms: None,
+        },
+        IpcRequest::TimerFireWhenIdleAny {
+            body: "any".into(),
+            processes: vec![ProcessId::from_raw(2)],
+            max_wait_ms: Some(60_000),
+        },
+        IpcRequest::TimerFireWhenIdleAll {
+            body: "all".into(),
+            processes: vec![ProcessId::from_raw(2), ProcessId::from_raw(3)],
+            max_wait_ms: None,
+        },
+        IpcRequest::TimerCancel {
+            timer: TimerId::from_raw(1),
+        },
+        IpcRequest::TimerPause {
+            timer: TimerId::from_raw(1),
+        },
+        IpcRequest::TimerResume {
+            timer: TimerId::from_raw(1),
+        },
+        IpcRequest::TimerList,
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -196,6 +225,36 @@ fn every_response_variant_round_trips_through_json() {
         })),
         IpcResponse::LeaseStatus(None),
         IpcResponse::LeaseReleased(true),
+        IpcResponse::TimerArmed(TimerView {
+            id: TimerId::from_raw(3),
+            body: "ping".into(),
+            fire: FireCond::At,
+            status: TimerStatus::Armed,
+            deadline_unix_millis: 1_700_000_005_000,
+        }),
+        IpcResponse::TimerWhenIdle(SetWhenIdleOutcome {
+            timer: TimerView {
+                id: TimerId::from_raw(4),
+                body: "all done".into(),
+                fire: FireCond::WhenIdleAll {
+                    watched: vec![ProcessId::from_raw(2), ProcessId::from_raw(3)],
+                },
+                status: TimerStatus::Armed,
+                deadline_unix_millis: 1_700_000_060_000,
+            },
+            already_idle: false,
+            waiting_on: vec![ProcessId::from_raw(2), ProcessId::from_raw(3)],
+        }),
+        IpcResponse::TimerChanged(true),
+        IpcResponse::Timers(vec![TimerView {
+            id: TimerId::from_raw(5),
+            body: "paused".into(),
+            fire: FireCond::WhenIdleAny {
+                watched: vec![ProcessId::from_raw(9)],
+            },
+            status: TimerStatus::Paused,
+            deadline_unix_millis: 0,
+        }]),
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");

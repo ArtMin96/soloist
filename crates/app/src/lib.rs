@@ -70,9 +70,9 @@ fn build_facade(app: AppHandle) -> Facade {
         }
     };
 
-    // One SQLite store backs the trust, project, agent-tool, and coordination-lease repositories
-    // the façade needs. The lock releaser drops a closing process's leases (over the same store),
-    // and the lease store persists them; the runtime-state and orphan-control adapters are wired
+    // One SQLite store backs the trust, project, agent-tool, and coordination (lease + timer)
+    // repositories the façade needs. The lock releaser drops a closing process's leases (over the
+    // same store), and the lease and timer stores persist them; the runtime-state and orphan-control adapters are wired
     // for adoption, the metrics probe reads CPU/memory from /proc, the port probe reads /proc, the
     // file watcher reports filesystem changes via notify, the notifier shows desktop toasts via
     // the Tauri notification plugin, and the version probe auto-detects installed agent CLIs.
@@ -92,6 +92,7 @@ fn build_facade(app: AppHandle) -> Facade {
         .agent_tools(store.clone())
         .version_probe(Arc::new(CommandVersionProbe::new()))
         .lock_repo(store.clone())
+        .timer_repo(store.clone())
         .locks(Arc::new(LeaseReleaser::new(store)))
         .build(),
     )
@@ -124,10 +125,14 @@ pub fn run() {
             // Build the façade here (not in the builder chain) so the desktop notifier can
             // capture the AppHandle, then register it as managed state for the commands.
             app.manage(build_facade(app.handle().clone()));
-            // Clear coordination leases left by a previous run: they are process-owned and per-run
-            // process ids are recycled, so nothing from a fresh launch holds one yet.
+            // Clear coordination leases and timers left by a previous run: both are process-owned
+            // and per-run process ids are recycled, so nothing from a fresh launch holds (or could
+            // be delivered) one yet.
             if let Err(err) = app.state::<Facade>().reconcile_leases() {
                 eprintln!("soloist: could not reconcile stale leases on launch ({err})");
+            }
+            if let Err(err) = app.state::<Facade>().reconcile_timers() {
+                eprintln!("soloist: could not reconcile stale timers on launch ({err})");
             }
             forward_events(app.handle().clone());
             // Start the self-healing reactor: it watches the core event stream and
@@ -143,6 +148,10 @@ pub fn run() {
             // Start the idle sampler: it reclassifies each launched agent's activity from its
             // terminal output and publishes transitions (also weakly held, also self-supervised).
             tauri::async_runtime::spawn(app.state::<Facade>().idle_sampler_loop());
+            // Start the coordination timer scheduler: it fires due timers and delivers each body to
+            // its owning process as a fresh turn, tracking idle state from the event stream (also
+            // weakly held, also self-supervised).
+            tauri::async_runtime::spawn(app.state::<Facade>().timer_scheduler_loop());
             // Start the notification reactor: it shows a desktop toast on a crash or an
             // exhausted auto-restart via the notification plugin (also weakly held).
             tauri::async_runtime::spawn(app.state::<Facade>().notifications_loop());

@@ -13,11 +13,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Notify};
 
 use crate::agents::{Agents, IdleSampler, IdleTracker};
 use crate::config::ConfigEngine;
-use crate::coordination::Leases;
+use crate::coordination::{Leases, Timers};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::{FileWatcher, WatchReactor};
 use crate::identity::Identity;
@@ -60,6 +60,7 @@ pub struct Facade {
     idle: Arc<IdleTracker>,
     identity: Identity,
     leases: Leases,
+    timers: Timers,
 }
 
 impl Facade {
@@ -80,11 +81,15 @@ impl Facade {
             agent_tools,
             version_probe,
             lock_repo,
+            timer_repo,
             ..
         } = ports;
         Self {
             supervisor,
             leases: Leases::new(lock_repo, clock.clone()),
+            // The scheduler shares this wake handle with the aggregate (see `Timers`), so creating
+            // or resuming a timer re-evaluates the schedule at once.
+            timers: Timers::new(timer_repo, clock.clone(), Arc::new(Notify::new())),
             clock,
             metrics,
             port_probe,
@@ -161,6 +166,20 @@ impl Facade {
             Arc::downgrade(&self.supervisor),
         )
         .run()
+    }
+
+    /// The coordination timer scheduler loop (C6), returned for the composition root to spawn
+    /// once on its runtime. It fires each due timer — at its deadline, or when the agents it
+    /// watches go idle — and delivers the timer's body to its owning process as a fresh turn
+    /// (reusing the supervisor's input behaviour). It tracks idle state from the
+    /// [`DomainEvent::AgentActivityChanged`] stream, watches the supervisor weakly so it ends when
+    /// the facade is dropped, and is self-supervised like the samplers. With the default
+    /// [`crate::coordination::NoopTimerRepo`] no timer ever persists, so it fires nothing — the
+    /// real SQLite store is chosen in the composition root.
+    pub fn timer_scheduler_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        self.timers
+            .scheduler(self.bus.clone(), Arc::downgrade(&self.supervisor))
+            .run()
     }
 
     /// The port-discovery scanner loop (monitoring C5), returned for the composition root to

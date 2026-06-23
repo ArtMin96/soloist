@@ -3,7 +3,7 @@
 //! actor path — the grace window, panic isolation, a clean or signalled exit, or an
 //! output stream into the terminal buffers.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use tokio::sync::{mpsc, oneshot};
@@ -52,6 +52,10 @@ enum Behavior {
     /// produced output and remains running, for exercising the idle classifier (output is
     /// in the buffers while the process is still `Running`).
     StreamsThenStaysAlive { chunks: Vec<Vec<u8>> },
+    /// Stays alive until killed and records every byte written to its PTY into a shared
+    /// buffer — so a test can prove what reached a process's input (e.g. a timer delivering
+    /// its body as a fresh turn).
+    RecordsInput(Arc<Mutex<Vec<u8>>>),
 }
 
 /// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is chosen
@@ -135,6 +139,19 @@ impl FakeSpawner {
         Self {
             behavior: Behavior::StreamsThenStaysAlive { chunks },
         }
+    }
+
+    /// A long-lived child that records every byte written to its PTY, returning the spawner and
+    /// the shared buffer the test reads. Used to prove what reached a process's input — e.g. that
+    /// a fired timer delivered its body, followed by a carriage return, as a fresh turn.
+    pub fn records_input() -> (Self, Arc<Mutex<Vec<u8>>>) {
+        let recorder = Arc::new(Mutex::new(Vec::new()));
+        (
+            Self {
+                behavior: Behavior::RecordsInput(recorder.clone()),
+            },
+            recorder,
+        )
     }
 }
 
@@ -227,6 +244,24 @@ impl ProcessSpawner for FakeSpawner {
                     io: Box::new(NoopPtyIo),
                 })
             }
+            Behavior::RecordsInput(recorder) => {
+                let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
+                let control = Box::new(OneshotControl {
+                    exit_tx: Mutex::new(Some(exit_tx)),
+                    dies_on: DiesOn::Kill,
+                });
+                let exit: ExitFuture =
+                    Box::pin(async move { exit_rx.await.unwrap_or_else(|_| killed_by(SIGKILL)) });
+                Ok(Spawned {
+                    pid: Some(424244),
+                    output: no_output(),
+                    exit,
+                    control,
+                    io: Box::new(RecordingPtyIo {
+                        recorder: recorder.clone(),
+                    }),
+                })
+            }
         }
     }
 }
@@ -281,6 +316,24 @@ struct NoopPtyIo;
 #[async_trait]
 impl PtyIo for NoopPtyIo {
     async fn write(&self, _data: &[u8]) -> Result<(), SpawnError> {
+        Ok(())
+    }
+
+    async fn resize(&self, _size: PtySize) -> Result<(), SpawnError> {
+        Ok(())
+    }
+}
+
+/// A [`PtyIo`] that appends every written byte to a shared buffer (discarding resizes), so a
+/// test can read back exactly what was sent to a process's input.
+struct RecordingPtyIo {
+    recorder: Arc<Mutex<Vec<u8>>>,
+}
+
+#[async_trait]
+impl PtyIo for RecordingPtyIo {
+    async fn write(&self, data: &[u8]) -> Result<(), SpawnError> {
+        lock(&self.recorder).extend_from_slice(data);
         Ok(())
     }
 

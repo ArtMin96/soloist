@@ -11,8 +11,9 @@
 use std::time::Duration;
 
 use super::Facade;
-use crate::coordination::{AcquireOutcome, LeaseView};
-use crate::ids::{ProcessId, ProjectId, SessionId};
+use crate::agents::AgentActivity;
+use crate::coordination::{AcquireOutcome, IdleMode, LeaseView, SetWhenIdleOutcome, TimerView};
+use crate::ids::{ProcessId, ProjectId, SessionId, TimerId};
 use crate::ports::StoreError;
 
 /// Why a coordination action was refused. Mapped by the wire adapters to their own error type, so
@@ -72,6 +73,110 @@ impl Facade {
     /// Not session-scoped; the composition root calls it once at startup.
     pub fn reconcile_leases(&self) -> Result<usize, StoreError> {
         self.leases.reconcile()
+    }
+
+    /// Arms a plain timer in the session's effective project, owned by its bound process, that
+    /// delivers `body` to that process as a fresh turn after `after` (immediately when `None`).
+    /// Needs a bound process — the owner the body is delivered to and that the timer is cleaned up
+    /// with on close.
+    pub fn timer_set(
+        &self,
+        session: SessionId,
+        body: String,
+        after: Option<Duration>,
+    ) -> Result<TimerView, CoordinationError> {
+        let project = self.lease_scope(session)?;
+        let owner = self.lease_owner(session)?;
+        Ok(self.timers.set(project, owner, body, after)?)
+    }
+
+    /// Arms a fire-when-idle timer owned by the session's bound process: it delivers `body` to
+    /// that process when the watched `processes` reach the `mode` idle quorum, or when `max_wait`
+    /// elapses. Reports whether the condition is **already** satisfied and which processes it is
+    /// still waiting on, read from the live idle state — a non-blocking signal. The watched
+    /// processes need not be in scope: a timer only ever delivers to its own owner, and idle state
+    /// is already open through the read tools, so watching another process observes nothing it
+    /// could not already see.
+    pub fn timer_fire_when_idle(
+        &self,
+        session: SessionId,
+        body: String,
+        processes: Vec<ProcessId>,
+        mode: IdleMode,
+        max_wait: Option<Duration>,
+    ) -> Result<SetWhenIdleOutcome, CoordinationError> {
+        let project = self.lease_scope(session)?;
+        let owner = self.lease_owner(session)?;
+        let waiting_on: Vec<ProcessId> = processes
+            .iter()
+            .copied()
+            .filter(|&process| !self.is_idle_now(process))
+            .collect();
+        let already_idle = match mode {
+            IdleMode::Any => processes.iter().any(|&process| self.is_idle_now(process)),
+            IdleMode::All => {
+                !processes.is_empty() && processes.iter().all(|&process| self.is_idle_now(process))
+            }
+        };
+        let timer = self
+            .timers
+            .set_when_idle(project, owner, body, processes, mode, max_wait)?;
+        Ok(SetWhenIdleOutcome {
+            timer,
+            already_idle,
+            waiting_on,
+        })
+    }
+
+    /// Cancels a timer the session's bound process owns, returning whether one was removed.
+    pub fn timer_cancel(
+        &self,
+        session: SessionId,
+        timer: TimerId,
+    ) -> Result<bool, CoordinationError> {
+        let owner = self.lease_owner(session)?;
+        Ok(self.timers.cancel(timer, owner)?)
+    }
+
+    /// Pauses a timer the session's bound process owns (freezing the time that remains), returning
+    /// whether one was paused.
+    pub fn timer_pause(
+        &self,
+        session: SessionId,
+        timer: TimerId,
+    ) -> Result<bool, CoordinationError> {
+        let owner = self.lease_owner(session)?;
+        Ok(self.timers.pause(timer, owner)?)
+    }
+
+    /// Resumes a paused timer the session's bound process owns (re-arming it with the time that
+    /// remained), returning whether one was resumed.
+    pub fn timer_resume(
+        &self,
+        session: SessionId,
+        timer: TimerId,
+    ) -> Result<bool, CoordinationError> {
+        let owner = self.lease_owner(session)?;
+        Ok(self.timers.resume(timer, owner)?)
+    }
+
+    /// Every timer the session's bound process owns (armed or paused).
+    pub fn timer_list(&self, session: SessionId) -> Result<Vec<TimerView>, CoordinationError> {
+        let owner = self.lease_owner(session)?;
+        Ok(self.timers.list(owner)?)
+    }
+
+    /// Clears every stale timer on launch — see [`Timers::reconcile`](crate::coordination::Timers::reconcile).
+    /// Not session-scoped; the composition root calls it once at startup.
+    pub fn reconcile_timers(&self) -> Result<usize, StoreError> {
+        self.timers.reconcile()
+    }
+
+    /// Whether a process is idle right now per the agent idle FSM (C4) — the snapshot the
+    /// fire-when-idle report is computed from. An untracked or unclassified process reads
+    /// not-idle.
+    fn is_idle_now(&self, process: ProcessId) -> bool {
+        self.idle.activity(process) == Some(AgentActivity::Idle)
     }
 
     /// The session's effective project, or [`CoordinationError::NoProjectScope`].
