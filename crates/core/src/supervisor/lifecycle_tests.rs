@@ -108,3 +108,17 @@ async fn close_reaps_a_running_process_before_removing_it() {
     assert_eq!(id, next_removed(&mut h.rx).await);
     assert!(h.sup.view(id).is_none(), "the reaped process is gone");
 }
+
+#[tokio::test]
+async fn a_closed_process_cannot_be_relaunched_into_an_orphan() {
+    // close removes the entry *before* it awaits the reap, so once a process is closed the
+    // shared launch primitive can no longer claim its id. This is what stops a crash arriving
+    // mid-close from being auto-restarted into a child the removal would then orphan.
+    let h = harness(FakeSpawner::exits_on_kill());
+    let id = terminal(&h.sup, "sleep 60");
+    h.sup.close(id).await.expect("close");
+    assert!(
+        h.sup.registry.begin_launch(id).is_none(),
+        "a closed id is gone, so the crash-restart launch primitive cannot reclaim it"
+    );
+}

@@ -9,6 +9,19 @@
 
 ## Current state
 
+- **Review-fix pass on PR #20 (2026-06-23):** an independent review of the F6-remainder branch confirmed it
+  (gates green, hexagonal boundaries + clean-room intact) and its one should-fix + the nits were applied on
+  `feat/phase-8-mcp-f6-remainder`. (1) **`Supervisor::close` no longer races a mid-close crash:** it now removes
+  the registry entry *atomically with* taking the actor handle (new `Registry::remove_returning_handle`) **before**
+  awaiting the reap, so a concurrent crash auto-restart finds no entry (`begin_launch → None`) and cannot leave a
+  relaunched child orphaned behind the removal; the `close`/`shutdown` reap step is DRY'd into one `signal_stop`
+  helper. (2) **`select_process` is scope-confined:** existence is checked within the session's effective project,
+  so an out-of-scope id reads as `UnknownProcess` (indistinguishable from a missing one) — closing a cross-project
+  existence oracle; `whoami` now drops a selection whose process has since been removed. (3) Stray root
+  `package-lock.json` removed (the UI is pnpm). **R8** (MCP tool-router split) stays **deferred** by the user.
+  Gate green: core **254** (+2: an out-of-scope `select_process` refusal and a closed-process no-relaunch test) /
+  ipc 13 / app 28 / mcp 31 / store 15 / sys 15 / pty 13 (+3 soak ign) / UI 78; clippy `-D warnings`, fmt, tsc,
+  eslint, prettier, dep-direction all green. Runtime acceptance walk (user-only) still owed before `Verified`.
 - **Newest (2026-06-23, Phase 8 session 5):** **F6 remainder landed → Phase 8 is `Done — pending verify`
   with every v1 F-row (F1, F3–F11, F13) code-complete.** The last three F6 process tools shipped on branch
   `feat/phase-8-mcp-f6-remainder` (`950e559`, off `main` `633c862` = PR #19 merged): **`rename_process`**

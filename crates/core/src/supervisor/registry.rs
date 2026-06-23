@@ -344,11 +344,14 @@ impl Registry {
         guard.get_mut(&id).and_then(|entry| entry.handle.take())
     }
 
-    /// Removes a process from the registry entirely — the one path that forgets a managed
-    /// process, unlike a stop, which leaves it resting. The caller ([`Supervisor::close`])
-    /// reaps any live actor first, so a removed entry never abandons a running child.
-    pub(crate) fn remove(&self, id: ProcessId) {
-        lock(&self.inner).remove(&id);
+    /// Removes a process from the registry entirely and hands back its actor handle if it held
+    /// one — the one path that forgets a managed process, unlike a stop, which leaves it
+    /// resting. Returns [`None`] if it was not registered. Taking the entry and its handle
+    /// under a single lock lets [`Supervisor::close`] forget the process *before* it reaps, so
+    /// a concurrent crash auto-restart finds no entry to relaunch and cannot leave a child
+    /// orphaned behind the removal.
+    pub(crate) fn remove_returning_handle(&self, id: ProcessId) -> Option<Option<ActorHandle>> {
+        lock(&self.inner).remove(&id).map(|entry| entry.handle)
     }
 
     /// Every process that still holds an actor handle — the shutdown set. Messaging

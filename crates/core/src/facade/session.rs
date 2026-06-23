@@ -78,16 +78,22 @@ impl Facade {
 
     /// Records a session's selected process — an informational default-target hint reported by
     /// `whoami`. Unlike [`select_project`](Self::select_project) it confers no scope or
-    /// authority: every scoped tool takes an explicit process id and the read tools already
-    /// expose every process, so the selection is a convenience marker, not a gate (and needs
-    /// no peer-group authentication). Fails
-    /// [`UnknownProcess`](IdentityError::UnknownProcess) if no such process is registered.
+    /// authority: every scoped tool takes an explicit process id, so the selection is a
+    /// convenience marker, not a gate, and needs no peer-group authentication. It is still
+    /// confined to the caller's effective project, though: a process outside scope is reported
+    /// as [`UnknownProcess`](IdentityError::UnknownProcess), indistinguishable from one that
+    /// does not exist, so selecting can never confirm the existence of another project's
+    /// processes. Fails `UnknownProcess` when the process is not in the session's scope.
     pub fn select_process(
         &self,
         session: SessionId,
         process: ProcessId,
     ) -> Result<(), IdentityError> {
-        if self.supervisor.label_of(process).is_none() {
+        let in_scope = self
+            .effective_project(session)
+            .zip(self.process_view(process))
+            .is_some_and(|(scope, view)| view.project == scope);
+        if !in_scope {
             return Err(IdentityError::UnknownProcess);
         }
         self.identity.select_process(session, process);
@@ -101,7 +107,12 @@ impl Facade {
         Whoami {
             session,
             bound_process: origin.process(),
-            selected_process: self.identity.selected_process(session),
+            // Drop a selection whose process has since left the registry (e.g. it was closed),
+            // so `whoami` never echoes a dangling id.
+            selected_process: self
+                .identity
+                .selected_process(session)
+                .filter(|process| self.process_view(*process).is_some()),
             effective_project: self.effective_project(session),
             origin,
         }
