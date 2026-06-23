@@ -13,11 +13,6 @@ use crate::args::{LockAcquireArg, LockKeyArg};
 use crate::server::SoloistMcp;
 use crate::tools::reply::{app_error, structured, unexpected};
 
-/// The lease lifetime used when a caller does not specify one — long enough for a typical
-/// coordinated step, short enough that a holder which crashed without releasing frees the key
-/// soon after.
-const DEFAULT_LEASE_TTL_MS: u64 = 5 * 60 * 1000;
-
 #[tool_router(router = lock_router, vis = "pub(crate)")]
 impl SoloistMcp {
     #[tool(
@@ -27,10 +22,8 @@ impl SoloistMcp {
         &self,
         Parameters(LockAcquireArg { key, ttl_ms }): Parameters<LockAcquireArg>,
     ) -> Result<CallToolResult, ErrorData> {
-        let request = IpcRequest::LockAcquire {
-            key,
-            ttl_ms: ttl_ms.unwrap_or(DEFAULT_LEASE_TTL_MS),
-        };
+        // The default and the bounds live in the core, so an omitted ttl is forwarded as-is.
+        let request = IpcRequest::LockAcquire { key, ttl_ms };
         match self.client.request(request).await {
             Ok(IpcResponse::LeaseOutcome(outcome)) => structured(&outcome),
             Ok(_) => Err(unexpected()),

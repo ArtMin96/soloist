@@ -241,7 +241,7 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             Ok(IpcResponse::PortWait(outcome))
         }
         IpcRequest::LockAcquire { key, ttl_ms } => facade
-            .lock_acquire(session, &key, Duration::from_millis(ttl_ms))
+            .lock_acquire(session, &key, ttl_ms.map(Duration::from_millis))
             .map(IpcResponse::LeaseOutcome)
             .map_err(IpcError::from),
         IpcRequest::LockStatus { key } => facade

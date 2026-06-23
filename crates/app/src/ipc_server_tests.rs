@@ -547,7 +547,7 @@ async fn acquiring_a_lease_in_scope_is_granted_then_released() {
         session,
         IpcRequest::LockAcquire {
             key: "deploy".into(),
-            ttl_ms: 30_000,
+            ttl_ms: Some(30_000),
         },
     )
     .await
@@ -592,7 +592,7 @@ async fn a_lease_action_without_scope_is_refused() {
             session,
             IpcRequest::LockAcquire {
                 key: "deploy".into(),
-                ttl_ms: 30_000,
+                ttl_ms: Some(30_000),
             },
         )
         .await,

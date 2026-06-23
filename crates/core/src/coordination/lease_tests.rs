@@ -21,13 +21,18 @@ fn project() -> ProjectId {
     ProjectId::from_raw(1)
 }
 
+/// A finite TTL, the common case.
+fn ttl(secs: u64) -> Option<Duration> {
+    Some(Duration::from_secs(secs))
+}
+
 #[test]
 fn acquiring_a_free_key_grants_it() {
     let (leases, _clock, _repo) = leases();
     let owner = ProcessId::from_raw(7);
 
     let outcome = leases
-        .acquire(project(), "deploy", owner, Duration::from_secs(30))
+        .acquire(project(), "deploy", owner, ttl(30))
         .expect("acquire");
 
     match outcome {
@@ -45,11 +50,11 @@ fn acquiring_a_held_key_reports_the_holder_without_taking_it() {
     let holder = ProcessId::from_raw(1);
     let contender = ProcessId::from_raw(2);
     leases
-        .acquire(project(), "deploy", holder, Duration::from_secs(30))
+        .acquire(project(), "deploy", holder, ttl(30))
         .expect("first acquire");
 
     let outcome = leases
-        .acquire(project(), "deploy", contender, Duration::from_secs(30))
+        .acquire(project(), "deploy", contender, ttl(30))
         .expect("contended acquire");
 
     match outcome {
@@ -71,7 +76,7 @@ fn a_lease_expires_after_its_ttl_and_is_then_free() {
     let (leases, clock, _repo) = leases();
     let holder = ProcessId::from_raw(1);
     leases
-        .acquire(project(), "deploy", holder, Duration::from_secs(10))
+        .acquire(project(), "deploy", holder, ttl(10))
         .expect("acquire");
 
     // Still held just before the TTL.
@@ -89,7 +94,7 @@ fn a_lease_expires_after_its_ttl_and_is_then_free() {
         .is_none());
     let other = ProcessId::from_raw(2);
     let outcome = leases
-        .acquire(project(), "deploy", other, Duration::from_secs(10))
+        .acquire(project(), "deploy", other, ttl(10))
         .expect("re-acquire after expiry");
     assert!(matches!(outcome, AcquireOutcome::Acquired(view) if view.owner == other));
 }
@@ -99,13 +104,13 @@ fn an_owner_renews_its_own_lease_by_re_acquiring() {
     let (leases, clock, _repo) = leases();
     let owner = ProcessId::from_raw(1);
     leases
-        .acquire(project(), "deploy", owner, Duration::from_secs(10))
+        .acquire(project(), "deploy", owner, ttl(10))
         .expect("acquire");
 
     // Re-acquire near expiry: the owner keeps the key with a fresh deadline.
     clock.advance(Duration::from_secs(9));
     let outcome = leases
-        .acquire(project(), "deploy", owner, Duration::from_secs(10))
+        .acquire(project(), "deploy", owner, ttl(10))
         .expect("renew");
     assert!(matches!(outcome, AcquireOutcome::Acquired(_)));
 
@@ -126,7 +131,7 @@ fn release_frees_a_key_only_for_its_owner() {
     let owner = ProcessId::from_raw(1);
     let other = ProcessId::from_raw(2);
     leases
-        .acquire(project(), "deploy", owner, Duration::from_secs(30))
+        .acquire(project(), "deploy", owner, ttl(30))
         .expect("acquire");
 
     // A non-owner cannot release it.
@@ -153,10 +158,10 @@ fn releasing_an_owner_drops_every_lease_it_holds() {
     let (leases, _clock, repo) = leases();
     let owner = ProcessId::from_raw(1);
     leases
-        .acquire(project(), "deploy", owner, Duration::from_secs(30))
+        .acquire(project(), "deploy", owner, ttl(30))
         .expect("first");
     leases
-        .acquire(project(), "migrate", owner, Duration::from_secs(30))
+        .acquire(project(), "migrate", owner, ttl(30))
         .expect("second");
 
     // The supervisor's hook routes here on process close.
@@ -176,20 +181,10 @@ fn releasing_an_owner_drops_every_lease_it_holds() {
 fn launch_reconcile_clears_every_lease() {
     let (leases, _clock, _repo) = leases();
     leases
-        .acquire(
-            project(),
-            "from-last-run",
-            ProcessId::from_raw(1),
-            Duration::from_secs(30),
-        )
+        .acquire(project(), "from-last-run", ProcessId::from_raw(1), ttl(30))
         .expect("first");
     leases
-        .acquire(
-            project(),
-            "also-last-run",
-            ProcessId::from_raw(2),
-            Duration::from_secs(30),
-        )
+        .acquire(project(), "also-last-run", ProcessId::from_raw(2), ttl(30))
         .expect("second");
 
     // On launch every persisted lease is stale (its owner's run ended; per-run ids are recycled),
@@ -208,17 +203,66 @@ fn launch_reconcile_clears_every_lease() {
 }
 
 #[test]
+fn an_omitted_ttl_uses_the_default() {
+    let (leases, clock, _repo) = leases();
+    let owner = ProcessId::from_raw(1);
+    leases
+        .acquire(project(), "deploy", owner, None)
+        .expect("acquire with the default ttl");
+
+    // The default is minutes, not seconds: still held well after a 10-second-style lease would
+    // have lapsed, and gone well before the one-hour ceiling.
+    clock.advance(Duration::from_secs(60));
+    assert!(
+        leases
+            .status(project(), "deploy")
+            .expect("status")
+            .is_some(),
+        "the default ttl outlasts a minute"
+    );
+    clock.advance(Duration::from_secs(60 * 60));
+    assert!(
+        leases
+            .status(project(), "deploy")
+            .expect("status")
+            .is_none(),
+        "the default ttl is well under the ceiling"
+    );
+}
+
+#[test]
+fn a_sub_second_ttl_is_raised_to_the_floor() {
+    let (leases, clock, _repo) = leases();
+    let owner = ProcessId::from_raw(1);
+    // A zero TTL would otherwise grant a lease that is already expired; the floor keeps it briefly
+    // live so an acquire is meaningful.
+    let outcome = leases
+        .acquire(project(), "deploy", owner, Some(Duration::ZERO))
+        .expect("acquire");
+    assert!(matches!(outcome, AcquireOutcome::Acquired(_)));
+    assert!(
+        leases
+            .status(project(), "deploy")
+            .expect("status")
+            .is_some(),
+        "a floored lease is live the instant it is acquired"
+    );
+
+    // It still expires shortly after — the floor is a second, not forever.
+    clock.advance(Duration::from_secs(2));
+    assert!(leases
+        .status(project(), "deploy")
+        .expect("status")
+        .is_none());
+}
+
+#[test]
 fn a_ttl_above_the_ceiling_is_clamped() {
     let (leases, clock, _repo) = leases();
     let owner = ProcessId::from_raw(1);
     // Request far beyond the ceiling; the lease must not outlive it.
     leases
-        .acquire(
-            project(),
-            "deploy",
-            owner,
-            Duration::from_secs(60 * 60 * 24),
-        )
+        .acquire(project(), "deploy", owner, ttl(60 * 60 * 24))
         .expect("acquire");
 
     clock.advance(Duration::from_secs(60 * 60) + Duration::from_secs(1));
@@ -238,13 +282,13 @@ fn leases_are_scoped_per_project() {
     let a = ProjectId::from_raw(1);
     let b = ProjectId::from_raw(2);
     leases
-        .acquire(a, "deploy", owner, Duration::from_secs(30))
+        .acquire(a, "deploy", owner, ttl(30))
         .expect("acquire in a");
 
     // The same key is free in a different project.
     assert!(leases.status(b, "deploy").expect("status").is_none());
     let outcome = leases
-        .acquire(b, "deploy", ProcessId::from_raw(2), Duration::from_secs(30))
+        .acquire(b, "deploy", ProcessId::from_raw(2), ttl(30))
         .expect("acquire in b");
     assert!(matches!(outcome, AcquireOutcome::Acquired(_)));
 }

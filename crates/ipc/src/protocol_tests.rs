@@ -103,7 +103,11 @@ fn requests_round_trip_through_json() {
         },
         IpcRequest::LockAcquire {
             key: "deploy".into(),
-            ttl_ms: 30_000,
+            ttl_ms: Some(30_000),
+        },
+        IpcRequest::LockAcquire {
+            key: "deploy".into(),
+            ttl_ms: None,
         },
         IpcRequest::LockStatus {
             key: "deploy".into(),

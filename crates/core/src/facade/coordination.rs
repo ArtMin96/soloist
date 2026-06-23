@@ -34,14 +34,14 @@ pub enum CoordinationError {
 
 impl Facade {
     /// Acquires the lease `key` in the session's effective project, owned by its bound process,
-    /// for `ttl` (clamped by the aggregate). Non-blocking: if the key is already held by another
-    /// process, returns [`AcquireOutcome::Held`] with the holder rather than waiting. Re-acquiring
-    /// a key the caller already holds renews it.
+    /// for `ttl` (the aggregate's default when `None`, bounded by it otherwise). Non-blocking: if
+    /// the key is already held by another process, returns [`AcquireOutcome::Held`] with the
+    /// holder rather than waiting. Re-acquiring a key the caller already holds renews it.
     pub fn lock_acquire(
         &self,
         session: SessionId,
         key: &str,
-        ttl: Duration,
+        ttl: Option<Duration>,
     ) -> Result<AcquireOutcome, CoordinationError> {
         let project = self.lease_scope(session)?;
         let owner = self.lease_owner(session)?;

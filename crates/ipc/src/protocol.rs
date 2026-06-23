@@ -100,9 +100,10 @@ pub enum IpcRequest {
         port: u16,
         timeout_ms: Option<u64>,
     },
-    /// Acquire the lease `key` in the session's effective project, owned by its bound process,
-    /// for `ttl_ms` (clamped by the core). Non-blocking: a held key reports its holder.
-    LockAcquire { key: String, ttl_ms: u64 },
+    /// Acquire the lease `key` in the session's effective project, owned by its bound process.
+    /// `ttl_ms` is the lease lifetime; omit it for the core's default (the default and the bounds
+    /// live in the core, so every frontend shares them). Non-blocking: a held key reports its holder.
+    LockAcquire { key: String, ttl_ms: Option<u64> },
     /// The current holder of the lease `key` in the session's effective project, if any.
     LockStatus { key: String },
     /// Release the lease `key` if held by the session's bound process.

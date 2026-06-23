@@ -45,7 +45,7 @@ fn acquiring_with_no_project_in_scope_is_refused() {
     let session = facade.open_session(None);
 
     assert!(matches!(
-        facade.lock_acquire(session, "deploy", Duration::from_secs(30)),
+        facade.lock_acquire(session, "deploy", Some(Duration::from_secs(30))),
         Err(CoordinationError::NoProjectScope)
     ));
 }
@@ -62,7 +62,7 @@ fn acquiring_without_a_bound_process_is_refused() {
     let session = facade.open_session(None);
 
     assert!(matches!(
-        facade.lock_acquire(session, "deploy", Duration::from_secs(30)),
+        facade.lock_acquire(session, "deploy", Some(Duration::from_secs(30))),
         Err(CoordinationError::NoBoundProcess)
     ));
 }
@@ -73,7 +73,7 @@ fn a_bound_session_acquires_reads_and_releases_a_lease() {
     let (session, owner) = bound_session(&facade, ProjectId::from_raw(1));
 
     let outcome = facade
-        .lock_acquire(session, "deploy", Duration::from_secs(30))
+        .lock_acquire(session, "deploy", Some(Duration::from_secs(30)))
         .expect("acquire");
     assert!(
         matches!(outcome, AcquireOutcome::Acquired(ref view) if view.owner == owner),

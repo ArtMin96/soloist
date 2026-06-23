@@ -694,7 +694,7 @@ async fn lock_acquire_threads_its_arguments_through_and_projects_the_outcome() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
     spawn_fake_app(socket.clone(), |request| match request {
-        IpcRequest::LockAcquire { key, ttl_ms } if key == "deploy" && ttl_ms == 30_000 => Ok(
+        IpcRequest::LockAcquire { key, ttl_ms } if key == "deploy" && ttl_ms == Some(30_000) => Ok(
             IpcResponse::LeaseOutcome(AcquireOutcome::Acquired(LeaseView {
                 key: "deploy".into(),
                 owner: ProcessId::from_raw(7),
@@ -717,20 +717,20 @@ async fn lock_acquire_threads_its_arguments_through_and_projects_the_outcome() {
 }
 
 #[tokio::test]
-async fn lock_acquire_fills_a_default_ttl_when_omitted() {
+async fn lock_acquire_forwards_an_omitted_ttl_as_none() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
-    // The handler supplies a default ttl, so the app never receives an absent one. This succeeds
-    // only if the handler sent exactly the default — which pins the documented default value.
+    // The default and the bounds live in the core, so the handler forwards an omitted ttl as None
+    // rather than inventing one — this succeeds only if it sent exactly that.
     spawn_fake_app(socket.clone(), |request| match request {
-        IpcRequest::LockAcquire { key, ttl_ms } if key == "deploy" && ttl_ms == 300_000 => Ok(
+        IpcRequest::LockAcquire { key, ttl_ms: None } if key == "deploy" => Ok(
             IpcResponse::LeaseOutcome(AcquireOutcome::Acquired(LeaseView {
                 key,
                 owner: ProcessId::from_raw(1),
                 expires_unix_millis: 0,
             })),
         ),
-        _ => Err(IpcError::Internal("expected the default ttl".into())),
+        _ => Err(IpcError::Internal("expected an absent ttl".into())),
     });
 
     handler(socket)
@@ -739,7 +739,7 @@ async fn lock_acquire_fills_a_default_ttl_when_omitted() {
             ttl_ms: None,
         }))
         .await
-        .expect("lock_acquire fills the default ttl");
+        .expect("lock_acquire forwards the absent ttl");
 }
 
 #[tokio::test]
