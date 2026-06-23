@@ -118,6 +118,24 @@ fn another_projects_process_is_out_of_scope() {
 }
 
 #[tokio::test]
+async fn send_input_enforces_scope() {
+    let (facade, _trust) = facade();
+    let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
+    let elsewhere = terminal_in(&facade, ProjectId::from_raw(2), "elsewhere");
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, here)
+        .expect("scope to project 1");
+    // send_input shares the one scope guard, so a cross-project target is refused too.
+    assert!(matches!(
+        facade
+            .send_input(session, elsewhere, b"x".to_vec(), None)
+            .await,
+        Err(ScopedActionError::OutOfScope)
+    ));
+}
+
+#[tokio::test]
 async fn an_untrusted_command_in_scope_is_refused() {
     let (facade, trust) = facade();
     let config = parse("processes:\n  Web:\n    command: npm run dev\n").expect("parse");

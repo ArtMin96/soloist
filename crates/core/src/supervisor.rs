@@ -278,6 +278,12 @@ impl Supervisor {
         self.terminals.rendered(id)
     }
 
+    /// A process's last `lines` rendered output lines — a bounded tail, not the whole
+    /// scrollback. `None` if the process has never been started.
+    pub fn rendered_tail(&self, id: ProcessId, lines: usize) -> Option<Vec<String>> {
+        self.terminals.rendered_tail(id, lines)
+    }
+
     /// A process's terminal liveness snapshot (output counter, latest title, rendered
     /// tail), read each sample by the agent idle classifier (C4). `None` if the process
     /// has never been started.

@@ -39,6 +39,13 @@ pub enum IpcRequest {
     StopProcess { process: ProcessId },
     /// Restart one process, scoped to the session's effective project (trust-gated).
     RestartProcess { process: ProcessId },
+    /// Write input to one process's PTY (text or raw control bytes), scoped to the session.
+    /// With `wait_ms`, the app waits then returns the rendered tail.
+    SendInput {
+        process: ProcessId,
+        input: String,
+        wait_ms: Option<u64>,
+    },
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -63,6 +70,8 @@ pub enum IpcResponse {
     Process(ProcessView),
     /// A stop request succeeded; the payload is whether the process was live when stopped.
     Stopped(bool),
+    /// Input was written; the rendered tail when `wait_ms` was given, else `None`.
+    InputSent(Option<String>),
 }
 
 /// The agent-facing projection of a project: its identity and root, without the UI's

@@ -8,10 +8,21 @@
 //! add scope on top for callers that are. Scope is resolved here, in the core, so every
 //! remote adapter inherits the identical guarantee instead of re-checking it per adapter.
 
+use std::time::Duration;
+
 use super::Facade;
 use crate::ids::{ProcessId, SessionId};
 use crate::ports::StoreError;
 use crate::supervisor::SupervisorError;
+
+/// How many trailing rendered lines `send_input`'s `wait_ms` snapshot returns — a bounded
+/// tail (about a screenful), never the whole scrollback, so the reply stays small.
+const INPUT_TAIL_LINES: usize = 24;
+
+/// The longest `send_input` waits before snapshotting the tail, regardless of the requested
+/// `wait_ms`. A bound (per the longevity rules) so a large value cannot tie up the request,
+/// and it stays well under the IPC client's request timeout.
+const MAX_INPUT_WAIT: Duration = Duration::from_secs(10);
 
 /// Why a session-scoped process action was refused. The wire adapters map this to their
 /// own error type, so the taxonomy is defined once here.
@@ -78,6 +89,30 @@ impl Facade {
         self.require_in_scope(session, process)?;
         self.supervisor().restart(process)?;
         Ok(())
+    }
+
+    /// Writes input to an in-scope process's PTY — typed text or raw control bytes, sent
+    /// verbatim (include `\r` to submit a line, `\u{3}` for Ctrl-C). When `wait` is set, waits
+    /// up to [`MAX_INPUT_WAIT`] for the process to react, then returns the rendered terminal
+    /// tail so the caller sees the effect; without it, returns `None` immediately. The clock
+    /// is injected, so a test drives the wait without real time passing.
+    pub async fn send_input(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+        input: Vec<u8>,
+        wait: Option<Duration>,
+    ) -> Result<Option<String>, ScopedActionError> {
+        self.require_in_scope(session, process)?;
+        self.supervisor().write_stdin(process, input).await?;
+        let Some(wait) = wait else {
+            return Ok(None);
+        };
+        self.clock.sleep(wait.min(MAX_INPUT_WAIT)).await;
+        Ok(self
+            .supervisor()
+            .rendered_tail(process, INPUT_TAIL_LINES)
+            .map(|lines| lines.join("\n")))
     }
 
     /// The F13 guard: the process must exist and belong to the session's effective project.

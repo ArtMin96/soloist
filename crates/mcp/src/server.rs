@@ -38,6 +38,19 @@ struct ProjectArg {
     project: Option<u64>,
 }
 
+/// Arguments for writing input to a process.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SendInputArg {
+    /// The id of the process to write to, as returned by `list_processes`.
+    process: u64,
+    /// The bytes to write to the process's input, as text. Control characters are sent
+    /// verbatim — e.g. a trailing carriage return to submit a line, or 0x03 for Ctrl-C.
+    input: String,
+    /// Optionally wait this many milliseconds after writing, then return the rendered
+    /// terminal tail so you can see the effect. Capped by the app; omit to return at once.
+    wait_ms: Option<u64>,
+}
+
 /// Arguments for selecting the session's project scope.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct SelectProjectArg {
@@ -206,6 +219,29 @@ impl SoloistMcp {
         };
         match self.client.request(request).await {
             Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => Err(app_error(&err)),
+        }
+    }
+
+    #[tool(
+        description = "Write input to a process's terminal (typed text or raw control bytes). With wait_ms, returns the rendered terminal tail after waiting, so you can see the effect. Acts only within the session's project."
+    )]
+    async fn send_input(
+        &self,
+        Parameters(SendInputArg {
+            process,
+            input,
+            wait_ms,
+        }): Parameters<SendInputArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::SendInput {
+            process: ProcessId::from_raw(process),
+            input,
+            wait_ms,
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::InputSent(tail)) => structured(&serde_json::json!({ "tail": tail })),
             Ok(_) => Err(unexpected()),
             Err(err) => Err(app_error(&err)),
         }

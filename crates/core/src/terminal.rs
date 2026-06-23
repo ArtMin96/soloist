@@ -218,6 +218,15 @@ impl Terminals {
             .map(|c| lock(&c.buffers).rendered())
     }
 
+    /// `id`'s last `lines` rendered output lines — a bounded tail, cloning only those lines
+    /// rather than the whole scrollback like [`rendered`](Self::rendered). `None` if the
+    /// process has never started.
+    pub(crate) fn rendered_tail(&self, id: ProcessId, lines: usize) -> Option<Vec<String>> {
+        lock(&self.inner)
+            .get(&id)
+            .map(|c| lock(&c.buffers).tail(lines))
+    }
+
     /// `id`'s terminal liveness snapshot for agent idle classification (C4). Reads the
     /// output counter, latest title, and rendered tail under one lock. `None` if the
     /// process has never been started.

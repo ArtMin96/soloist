@@ -36,6 +36,16 @@ fn requests_round_trip_through_json() {
         IpcRequest::RestartProcess {
             process: ProcessId::from_raw(7),
         },
+        IpcRequest::SendInput {
+            process: ProcessId::from_raw(8),
+            input: "ls\r".into(),
+            wait_ms: Some(200),
+        },
+        IpcRequest::SendInput {
+            process: ProcessId::from_raw(9),
+            input: "\u{3}".into(),
+            wait_ms: None,
+        },
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -80,6 +90,8 @@ fn every_response_variant_round_trips_through_json() {
         IpcResponse::Processes(vec![view.clone()]),
         IpcResponse::Process(view.clone()),
         IpcResponse::Stopped(true),
+        IpcResponse::InputSent(Some("$ ls\nfile.txt".into())),
+        IpcResponse::InputSent(None),
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");

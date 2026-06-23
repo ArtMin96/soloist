@@ -201,6 +201,55 @@ async fn restart_process_threads_the_id_through_and_acks() {
 }
 
 #[tokio::test]
+async fn send_input_threads_its_arguments_through_and_returns_the_tail() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SendInput {
+            process,
+            input,
+            wait_ms,
+        } if process == ProcessId::from_raw(5) && input == "ls\r" && wait_ms == Some(200) => {
+            Ok(IpcResponse::InputSent(Some("$ ls\nfile.txt".into())))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .send_input(Parameters(SendInputArg {
+            process: 5,
+            input: "ls\r".into(),
+            wait_ms: Some(200),
+        }))
+        .await
+        .expect("send_input succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "tail": "$ ls\nfile.txt" })
+    );
+}
+
+#[tokio::test]
+async fn send_input_without_a_wait_returns_a_null_tail() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SendInput { .. } => Ok(IpcResponse::InputSent(None)),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .send_input(Parameters(SendInputArg {
+            process: 5,
+            input: "x".into(),
+            wait_ms: None,
+        }))
+        .await
+        .expect("send_input succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "tail": null }));
+}
+
+#[tokio::test]
 async fn a_refused_action_surfaces_as_a_tool_error() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");

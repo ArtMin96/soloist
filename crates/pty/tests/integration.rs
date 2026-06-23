@@ -286,6 +286,56 @@ async fn facade_runs_the_full_thread_with_real_spawner_and_clock() {
 }
 
 #[tokio::test]
+async fn send_input_writes_to_the_pty_and_returns_the_rendered_tail() {
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(PtyProcessSpawner),
+            Arc::new(TokioClock),
+            Arc::new(NoTrust),
+            Arc::new(NoProjects),
+        )
+        .build(),
+    );
+    let mut events = facade.subscribe();
+
+    // `cat` echoes its input back to the terminal, so the rendered tail reflects what we
+    // sent — a true end-to-end check of the write plus the wait_ms snapshot on a real PTY.
+    let id = facade
+        .supervisor()
+        .register(soloist_core::testing::terminal_registration(
+            ProjectId::from_raw(1),
+            "echo",
+            "cat",
+        ));
+    facade.supervisor().start(id).expect("cat starts");
+    wait_for_status(&mut events, ProcStatus::Running).await;
+
+    let session = facade.open_session();
+    facade
+        .bind_session_process(session, id)
+        .expect("scope the session to the running process");
+
+    // The wait is generous so the echo is recorded before the snapshot; cat echoes at once.
+    let tail = facade
+        .send_input(
+            session,
+            id,
+            b"marco-polo\r".to_vec(),
+            Some(Duration::from_millis(750)),
+        )
+        .await
+        .expect("send_input succeeds")
+        .expect("a tail is returned when waiting");
+    assert!(
+        tail.contains("marco-polo"),
+        "the echoed input appears in the rendered tail: {tail:?}"
+    );
+
+    assert!(facade.supervisor().stop(id), "stop finds the process");
+    wait_for_status(&mut events, ProcStatus::Stopped).await;
+}
+
+#[tokio::test]
 async fn launch_agent_runs_a_stub_in_the_project_dir_inheriting_the_environment() {
     use std::os::unix::fs::PermissionsExt;
 
