@@ -2,7 +2,7 @@
 //! their body to the owning process as a fresh turn.
 //!
 //! It is woken three ways and re-evaluates the full armed set on each: a [`Clock`] sleep until the
-//! soonest deadline (for [`FireCond::At`] and the idle max-wait backstops); a [`Notify`] the
+//! soonest deadline (for [`At`](super::timer::FireCond::At) and the idle max-wait backstops); a [`Notify`] the
 //! [`Timers`](super::Timers) aggregate pings when a timer is created or resumed (so an
 //! already-satisfied condition fires at once); and the [`DomainEvent`] bus, from which it tracks
 //! each agent's idle state via [`AgentActivityChanged`](DomainEvent::AgentActivityChanged) — the
@@ -27,7 +27,7 @@ use crate::ports::Clock;
 use crate::supervision::supervise;
 use crate::supervisor::Supervisor;
 
-use super::timer::FireCond;
+use super::timer::watched_is_idle;
 use super::timer_repo::{StoredTimer, TimerRepo};
 
 /// Fires due coordination timers. Cloneable so the supervising [`run`](TimerScheduler::run) can
@@ -124,8 +124,10 @@ impl TimerScheduler {
         }
     }
 
-    /// Whether `timer` should fire now: an [`At`](FireCond::At) timer once its deadline passes; an
-    /// idle timer once its quorum of watched processes is idle, or its max-wait backstop passes.
+    /// Whether `timer` should fire now: any timer once its deadline passes (its scheduled time, or
+    /// a fire-when-idle backstop), and a fire-when-idle timer as soon as its watched quorum is idle.
+    /// The quorum and the per-process idle rule are the shared `IdleMode::quorum_met` and
+    /// [`watched_is_idle`], so this fires on exactly what the façade reports at set time.
     fn is_due(
         timer: &StoredTimer,
         now: u64,
@@ -135,34 +137,12 @@ impl TimerScheduler {
         if timer.deadline_unix_millis <= now {
             return true;
         }
-        match &timer.fire {
-            FireCond::At => false,
-            FireCond::WhenIdleAny { watched } => {
-                watched.iter().any(|&p| is_idle(p, activity, supervisor))
-            }
-            // An empty watch set never satisfies "all", so such a timer fires only on its
-            // backstop — never spuriously at once.
-            FireCond::WhenIdleAll { watched } => {
-                !watched.is_empty() && watched.iter().all(|&p| is_idle(p, activity, supervisor))
-            }
+        match timer.fire.idle_quorum() {
+            None => false,
+            Some((mode, watched)) => mode.quorum_met(watched, |p| {
+                watched_is_idle(activity.get(&p).copied(), supervisor.view(p).is_some())
+            }),
         }
-    }
-}
-
-/// Whether a watched process counts as idle for a fire-when-idle timer: an agent whose last-known
-/// activity is [`Idle`](AgentActivity::Idle), or a process that has left the registry entirely (it
-/// can no longer do work). A running process whose activity is unknown (not yet classified, or a
-/// non-agent with no idle signal) is *not* idle — the timer keeps waiting (and its backstop still
-/// guarantees it eventually fires).
-fn is_idle(
-    process: ProcessId,
-    activity: &HashMap<ProcessId, AgentActivity>,
-    supervisor: &Supervisor,
-) -> bool {
-    match activity.get(&process) {
-        Some(AgentActivity::Idle) => true,
-        Some(_) => false,
-        None => supervisor.view(process).is_none(),
     }
 }
 

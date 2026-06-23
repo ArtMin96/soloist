@@ -1,10 +1,12 @@
 //! The public command and query API that adapters call (context C8).
 //!
 //! [`Facade`] is the one surface every adapter (Tauri, MCP, HTTP/CLI) talks to. It
-//! owns the event bus and the bounded contexts — process supervision (C2), and the
-//! projects/trust/config of C1 — and hands adapters references to them, so a behaviour
-//! like "restart" or "is this command trusted" is implemented exactly once. Adapters
-//! translate requests in and project the read model out; they hold no business state.
+//! owns the event bus and the bounded contexts — projects/trust/config (C1), process
+//! supervision (C2), terminal I/O (C3), agents & idle (C4), monitoring (C5),
+//! coordination (C6: leases & timers), notifications (C7), and identity (C8) — and hands
+//! adapters references to them, so a behaviour like "restart" or "is this command
+//! trusted" is implemented exactly once. Adapters translate requests in and project the
+//! read model out; they hold no business state.
 
 use std::collections::BTreeMap;
 use std::future::Future;

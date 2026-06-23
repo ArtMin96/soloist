@@ -259,7 +259,7 @@ pub enum IpcError {
     #[error("no project is in scope; select one first")]
     NoProjectScope,
     /// A coordination action that needs an owning process was made by a session bound to none.
-    #[error("not bound to a process; bind a session before holding a lease")]
+    #[error("not bound to a process; bind a session before owning a timer or lease")]
     NoBoundProcess,
     /// The referenced process belongs to a different project than the session's scope.
     #[error("that process belongs to a different project")]

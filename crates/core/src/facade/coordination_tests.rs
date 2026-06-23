@@ -142,8 +142,18 @@ fn a_bound_session_sets_lists_pauses_and_cancels_a_timer() {
 #[test]
 fn fire_when_idle_reports_the_processes_it_is_waiting_on() {
     let facade = facade_with(Arc::new(FakeProjectRepo::new()));
-    let (session, _owner) = bound_session(&facade, ProjectId::from_raw(1));
-    let watched = vec![ProcessId::from_raw(50), ProcessId::from_raw(51)];
+    let project = ProjectId::from_raw(1);
+    let (session, _owner) = bound_session(&facade, project);
+    // Two registered processes, running but not classified idle: in the registry with no idle
+    // signal, so the timer waits on both.
+    let watched = vec![
+        facade
+            .supervisor()
+            .register(terminal_registration(project, "first", "sleep 60")),
+        facade
+            .supervisor()
+            .register(terminal_registration(project, "second", "sleep 60")),
+    ];
 
     let outcome = facade
         .timer_fire_when_idle(
@@ -155,8 +165,37 @@ fn fire_when_idle_reports_the_processes_it_is_waiting_on() {
         )
         .expect("set");
 
-    // Nothing has been classified idle, so the condition is not yet met and the report names every
-    // watched process as still pending.
+    // Neither is idle, so the condition is not yet met and the report names both as still pending.
     assert!(!outcome.already_idle);
     assert_eq!(outcome.waiting_on, watched);
+}
+
+#[test]
+fn fire_when_idle_counts_a_process_absent_from_the_registry_as_idle() {
+    // A watched worker that has already exited (left the registry) can no longer work, so it counts
+    // as idle — exactly the rule the scheduler fires on. The report must not claim the timer is
+    // still waiting on it: otherwise an `all` condition that is in fact already met reads as unmet,
+    // and a lead believes a finished worker is still busy.
+    let facade = facade_with(Arc::new(FakeProjectRepo::new()));
+    let (session, _owner) = bound_session(&facade, ProjectId::from_raw(1));
+    let gone = ProcessId::from_raw(9999); // never registered → not in the supervisor
+
+    let outcome = facade
+        .timer_fire_when_idle(
+            session,
+            "all done".into(),
+            vec![gone],
+            IdleMode::All,
+            Some(Duration::from_secs(60)),
+        )
+        .expect("set");
+
+    assert!(
+        outcome.already_idle,
+        "an absent watched process counts as idle, so an all-timer's condition is already met"
+    );
+    assert!(
+        outcome.waiting_on.is_empty(),
+        "the report must not wait on a process that has left the registry"
+    );
 }

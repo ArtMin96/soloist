@@ -1,18 +1,20 @@
-//! Session-scoped coordination actions (context C8 → C6): the lease surface a remote caller
-//! (MCP today) drives within its effective project.
+//! Session-scoped coordination actions (context C8 → C6): the lease and timer surface a remote
+//! caller (MCP today) drives within its effective project.
 //!
-//! A lease is project-scoped and process-owned, so each method resolves two things in the core —
-//! the session's **effective project** (what the lease belongs to) and its **bound process** (who
-//! owns it) — before routing to the one [`Leases`](crate::coordination::Leases) aggregate. Both
-//! are resolved here, not in any adapter, so every remote surface inherits the identical scope and
-//! ownership rules. The bound process must be authentic (it was checked at bind time), which is
-//! also what lets the supervisor auto-release the lease when that process closes.
+//! Leases and timers are project-scoped and process-owned, so each method resolves two things in
+//! the core — the session's **effective project** (what the record belongs to) and its **bound
+//! process** (who owns it) — before routing to the one [`Leases`](crate::coordination::Leases) or
+//! [`Timers`](crate::coordination::Timers) aggregate. Both are resolved here, not in any adapter,
+//! so every remote surface inherits the identical scope and ownership rules. The bound process must
+//! be authentic (it was checked at bind time), which is also what lets the supervisor auto-release a
+//! lease — and what a fired timer delivers its body to — when that process closes.
 
 use std::time::Duration;
 
 use super::Facade;
-use crate::agents::AgentActivity;
-use crate::coordination::{AcquireOutcome, IdleMode, LeaseView, SetWhenIdleOutcome, TimerView};
+use crate::coordination::{
+    watched_is_idle, AcquireOutcome, IdleMode, LeaseView, SetWhenIdleOutcome, TimerView,
+};
 use crate::ids::{ProcessId, ProjectId, SessionId, TimerId};
 use crate::ports::StoreError;
 
@@ -23,10 +25,11 @@ pub enum CoordinationError {
     /// The session has no project in scope to act within (none selected, bound, or singular).
     #[error("no project is in scope; select one first")]
     NoProjectScope,
-    /// The session is not bound to a process, so it has no owner to attribute a lease to. An
-    /// agent binds via its injected `SOLOIST_PROCESS_ID`; an unbound external caller cannot hold
-    /// a process-owned lease (it has nothing to auto-release it on close).
-    #[error("not bound to a process; bind a session before holding a lease")]
+    /// The session is not bound to a process, so it has no owner to attribute the record to. An
+    /// agent binds via its injected `SOLOIST_PROCESS_ID`; an unbound external caller cannot own a
+    /// process-owned coordination record — a lease or a timer (nothing would deliver a timer's body
+    /// or auto-release a lease on close).
+    #[error("not bound to a process; bind a session before owning a timer or lease")]
     NoBoundProcess,
     /// A durable read or write failed.
     #[error(transparent)]
@@ -44,8 +47,8 @@ impl Facade {
         key: &str,
         ttl: Option<Duration>,
     ) -> Result<AcquireOutcome, CoordinationError> {
-        let project = self.lease_scope(session)?;
-        let owner = self.lease_owner(session)?;
+        let project = self.coordination_scope(session)?;
+        let owner = self.coordination_owner(session)?;
         Ok(self.leases.acquire(project, key, owner, ttl)?)
     }
 
@@ -56,7 +59,7 @@ impl Facade {
         session: SessionId,
         key: &str,
     ) -> Result<Option<LeaseView>, CoordinationError> {
-        let project = self.lease_scope(session)?;
+        let project = self.coordination_scope(session)?;
         Ok(self.leases.status(project, key)?)
     }
 
@@ -64,8 +67,8 @@ impl Facade {
     /// bound process, returning whether the caller's lease was released. A caller cannot release a
     /// lease another process holds.
     pub fn lock_release(&self, session: SessionId, key: &str) -> Result<bool, CoordinationError> {
-        let project = self.lease_scope(session)?;
-        let owner = self.lease_owner(session)?;
+        let project = self.coordination_scope(session)?;
+        let owner = self.coordination_owner(session)?;
         Ok(self.leases.release(project, key, owner)?)
     }
 
@@ -85,8 +88,8 @@ impl Facade {
         body: String,
         after: Option<Duration>,
     ) -> Result<TimerView, CoordinationError> {
-        let project = self.lease_scope(session)?;
-        let owner = self.lease_owner(session)?;
+        let project = self.coordination_scope(session)?;
+        let owner = self.coordination_owner(session)?;
         Ok(self.timers.set(project, owner, body, after)?)
     }
 
@@ -105,19 +108,14 @@ impl Facade {
         mode: IdleMode,
         max_wait: Option<Duration>,
     ) -> Result<SetWhenIdleOutcome, CoordinationError> {
-        let project = self.lease_scope(session)?;
-        let owner = self.lease_owner(session)?;
+        let project = self.coordination_scope(session)?;
+        let owner = self.coordination_owner(session)?;
         let waiting_on: Vec<ProcessId> = processes
             .iter()
             .copied()
             .filter(|&process| !self.is_idle_now(process))
             .collect();
-        let already_idle = match mode {
-            IdleMode::Any => processes.iter().any(|&process| self.is_idle_now(process)),
-            IdleMode::All => {
-                !processes.is_empty() && processes.iter().all(|&process| self.is_idle_now(process))
-            }
-        };
+        let already_idle = mode.quorum_met(&processes, |process| self.is_idle_now(process));
         let timer = self
             .timers
             .set_when_idle(project, owner, body, processes, mode, max_wait)?;
@@ -134,7 +132,7 @@ impl Facade {
         session: SessionId,
         timer: TimerId,
     ) -> Result<bool, CoordinationError> {
-        let owner = self.lease_owner(session)?;
+        let owner = self.coordination_owner(session)?;
         Ok(self.timers.cancel(timer, owner)?)
     }
 
@@ -145,7 +143,7 @@ impl Facade {
         session: SessionId,
         timer: TimerId,
     ) -> Result<bool, CoordinationError> {
-        let owner = self.lease_owner(session)?;
+        let owner = self.coordination_owner(session)?;
         Ok(self.timers.pause(timer, owner)?)
     }
 
@@ -156,13 +154,13 @@ impl Facade {
         session: SessionId,
         timer: TimerId,
     ) -> Result<bool, CoordinationError> {
-        let owner = self.lease_owner(session)?;
+        let owner = self.coordination_owner(session)?;
         Ok(self.timers.resume(timer, owner)?)
     }
 
     /// Every timer the session's bound process owns (armed or paused).
     pub fn timer_list(&self, session: SessionId) -> Result<Vec<TimerView>, CoordinationError> {
-        let owner = self.lease_owner(session)?;
+        let owner = self.coordination_owner(session)?;
         Ok(self.timers.list(owner)?)
     }
 
@@ -172,21 +170,26 @@ impl Facade {
         self.timers.reconcile()
     }
 
-    /// Whether a process is idle right now per the agent idle FSM (C4) — the snapshot the
-    /// fire-when-idle report is computed from. An untracked or unclassified process reads
-    /// not-idle.
+    /// Whether a process counts as idle right now for a fire-when-idle timer — the snapshot the
+    /// `already_idle`/`waiting_on` report is built from. Applies the same rule the scheduler fires
+    /// on ([`watched_is_idle`]): the agent idle FSM (C4) reports `Idle`, or the process has left the
+    /// registry (it can no longer work), so the report can never disagree with what fires.
     fn is_idle_now(&self, process: ProcessId) -> bool {
-        self.idle.activity(process) == Some(AgentActivity::Idle)
+        watched_is_idle(
+            self.idle.activity(process),
+            self.supervisor.view(process).is_some(),
+        )
     }
 
     /// The session's effective project, or [`CoordinationError::NoProjectScope`].
-    fn lease_scope(&self, session: SessionId) -> Result<ProjectId, CoordinationError> {
+    fn coordination_scope(&self, session: SessionId) -> Result<ProjectId, CoordinationError> {
         self.effective_project(session)
             .ok_or(CoordinationError::NoProjectScope)
     }
 
-    /// The session's bound process — the lease owner — or [`CoordinationError::NoBoundProcess`].
-    fn lease_owner(&self, session: SessionId) -> Result<ProcessId, CoordinationError> {
+    /// The session's bound process — the owner a lease or timer is attributed to — or
+    /// [`CoordinationError::NoBoundProcess`].
+    fn coordination_owner(&self, session: SessionId) -> Result<ProcessId, CoordinationError> {
         self.identity
             .origin(session)
             .process()

@@ -20,5 +20,6 @@ pub use lease::{AcquireOutcome, LeaseView, Leases};
 pub use releaser::LeaseReleaser;
 pub use repo::{LockRepo, NoopLockRepo, StoredLease};
 pub use scheduler::TimerScheduler;
+pub(crate) use timer::watched_is_idle;
 pub use timer::{FireCond, IdleMode, SetWhenIdleOutcome, TimerStatus, TimerView, Timers};
 pub use timer_repo::{NewTimer, NoopTimerRepo, StoredTimer, TimerRepo};

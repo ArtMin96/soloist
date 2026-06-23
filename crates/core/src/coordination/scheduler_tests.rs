@@ -256,6 +256,33 @@ async fn fire_when_idle_any_fires_as_soon_as_one_watched_process_is_idle() {
 }
 
 #[tokio::test]
+async fn a_watched_process_absent_from_the_registry_counts_as_idle_and_fires() {
+    // A watched worker that has exited (is not in the registry) can no longer work, so it counts as
+    // idle: the timer fires without ever seeing an idle event and without the backstop elapsing.
+    let h = harness(FakeSpawner::exits_on_kill());
+    let owner = h.running_process().await;
+    let gone = ProcessId::from_raw(9999); // never registered → not in the supervisor
+    h.spawn_scheduler();
+    settle().await;
+
+    let view = h
+        .timers
+        .set_when_idle(
+            PROJECT,
+            owner,
+            "all done".into(),
+            vec![gone],
+            IdleMode::All,
+            Some(Duration::from_secs(3600)),
+        )
+        .expect("set");
+
+    // No event published and no clock advance: arming wakes the scheduler, which sees the absent
+    // process as idle and fires at once — far before the hour-long backstop.
+    settle_until(|| !h.armed(view.id)).await;
+}
+
+#[tokio::test]
 async fn a_non_idle_transition_does_not_fire_a_fire_when_idle_timer() {
     let h = harness(FakeSpawner::exits_on_kill());
     let owner = h.running_process().await;

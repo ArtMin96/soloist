@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
 use super::timer_repo::{NewTimer, TimerRepo};
+use crate::agents::AgentActivity;
 use crate::events::EventBus;
 use crate::ids::{ProcessId, ProjectId, TimerId};
 use crate::ports::{Clock, StoreError};
@@ -54,6 +55,19 @@ pub enum FireCond {
     WhenIdleAll { watched: Vec<ProcessId> },
 }
 
+impl FireCond {
+    /// The idle quorum and watched set this condition fires on, or `None` for a plain [`At`](Self::At)
+    /// timer (which fires only at its deadline). Lets the scheduler evaluate an idle condition
+    /// through the one [`IdleMode::quorum_met`], rather than re-matching the variants itself.
+    pub(crate) fn idle_quorum(&self) -> Option<(IdleMode, &[ProcessId])> {
+        match self {
+            FireCond::At => None,
+            FireCond::WhenIdleAny { watched } => Some((IdleMode::Any, watched)),
+            FireCond::WhenIdleAll { watched } => Some((IdleMode::All, watched)),
+        }
+    }
+}
+
 /// Which idle quorum a fire-when-idle timer needs — the one knob distinguishing the
 /// `timer_fire_when_idle_any` and `_all` tools, so one aggregate method serves both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +76,40 @@ pub enum IdleMode {
     Any,
     /// Fire only once every watched process is idle.
     All,
+}
+
+impl IdleMode {
+    /// Whether the idle quorum is met across `watched`, given a per-process idle test: `Any` as
+    /// soon as one watched process is idle, `All` only once every one is. Neither is met by an
+    /// empty set — an `All` timer with nothing to watch fires on its backstop, not at once. The
+    /// single definition of the quorum, shared by the scheduler (deciding to fire) and the façade
+    /// (reporting `already_idle` at set time), so the two can never disagree.
+    pub(crate) fn quorum_met(
+        self,
+        watched: &[ProcessId],
+        is_idle: impl Fn(ProcessId) -> bool,
+    ) -> bool {
+        match self {
+            IdleMode::Any => watched.iter().any(|&p| is_idle(p)),
+            IdleMode::All => !watched.is_empty() && watched.iter().all(|&p| is_idle(p)),
+        }
+    }
+}
+
+/// Whether a watched process counts as idle for a fire-when-idle timer, from its last-known
+/// activity and whether it is still in the process registry: an agent reported
+/// [`Idle`](AgentActivity::Idle), or a process that has **left the registry** entirely — it can no
+/// longer do work, so a watched process that has gone counts as done and never deadlocks the wait.
+/// A process still running whose activity is unknown (not yet classified, or a non-agent with no
+/// idle signal) is *not* idle; the wait continues, with the timer's backstop as the guarantee it
+/// eventually fires. The single definition of "idle" for a watched process, shared by the scheduler
+/// and the façade's `already_idle`/`waiting_on` report, so what is reported matches what fires.
+pub(crate) fn watched_is_idle(activity: Option<AgentActivity>, in_registry: bool) -> bool {
+    match activity {
+        Some(AgentActivity::Idle) => true,
+        Some(_) => false,
+        None => !in_registry,
+    }
 }
 
 /// Whether a timer is counting down or has been suspended by its owner. A paused timer never
