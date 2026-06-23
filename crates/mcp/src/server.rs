@@ -157,6 +157,59 @@ impl SoloistMcp {
             Err(err) => Err(app_error(&err)),
         }
     }
+
+    #[tool(
+        description = "Start one process by its id. Acts only within the session's project; refused if the command is untrusted."
+    )]
+    async fn start_process(
+        &self,
+        Parameters(ProcessArg { process }): Parameters<ProcessArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::StartProcess {
+            process: ProcessId::from_raw(process),
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => Err(app_error(&err)),
+        }
+    }
+
+    #[tool(
+        description = "Gracefully stop one process by its id. Reports whether it was running. Acts only within the session's project."
+    )]
+    async fn stop_process(
+        &self,
+        Parameters(ProcessArg { process }): Parameters<ProcessArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::StopProcess {
+            process: ProcessId::from_raw(process),
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Stopped(was_running)) => {
+                structured(&serde_json::json!({ "was_running": was_running }))
+            }
+            Ok(_) => Err(unexpected()),
+            Err(err) => Err(app_error(&err)),
+        }
+    }
+
+    #[tool(
+        description = "Restart one process by its id (stop then start with its saved config). Acts only within the session's project; refused if untrusted."
+    )]
+    async fn restart_process(
+        &self,
+        Parameters(ProcessArg { process }): Parameters<ProcessArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::RestartProcess {
+            process: ProcessId::from_raw(process),
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => Err(app_error(&err)),
+        }
+    }
 }
 
 #[tool_handler(router = self.tool_router)]

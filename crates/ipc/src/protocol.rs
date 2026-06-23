@@ -8,7 +8,9 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use soloist_core::{ProcessId, ProcessView, ProjectId, ProjectView, Whoami};
+use soloist_core::{
+    IdentityError, ProcessId, ProcessView, ProjectId, ProjectView, ScopedActionError, Whoami,
+};
 
 /// A request from an IPC client to the running app. The server resolves identity and
 /// scope from the connection's session, so requests carry no session of their own.
@@ -31,6 +33,12 @@ pub enum IpcRequest {
     ListProcesses,
     /// One process's current read-model row.
     GetProcessStatus { process: ProcessId },
+    /// Start one process, scoped to the session's effective project (trust-gated).
+    StartProcess { process: ProcessId },
+    /// Gracefully stop one process, scoped to the session's effective project.
+    StopProcess { process: ProcessId },
+    /// Restart one process, scoped to the session's effective project (trust-gated).
+    RestartProcess { process: ProcessId },
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -53,6 +61,8 @@ pub enum IpcResponse {
     Processes(Vec<ProcessView>),
     /// One process's read-model row.
     Process(ProcessView),
+    /// A stop request succeeded; the payload is whether the process was live when stopped.
+    Stopped(bool),
 }
 
 /// The agent-facing projection of a project: its identity and root, without the UI's
@@ -95,9 +105,37 @@ pub enum IpcError {
     /// A scoped request was made with no project in scope.
     #[error("no project is in scope; select one first")]
     NoProjectScope,
+    /// The referenced process belongs to a different project than the session's scope.
+    #[error("that process belongs to a different project")]
+    OutOfScope,
+    /// An action targeted a command that is not trusted to run in this project.
+    #[error("command is not trusted to run in this project")]
+    Untrusted,
     /// The app failed to serve the request (e.g. a durable read failed).
     #[error("the app could not serve the request: {0}")]
     Internal(String),
+}
+
+impl From<IdentityError> for IpcError {
+    fn from(err: IdentityError) -> Self {
+        match err {
+            IdentityError::UnknownProcess => IpcError::UnknownProcess,
+            IdentityError::UnknownProject => IpcError::UnknownProject,
+            IdentityError::Store(err) => IpcError::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<ScopedActionError> for IpcError {
+    fn from(err: ScopedActionError) -> Self {
+        match err {
+            ScopedActionError::UnknownProcess => IpcError::UnknownProcess,
+            ScopedActionError::NoProjectScope => IpcError::NoProjectScope,
+            ScopedActionError::OutOfScope => IpcError::OutOfScope,
+            ScopedActionError::Untrusted => IpcError::Untrusted,
+            ScopedActionError::Store(err) => IpcError::Internal(err.to_string()),
+        }
+    }
 }
 
 /// A framed reply: success or a typed failure.

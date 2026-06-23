@@ -144,3 +144,74 @@ async fn a_wrong_shaped_reply_is_a_protocol_error() {
     let result = handler(socket).whoami().await;
     assert!(result.is_err(), "a mismatched reply must be rejected");
 }
+
+#[tokio::test]
+async fn start_process_threads_the_id_through_and_acks() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::StartProcess { process } if process == ProcessId::from_raw(5) => {
+            Ok(IpcResponse::Acked)
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .start_process(Parameters(ProcessArg { process: 5 }))
+        .await
+        .expect("start succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "ok": true }));
+}
+
+#[tokio::test]
+async fn stop_process_reports_whether_it_was_running() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::StopProcess { .. } => Ok(IpcResponse::Stopped(true)),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .stop_process(Parameters(ProcessArg { process: 5 }))
+        .await
+        .expect("stop succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "was_running": true })
+    );
+}
+
+#[tokio::test]
+async fn restart_process_threads_the_id_through_and_acks() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::RestartProcess { process } if process == ProcessId::from_raw(5) => {
+            Ok(IpcResponse::Acked)
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .restart_process(Parameters(ProcessArg { process: 5 }))
+        .await
+        .expect("restart succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "ok": true }));
+}
+
+#[tokio::test]
+async fn a_refused_action_surfaces_as_a_tool_error() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // The core refused the action (untrusted / out of scope); the agent must see an error.
+    spawn_fake_app(socket.clone(), |_request| Err(IpcError::Untrusted));
+
+    let result = handler(socket)
+        .start_process(Parameters(ProcessArg { process: 5 }))
+        .await;
+    assert!(
+        result.is_err(),
+        "a refused action must surface as a tool error"
+    );
+}

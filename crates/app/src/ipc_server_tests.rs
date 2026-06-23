@@ -162,3 +162,66 @@ fn binding_an_unknown_process_maps_to_the_wire_error() {
         Err(IpcError::UnknownProcess)
     );
 }
+
+/// Registers a terminal in `project` and binds `session` to it, putting that project in
+/// scope — the setup every action-routing test shares.
+fn scoped_terminal(
+    facade: &Facade,
+    session: SessionId,
+    project: ProjectId,
+    name: &str,
+) -> ProcessId {
+    let id = facade
+        .supervisor()
+        .register(terminal_registration(project, name, "sleep 60"));
+    facade
+        .bind_session_process(session, id)
+        .expect("bind to the registered process");
+    id
+}
+
+#[tokio::test]
+async fn starting_an_in_scope_process_is_acked() {
+    let facade = facade();
+    let session = facade.open_session();
+    let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::StartProcess { process: id }),
+        Ok(IpcResponse::Acked)
+    );
+}
+
+#[test]
+fn stopping_an_idle_in_scope_process_reports_it_was_not_running() {
+    let facade = facade();
+    let session = facade.open_session();
+    let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
+    // Never started, so the stop finds nothing live — the bool the agent reads back.
+    assert_eq!(
+        handle_request(&facade, session, IpcRequest::StopProcess { process: id }),
+        Ok(IpcResponse::Stopped(false))
+    );
+}
+
+#[test]
+fn an_action_on_another_projects_process_maps_to_out_of_scope() {
+    let facade = facade();
+    let session = facade.open_session();
+    // The session is scoped to project 1; the target lives in project 2.
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
+    let elsewhere = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(2),
+        "elsewhere",
+        "sleep 60",
+    ));
+    for request in [
+        IpcRequest::StartProcess { process: elsewhere },
+        IpcRequest::StopProcess { process: elsewhere },
+        IpcRequest::RestartProcess { process: elsewhere },
+    ] {
+        assert_eq!(
+            handle_request(&facade, session, request),
+            Err(IpcError::OutOfScope)
+        );
+    }
+}

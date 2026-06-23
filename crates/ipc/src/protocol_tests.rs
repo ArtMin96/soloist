@@ -27,6 +27,15 @@ fn requests_round_trip_through_json() {
         IpcRequest::GetProcessStatus {
             process: ProcessId::from_raw(4),
         },
+        IpcRequest::StartProcess {
+            process: ProcessId::from_raw(5),
+        },
+        IpcRequest::StopProcess {
+            process: ProcessId::from_raw(6),
+        },
+        IpcRequest::RestartProcess {
+            process: ProcessId::from_raw(7),
+        },
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -70,6 +79,7 @@ fn every_response_variant_round_trips_through_json() {
         }),
         IpcResponse::Processes(vec![view.clone()]),
         IpcResponse::Process(view.clone()),
+        IpcResponse::Stopped(true),
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");
@@ -84,12 +94,49 @@ fn a_typed_error_round_trips() {
         IpcError::UnknownProcess,
         IpcError::UnknownProject,
         IpcError::NoProjectScope,
+        IpcError::OutOfScope,
+        IpcError::Untrusted,
         IpcError::Internal("disk full".into()),
     ] {
         let json = serde_json::to_string(&error).expect("serialize");
         let back: IpcError = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, error);
     }
+}
+
+#[test]
+fn core_action_errors_map_to_the_wire_error() {
+    use soloist_core::ScopedActionError;
+    // The single place core action errors become wire errors, so every adapter agrees.
+    assert_eq!(
+        IpcError::from(ScopedActionError::UnknownProcess),
+        IpcError::UnknownProcess
+    );
+    assert_eq!(
+        IpcError::from(ScopedActionError::NoProjectScope),
+        IpcError::NoProjectScope
+    );
+    assert_eq!(
+        IpcError::from(ScopedActionError::OutOfScope),
+        IpcError::OutOfScope
+    );
+    assert_eq!(
+        IpcError::from(ScopedActionError::Untrusted),
+        IpcError::Untrusted
+    );
+}
+
+#[test]
+fn core_identity_errors_map_to_the_wire_error() {
+    use soloist_core::IdentityError;
+    assert_eq!(
+        IpcError::from(IdentityError::UnknownProcess),
+        IpcError::UnknownProcess
+    );
+    assert_eq!(
+        IpcError::from(IdentityError::UnknownProject),
+        IpcError::UnknownProject
+    );
 }
 
 #[test]
