@@ -24,7 +24,7 @@ the phase file (the task).
    HTTP/CLI ── crates/httpapi, crates/cli       pty/     PTY adapter (ProcessSpawner/PtyIo/OrphanControl)
         │  (each its own crate, core-only dep)  app/     Tauri binary + UI + composition root
         ▼                                       mcp/     soloist-mcp binary (stdio)              [stub→P8]
-   ┌─────────────────────────────┐              httpapi/ loopback HTTP adapter                  [stub→P10]
+   ┌─────────────────────────────┐              httpapi/ loopback HTTP adapter                  [P10: read API]
    │  crates/core::Facade  (C8)  │              cli/     soloist CLI (HTTP client)               [stub→P10]
    │  bounded contexts C1–C8     │              ipc/     app↔mcp transport + shared msg types    [stub→P8]
    │  ports (traits) · event bus │
@@ -52,7 +52,7 @@ builds and runs" (§8).
 | `sys` | driven adapter | `MetricsProbe` (CPU/mem) + `PortProbe` (discovery) over `/proc`; `FileWatcher` over `notify` — monitoring C5 | `core`, `notify`, `libc` | live |
 | `app` | driving adapter + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `sys`, `httpapi`, `tauri` | live |
 | `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | live (P8 skeleton) |
-| `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | stub → P10 |
+| `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | live (P10: read API + CORS) |
 | `cli` | driving adapter | `soloist` CLI = thin HTTP client | `ipc`, `clap` (not `core` directly) | stub → P10 |
 | `ipc` | shared contract | app↔mcp UDS framing + request/reply types + the data-dir/socket path | `core`, `serde`, `tokio` | live (P8) |
 
