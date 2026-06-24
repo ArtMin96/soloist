@@ -420,6 +420,22 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .todo_comment_list(session, todo)
             .map(IpcResponse::TodoComments)
             .map_err(IpcError::from),
+        IpcRequest::KvSet { key, value } => facade
+            .kv_set(session, key, value)
+            .map(|()| IpcResponse::KvValue(None))
+            .map_err(IpcError::from),
+        IpcRequest::KvGet { key } => facade
+            .kv_get(session, key)
+            .map(IpcResponse::KvValue)
+            .map_err(IpcError::from),
+        IpcRequest::KvDelete { key } => facade
+            .kv_delete(session, key)
+            .map(IpcResponse::KvDeleted)
+            .map_err(IpcError::from),
+        IpcRequest::KvList => facade
+            .kv_list(session)
+            .map(IpcResponse::KvPairs)
+            .map_err(IpcError::from),
     }
 }
 

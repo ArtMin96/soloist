@@ -12,7 +12,7 @@
 - **Phase 9 — todos (G3/G4/G5) landed (2026-06-24), the disciplined shared work-item aggregate.** Fourth C6
   aggregate, built end-to-end on the same proven ports/adapters vertical the leases + timers + scratchpads slices
   set: behavior → C6 context → context-owned port (+`Noop` default) → one `Facade` method per action → ipc arm →
-  thin MCP tool. **Branch `feat/phase-9-todos` off `main` `67787bc`; PR pending — opening it is fine, merge is the
+  thin MCP tool. **Branch `feat/phase-9-todos` off `main` `67787bc`; PR #25 open — merge is the
   user's call, do NOT self-merge.** **What landed:** the **`Todos`** aggregate (`core/coordination/todo.rs`) over a
   typed **`TodoDoc { title, description, acceptance_criteria[], risks[], status: TodoStatus }`** — validated on
   write (title/description non-blank; the two lists each ≥1 non-blank → `InvalidTodo`) — with the **live columns**
@@ -2883,7 +2883,7 @@ review's one should-fix + the mechanical nits:
 **A. Phase 9 is IN PROGRESS — leases (G6), timers (G7–G9), scratchpads (G1/G2) AND todos (G3–G5) landed. Next: kv
 G10, then E7.** PR #22 (leases), #23 (timers), and **#24 (scratchpads)** are all **MERGED to `main`** (`67787bc` =
 the scratchpads merge commit, HEAD before this branch). Todos landed this session on branch `feat/phase-9-todos`
-(off `main` `67787bc`; **PR pending — opening it is fine, then merge is the user's call, do NOT self-merge**). Gate
+(off `main` `67787bc`; **PR #25 open — merge is the user's call, do NOT self-merge**). Gate
 green (core 333 / store 54 / ipc 14 / app 30 / mcp 57 / sys 5 +10 / pty 1 +12 +3 ign / UI 78; `just lint` + `just
 test` + `cargo check -p soloist-app --no-default-features` all pass). **In order:**
 1. **Open + (on the user's go) merge the todos PR** (`feat/phase-9-todos`). Additive vertical on the established

@@ -100,7 +100,8 @@ fn build_facade(app: AppHandle) -> Facade {
         .lock_repo(store.clone())
         .timer_repo(store.clone())
         .scratchpad_repo(store.clone())
-        .todo_repo(store)
+        .todo_repo(store.clone())
+        .kv_repo(store)
         .locks(Arc::new(lock_releaser))
         .build(),
     )

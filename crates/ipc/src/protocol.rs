@@ -9,9 +9,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AcquireOutcome, AgentTool, Comment, LeaseView, ProcessId, ProcessView, ProjectId, ProjectView,
-    ScratchpadDoc, ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome, StartSummary, TimerId,
-    TimerView, TodoDoc, TodoId, TodoSummary, TodoView, Whoami,
+    AcquireOutcome, AgentTool, Comment, KvEntry, LeaseView, ProcessId, ProcessView, ProjectId,
+    ProjectView, ScratchpadDoc, ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome,
+    StartSummary, TimerId, TimerView, TodoDoc, TodoId, TodoSummary, TodoView, Whoami,
 };
 
 use crate::error::IpcError;
@@ -204,6 +204,17 @@ pub enum IpcRequest {
     TodoCommentDelete { todo: TodoId, comment: u64 },
     /// The comments on `todo` in the session's effective project.
     TodoCommentList { todo: TodoId },
+    /// Store `value` at `key` in the session's effective project's kv store (create or replace).
+    KvSet {
+        key: String,
+        value: serde_json::Value,
+    },
+    /// The value at `key` in the session's effective project's kv store, or `None` if absent.
+    KvGet { key: String },
+    /// Remove the entry at `key` from the session's effective project's kv store.
+    KvDelete { key: String },
+    /// Every key-value entry in the session's effective project's kv store, ordered by key.
+    KvList,
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -288,6 +299,14 @@ pub enum IpcResponse {
     TodoTags(Vec<String>),
     /// Whether a todo was deleted (answer to [`IpcRequest::TodoDelete`]).
     TodoDeleted(bool),
+    /// The value at a kv key, or `None` if absent (answer to [`IpcRequest::KvGet`] and
+    /// [`IpcRequest::KvSet`]).
+    KvValue(Option<serde_json::Value>),
+    /// Every key-value entry in scope (answer to [`IpcRequest::KvList`]). Reuses the core entry
+    /// type so the wire shape cannot drift.
+    KvPairs(Vec<KvEntry>),
+    /// Whether a kv entry was deleted (answer to [`IpcRequest::KvDelete`]).
+    KvDeleted(bool),
 }
 
 /// How a [`IpcRequest::WaitForBoundPort`] resolved — a structured answer, not an error: a

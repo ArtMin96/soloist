@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 7;
+pub(crate) const SCHEMA_VERSION: i64 = 8;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -146,6 +146,22 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         .map_err(sql_err)?;
     }
 
+    if version < 8 {
+        // Coordination kv: one row per (project, key). `value` stores arbitrary JSON — the TEXT
+        // column holds the serialized form; parsing happens at the repository boundary. Durable,
+        // not process-owned, and survives an app restart; no launch-reconcile clear. The project
+        // foreign key cascades, so removing a project drops its kv entries.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS kv (
+                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 key        TEXT NOT NULL,
+                 value      TEXT NOT NULL,
+                 PRIMARY KEY (project_id, key)
+             );",
+        )
+        .map_err(sql_err)?;
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
@@ -197,6 +213,7 @@ mod tests {
             "timers",
             "scratchpads",
             "todos",
+            "kv",
         ] {
             let exists = conn
                 .query_row(

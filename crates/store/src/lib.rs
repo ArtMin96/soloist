@@ -8,6 +8,7 @@
 //! no system `libsqlite3`.
 
 mod agents;
+mod kv;
 mod leases;
 mod meta;
 mod migrate;

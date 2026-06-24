@@ -17,6 +17,7 @@
 mod agents;
 mod clock;
 mod coordination;
+mod coordination_kv;
 mod coordination_todo;
 // Event-stream waiters are used only by the core's own reactor tests, not by the adapter
 // crates that consume the `testing` feature — and they assert via `panic!`, which the core
@@ -37,6 +38,7 @@ mod spawner;
 pub use agents::{FakeAgentToolRepo, FakeVersionProbe};
 pub use clock::MockClock;
 pub use coordination::{FakeLockRepo, FakeScratchpadRepo, FakeTimerRepo};
+pub use coordination_kv::FakeKvRepo;
 pub use coordination_todo::FakeTodoRepo;
 #[cfg(test)]
 pub use events::{next_change, next_matching, next_to, wait_all};

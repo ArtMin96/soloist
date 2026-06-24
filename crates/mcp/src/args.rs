@@ -328,3 +328,20 @@ pub(crate) struct TodoCommentRefArg {
     /// The id of the comment to delete.
     pub(crate) comment: u64,
 }
+
+/// Arguments for storing a kv entry.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct KvSetArg {
+    /// The key to store the value at. Case-sensitive; unique within the project.
+    pub(crate) key: String,
+    /// The JSON value to store. Can be any valid JSON — an object, array, string, number, or
+    /// boolean. Replaces the previous value if the key already exists.
+    pub(crate) value: serde_json::Value,
+}
+
+/// Arguments for reading or deleting a kv entry by key.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct KvKeyArg {
+    /// The key to read or delete.
+    pub(crate) key: String,
+}

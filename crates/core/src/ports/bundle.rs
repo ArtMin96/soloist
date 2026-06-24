@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use crate::agents::{AgentToolRepo, NoopAgentToolRepo, NoopVersionProbe, VersionProbe};
 use crate::coordination::{
-    LockRepo, NoopLockRepo, NoopScratchpadRepo, NoopTimerRepo, NoopTodoRepo, ScratchpadRepo,
-    TimerRepo, TodoRepo,
+    KvRepo, LockRepo, NoopKvRepo, NoopLockRepo, NoopScratchpadRepo, NoopTimerRepo, NoopTodoRepo,
+    ScratchpadRepo, TimerRepo, TodoRepo,
 };
 use crate::filewatch::{FileWatcher, NoopFileWatcher};
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
@@ -24,7 +24,7 @@ use super::{
 /// rather than another argument threaded through every call site. The required adapters
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
 /// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `todo_repo`,
-/// `runtime`, `orphan_control`, `metrics`,
+/// `kv_repo`, `runtime`, `orphan_control`, `metrics`,
 /// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`) default to their
 /// `Noop` port via [`CorePorts::builder`], so a new optional port never
 /// forces every existing composition root to change. The composition root
@@ -40,6 +40,7 @@ pub struct CorePorts {
     pub(crate) timer_repo: Arc<dyn TimerRepo>,
     pub(crate) scratchpad_repo: Arc<dyn ScratchpadRepo>,
     pub(crate) todo_repo: Arc<dyn TodoRepo>,
+    pub(crate) kv_repo: Arc<dyn KvRepo>,
     pub(crate) runtime: Arc<dyn RuntimeState>,
     pub(crate) orphan_control: Arc<dyn OrphanControl>,
     pub(crate) metrics: Arc<dyn MetricsProbe>,
@@ -70,6 +71,7 @@ impl CorePorts {
                 timer_repo: Arc::new(NoopTimerRepo),
                 scratchpad_repo: Arc::new(NoopScratchpadRepo),
                 todo_repo: Arc::new(NoopTodoRepo),
+                kv_repo: Arc::new(NoopKvRepo),
                 runtime: Arc::new(NoopRuntimeState),
                 orphan_control: Arc::new(NoopOrphanControl),
                 metrics: Arc::new(NoopMetricsProbe),
@@ -126,6 +128,15 @@ impl CorePortsBuilder {
     /// though their process-owned locks are cleared on launch.
     pub fn todo_repo(mut self, todo_repo: Arc<dyn TodoRepo>) -> Self {
         self.ports.todo_repo = todo_repo;
+        self
+    }
+
+    /// Overrides the durable key-value store the coordination aggregate persists to (C6; defaults
+    /// to [`NoopKvRepo`], which stores nothing). The real adapter is SQLite, the same store backing
+    /// every other durable repository; kv entries are durable shared content that survives a
+    /// restart and have no process ownership.
+    pub fn kv_repo(mut self, kv_repo: Arc<dyn KvRepo>) -> Self {
+        self.ports.kv_repo = kv_repo;
         self
     }
 

@@ -143,6 +143,11 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "todo_comment_update",
     "todo_comment_delete",
     "todo_comment_list",
+    // tools/kv.rs
+    "kv_set",
+    "kv_get",
+    "kv_delete",
+    "kv_list",
 ];
 
 /// The router [`SoloistMcp::new`] composes from the per-category sub-routers must serve exactly
