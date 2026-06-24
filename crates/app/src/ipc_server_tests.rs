@@ -1,9 +1,11 @@
 use super::*;
 use soloist_core::testing::{
-    terminal_registration, FakeLockRepo, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
+    terminal_registration, FakeLockRepo, FakeProjectRepo, FakeSettingsRepo, FakeSpawner,
+    FakeTrustRepo,
 };
 use soloist_core::{
-    AcquireOutcome, CorePorts, DomainEvent, Origin, ProcStatus, ProcessId, StartSummary, TokioClock,
+    AcquireOutcome, CorePorts, DomainEvent, McpFeatureGroup, Origin, ProcStatus, ProcessId,
+    StartSummary, TokioClock,
 };
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -630,5 +632,46 @@ async fn an_action_on_another_projects_process_maps_to_out_of_scope() {
             handle_request(&facade, session, request).await,
             Err(IpcError::OutOfScope)
         );
+    }
+}
+
+/// A façade whose settings persist to an in-memory fake, so a toggle round-trips.
+fn facade_with_settings() -> Facade {
+    Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .settings_repo(Arc::new(FakeSettingsRepo::new()))
+        .build(),
+    )
+}
+
+#[tokio::test]
+async fn mcp_tool_groups_returns_the_default_enablement() {
+    // A global read — no scope needed, so an unbound session resolves it.
+    let facade = facade();
+    let session = facade.open_session(None);
+    match handle_request(&facade, session, IpcRequest::McpToolGroups).await {
+        Ok(IpcResponse::McpToolGroups(groups)) => {
+            assert!(groups.scratchpads && groups.todos && groups.timers);
+            assert!(!groups.key_value, "Key-Value defaults off (G10)");
+        }
+        other => panic!("expected an McpToolGroups reply, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn mcp_tool_groups_reflects_a_persisted_change() {
+    let facade = facade_with_settings();
+    facade
+        .set_mcp_tool_group(McpFeatureGroup::KeyValue, true)
+        .expect("enable key-value");
+    let session = facade.open_session(None);
+    match handle_request(&facade, session, IpcRequest::McpToolGroups).await {
+        Ok(IpcResponse::McpToolGroups(groups)) => assert!(groups.key_value),
+        other => panic!("expected an McpToolGroups reply, got {other:?}"),
     }
 }

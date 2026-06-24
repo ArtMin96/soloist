@@ -35,6 +35,7 @@ pub mod ports;
 pub mod portscan;
 pub mod process;
 pub mod projects;
+pub mod settings;
 pub mod shellenv;
 pub mod supervisor;
 pub mod terminal;
@@ -87,6 +88,9 @@ pub use portscan::{wait_for_port, NoopPortProbe, PortProbe, PortScanner, WaitFor
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView, Readiness};
 pub use projects::{
     LoadProjectError, ProjectError, ProjectLoad, ProjectService, ProjectView, Projects,
+};
+pub use settings::{
+    McpFeatureGroup, McpToolGroups, NoopSettingsRepo, Settings, SettingsRepo, SettingsStore,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};
