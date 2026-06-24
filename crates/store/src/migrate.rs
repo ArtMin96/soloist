@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 5;
+pub(crate) const SCHEMA_VERSION: i64 = 6;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -101,6 +101,28 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         .map_err(sql_err)?;
     }
 
+    if version < 6 {
+        // Coordination scratchpads: durable, project-scoped shared documents. The store-assigned
+        // `id` is durable and never reused (`AUTOINCREMENT`); `doc` is the JSON of the disciplined
+        // `ScratchpadDoc` and `tags` a JSON array, so the persisted shape cannot drift; `revision`
+        // guards optimistic-concurrency writes; `(project_id, name)` is unique (the addressing
+        // handle). Unlike leases and timers these are NOT process-owned and are NOT cleared on
+        // launch — a scratchpad survives an app restart. The project foreign key cascades.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS scratchpads (
+                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 name       TEXT NOT NULL,
+                 doc        TEXT NOT NULL,
+                 tags       TEXT NOT NULL,
+                 archived   INTEGER NOT NULL DEFAULT 0,
+                 revision   INTEGER NOT NULL,
+                 UNIQUE (project_id, name)
+             );",
+        )
+        .map_err(sql_err)?;
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
@@ -150,6 +172,7 @@ mod tests {
             "agent_tools",
             "leases",
             "timers",
+            "scratchpads",
         ] {
             let exists = conn
                 .query_row(

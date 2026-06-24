@@ -4,12 +4,15 @@
 //! its durable table is, and every method holds the map lock for its whole operation so a
 //! check-and-write is atomic, matching the store's contract.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-use crate::coordination::{LockRepo, NewTimer, StoredLease, StoredTimer, TimerRepo, TimerStatus};
-use crate::ids::{ProcessId, ProjectId, TimerId};
+use crate::coordination::{
+    LockRepo, NewTimer, RenameResult, ScratchpadDoc, ScratchpadRepo, StoredLease, StoredScratchpad,
+    StoredTimer, TimerRepo, TimerStatus, WriteResult,
+};
+use crate::ids::{ProcessId, ProjectId, ScratchpadId, TimerId};
 use crate::ports::StoreError;
 use crate::sync::lock;
 
@@ -85,6 +88,167 @@ impl LockRepo for FakeLockRepo {
         let cleared = rows.len();
         rows.clear();
         Ok(cleared)
+    }
+}
+
+/// An in-memory [`ScratchpadRepo`] for headless coordination tests. Keyed by `(project, name)` like
+/// the durable table, assigns durable ids from a counter, and mirrors the store's atomic
+/// revision-guarded write, rename uniqueness, and tag read-modify-write under one lock.
+#[derive(Default)]
+pub struct FakeScratchpadRepo {
+    rows: Mutex<HashMap<(u64, String), StoredScratchpad>>,
+    next_id: AtomicU64,
+}
+
+impl FakeScratchpadRepo {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl ScratchpadRepo for FakeScratchpadRepo {
+    fn write(
+        &self,
+        project: ProjectId,
+        name: &str,
+        doc: &ScratchpadDoc,
+        expected: Option<u64>,
+    ) -> Result<WriteResult, StoreError> {
+        let mut rows = lock(&self.rows);
+        let slot = (project.get(), name.to_owned());
+        match rows.get(&slot) {
+            Some(existing) => match expected {
+                Some(rev) if rev == existing.revision => {
+                    let mut updated = existing.clone();
+                    updated.doc = doc.clone();
+                    updated.revision = existing.revision + 1;
+                    rows.insert(slot, updated.clone());
+                    Ok(WriteResult::Written(Box::new(updated)))
+                }
+                _ => Ok(WriteResult::Conflict {
+                    actual: Some(existing.revision),
+                }),
+            },
+            None => match expected {
+                None => {
+                    let id =
+                        ScratchpadId::from_raw(self.next_id.fetch_add(1, Ordering::Relaxed) + 1);
+                    let stored = StoredScratchpad {
+                        id,
+                        project,
+                        name: name.to_owned(),
+                        doc: doc.clone(),
+                        tags: Vec::new(),
+                        archived: false,
+                        revision: 1,
+                    };
+                    rows.insert(slot, stored.clone());
+                    Ok(WriteResult::Written(Box::new(stored)))
+                }
+                Some(_) => Ok(WriteResult::Conflict { actual: None }),
+            },
+        }
+    }
+
+    fn read(&self, project: ProjectId, name: &str) -> Result<Option<StoredScratchpad>, StoreError> {
+        Ok(lock(&self.rows)
+            .get(&(project.get(), name.to_owned()))
+            .cloned())
+    }
+
+    fn list(&self, project: ProjectId) -> Result<Vec<StoredScratchpad>, StoreError> {
+        let mut found: Vec<StoredScratchpad> = lock(&self.rows)
+            .values()
+            .filter(|row| row.project == project)
+            .cloned()
+            .collect();
+        found.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(found)
+    }
+
+    fn rename(&self, project: ProjectId, from: &str, to: &str) -> Result<RenameResult, StoreError> {
+        let mut rows = lock(&self.rows);
+        let to_slot = (project.get(), to.to_owned());
+        if from != to && rows.contains_key(&to_slot) {
+            return Ok(RenameResult::NameTaken);
+        }
+        match rows.remove(&(project.get(), from.to_owned())) {
+            Some(mut stored) => {
+                stored.name = to.to_owned();
+                rows.insert(to_slot, stored.clone());
+                Ok(RenameResult::Renamed(Box::new(stored)))
+            }
+            None => Ok(RenameResult::NotFound),
+        }
+    }
+
+    fn add_tags(
+        &self,
+        project: ProjectId,
+        name: &str,
+        tags: &[String],
+    ) -> Result<Option<StoredScratchpad>, StoreError> {
+        let mut rows = lock(&self.rows);
+        match rows.get_mut(&(project.get(), name.to_owned())) {
+            Some(stored) => {
+                for tag in tags {
+                    if !stored.tags.contains(tag) {
+                        stored.tags.push(tag.clone());
+                    }
+                }
+                stored.tags.sort();
+                Ok(Some(stored.clone()))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn remove_tags(
+        &self,
+        project: ProjectId,
+        name: &str,
+        tags: &[String],
+    ) -> Result<Option<StoredScratchpad>, StoreError> {
+        let mut rows = lock(&self.rows);
+        match rows.get_mut(&(project.get(), name.to_owned())) {
+            Some(stored) => {
+                stored.tags.retain(|tag| !tags.contains(tag));
+                stored.tags.sort();
+                Ok(Some(stored.clone()))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn tags(&self, project: ProjectId) -> Result<Vec<String>, StoreError> {
+        let distinct: BTreeSet<String> = lock(&self.rows)
+            .values()
+            .filter(|row| row.project == project)
+            .flat_map(|row| row.tags.iter().cloned())
+            .collect();
+        Ok(distinct.into_iter().collect())
+    }
+
+    fn set_archived(
+        &self,
+        project: ProjectId,
+        name: &str,
+        archived: bool,
+    ) -> Result<Option<StoredScratchpad>, StoreError> {
+        let mut rows = lock(&self.rows);
+        match rows.get_mut(&(project.get(), name.to_owned())) {
+            Some(stored) => {
+                stored.archived = archived;
+                Ok(Some(stored.clone()))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn delete(&self, project: ProjectId, name: &str) -> Result<bool, StoreError> {
+        Ok(lock(&self.rows)
+            .remove(&(project.get(), name.to_owned()))
+            .is_some())
     }
 }
 

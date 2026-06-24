@@ -300,6 +300,46 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .timer_list(session)
             .map(IpcResponse::Timers)
             .map_err(IpcError::from),
+        IpcRequest::ScratchpadWrite {
+            name,
+            doc,
+            expected_revision,
+        } => facade
+            .scratchpad_write(session, &name, doc, expected_revision)
+            .map(IpcResponse::Scratchpad)
+            .map_err(IpcError::from),
+        IpcRequest::ScratchpadRead { name } => facade
+            .scratchpad_read(session, &name)
+            .map(IpcResponse::Scratchpad)
+            .map_err(IpcError::from),
+        IpcRequest::ScratchpadList => facade
+            .scratchpad_list(session)
+            .map(IpcResponse::Scratchpads)
+            .map_err(IpcError::from),
+        IpcRequest::ScratchpadRename { name, new_name } => facade
+            .scratchpad_rename(session, &name, &new_name)
+            .map(IpcResponse::Scratchpad)
+            .map_err(IpcError::from),
+        IpcRequest::ScratchpadAddTags { name, tags } => facade
+            .scratchpad_add_tags(session, &name, &tags)
+            .map(IpcResponse::Scratchpad)
+            .map_err(IpcError::from),
+        IpcRequest::ScratchpadRemoveTags { name, tags } => facade
+            .scratchpad_remove_tags(session, &name, &tags)
+            .map(IpcResponse::Scratchpad)
+            .map_err(IpcError::from),
+        IpcRequest::ScratchpadTagsList => facade
+            .scratchpad_tags_list(session)
+            .map(IpcResponse::ScratchpadTags)
+            .map_err(IpcError::from),
+        IpcRequest::ScratchpadArchive { name, archived } => facade
+            .scratchpad_archive(session, &name, archived)
+            .map(IpcResponse::Scratchpad)
+            .map_err(IpcError::from),
+        IpcRequest::ScratchpadDelete { name } => facade
+            .scratchpad_delete(session, &name)
+            .map(IpcResponse::ScratchpadDeleted)
+            .map_err(IpcError::from),
     }
 }
 

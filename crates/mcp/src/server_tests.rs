@@ -3,8 +3,9 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use soloist_core::{
     AcquireOutcome, AgentKind, AgentTool, FireCond, LeaseView, Origin, ProcStatus, ProcessId,
-    ProcessKind, ProcessView, ProjectId, PromptMode, Readiness, SessionId, SetWhenIdleOutcome,
-    StartSummary, TimerId, TimerStatus, TimerView, Whoami,
+    ProcessKind, ProcessView, ProjectId, PromptMode, Readiness, ScratchpadDoc, ScratchpadId,
+    ScratchpadSummary, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary, TimerId,
+    TimerStatus, TimerView, Whoami,
 };
 use soloist_ipc::{
     read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome,
@@ -14,7 +15,8 @@ use std::path::PathBuf;
 use tokio::net::UnixListener;
 
 use crate::args::{
-    LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, RenameArg, SearchArg, SelectProjectArg,
+    LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, RenameArg, ScratchpadArchiveArg,
+    ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg, SelectProjectArg,
     SendInputArg, SpawnAgentArg, TimerArg, TimerFireWhenIdleArg, TimerSetArg, WaitForPortArg,
 };
 
@@ -111,6 +113,16 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "timer_pause",
     "timer_resume",
     "timer_list",
+    // tools/scratchpad.rs
+    "scratchpad_list",
+    "scratchpad_read",
+    "scratchpad_write",
+    "scratchpad_rename",
+    "scratchpad_add_tags",
+    "scratchpad_remove_tags",
+    "scratchpad_tags_list",
+    "scratchpad_archive",
+    "scratchpad_delete",
 ];
 
 /// The router [`SoloistMcp::new`] composes from the per-category sub-routers must serve exactly
@@ -1003,4 +1015,183 @@ async fn timer_list_projects_the_timers() {
     let back: Vec<TimerView> =
         serde_json::from_value(structured_of(result)["timers"].clone()).expect("decode timers");
     assert_eq!(back, vec![timer]);
+}
+
+/// A sample disciplined document for the scratchpad response-projection tests.
+fn sample_doc() -> ScratchpadDoc {
+    ScratchpadDoc {
+        objective: "Ship v1".into(),
+        context: "RC cut".into(),
+        plan: vec!["Cut RC".into()],
+        acceptance_criteria: vec!["soak green".into()],
+        risks: vec!["none identified".into()],
+        status: "in progress".into(),
+        notes: None,
+    }
+}
+
+/// A sample scratchpad view for the response-projection tests.
+fn sample_scratchpad(name: &str) -> ScratchpadView {
+    let doc = sample_doc();
+    let rendered = doc.render(name);
+    ScratchpadView {
+        id: ScratchpadId::from_raw(1),
+        name: name.into(),
+        tags: vec!["release".into()],
+        archived: false,
+        revision: 1,
+        doc,
+        rendered,
+    }
+}
+
+#[tokio::test]
+async fn scratchpad_write_builds_the_disciplined_document_and_projects_the_view() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // The handler assembles the document from the flat tool fields and forwards an omitted revision
+    // as a create — the request matches only if it did exactly that.
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::ScratchpadWrite {
+            name,
+            doc,
+            expected_revision: None,
+        } if name == "plan" && doc == sample_doc() => {
+            Ok(IpcResponse::Scratchpad(sample_scratchpad("plan")))
+        }
+        _ => Err(IpcError::Internal("unexpected write".into())),
+    });
+
+    let result = handler(socket)
+        .scratchpad_write(Parameters(ScratchpadWriteArg {
+            name: "plan".into(),
+            objective: "Ship v1".into(),
+            context: "RC cut".into(),
+            plan: vec!["Cut RC".into()],
+            acceptance_criteria: vec!["soak green".into()],
+            risks: vec!["none identified".into()],
+            status: "in progress".into(),
+            notes: None,
+            expected_revision: None,
+        }))
+        .await
+        .expect("scratchpad_write succeeds");
+    let back: ScratchpadView = serde_json::from_value(structured_of(result)).expect("decode view");
+    assert_eq!(back.name, "plan");
+    assert_eq!(back.revision, 1);
+    assert!(back.rendered.starts_with("# plan"));
+}
+
+#[tokio::test]
+async fn scratchpad_read_projects_the_view() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::ScratchpadRead { name } if name == "plan" => {
+            Ok(IpcResponse::Scratchpad(sample_scratchpad("plan")))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .scratchpad_read(Parameters(ScratchpadNameArg {
+            name: "plan".into(),
+        }))
+        .await
+        .expect("scratchpad_read succeeds");
+    let back: ScratchpadView = serde_json::from_value(structured_of(result)).expect("decode view");
+    assert_eq!(back.doc, sample_doc());
+}
+
+#[tokio::test]
+async fn scratchpad_list_projects_the_summaries() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let summary = ScratchpadSummary {
+        id: ScratchpadId::from_raw(1),
+        name: "plan".into(),
+        tags: vec!["release".into()],
+        archived: false,
+        revision: 2,
+        objective: "Ship v1".into(),
+    };
+    let canned = summary.clone();
+    spawn_fake_app(socket.clone(), move |request| match request {
+        IpcRequest::ScratchpadList => Ok(IpcResponse::Scratchpads(vec![canned.clone()])),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .scratchpad_list()
+        .await
+        .expect("scratchpad_list succeeds");
+    let back: Vec<ScratchpadSummary> =
+        serde_json::from_value(structured_of(result)["scratchpads"].clone()).expect("decode list");
+    assert_eq!(back, vec![summary]);
+}
+
+#[tokio::test]
+async fn scratchpad_add_tags_threads_its_arguments_and_projects_the_view() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::ScratchpadAddTags { name, tags } if name == "plan" && tags == ["p1"] => {
+            Ok(IpcResponse::Scratchpad(sample_scratchpad("plan")))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .scratchpad_add_tags(Parameters(ScratchpadTagsArg {
+            name: "plan".into(),
+            tags: vec!["p1".into()],
+        }))
+        .await
+        .expect("scratchpad_add_tags succeeds");
+    let back: ScratchpadView = serde_json::from_value(structured_of(result)).expect("decode view");
+    assert_eq!(back.name, "plan");
+}
+
+#[tokio::test]
+async fn scratchpad_archive_threads_the_flag_through() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::ScratchpadArchive {
+            name,
+            archived: true,
+        } if name == "plan" => Ok(IpcResponse::Scratchpad(sample_scratchpad("plan"))),
+        _ => Err(IpcError::Internal("expected an archive".into())),
+    });
+
+    handler(socket)
+        .scratchpad_archive(Parameters(ScratchpadArchiveArg {
+            name: "plan".into(),
+            archived: true,
+        }))
+        .await
+        .expect("scratchpad_archive succeeds");
+}
+
+#[tokio::test]
+async fn scratchpad_delete_reports_whether_it_was_removed() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::ScratchpadDelete { name } if name == "plan" => {
+            Ok(IpcResponse::ScratchpadDeleted(true))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .scratchpad_delete(Parameters(ScratchpadNameArg {
+            name: "plan".into(),
+        }))
+        .await
+        .expect("scratchpad_delete succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "deleted": true })
+    );
 }

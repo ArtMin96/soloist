@@ -31,6 +31,24 @@ pub enum CoordinationError {
     /// or auto-release a lease on close).
     #[error("not bound to a process; bind a session before owning a timer or lease")]
     NoBoundProcess,
+    /// A scratchpad write carried a malformed document — the disciplined-structure check failed; the
+    /// message names every problem so the caller can fix the document in one revision.
+    #[error("scratchpad is not well-formed: {0}")]
+    InvalidScratchpad(String),
+    /// A scratchpad write expected a different revision than the one on record — a concurrent edit
+    /// landed first, so the write was refused rather than clobbering it. `expected` is `None` for a
+    /// create; `actual` is `None` when no scratchpad exists under that name.
+    #[error("scratchpad revision conflict (expected {expected:?}, found {actual:?})")]
+    RevisionConflict {
+        expected: Option<u64>,
+        actual: Option<u64>,
+    },
+    /// A scratchpad action named one that does not exist in the session's effective project.
+    #[error("no scratchpad under that name")]
+    UnknownScratchpad,
+    /// A scratchpad rename targeted a name already used by another scratchpad in the project.
+    #[error("a scratchpad with that name already exists")]
+    ScratchpadNameTaken,
     /// A durable read or write failed.
     #[error(transparent)]
     Store(#[from] StoreError),
@@ -181,8 +199,13 @@ impl Facade {
         )
     }
 
-    /// The session's effective project, or [`CoordinationError::NoProjectScope`].
-    fn coordination_scope(&self, session: SessionId) -> Result<ProjectId, CoordinationError> {
+    /// The session's effective project, or [`CoordinationError::NoProjectScope`]. Shared with the
+    /// sibling scratchpad surface ([`super::scratchpad`]), so every coordination action resolves
+    /// project scope in one place.
+    pub(in crate::facade) fn coordination_scope(
+        &self,
+        session: SessionId,
+    ) -> Result<ProjectId, CoordinationError> {
         self.effective_project(session)
             .ok_or(CoordinationError::NoProjectScope)
     }
