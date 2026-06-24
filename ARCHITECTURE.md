@@ -68,7 +68,7 @@ adapter. Adapters hold **no** business state and make **no** domain decisions.
 | **C3** Terminal I/O | `terminal/` | PTY read loop, rendered+raw buffers, OSC parse, attach replay | live (P4) |
 | **C4** Agents & Idle | `agents` `idle` | agent-tool defs, launch, 5-state idle FSM, optional summary | placeholder → P7 |
 | **C5** Monitoring | `metrics/` `portscan/` | CPU/mem sampling, `/proc` port discovery, readiness | live (P6: D1/D2/D3) |
-| **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos); kv → P9 |
+| **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos + key-value); end-to-end orchestration (E7) proven |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
 | **C8** Integration façade | `facade` `identity` | the public command/query API; MCP identity & effective scope | live (`facade`) |
 
@@ -108,7 +108,10 @@ body to its owner as a fresh turn; **scratchpads done**: revision-guarded `scrat
 aggregate + `ScratchpadRepo` — a durable, disciplined typed document (not free-form, `KNOWN-DIVERGENCES` D-7) that
 survives restart; **todos done**: `todo_*` over the `Todos` aggregate + `TodoRepo` — a durable, disciplined typed
 document with revision-guarded writes, blockers that **gate completion**, comments, and a process-owned lock that
-auto-releases on close (`KNOWN-DIVERGENCES` D-8); kv next); tool *param schemas* are clean-room (`plan/05`
+auto-releases on close (`KNOWN-DIVERGENCES` D-8); **key-value done**: project-scoped JSON `kv_set`/`kv_get`/`kv_delete`
+/`kv_list` over the `Kv` aggregate + `KvRepo`; and the **end-to-end orchestration (E7)** — a lead spawning a worker,
+handing it a locked todo, and waiting token-free via `timer_fire_when_idle_all` until the worker goes idle — is proven
+against real stub agents on real PTYs); tool *param schemas* are clean-room (`plan/05`
 §12). Full recipe: **`plan/06` §5.8**; data-flow walkthroughs: `plan/01`; tool catalog: `plan/05` §7.
 
 ### Frontend domain split (`crates/app/ui/src`)
