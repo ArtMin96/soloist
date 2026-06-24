@@ -9,8 +9,8 @@
 //! disciplined-document policy lives in the [`Scratchpads`](super::Scratchpads) aggregate. The
 //! bounded context owns its own port (with a [`NoopScratchpadRepo`] default), so coordination
 //! persistence stays confined to coordination. Unlike leases and timers, a scratchpad is durable
-//! and **not** process-owned: there is no owner column and no launch-reconcile clear — it survives a
-//! restart (matrix G11).
+//! and **not** process-owned: there is no owner column and no launch-reconcile clear — it survives
+//! an app restart.
 
 use super::scratchpad::ScratchpadDoc;
 use crate::ids::{ProjectId, ScratchpadId};

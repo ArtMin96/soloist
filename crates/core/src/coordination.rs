@@ -9,8 +9,8 @@
 //! primitive — and **scratchpads** — durable, project-scoped shared documents with a disciplined,
 //! typed body and revision-guarded writes. Leases and timers are process-owned, so launch
 //! reconciliation clears them (a per-run process id is recycled, so neither can be matched safely to
-//! a later run's processes); scratchpads are durable shared content that **survives** a restart
-//! (matrix G11).
+//! a later run's processes); scratchpads are durable shared content that **survives** an app
+//! restart.
 
 mod lease;
 mod releaser;

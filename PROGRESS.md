@@ -9,6 +9,23 @@
 
 ## Current state
 
+- **Review-fix pass on the scratchpads slice (2026-06-24, branch `feat/phase-9-scratchpads`).** An independent
+  review graded the G1/G2 slice **fix-then-ship** (architecture/security/correctness/clean-room boundaries and the
+  gates all sound); its findings + nits were applied on the same branch. **(1) Comment discipline (CLAUDE.md §8):**
+  removed the plan-doc citations the slice had introduced into *source* comments — one `04 §7` and several
+  `matrix G11` cross-references across `coordination.rs` / `scratchpad.rs` / `scratchpad_repo.rs` /
+  `store/migrate.rs` / `store/scratchpads.rs` + the store test — reworded to the permanent behaviour ("survives an
+  app restart"; "revision-guarded optimistic concurrency"), matching the citation-free style the merged lease/timer
+  code already follows (traceability lives in this ledger + git). **(2) Tag-set order symmetry:** the scratchpad tag
+  set is now normalized (sorted) at the single `update_tags` chokepoint in the SQLite repo (and symmetrically in
+  `FakeScratchpadRepo::remove_tags`), so `add_tags` and `remove_tags` leave the same canonical order rather than only
+  `add` sorting. **(3) Added a SQLite contention test** (`concurrent_writes_at_one_revision_apply_exactly_one`): 16
+  barrier-synced threads write one scratchpad from revision 1 — exactly one applies (→ rev 2), the other 15 are
+  refused as conflicts, proving the revision guard is atomic (mirrors the leases `concurrent_acquires…` test). Pure
+  cleanup — **no tool-surface or wire change**. Gate green: **store 46→47**, all other counts unchanged (core 314 /
+  ipc 14 / app 30 / mcp 50 / sys 5 / pty 1 / UI 78); `just lint` + `just test` exit 0. (Aside: the unrelated
+  `metrics::sampler::tests::the_sampler_restarts_itself_after_a_panic` flaked once under full-workspace CPU load —
+  a timing-sensitive panic-restart budget — then passed 5/5 in isolation; pre-existing flake, not from this pass.)
 - **Phase 9 — scratchpads (G1/G2) landed (2026-06-24), the disciplined shared-document aggregate.** Third C6
   aggregate, built end-to-end on the proven ports/adapters vertical (branch `feat/phase-9-scratchpads` off `main`
   `e1435dc`, commit `6e4d758`; **PR pending — merge is the user's call, do NOT self-merge**). Same vertical the

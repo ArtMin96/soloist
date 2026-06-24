@@ -2,15 +2,15 @@
 //! coordinate through.
 //!
 //! Unlike a lease or a timer, a scratchpad is **not** process-owned and is **durable** — it
-//! survives an app restart (matrix G11), so launch reconciliation never clears it. A scratchpad
+//! survives an app restart, so launch reconciliation never clears it. A scratchpad
 //! carries a **disciplined, typed body** ([`ScratchpadDoc`]): objective, context, an ordered plan,
 //! acceptance criteria, risks, and a status, plus optional free notes. The shape is enforced (the
 //! tool schema presents exactly these fields and the aggregate rejects a blank one), so every agent
 //! writes the same informative structure rather than free-form prose, and the document renders to
-//! one canonical Markdown layout. Writes are **revision-guarded** (optimistic concurrency, `04`
-//! §7): a write carries the revision it expects, and a stale one is refused rather than clobbering a
-//! newer edit. The durable [`ScratchpadRepo`](super::ScratchpadRepo) performs each state-dependent
-//! step atomically.
+//! one canonical Markdown layout. Writes are **revision-guarded** (optimistic concurrency): a write
+//! carries the revision it expects, and a stale one is refused rather than clobbering a newer edit.
+//! The durable [`ScratchpadRepo`](super::ScratchpadRepo) performs each state-dependent step
+//! atomically.
 
 use std::fmt::Write as _;
 use std::sync::Arc;

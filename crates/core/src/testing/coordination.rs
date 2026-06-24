@@ -213,6 +213,7 @@ impl ScratchpadRepo for FakeScratchpadRepo {
         match rows.get_mut(&(project.get(), name.to_owned())) {
             Some(stored) => {
                 stored.tags.retain(|tag| !tags.contains(tag));
+                stored.tags.sort();
                 Ok(Some(stored.clone()))
             }
             None => Ok(None),

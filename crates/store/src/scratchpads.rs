@@ -7,8 +7,8 @@
 //! the single connection guard for its whole operation, so the revision-guarded write, the tag
 //! read-modify-write, and the rename uniqueness check are atomic — two agents editing one project's
 //! scratchpads cannot interleave to clobber an edit or duplicate a name. Unlike leases and timers a
-//! scratchpad is durable and **not** process-owned: it survives a restart (matrix G11), so there is
-//! no launch-reconcile clear. The `project_id` foreign key cascades, so removing a project drops its
+//! scratchpad is durable and **not** process-owned: it survives an app restart, so there is no
+//! launch-reconcile clear. The `project_id` foreign key cascades, so removing a project drops its
 //! scratchpads.
 
 use rusqlite::{Connection, OptionalExtension, Row};
@@ -119,7 +119,6 @@ impl ScratchpadRepo for SqliteStore {
                     current.push(tag.clone());
                 }
             }
-            current.sort();
         })
     }
 
@@ -184,7 +183,8 @@ impl ScratchpadRepo for SqliteStore {
 impl SqliteStore {
     /// Reads the scratchpad's tag set, applies `change`, writes it back, and returns the updated
     /// row — all under one connection guard, so a concurrent tag change is not lost. `None` if the
-    /// scratchpad does not exist.
+    /// scratchpad does not exist. The tag set is stored sorted, normalized here after every change
+    /// so add and remove leave the same canonical order.
     fn update_tags(
         &self,
         project: ProjectId,
@@ -196,6 +196,7 @@ impl SqliteStore {
             return Ok(None);
         };
         change(&mut stored.tags);
+        stored.tags.sort();
         let tags_json = serialize_tags(&stored.tags)?;
         conn.execute(
             "UPDATE scratchpads SET tags = ?3 WHERE project_id = ?1 AND name = ?2",

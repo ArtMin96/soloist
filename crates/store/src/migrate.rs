@@ -107,7 +107,7 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         // `ScratchpadDoc` and `tags` a JSON array, so the persisted shape cannot drift; `revision`
         // guards optimistic-concurrency writes; `(project_id, name)` is unique (the addressing
         // handle). Unlike leases and timers these are NOT process-owned and are NOT cleared on
-        // launch — a scratchpad survives a restart (matrix G11). The project foreign key cascades.
+        // launch — a scratchpad survives an app restart. The project foreign key cascades.
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS scratchpads (
                  id         INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::{Arc, Barrier};
 
 use soloist_core::{
     ProjectId, ProjectRepo, RenameResult, ScratchpadDoc, ScratchpadRepo, StoredScratchpad,
@@ -217,8 +218,8 @@ fn list_is_scoped_and_ordered_by_name() {
 
 #[test]
 fn scratchpads_survive_a_store_reopen() {
-    // Matrix G11: coordination content persists across an app restart. Unlike leases and timers,
-    // scratchpads are durable and not cleared on launch.
+    // Coordination content persists across an app restart: unlike leases and timers, scratchpads
+    // are durable and not cleared on launch.
     let dir = tempdir().expect("temp dir");
     let db = dir.path().join("soloist.db");
     let id = {
@@ -260,4 +261,55 @@ fn deleting_a_project_cascades_to_its_scratchpads() {
         store.read(project, "plan").expect("read").is_none(),
         "the project's scratchpads are dropped with it"
     );
+}
+
+#[test]
+fn concurrent_writes_at_one_revision_apply_exactly_one() {
+    // The race the atomic revision guard fixes: many agents update one scratchpad from the same
+    // revision at once. Exactly one write must apply (bumping the revision); every other must be
+    // refused as a conflict — never two writes accepted at one revision.
+    let dir = tempdir().expect("temp dir");
+    let store = Arc::new(SqliteStore::open(&dir.path().join("soloist.db")).expect("open"));
+    let project = project(&store, "/p/race");
+    store
+        .write(project, "plan", &doc("base"), None)
+        .expect("create at revision 1");
+    const CONTENDERS: u64 = 16;
+
+    let barrier = Arc::new(Barrier::new(CONTENDERS as usize));
+    let outcomes: Vec<WriteResult> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..CONTENDERS)
+            .map(|n| {
+                let store = store.clone();
+                let barrier = barrier.clone();
+                scope.spawn(move || {
+                    barrier.wait();
+                    store
+                        .write(project, "plan", &doc(&format!("edit-{n}")), Some(1))
+                        .expect("write")
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("thread"))
+            .collect()
+    });
+
+    let applied = outcomes
+        .iter()
+        .filter(|outcome| matches!(outcome, WriteResult::Written(_)))
+        .count();
+    let conflicts = outcomes
+        .iter()
+        .filter(|outcome| matches!(outcome, WriteResult::Conflict { actual: Some(2) }))
+        .count();
+    assert_eq!(applied, 1, "exactly one write at revision 1 applies");
+    assert_eq!(
+        conflicts,
+        (CONTENDERS - 1) as usize,
+        "every other writer is refused against the single bumped revision"
+    );
+    // The scratchpad advanced exactly one revision — no lost update, no double-apply.
+    assert_eq!(store.read(project, "plan").unwrap().unwrap().revision, 2);
 }
