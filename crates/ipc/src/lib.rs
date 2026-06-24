@@ -22,6 +22,6 @@ pub use protocol::{
 
 /// The core read-model view types the wire carries, re-exported so an out-of-process client
 /// — the `soloist` CLI over the loopback HTTP API — deserializes the exact serde shape the
-/// server returns, without depending on the engine crate directly (the dependency rule in
-/// `06` §2: the CLI links `core`'s *types* through `ipc`, never its running engine).
+/// server returns, without depending on the engine crate directly (the dependency rule: the
+/// CLI links `core`'s *types* through `ipc`, never its running engine).
 pub use soloist_core::{ProcStatus, ProcessKind, ProcessView, ProjectView};

@@ -13,7 +13,7 @@ name = "soloist_cli"
 path = "src/lib.rs"
 
 # Named to avoid colliding with the desktop app's `soloist` binary in one workspace; it is
-# installed as `soloist` at packaging (Phase 12).
+# installed as `soloist` at packaging.
 [[bin]]
 name = "soloist-cli"
 path = "src/main.rs"
@@ -22,7 +22,7 @@ path = "src/main.rs"
 soloist-ipc = { path = "../ipc" }
 clap = { version = "4", features = ["derive"] }
 # Loopback `http://` only — no TLS and no compression are needed to reach 127.0.0.1, so the
-# default `rustls`/`gzip` features are dropped to keep the CLI binary small (`04` §6).
+# default `rustls`/`gzip` features are dropped to keep the CLI binary small.
 ureq = { version = "3", default-features = false }
 serde = "1"
 serde_json = "1"

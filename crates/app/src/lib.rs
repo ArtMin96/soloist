@@ -233,6 +233,9 @@ pub fn run() {
                 // outlives it (the deterministic-shutdown contract).
                 let facade = app.state::<Arc<Facade>>();
                 tauri::async_runtime::block_on(facade.supervisor().shutdown());
+                // Drop the HTTP runtime file so a stale port does not outlive the app.
+                #[cfg(feature = "http")]
+                soloist_httpapi::remove_runtime();
             }
         });
 }

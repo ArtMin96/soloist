@@ -27,6 +27,13 @@ pub const LOCAL_AUTH_HEADER: &str = "x-soloist-local-auth";
 /// The value [`LOCAL_AUTH_HEADER`] must hold on a mutating request.
 pub const LOCAL_AUTH_VALUE: &str = "1";
 
+/// The status a mutation gets when the local-auth header is missing or wrong.
+pub const STATUS_UNAUTHORIZED: u16 = 401;
+/// The status a mutation gets when the command is not trusted (the core trust gate).
+pub const STATUS_FORBIDDEN: u16 = 403;
+/// The status a mutation gets when the named process or project does not exist.
+pub const STATUS_NOT_FOUND: u16 = 404;
+
 /// The file in the data directory recording the port the running server bound, so the
 /// CLI can reach it even after an auto-fallback.
 const RUNTIME_FILE: &str = "http-api.json";
@@ -60,4 +67,13 @@ pub fn read_runtime() -> Option<HttpRuntime> {
     let path = runtime_file_path().ok()?;
     let bytes = std::fs::read(path).ok()?;
     serde_json::from_slice(&bytes).ok()
+}
+
+/// Removes the runtime file on a graceful shutdown, so a stale port does not outlive the
+/// server. Best-effort: a missing file or unresolved data directory is fine, since a refused
+/// connection already reads as "Soloist is not running" and the next bind rewrites the file.
+pub fn remove_runtime() {
+    if let Ok(path) = runtime_file_path() {
+        let _ = std::fs::remove_file(path);
+    }
 }

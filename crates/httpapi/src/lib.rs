@@ -17,6 +17,7 @@ use soloist_ipc::http::{write_runtime, HttpRuntime, DEFAULT_PORT};
 use tokio::net::TcpListener;
 
 pub use routes::router;
+pub use soloist_ipc::http::remove_runtime;
 pub use state::{ApiState, FocusFn};
 
 /// How many ports above [`DEFAULT_PORT`] to try before asking the OS for any free port.

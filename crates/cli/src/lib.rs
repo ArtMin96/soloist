@@ -1,9 +1,9 @@
-//! The `soloist` CLI: a thin HTTP client of the loopback API (`05` §8). It parses a
-//! subcommand, resolves the running app's loopback port from the runtime file the server
-//! records, issues **one** request per command to the **same** core method the desktop UI
-//! and the MCP server drive, and renders the result. It holds no business logic — name→id
-//! resolution and table rendering are the only CLI-side concerns, and even those are pure,
-//! testable functions (`06` §2: the CLI is process-isolated from the engine).
+//! The `soloist` CLI: a thin HTTP client of the loopback API. It parses a subcommand,
+//! resolves the running app's loopback port from the runtime file the server records, issues
+//! **one** request per command to the **same** core method the desktop UI and the MCP server
+//! drive, and renders the result. It holds no business logic — name→id resolution and table
+//! rendering are the only CLI-side concerns, and even those are pure, testable functions (the
+//! CLI is process-isolated from the engine).
 
 mod cli;
 mod client;

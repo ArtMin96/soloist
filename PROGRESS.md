@@ -21,6 +21,21 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Phase 10 — review-cleanup pass (2026-06-24):** acted on a review of PR #26. Removed the doc/plan
+  citations and the one phase number from code comments (CLAUDE.md §8) across `crates/cli/src/{lib,client,command}.rs`,
+  `crates/cli/Cargo.toml`, and `crates/ipc/src/lib.rs` (the reasoning kept, the `0X §Y`/`Phase NN` tags dropped);
+  the `httpapi` crate was already clean. Single-sourced the mutation status codes (`401`/`403`/`404`) into
+  `ipc::http` (`STATUS_UNAUTHORIZED`/`_FORBIDDEN`/`_NOT_FOUND`), referenced by the CLI client, with a new pin test
+  (`crates/httpapi/tests/mutations.rs::the_shared_status_contract_matches_the_codes_the_server_returns`) locking them
+  to the axum codes the server returns so the two halves cannot drift. Made the CLI table measure column widths in
+  characters (not bytes) so a multibyte label cannot skew alignment. Added `ipc::http::remove_runtime` (re-exported
+  via `soloist_httpapi`) and called it from the app's `ExitRequested` handler so the `http-api.json` runtime file does
+  not outlive a graceful shutdown — routed through `httpapi` (not `soloist-ipc` directly) to keep the app's
+  `--features http` build independent of the `mcp` feature. **Gate re-confirmed green:** `just lint` exit 0; `just
+  test` exit 0 — **Rust 580 (+1 pin test) / 3 ignored, UI 78**; the three feature-matrix `cargo check`s
+  (`--no-default-features`, `--features http`, `--features mcp`) all build; `Cargo.lock` brotli pins unchanged. Not a
+  Solo divergence; one process named literally `all` staying shadowed by the `all` bulk keyword is left as-is (the
+  documented CLI surface — changing it would diverge from `plan/05` §12). Working tree only — not yet committed.
 - **Phase 10 — slice 4 (the final slice): the HTTP API reference doc landed; the phase is code-complete (2026-06-24).**
   No source change — docs + the acceptance hand-off only. New **`docs/http-api.md`**, single-sourced from the code (read
   `crates/httpapi/src/{routes,mutations,cors,auth,lib}.rs`, `crates/cli/src/{cli,command,client,lib}.rs`,

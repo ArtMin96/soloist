@@ -14,7 +14,7 @@ use crate::client::{CliError, Client};
 const ALL: &str = "all";
 
 /// A process-control verb and the endpoints it maps to: the per-process action and the
-/// project-wide bulk action. The bulk scopes mirror the HTTP/MCP semantics (`05` §12):
+/// project-wide bulk action. The bulk scopes mirror the HTTP and MCP semantics:
 /// `start-all`/`restart-all` act on the trusted commands, `stop-all` on every live process.
 #[derive(Debug, Clone, Copy)]
 pub enum Verb {
@@ -142,7 +142,7 @@ fn resolve_project(client: &Client, explicit: Option<&str>) -> Result<ProjectVie
 
 /// Picks the project a bulk command targets: the named one if given, else the sole open
 /// project, else an error — `all` is unambiguous only with one project or an explicit
-/// `--project` (mirrors the MCP single-project default, `05` §12).
+/// `--project` (mirrors the MCP single-project default).
 fn pick_project(
     projects: Vec<ProjectView>,
     explicit: Option<&str>,
@@ -196,12 +196,13 @@ fn render_table(processes: &[ProcessView], filter: Option<StatusFilter>) -> Stri
     out.trim_end().to_string()
 }
 
-/// The widest cell in each column, header included, so columns line up.
+/// The widest cell in each column, header included, so columns line up. Measured in characters
+/// (not bytes), matching how the formatter pads, so a multibyte label does not skew alignment.
 fn column_widths(headers: &[&str; 5], rows: &[[String; 5]]) -> [usize; 5] {
-    let mut widths = headers.map(str::len);
+    let mut widths = headers.map(|header| header.chars().count());
     for row in rows {
         for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.len());
+            widths[i] = widths[i].max(cell.chars().count());
         }
     }
     widths

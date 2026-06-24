@@ -16,7 +16,9 @@ use tower::ServiceExt;
 use soloist_core::testing::{terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
 use soloist_core::{CorePorts, DomainEvent, Facade, ProcStatus, ProcessId, ProjectId, TokioClock};
 use soloist_httpapi::{router, ApiState, FocusFn};
-use soloist_ipc::http::{LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE};
+use soloist_ipc::http::{
+    LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE, STATUS_FORBIDDEN, STATUS_NOT_FOUND, STATUS_UNAUTHORIZED,
+};
 
 /// The header pair an authorized mutation carries.
 const AUTH: (&str, &str) = (LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE);
@@ -180,6 +182,15 @@ async fn focus_without_auth_is_rejected_before_the_handler_runs() {
         !raised.load(Ordering::SeqCst),
         "the gate rejects before the focus callback can fire"
     );
+}
+
+#[test]
+fn the_shared_status_contract_matches_the_codes_the_server_returns() {
+    // The CLI interprets these `ipc::http` constants; the server returns these axum codes.
+    // Pinning them together keeps the two halves of the contract from drifting apart.
+    assert_eq!(STATUS_UNAUTHORIZED, StatusCode::UNAUTHORIZED.as_u16());
+    assert_eq!(STATUS_FORBIDDEN, StatusCode::FORBIDDEN.as_u16());
+    assert_eq!(STATUS_NOT_FOUND, StatusCode::NOT_FOUND.as_u16());
 }
 
 #[tokio::test]

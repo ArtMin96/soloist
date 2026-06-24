@@ -6,13 +6,10 @@ use std::fmt;
 
 use serde::de::DeserializeOwned;
 
-use soloist_ipc::http::{read_runtime, DEFAULT_PORT, LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE};
-
-/// The mutation status codes the adapter returns from a core outcome (`05` §12 HTTP mapping),
-/// translated back to messages here — the client and server program against the one contract.
-const UNAUTHORIZED: u16 = 401;
-const FORBIDDEN: u16 = 403;
-const NOT_FOUND: u16 = 404;
+use soloist_ipc::http::{
+    read_runtime, DEFAULT_PORT, LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE, STATUS_FORBIDDEN,
+    STATUS_NOT_FOUND, STATUS_UNAUTHORIZED,
+};
 
 /// Why a CLI command failed — each rendered to one stderr line by [`crate::run`].
 #[derive(Debug, PartialEq, Eq)]
@@ -105,13 +102,13 @@ fn read_error(err: ureq::Error) -> CliError {
 /// failure means the app is not running.
 fn mutation_error(err: ureq::Error) -> CliError {
     match err {
-        ureq::Error::StatusCode(FORBIDDEN) => {
+        ureq::Error::StatusCode(STATUS_FORBIDDEN) => {
             CliError::Request("that command is not trusted — trust it in Soloist first".to_string())
         }
-        ureq::Error::StatusCode(NOT_FOUND) => {
+        ureq::Error::StatusCode(STATUS_NOT_FOUND) => {
             CliError::Request("no such process or project".to_string())
         }
-        ureq::Error::StatusCode(UNAUTHORIZED) => {
+        ureq::Error::StatusCode(STATUS_UNAUTHORIZED) => {
             CliError::Request("the local-auth header was rejected".to_string())
         }
         ureq::Error::StatusCode(code) => CliError::Request(format!("the API returned HTTP {code}")),
