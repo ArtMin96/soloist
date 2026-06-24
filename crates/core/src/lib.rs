@@ -54,11 +54,13 @@ pub use config::{
     TrustReviewCommand,
 };
 pub use coordination::{
-    AcquireOutcome, FireCond, IdleMode, LeaseReleaser, LeaseView, Leases, LockRepo, NewTimer,
-    NoopLockRepo, NoopScratchpadRepo, NoopTimerRepo, RenameError, RenameResult, ScratchpadDoc,
-    ScratchpadRepo, ScratchpadSummary, ScratchpadView, Scratchpads, SetWhenIdleOutcome,
-    StoredLease, StoredScratchpad, StoredTimer, TimerRepo, TimerScheduler, TimerStatus, TimerView,
-    Timers, WriteError, WriteResult,
+    AcquireOutcome, Comment, CommentEdit, CommentOutcome, FireCond, IdleMode, LeaseReleaser,
+    LeaseView, Leases, LockRepo, NewTimer, NoopLockRepo, NoopScratchpadRepo, NoopTimerRepo,
+    NoopTodoRepo, RenameError, RenameResult, ScratchpadDoc, ScratchpadRepo, ScratchpadSummary,
+    ScratchpadView, Scratchpads, SetWhenIdleOutcome, StoredLease, StoredScratchpad, StoredTimer,
+    StoredTodo, TimerRepo, TimerScheduler, TimerStatus, TimerView, Timers, TodoDoc, TodoError,
+    TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView, TodoWriteResult, Todos,
+    WriteError, WriteResult,
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
@@ -69,15 +71,16 @@ pub use facade::{
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, Whoami, PROCESS_ID_ENV};
-pub use ids::{ProcessId, ProjectId, ScratchpadId, SessionId, TimerId};
+pub use ids::{ProcessId, ProjectId, ScratchpadId, SessionId, TimerId, TodoId};
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use notify::{NoopNotifier, Notification, NotificationReactor, Notifier};
 pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{
-    Clock, CorePorts, CorePortsBuilder, ExitFuture, ExitStatus, LockReleaser, NoopLockReleaser,
-    NoopOrphanControl, NoopRuntimeState, OrphanControl, OrphanRecord, ProcessControl,
-    ProcessSpawner, ProjectRecord, ProjectRepo, PtyIo, PtySize, RuntimeState, RuntimeStateError,
-    SpawnError, SpawnSpec, Spawned, Store, StoreError, TokioClock, TrustRepo,
+    Clock, CompositeLockReleaser, CorePorts, CorePortsBuilder, ExitFuture, ExitStatus,
+    LockReleaser, NoopLockReleaser, NoopOrphanControl, NoopRuntimeState, OrphanControl,
+    OrphanRecord, ProcessControl, ProcessSpawner, ProjectRecord, ProjectRepo, PtyIo, PtySize,
+    RuntimeState, RuntimeStateError, SpawnError, SpawnSpec, Spawned, Store, StoreError, TokioClock,
+    TrustRepo,
 };
 pub use portscan::{wait_for_port, NoopPortProbe, PortProbe, PortScanner, WaitForPortError};
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView, Readiness};

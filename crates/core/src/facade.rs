@@ -18,7 +18,7 @@ use tokio::sync::{broadcast, Notify};
 
 use crate::agents::{Agents, IdleTracker};
 use crate::config::ConfigEngine;
-use crate::coordination::{Leases, Scratchpads, Timers};
+use crate::coordination::{Leases, Scratchpads, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::FileWatcher;
 use crate::identity::Identity;
@@ -38,6 +38,7 @@ mod output;
 mod scoped;
 mod scratchpad;
 mod session;
+mod todo;
 
 pub use coordination::CoordinationError;
 pub use scoped::{ScopedActionError, SpawnAgentError};
@@ -65,6 +66,7 @@ pub struct Facade {
     leases: Leases,
     timers: Timers,
     scratchpads: Scratchpads,
+    todos: Todos,
 }
 
 impl Facade {
@@ -87,6 +89,7 @@ impl Facade {
             lock_repo,
             timer_repo,
             scratchpad_repo,
+            todo_repo,
             ..
         } = ports;
         Self {
@@ -96,6 +99,7 @@ impl Facade {
             // or resuming a timer re-evaluates the schedule at once.
             timers: Timers::new(timer_repo, clock.clone(), Arc::new(Notify::new())),
             scratchpads: Scratchpads::new(scratchpad_repo),
+            todos: Todos::new(todo_repo),
             clock,
             metrics,
             port_probe,

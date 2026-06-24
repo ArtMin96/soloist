@@ -3,7 +3,7 @@
 //! One connection (WAL, foreign keys on) behind a `Mutex` backs the durable
 //! repositories, following the repository pattern: each port lives in its own
 //! module (`meta`, `projects`, `trust`, `agents`, `leases`, `timers`, `scratchpads`,
-//! `runtime`) implementing the matching core trait. Schema changes are versioned, idempotent
+//! `todos`, `runtime`) implementing the matching core trait. Schema changes are versioned, idempotent
 //! [`migrate`]ions. SQLite is bundled, so the binary carries its own engine and needs
 //! no system `libsqlite3`.
 
@@ -15,6 +15,7 @@ mod projects;
 mod runtime;
 mod scratchpads;
 mod timers;
+mod todos;
 mod trust;
 
 use std::path::Path;

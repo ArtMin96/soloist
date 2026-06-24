@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 6;
+pub(crate) const SCHEMA_VERSION: i64 = 7;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -123,6 +123,29 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         .map_err(sql_err)?;
     }
 
+    if version < 7 {
+        // Coordination todos: durable, project-scoped work items. The store-assigned `id` is durable
+        // and never reused (`AUTOINCREMENT`); `doc` is the JSON of the disciplined `TodoDoc` (title,
+        // description, acceptance criteria, risks, status), and `tags`/`blockers`/`comments` are JSON
+        // arrays, so the persisted shapes cannot drift; `revision` guards optimistic-concurrency doc
+        // writes. `locked_by` is the per-run process id holding the todo's lock, or NULL — the only
+        // process-owned, per-run field, cleared on launch (the todo itself survives, G11). The
+        // project foreign key cascades, so removing a project drops its todos.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS todos (
+                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 doc        TEXT NOT NULL,
+                 tags       TEXT NOT NULL DEFAULT '[]',
+                 blockers   TEXT NOT NULL DEFAULT '[]',
+                 comments   TEXT NOT NULL DEFAULT '[]',
+                 locked_by  INTEGER,
+                 revision   INTEGER NOT NULL
+             );",
+        )
+        .map_err(sql_err)?;
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
@@ -173,6 +196,7 @@ mod tests {
             "leases",
             "timers",
             "scratchpads",
+            "todos",
         ] {
             let exists = conn
                 .query_row(

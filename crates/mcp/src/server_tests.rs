@@ -2,10 +2,10 @@ use super::*;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, FireCond, LeaseView, Origin, ProcStatus, ProcessId,
-    ProcessKind, ProcessView, ProjectId, PromptMode, Readiness, ScratchpadDoc, ScratchpadId,
-    ScratchpadSummary, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary, TimerId,
-    TimerStatus, TimerView, Whoami,
+    AcquireOutcome, AgentKind, AgentTool, Comment, FireCond, LeaseView, Origin, ProcStatus,
+    ProcessId, ProcessKind, ProcessView, ProjectId, PromptMode, Readiness, ScratchpadDoc,
+    ScratchpadId, ScratchpadSummary, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary,
+    TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary, TodoView, Whoami,
 };
 use soloist_ipc::{
     read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome,
@@ -17,7 +17,8 @@ use tokio::net::UnixListener;
 use crate::args::{
     LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, RenameArg, ScratchpadArchiveArg,
     ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg, SelectProjectArg,
-    SendInputArg, SpawnAgentArg, TimerArg, TimerFireWhenIdleArg, TimerSetArg, WaitForPortArg,
+    SendInputArg, SpawnAgentArg, TimerArg, TimerFireWhenIdleArg, TimerSetArg, TodoArg,
+    TodoCommentCreateArg, TodoCreateArg, TodoStatusArg, WaitForPortArg,
 };
 
 /// Spawns a fake app on `socket` that answers each request via `respond` until the client
@@ -123,6 +124,25 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "scratchpad_tags_list",
     "scratchpad_archive",
     "scratchpad_delete",
+    // tools/todo.rs
+    "todo_list",
+    "todo_get",
+    "todo_create",
+    "todo_update",
+    "todo_complete",
+    "todo_delete",
+    "todo_tags_list",
+    "todo_add_tag",
+    "todo_remove_tag",
+    "todo_set_blockers",
+    "todo_add_blocker",
+    "todo_remove_blocker",
+    "todo_lock",
+    "todo_unlock",
+    "todo_comment_create",
+    "todo_comment_update",
+    "todo_comment_delete",
+    "todo_comment_list",
 ];
 
 /// The router [`SoloistMcp::new`] composes from the per-category sub-routers must serve exactly
@@ -1194,4 +1214,199 @@ async fn scratchpad_delete_reports_whether_it_was_removed() {
         structured_of(result),
         serde_json::json!({ "deleted": true })
     );
+}
+
+/// A sample disciplined document for the todo response-projection tests.
+fn sample_todo_doc() -> TodoDoc {
+    TodoDoc {
+        title: "ship".into(),
+        description: "cut the release".into(),
+        acceptance_criteria: vec!["soak green".into()],
+        risks: vec!["none identified".into()],
+        status: TodoStatus::Open,
+    }
+}
+
+/// A sample todo view for the response-projection tests.
+fn sample_todo(id: u64) -> TodoView {
+    TodoView {
+        id: TodoId::from_raw(id),
+        doc: sample_todo_doc(),
+        tags: vec!["release".into()],
+        blockers: Vec::new(),
+        blocked_by: Vec::new(),
+        blocked: false,
+        comments: Vec::new(),
+        locked_by: None,
+        revision: 1,
+    }
+}
+
+#[tokio::test]
+async fn todo_create_builds_the_disciplined_document_and_projects_the_view() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // The handler assembles the document from the flat tool fields and maps the wire status.
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TodoCreate { doc } if doc == sample_todo_doc() => {
+            Ok(IpcResponse::Todo(sample_todo(5)))
+        }
+        _ => Err(IpcError::Internal("unexpected create".into())),
+    });
+
+    let result = handler(socket)
+        .todo_create(Parameters(TodoCreateArg {
+            title: "ship".into(),
+            description: "cut the release".into(),
+            acceptance_criteria: vec!["soak green".into()],
+            risks: vec!["none identified".into()],
+            status: TodoStatusArg::Open,
+        }))
+        .await
+        .expect("todo_create succeeds");
+    let back: TodoView = serde_json::from_value(structured_of(result)).expect("decode view");
+    assert_eq!(back.id, TodoId::from_raw(5));
+    assert_eq!(back.doc, sample_todo_doc());
+}
+
+#[tokio::test]
+async fn todo_list_projects_the_summaries() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let summary = TodoSummary {
+        id: TodoId::from_raw(3),
+        title: "ship".into(),
+        status: TodoStatus::InProgress,
+        tags: vec!["release".into()],
+        blocked: true,
+        locked_by: Some(ProcessId::from_raw(9)),
+        revision: 2,
+    };
+    let canned = summary.clone();
+    spawn_fake_app(socket.clone(), move |request| match request {
+        IpcRequest::TodoList => Ok(IpcResponse::Todos(vec![canned.clone()])),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .todo_list()
+        .await
+        .expect("todo_list succeeds");
+    let back: Vec<TodoSummary> =
+        serde_json::from_value(structured_of(result)["todos"].clone()).expect("decode list");
+    assert_eq!(back, vec![summary]);
+}
+
+#[tokio::test]
+async fn todo_complete_threads_the_id_and_projects_the_view() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TodoComplete { todo } if todo == TodoId::from_raw(7) => {
+            Ok(IpcResponse::Todo(sample_todo(7)))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .todo_complete(Parameters(TodoArg { todo: 7 }))
+        .await
+        .expect("todo_complete succeeds");
+    let back: TodoView = serde_json::from_value(structured_of(result)).expect("decode view");
+    assert_eq!(back.id, TodoId::from_raw(7));
+}
+
+#[tokio::test]
+async fn a_blocked_completion_becomes_a_tool_execution_error() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // The core refused completion because the todo is gated; the agent must see it as an actionable
+    // tool error naming the blockers, so it can finish those first.
+    spawn_fake_app(socket.clone(), |_request| {
+        Err(IpcError::TodoBlocked {
+            by: vec![TodoId::from_raw(2)],
+        })
+    });
+
+    let result = handler(socket)
+        .todo_complete(Parameters(TodoArg { todo: 9 }))
+        .await
+        .expect("a refusal is a tool result, not a protocol error");
+    assert_eq!(result.is_error, Some(true));
+}
+
+#[tokio::test]
+async fn todo_comment_create_projects_the_todo_and_comment_id() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TodoCommentCreate { todo, body }
+            if todo == TodoId::from_raw(4) && body == "note" =>
+        {
+            Ok(IpcResponse::TodoComment {
+                todo: sample_todo(4),
+                comment: 1,
+            })
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .todo_comment_create(Parameters(TodoCommentCreateArg {
+            todo: 4,
+            body: "note".into(),
+        }))
+        .await
+        .expect("todo_comment_create succeeds");
+    let structured = structured_of(result);
+    assert_eq!(structured["comment"], serde_json::json!(1));
+    let back: TodoView = serde_json::from_value(structured["todo"].clone()).expect("decode todo");
+    assert_eq!(back.id, TodoId::from_raw(4));
+}
+
+#[tokio::test]
+async fn todo_delete_reports_whether_it_was_removed() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TodoDelete { todo } if todo == TodoId::from_raw(5) => {
+            Ok(IpcResponse::TodoDeleted(true))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .todo_delete(Parameters(TodoArg { todo: 5 }))
+        .await
+        .expect("todo_delete succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "deleted": true })
+    );
+}
+
+/// The `Comment` core type is part of the todo wire surface (the comment-list reply); this guards
+/// that it serializes to the shape the agent reads.
+#[tokio::test]
+async fn todo_comment_list_projects_the_comments() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TodoCommentList { todo } if todo == TodoId::from_raw(4) => {
+            Ok(IpcResponse::TodoComments(vec![Comment {
+                id: 1,
+                body: "looks good".into(),
+            }]))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .todo_comment_list(Parameters(TodoArg { todo: 4 }))
+        .await
+        .expect("todo_comment_list succeeds");
+    let back: Vec<Comment> =
+        serde_json::from_value(structured_of(result)["comments"].clone()).expect("decode comments");
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0].body, "looks good");
 }

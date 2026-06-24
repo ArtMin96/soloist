@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    CoordinationError, IdentityError, LaunchAgentError, ScopedActionError, SpawnAgentError,
+    CoordinationError, IdentityError, LaunchAgentError, ScopedActionError, SpawnAgentError, TodoId,
 };
 
 /// Why a request failed: a typed error the client maps to a clear MCP tool error.
@@ -50,6 +50,30 @@ pub enum IpcError {
     /// A scratchpad rename targeted a name already used in the project.
     #[error("a scratchpad with that name already exists")]
     ScratchpadNameTaken,
+    /// A todo write carried a malformed document; the detail names every problem.
+    #[error("todo is not well-formed: {0}")]
+    InvalidTodo(String),
+    /// A todo update expected a revision other than the one on record — re-read and retry.
+    #[error("todo revision conflict (expected {expected:?}, found {actual:?})")]
+    TodoRevisionConflict {
+        expected: Option<u64>,
+        actual: Option<u64>,
+    },
+    /// A todo action named one that does not exist in the session's effective project.
+    #[error("no todo under that id")]
+    UnknownTodo,
+    /// Completing a todo was refused because it still has unmet blockers; `by` lists them.
+    #[error("todo is blocked by {by:?}")]
+    TodoBlocked { by: Vec<TodoId> },
+    /// A blocker referenced a todo that does not exist in the session's effective project.
+    #[error("no todo under that id to block on")]
+    UnknownBlocker,
+    /// A todo cannot block itself.
+    #[error("a todo cannot block itself")]
+    SelfBlocker,
+    /// A comment action named one that does not exist on the todo.
+    #[error("no comment under that id on that todo")]
+    UnknownComment,
     /// The referenced process belongs to a different project than the session's scope.
     #[error("that process belongs to a different project")]
     OutOfScope,
@@ -83,6 +107,13 @@ impl IpcError {
             | IpcError::RevisionConflict { .. }
             | IpcError::UnknownScratchpad
             | IpcError::ScratchpadNameTaken
+            | IpcError::InvalidTodo(_)
+            | IpcError::TodoRevisionConflict { .. }
+            | IpcError::UnknownTodo
+            | IpcError::TodoBlocked { .. }
+            | IpcError::UnknownBlocker
+            | IpcError::SelfBlocker
+            | IpcError::UnknownComment
             | IpcError::OutOfScope
             | IpcError::Untrusted
             | IpcError::UnknownTool => true,
@@ -146,6 +177,15 @@ impl From<CoordinationError> for IpcError {
             }
             CoordinationError::UnknownScratchpad => IpcError::UnknownScratchpad,
             CoordinationError::ScratchpadNameTaken => IpcError::ScratchpadNameTaken,
+            CoordinationError::InvalidTodo(message) => IpcError::InvalidTodo(message),
+            CoordinationError::TodoRevisionConflict { expected, actual } => {
+                IpcError::TodoRevisionConflict { expected, actual }
+            }
+            CoordinationError::UnknownTodo => IpcError::UnknownTodo,
+            CoordinationError::TodoBlocked { by } => IpcError::TodoBlocked { by },
+            CoordinationError::UnknownBlocker => IpcError::UnknownBlocker,
+            CoordinationError::SelfBlocker => IpcError::SelfBlocker,
+            CoordinationError::UnknownComment => IpcError::UnknownComment,
             CoordinationError::Store(err) => IpcError::Internal(err.to_string()),
         }
     }

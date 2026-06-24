@@ -340,6 +340,86 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .scratchpad_delete(session, &name)
             .map(IpcResponse::ScratchpadDeleted)
             .map_err(IpcError::from),
+        IpcRequest::TodoCreate { doc } => facade
+            .todo_create(session, doc)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoList => facade
+            .todo_list(session)
+            .map(IpcResponse::Todos)
+            .map_err(IpcError::from),
+        IpcRequest::TodoGet { todo } => facade
+            .todo_get(session, todo)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoUpdate {
+            todo,
+            doc,
+            expected_revision,
+        } => facade
+            .todo_update(session, todo, doc, expected_revision)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoComplete { todo } => facade
+            .todo_complete(session, todo)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoDelete { todo } => facade
+            .todo_delete(session, todo)
+            .map(IpcResponse::TodoDeleted)
+            .map_err(IpcError::from),
+        IpcRequest::TodoTagsList => facade
+            .todo_tags_list(session)
+            .map(IpcResponse::TodoTags)
+            .map_err(IpcError::from),
+        IpcRequest::TodoAddTag { todo, tag } => facade
+            .todo_add_tag(session, todo, &tag)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoRemoveTag { todo, tag } => facade
+            .todo_remove_tag(session, todo, &tag)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoSetBlockers { todo, blockers } => facade
+            .todo_set_blockers(session, todo, blockers)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoAddBlocker { todo, blocker } => facade
+            .todo_add_blocker(session, todo, blocker)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoRemoveBlocker { todo, blocker } => facade
+            .todo_remove_blocker(session, todo, blocker)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoLock { todo } => facade
+            .todo_lock(session, todo)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoUnlock { todo } => facade
+            .todo_unlock(session, todo)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoCommentCreate { todo, body } => facade
+            .todo_comment_create(session, todo, &body)
+            .map(|(todo, comment)| IpcResponse::TodoComment { todo, comment })
+            .map_err(IpcError::from),
+        IpcRequest::TodoCommentUpdate {
+            todo,
+            comment,
+            body,
+        } => facade
+            .todo_comment_update(session, todo, comment, &body)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoCommentDelete { todo, comment } => facade
+            .todo_comment_delete(session, todo, comment)
+            .map(IpcResponse::Todo)
+            .map_err(IpcError::from),
+        IpcRequest::TodoCommentList { todo } => facade
+            .todo_comment_list(session, todo)
+            .map(IpcResponse::TodoComments)
+            .map_err(IpcError::from),
     }
 }
 

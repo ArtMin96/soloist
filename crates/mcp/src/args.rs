@@ -5,6 +5,7 @@
 
 use rmcp::schemars;
 use serde::Deserialize;
+use soloist_core::TodoStatus;
 
 /// Arguments for a single-process tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -204,4 +205,126 @@ pub(crate) struct ScratchpadArchiveArg {
     pub(crate) name: String,
     /// True to archive it (hide from the default listing), false to restore it.
     pub(crate) archived: bool,
+}
+
+/// The lifecycle status an agent declares on a todo — a closed set, mirroring the core
+/// `TodoStatus` on the wire; the handler converts it. Distinct from the *blocker gate*: a todo is
+/// prevented from completing by its unmet blockers, not by this label.
+#[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum TodoStatusArg {
+    Open,
+    Blocked,
+    InProgress,
+    Done,
+}
+
+impl From<TodoStatusArg> for TodoStatus {
+    fn from(status: TodoStatusArg) -> Self {
+        match status {
+            TodoStatusArg::Open => TodoStatus::Open,
+            TodoStatusArg::Blocked => TodoStatus::Blocked,
+            TodoStatusArg::InProgress => TodoStatus::InProgress,
+            TodoStatusArg::Done => TodoStatus::Done,
+        }
+    }
+}
+
+/// Arguments naming a single todo by id.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoArg {
+    /// The id of the todo, as returned by `todo_list` or `todo_create`.
+    pub(crate) todo: u64,
+}
+
+/// Arguments for creating a todo's disciplined document. The fields ARE the required structure —
+/// every todo records the same sections, so they stay consistent and informative.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoCreateArg {
+    /// A short imperative title — what this todo is.
+    pub(crate) title: String,
+    /// What needs doing and any detail a worker needs to act on it.
+    pub(crate) description: String,
+    /// The testable criteria that define the todo as done. At least one.
+    pub(crate) acceptance_criteria: Vec<String>,
+    /// The risks, unknowns, or blockers to watch. State "none identified" rather than leaving empty.
+    pub(crate) risks: Vec<String>,
+    /// The lifecycle status to start in (usually open).
+    pub(crate) status: TodoStatusArg,
+}
+
+/// Arguments for updating a todo's document, revision-guarded.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoUpdateArg {
+    /// The id of the todo to update.
+    pub(crate) todo: u64,
+    /// A short imperative title — what this todo is.
+    pub(crate) title: String,
+    /// What needs doing and any detail a worker needs to act on it.
+    pub(crate) description: String,
+    /// The testable criteria that define the todo as done. At least one.
+    pub(crate) acceptance_criteria: Vec<String>,
+    /// The risks, unknowns, or blockers to watch. State "none identified" rather than leaving empty.
+    pub(crate) risks: Vec<String>,
+    /// The lifecycle status. Set it to done only when the todo's blockers are all complete.
+    pub(crate) status: TodoStatusArg,
+    /// The revision you are updating from, as returned by `todo_get`. A mismatch means someone
+    /// edited it first, so re-read and retry.
+    pub(crate) expected_revision: u64,
+}
+
+/// Arguments for adding or removing a single tag on a todo.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoTagArg {
+    /// The id of the todo.
+    pub(crate) todo: u64,
+    /// The tag to add or remove.
+    pub(crate) tag: String,
+}
+
+/// Arguments for replacing a todo's blockers.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoBlockersArg {
+    /// The id of the todo.
+    pub(crate) todo: u64,
+    /// The ids of the todos that must complete before this one (from `todo_list`).
+    pub(crate) blockers: Vec<u64>,
+}
+
+/// Arguments for adding or removing a single blocker on a todo.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoBlockerArg {
+    /// The id of the todo to gate.
+    pub(crate) todo: u64,
+    /// The id of the todo that must complete first.
+    pub(crate) blocker: u64,
+}
+
+/// Arguments for creating a comment on a todo.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoCommentCreateArg {
+    /// The id of the todo to comment on.
+    pub(crate) todo: u64,
+    /// The comment text.
+    pub(crate) body: String,
+}
+
+/// Arguments for updating a comment on a todo.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoCommentEditArg {
+    /// The id of the todo.
+    pub(crate) todo: u64,
+    /// The id of the comment, as returned by `todo_comment_create` or seen on the todo.
+    pub(crate) comment: u64,
+    /// The new comment text.
+    pub(crate) body: String,
+}
+
+/// Arguments for referencing a comment on a todo (delete).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoCommentRefArg {
+    /// The id of the todo.
+    pub(crate) todo: u64,
+    /// The id of the comment to delete.
+    pub(crate) comment: u64,
 }
