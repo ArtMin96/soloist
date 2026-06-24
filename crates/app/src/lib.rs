@@ -190,9 +190,18 @@ pub fn run() {
             // Start the loopback HTTP API so a shell or launcher can drive the core over
             // 127.0.0.1, identically to the UI and MCP. Compiled in only under the `http`
             // feature; it degrades to a logged no-op if no loopback port can be bound,
-            // never blocking app launch.
+            // never blocking app launch. The focus callback raises the desktop window for
+            // `POST /focus` — the one effect the core-only server cannot perform itself.
             #[cfg(feature = "http")]
-            tauri::async_runtime::spawn(soloist_httpapi::serve(http_facade));
+            {
+                let window_handle = app.handle().clone();
+                let focus: soloist_httpapi::FocusFn = Arc::new(move || {
+                    if let Some(window) = window_handle.get_webview_window("main") {
+                        let _ = window.set_focus();
+                    }
+                });
+                tauri::async_runtime::spawn(soloist_httpapi::serve(http_facade, focus));
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -9,7 +9,7 @@
 
 ## Current state
 
-> **ACTIVE PHASE: 10 (HTTP API & CLI) — `In progress` (slice 1 of ~4 landed: the HTTP read API). Phase 9 (Coordination, C6) is `Verified`.**
+> **ACTIVE PHASE: 10 (HTTP API & CLI) — `In progress` (slices 1–2 of ~4 landed: HTTP read API + mutation API). Phase 9 (Coordination, C6) is `Verified`.**
 > PR #25 (todos G3–G5 + kv G10 + E7) is **merged to `main`** (merge commit `9dc1857`); all v1 coordination Verify
 > checks **G1–G11 + E7** pass. Gate **re-confirmed green on `main` `369f3a0` this session (2026-06-24):** Rust
 > **541 passed / 3 ignored** (24 suites), UI **78**, `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint,
@@ -21,6 +21,34 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Phase 10 — slice 2: the HTTP mutation API (H3) + the H1 mutation auth header landed (2026-06-24).** The second
+  vertical, on the same core-only adapter. **H1 is now complete:** an axum `middleware::from_fn` auth gate
+  (`crates/httpapi/src/auth.rs`) requires `x-soloist-local-auth: 1` (single-sourced from `ipc::http::{LOCAL_AUTH_HEADER,
+  LOCAL_AUTH_VALUE}`), applied via `route_layer` to a **mutation sub-router only** — so reads stay open on loopback while
+  every mutation needs the header (missing/wrong → **401**). **H3 — nine mutation endpoints** (`crates/httpapi/src/mutations.rs`),
+  each a thin 1:1 delegation to the **one** core method the UI/MCP already drive (never reimplemented per adapter):
+  `POST /processes/{id}/start|stop|restart` → `supervisor().start|stop|restart`; the project bulk set
+  `start-auto` → `start_all` (auto-start subset), `start-all` → `start_all_commands` (all trusted), `stop-all` → `stop_all`,
+  `restart-running` → `restart_running`, `restart-all` → `restart_all_commands` (reconciling the long-open start-all-vs-start-auto
+  thread — recorded in `plan/05` §12); and `POST /focus`. **Error→status mapping** in the adapter: unknown process **404**,
+  untrusted command **403** (the core trust gate), durable-store failure **500**; `stop`/`stop-all` idempotent **200**.
+  **`/focus`** is the one effect that can't route through the core (the core has no window): `httpapi::serve(facade, focus)`
+  + `ApiState` now carry a `FocusFn = Arc<dyn Fn()+Send+Sync>` (no-op default, so the adapter stays Tauri-free and testable);
+  the composition root (`app/src/lib.rs`) wires it to `get_webview_window("main").set_focus()` — `httpapi` still depends only on
+  `core`/`ipc`/`axum`. **`reload` is a tracked deferral** (user decision 2026-06-24): a correct reload needs a registration-reconcile
+  path that doesn't exist yet (`config.sync()` only refreshes the engine snapshot and `supervisor.register()` mints a fresh id, so
+  "sync + restart-all" would restart stale specs) — recorded in `plan/05` §12; H3's Verify and the nine implemented endpoints don't
+  depend on it. **Skills/sources (CLAUDE.md §4/§5):** axum 0.8.4 `from_fn`/`route_layer` confirmed via context7; Tauri 2.9.5
+  `WebviewWindow::set_focus` confirmed via context7 + the `tauri-window-customization` skill. **Tests:** 9 handler-level `oneshot`
+  tests in `crates/httpapi/tests/mutations.rs` — missing/wrong header → 401, reads stay open, an authorized start reaches the real
+  core and the process reaches `Running` (observed via the event bus), an unknown restart → 404, a project bulk stop → 200, `/focus`
+  fires the callback (and is rejected — and does not fire — without auth), and CORS still withholds the allow-origin header from a
+  non-loopback origin on a mutation. **Gate green:** **Rust 558 (+9) / 3 ignored** (26 suites), **UI 78**; `just lint` exit 0
+  (clippy `-D warnings`, fmt, tsc, eslint, prettier, dep-direction `soloist-core` framework-free; file-size advisory only — all new
+  files small); `cargo check -p soloist-app` across `--features http` / `--no-default-features` / `--no-default-features --features mcp`
+  all build (http still removable both ways); `Cargo.lock` brotli pins unchanged (no `cargo update`; added `time` to httpapi dev-deps
+  tokio). **Branch `feat/phase-10-http-api` (PR #26, still OPEN — the user merges, do NOT self-merge); slice committed — stop for
+  review before slice 3.** Next: **slice 3 = H4** (`crates/cli` — the `soloist` CLI, a thin HTTP client), then slice 4 = docs + acceptance.
 - **Phase 10 STARTED — slice 1: the loopback HTTP read API (H2 + the H1 transport/CORS) landed (2026-06-24).** First
   vertical of the HTTP/CLI phase, on the proven adapter pattern. A new `axum` server in **`crates/httpapi`** (core-only —
   depends on `core`/`ipc`/`axum`, **never** `tauri`) bound to **`127.0.0.1:24678`** with **auto-fallback** to the next 16
@@ -2975,8 +3003,8 @@ review's one should-fix + the mechanical nits:
 (`crates/httpapi`) + the `soloist` CLI (`crates/cli`) as the parity rows **H1–H4** require, routing **every** action
 to the **same `Facade`** the UI and MCP already use (`04` §2; recipe `plan/06` §5.4 — never reimplement an action
 per adapter). Research `axum` + `tower-http` (CORS) and `clap` via context7 **before** writing (CLAUDE.md §4; the
-Tauri skills don't cover axum). **Slice 1 (H2 + the H1 transport/CORS) is landed on branch `feat/phase-10-http-api`** —
-see the top Current-state entry; **resume at slice 2 (item 2 below, H3).** **In order:**
+Tauri skills don't cover axum). **Slices 1–2 (H2 reads + H1 transport/CORS + H3 mutations + the H1 auth header) are landed on branch
+`feat/phase-10-http-api`** (PR #26, OPEN) — see the top Current-state entries; **resume at slice 3 (item 3 below, H4 — the CLI).** **In order:**
 1. **H1 + H2 — HTTP server skeleton + read endpoints. ✅ DONE (slice 1, 2026-06-24)** — `crates/httpapi` `axum` server on
    `127.0.0.1:24678` with auto-fallback + runtime port file, localhost CORS, the 5 read endpoints, in-process behind the
    `http` feature, app on `Arc<Facade>`. The mutation auth header is defined in `ipc::http` but **enforced in slice 2**.
@@ -2988,11 +3016,12 @@ see the top Current-state entry; **resume at slice 2 (item 2 below, H3).** **In 
    `#[cfg(feature = "http")]`) or a runtime toggle **from day one**. Read endpoints (`GET /health` → `{ok,version}`,
    `/status`, `/processes` → `[ProcessView]`, `/processes/:id/ports`, `/projects` → `[ProjectView]`) return JSON
    projections from `facade.snapshot()` etc., **reusing the core `ProcessView`/`ProjectView` types** (single source).
-2. **H3 — mutation endpoints. ◀ START HERE (slice 2).** `POST /processes/:id/{start|stop|restart}`; `POST
-   /projects/:id/{start-all|stop-all|reload|start-auto|restart-running|restart-all}`; `POST /focus` (raise the
-   window). Each maps to **one** core command; the trust gate + effective scope stay enforced **in the core**.
-   Missing auth header → 401/403; non-localhost origin → rejected (CORS).
-3. **H4 — the `soloist` CLI.** `crates/cli` = a thin HTTP **client** (`clap` + a small HTTP client; depends on `ipc`
+2. **H3 — mutation endpoints + the H1 auth header. ✅ DONE (slice 2, 2026-06-24)** — eight endpoints live
+   (`POST /processes/:id/{start|stop|restart}`; `POST /projects/:id/{start-auto|start-all|stop-all|restart-running|restart-all}`;
+   `POST /focus`), each a 1:1 delegation to one core method, behind a `route_layer` auth gate (missing/wrong header → 401;
+   reads stay open), with the focus callback wired from the composition root. `reload` is a **tracked deferral** (needs a
+   registration-reconcile path; `plan/05` §12). See the top Current-state entry. **H1 is now complete.**
+3. **H4 — the `soloist` CLI. ◀ START HERE (slice 3).** `crates/cli` = a thin HTTP **client** (`clap` + a small HTTP client; depends on `ipc`
    for shared types, **not** `core` directly — `plan/06` §2; watch the CLI binary size, `04` §6/§10). Subcommands
    `status [--status running|crashed]` / `start|stop|restart <name|all>` / `logs <name> [-n N]` / `spawn <tool>` /
    `open` / `focus`; resolve the port/auth from the app's runtime file; a clear "Soloist is not running" when the

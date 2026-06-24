@@ -13,17 +13,25 @@ use soloist_core::{ProcStatus, ProcessId, ProcessView, ProjectView};
 use crate::cors::localhost_cors;
 use crate::state::ApiState;
 
-/// Builds the router: the read routes, with the localhost CORS layer applied to all of
-/// them. Mutation routes and their auth gate land in their own slice.
+/// Builds the full router: the open read routes merged with the auth-gated mutation routes,
+/// with the localhost CORS layer over both. The auth gate rides only the mutation routes
+/// (see [`crate::mutations`]); CORS applies to everything.
 pub fn router(state: ApiState) -> Router {
+    read_routes()
+        .merge(crate::mutations::router())
+        .layer(localhost_cors())
+        .with_state(state)
+}
+
+/// The read routes — open on loopback (no auth gate), since reading the local stack is the
+/// low-risk half of the API.
+fn read_routes() -> Router<ApiState> {
     Router::new()
         .route("/health", get(health))
         .route("/status", get(status))
         .route("/processes", get(processes))
         .route("/processes/{id}/ports", get(process_ports))
         .route("/projects", get(projects))
-        .layer(localhost_cors())
-        .with_state(state)
 }
 
 /// `GET /health` — liveness plus the running version, so a client can confirm it reached

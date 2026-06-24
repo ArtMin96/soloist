@@ -4,7 +4,9 @@
 //! header and CORS is restricted to localhost. The server holds no business state — every
 //! route maps to one façade call.
 
+mod auth;
 mod cors;
+mod mutations;
 mod routes;
 mod state;
 
@@ -15,7 +17,7 @@ use soloist_ipc::http::{write_runtime, HttpRuntime, DEFAULT_PORT};
 use tokio::net::TcpListener;
 
 pub use routes::router;
-pub use state::ApiState;
+pub use state::{ApiState, FocusFn};
 
 /// How many ports above [`DEFAULT_PORT`] to try before asking the OS for any free port.
 const FALLBACK_TRIES: u16 = 16;
@@ -23,8 +25,9 @@ const FALLBACK_TRIES: u16 = 16;
 /// Binds the loopback HTTP API and serves it until the app shuts down. Degrades to a
 /// logged no-op if no loopback port can be bound, so a port conflict disables the API
 /// rather than taking down the app (graceful degradation). Records the bound port so the
-/// CLI can reach it after a fallback.
-pub async fn serve(facade: Arc<Facade>) {
+/// CLI can reach it after a fallback. `focus` raises the desktop window for `POST /focus` —
+/// the one effect that cannot route through the core, so the composition root supplies it.
+pub async fn serve(facade: Arc<Facade>, focus: FocusFn) {
     let Some(listener) = bind_loopback().await else {
         eprintln!("soloist: HTTP API disabled (no loopback port available)");
         return;
@@ -41,7 +44,8 @@ pub async fn serve(facade: Arc<Facade>) {
         // CLI falls back to the default port.
         eprintln!("soloist: could not record the HTTP API port ({err})");
     }
-    if let Err(err) = axum::serve(listener, router(ApiState::new(facade))).await {
+    let state = ApiState::new(facade).with_focus(focus);
+    if let Err(err) = axum::serve(listener, router(state)).await {
         eprintln!("soloist: HTTP API stopped: {err}");
     }
 }
