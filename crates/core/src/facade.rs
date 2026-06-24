@@ -18,7 +18,7 @@ use tokio::sync::{broadcast, Notify};
 
 use crate::agents::{Agents, IdleTracker};
 use crate::config::ConfigEngine;
-use crate::coordination::{Leases, Scratchpads, Timers};
+use crate::coordination::{Kv, Leases, Scratchpads, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::FileWatcher;
 use crate::identity::Identity;
@@ -33,11 +33,13 @@ use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::trust::TrustStore;
 
 mod coordination;
+mod kv;
 mod loops;
 mod output;
 mod scoped;
 mod scratchpad;
 mod session;
+mod todo;
 
 pub use coordination::CoordinationError;
 pub use scoped::{ScopedActionError, SpawnAgentError};
@@ -62,9 +64,11 @@ pub struct Facade {
     agents: Agents,
     idle: Arc<IdleTracker>,
     identity: Identity,
+    kv: Kv,
     leases: Leases,
     timers: Timers,
     scratchpads: Scratchpads,
+    todos: Todos,
 }
 
 impl Facade {
@@ -84,18 +88,22 @@ impl Facade {
             projects,
             agent_tools,
             version_probe,
+            kv_repo,
             lock_repo,
             timer_repo,
             scratchpad_repo,
+            todo_repo,
             ..
         } = ports;
         Self {
             supervisor,
+            kv: Kv::new(kv_repo),
             leases: Leases::new(lock_repo, clock.clone()),
             // The scheduler shares this wake handle with the aggregate (see `Timers`), so creating
             // or resuming a timer re-evaluates the schedule at once.
             timers: Timers::new(timer_repo, clock.clone(), Arc::new(Notify::new())),
             scratchpads: Scratchpads::new(scratchpad_repo),
+            todos: Todos::new(todo_repo),
             clock,
             metrics,
             port_probe,

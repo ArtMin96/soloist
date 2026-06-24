@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -261,6 +262,29 @@ pub struct NoopLockReleaser;
 
 impl LockReleaser for NoopLockReleaser {
     fn release_all(&self, _process: ProcessId) {}
+}
+
+/// A [`LockReleaser`] that fans the one supervisor close hook out to several releasers — so a closing
+/// process releases every kind of process-owned coordination lock it holds (leases *and* todo locks)
+/// while the supervisor still holds a single port. Each delegate is best-effort and independent: one
+/// failing does not stop the others (the port forbids blocking or panicking).
+pub struct CompositeLockReleaser {
+    releasers: Vec<Arc<dyn LockReleaser>>,
+}
+
+impl CompositeLockReleaser {
+    /// Builds a releaser that delegates to each of `releasers` in turn.
+    pub fn new(releasers: Vec<Arc<dyn LockReleaser>>) -> Self {
+        Self { releasers }
+    }
+}
+
+impl LockReleaser for CompositeLockReleaser {
+    fn release_all(&self, process: ProcessId) {
+        for releaser in &self.releasers {
+            releaser.release_all(process);
+        }
+    }
 }
 
 // ───────────────────────────── Orphan adoption ──────────────────────────────

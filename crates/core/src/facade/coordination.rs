@@ -15,7 +15,7 @@ use super::Facade;
 use crate::coordination::{
     watched_is_idle, AcquireOutcome, IdleMode, LeaseView, SetWhenIdleOutcome, TimerView,
 };
-use crate::ids::{ProcessId, ProjectId, SessionId, TimerId};
+use crate::ids::{ProcessId, ProjectId, SessionId, TimerId, TodoId};
 use crate::ports::StoreError;
 
 /// Why a coordination action was refused. Mapped by the wire adapters to their own error type, so
@@ -49,6 +49,33 @@ pub enum CoordinationError {
     /// A scratchpad rename targeted a name already used by another scratchpad in the project.
     #[error("a scratchpad with that name already exists")]
     ScratchpadNameTaken,
+    /// A todo write carried a malformed document — the disciplined-structure check failed; the
+    /// message names every problem so the caller can fix the document in one revision.
+    #[error("todo is not well-formed: {0}")]
+    InvalidTodo(String),
+    /// A todo update expected a different revision than the one on record — a concurrent edit landed
+    /// first, so the write was refused rather than clobbering it.
+    #[error("todo revision conflict (expected {expected:?}, found {actual:?})")]
+    TodoRevisionConflict {
+        expected: Option<u64>,
+        actual: Option<u64>,
+    },
+    /// A todo action named one that does not exist in the session's effective project.
+    #[error("no todo under that id")]
+    UnknownTodo,
+    /// Completing a todo was refused because it still has unmet blockers (the gate). `by` lists the
+    /// blockers that are not yet done.
+    #[error("todo is blocked by {by:?}")]
+    TodoBlocked { by: Vec<TodoId> },
+    /// A blocker referenced a todo that does not exist in the session's effective project.
+    #[error("no todo under that id to block on")]
+    UnknownBlocker,
+    /// A todo cannot block itself.
+    #[error("a todo cannot block itself")]
+    SelfBlocker,
+    /// A comment action named one that does not exist on the todo.
+    #[error("no comment under that id on that todo")]
+    UnknownComment,
     /// A durable read or write failed.
     #[error(transparent)]
     Store(#[from] StoreError),
@@ -210,9 +237,13 @@ impl Facade {
             .ok_or(CoordinationError::NoProjectScope)
     }
 
-    /// The session's bound process — the owner a lease or timer is attributed to — or
-    /// [`CoordinationError::NoBoundProcess`].
-    fn coordination_owner(&self, session: SessionId) -> Result<ProcessId, CoordinationError> {
+    /// The session's bound process — the owner a lease, timer, or todo lock is attributed to — or
+    /// [`CoordinationError::NoBoundProcess`]. Shared with the sibling todo surface
+    /// ([`super::todo`]), so process ownership resolves in one place.
+    pub(in crate::facade) fn coordination_owner(
+        &self,
+        session: SessionId,
+    ) -> Result<ProcessId, CoordinationError> {
         self.identity
             .origin(session)
             .process()

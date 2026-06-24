@@ -9,9 +9,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AcquireOutcome, AgentTool, LeaseView, ProcessId, ProcessView, ProjectId, ProjectView,
-    ScratchpadDoc, ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome, StartSummary, TimerId,
-    TimerView, Whoami,
+    AcquireOutcome, AgentTool, Comment, KvEntry, LeaseView, ProcessId, ProcessView, ProjectId,
+    ProjectView, ScratchpadDoc, ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome,
+    StartSummary, TimerId, TimerView, TodoDoc, TodoId, TodoSummary, TodoView, Whoami,
 };
 
 use crate::error::IpcError;
@@ -159,6 +159,62 @@ pub enum IpcRequest {
     ScratchpadArchive { name: String, archived: bool },
     /// Delete the scratchpad `name` in the session's effective project.
     ScratchpadDelete { name: String },
+    /// Create a todo from the disciplined `doc` in the session's effective project.
+    TodoCreate { doc: TodoDoc },
+    /// Every todo in the session's effective project, as one-line summaries.
+    TodoList,
+    /// One todo by id in the session's effective project.
+    TodoGet { todo: TodoId },
+    /// Replace the document of `todo` in the session's effective project, revision-guarded by
+    /// `expected_revision`.
+    TodoUpdate {
+        todo: TodoId,
+        doc: TodoDoc,
+        expected_revision: u64,
+    },
+    /// Mark `todo` done in the session's effective project (gated on its blockers).
+    TodoComplete { todo: TodoId },
+    /// Delete `todo` in the session's effective project.
+    TodoDelete { todo: TodoId },
+    /// The distinct tags used across the session's effective project's todos.
+    TodoTagsList,
+    /// Add `tag` to `todo` in the session's effective project.
+    TodoAddTag { todo: TodoId, tag: String },
+    /// Remove `tag` from `todo` in the session's effective project.
+    TodoRemoveTag { todo: TodoId, tag: String },
+    /// Replace the blockers of `todo` in the session's effective project.
+    TodoSetBlockers { todo: TodoId, blockers: Vec<TodoId> },
+    /// Add `blocker` to `todo` in the session's effective project.
+    TodoAddBlocker { todo: TodoId, blocker: TodoId },
+    /// Remove `blocker` from `todo` in the session's effective project.
+    TodoRemoveBlocker { todo: TodoId, blocker: TodoId },
+    /// Lock `todo` for the session's bound process (signals, not ownership).
+    TodoLock { todo: TodoId },
+    /// Release the lock on `todo` if held by the session's bound process.
+    TodoUnlock { todo: TodoId },
+    /// Add a comment with `body` to `todo` in the session's effective project.
+    TodoCommentCreate { todo: TodoId, body: String },
+    /// Update comment `comment` of `todo` in the session's effective project.
+    TodoCommentUpdate {
+        todo: TodoId,
+        comment: u64,
+        body: String,
+    },
+    /// Delete comment `comment` of `todo` in the session's effective project.
+    TodoCommentDelete { todo: TodoId, comment: u64 },
+    /// The comments on `todo` in the session's effective project.
+    TodoCommentList { todo: TodoId },
+    /// Store `value` at `key` in the session's effective project's kv store (create or replace).
+    KvSet {
+        key: String,
+        value: serde_json::Value,
+    },
+    /// The value at `key` in the session's effective project's kv store, or `None` if absent.
+    KvGet { key: String },
+    /// Remove the entry at `key` from the session's effective project's kv store.
+    KvDelete { key: String },
+    /// Every key-value entry in the session's effective project's kv store, ordered by key.
+    KvList,
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -230,6 +286,27 @@ pub enum IpcResponse {
     ScratchpadTags(Vec<String>),
     /// Whether a scratchpad was deleted (answer to [`IpcRequest::ScratchpadDelete`]).
     ScratchpadDeleted(bool),
+    /// One todo (answer to a get, create, update, tag, blocker, or lock request). Reuses the core
+    /// view so the wire shape cannot drift.
+    Todo(TodoView),
+    /// Every todo in scope, as one-line summaries (answer to [`IpcRequest::TodoList`]).
+    Todos(Vec<TodoSummary>),
+    /// A todo and a new comment's id (answer to [`IpcRequest::TodoCommentCreate`]).
+    TodoComment { todo: TodoView, comment: u64 },
+    /// The comments on a todo (answer to [`IpcRequest::TodoCommentList`]).
+    TodoComments(Vec<Comment>),
+    /// The distinct todo tags in scope (answer to [`IpcRequest::TodoTagsList`]).
+    TodoTags(Vec<String>),
+    /// Whether a todo was deleted (answer to [`IpcRequest::TodoDelete`]).
+    TodoDeleted(bool),
+    /// The value at a kv key, or `None` if absent (answer to [`IpcRequest::KvGet`] and
+    /// [`IpcRequest::KvSet`]).
+    KvValue(Option<serde_json::Value>),
+    /// Every key-value entry in scope (answer to [`IpcRequest::KvList`]). Reuses the core entry
+    /// type so the wire shape cannot drift.
+    KvPairs(Vec<KvEntry>),
+    /// Whether a kv entry was deleted (answer to [`IpcRequest::KvDelete`]).
+    KvDeleted(bool),
 }
 
 /// How a [`IpcRequest::WaitForBoundPort`] resolved — a structured answer, not an error: a

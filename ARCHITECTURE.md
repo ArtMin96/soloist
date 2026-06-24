@@ -68,7 +68,7 @@ adapter. Adapters hold **no** business state and make **no** domain decisions.
 | **C3** Terminal I/O | `terminal/` | PTY read loop, rendered+raw buffers, OSC parse, attach replay | live (P4) |
 | **C4** Agents & Idle | `agents` `idle` | agent-tool defs, launch, 5-state idle FSM, optional summary | placeholder → P7 |
 | **C5** Monitoring | `metrics/` `portscan/` | CPU/mem sampling, `/proc` port discovery, readiness | live (P6: D1/D2/D3) |
-| **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | live (P9: leases + timers + scratchpads); todos/kv → P9 |
+| **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos + key-value); end-to-end orchestration (E7) proven |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
 | **C8** Integration façade | `facade` `identity` | the public command/query API; MCP identity & effective scope | live (`facade`) |
 
@@ -106,7 +106,12 @@ Target design — **C6 is being built in Phase 9** (leases done: `lock_acquire`/
 /`_pause`/`_resume`/`_list` over the `Timers` aggregate + `TimerRepo` + a `Clock`-driven `TimerScheduler` that fires a
 body to its owner as a fresh turn; **scratchpads done**: revision-guarded `scratchpad_*` over the `Scratchpads`
 aggregate + `ScratchpadRepo` — a durable, disciplined typed document (not free-form, `KNOWN-DIVERGENCES` D-7) that
-survives restart; todos/kv next); tool *param schemas* are clean-room (`plan/05`
+survives restart; **todos done**: `todo_*` over the `Todos` aggregate + `TodoRepo` — a durable, disciplined typed
+document with revision-guarded writes, blockers that **gate completion**, comments, and a process-owned lock that
+auto-releases on close (`KNOWN-DIVERGENCES` D-8); **key-value done**: project-scoped JSON `kv_set`/`kv_get`/`kv_delete`
+/`kv_list` over the `Kv` aggregate + `KvRepo`; and the **end-to-end orchestration (E7)** — a lead spawning a worker,
+handing it a locked todo, and waiting token-free via `timer_fire_when_idle_all` until the worker goes idle — is proven
+against real stub agents on real PTYs); tool *param schemas* are clean-room (`plan/05`
 §12). Full recipe: **`plan/06` §5.8**; data-flow walkthroughs: `plan/01`; tool catalog: `plan/05` §7.
 
 ### Frontend domain split (`crates/app/ui/src`)
@@ -139,8 +144,8 @@ Reach for a pattern when its **trigger** fires — not preemptively (YAGNI).
 | **Parameter Object / Builder** | `core::ports::CorePorts` (+ `CorePortsBuilder`) — the port set for `Facade::new`/`Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) |
 | **Registry** | `config::detect::DETECTORS` (C1); the MCP tool router composed from per-category sub-routers (`crates/mcp/src/tools/`, R8); *to add* — agent-tool defs (P7) | a growing set of "one of many" handlers → register, don't extend a giant `match` |
 | **Strategy** | `config::detect::Detector` — one impl per ecosystem (C1); *to add* — per-provider idle heuristics (P7), per-agent launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
-| **Optimistic concurrency** | `coordination::Scratchpads` over `ScratchpadRepo` (P9: scratchpads done); *to add* — todo `expected_revision` (P9) | concurrent writers to one durable record → revision guard |
-| **Lease / lock** | `core::coordination::Leases` over `LockRepo` (P9: leases) | cooperative cross-agent intent → TTL + owner `ProcessId`, auto-release on close |
+| **Optimistic concurrency** | `coordination::{Scratchpads, Todos}` over their repos (P9: scratchpads + todos done) | concurrent writers to one durable record → revision guard |
+| **Lease / lock** | `Leases` over `LockRepo` (TTL lease) + `Todos` process-owned lock over `TodoRepo` (P9) | cooperative cross-agent intent → owner `ProcessId`, auto-release on close (fanned out by `CompositeLockReleaser`) |
 
 ---
 

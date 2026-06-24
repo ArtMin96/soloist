@@ -17,7 +17,8 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use soloist_core::{
-    CorePorts, Facade, LeaseReleaser, NoopRuntimeState, RuntimeState, Store, TokioClock,
+    CompositeLockReleaser, CorePorts, Facade, LeaseReleaser, NoopRuntimeState, RuntimeState, Store,
+    TodoLockReleaser, TokioClock,
 };
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use soloist_store::{FileRuntimeState, SqliteStore};
@@ -71,12 +72,16 @@ fn build_facade(app: AppHandle) -> Facade {
     };
 
     // One SQLite store backs the trust, project, agent-tool, and coordination (lease + timer +
-    // scratchpad) repositories the façade needs. The lock releaser drops a closing process's leases
-    // (over the same store), and the lease, timer, and scratchpad stores persist them; the
-    // runtime-state and orphan-control adapters are wired
-    // for adoption, the metrics probe reads CPU/memory from /proc, the port probe reads /proc, the
-    // file watcher reports filesystem changes via notify, the notifier shows desktop toasts via
+    // scratchpad + todo) repositories the façade needs. The lock releaser fans a closing process's
+    // close out to both its leases and its todo locks (over the same store), and the lease, timer,
+    // scratchpad, and todo stores persist them; the runtime-state and orphan-control adapters are
+    // wired for adoption, the metrics probe reads CPU/memory from /proc, the port probe reads /proc,
+    // the file watcher reports filesystem changes via notify, the notifier shows desktop toasts via
     // the Tauri notification plugin, and the version probe auto-detects installed agent CLIs.
+    let lock_releaser = CompositeLockReleaser::new(vec![
+        Arc::new(LeaseReleaser::new(store.clone())),
+        Arc::new(TodoLockReleaser::new(store.clone())),
+    ]);
     Facade::new(
         CorePorts::builder(
             Arc::new(PtyProcessSpawner),
@@ -95,7 +100,9 @@ fn build_facade(app: AppHandle) -> Facade {
         .lock_repo(store.clone())
         .timer_repo(store.clone())
         .scratchpad_repo(store.clone())
-        .locks(Arc::new(LeaseReleaser::new(store)))
+        .todo_repo(store.clone())
+        .kv_repo(store)
+        .locks(Arc::new(lock_releaser))
         .build(),
     )
 }
@@ -127,14 +134,18 @@ pub fn run() {
             // Build the façade here (not in the builder chain) so the desktop notifier can
             // capture the AppHandle, then register it as managed state for the commands.
             app.manage(build_facade(app.handle().clone()));
-            // Clear coordination leases and timers left by a previous run: both are process-owned
-            // and per-run process ids are recycled, so nothing from a fresh launch holds (or could
-            // be delivered) one yet.
+            // Clear coordination leases and timers left by a previous run, and the process-owned
+            // locks on durable todos: all are owned by per-run process ids that are recycled, so
+            // nothing from a fresh launch holds (or could be delivered) one yet. The todos
+            // themselves persist (G11) — only their stale locks are dropped.
             if let Err(err) = app.state::<Facade>().reconcile_leases() {
                 eprintln!("soloist: could not reconcile stale leases on launch ({err})");
             }
             if let Err(err) = app.state::<Facade>().reconcile_timers() {
                 eprintln!("soloist: could not reconcile stale timers on launch ({err})");
+            }
+            if let Err(err) = app.state::<Facade>().reconcile_todo_locks() {
+                eprintln!("soloist: could not reconcile stale todo locks on launch ({err})");
             }
             forward_events(app.handle().clone());
             // Start the self-healing reactor: it watches the core event stream and

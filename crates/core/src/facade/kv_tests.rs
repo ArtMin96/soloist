@@ -1,0 +1,84 @@
+use std::path::Path;
+use std::sync::Arc;
+
+use serde_json::json;
+
+use super::*;
+use crate::ids::SessionId;
+use crate::ports::{CorePorts, ProjectRepo, TokioClock};
+use crate::testing::{FakeKvRepo, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
+
+fn facade_with_kv(projects: Arc<FakeProjectRepo>) -> Facade {
+    Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            projects,
+        )
+        .kv_repo(Arc::new(FakeKvRepo::new()))
+        .build(),
+    )
+}
+
+fn scoped_facade() -> (Facade, SessionId) {
+    let projects = Arc::new(FakeProjectRepo::new());
+    projects
+        .upsert(Path::new("/tmp/soloist-kv-test"), Some("p"), None)
+        .expect("seed one project");
+    let facade = facade_with_kv(projects);
+    let session = facade.open_session(None);
+    (facade, session)
+}
+
+#[test]
+fn kv_set_with_no_project_scope_is_refused() {
+    let facade = facade_with_kv(Arc::new(FakeProjectRepo::new()));
+    let session = facade.open_session(None);
+    // Two or more projects → no automatic scope
+    assert!(matches!(
+        facade.kv_set(session, "k".into(), json!(1)),
+        Err(CoordinationError::NoProjectScope)
+    ));
+}
+
+#[test]
+fn kv_get_returns_none_for_absent_key() {
+    let (facade, session) = scoped_facade();
+    assert_eq!(facade.kv_get(session, "absent".into()).unwrap(), None);
+}
+
+#[test]
+fn kv_set_and_get_round_trip() {
+    let (facade, session) = scoped_facade();
+    facade.kv_set(session, "x".into(), json!({"n": 1})).unwrap();
+    assert_eq!(
+        facade.kv_get(session, "x".into()).unwrap(),
+        Some(json!({"n": 1}))
+    );
+}
+
+#[test]
+fn kv_delete_returns_true_when_present() {
+    let (facade, session) = scoped_facade();
+    facade.kv_set(session, "x".into(), json!(true)).unwrap();
+    assert!(facade.kv_delete(session, "x".into()).unwrap());
+    assert_eq!(facade.kv_get(session, "x".into()).unwrap(), None);
+}
+
+#[test]
+fn kv_delete_returns_false_when_absent() {
+    let (facade, session) = scoped_facade();
+    assert!(!facade.kv_delete(session, "missing".into()).unwrap());
+}
+
+#[test]
+fn kv_list_returns_entries_ordered_by_key() {
+    let (facade, session) = scoped_facade();
+    facade.kv_set(session, "b".into(), json!(2)).unwrap();
+    facade.kv_set(session, "a".into(), json!(1)).unwrap();
+    let entries = facade.kv_list(session).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].key, "a");
+    assert_eq!(entries[1].key, "b");
+}

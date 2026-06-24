@@ -7,6 +7,7 @@
 pub(crate) mod agent;
 pub(crate) mod bulk;
 pub(crate) mod identity;
+pub(crate) mod kv;
 pub(crate) mod lock;
 pub(crate) mod output;
 pub(crate) mod process;
@@ -15,3 +16,4 @@ pub(crate) mod reply;
 pub(crate) mod scratchpad;
 pub(crate) mod services;
 pub(crate) mod timer;
+pub(crate) mod todo;

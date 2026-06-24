@@ -237,4 +237,50 @@ returns both the structured doc and its canonical rendering rather than an autho
 free-form-oriented tools (`_append`/`_edit`/`_append_section`/`_tail`/`_find`/`_clear`),
 cross-project `_transfer`, and the host file-io tools (`_save_to_file`/`_load_from_file`) are tracked
 deferrals (the latter behind a focused security pass), not part of this slice. Todos carry the same
-discipline in the next C6 slice. The clean-room per-tool semantics are recorded in `plan/05` §12.
+discipline ([D-8](#d-8--todos-carry-an-enforced-disciplined-structure-and-a-blocker-gate-)). The
+clean-room per-tool semantics are recorded in `plan/05` §12.
+
+---
+
+## D-8 — Todos carry an enforced disciplined structure and a blocker gate 🟢
+
+**Introduced:** Phase 9 (Coordination, G3/G4/G5). Same project-owner directive as [D-7](#d-7--scratchpads-carry-an-enforced-disciplined-structure-not-free-form-markdown-): the
+shared coordination artifacts must have *disciplined, informative schemas*, not free-form bodies.
+
+**Solo (ref `plan/05` §7):** a todo is a free-form item with a title and an arbitrary body, tags,
+blockers, comments, a transfer, and a process-owned lock; Solo documents the tool *names*
+(`todo_create`/`_update`/`_complete`/`_set_blockers`/…) but not their parameter schemas.
+
+**Soloist:** a todo carries a **typed document** — `TodoDoc { title, description, acceptance_criteria[],
+risks[], status }` — defined once in `core::coordination::todo`. The MCP `todo_create`/`todo_update`
+tool parameters *are* those fields, so the schema presents the required structure; the core
+**validates** it (title and description non-blank; `acceptance_criteria`/`risks` each need ≥1 non-blank
+entry) and rejects a malformed write (`InvalidTodo`). Around the revision-guarded document sit live
+columns each mutated by its own atomic operation — **tags**, **blockers**, **comments**, and a
+process-owned **lock**.
+
+Two semantics are clean-room decisions worth flagging:
+- **The blocker gate.** `status` (`Open`/`Blocked`/`InProgress`/`Done`) is the label an agent
+  *declares*; what *mechanically* prevents completion is the todo's unmet **blockers**. `todo_complete`
+  (and `todo_update` setting status to `Done`) is refused with `TodoBlocked { by }` while any blocker
+  still exists and is not itself done. A blocker that has been **deleted counts as met**, so dropping a
+  dependency never deadlocks the graph. Keeping the gate in the blocker set (not the `status` label)
+  avoids a single-source-of-truth conflict where "blocked" would be both stored and derived.
+- **The lock is process-owned and per-run; the todo is durable.** `todo_lock`/`todo_unlock` set a
+  `locked_by` owner ("signals, not ownership" — a lock another process holds is reported, not stolen),
+  which **auto-releases when the owning process closes** (the supervisor's `LockReleaser` hook, shared
+  with leases via a `CompositeLockReleaser`, G5) and is **cleared for every todo on launch** (per-run
+  process ids are recycled). The **todo itself survives an app restart** (G11) — only its stale lock is
+  reconciled away, never the content.
+
+**Rationale:** identical to D-7 — enforced shape makes "consistent, informative coordination artifacts"
+a property of the schema rather than a convention. The blocker gate gives G4 a real, testable meaning
+("a blocker gates a todo") without a second source of truth for blocked-ness.
+
+**Effect on parity:** G3 (create/list/get/update/complete/delete), G4 (tags, blockers, comments — a
+blocker gates a todo), and G5 (process-owned lock, auto-releases on close) are **delivered**. The
+observable difference from Solo is that a todo cannot hold an arbitrary free-form body (a write must
+supply and pass the structured fields), and completion is gated on blockers. Cross-project
+`todo_transfer` is a **tracked deferral** — it raises the same cross-scope question as the scratchpad
+`_transfer` (D-7) and is held for the same focused follow-up; G4's Verify (the blocker gate) does not
+depend on it. The clean-room per-tool semantics are recorded in `plan/05` §12.

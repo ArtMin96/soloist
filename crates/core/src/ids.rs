@@ -78,6 +78,15 @@ id_newtype!(
     /// is the handle callers address; this id is the stable identity a rename does not change.
     ScratchpadId
 );
+id_newtype!(
+    /// Identifies a coordination todo (context C6) — a durable, project-scoped shared work item.
+    /// The store assigns it on creation and reconstructs it via [`from_raw`](TodoId::from_raw) when
+    /// reading a row back. Like a scratchpad and unlike a timer or lease, a todo is **durable**: it
+    /// survives an app restart, so its id is stable across runs and a sibling todo can name it as a
+    /// blocker. A todo's *lock* is process-owned and per-run (cleared on launch), but the todo
+    /// itself is content that persists.
+    TodoId
+);
 
 #[cfg(test)]
 mod tests {
