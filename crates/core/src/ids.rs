@@ -69,6 +69,15 @@ id_newtype!(
     /// only within the run that created it (launch reconciliation clears the table).
     TimerId
 );
+id_newtype!(
+    /// Identifies a coordination scratchpad (context C6) — a durable, project-scoped shared
+    /// document. The store assigns it on creation and reconstructs it via
+    /// [`from_raw`](ScratchpadId::from_raw) when reading a row back. Unlike a timer or lease, a
+    /// scratchpad is **not** process-owned and is **durable**: it survives an app restart, so its
+    /// id is stable across runs. The mutable [`name`](crate::coordination::ScratchpadView::name)
+    /// is the handle callers address; this id is the stable identity a rename does not change.
+    ScratchpadId
+);
 
 #[cfg(test)]
 mod tests {

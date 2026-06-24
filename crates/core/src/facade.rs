@@ -9,7 +9,6 @@
 //! read model out; they hold no business state.
 
 use std::collections::BTreeMap;
-use std::future::Future;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -17,25 +16,27 @@ use std::time::Duration;
 
 use tokio::sync::{broadcast, Notify};
 
-use crate::agents::{Agents, IdleSampler, IdleTracker};
+use crate::agents::{Agents, IdleTracker};
 use crate::config::ConfigEngine;
-use crate::coordination::{Leases, Timers};
+use crate::coordination::{Leases, Scratchpads, Timers};
 use crate::events::{DomainEvent, EventBus};
-use crate::filewatch::{FileWatcher, WatchReactor};
+use crate::filewatch::FileWatcher;
 use crate::identity::Identity;
 use crate::ids::{ProcessId, ProjectId};
-use crate::metrics::{MetricsProbe, MetricsSampler};
-use crate::notify::{NotificationReactor, Notifier};
+use crate::metrics::MetricsProbe;
+use crate::notify::Notifier;
 use crate::ports::{Clock, CorePorts, PtySize, SpawnSpec, StoreError};
-use crate::portscan::{self, PortProbe, PortScanner, WaitForPortError};
+use crate::portscan::{self, PortProbe, WaitForPortError};
 use crate::process::{ProcessKind, ProcessView};
 use crate::projects::{LoadProjectError, ProjectLoad, ProjectService, ProjectView, Projects};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::trust::TrustStore;
 
 mod coordination;
+mod loops;
 mod output;
 mod scoped;
+mod scratchpad;
 mod session;
 
 pub use coordination::CoordinationError;
@@ -63,6 +64,7 @@ pub struct Facade {
     identity: Identity,
     leases: Leases,
     timers: Timers,
+    scratchpads: Scratchpads,
 }
 
 impl Facade {
@@ -84,6 +86,7 @@ impl Facade {
             version_probe,
             lock_repo,
             timer_repo,
+            scratchpad_repo,
             ..
         } = ports;
         Self {
@@ -92,6 +95,7 @@ impl Facade {
             // The scheduler shares this wake handle with the aggregate (see `Timers`), so creating
             // or resuming a timer re-evaluates the schedule at once.
             timers: Timers::new(timer_repo, clock.clone(), Arc::new(Notify::new())),
+            scratchpads: Scratchpads::new(scratchpad_repo),
             clock,
             metrics,
             port_probe,
@@ -130,104 +134,6 @@ impl Facade {
     /// The process supervisor (C2) — start/stop/restart and bulk operations.
     pub fn supervisor(&self) -> &Supervisor {
         self.supervisor.as_ref()
-    }
-
-    /// The self-healing reactor loop (crash auto-restart, C2), returned for the
-    /// composition root to spawn once on its runtime. It runs until the facade is
-    /// dropped; the supervisor's restart policy drives it.
-    pub fn self_healing_loop(&self) -> impl Future<Output = ()> + Send + 'static {
-        self.supervisor.self_healing_loop()
-    }
-
-    /// The metrics sampler loop (monitoring C5), returned for the composition root to spawn
-    /// once on its runtime. It samples each running process group on an interval and
-    /// publishes a [`DomainEvent::MetricsTick`] per group, watching the supervisor weakly so
-    /// it ends when the facade is dropped. Self-supervised: a panicking sample is isolated
-    /// and the loop restarts. With the default [`crate::metrics::NoopMetricsProbe`] it emits
-    /// nothing — the real CPU/memory adapter is chosen in the composition root.
-    pub fn metrics_sampler_loop(&self) -> impl Future<Output = ()> + Send + 'static {
-        MetricsSampler::new(
-            self.clock.clone(),
-            self.metrics.clone(),
-            self.bus.clone(),
-            Arc::downgrade(&self.supervisor),
-        )
-        .run()
-    }
-
-    /// The agent idle-detection sampler loop (agents C4), returned for the composition root to
-    /// spawn once on its runtime. It reclassifies each launched agent on an interval from its
-    /// terminal output and publishes a [`DomainEvent::AgentActivityChanged`] on a transition,
-    /// watching the supervisor weakly so it ends when the facade is dropped. Self-supervised
-    /// like the other samplers; agents are registered for tracking by [`Facade::launch_agent`].
-    pub fn idle_sampler_loop(&self) -> impl Future<Output = ()> + Send + 'static {
-        IdleSampler::new(
-            self.clock.clone(),
-            self.idle.clone(),
-            self.bus.clone(),
-            Arc::downgrade(&self.supervisor),
-        )
-        .run()
-    }
-
-    /// The coordination timer scheduler loop (C6), returned for the composition root to spawn
-    /// once on its runtime. It fires each due timer — at its deadline, or when the agents it
-    /// watches go idle — and delivers the timer's body to its owning process as a fresh turn
-    /// (reusing the supervisor's input behaviour). It tracks idle state from the
-    /// [`DomainEvent::AgentActivityChanged`] stream, watches the supervisor weakly so it ends when
-    /// the facade is dropped, and is self-supervised like the samplers. With the default
-    /// [`crate::coordination::NoopTimerRepo`] no timer ever persists, so it fires nothing — the
-    /// real SQLite store is chosen in the composition root.
-    pub fn timer_scheduler_loop(&self) -> impl Future<Output = ()> + Send + 'static {
-        self.timers
-            .scheduler(self.bus.clone(), Arc::downgrade(&self.supervisor))
-            .run()
-    }
-
-    /// The port-discovery scanner loop (monitoring C5), returned for the composition root to
-    /// spawn once on its runtime. It discovers each running process group's listening ports,
-    /// reflects them on [`ProcessView::ports`], and publishes [`DomainEvent::PortsChanged`]
-    /// on a real change. Watches the supervisor weakly and is self-supervised, like the
-    /// metrics sampler. With the default [`crate::portscan::NoopPortProbe`] it finds nothing.
-    pub fn port_scanner_loop(&self) -> impl Future<Output = ()> + Send + 'static {
-        PortScanner::new(
-            self.clock.clone(),
-            self.port_probe.clone(),
-            self.bus.clone(),
-            Arc::downgrade(&self.supervisor),
-        )
-        .run()
-    }
-
-    /// The file-watch reactor loop (monitoring C5), returned for the composition root to spawn
-    /// once on its runtime. It watches each trusted, file-watched command's project root and,
-    /// on a matching change, restarts that command (debounced) via the supervisor — reusing
-    /// one restart behaviour. Watches the supervisor weakly and ends when the bus closes (app
-    /// shutdown). With the default [`crate::filewatch::NoopFileWatcher`] it watches nothing,
-    /// so the real `notify` adapter is chosen in the composition root.
-    pub fn file_watch_loop(&self) -> impl Future<Output = ()> + Send + 'static {
-        WatchReactor::new(
-            self.clock.clone(),
-            self.file_watcher.clone(),
-            &self.bus,
-            Arc::downgrade(&self.supervisor),
-        )
-        .run()
-    }
-
-    /// The notification reactor loop (notifications C7), returned for the composition root to
-    /// spawn once on its runtime. It shows a desktop toast on a crash or an exhausted
-    /// auto-restart (honouring the global on/off), watching the supervisor weakly so it ends
-    /// when the facade is dropped. With the default [`crate::notify::NoopNotifier`] it shows
-    /// nothing — the real desktop adapter is chosen in the composition root.
-    pub fn notifications_loop(&self) -> impl Future<Output = ()> + Send + 'static {
-        NotificationReactor::new(
-            self.notifier.clone(),
-            self.notifications_enabled.clone(),
-            &self.bus,
-            Arc::downgrade(&self.supervisor),
-        )
-        .run()
     }
 
     /// Turns desktop notifications on or off globally — the single switch the notification

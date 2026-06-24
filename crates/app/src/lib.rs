@@ -70,9 +70,10 @@ fn build_facade(app: AppHandle) -> Facade {
         }
     };
 
-    // One SQLite store backs the trust, project, agent-tool, and coordination (lease + timer)
-    // repositories the façade needs. The lock releaser drops a closing process's leases (over the
-    // same store), and the lease and timer stores persist them; the runtime-state and orphan-control adapters are wired
+    // One SQLite store backs the trust, project, agent-tool, and coordination (lease + timer +
+    // scratchpad) repositories the façade needs. The lock releaser drops a closing process's leases
+    // (over the same store), and the lease, timer, and scratchpad stores persist them; the
+    // runtime-state and orphan-control adapters are wired
     // for adoption, the metrics probe reads CPU/memory from /proc, the port probe reads /proc, the
     // file watcher reports filesystem changes via notify, the notifier shows desktop toasts via
     // the Tauri notification plugin, and the version probe auto-detects installed agent CLIs.
@@ -93,6 +94,7 @@ fn build_facade(app: AppHandle) -> Facade {
         .version_probe(Arc::new(CommandVersionProbe::new()))
         .lock_repo(store.clone())
         .timer_repo(store.clone())
+        .scratchpad_repo(store.clone())
         .locks(Arc::new(LeaseReleaser::new(store)))
         .build(),
     )

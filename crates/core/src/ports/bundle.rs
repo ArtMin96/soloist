@@ -5,7 +5,9 @@
 use std::sync::Arc;
 
 use crate::agents::{AgentToolRepo, NoopAgentToolRepo, NoopVersionProbe, VersionProbe};
-use crate::coordination::{LockRepo, NoopLockRepo, NoopTimerRepo, TimerRepo};
+use crate::coordination::{
+    LockRepo, NoopLockRepo, NoopScratchpadRepo, NoopTimerRepo, ScratchpadRepo, TimerRepo,
+};
 use crate::filewatch::{FileWatcher, NoopFileWatcher};
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
 use crate::notify::{NoopNotifier, Notifier};
@@ -20,7 +22,8 @@ use super::{
 /// core's constructors take one value, and adding a future port is one field here
 /// rather than another argument threaded through every call site. The required adapters
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
-/// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `runtime`, `orphan_control`, `metrics`,
+/// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `runtime`,
+/// `orphan_control`, `metrics`,
 /// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`) default to their
 /// `Noop` port via [`CorePorts::builder`], so a new optional port never
 /// forces every existing composition root to change. The composition root
@@ -34,6 +37,7 @@ pub struct CorePorts {
     pub(crate) locks: Arc<dyn LockReleaser>,
     pub(crate) lock_repo: Arc<dyn LockRepo>,
     pub(crate) timer_repo: Arc<dyn TimerRepo>,
+    pub(crate) scratchpad_repo: Arc<dyn ScratchpadRepo>,
     pub(crate) runtime: Arc<dyn RuntimeState>,
     pub(crate) orphan_control: Arc<dyn OrphanControl>,
     pub(crate) metrics: Arc<dyn MetricsProbe>,
@@ -62,6 +66,7 @@ impl CorePorts {
                 locks: Arc::new(NoopLockReleaser),
                 lock_repo: Arc::new(NoopLockRepo),
                 timer_repo: Arc::new(NoopTimerRepo),
+                scratchpad_repo: Arc::new(NoopScratchpadRepo),
                 runtime: Arc::new(NoopRuntimeState),
                 orphan_control: Arc::new(NoopOrphanControl),
                 metrics: Arc::new(NoopMetricsProbe),
@@ -100,6 +105,15 @@ impl CorePortsBuilder {
     /// SQLite, the same store backing every other durable repository.
     pub fn timer_repo(mut self, timer_repo: Arc<dyn TimerRepo>) -> Self {
         self.ports.timer_repo = timer_repo;
+        self
+    }
+
+    /// Overrides the durable scratchpad store the coordination aggregate persists to (C6; defaults
+    /// to [`NoopScratchpadRepo`], which stores nothing). The real adapter is SQLite, the same store
+    /// backing every other durable repository; scratchpads are durable shared content that survives
+    /// a restart.
+    pub fn scratchpad_repo(mut self, scratchpad_repo: Arc<dyn ScratchpadRepo>) -> Self {
+        self.ports.scratchpad_repo = scratchpad_repo;
         self
     }
 

@@ -35,7 +35,8 @@ impl SoloistMcp {
                 + Self::output_router()
                 + Self::services_router()
                 + Self::lock_router()
-                + Self::timer_router(),
+                + Self::timer_router()
+                + Self::scratchpad_router(),
         }
     }
 }

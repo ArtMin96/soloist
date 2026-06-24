@@ -198,3 +198,43 @@ in `plan/05` §12 (MCP session↔process binding authenticity).
 **Effect on parity:** F3 (effective project scope) and F13 (a tool cannot touch another project) are
 **delivered** — the scope is now authenticated, so the cross-project isolation guarantee holds for the
 action tools. Tests prove a forged bind/select to a sibling project is refused.
+
+---
+
+## D-7 — Scratchpads carry an enforced disciplined structure, not free-form Markdown 🟢
+
+**Introduced:** Phase 9 (Coordination, G1/G2). **Per the project owner's directive** (2026-06-24):
+scratchpads and todos must have *disciplined, informative schemas* — "I don't want to let AI write
+different ways every time."
+
+**Solo (ref `plan/05` §6/§7/§10):** a scratchpad is a **free-form Markdown** note whose **leading H1
+is the title**; the tools (`scratchpad_write`/`_read`/`_append`/`_edit`/…) read and write that arbitrary
+Markdown body, with read modes full/headings/section over whatever the author wrote.
+
+**Soloist:** a scratchpad is a **typed, structured document** — `ScratchpadDoc { objective, context,
+plan[], acceptance_criteria[], risks[], status, notes? }` — defined once in
+`core::coordination::scratchpad`. The MCP `scratchpad_write` tool's parameters *are* those fields, so
+the schema itself presents the required structure; the core **validates** it (no required field blank;
+`plan`/`acceptance_criteria`/`risks` each need ≥1 non-blank entry) and rejects a malformed write
+(`InvalidScratchpad`). The core **renders** the document to one canonical Markdown layout (H1 = the
+scratchpad's `name`; `## Objective` / `## Context` / `## Plan` (numbered) / `## Acceptance criteria`
+(checkboxes) / `## Risks` / `## Status` / optional `## Notes`), returned alongside the structured doc.
+`notes` is the single free-Markdown field for anything the structure does not cover. Identity is a
+durable, store-assigned `ScratchpadId` (stable across a rename and across restarts) addressed by a
+unique `name` handle per project; writes are revision-guarded (G2).
+
+**Rationale:** the owner's product decision — coordination artifacts that multiple agents read and
+extend stay consistent and informative only if their shape is enforced, not merely suggested. A typed
+structure rendered to one canonical layout makes "write it the same way every time" a property of the
+schema rather than a convention an agent may ignore. The free `notes` field preserves an escape hatch
+so the discipline does not block legitimate ad-hoc content.
+
+**Effect on parity:** G1 ("read/write a scratchpad") and G2 ("stale write → conflict") are
+**delivered** — read/write/list/rename/tags/archive/delete over the disciplined document, with
+revision-guarded writes. The observable difference from Solo is that a scratchpad cannot hold an
+arbitrary free-form body: a write must supply the structured fields (and pass validation), and a read
+returns both the structured doc and its canonical rendering rather than an author-formatted blob. The
+free-form-oriented tools (`_append`/`_edit`/`_append_section`/`_tail`/`_find`/`_clear`),
+cross-project `_transfer`, and the host file-io tools (`_save_to_file`/`_load_from_file`) are tracked
+deferrals (the latter behind a focused security pass), not part of this slice. Todos carry the same
+discipline in the next C6 slice. The clean-room per-tool semantics are recorded in `plan/05` §12.

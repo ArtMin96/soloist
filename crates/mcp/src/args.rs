@@ -145,3 +145,63 @@ pub(crate) struct WaitForPortArg {
     /// same session queue behind it until it returns.
     pub(crate) timeout_ms: Option<u64>,
 }
+
+/// Arguments naming a single scratchpad by its handle.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ScratchpadNameArg {
+    /// The scratchpad's name handle (unique within the project), as returned by `scratchpad_list`.
+    pub(crate) name: String,
+}
+
+/// Arguments for writing a scratchpad's disciplined document. The fields ARE the required structure
+/// — every scratchpad records the same sections, so they stay consistent and informative.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ScratchpadWriteArg {
+    /// The scratchpad's name handle (unique within the project). Omit `expected_revision` to create
+    /// it; pass the current revision (from `scratchpad_read`) to update it.
+    pub(crate) name: String,
+    /// What this scratchpad is for — the goal it serves, in a sentence or two.
+    pub(crate) objective: String,
+    /// The background and current state a reader needs to act on it.
+    pub(crate) context: String,
+    /// The ordered path to the objective: each entry one step, in order. At least one.
+    pub(crate) plan: Vec<String>,
+    /// The testable criteria that define the objective as done. At least one.
+    pub(crate) acceptance_criteria: Vec<String>,
+    /// The risks, unknowns, or blockers to watch. State "none identified" rather than leaving empty.
+    pub(crate) risks: Vec<String>,
+    /// Where the work stands right now.
+    pub(crate) status: String,
+    /// Anything the structured sections do not cover — free Markdown. Optional.
+    pub(crate) notes: Option<String>,
+    /// The revision you are updating from, as returned by `scratchpad_read`. Omit to create a new
+    /// scratchpad; a mismatch means someone edited it first, so re-read and retry.
+    pub(crate) expected_revision: Option<u64>,
+}
+
+/// Arguments for renaming a scratchpad.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ScratchpadRenameArg {
+    /// The scratchpad's current name handle.
+    pub(crate) name: String,
+    /// The new name handle (must be unused in the project).
+    pub(crate) new_name: String,
+}
+
+/// Arguments for adding or removing a scratchpad's tags.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ScratchpadTagsArg {
+    /// The scratchpad's name handle.
+    pub(crate) name: String,
+    /// The tags to add or remove.
+    pub(crate) tags: Vec<String>,
+}
+
+/// Arguments for archiving or restoring a scratchpad.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ScratchpadArchiveArg {
+    /// The scratchpad's name handle.
+    pub(crate) name: String,
+    /// True to archive it (hide from the default listing), false to restore it.
+    pub(crate) archived: bool,
+}

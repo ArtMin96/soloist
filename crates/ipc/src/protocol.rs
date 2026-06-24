@@ -9,10 +9,12 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AcquireOutcome, AgentTool, CoordinationError, IdentityError, LaunchAgentError, LeaseView,
-    ProcessId, ProcessView, ProjectId, ProjectView, ScopedActionError, SetWhenIdleOutcome,
-    SpawnAgentError, StartSummary, TimerId, TimerView, Whoami,
+    AcquireOutcome, AgentTool, LeaseView, ProcessId, ProcessView, ProjectId, ProjectView,
+    ScratchpadDoc, ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome, StartSummary, TimerId,
+    TimerView, Whoami,
 };
+
+use crate::error::IpcError;
 
 /// A request from an IPC client to the running app. The server resolves identity and
 /// scope from the connection's session, so requests carry no session of their own.
@@ -133,6 +135,30 @@ pub enum IpcRequest {
     TimerResume { timer: TimerId },
     /// Every timer the session's bound process owns.
     TimerList,
+    /// Create or replace the scratchpad `name` in the session's effective project with the
+    /// disciplined `doc`, revision-guarded: `expected_revision` is omitted to create or the current
+    /// revision to update.
+    ScratchpadWrite {
+        name: String,
+        doc: ScratchpadDoc,
+        expected_revision: Option<u64>,
+    },
+    /// The scratchpad `name` in the session's effective project.
+    ScratchpadRead { name: String },
+    /// Every scratchpad in the session's effective project, as one-line summaries.
+    ScratchpadList,
+    /// Rename the scratchpad `name` to `new_name` in the session's effective project.
+    ScratchpadRename { name: String, new_name: String },
+    /// Add `tags` to the scratchpad `name` in the session's effective project.
+    ScratchpadAddTags { name: String, tags: Vec<String> },
+    /// Remove `tags` from the scratchpad `name` in the session's effective project.
+    ScratchpadRemoveTags { name: String, tags: Vec<String> },
+    /// The distinct tags used across the session's effective project's scratchpads.
+    ScratchpadTagsList,
+    /// Archive or restore the scratchpad `name` in the session's effective project.
+    ScratchpadArchive { name: String, archived: bool },
+    /// Delete the scratchpad `name` in the session's effective project.
+    ScratchpadDelete { name: String },
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -195,6 +221,15 @@ pub enum IpcResponse {
     TimerChanged(bool),
     /// Every timer the caller owns (answer to [`IpcRequest::TimerList`]).
     Timers(Vec<TimerView>),
+    /// One scratchpad (answer to a read, write, rename, tag, or archive request). Reuses the core
+    /// view so the wire shape — including the canonically rendered Markdown — cannot drift.
+    Scratchpad(ScratchpadView),
+    /// Every scratchpad in scope, as one-line summaries (answer to [`IpcRequest::ScratchpadList`]).
+    Scratchpads(Vec<ScratchpadSummary>),
+    /// The distinct scratchpad tags in scope (answer to [`IpcRequest::ScratchpadTagsList`]).
+    ScratchpadTags(Vec<String>),
+    /// Whether a scratchpad was deleted (answer to [`IpcRequest::ScratchpadDelete`]).
+    ScratchpadDeleted(bool),
 }
 
 /// How a [`IpcRequest::WaitForBoundPort`] resolved — a structured answer, not an error: a
@@ -237,122 +272,8 @@ pub struct ProjectStatus {
     pub processes: Vec<ProcessView>,
 }
 
-/// Why a request failed: a typed error the client maps to a clear MCP tool error.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
-#[serde(tag = "error", content = "detail", rename_all = "snake_case")]
-pub enum IpcError {
-    /// The referenced process is not registered.
-    #[error("no such process")]
-    UnknownProcess,
-    /// The referenced project is not loaded.
-    #[error("no such project")]
-    UnknownProject,
-    /// `bind_session_process` named a process the caller does not run in — the binding is not
-    /// authentic. An agent must bind to its own injected `SOLOIST_PROCESS_ID`.
-    #[error("that process is not yours to bind")]
-    ForeignProcess,
-    /// `select_project` named a project the caller does not run in — the scope would not be
-    /// authentic.
-    #[error("you are not running in that project")]
-    ForeignProject,
-    /// A scoped request was made with no project in scope.
-    #[error("no project is in scope; select one first")]
-    NoProjectScope,
-    /// A coordination action that needs an owning process was made by a session bound to none.
-    #[error("not bound to a process; bind a session before owning a timer or lease")]
-    NoBoundProcess,
-    /// The referenced process belongs to a different project than the session's scope.
-    #[error("that process belongs to a different project")]
-    OutOfScope,
-    /// An action targeted a command that is not trusted to run in this project.
-    #[error("command is not trusted to run in this project")]
-    Untrusted,
-    /// No agent tool is registered under the requested name.
-    #[error("no agent tool is registered under that name")]
-    UnknownTool,
-    /// The app failed to serve the request (e.g. a durable read failed).
-    #[error("the app could not serve the request: {0}")]
-    Internal(String),
-}
-
-impl IpcError {
-    /// Whether the request itself caused the failure — a business-logic refusal or bad
-    /// input the caller can act on (unknown target, out of scope, untrusted, no scope in
-    /// place) — as opposed to a server-side failure. Each adapter maps the two classes to
-    /// its own convention from this one place: an MCP tool returns a request error as a
-    /// tool-execution error (`isError: true`) the model can self-correct on, and a server
-    /// error as a protocol error; a future HTTP API maps them to 4xx vs 5xx.
-    pub fn is_request_error(&self) -> bool {
-        match self {
-            IpcError::UnknownProcess
-            | IpcError::UnknownProject
-            | IpcError::ForeignProcess
-            | IpcError::ForeignProject
-            | IpcError::NoProjectScope
-            | IpcError::NoBoundProcess
-            | IpcError::OutOfScope
-            | IpcError::Untrusted
-            | IpcError::UnknownTool => true,
-            IpcError::Internal(_) => false,
-        }
-    }
-}
-
-impl From<IdentityError> for IpcError {
-    fn from(err: IdentityError) -> Self {
-        match err {
-            IdentityError::UnknownProcess => IpcError::UnknownProcess,
-            IdentityError::ForeignProcess => IpcError::ForeignProcess,
-            IdentityError::UnknownProject => IpcError::UnknownProject,
-            IdentityError::ForeignProject => IpcError::ForeignProject,
-            IdentityError::Store(err) => IpcError::Internal(err.to_string()),
-        }
-    }
-}
-
-impl From<ScopedActionError> for IpcError {
-    fn from(err: ScopedActionError) -> Self {
-        match err {
-            ScopedActionError::UnknownProcess => IpcError::UnknownProcess,
-            ScopedActionError::NoProjectScope => IpcError::NoProjectScope,
-            ScopedActionError::OutOfScope => IpcError::OutOfScope,
-            ScopedActionError::Untrusted => IpcError::Untrusted,
-            ScopedActionError::Store(err) => IpcError::Internal(err.to_string()),
-        }
-    }
-}
-
-impl From<LaunchAgentError> for IpcError {
-    fn from(err: LaunchAgentError) -> Self {
-        match err {
-            LaunchAgentError::UnknownTool => IpcError::UnknownTool,
-            LaunchAgentError::UnknownProject => IpcError::UnknownProject,
-            LaunchAgentError::Store(err) => IpcError::Internal(err.to_string()),
-            LaunchAgentError::Supervisor(err) => IpcError::Internal(err.to_string()),
-        }
-    }
-}
-
-impl From<SpawnAgentError> for IpcError {
-    fn from(err: SpawnAgentError) -> Self {
-        match err {
-            SpawnAgentError::NoProjectScope => IpcError::NoProjectScope,
-            SpawnAgentError::Launch(err) => err.into(),
-        }
-    }
-}
-
-impl From<CoordinationError> for IpcError {
-    fn from(err: CoordinationError) -> Self {
-        match err {
-            CoordinationError::NoProjectScope => IpcError::NoProjectScope,
-            CoordinationError::NoBoundProcess => IpcError::NoBoundProcess,
-            CoordinationError::Store(err) => IpcError::Internal(err.to_string()),
-        }
-    }
-}
-
-/// A framed reply: success or a typed failure.
+/// A framed reply: success or a typed failure. The failure taxonomy and its mappings from the
+/// core's errors live in [`crate::error`].
 pub type IpcResult = Result<IpcResponse, IpcError>;
 
 #[cfg(test)]
