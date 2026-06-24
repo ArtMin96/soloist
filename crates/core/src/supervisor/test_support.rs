@@ -14,6 +14,7 @@ use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{CorePorts, PtySize, SpawnSpec};
 use crate::process::{ProcStatus, ProcessKind};
+use crate::shellenv::{NoopShellEnvProbe, ShellEnvProbe};
 use crate::testing::{
     FakeOrphanControl, FakeProjectRepo, FakeRuntimeState, FakeSpawner, FakeTrustRepo, MockClock,
     RecordingLockReleaser,
@@ -38,6 +39,18 @@ pub(crate) struct Harness {
 }
 
 pub(crate) fn harness(spawner: FakeSpawner) -> Harness {
+    harness_with_shell_env(spawner, Arc::new(NoopShellEnvProbe), BTreeMap::new())
+}
+
+/// A [`Harness`] whose supervisor resolves spawn environments through `shell_env_probe`
+/// over `app_env` — for the tests that prove the captured shell environment reaches a
+/// spawn. The default [`harness`] passes [`NoopShellEnvProbe`] and an empty app env, so a
+/// process's environment is exactly its own overrides (the pre-capture behavior).
+pub(crate) fn harness_with_shell_env(
+    spawner: FakeSpawner,
+    shell_env_probe: Arc<dyn ShellEnvProbe>,
+    app_env: BTreeMap<String, String>,
+) -> Harness {
     let bus = EventBus::new(256);
     let rx = bus.subscribe();
     let trust = Arc::new(FakeTrustRepo::new());
@@ -54,6 +67,8 @@ pub(crate) fn harness(spawner: FakeSpawner) -> Harness {
     .locks(Arc::new(locks.clone()))
     .runtime(runtime.clone())
     .orphan_control(orphans.clone())
+    .shell_env_probe(shell_env_probe)
+    .app_env(app_env)
     .build();
     let sup = Arc::new(Supervisor::new(&ports, bus));
     Harness {

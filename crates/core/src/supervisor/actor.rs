@@ -23,6 +23,7 @@ use crate::ports::{
     PtyIo, RuntimeState, SpawnSpec, Spawned,
 };
 use crate::process::ProcStatus;
+use crate::shellenv::ShellEnv;
 use crate::terminal::{ActorTerminal, PtyInput, Recorder, TerminalSignal, Terminals};
 
 use super::apply_transition;
@@ -69,6 +70,7 @@ pub(crate) struct ActorPorts {
     pub(crate) bus: EventBus,
     pub(crate) registry: Registry,
     pub(crate) terminals: Terminals,
+    pub(crate) shell_env: Arc<ShellEnv>,
 }
 
 impl ActorPorts {
@@ -81,6 +83,7 @@ impl ActorPorts {
             bus: self.bus.clone(),
             registry: self.registry.clone(),
             terminals: self.terminals.clone(),
+            shell_env: self.shell_env.clone(),
         }
     }
 }
@@ -152,6 +155,7 @@ async fn run(
         bus,
         registry,
         terminals,
+        shell_env,
     } = ports;
     let ActorTerminal {
         mut input,
@@ -170,14 +174,26 @@ async fn run(
         // existing process group; every spawn (and every restart) creates a fresh child.
         let spawned = match initial.take() {
             Some(spawned) => spawned,
-            None => match spawner.spawn(&launch).await {
-                Ok(spawned) => spawned,
-                Err(_err) => {
-                    advance(&registry, &bus, id, &mut status, ProcStatus::Crashed, None);
-                    locks.release_all(id);
-                    return;
+            None => {
+                // Resolve the launch environment at spawn time: the captured login-shell
+                // environment (version-manager PATHs included) under this process's own
+                // overrides. Done per spawn so a restart picks up a refreshed capture, and
+                // kept off `launch` so the canonical overrides are re-resolved each time.
+                let spec = SpawnSpec {
+                    env: shell_env.resolve(&launch.env).await,
+                    command: launch.command.clone(),
+                    working_dir: launch.working_dir.clone(),
+                    size: launch.size,
+                };
+                match spawner.spawn(&spec).await {
+                    Ok(spawned) => spawned,
+                    Err(_err) => {
+                        advance(&registry, &bus, id, &mut status, ProcStatus::Crashed, None);
+                        locks.release_all(id);
+                        return;
+                    }
                 }
-            },
+            }
         };
         let Spawned {
             pid,

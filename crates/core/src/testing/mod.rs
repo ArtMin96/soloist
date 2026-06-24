@@ -33,6 +33,7 @@ mod notify;
 mod portscan;
 mod repos;
 mod runtime_state;
+mod shellenv;
 mod spawner;
 
 pub use agents::{FakeAgentToolRepo, FakeVersionProbe};
@@ -51,4 +52,5 @@ pub use notify::RecordingNotifier;
 pub use portscan::FakePortProbe;
 pub use repos::{FakeProjectRepo, FakeTrustRepo};
 pub use runtime_state::{FakeOrphanControl, FakeRuntimeState};
+pub use shellenv::FakeShellEnvProbe;
 pub use spawner::FakeSpawner;

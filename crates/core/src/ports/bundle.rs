@@ -2,6 +2,7 @@
 //! constructed over, kept separate from the port *traits* (`super`) so each file has
 //! one purpose.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::agents::{AgentToolRepo, NoopAgentToolRepo, NoopVersionProbe, VersionProbe};
@@ -13,6 +14,7 @@ use crate::filewatch::{FileWatcher, NoopFileWatcher};
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
 use crate::notify::{NoopNotifier, Notifier};
 use crate::portscan::{NoopPortProbe, PortProbe};
+use crate::shellenv::{NoopShellEnvProbe, ShellEnvProbe};
 
 use super::{
     Clock, LockReleaser, NoopLockReleaser, NoopOrphanControl, NoopRuntimeState, OrphanControl,
@@ -25,11 +27,12 @@ use super::{
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
 /// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `todo_repo`,
 /// `kv_repo`, `runtime`, `orphan_control`, `metrics`,
-/// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`) default to their
-/// `Noop` port via [`CorePorts::builder`], so a new optional port never
-/// forces every existing composition root to change. The composition root
-/// (`app::build_facade`) is the one place these are chosen; tests assemble it from
-/// `crate::testing` fakes.
+/// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`, `shell_env_probe`)
+/// default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
+/// forces every existing composition root to change. `app_env` (the app's own environment,
+/// captured at the composition root for the shell-environment resolver) defaults to empty.
+/// The composition root (`app::build_facade`) is the one place these are chosen; tests
+/// assemble it from `crate::testing` fakes.
 pub struct CorePorts {
     pub(crate) spawner: Arc<dyn ProcessSpawner>,
     pub(crate) clock: Arc<dyn Clock>,
@@ -49,6 +52,8 @@ pub struct CorePorts {
     pub(crate) notifier: Arc<dyn Notifier>,
     pub(crate) agent_tools: Arc<dyn AgentToolRepo>,
     pub(crate) version_probe: Arc<dyn VersionProbe>,
+    pub(crate) shell_env_probe: Arc<dyn ShellEnvProbe>,
+    pub(crate) app_env: BTreeMap<String, String>,
 }
 
 impl CorePorts {
@@ -80,6 +85,8 @@ impl CorePorts {
                 notifier: Arc::new(NoopNotifier),
                 agent_tools: Arc::new(NoopAgentToolRepo),
                 version_probe: Arc::new(NoopVersionProbe),
+                shell_env_probe: Arc::new(NoopShellEnvProbe),
+                app_env: BTreeMap::new(),
             },
         }
     }
@@ -194,6 +201,23 @@ impl CorePortsBuilder {
     /// defaults to [`NoopVersionProbe`], which detects nothing).
     pub fn version_probe(mut self, version_probe: Arc<dyn VersionProbe>) -> Self {
         self.ports.version_probe = version_probe;
+        self
+    }
+
+    /// Overrides the login-shell environment probe the supervisor captures version-manager
+    /// PATHs through (defaults to [`NoopShellEnvProbe`], which captures nothing, so a process
+    /// gets exactly its own `env` over the inherited app environment). The real adapter runs
+    /// `$SHELL -ilc env`.
+    pub fn shell_env_probe(mut self, shell_env_probe: Arc<dyn ShellEnvProbe>) -> Self {
+        self.ports.shell_env_probe = shell_env_probe;
+        self
+    }
+
+    /// Sets the app's own environment, captured once at the composition root. The
+    /// shell-environment resolver uses it as the base layer and the source of the fallback
+    /// `PATH` when a shell capture fails (defaults to empty).
+    pub fn app_env(mut self, app_env: BTreeMap<String, String>) -> Self {
+        self.ports.app_env = app_env;
         self
     }
 

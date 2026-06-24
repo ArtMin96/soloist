@@ -22,7 +22,9 @@ use soloist_core::{
 };
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use soloist_store::{FileRuntimeState, SqliteStore};
-use soloist_sys::{CommandVersionProbe, NotifyFileWatcher, ProcMetricsProbe, ProcPortProbe};
+use soloist_sys::{
+    CommandShellEnvProbe, CommandVersionProbe, NotifyFileWatcher, ProcMetricsProbe, ProcPortProbe,
+};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::broadcast::error::RecvError;
 
@@ -77,7 +79,9 @@ fn build_facade(app: AppHandle) -> Facade {
     // scratchpad, and todo stores persist them; the runtime-state and orphan-control adapters are
     // wired for adoption, the metrics probe reads CPU/memory from /proc, the port probe reads /proc,
     // the file watcher reports filesystem changes via notify, the notifier shows desktop toasts via
-    // the Tauri notification plugin, and the version probe auto-detects installed agent CLIs.
+    // the Tauri notification plugin, the version probe auto-detects installed agent CLIs, and the
+    // shell-env probe captures the login shell's environment (over this process's own env as the
+    // base) so launched processes see version-manager PATHs.
     let lock_releaser = CompositeLockReleaser::new(vec![
         Arc::new(LeaseReleaser::new(store.clone())),
         Arc::new(TodoLockReleaser::new(store.clone())),
@@ -97,6 +101,8 @@ fn build_facade(app: AppHandle) -> Facade {
         .notifier(Arc::new(TauriNotifier::new(app)))
         .agent_tools(store.clone())
         .version_probe(Arc::new(CommandVersionProbe::new()))
+        .shell_env_probe(Arc::new(CommandShellEnvProbe::new()))
+        .app_env(std::env::vars().collect())
         .lock_repo(store.clone())
         .timer_repo(store.clone())
         .scratchpad_repo(store.clone())

@@ -3926,6 +3926,7 @@ name = "soloist-sys"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "nix 0.29.0",
  "notify",
  "soloist-core",
  "tempfile",
