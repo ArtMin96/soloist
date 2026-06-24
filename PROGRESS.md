@@ -9,7 +9,7 @@
 
 ## Current state
 
-> **ACTIVE PHASE: 10 (HTTP API & CLI) — `In progress` (slices 1–2 of ~4 landed: HTTP read API + mutation API). Phase 9 (Coordination, C6) is `Verified`.**
+> **ACTIVE PHASE: 10 (HTTP API & CLI) — `In progress` (slice 3 of 4 landed: read API + mutation API + the `soloist` CLI; slice 4 = docs + acceptance). Phase 9 (Coordination, C6) is `Verified`.**
 > PR #25 (todos G3–G5 + kv G10 + E7) is **merged to `main`** (merge commit `9dc1857`); all v1 coordination Verify
 > checks **G1–G11 + E7** pass. Gate **re-confirmed green on `main` `369f3a0` this session (2026-06-24):** Rust
 > **541 passed / 3 ignored** (24 suites), UI **78**, `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint,
@@ -21,6 +21,43 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Phase 10 — slice 3: the `soloist` CLI (H4) + the `/processes/:id/output` read endpoint landed (2026-06-24).** The
+  third vertical completes the phase's code. A thin HTTP **client** in **`crates/cli`** (`clap` derive + `ureq`),
+  process-isolated from the engine: it depends on `ipc` for the shared `ipc::http` contract and the re-exported
+  read-model wire types, **never** on `core` directly (`06` §2). Subcommands: `status [--status running|crashed]`
+  (→ `GET /processes`, filtered + tabulated client-side), `start|stop|restart <name|all>` (a name → id via `GET
+  /processes`, an **ambiguous label across projects is refused, not guessed**; `all` → the project bulk endpoints,
+  resolving the project as the sole open one or `--project <name>` when ≥2 — mirrors the MCP single-project default),
+  `logs <name> [-n N]` (→ the new output endpoint), and `focus` (→ `POST /focus`). Port/auth resolve from
+  `ipc::http::read_runtime()` (→ `DEFAULT_PORT` when absent) and the `X-Soloist-Local-Auth` header rides every
+  mutation; a refused connection prints a clear **"Soloist is not running"** (exit 1) — the acceptance criterion. Every
+  action routes to the **same** `Facade` method the UI and MCP drive (one behavior, many frontends); the only CLI-side
+  logic — name→id resolution, `--status` filtering, table rendering — is pure and unit-tested. **New read endpoint**
+  `GET /processes/:id/output?lines=N` (`crates/httpapi/src/routes.rs`) is a thin read over the **same**
+  `Facade::process_output` the MCP output tools use (open on loopback; unknown id → empty, like `/ports`) — the one
+  endpoint the CLI needed that H2 lacked. **Single-source plumbing:** added `Deserialize` to `core::ProjectView` (the
+  wire type must round-trip on the client) and re-exported `ProcStatus/ProcessKind/ProcessView/ProjectView` from `ipc`
+  so the CLI names the exact serde shape without linking the engine. **Decisions (2026-06-24, user-approved):** `logs`
+  → add the output endpoint (done); **`spawn` deferred** (an HTTP launch needs a session/project-scoping + trust design
+  — `spawn_agent` is session-scoped); **`open` deferred** (project-open needs a `load_project` endpoint; `focus`
+  already raises the window) — all recorded in `plan/05` §12 with the CLI→endpoint mapping. **Skills/sources (CLAUDE.md
+  §4):** `clap` derive (subcommands/`ValueEnum`) and `ureq` 3.x (blocking `http://` client, `StatusCode` errors,
+  `send_empty`) confirmed via context7; `ureq` is `default-features = false` (no TLS/gzip — loopback only) to keep the
+  binary small. **Tests:** 20 CLI tests — 16 unit (clap parsing incl. `debug_assert`, base-URL resolution, the "Soloist
+  is not running" message, name→id resolution incl. ambiguity/unknown, project resolution, status filter + table
+  render) + **one subprocess end-to-end** (`crates/cli/tests/shell.rs`): the real `soloist` binary against an ephemeral
+  `axum` server over a temp runtime file — `status` prints the row, `restart web` reaches the **real core** (observed on
+  the event bus, proving identical behavior), and a runtime file pointing at a closed port → "Soloist is not running" +
+  non-zero exit. Plus 1 httpapi output-endpoint test. **Gate green:** **Rust 579 (+21) / 3 ignored** (29 suites), **UI
+  78**; `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier, dep-direction `soloist-core`
+  framework-free; file-size advisory only — all new files small); `cargo check -p soloist-app` across `--features http`
+  / `--no-default-features` / `--features mcp` / `--features http`-only all build; **CLI release binary measured
+  1,147,584 bytes ≈ 1.1 MB** (stripped, LTO; `04` §6); `Cargo.lock` brotli pins unchanged (additive only —
+  `clap`/`ureq`/deps added, no `cargo update`). **Branch `feat/phase-10-http-api` (PR #26, still OPEN — the user merges,
+  do NOT self-merge); slice committed — stop for review before slice 4.** Next: **slice 4 = docs** (an HTTP API
+  reference: endpoints, payloads, the auth header; `soloist --help` is auto-generated) + the user-facing acceptance
+  walk, then Phase 10 → `Verified`. H4's matrix Verify (`soloist status` prints the table) is already met headlessly by
+  the subprocess test, so H4 is flipped `✅` in `plan/02`.
 - **Phase 10 — slice 2: the HTTP mutation API (H3) + the H1 mutation auth header landed (2026-06-24).** The second
   vertical, on the same core-only adapter. **H1 is now complete:** an axum `middleware::from_fn` auth gate
   (`crates/httpapi/src/auth.rs`) requires `x-soloist-local-auth: 1` (single-sourced from `ipc::http::{LOCAL_AUTH_HEADER,
@@ -3021,16 +3058,22 @@ Tauri skills don't cover axum). **Slices 1–2 (H2 reads + H1 transport/CORS + H
    `POST /focus`), each a 1:1 delegation to one core method, behind a `route_layer` auth gate (missing/wrong header → 401;
    reads stay open), with the focus callback wired from the composition root. `reload` is a **tracked deferral** (needs a
    registration-reconcile path; `plan/05` §12). See the top Current-state entry. **H1 is now complete.**
-3. **H4 — the `soloist` CLI. ◀ START HERE (slice 3).** `crates/cli` = a thin HTTP **client** (`clap` + a small HTTP client; depends on `ipc`
-   for shared types, **not** `core` directly — `plan/06` §2; watch the CLI binary size, `04` §6/§10). Subcommands
-   `status [--status running|crashed]` / `start|stop|restart <name|all>` / `logs <name> [-n N]` / `spawn <tool>` /
-   `open` / `focus`; resolve the port/auth from the app's runtime file; a clear "Soloist is not running" when the
-   app is down.
-4. **Docs + tests.** API reference (endpoints, payloads, the auth header) + `soloist --help`; integration tests
-   spinning up the app headless against a fixture stack (assert auth/CORS enforcement + that mutations change real
-   state via events) and CLI tests against the fixture app incl. the app-down path. Acceptance: the same restart via
-   UI, MCP, and HTTP produces **identical** core behavior. Slice it like Phase 9 was (one reviewable vertical per
-   commit; gate green start-and-end).
+3. **H4 — the `soloist` CLI. ✅ DONE (slice 3, 2026-06-24)** — `crates/cli` = a thin HTTP **client** (`clap` derive +
+   `ureq`, `default-features=false`; depends on `ipc`/`clap`/`ureq`, **not** `core` directly). Subcommands
+   `status [--status running|crashed]` / `start|stop|restart <name|all>` / `logs <name> [-n N]` / `focus`, each routed
+   to the same `Facade` method the UI/MCP use; port/auth from `ipc::http::read_runtime()`; a refused connection →
+   "Soloist is not running" (exit 1). Added the `GET /processes/:id/output` read endpoint for `logs`; **`spawn`/`open`
+   are tracked deferrals** (`plan/05` §12). 20 CLI tests (16 unit + 1 subprocess end-to-end) + 1 endpoint test; CLI
+   release binary **1,147,584 bytes ≈ 1.1 MB**. See the top Current-state entry. **H4 is `✅` in `plan/02`.**
+4. **Docs + acceptance. ◀ START HERE (slice 4).** The tests are already done (slice 3). Remaining: **(a)** write an
+   **HTTP API reference** — every endpoint (the 6 reads incl. `/processes/:id/output`, the 9 mutations, `/focus`),
+   their JSON payloads, the `X-Soloist-Local-Auth` header, localhost-CORS + loopback-bind, and the `soloist`
+   subcommand → endpoint map (a new `docs/http-api.md` is the natural home; cross-link from `README.md`). `soloist
+   --help` is auto-generated — no work. **(b)** The **user-only runtime acceptance walk**: `just dev`, then from a shell
+   `soloist status` prints the live table, `soloist restart <name>` restarts (and the **same** restart via UI/MCP/HTTP
+   is identical), `soloist logs <name>` shows output, and `soloist status` with the app quit prints "Soloist is not
+   running". On a green walk **and your confirmation**, flip **Phase 10 → `Verified`** (all H1–H4 v1 rows pass; the
+   headless tests already meet every matrix Verify, so the walk is confirmation, not new evidence).
 1a. **Carry the Key-Value "default off" tool gate (G10 / phase-09 Task 6) into Phase 11.** It is **not** implemented
    in Phase 9 and intentionally so — it needs the per-group enablement toggle/settings Phase 11 builds (the phase-09
    task defers it: "per-group settings (Phase 11 surfaces toggles)"; plan/05 §7: Key-Value "defaults OFF"). When

@@ -19,3 +19,9 @@ pub use paths::{data_dir, ensure_data_dir, ensure_socket_path, socket_path, Data
 pub use protocol::{
     IpcRequest, IpcResponse, IpcResult, PortWaitOutcome, ProjectStatus, ProjectSummary,
 };
+
+/// The core read-model view types the wire carries, re-exported so an out-of-process client
+/// — the `soloist` CLI over the loopback HTTP API — deserializes the exact serde shape the
+/// server returns, without depending on the engine crate directly (the dependency rule in
+/// `06` §2: the CLI links `core`'s *types* through `ipc`, never its running engine).
+pub use soloist_core::{ProcStatus, ProcessKind, ProcessView, ProjectView};

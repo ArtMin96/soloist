@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use base64::Engine as _;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::ids::ProjectId;
 use crate::ports::ProjectRecord;
@@ -19,7 +19,7 @@ const MAX_ICON_BYTES: u64 = 512 * 1024;
 /// `solo.yml` `icon:` loaded into a ready-to-render `data:` URL (`None` when absent,
 /// unreadable, oversized, or not an image). The icon is not a separate lookup — it is a
 /// field of the project, just like the name.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectView {
     pub id: ProjectId,
     pub name: String,

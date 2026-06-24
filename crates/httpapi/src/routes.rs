@@ -2,11 +2,11 @@
 //! read; the response bodies reuse the core read-model types, so the wire shape stays
 //! single-source with the UI and MCP.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use soloist_core::{ProcStatus, ProcessId, ProcessView, ProjectView};
 
@@ -31,6 +31,7 @@ fn read_routes() -> Router<ApiState> {
         .route("/status", get(status))
         .route("/processes", get(processes))
         .route("/processes/{id}/ports", get(process_ports))
+        .route("/processes/{id}/output", get(process_output))
         .route("/projects", get(projects))
 }
 
@@ -90,6 +91,30 @@ async fn process_ports(State(state): State<ApiState>, Path(id): Path<u64>) -> Js
         .map(|view| view.ports)
         .unwrap_or_default();
     Json(ports)
+}
+
+/// `GET /processes/:id/output?lines=N` — a process's most recent rendered output lines,
+/// oldest first. `lines` requests that many (the default count and the ceiling are enforced
+/// in the core, like the MCP output tools); an unknown id has no buffer and so reads as an
+/// empty list, consistent with [`process_ports`]. This is the read the CLI's `logs` drives,
+/// over the **same** core method the MCP output tools use.
+async fn process_output(
+    State(state): State<ApiState>,
+    Path(id): Path<u64>,
+    Query(query): Query<OutputQuery>,
+) -> Json<Vec<String>> {
+    let lines = state
+        .facade()
+        .process_output(ProcessId::from_raw(id), query.lines)
+        .unwrap_or_default();
+    Json(lines)
+}
+
+/// `?lines=N` caps `GET /processes/:id/output` to the most recent N lines (omitted = the
+/// core's default count).
+#[derive(Deserialize)]
+struct OutputQuery {
+    lines: Option<usize>,
 }
 
 /// `GET /projects` — every opened project's display identity.

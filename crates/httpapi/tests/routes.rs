@@ -70,6 +70,33 @@ async fn processes_returns_the_live_read_model_as_json() {
 }
 
 #[tokio::test]
+async fn output_returns_a_line_array_and_an_unknown_id_reads_as_empty() {
+    let facade = facade_with_one_process();
+    let id = facade.snapshot()[0].id.get();
+    let app = router(ApiState::new(facade));
+
+    // A known (resting) process: 200 with a JSON array — empty, since it never started.
+    let response = get(app.clone(), &format!("/processes/{id}/output"), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(json(response).await.as_array().expect("array").is_empty());
+
+    // The `lines` query cap is accepted and still yields an array.
+    let response = get(
+        app.clone(),
+        &format!("/processes/{id}/output?lines=5"),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(json(response).await.is_array());
+
+    // An unknown id has no buffer and reads as an empty list rather than erroring (like ports).
+    let response = get(app, "/processes/999999/output", None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(json(response).await.as_array().expect("array").is_empty());
+}
+
+#[tokio::test]
 async fn status_summarizes_projects_and_processes() {
     let app = router(ApiState::new(facade_with_one_process()));
     let body = json(get(app, "/status", None).await).await;

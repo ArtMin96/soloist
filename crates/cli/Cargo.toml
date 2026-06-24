@@ -8,10 +8,28 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
-# Named to avoid colliding with the desktop app's `soloist` binary in one workspace.
+[lib]
+name = "soloist_cli"
+path = "src/lib.rs"
+
+# Named to avoid colliding with the desktop app's `soloist` binary in one workspace; it is
+# installed as `soloist` at packaging (Phase 12).
 [[bin]]
 name = "soloist-cli"
 path = "src/main.rs"
 
 [dependencies]
 soloist-ipc = { path = "../ipc" }
+clap = { version = "4", features = ["derive"] }
+# Loopback `http://` only — no TLS and no compression are needed to reach 127.0.0.1, so the
+# default `rustls`/`gzip` features are dropped to keep the CLI binary small (`04` §6).
+ureq = { version = "3", default-features = false }
+serde = "1"
+serde_json = "1"
+
+[dev-dependencies]
+soloist-core = { path = "../core", features = ["testing"] }
+soloist-httpapi = { path = "../httpapi" }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "time", "sync"] }
+tempfile = "3"
