@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 use soloist_core::{KvEntry, KvRepo, ProjectId};
+use tempfile::tempdir;
 
 use crate::SqliteStore;
 
@@ -106,4 +107,33 @@ fn kv_is_project_scoped() {
 fn list_empty_project_returns_empty() {
     let store = store_with_project();
     assert!(store.list(P).unwrap().is_empty());
+}
+
+#[test]
+fn kv_survives_a_store_reopen() {
+    // Coordination key-value is durable content (G11): it persists across an app restart, like the
+    // todo, scratchpad, timer, and lease aggregates. Set a value, reopen the store on the same file,
+    // and read it back.
+    let dir = tempdir().expect("temp dir");
+    let db = dir.path().join("soloist.db");
+    let value: Value = json!({ "build": "release", "ready": true });
+    {
+        let store = SqliteStore::open(&db).expect("open");
+        store
+            .lock()
+            .execute(
+                "INSERT INTO projects (id, root, name) VALUES (?1, ?2, ?3)",
+                (P.get() as i64, "/p", "P"),
+            )
+            .expect("seed project P");
+        store.set(P, "config", &value).unwrap();
+    }
+
+    // Reopen: the project row and its key-value entry are both still there.
+    let store = SqliteStore::open(&db).expect("reopen");
+    assert_eq!(
+        store.get(P, "config").unwrap(),
+        Some(value),
+        "the key-value entry survives the reopen"
+    );
 }
