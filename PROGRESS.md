@@ -2880,26 +2880,19 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-**A. Phase 9 is IN PROGRESS — leases (G6), timers (G7–G9), scratchpads (G1/G2) AND todos (G3–G5) landed. Next: kv
-G10, then E7.** PR #22 (leases), #23 (timers), and **#24 (scratchpads)** are all **MERGED to `main`** (`67787bc` =
-the scratchpads merge commit, HEAD before this branch). Todos landed this session on branch `feat/phase-9-todos`
-(off `main` `67787bc`; **PR #25 open — merge is the user's call, do NOT self-merge**). Gate
-green (core 333 / store 54 / ipc 14 / app 30 / mcp 57 / sys 5 +10 / pty 1 +12 +3 ign / UI 78; `just lint` + `just
-test` + `cargo check -p soloist-app --no-default-features` all pass). **In order:**
-1. **Open + (on the user's go) merge the todos PR** (`feat/phase-9-todos`). Additive vertical on the established
-   structure (C6 `Todos` aggregate over a typed, validated `TodoDoc` + `TodoRepo`/`NoopTodoRepo`; SQLite + migration
-   **v7**; revision-guarded doc writes; the **blocker gate** for G4; a process-owned lock for G5 auto-released via a
-   new `CompositeLockReleaser`; 18 MCP tools; ipc arms). **Disciplined typed structure + the blocker gate are
-   clean-room — `KNOWN-DIVERGENCES.md` D-8 + `plan/05` §12 (7 rows).** Durable (survives restart, G11 — only the
-   process-owned lock is launch-cleared).
-2. **Next slice — kv G10** (project-scoped JSON key-value, **default OFF** per `plan/05` §7 — the tool group is
-   off unless enabled): a `KvRepo` over the store (migration **v8**), `kv_set`/`_get`/`_delete`/`_list` in a new
-   `tools/kv.rs` sub-router → one `Facade` method each → ipc arms; project-scoped, ungated by trust (content).
-   Smallest remaining C6 aggregate. Then **E7 end-to-end** — a scripted lead agent: `spawn_agent` → `todo_create` +
-   `todo_lock` → `timer_fire_when_idle_all` → integrate on wake (an integration test exercising the whole
-   coordination loop; closes Phase 9's acceptance). Follow the SAME vertical the four landed slices set; consult the
-   **MCP spec** (`modelcontextprotocol.io`, current rev **2025-11-25**) + `rmcp` via context7 (mcp-builder is not
-   installed).
+**A. Phase 9 is IN PROGRESS — leases (G6), timers (G7–G9), scratchpads (G1/G2), todos (G3–G5), AND kv (G10) landed.
+Next: E7 end-to-end.** PR #22 (leases), #23 (timers), and **#24 (scratchpads)** are all **MERGED to `main`**
+(`67787bc` = the scratchpads merge commit). Todos landed on branch `feat/phase-9-todos` (off `main` `67787bc`;
+**PR #25 open — merge is the user's call, do NOT self-merge**). **kv G10 is committed on `feat/phase-9-todos`**
+(most recent commit: kv aggregate + SqliteStore migration v8 + 4 MCP tools). Gate green (core 539 / store / ipc /
+app / mcp / sys / pty / UI; `just lint` + `just test` + dep-direction all pass). **In order:**
+1. **Open + (on the user's go) merge the todos+kv PR** (`feat/phase-9-todos`). Includes: C6 `Todos` aggregate (G3–G5),
+   C6 `Kv` aggregate (G10), SQLite migrations v7 (todos) + v8 (kv), 18 todo MCP tools + 4 kv MCP tools; 539 tests
+   passing. **PR #25 open — merge is the user's call, do NOT self-merge.**
+2. **E7 end-to-end** — a scripted lead agent: `spawn_agent` → `todo_create` + `todo_lock` → `kv_set` (shared state)
+   → `timer_fire_when_idle_all` → integrate on wake (an integration test exercising the whole coordination loop;
+   closes Phase 9's acceptance). Follow the SAME vertical the five landed slices set; consult the **MCP spec**
+   (`modelcontextprotocol.io`, current rev **2025-11-25**) + `rmcp` via context7 (mcp-builder is not installed).
 2a. **Tracked C6 follow-ups (none G-row-blocking — pick up when convenient):** cross-project `scratchpad_transfer`
    **and** `todo_transfer` share one cross-scope question — design them together. Scratchpad free-form tools
    (`_append`/`_edit`/`_append_section`/`_tail`/`_find`/`_clear`) need a disciplined design against the typed doc;
