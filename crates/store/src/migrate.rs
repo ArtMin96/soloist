@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 8;
+pub(crate) const SCHEMA_VERSION: i64 = 9;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -157,6 +157,21 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
                  key        TEXT NOT NULL,
                  value      TEXT NOT NULL,
                  PRIMARY KEY (project_id, key)
+             );",
+        )
+        .map_err(sql_err)?;
+    }
+
+    if version < 9 {
+        // Application settings: a single global record (the `id = 1` CHECK enforces the singleton),
+        // not project-scoped, so it has no project foreign key and survives across projects. `doc`
+        // is the JSON of the `Settings` document, so the persisted shape is the domain type and
+        // cannot drift; serde defaults fill any field a newer build adds. Durable, never cleared on
+        // launch.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS settings (
+                 id  INTEGER PRIMARY KEY CHECK (id = 1),
+                 doc TEXT NOT NULL
              );",
         )
         .map_err(sql_err)?;

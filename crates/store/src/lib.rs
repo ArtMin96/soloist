@@ -15,6 +15,7 @@ mod migrate;
 mod projects;
 mod runtime;
 mod scratchpads;
+mod settings;
 mod timers;
 mod todos;
 mod trust;

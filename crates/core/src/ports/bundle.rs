@@ -14,6 +14,7 @@ use crate::filewatch::{FileWatcher, NoopFileWatcher};
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
 use crate::notify::{NoopNotifier, Notifier};
 use crate::portscan::{NoopPortProbe, PortProbe};
+use crate::settings::{NoopSettingsRepo, SettingsRepo};
 use crate::shellenv::{NoopShellEnvProbe, ShellEnvProbe};
 
 use super::{
@@ -27,7 +28,8 @@ use super::{
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
 /// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `todo_repo`,
 /// `kv_repo`, `runtime`, `orphan_control`, `metrics`,
-/// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`, `shell_env_probe`)
+/// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`, `shell_env_probe`,
+/// `settings_repo`)
 /// default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
 /// forces every existing composition root to change. `app_env` (the app's own environment,
 /// captured at the composition root for the shell-environment resolver) defaults to empty.
@@ -53,6 +55,7 @@ pub struct CorePorts {
     pub(crate) agent_tools: Arc<dyn AgentToolRepo>,
     pub(crate) version_probe: Arc<dyn VersionProbe>,
     pub(crate) shell_env_probe: Arc<dyn ShellEnvProbe>,
+    pub(crate) settings_repo: Arc<dyn SettingsRepo>,
     pub(crate) app_env: BTreeMap<String, String>,
 }
 
@@ -86,6 +89,7 @@ impl CorePorts {
                 agent_tools: Arc::new(NoopAgentToolRepo),
                 version_probe: Arc::new(NoopVersionProbe),
                 shell_env_probe: Arc::new(NoopShellEnvProbe),
+                settings_repo: Arc::new(NoopSettingsRepo),
                 app_env: BTreeMap::new(),
             },
         }
@@ -210,6 +214,14 @@ impl CorePortsBuilder {
     /// `$SHELL -ilc env`.
     pub fn shell_env_probe(mut self, shell_env_probe: Arc<dyn ShellEnvProbe>) -> Self {
         self.ports.shell_env_probe = shell_env_probe;
+        self
+    }
+
+    /// Overrides the durable settings store the settings aggregate persists to (defaults to
+    /// [`NoopSettingsRepo`], which stores nothing, so settings stay at their defaults). The real
+    /// adapter is SQLite, the same store backing every other durable repository.
+    pub fn settings_repo(mut self, settings_repo: Arc<dyn SettingsRepo>) -> Self {
+        self.ports.settings_repo = settings_repo;
         self
     }
 
