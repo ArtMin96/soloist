@@ -46,7 +46,7 @@ headless-testable and is the mechanical guarantee behind *"remove MCP → app st
 | `sys` | driven adapter | `MetricsProbe` (CPU/mem) + `PortProbe` (discovery), both over `/proc`; `FileWatcher` over `notify` — monitoring C5 | `core`, `notify`, `libc` | live |
 | `app` | driving + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `sys`, `httpapi`, `tauri` | live |
 | `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | live (P8 skeleton) |
-| `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | stub → P10 |
+| `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | live (P10: read API + CORS) |
 | `cli` | driving adapter | `soloist` CLI = thin HTTP client | `ipc`, `clap` (not `core`) | stub → P10 |
 | `ipc` | shared contract | app↔mcp UDS framing + request/reply types + the data-dir/socket path | `core`, `serde`, `tokio` | live (P8) |
 

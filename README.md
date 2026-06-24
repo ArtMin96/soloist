@@ -89,6 +89,13 @@ writes a `solo.yml` for you it omits keys left at their defaults, so the file st
 - **`restart_when_changed` / `auto_restart`** are parsed today; their live file-watch and crash-restart
   behavior is built in Phase 6.
 
+## Local HTTP API and CLI
+
+When Soloist is running it serves a loopback HTTP API on `127.0.0.1:24678`, and the `soloist`
+command-line tool drives that API from a shell. Both route to the same core commands as the desktop
+UI. See [`docs/http-api.md`](docs/http-api.md) for the endpoints, their JSON payloads, the
+`X-Soloist-Local-Auth` mutation header, and the CLI subcommands.
+
 ## How to read these docs
 
 > **New session? Start with [`CLAUDE.md`](CLAUDE.md) and [`PROGRESS.md`](PROGRESS.md).** `CLAUDE.md` is
