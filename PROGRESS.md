@@ -29,9 +29,11 @@
   full-suite CPU load. Stable across repeated runs in isolation **and** under the full `cargo test --workspace` load
   (~4.1 s). Gate green: **Rust 540 (+1) / 3 ignored / UI 78**; `just lint` + `just test` + `cargo check -p soloist-app
   --no-default-features` all exit 0. **No production code changed** — E7 is a pure integration test over the existing
-  C4 (`spawn_agent`, idle FSM) + C6 (todos, timers, scheduler) surface. **PR #25 (`feat/phase-9-todos`) carries the
-  todos (G3–G5) + kv (G10) that E7 builds on; merge is the user's call (do NOT self-merge). Where E7 is delivered
-  (folded into #25 vs a stacked PR) is the open question for the user — see "Next session".**
+  C4 (`spawn_agent`, idle FSM) + C6 (todos, timers, scheduler) surface. **User decision (2026-06-24): E7 is folded
+  into PR #25** (it depends on the todos there, so cannot merge to `main` independently first) — commit `4cd1e27`
+  pushed onto `feat/phase-9-todos`, PR #25 re-titled `feat(coordination): Phase 9 — todos (G3–G5) + kv (G10) + E7
+  end-to-end` and its body updated with an E7 section. **Merge is the user's call (do NOT self-merge); on merge, flip
+  Phase 9 → `Verified`.**
 - **PR #25 reconciled + rescoped (2026-06-24).** The branch had diverged: a concurrent session built **kv (G10)** on
   the same branch and pushed it (origin `fabc40c`) while local held todos only (`82a1854`). Reconciled by a clean
   **fast-forward** (no force-push, no commits destroyed); local now matches origin. The kv commit also carried an
@@ -2916,16 +2918,12 @@ on branch `feat/phase-9-todos` = **PR #25** (`feat(coordination): Phase 9 — to
 end-to-end orchestration test — is DONE** (`crates/pty/tests/orchestration.rs`, committed on `feat/phase-9-todos`;
 real PTY + real idle sampler + real scheduler; mutation-verified; stable under full-suite load). Gate green (Rust
 **540** / 3 ignored / UI 78; `just lint` + `just test` + `--no-default-features` all exit 0). **In order:**
-1. **DECIDE WITH THE USER how E7 is delivered, then act.** E7 (`crates/pty/tests/orchestration.rs`) is committed on
-   `feat/phase-9-todos` but **NOT pushed**, because pushing folds it into PR #25 — broadening the PR the user
-   explicitly scoped as "todos (G3–G5) + kv (G10)". E7 genuinely **depends on** the todos in PR #25 (`todo_create`/
-   `todo_lock`), so it cannot merge to `main` independently first. Two clean options: **(a) fold E7 into PR #25**
-   (push the branch, add an E7 line to the PR body — simplest, reflects the dependency), or **(b) stacked PR** (E7 on
-   a branch based off `feat/phase-9-todos`, merges after #25). **Surface this and let the user pick before pushing.**
-2. **On the user's go, merge PR #25** (todos G3–G5 + kv G10; + E7 if folded in). Includes: `Todos` aggregate, `Kv`
-   aggregate, migrations v7 + v8, 18 todo + 4 kv MCP tools, the E7 orchestration test. **Merge is the user's call —
-   do NOT self-merge.** Once merged, flip Phase 9 → `Verified` (coordination is headless-testable; the passing E7
-   acceptance test is the evidence — no GUI walk needed).
+1. **Merge PR #25 on the user's go (do NOT self-merge), then flip Phase 9 → `Verified`.** PR #25
+   (`feat/phase-9-todos`, head `4cd1e27`) now carries everything: `Todos` aggregate (G3–G5), `Kv` aggregate (G10),
+   migrations v7 + v8, 18 todo + 4 kv MCP tools, **and the E7 orchestration test** (folded in per the user — it
+   depends on the todos, so cannot merge to `main` independently). Local == origin == PR head. On merge, Phase 9 is
+   `Verified`: coordination is headless-testable, so the passing E7 acceptance test (mutation-verified, stable) is the
+   evidence — no GUI walk needed.
 2a. **Tracked C6 follow-ups (none G-row-blocking — pick up when convenient):** cross-project `scratchpad_transfer`
    **and** `todo_transfer` share one cross-scope question — design them together. Scratchpad free-form tools
    (`_append`/`_edit`/`_append_section`/`_tail`/`_find`/`_clear`) need a disciplined design against the typed doc;
