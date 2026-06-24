@@ -36,6 +36,7 @@ use crate::ports::{
     Spawned, StoreError, TrustRepo,
 };
 use crate::process::{ProcStatus, ProcessView, Readiness};
+use crate::shellenv::ShellEnv;
 use crate::terminal::Terminals;
 
 use actor::{ActorMsg, ActorPorts, OrphanIdentity};
@@ -73,6 +74,10 @@ pub struct Supervisor {
     registry: Registry,
     terminals: Terminals,
     restart_policy: RestartPolicy,
+    /// Resolves the environment each process launches with — the captured login-shell
+    /// environment layered under the process's own `env`. Shared by every actor so the
+    /// shell is captured at most once per cache window.
+    shell_env: Arc<ShellEnv>,
 }
 
 impl Supervisor {
@@ -92,6 +97,11 @@ impl Supervisor {
             registry: Registry::default(),
             terminals: Terminals::default(),
             restart_policy: RestartPolicy::default(),
+            shell_env: Arc::new(ShellEnv::new(
+                ports.shell_env_probe.clone(),
+                ports.clock.clone(),
+                ports.app_env.clone(),
+            )),
         }
     }
 
@@ -358,6 +368,7 @@ impl Supervisor {
             bus: self.bus.clone(),
             registry: self.registry.clone(),
             terminals: self.terminals.clone(),
+            shell_env: self.shell_env.clone(),
         }
     }
 }
@@ -408,18 +419,75 @@ mod lifecycle_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::identity::PROCESS_ID_ENV;
     use crate::process::ProcessKind;
     use crate::supervisor::test_support::{
-        command_spec, harness, next_change, next_to, spawn_spec, status_of, terminal, wait_all,
-        PROJECT,
+        command_spec, harness, harness_with_shell_env, next_change, next_to, spawn_spec, status_of,
+        terminal, wait_all, PROJECT,
     };
-    use crate::testing::FakeSpawner;
+    use crate::testing::{FakeShellEnvProbe, FakeSpawner};
+    use std::collections::BTreeMap;
     use std::path::Path;
     use std::time::Duration;
     use tokio::sync::broadcast::error::RecvError;
 
+    /// Builds an environment map from `(key, value)` pairs.
+    fn env_map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
     /// A duration safely past the actor's SIGTERM→SIGKILL grace window.
     const PAST_GRACE: Duration = Duration::from_secs(6);
+
+    #[tokio::test]
+    async fn a_spawn_layers_the_captured_shell_env_under_the_process_overrides() {
+        // The login-shell capture exposes a version-manager bin dir and a key the process
+        // also sets; the process's own value must win, the captured-only key must carry
+        // through, and the injected process id must ride along.
+        let captured = env_map(&[
+            ("NVM_BIN", "/home/dev/.nvm/versions/node/bin"),
+            ("SHARED", "from-shell"),
+        ]);
+        let (spawner, recorder) = FakeSpawner::records_spec_env();
+        let mut h = harness_with_shell_env(
+            spawner,
+            Arc::new(FakeShellEnvProbe::returning(captured)),
+            BTreeMap::new(),
+        );
+
+        let mut spec = spawn_spec("sleep 60");
+        spec.env = env_map(&[("SHARED", "from-process"), ("FOO", "bar")]);
+        let id = h.sup.register(Registration::launched(
+            PROJECT,
+            ProcessKind::Terminal,
+            "shell",
+            spec,
+        ));
+        h.sup.start(id).expect("start");
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
+
+        let spawned = recorder.lock().expect("recorder").first().cloned();
+        let spawned = spawned.expect("the process was spawned once");
+        assert_eq!(
+            spawned.get("NVM_BIN"),
+            Some(&"/home/dev/.nvm/versions/node/bin".to_string()),
+            "the captured version-manager dir reaches the spawn"
+        );
+        assert_eq!(
+            spawned.get("SHARED"),
+            Some(&"from-process".to_string()),
+            "the process's own env wins over the captured shell env"
+        );
+        assert_eq!(spawned.get("FOO"), Some(&"bar".to_string()));
+        assert_eq!(
+            spawned.get(PROCESS_ID_ENV),
+            Some(&id.get().to_string()),
+            "the injected process id rides along"
+        );
+    }
 
     #[tokio::test]
     async fn start_then_stop_runs_the_full_lifecycle_via_the_mock_clock() {

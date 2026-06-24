@@ -3,6 +3,7 @@
 //! actor path — the grace window, panic isolation, a clean or signalled exit, or an
 //! output stream into the terminal buffers.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -13,6 +14,10 @@ use crate::ports::{
     Spawned,
 };
 use crate::sync::lock;
+
+/// A shared buffer of the environment of each spawn, recorded by
+/// [`FakeSpawner::records_spec_env`] so a test can read back what reached a process.
+type SpecEnvLog = Arc<Mutex<Vec<BTreeMap<String, String>>>>;
 
 /// Signal numbers a simulated kill records on a fake child's exit status.
 const SIGKILL: i32 = 9;
@@ -56,6 +61,10 @@ enum Behavior {
     /// buffer — so a test can prove what reached a process's input (e.g. a timer delivering
     /// its body as a fresh turn).
     RecordsInput(Arc<Mutex<Vec<u8>>>),
+    /// Stays alive until killed and records the environment of each spawn into a shared
+    /// buffer — so a test can prove what env reached a process (e.g. the captured shell
+    /// environment merged with the per-process overrides).
+    RecordsSpecEnv(SpecEnvLog),
 }
 
 /// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is chosen
@@ -153,6 +162,20 @@ impl FakeSpawner {
             recorder,
         )
     }
+
+    /// A long-lived child that records the environment of each spawn, returning the spawner
+    /// and the shared buffer the test reads. Used to prove which variables reached a
+    /// process — e.g. that the captured shell environment was merged with the process's own
+    /// `env` and the injected process id.
+    pub fn records_spec_env() -> (Self, SpecEnvLog) {
+        let recorder = Arc::new(Mutex::new(Vec::new()));
+        (
+            Self {
+                behavior: Behavior::RecordsSpecEnv(recorder.clone()),
+            },
+            recorder,
+        )
+    }
 }
 
 /// A closed PTY output channel: the receiver yields nothing and reports EOF at once.
@@ -164,7 +187,7 @@ fn no_output() -> mpsc::Receiver<Vec<u8>> {
 
 #[async_trait]
 impl ProcessSpawner for FakeSpawner {
-    async fn spawn(&self, _spec: &SpawnSpec) -> Result<Spawned, SpawnError> {
+    async fn spawn(&self, spec: &SpawnSpec) -> Result<Spawned, SpawnError> {
         match &self.behavior {
             Behavior::LongLived(dies_on) => {
                 let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
@@ -260,6 +283,23 @@ impl ProcessSpawner for FakeSpawner {
                     io: Box::new(RecordingPtyIo {
                         recorder: recorder.clone(),
                     }),
+                })
+            }
+            Behavior::RecordsSpecEnv(recorder) => {
+                lock(recorder).push(spec.env.clone());
+                let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
+                let control = Box::new(OneshotControl {
+                    exit_tx: Mutex::new(Some(exit_tx)),
+                    dies_on: DiesOn::Kill,
+                });
+                let exit: ExitFuture =
+                    Box::pin(async move { exit_rx.await.unwrap_or_else(|_| killed_by(SIGKILL)) });
+                Ok(Spawned {
+                    pid: Some(424245),
+                    output: no_output(),
+                    exit,
+                    control,
+                    io: Box::new(NoopPtyIo),
                 })
             }
         }

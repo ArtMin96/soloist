@@ -35,6 +35,7 @@ pub mod ports;
 pub mod portscan;
 pub mod process;
 pub mod projects;
+pub mod shellenv;
 pub mod supervisor;
 pub mod terminal;
 pub mod trust;
@@ -87,6 +88,7 @@ pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView, Readi
 pub use projects::{
     LoadProjectError, ProjectError, ProjectLoad, ProjectService, ProjectView, Projects,
 };
+pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};
 pub use terminal::{LogLine, PtyChunk, RenderedScreen};
 pub use trust::{Trust, TrustStore};
