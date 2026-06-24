@@ -10,7 +10,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use soloist_core::ProcessId;
+use soloist_core::{McpToolGroups, ProcessId};
 use soloist_ipc::{read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult};
 use tokio::net::UnixStream;
 use tokio::sync::Mutex;
@@ -86,6 +86,17 @@ impl AppClient {
                 *slot = None;
                 Err(err)
             }
+        }
+    }
+
+    /// Reads the MCP feature-group enablement from the app — the server consults this at startup to
+    /// decide which feature-tool groups to serve. Any failure (app down, transport, or a mismatched
+    /// reply) is the caller's to handle; the server falls back to the defaults so it still starts
+    /// when the app is unreachable.
+    pub async fn mcp_tool_groups(&self) -> Result<McpToolGroups, ClientError> {
+        match self.request(IpcRequest::McpToolGroups).await? {
+            IpcResponse::McpToolGroups(groups) => Ok(groups),
+            _ => Err(ClientError::Transport),
         }
     }
 

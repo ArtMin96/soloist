@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AcquireOutcome, AgentTool, Comment, KvEntry, LeaseView, ProcessId, ProcessView, ProjectId,
-    ProjectView, ScratchpadDoc, ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome,
+    AcquireOutcome, AgentTool, Comment, KvEntry, LeaseView, McpToolGroups, ProcessId, ProcessView,
+    ProjectId, ProjectView, ScratchpadDoc, ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome,
     StartSummary, TimerId, TimerView, TodoDoc, TodoId, TodoSummary, TodoView, Whoami,
 };
 
@@ -215,6 +215,9 @@ pub enum IpcRequest {
     KvDelete { key: String },
     /// Every key-value entry in the session's effective project's kv store, ordered by key.
     KvList,
+    /// The MCP feature-group tool enablement — a global settings read (not project-scoped) the MCP
+    /// server consults at startup to decide which feature-tool groups to serve.
+    McpToolGroups,
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -307,6 +310,9 @@ pub enum IpcResponse {
     KvPairs(Vec<KvEntry>),
     /// Whether a kv entry was deleted (answer to [`IpcRequest::KvDelete`]).
     KvDeleted(bool),
+    /// The MCP feature-group tool enablement (answer to [`IpcRequest::McpToolGroups`]). Reuses the
+    /// core type so the wire shape cannot drift.
+    McpToolGroups(McpToolGroups),
 }
 
 /// How a [`IpcRequest::WaitForBoundPort`] resolved — a structured answer, not an error: a

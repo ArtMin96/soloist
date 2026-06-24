@@ -437,6 +437,10 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .kv_list(session)
             .map(IpcResponse::KvPairs)
             .map_err(IpcError::from),
+        IpcRequest::McpToolGroups => facade
+            .mcp_tool_groups()
+            .map(IpcResponse::McpToolGroups)
+            .map_err(|err| IpcError::Internal(err.to_string())),
     }
 }
 

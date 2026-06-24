@@ -2,10 +2,11 @@ use super::*;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, Comment, FireCond, LeaseView, Origin, ProcStatus,
-    ProcessId, ProcessKind, ProcessView, ProjectId, PromptMode, Readiness, ScratchpadDoc,
-    ScratchpadId, ScratchpadSummary, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary,
-    TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary, TodoView, Whoami,
+    AcquireOutcome, AgentKind, AgentTool, Comment, FireCond, LeaseView, McpToolGroups, Origin,
+    ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, PromptMode, Readiness,
+    ScratchpadDoc, ScratchpadId, ScratchpadSummary, ScratchpadView, SessionId, SetWhenIdleOutcome,
+    StartSummary, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary,
+    TodoView, Whoami,
 };
 use soloist_ipc::{
     read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome,
@@ -38,9 +39,40 @@ fn spawn_fake_app(socket: PathBuf, respond: impl Fn(IpcRequest) -> IpcResult + S
     });
 }
 
-/// A handler whose single client connection talks to the fake app on `socket`.
+/// Every feature group enabled — the full tool surface, so the per-tool tests below exercise every
+/// tool regardless of the default gating (the gating tests construct specific enablements).
+fn all_feature_groups() -> McpToolGroups {
+    McpToolGroups {
+        scratchpads: true,
+        todos: true,
+        timers: true,
+        key_value: true,
+    }
+}
+
+/// A handler whose single client connection talks to the fake app on `socket`, with every feature
+/// group enabled.
 fn handler(socket: PathBuf) -> SoloistMcp {
-    SoloistMcp::new(Arc::new(AppClient::new(None, socket)))
+    SoloistMcp::new(Arc::new(AppClient::new(None, socket)), all_feature_groups())
+}
+
+/// A handler with the given feature-group enablement. `list_all` reads the statically composed
+/// router, so no IPC connection is opened and the socket path is never used.
+fn handler_with_groups(groups: McpToolGroups) -> SoloistMcp {
+    SoloistMcp::new(
+        Arc::new(AppClient::new(None, PathBuf::from("unused.sock"))),
+        groups,
+    )
+}
+
+/// The tool names the composed router actually serves.
+fn served_tools(handler: &SoloistMcp) -> BTreeSet<String> {
+    handler
+        .tool_router
+        .list_all()
+        .into_iter()
+        .map(|tool| tool.name.into_owned())
+        .collect()
 }
 
 /// The structured JSON content a tool returned, or a panic if there was none.
@@ -150,23 +182,18 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "kv_list",
 ];
 
-/// The router [`SoloistMcp::new`] composes from the per-category sub-routers must serve exactly
-/// the intended surface. This guards the split itself: a category sub-router left out of the
-/// `+` composition, a tool name colliding across two category files (`ToolRouter::add_route` is
-/// a map insert that silently overwrites), or an accidental add/rename all change what the
-/// served router reports — drift the per-tool behaviour tests cannot catch, because they invoke
-/// the tool methods directly without going through the composed router.
+/// With every feature group enabled, the router [`SoloistMcp::new`] composes from the per-category
+/// sub-routers must serve exactly the intended surface. This guards the split itself: a category
+/// sub-router left out of the `+` composition, a tool name colliding across two category files
+/// (`ToolRouter::add_route` is a map insert that silently overwrites), or an accidental add/rename
+/// all change what the served router reports — drift the per-tool behaviour tests cannot catch,
+/// because they invoke the tool methods directly without going through the composed router.
 #[test]
 fn served_router_exposes_exactly_the_expected_tool_surface() {
     let dir = tempfile::tempdir().expect("temp dir");
     // `list_all` reads the statically composed router; no IPC connection is opened, so the
-    // socket path is never touched.
-    let served: BTreeSet<String> = handler(dir.path().join("soloist-ipc.sock"))
-        .tool_router
-        .list_all()
-        .into_iter()
-        .map(|tool| tool.name.into_owned())
-        .collect();
+    // socket path is never touched. `handler` enables every feature group.
+    let served = served_tools(&handler(dir.path().join("soloist-ipc.sock")));
 
     let expected: BTreeSet<String> = EXPECTED_TOOL_SURFACE
         .iter()
@@ -177,6 +204,72 @@ fn served_router_exposes_exactly_the_expected_tool_surface() {
         served, expected,
         "the served MCP tool surface drifted from the intended set"
     );
+}
+
+/// The default surface serves every core and on-by-default feature group, but gates Key-Value off
+/// (G10): its tools are absent from the composed router, so they are neither listed nor callable.
+#[test]
+fn default_settings_gate_key_value_off_and_serve_the_rest() {
+    let served = served_tools(&handler_with_groups(McpToolGroups::default()));
+
+    // Core groups and the on-by-default feature groups are present.
+    assert!(served.contains("whoami"), "a core tool is served");
+    assert!(
+        served.contains("lock_acquire"),
+        "coordination leases are a core group"
+    );
+    assert!(served.contains("scratchpad_list"));
+    assert!(served.contains("todo_list"));
+    assert!(served.contains("timer_set"));
+    // Key-Value is gated off by default.
+    assert!(
+        !served.iter().any(|name| name.starts_with("kv_")),
+        "no Key-Value tool is served by default"
+    );
+}
+
+/// Enabling Key-Value adds its tools to the served surface.
+#[test]
+fn enabling_key_value_serves_its_tools() {
+    let groups = McpToolGroups {
+        key_value: true,
+        ..McpToolGroups::default()
+    };
+    let served = served_tools(&handler_with_groups(groups));
+
+    for tool in ["kv_set", "kv_get", "kv_delete", "kv_list"] {
+        assert!(
+            served.contains(tool),
+            "{tool} should be served when Key-Value is enabled"
+        );
+    }
+}
+
+/// Disabling one feature group hides only its tools — the core groups and the other feature groups
+/// are unaffected.
+#[test]
+fn disabling_a_feature_group_hides_only_its_tools() {
+    let groups = McpToolGroups {
+        scratchpads: false,
+        todos: true,
+        timers: true,
+        key_value: false,
+    };
+    let served = served_tools(&handler_with_groups(groups));
+
+    assert!(
+        !served.iter().any(|name| name.starts_with("scratchpad_")),
+        "the disabled group's tools are gone"
+    );
+    assert!(
+        served.contains("todo_list"),
+        "another feature group is unaffected"
+    );
+    assert!(
+        served.contains("timer_set"),
+        "another feature group is unaffected"
+    );
+    assert!(served.contains("whoami"), "core tools stay regardless");
 }
 
 #[tokio::test]
