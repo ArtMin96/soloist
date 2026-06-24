@@ -9,6 +9,7 @@
 
 mod error;
 mod frame;
+pub mod http;
 mod paths;
 mod protocol;
 

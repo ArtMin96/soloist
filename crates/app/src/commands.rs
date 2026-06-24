@@ -9,6 +9,7 @@
 //! [`Channel`]: tauri::ipc::Channel
 
 use std::path::Path;
+use std::sync::Arc;
 
 use soloist_core::{
     AgentTool, DetectedTool, Facade, ProcessId, ProcessView, ProjectId, ProjectLoad, ProjectView,
@@ -21,7 +22,7 @@ use crate::pty_bridge::PtyBridge;
 
 /// The current process read model — the snapshot half of snapshot-then-deltas.
 #[tauri::command]
-pub async fn proc_list(facade: State<'_, Facade>) -> Result<Vec<ProcessView>, String> {
+pub async fn proc_list(facade: State<'_, Arc<Facade>>) -> Result<Vec<ProcessView>, String> {
     Ok(facade.snapshot())
 }
 
@@ -29,7 +30,7 @@ pub async fn proc_list(facade: State<'_, Facade>) -> Result<Vec<ProcessView>, St
 /// resolved by the core. The snapshot half of snapshot-then-deltas for projects; a live open
 /// arrives as a `ProjectOpened` event that prompts the UI to re-read this.
 #[tauri::command]
-pub async fn project_list(facade: State<'_, Facade>) -> Result<Vec<ProjectView>, String> {
+pub async fn project_list(facade: State<'_, Arc<Facade>>) -> Result<Vec<ProjectView>, String> {
     facade.projects_snapshot().map_err(|err| err.to_string())
 }
 
@@ -40,7 +41,10 @@ pub async fn project_list(facade: State<'_, Facade>) -> Result<Vec<ProjectView>,
 /// processes were declared and whether the `solo.yml` was just created, so the UI can
 /// confirm what happened instead of leaving the screen unchanged.
 #[tauri::command]
-pub async fn project_load(path: String, facade: State<'_, Facade>) -> Result<ProjectLoad, String> {
+pub async fn project_load(
+    path: String,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<ProjectLoad, String> {
     facade
         .load_project(Path::new(&path))
         .map_err(|err| err.to_string())
@@ -52,7 +56,7 @@ pub async fn project_load(path: String, facade: State<'_, Facade>) -> Result<Pro
 pub async fn config_trust(
     project: u64,
     name: String,
-    facade: State<'_, Facade>,
+    facade: State<'_, Arc<Facade>>,
 ) -> Result<(), String> {
     facade
         .trust_command(ProjectId::from_raw(project), &name)
@@ -61,7 +65,7 @@ pub async fn config_trust(
 
 /// Every configured agent tool, for the launch picker to render instantly (no probing).
 #[tauri::command]
-pub async fn agent_list(facade: State<'_, Facade>) -> Result<Vec<AgentTool>, String> {
+pub async fn agent_list(facade: State<'_, Arc<Facade>>) -> Result<Vec<AgentTool>, String> {
     facade.agents().list_tools().map_err(|err| err.to_string())
 }
 
@@ -69,7 +73,7 @@ pub async fn agent_list(facade: State<'_, Facade>) -> Result<Vec<AgentTool>, Str
 /// `<command> --version` off the runtime. The picker badges installed tools; this is slower
 /// than [`agent_list`], so the UI lists first and fills in detection when this resolves.
 #[tauri::command]
-pub async fn agent_detect(facade: State<'_, Facade>) -> Result<Vec<DetectedTool>, String> {
+pub async fn agent_detect(facade: State<'_, Arc<Facade>>) -> Result<Vec<DetectedTool>, String> {
     facade
         .agents()
         .detect_installed()
@@ -86,7 +90,7 @@ pub async fn agent_launch(
     project: u64,
     tool: String,
     extra_args: Vec<String>,
-    facade: State<'_, Facade>,
+    facade: State<'_, Arc<Facade>>,
 ) -> Result<u64, String> {
     facade
         .launch_agent(ProjectId::from_raw(project), &tool, extra_args)
@@ -96,7 +100,7 @@ pub async fn agent_launch(
 
 /// Starts one process; refused by the core trust gate if its command is untrusted.
 #[tauri::command]
-pub async fn proc_start(id: u64, facade: State<'_, Facade>) -> Result<(), String> {
+pub async fn proc_start(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
     facade
         .supervisor()
         .start(ProcessId::from_raw(id))
@@ -105,13 +109,13 @@ pub async fn proc_start(id: u64, facade: State<'_, Facade>) -> Result<(), String
 
 /// Requests a graceful stop of one process; reports whether it was found live.
 #[tauri::command]
-pub async fn proc_stop(id: u64, facade: State<'_, Facade>) -> Result<bool, String> {
+pub async fn proc_stop(id: u64, facade: State<'_, Arc<Facade>>) -> Result<bool, String> {
     Ok(facade.supervisor().stop(ProcessId::from_raw(id)))
 }
 
 /// Restarts one process (stop then start with its saved config); trust-gated.
 #[tauri::command]
-pub async fn proc_restart(id: u64, facade: State<'_, Facade>) -> Result<(), String> {
+pub async fn proc_restart(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
     facade
         .supervisor()
         .restart(ProcessId::from_raw(id))
@@ -120,7 +124,7 @@ pub async fn proc_restart(id: u64, facade: State<'_, Facade>) -> Result<(), Stri
 
 /// Starts every trusted auto-start command in a project (untrusted ones are skipped).
 #[tauri::command]
-pub async fn stack_start(project: u64, facade: State<'_, Facade>) -> Result<(), String> {
+pub async fn stack_start(project: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
     facade
         .supervisor()
         .start_all(ProjectId::from_raw(project))
@@ -130,14 +134,17 @@ pub async fn stack_start(project: u64, facade: State<'_, Facade>) -> Result<(), 
 
 /// Stops every live process in a project.
 #[tauri::command]
-pub async fn stack_stop(project: u64, facade: State<'_, Facade>) -> Result<(), String> {
+pub async fn stack_stop(project: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
     facade.supervisor().stop_all(ProjectId::from_raw(project));
     Ok(())
 }
 
 /// Restarts every currently-running process in a project (trusted only).
 #[tauri::command]
-pub async fn stack_restart_running(project: u64, facade: State<'_, Facade>) -> Result<(), String> {
+pub async fn stack_restart_running(
+    project: u64,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<(), String> {
     facade
         .supervisor()
         .restart_running(ProjectId::from_raw(project))
@@ -146,7 +153,11 @@ pub async fn stack_restart_running(project: u64, facade: State<'_, Facade>) -> R
 
 /// Writes typed text or raw control bytes to a running process's PTY.
 #[tauri::command]
-pub async fn pty_write(id: u64, data: String, facade: State<'_, Facade>) -> Result<(), String> {
+pub async fn pty_write(
+    id: u64,
+    data: String,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<(), String> {
     facade
         .supervisor()
         .write_stdin(ProcessId::from_raw(id), data.into_bytes())
@@ -160,7 +171,7 @@ pub async fn pty_resize(
     id: u64,
     cols: u16,
     rows: u16,
-    facade: State<'_, Facade>,
+    facade: State<'_, Arc<Facade>>,
 ) -> Result<(), String> {
     facade
         .supervisor()
@@ -176,7 +187,7 @@ pub async fn pty_resize(
 pub async fn pty_attach(
     id: u64,
     on_chunk: Channel<Vec<u8>>,
-    facade: State<'_, Facade>,
+    facade: State<'_, Arc<Facade>>,
     bridge: State<'_, PtyBridge>,
 ) -> Result<(), String> {
     let (scrollback, mut live) = facade
@@ -214,7 +225,10 @@ pub async fn pty_detach(bridge: State<'_, PtyBridge>) -> Result<(), String> {
 /// group and forgets its runtime-state record. "Leave running" sends an empty list, so
 /// nothing is signalled — the dialog simply dismisses.
 #[tauri::command]
-pub async fn orphans_resolve(pgids: Vec<i32>, facade: State<'_, Facade>) -> Result<(), String> {
+pub async fn orphans_resolve(
+    pgids: Vec<i32>,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<(), String> {
     for pgid in pgids {
         facade.supervisor().kill_orphan(pgid);
     }

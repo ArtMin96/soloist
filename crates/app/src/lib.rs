@@ -111,7 +111,7 @@ fn build_facade(app: AppHandle) -> Facade {
 /// receivers are skipped (the UI re-syncs via `proc_list`); a closed bus ends the task
 /// at shutdown.
 fn forward_events(app: AppHandle) {
-    let mut events = app.state::<Facade>().subscribe();
+    let mut events = app.state::<Arc<Facade>>().subscribe();
     tauri::async_runtime::spawn(async move {
         loop {
             match events.recv().await {
@@ -132,56 +132,67 @@ pub fn run() {
         .manage(PtyBridge::default())
         .setup(|app| {
             // Build the façade here (not in the builder chain) so the desktop notifier can
-            // capture the AppHandle, then register it as managed state for the commands.
-            app.manage(build_facade(app.handle().clone()));
+            // capture the AppHandle. Hold it in an Arc so the loopback HTTP server — a
+            // core-only adapter that cannot see the AppHandle — can share the one core; the
+            // commands read it back from managed state.
+            let facade = Arc::new(build_facade(app.handle().clone()));
+            #[cfg(feature = "http")]
+            let http_facade = Arc::clone(&facade);
+            app.manage(facade);
             // Clear coordination leases and timers left by a previous run, and the process-owned
             // locks on durable todos: all are owned by per-run process ids that are recycled, so
             // nothing from a fresh launch holds (or could be delivered) one yet. The todos
             // themselves persist (G11) — only their stale locks are dropped.
-            if let Err(err) = app.state::<Facade>().reconcile_leases() {
+            if let Err(err) = app.state::<Arc<Facade>>().reconcile_leases() {
                 eprintln!("soloist: could not reconcile stale leases on launch ({err})");
             }
-            if let Err(err) = app.state::<Facade>().reconcile_timers() {
+            if let Err(err) = app.state::<Arc<Facade>>().reconcile_timers() {
                 eprintln!("soloist: could not reconcile stale timers on launch ({err})");
             }
-            if let Err(err) = app.state::<Facade>().reconcile_todo_locks() {
+            if let Err(err) = app.state::<Arc<Facade>>().reconcile_todo_locks() {
                 eprintln!("soloist: could not reconcile stale todo locks on launch ({err})");
             }
             forward_events(app.handle().clone());
             // Start the self-healing reactor: it watches the core event stream and
             // relaunches crashed auto_restart commands within the documented rate limit
             // (the future holds only a weak reference and ends when the app shuts down).
-            tauri::async_runtime::spawn(app.state::<Facade>().self_healing_loop());
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().self_healing_loop());
             // Start the metrics sampler: it samples each running process group on its
             // interval and publishes CPU/memory ticks (also weakly held, also self-supervised).
-            tauri::async_runtime::spawn(app.state::<Facade>().metrics_sampler_loop());
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().metrics_sampler_loop());
             // Start the port scanner: it discovers each running group's listening ports and
             // reflects them on the read model (also weakly held, also self-supervised).
-            tauri::async_runtime::spawn(app.state::<Facade>().port_scanner_loop());
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().port_scanner_loop());
             // Start the idle sampler: it reclassifies each launched agent's activity from its
             // terminal output and publishes transitions (also weakly held, also self-supervised).
-            tauri::async_runtime::spawn(app.state::<Facade>().idle_sampler_loop());
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().idle_sampler_loop());
             // Start the coordination timer scheduler: it fires due timers and delivers each body to
             // its owning process as a fresh turn, tracking idle state from the event stream (also
             // weakly held, also self-supervised).
-            tauri::async_runtime::spawn(app.state::<Facade>().timer_scheduler_loop());
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().timer_scheduler_loop());
             // Start the notification reactor: it shows a desktop toast on a crash or an
             // exhausted auto-restart via the notification plugin (also weakly held).
-            tauri::async_runtime::spawn(app.state::<Facade>().notifications_loop());
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().notifications_loop());
             // Re-register previously-opened projects so they reappear in the sidebar on
             // launch (resting — restore never starts a process); the UI seeds from the
             // resulting snapshots.
-            app.state::<Facade>().restore_projects();
+            app.state::<Arc<Facade>>().restore_projects();
             // Start the file-watch reactor last: it reads the restored commands at startup, so
             // it must run after restore has registered them, then re-syncs on each project
             // open. It reloads a running watched command when a matching file changes via the
             // notify watcher wired in `build_facade` (weakly held, ends when the bus closes).
-            tauri::async_runtime::spawn(app.state::<Facade>().file_watch_loop());
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().file_watch_loop());
             // Start the local IPC server so the soloist-mcp sidecar can drive the core over
             // a Unix socket. Compiled in only under the `mcp` feature; it degrades to a
             // logged no-op if the socket cannot be bound, never blocking app launch.
             #[cfg(feature = "mcp")]
             tauri::async_runtime::spawn(ipc_server::serve(app.handle().clone()));
+            // Start the loopback HTTP API so a shell or launcher can drive the core over
+            // 127.0.0.1, identically to the UI and MCP. Compiled in only under the `http`
+            // feature; it degrades to a logged no-op if no loopback port can be bound,
+            // never blocking app launch.
+            #[cfg(feature = "http")]
+            tauri::async_runtime::spawn(soloist_httpapi::serve(http_facade));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -211,7 +222,7 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 // Reap every managed process group before the app exits, so no child
                 // outlives it (the deterministic-shutdown contract).
-                let facade = app.state::<Facade>();
+                let facade = app.state::<Arc<Facade>>();
                 tauri::async_runtime::block_on(facade.supervisor().shutdown());
             }
         });

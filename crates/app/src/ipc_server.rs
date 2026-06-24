@@ -7,6 +7,7 @@
 //! the HTTP API share one behaviour and the read model projects back. The server holds no
 //! business state.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::peer_cred;
@@ -80,7 +81,7 @@ async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
             return;
         }
     };
-    let session = app.state::<Facade>().open_session(peer_pgid);
+    let session = app.state::<Arc<Facade>>().open_session(peer_pgid);
     loop {
         let request: IpcRequest = match read_frame(&mut stream).await {
             Ok(Some(request)) => request,
@@ -90,13 +91,13 @@ async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
                 break;
             }
         };
-        let reply = handle_request(app.state::<Facade>().inner(), session, request).await;
+        let reply = handle_request(app.state::<Arc<Facade>>().inner(), session, request).await;
         if let Err(err) = write_frame(&mut stream, &reply).await {
             eprintln!("soloist: MCP IPC write error: {err}");
             break;
         }
     }
-    app.state::<Facade>().close_session(session);
+    app.state::<Arc<Facade>>().close_session(session);
 }
 
 /// Routes one request to the single matching [`Facade`] method and projects the result
