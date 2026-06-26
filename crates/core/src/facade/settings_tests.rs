@@ -3,8 +3,8 @@ use std::sync::Arc;
 use super::*;
 use crate::ports::{CorePorts, TokioClock};
 use crate::settings::{
-    AgentSettings, Appearance, Integrations, McpFeatureGroup, ProcessCpuThreshold, Sidebar,
-    TerminalAppearance, Theme, ToolDefaults,
+    AgentSettings, Appearance, Binding, HotkeyAction, Integrations, McpFeatureGroup,
+    ProcessCpuThreshold, Sidebar, TerminalAppearance, Theme, ToolDefaults,
 };
 use crate::testing::{FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo};
 
@@ -87,6 +87,45 @@ fn set_appearance_persists_through_the_facade_and_leaves_other_tabs_untouched() 
         facade.mcp_tool_groups().unwrap().scratchpads,
         "writing one tab must not disturb another"
     );
+}
+
+#[test]
+fn hotkeys_remap_and_reset_all_persist_through_the_facade() {
+    let facade = facade_with_settings();
+
+    // A fresh install reports every action at its code default.
+    assert!(facade.hotkeys().unwrap().iter().all(|row| row.is_default));
+
+    let custom = Binding {
+        ctrl: true,
+        alt: false,
+        shift: false,
+        super_key: false,
+        key: "J".into(),
+    };
+    let after = facade
+        .remap_hotkey(HotkeyAction::QuickJump, custom.clone())
+        .unwrap();
+    let row = after
+        .iter()
+        .find(|r| r.action == HotkeyAction::QuickJump)
+        .unwrap();
+    assert_eq!(row.binding, Some(custom));
+    assert!(!row.is_default, "the remapped action is no longer default");
+
+    // The override persists across a re-read.
+    let reread = facade.hotkeys().unwrap();
+    assert!(
+        !reread
+            .iter()
+            .find(|r| r.action == HotkeyAction::QuickJump)
+            .unwrap()
+            .is_default
+    );
+
+    // Reset-all restores every default.
+    facade.reset_all_hotkeys().unwrap();
+    assert!(facade.hotkeys().unwrap().iter().all(|row| row.is_default));
 }
 
 #[test]

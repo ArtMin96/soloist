@@ -10,7 +10,8 @@
 use super::Facade;
 use crate::ports::StoreError;
 use crate::settings::{
-    AgentSettings, Appearance, Integrations, McpFeatureGroup, McpToolGroups, Sidebar, ToolDefaults,
+    AgentSettings, Appearance, Binding, HotkeyAction, HotkeyBindingView, Integrations,
+    McpFeatureGroup, McpToolGroups, Sidebar, ToolDefaults,
 };
 
 impl Facade {
@@ -38,6 +39,55 @@ impl Facade {
     /// Replaces the Sidebar sub-document and persists it (auto-save), returning the stored value.
     pub fn set_sidebar_settings(&self, sidebar: Sidebar) -> Result<Sidebar, StoreError> {
         Ok(self.settings.update(&(), |s| s.sidebar = sidebar)?.sidebar)
+    }
+
+    /// The hotkey keymap read model — every action with its scope, effective binding, and whether
+    /// it is still the code default. The defaults are code-defined; only overrides persist.
+    pub fn hotkeys(&self) -> Result<Vec<HotkeyBindingView>, StoreError> {
+        Ok(self.settings.get(&())?.hotkeys.view())
+    }
+
+    /// Remaps one action to a new chord and persists it, returning the updated keymap.
+    pub fn remap_hotkey(
+        &self,
+        action: HotkeyAction,
+        binding: Binding,
+    ) -> Result<Vec<HotkeyBindingView>, StoreError> {
+        Ok(self
+            .settings
+            .update(&(), |s| s.hotkeys.remap(action, binding))?
+            .hotkeys
+            .view())
+    }
+
+    /// Disables one action (it keeps no binding until reset) and persists it.
+    pub fn disable_hotkey(
+        &self,
+        action: HotkeyAction,
+    ) -> Result<Vec<HotkeyBindingView>, StoreError> {
+        Ok(self
+            .settings
+            .update(&(), |s| s.hotkeys.disable(action))?
+            .hotkeys
+            .view())
+    }
+
+    /// Resets one action to its code default (drops its override) and persists it.
+    pub fn reset_hotkey(&self, action: HotkeyAction) -> Result<Vec<HotkeyBindingView>, StoreError> {
+        Ok(self
+            .settings
+            .update(&(), |s| s.hotkeys.reset(action))?
+            .hotkeys
+            .view())
+    }
+
+    /// Resets every action to its code default ("Reset all to defaults") and persists it.
+    pub fn reset_all_hotkeys(&self) -> Result<Vec<HotkeyBindingView>, StoreError> {
+        Ok(self
+            .settings
+            .update(&(), |s| s.hotkeys.reset_all())?
+            .hotkeys
+            .view())
     }
 
     /// The Agents settings — the auto-summarization opt-in (the tool registry itself is C4).

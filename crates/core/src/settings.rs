@@ -23,6 +23,7 @@ use crate::ports::StoreError;
 
 mod agents;
 mod appearance;
+mod hotkeys;
 mod integrations;
 mod sidebar;
 mod tools;
@@ -31,6 +32,7 @@ pub use agents::AgentSettings;
 pub use appearance::{
     Appearance, FontScale, FontWeight, LetterSpacing, LineHeight, TerminalAppearance, Theme,
 };
+pub use hotkeys::{Binding, HotkeyAction, HotkeyBindingView, HotkeyScope, Hotkeys};
 pub use integrations::Integrations;
 pub use sidebar::{
     ProcessCpuThreshold, ProcessMemThreshold, ProjectCpuThreshold, ProjectMemThreshold, Sidebar,
@@ -114,6 +116,7 @@ impl McpToolGroups {
 pub struct Settings {
     pub appearance: Appearance,
     pub sidebar: Sidebar,
+    pub hotkeys: Hotkeys,
     pub agents: AgentSettings,
     pub tools: ToolDefaults,
     pub integrations: Integrations,
