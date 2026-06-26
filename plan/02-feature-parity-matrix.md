@@ -146,6 +146,31 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | I13 | Prompt templates UI (create/edit/search/duplicate; global+project scope; placeholder fill-in) | 🟡 | 11 | later | Template saved, filled, and applied to an agent |
 | I14 | Nested child-agent display (agent-spawned agents nested under their parent in the sidebar) | 🟡 | 5,11 | later | Spawned agent appears under its parent |
 
+### I7 decomposed — Settings detail (Phase 11a per-project · 11b global)
+
+> I7 above is the umbrella row; these are its concrete sub-features, sourced field-by-field from the Solo
+> demo "Your new agentic development environment" (Aaron Francis, `youtube.com/watch?v=kVyFCcP6B28`). Full
+> field inventory + design in `plan/phases/phase-11a-project-settings.md` and `…-11b-global-settings.md`.
+> Both surfaces share **one settings base** (`plan/06` §5.9): a generic `SettingsStore<K, D>` over a
+> serde-default document — adding a setting is one field, not a new store.
+
+| ID | Feature | Src | Phase | Target | Verify |
+|----|---------|-----|------:|--------|--------|
+| I7s | **Settings base:** generic `SettingsStore<K, D>` + serde-default document + `SettingsRepo<K, D>` port; reused by global (`K=()`) and per-project (`K=ProjectId`) | ✅ | 11a | v1 | Both surfaces persist through the one base; adding a field needs no new store/migration |
+| I7a | Project **Overview** (directory + actions, `solo.yml` ✓Valid/invalid badge + refresh, running/total counts) | ✅ | 11a | v1 | Badge reflects real validity; actions open root |
+| I7b | Project **run policy** (project auto-start gate, editor override, icon — `solo.yml`, rejects `.svg`) | ✅ | 11a | v1 | Persists; icon rejects `.svg`; override falls back to global default |
+| I7c | Project **notifications** (crash & exit alerts, terminal alerts) | ✅ | 11a | v1 | Toggles persist (app-local) |
+| I7d | **Commands** list + per-command editor (name/command, auto-start, auto-restart, terminal alerts, file-watch globs) + "Add command" modal | ✅ | 11a | v1 | Each field edits the right `solo.yml`/local target |
+| I7e | Command **storage** shared (`solo.yml`) ⇄ local ("Make local"); local never written to `solo.yml` | ✅ | 11a | v1 | Move round-trips; local command leaves `solo.yml` byte-unchanged |
+| I7f | Global **Appearance** (theme Light/Dark/System, interface font scale; terminal font/weight/scale/line-height/letter-spacing → xterm) | ✅ | 11b | v1 | Theme + terminal typography restyle app **and** xterm; persist |
+| I7g | Global **Sidebar** (filter input, hide empty sections, project/process CPU+mem header thresholds, hover actions, settings footer) | ✅ | 11b | v1 | Each control changes the live sidebar projection; persists |
+| I7h | Global **Hotkeys** (remappable keymap, scoped General/Sidebar/Terminal, search, Reset all to defaults; remap ⌘→Ctrl/Super) | ✅ | 11b | v1 | Remap takes effect + survives restart; reset restores defaults; same key OK across scopes |
+| I7i | Global **Agents** (tool registry detect/add/edit/enable; auto-summarization tool+model, **OFF by default**) | ✅ | 11b | v1 | Registry edits persist; summarization stays opt-in |
+| I7j | Global **Tools** (default editor, default terminal; editor overridable per-project) | ✅ | 11b | v1 | Defaults persist; project override wins |
+| I7k | Global **Integrations** (MCP enablement + per-group toggles + setup snippet [stdio, D4]; HTTP API toggle + endpoint list [`24678`, H1]) | ✅ | 11b | v1 | MCP group toggle changes the served tool surface (reuses G10); HTTP toggle reflects Phase 10 |
+| I7l | Global **Notifications** tab | ❓ | 11b | v1 | **NOT SHOWN in source — decide from `plan/05`/docs before building; do not invent** |
+| I7m | Global **Account** tab | ❓ | 11b | later | **NOT SHOWN; N/A under D3 (no licensing). Proposed: app info / data dir / reset — needs decision** |
+
 ## J. Packaging (Phase 12)
 
 | ID | Feature | Src | Phase | Target | Verify |

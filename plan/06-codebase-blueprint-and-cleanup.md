@@ -144,6 +144,7 @@ trigger that tells you to reach for it. Use a pattern when its trigger fires —
 | **Observer (event bus)** | `events::EventBus` (broadcast) | a state change must reach N adapters → emit a `DomainEvent`; never call adapters back directly |
 | **CQRS-lite** | `Facade::snapshot` (query) vs `supervisor.start` (command) | reads must not block writes → cheap projection for reads, owning context for writes |
 | **Repository** | `store` (`ProjectRepo`/`TrustRepo`/…); future Todo/Scratchpad/Kv/Lock repos | durable aggregate → one focused trait per aggregate, SQLite behind it |
+| **Settings document + generic store** | `core::settings` — `Settings` global singleton (migration v9) today; **to add (11a/11b)** a generic `SettingsStore<K, D>` reused by global (`K = ()`) and per-project local (`K = ProjectId`) | a durable typed **preference** record — no revision guard, not `solo.yml` config (C1) → one serde-default document + `get(key)`/`update(key, mutator)` over a `SettingsRepo<K, D>` port; **add a field, not a store** (recipe §5.9) |
 | **Newtype + closed enum** | `ids.rs`, `process.rs` | a domain id/state → newtype/enum, never a bare `String`/`int` |
 | **Null Object** | `Noop{LockReleaser,RuntimeState,OrphanControl}` in `ports/mod.rs` | a **driven** subsystem is optional → ship a `Noop` default so the core runs without the real adapter (§8) |
 | **Parameter Object / Builder** | `core::ports::CorePorts` + `CorePortsBuilder` — the port set for `Facade::new`/`Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) → group them in a struct/builder |
@@ -268,6 +269,43 @@ MCP, and HTTP/CLI behave identically (one behavior, many fronts).
 
 > This is the **target** design — C6 is a placeholder until Phase 9. It is grounded in `05` §7 + `01`'s
 > data-flow walkthroughs; per-tool param schemas and exact semantics are designed in Phase 8/9, not here.
+
+### 5.9 Add a setting — the one settings base (global + per-project)
+
+Settings are durable typed **preference** records — distinct from coordinated aggregates (no revision
+guard, §5.8) and from shared `solo.yml` config (C1, `Visibility::Shared`). The global Settings window
+(Phase 11b) and the per-project local settings (Phase 11a) reuse **one base** in `core::settings`, so
+neither surface re-rolls persistence and adding a setting is one field — never a new store.
+
+- **Document `D`** (`Clone + Default + Serialize + DeserializeOwned`): every field `#[serde(default)]`, so a
+  record an older build wrote still reads after a field is added. One source of truth per concept; a
+  discrete picker (theme, a CPU/mem threshold) is a **closed enum**, never a bare string/number (§15).
+- **Port `SettingsRepo<K, D>`**: `load(&K) -> Option<D>`, `save(&K, &D)`; `Noop` default + SQLite adapter
+  (§5.2). The key selects the surface: `K = ()` for the global singleton (the migration-v9 `settings`
+  row), `K = ProjectId` for per-project local settings.
+- **Aggregate `SettingsStore<K, D>`**: `get(key)` (absent → `D::default()`) plus the **single write
+  primitive** `update(key, mutator)` (apply one change, persist the whole record). Generalize the existing
+  non-generic `core::settings::SettingsStore` into this in 11a; the global instance is then
+  `SettingsStore<(), Settings>`, so `set_mcp_tool_group` is just `update((), …)`.
+- **Façade**: one thin getter + setter per field over `get`/`update`, so the settings UI, CLI, and an MCP
+  tool all drive the same record (one behavior, many fronts).
+
+**To add a setting:** (1) add a `#[serde(default)]` field — or a sub-struct for a whole new tab/group — to
+the matching document (`Settings` global, `ProjectSettings` per-project local); (2) add **one** `Facade`
+getter + setter calling `store.update(key, |d| d.x = v)` (§5.1; §5.5 for the Tauri command); (3) render it
+from the projected read-model in the tab/section panel (§5.7), auto-saving on change. No new port, no new
+table, no new migration (it is one JSON document), no duplicated store. A brand-new settings *surface*
+(e.g. per-agent settings) is one more `SettingsStore<AgentId, AgentSettings>` — same base, same recipe.
+
+**Domain separation (so the two surfaces never duplicate or merge):**
+- **`core::settings`** owns durable preferences: global `Settings` + per-project local `ProjectSettings`.
+  Pure core; persistence behind `SettingsRepo<K, D>`.
+- **`core::config` (C1)** owns shared project config — `solo.yml` (name/icon/commands/env,
+  `Visibility::Shared`). Unchanged by this work.
+- The per-project settings **page** is a **read-model composition**: shared fields projected from C1 +
+  local fields from the settings store, shown together but **stored apart**. The "Make local / Save to
+  solo.yml" control **moves** a command between the two stores via one core command — it never copies
+  state between them.
 
 ---
 
