@@ -33,6 +33,7 @@ use crate::settings::{ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::trust::TrustStore;
 
+mod commands;
 mod coordination;
 mod kv;
 mod loops;
@@ -44,6 +45,7 @@ mod session;
 mod settings;
 mod todo;
 
+pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
 pub use scoped::{ScopedActionError, SpawnAgentError};
 

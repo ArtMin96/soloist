@@ -52,8 +52,8 @@ pub use agents::{
     PromptMode, VersionProbe,
 };
 pub use config::{
-    ConfigEngine, ConfigError, ConfigSync, ProcessSpec, Rename, SoloYml, SyncError,
-    TrustReviewCommand,
+    ConfigEngine, ConfigError, ConfigSync, ConfigWriteError, ProcessSpec, Rename, SoloYml,
+    SyncError, TrustReviewCommand,
 };
 pub use coordination::{
     AcquireOutcome, Comment, CommentEdit, CommentOutcome, FireCond, IdleMode, Kv, KvEntry, KvRepo,
@@ -67,8 +67,8 @@ pub use coordination::{
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
-    CoordinationError, Facade, LaunchAgentError, ScopedActionError, SpawnAgentError,
-    TrustCommandError,
+    CoordinationError, Facade, LaunchAgentError, LocalCommandError, MoveCommandError,
+    ScopedActionError, SpawnAgentError, TrustCommandError,
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};

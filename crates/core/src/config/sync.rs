@@ -8,13 +8,15 @@
 //! stop, or restart anything.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use super::diff::{diff, ConfigSync};
+use super::edit;
 use super::load::{config_path, load_or_empty, ConfigError};
 use super::model::{ProcessSpec, SoloYml};
 use super::review::TrustReviewCommand;
+use super::write::WriteError;
 use crate::events::{DomainEvent, EventBus};
 use crate::hash::{content_hash, Hash};
 use crate::ids::ProjectId;
@@ -27,6 +29,27 @@ use crate::sync::lock;
 pub enum SyncError {
     #[error(transparent)]
     Config(#[from] ConfigError),
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
+/// Why an explicit `solo.yml` write failed. A duplicate or unknown command is reported by the
+/// caller's mutation, and the file is never touched on any error.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigWriteError {
+    /// The project is not open, so there is no `solo.yml` to write.
+    #[error("no such project is open")]
+    UnknownProject,
+    /// The mutation named a command the config does not contain.
+    #[error("no such command in the project config")]
+    UnknownCommand,
+    /// The mutation would add a command whose name is already taken in the config.
+    #[error("a command named {0:?} already exists in solo.yml")]
+    DuplicateCommand(String),
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+    #[error(transparent)]
+    Write(#[from] WriteError),
     #[error(transparent)]
     Store(#[from] StoreError),
 }
@@ -119,6 +142,62 @@ impl ConfigEngine {
         Ok(Some(changes))
     }
 
+    /// Applies `mutate` to a project's current `solo.yml` and writes the result back, preserving the
+    /// file's comments and formatting where possible and **never** corrupting it (the write is
+    /// re-parsed and verified, falling back to a faithful render otherwise). Then it refreshes sync
+    /// state to the written bytes — so the file watcher's debounced re-read of our own write is a
+    /// no-op (the hash matches) — and publishes a trust-aware [`DomainEvent::ConfigChanged`],
+    /// returning the commands the change left needing trust (a shared add/edit re-trusts). A no-op
+    /// mutation writes nothing; any error leaves the file untouched.
+    ///
+    /// Blocking file I/O: an async caller must invoke it off-thread. Drive it from a single writer
+    /// per project, like [`Self::sync`].
+    pub fn write<F>(
+        &self,
+        project: ProjectId,
+        mutate: F,
+    ) -> Result<Vec<TrustReviewCommand>, ConfigWriteError>
+    where
+        F: FnOnce(&mut SoloYml) -> Result<(), ConfigWriteError>,
+    {
+        let Some((root, _, _)) = self.snapshot(project) else {
+            return Err(ConfigWriteError::UnknownProject);
+        };
+        let path = config_path(&root);
+        let (text, current) = load_or_empty(&path)?;
+
+        let mut intended = current.clone();
+        mutate(&mut intended)?;
+        if intended == current {
+            return Ok(Vec::new());
+        }
+
+        let new_text = edit::rewrite(&text, &current, &intended)?;
+        atomic_write(&path, &new_text)?;
+
+        let hash = content_hash(new_text.as_bytes());
+        let changes = diff(&current, &intended);
+        let commands = self.pending_trust(project, &intended, &changes)?;
+        let requires_trust = !commands.is_empty();
+        lock(&self.states).insert(
+            project,
+            ProjectState {
+                root,
+                last_hash: hash,
+                last: intended,
+            },
+        );
+        if !changes.is_empty() {
+            self.bus.publish(DomainEvent::ConfigChanged {
+                project,
+                diff: changes,
+                requires_trust,
+                commands: commands.clone(),
+            });
+        }
+        Ok(commands)
+    }
+
     /// The current spec for a command by name in a loaded project, if present. Reads
     /// the last-synced snapshot — used to resolve a trust decision to a concrete
     /// variant (see [`crate::facade::Facade::trust_command`]).
@@ -162,6 +241,21 @@ impl ConfigEngine {
     }
 }
 
+/// Writes `contents` to `path` atomically: a sibling temp file is written and then renamed over the
+/// target, so a crash mid-write can never leave a half-written `solo.yml` (rename is atomic on the
+/// same filesystem).
+fn atomic_write(path: &Path, contents: &str) -> Result<(), WriteError> {
+    let tmp = path.with_extension("yml.tmp");
+    std::fs::write(&tmp, contents).map_err(|source| WriteError::Write {
+        path: tmp.clone(),
+        source,
+    })?;
+    std::fs::rename(&tmp, path).map_err(|source| WriteError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,6 +288,73 @@ mod tests {
             .open(project, dir.path().to_path_buf())
             .expect("open seeds state");
         (engine, trust, rx, project, dir)
+    }
+
+    fn spec(command: &str) -> ProcessSpec {
+        ProcessSpec {
+            command: command.into(),
+            working_dir: None,
+            auto_start: true,
+            auto_restart: false,
+            restart_when_changed: Vec::new(),
+            env: Default::default(),
+        }
+    }
+
+    #[test]
+    fn write_adds_a_command_to_the_file_and_flags_trust() {
+        let (engine, _trust, mut rx, project, dir) =
+            setup("processes:\n  Web:\n    command: npm run dev\n");
+
+        let pending = engine
+            .write(project, |c| {
+                c.processes.insert("Api".into(), spec("cargo run"));
+                Ok(())
+            })
+            .expect("write");
+
+        // The new command needs trust.
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].name, "Api");
+
+        // The file gained exactly the new entry; the existing one is preserved.
+        let text = std::fs::read_to_string(config_path(dir.path())).unwrap();
+        assert!(text.contains("command: npm run dev"));
+        assert!(text.contains("Api:\n    command: cargo run"));
+
+        match rx.try_recv() {
+            Ok(DomainEvent::ConfigChanged { requires_trust, .. }) => assert!(requires_trust),
+            other => panic!("expected ConfigChanged, got {other:?}"),
+        }
+
+        // Sync state is refreshed to our own write, so the watcher's re-read is a no-op.
+        assert!(engine.sync(project).expect("sync ok").is_none());
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn writing_a_no_op_change_leaves_the_file_untouched() {
+        let (engine, _trust, _rx, project, dir) =
+            setup("processes:\n  Web:\n    command: npm run dev  # keep this\n");
+        let before = std::fs::read_to_string(config_path(dir.path())).unwrap();
+
+        let pending = engine.write(project, |_| Ok(())).expect("write");
+
+        assert!(pending.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(config_path(dir.path())).unwrap(),
+            before,
+            "a no-op mutation writes nothing — the file is byte-unchanged"
+        );
+    }
+
+    #[test]
+    fn writing_an_unknown_project_errors() {
+        let (engine, ..) = setup("processes:\n  Web:\n    command: x\n");
+        assert!(matches!(
+            engine.write(ProjectId::from_raw(999), |_| Ok(())),
+            Err(ConfigWriteError::UnknownProject)
+        ));
     }
 
     #[test]

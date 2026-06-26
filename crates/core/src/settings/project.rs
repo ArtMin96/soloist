@@ -8,9 +8,11 @@
 
 use std::collections::BTreeMap;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use super::ToolDefaults;
+use crate::config::ProcessSpec;
 
 /// The per-project local settings document. Every field carries a serde default so a record an
 /// older build wrote still deserializes after a field is added. Stored app-local, keyed by
@@ -34,6 +36,11 @@ pub struct ProjectSettings {
     /// Per-command terminal-alert overrides, keyed by command name. An absent command uses the
     /// project default (on); only commands the user has toggled away from the default are stored.
     pub command_terminal_alerts: BTreeMap<String, bool>,
+    /// App-local commands — managed processes kept on this machine only, **never** written to
+    /// `solo.yml` (`Visibility::Local`). Same shape as a shared command, keyed by name in display
+    /// order. The "Make local" / "Save to solo.yml" move transfers a command between this overlay
+    /// and the shared config; the two stores never hold the same command at once after a move.
+    pub local_commands: IndexMap<String, ProcessSpec>,
 }
 
 impl Default for ProjectSettings {
@@ -44,6 +51,7 @@ impl Default for ProjectSettings {
             crash_exit_alerts: true,
             terminal_alerts: true,
             command_terminal_alerts: BTreeMap::new(),
+            local_commands: IndexMap::new(),
         }
     }
 }
