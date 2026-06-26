@@ -9,7 +9,7 @@
 
 ## Current state
 
-> **ACTIVE PHASE: 11 (UX Polish & Execution Profiles) — STARTED. Slice 1 landed: I10 env capture (`$SHELL -ilc env`, ~10-min cache, precedence process > captured > app). Slice 2 landed (2026-06-25): `SettingsRepo` (migration v9) + the per-group MCP tool-enablement Registry (G10 Key-Value default-OFF) — branch `feat/phase-11-settings-mcp-toggle`, PR to open. Phase 10 (HTTP API & CLI) is `Verified` — the user-only runtime acceptance walk PASSED 2026-06-25 (status/restart/logs against a live app, CLI/UI restart route identically, app-down → "Soloist is not running"/exit 1, mutation auth 200-vs-401, foreign-Origin CORS refused). Phase 9 (Coordination, C6) is `Verified`.**
+> **ACTIVE PHASE: 11 (UX Polish & Execution Profiles) — STARTED. Slice 1 landed: I10 env capture (`$SHELL -ilc env`, ~10-min cache, precedence process > captured > app). Slice 2 landed (2026-06-25): `SettingsRepo` (migration v9) + the per-group MCP tool-enablement Registry (G10 Key-Value default-OFF) — **PR #28 MERGED to `main` (`1356f44`)**. Phase 10 (HTTP API & CLI) is `Verified` — the user-only runtime acceptance walk PASSED 2026-06-25 (status/restart/logs against a live app, CLI/UI restart route identically, app-down → "Soloist is not running"/exit 1, mutation auth 200-vs-401, foreign-Origin CORS refused). Phase 9 (Coordination, C6) is `Verified`.**
 > PR #26 (Phase 10 — H1–H4) is **merged to `main`** (merge commit `7db4004`, incl. the review-cleanup `a83ac19`);
 > the merge was reconciled this session (`main` == `origin/main`, working tree clean) and the gate **re-confirmed
 > green on `main` `7db4004`: Rust 580 / 3 ignored, UI 78, `just lint` exit 0**. Phase 10's H1–H4 are all ✅ in
@@ -25,6 +25,21 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Orchestrator track PLANNED — queued for upcoming sessions (2026-06-26, user-directed).** A standalone
+  build track now lives in [`plan/orchestrator/`](plan/orchestrator/) — a charter
+  ([`README.md`](plan/orchestrator/README.md)) + six phase files **orch-00 … orch-05**. **Key finding from
+  citation-grade research:** the orchestration *mechanism* from the Solo demo (lead spawns workers →
+  blockered todos → `timer_fire_when_idle(All)` → sleep token-free → wake to read/verify worker output) is
+  **already built and `Verified`** — it is the passing `crates/pty/tests/orchestration.rs` (E7). So the
+  track is **UX + formalization + deferred tools, NOT new primitives**: orch-00 read-model + live events
+  (O1/O2) → orch-01 agent-lineage tree UI (O3/O4) → orch-02 scratchpad+todo panels (O5/O6) → orch-03
+  timers/fire-when-idle/wake-cycle UI (O7/O8) → orch-04 deferred tools `spawn_process`+`*_transfer`
+  (O9/O10) → orch-05 recipe+docs+parity verify (O11). Per the user's scope decisions (asked+answered this
+  session): **standalone `orch-NN`** numbering; an **explicit matrix expansion** (new `O`-rows) recorded as
+  a clean-room **gap decision** (orchestrator is absent from `plan/05`). **Nothing was implemented this
+  session** (per the user) and **no canonical doc was edited** — propagating the `O`-rows into `plan/02`
+  and the gap into `plan/05 §12` is **orch-00 Task 1**. The track depends only on Phases 7/8/9 (all done/
+  `Verified`). **Next sessions implement orch-00 → orch-05; see "Next session should start with" → ★.**
 - **Phase 11 STARTED — slice 1: I10 env capture landed (2026-06-24).** Managed processes now launch with the
   user's interactive-login-shell environment, so version-manager PATHs (nvm/rbenv/pyenv) initialised from
   interactive rc files — which a plain `$SHELL -lc` command shell never sources — are visible. Clean hexagonal
@@ -747,12 +762,51 @@ Status vocabulary: `Not started` · `In progress` · `Done — pending verify` �
 | 12 | Packaging (`.deb` + `.AppImage`, x86_64) | Not started | Add containerized 20.04 AppImage smoke (webkit 4.0 runtime) here |
 | 13 | Parity QA + longevity gate | Not started | The v1 definition-of-done; runs the soak/leak gate and parity walk |
 
+### Orchestrator track (standalone, `plan/orchestrator/` — planned 2026-06-26, queued)
+
+A user-directed track layered on the `Verified` Phase 7/8/9 core: **UX + formalization + deferred tools,
+not new primitives** (the mechanism is the passing E7 test, `crates/pty/tests/orchestration.rs`). Charter
++ the `O`-row matrix expansion: [`plan/orchestrator/README.md`](plan/orchestrator/README.md). Build order:
+orch-00 unblocks the three UI phases; orch-04 is backend-independent; orch-05 closes the track.
+
+| Phase | Name | Status | Delivers |
+|------:|------|--------|----------|
+| orch-00 | Charter, gap decision & read-model | **Not started** | O1, O2 — read-model + live coordination events; propagate `O`-rows to `plan/02` + the gap to `plan/05 §12` |
+| orch-01 | Agent lineage & live orchestration tree (UI) | **Not started** | O3, O4 — parent-on-spawn + nested lead→worker tree with live activity |
+| orch-02 | Scratchpad & to-do coordination panels (UI) | **Not started** | O5, O6 — disciplined-doc editors; revision-guard + blocker-gate visible |
+| orch-03 | Timers, fire-when-idle & wake-cycle (UI) | **Not started** | O7, O8 — `waiting_on` + max-wait countdown + injected-turn wake |
+| orch-04 | Deferred coordination tools | **Not started** | O9, O10 — `spawn_process` (trust) + cross-project `*_transfer` (scope) |
+| orch-05 | Formalization, recipe, docs & parity verify | **Not started** | O11 — orchestrator recipe + agent guidance + full-loop e2e + the `O`-row walk |
+
 Estimated v1 critical path: **~14–18 focused weeks** (one experienced Rust+TS dev); Phases 3, 8, 9 carry
 the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the per-phase breakdown.
 
 ---
 
 ## Decisions / changes this session
+
+### Orchestrator track planned (no implementation) — user-directed (2026-06-26)
+- **The user asked to plan a multi-agent "orchestrator" capability** (from researching the Solo demo
+  "Agent orchestration, simplified", Aaron Francis, `youtube.com/watch?v=WAKGhlzpYgs`) into phase files,
+  then **explicitly: do not implement anything now — upcoming sessions implement the whole track.**
+- **Created [`plan/orchestrator/`](plan/orchestrator/):** a charter (`README.md`) + six phase files
+  **orch-00 … orch-05**, in the `plan/phases/` format with `04`/`05`/`06`/`02` references. **No source code.**
+- **Citation-grade research first** (the four reference docs + this ledger): the orchestration mechanism
+  the demo shows is **already built and `Verified`** — `spawn_agent` (F11), todos+blockers+locks (G3–G5),
+  `timer_fire_when_idle(IdleMode::All)` + `TimerScheduler` (G7–G9), the idle FSM (E5), output-read tools
+  (F9), scratchpads (G1/G2) — and the exact loop is the passing `crates/pty/tests/orchestration.rs` (E7).
+  So the track is scoped to the genuine delta: **(a)** the human-facing orchestration UI (none exists
+  today; the agent-tree row I14 was `later`), **(b)** the deferred coordination sub-tools (`spawn_process`,
+  cross-project `*_transfer`), **(c)** formalizing the pattern as a documented first-class capability.
+- **User scope decisions (asked + answered):** deliver UX + formalization + deferred tools (the full
+  track); **standalone `orch-NN`** numbering; treat scope as an **explicit matrix expansion** (new
+  `O1–O11` rows) recorded as a clean-room **gap decision** ("orchestrator" is absent from `plan/05`).
+- **Discipline held:** did **not** edit the canonical contracts (`plan/02`, `plan/05 §12`,
+  `KNOWN-DIVERGENCES.md`) — the charter *proposes* the `O`-rows + gap text, and **propagation is orch-00
+  Task 1**. Each phase keeps CLAUDE.md discipline (one `Facade`, read-model not logic in React,
+  `/impeccable` for UI, trust/scope in core, no `later` gold-plating beyond the recorded expansion).
+- **The UX north star is the demo's *feel* only** (clean-room, CLAUDE.md §9) — no Solo assets/screenshots/
+  strings; visuals are produced fresh via `/impeccable` against `PRODUCT.md`/`DESIGN.md`.
 
 ### Phase 10 → `Verified` (acceptance walk passed) + Phase 11 slice 2 begun (2026-06-25)
 - **Phase 10 acceptance walk PASSED (user-confirmed 2026-06-25).** Ran the user-only desktop walk
@@ -3166,12 +3220,27 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
+**★ ORCHESTRATOR TRACK — the user's directive (2026-06-26): implement this across upcoming sessions.**
+A standalone track was planned this session in [`plan/orchestrator/`](plan/orchestrator/) (charter
+`README.md` + six phase files **orch-00 … orch-05**); **nothing was implemented** and **no canonical doc
+was edited** (per the user). The orchestration *mechanism* is already built + `Verified` (the passing
+`crates/pty/tests/orchestration.rs`, E7), so this track is **UX + formalization + deferred tools, not new
+primitives**. **Start with [`orch-00`](plan/orchestrator/orch-00-charter-gap-and-read-model.md)** — its
+Task 1 propagates the new `O`-rows into `plan/02` and the orchestrator **gap decision** into `plan/05 §12`
+(an explicit, recorded matrix expansion), then it builds the read-model (O1) + live coordination events
+(O2) that unblock every UI phase. Then **orch-01 → orch-02 → orch-03** (the three UI slices, each driven
+through `/impeccable` + Playwright), **orch-04** (deferred `spawn_process` + `*_transfer`, security-design
+first), **orch-05** (recipe + docs + full-loop e2e + the `O`-row parity walk). The track depends only on
+Phases 7/8/9 (all done/`Verified`); follow each phase file end-to-end — it carries its own tasks,
+acceptance criteria, test plan, and risks. Phase 11 (item 0 below) remains in progress and is **not**
+abandoned — sequence per the user.
+
 **0. Phase 11 (UX Polish & Execution Profiles) is the ACTIVE phase. PR #27 (I10) is MERGED (`17f0115`); slices 1–2 done.**
-Slice 2 (settings + MCP toggle) landed on **`feat/phase-11-settings-mcp-toggle`** (off `main` `17f0115`; commits
-`59a5037` Phase-10-Verified doc, `0e4a7e4` settings backend, `dbf88b7` MCP gating) — **PR to open; the user merges, no
-self-merge.** Gate green: `just lint` exit 0; `just test` exit 0 — **Rust 612 / 3 ignored, UI 78**; feature matrix builds;
-`Cargo.lock` unchanged. **First: open the PR for `feat/phase-11-settings-mcp-toggle`; once it merges, sync `main`;** then
-pick the next v1 slice. **v1 rows remaining:** `I1` drag-reorder, `I2` command palette (`Ctrl+K`), `I5` light/dark/system
+Slice 2 (settings + MCP toggle) **MERGED to `main` via PR #28 (merge commit `1356f44`; commits `59a5037`
+Phase-10-Verified doc, `0e4a7e4` settings backend, `dbf88b7` MCP gating).** State reconciled at the start of the
+next session (2026-06-25): `main` == `origin/main`, working tree clean, **gate re-confirmed green on `main` `1356f44`:
+`just lint` exit 0; `just test` exit 0 — Rust 612 / 3 ignored, UI 78** (matches the slice-2 hand-off exactly);
+feature matrix builds; `Cargo.lock` unchanged. **Next: pick the next v1 slice.** **v1 rows remaining:** `I1` drag-reorder, `I2` command palette (`Ctrl+K`), `I5` light/dark/system
 themes (app + xterm), `I6` keyboard-first nav, `I7` settings screen (Appearance/Terminal/Notifications/Sidebar/Agents/
 Tools/**MCP**/Hotkeys), `I9` open-in-editor. **`later` rows I3/I4/I8/I11–I14 are tracked, NOT v1 — do not gold-plate.**
 **Backend now done for G10 + the I5/I7 persistence foundation** (slice 2): `core::settings` (`SettingsStore` over

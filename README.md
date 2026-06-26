@@ -131,6 +131,12 @@ UI. See [`docs/http-api.md`](docs/http-api.md) for the endpoints, their JSON pay
 | 12 | phase-12-packaging-ubuntu.md | `.deb` + `.AppImage` (x86_64), desktop entry, icons, update channel |
 | 13 | phase-13-parity-qa-testing.md | Parity walk + e2e/integration + **longevity/soak gate** |
 
+**Orchestrator track (standalone, planned 2026-06-26):** [`plan/orchestrator/`](plan/orchestrator/) — a
+user-directed track (`orch-00 … orch-05`) layered on the `Verified` Phase 7/8/9 coordination core, adding
+the human-facing orchestration UI, the deferred coordination sub-tools, and the documented orchestrator
+recipe. It is **UX + formalization + deferred tools, not new primitives** (the mechanism is the passing E7
+test). Charter + the `O`-row matrix expansion: [`plan/orchestrator/README.md`](plan/orchestrator/README.md).
+
 ## Build order rationale
 
 Config → skeleton → supervisor → I/O → UI → self-healing → agents → MCP → coordination → API/CLI →
