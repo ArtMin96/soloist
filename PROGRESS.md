@@ -46,7 +46,10 @@
   restart. Notifications/Account render the explicit "to be defined" stub (no invented fields); the other tabs a
   "coming" placeholder. New shadcn `switch`/`select`; controls reuse Radix; no business logic in components. 3 behavior
   tests (theme applied to root, change persists + restyles, undefined-tab stub); UI vitest **81**; `just lint` exit 0;
-  production bundle builds. **Remaining:** the other 0b tabs (Sidebar/Hotkeys/Agents/Tools/Integrations panels), the
+  production bundle builds. **PR structure (owner's request):** the work is **two stacked PRs** — **PR #31**
+  (`feat/phase-11-settings-ui`) = the generic base + global-tab core behavior + the **0a** Tauri command adapter; **PR
+  #32** (`feat/phase-11-settings-window`, stacked on #31) = the **0b** Settings window UI. Merge #31 first. **Remaining:**
+  the other 0b tabs (Sidebar/Hotkeys/Agents/Tools/Integrations panels), the
   real-window e2e (tracked WebdriverIO+tauri-driver path, sudo deps), and all of per-project 11a (slice 0c — I7a–I7e +
   the C1 shared/local move). One pre-existing environmental red in `just test` (the I10 `crates/sys` shellenv capture
   times out — sandbox login shell ~6.8 s vs 3 s cap; orthogonal to settings). See the top Decisions entry + "Next
@@ -783,7 +786,9 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ## Decisions / changes this session
 
 ### Settings build-out — Slice 0b: the Settings window + the Appearance tab (I5) landed (2026-06-26)
-Branch **`feat/phase-11-settings-ui`**, commit **`176b2b1`** (off `0220731`). The first UI vertical, driven through
+Branch **`feat/phase-11-settings-window`** (commits **`176b2b1`** UI + **`1e1d28f`** progress), a **stacked PR #32**
+**based on `feat/phase-11-settings-ui`** (PR #31 = the base + 0a adapter). At the owner's request the UI vertical is its
+own PR on top of the adapter PR, so #31 must merge first. The first UI vertical, driven through
 **`/impeccable`** (`craft` flow) against the approved `DESIGN.md` (the "Instrument Panel" system). User-confirmed the
 shape (in-app overlay, left rail, Appearance-first) before any code. This harness has no native image generation, so the
 visual-direction-by-generation step was skipped — `DESIGN.md` was the contract.
