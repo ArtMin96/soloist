@@ -1,0 +1,43 @@
+# Supply-chain gate for the Rust dependency tree: RustSec advisories, license policy, and
+# source provenance. Run with `just audit` (or `cargo deny check`); also enforced in CI.
+
+[graph]
+# Soloist ships x86_64 Linux only (D2), so only that target's dependency tree is checked —
+# this prunes platform-specific crates that never reach a build.
+targets = ["x86_64-unknown-linux-gnu"]
+
+[advisories]
+# Vulnerabilities and unsound advisories fail the gate everywhere (the default). Unmaintained
+# advisories are scoped to crates Soloist depends on directly: the transitive tree is almost
+# entirely Tauri's GTK3 Linux GUI bindings, which are upstream-unmaintained with no fix here.
+unmaintained = "workspace"
+# Add an entry here, each with a written reason, only when a vulnerability has no fix and the
+# risk is knowingly accepted.
+ignore = []
+
+[licenses]
+# The dependency tree must stay permissively licensed, matching Soloist's own MIT/Apache-2.0.
+# Anything outside this list fails the gate until it is reviewed and added here.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+]
+
+[bans]
+# Duplicate versions are reported, not failed — they are common transitively and are a size,
+# not a correctness or licensing, concern (tracked separately under the size budget).
+multiple-versions = "warn"
+wildcards = "warn"
+
+[sources]
+# crates.io is the only sanctioned source; an unknown registry or git remote fails the gate.
+unknown-registry = "deny"
+unknown-git = "deny"
