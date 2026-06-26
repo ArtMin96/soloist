@@ -23,8 +23,22 @@ mcp = ["dep:soloist-ipc", "dep:nix", "tokio/net"]
 # The loopback HTTP API adapter, likewise linked into the app binary and so gated at compile
 # time: turning it off drops the axum server and its dependency, and the app still builds and runs.
 http = ["dep:soloist-httpapi"]
+# CrabNebula DevTools instrumentation: traces IPC commands, events, and spans into a dev
+# viewer. Opt-in and absent from `default`, so release builds never link it. Run with
+# `just devtools`.
+devtools = ["dep:tauri-plugin-devtools"]
+# tokio-console runtime instrumentation: exposes live task states, poll times, and lock
+# contention over the console wire protocol. Opt-in and absent from `default`. Needs a build
+# with `--cfg tokio_unstable`; run with `just tokio-console`.
+tokio-console = ["dep:console-subscriber", "tokio/tracing"]
+# The MCP bridge plugin (hypothesi tauri-plugin-mcp-bridge): a dev-only diagnostic that lets an
+# AI agent inspect IPC calls and drive the webview over @hypothesi/tauri-mcp-server. Opt-in and
+# absent from `default`, so release builds never link it. Needs the dev config override that
+# enables withGlobalTauri and the bridge capability; run with `just agent-bridge`.
+agent-bridge = ["dep:tauri-plugin-mcp-bridge"]
 
 [dependencies]
+console-subscriber = { version = "0.5", optional = true }
 nix = { version = "0.29", features = ["process"], optional = true }
 serde = { version = "1.0.228", features = ["derive"] }
 soloist-core = { path = "../core" }
@@ -34,7 +48,9 @@ soloist-pty = { path = "../pty" }
 soloist-store = { path = "../store" }
 soloist-sys = { path = "../sys" }
 tauri = { version = "2.11.2", features = [] }
+tauri-plugin-devtools = { version = "2.1", optional = true }
 tauri-plugin-dialog = "2"
+tauri-plugin-mcp-bridge = { version = "0.11", optional = true }
 tauri-plugin-notification = "2"
 tokio = { version = "1", features = ["sync"] }
 

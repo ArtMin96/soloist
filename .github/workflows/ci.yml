@@ -52,6 +52,11 @@ jobs:
       - name: Dependency-direction guard
         run: ./scripts/check-core-deps.sh
 
+      - name: Supply-chain audit (advisories, licenses, sources)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
       - name: File-size guard (warn-only)
         run: ./scripts/check-file-size.sh
 

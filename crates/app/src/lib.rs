@@ -13,6 +13,11 @@ mod notifier;
 mod peer_cred;
 mod pty_bridge;
 
+// The two dev diagnostics each install a global tracing subscriber; enabling both would make
+// the second registration fail at runtime. Force the choice at compile time instead.
+#[cfg(all(feature = "devtools", feature = "tokio-console"))]
+compile_error!("enable either `devtools` or `tokio-console`, not both");
+
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -133,7 +138,34 @@ fn forward_events(app: AppHandle) {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    // Install the tokio-console subscriber before anything spawns, so every supervised actor
+    // and sampler is instrumented from the first task. Dev-only (`tokio-console` feature).
+    #[cfg(feature = "tokio-console")]
+    console_subscriber::init();
+
+    // Build the CrabNebula DevTools plugin as early as possible so it captures startup spans.
+    // Dev-only (`devtools` feature); release and default builds never link it.
+    #[cfg(feature = "devtools")]
+    let devtools = tauri_plugin_devtools::init();
+
+    #[cfg_attr(
+        not(any(feature = "devtools", feature = "agent-bridge")),
+        allow(unused_mut)
+    )]
+    let mut builder = tauri::Builder::default();
+    #[cfg(feature = "devtools")]
+    {
+        builder = builder.plugin(devtools);
+    }
+    // Dev-only MCP bridge: lets an AI agent inspect IPC calls and drive the webview for
+    // debugging over @hypothesi/tauri-mcp-server. Compiled in only under the `agent-bridge`
+    // feature; release and default builds never link it.
+    #[cfg(feature = "agent-bridge")]
+    {
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(PtyBridge::default())
