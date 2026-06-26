@@ -31,6 +31,7 @@ use soloist_sys::{
     CommandShellEnvProbe, CommandVersionProbe, NotifyFileWatcher, ProcMetricsProbe, ProcPortProbe,
 };
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_window_state::StateFlags;
 use tokio::sync::broadcast::error::RecvError;
 
 use notifier::TauriNotifier;
@@ -168,6 +169,19 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Persist and restore the window's geometry and mode across launches. Size, position,
+        // maximized, and fullscreen are tracked; decorations and visibility are deliberately not —
+        // the custom titlebar keeps decorations off, and the window owns its own visibility.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    StateFlags::SIZE
+                        | StateFlags::POSITION
+                        | StateFlags::MAXIMIZED
+                        | StateFlags::FULLSCREEN,
+                )
+                .build(),
+        )
         .manage(PtyBridge::default())
         .setup(|app| {
             // Build the façade here (not in the builder chain) so the desktop notifier can
