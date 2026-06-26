@@ -89,6 +89,7 @@ builds and runs" (§8).
 | `ports` | cross-cutting | every port trait + its `Noop*` default | live |
 | `ids` | cross-cutting | newtype IDs (`ProcessId`, `ProjectId`, …) | live |
 | `sync` | internal util | poison-safe `lock()` helper | live |
+| `cache` | internal util | `ReadCache` — `Clock`-driven, single-flight TTL memo for derived read-models | live |
 | `testing` | test support | fakes + `MockClock` (see §6) | live, test-gated |
 
 **The placeholder-module rule (the one allowed empty module).** An empty `pub mod foo;` is acceptable
@@ -120,6 +121,7 @@ do). Inside it:
 | `domain.ts` | the **single** TS mirror of core enums/`DomainEvent` | one definition per type; mirrors serde output; nowhere else |
 | `api.ts` | typed `invoke`/`listen` + Channel only | **every** Tauri command/event name string lives here once |
 | `store/` | read-model: pure reducers (`projection`, `grouping`) + hooks (`useProcesses`, …) | reducers are pure + unit-tested; hooks own subscriptions |
+| `store/cache/` | the persisted read-model cache: `persistentCache.ts` (the **only** `tauri-plugin-store` importer — named keys + a schema-versioned envelope) + the generic `usePersistentSnapshot(key, fetcher)` stale-while-revalidate hook | display-only last-known projection for instant cold-start paint; the core **always wins** on reconcile; reuse the hook, never re-roll a second persistence path. Live status (e.g. `useProcesses`) stays uncached |
 | `lib/` | pure presentational helpers (`status.ts` = the single `ProcStatus`→glyph/color/label map) | no IPC, no state |
 | `components/` | small presentational components, grouped by surface (`sidebar/`, `terminal/`) | props-in/callbacks-out; **no** business logic, **no** `invoke` |
 | `*.test.ts(x)` | vitest, beside the unit they test | exercises real logic; deletable-on-sight if tautological |
@@ -153,6 +155,7 @@ trigger that tells you to reach for it. Use a pattern when its trigger fires —
 | **Optimistic concurrency** | `core::coordination::{Scratchpads, Todos}` over their repos (P9: scratchpads + todos done — revision-guarded document writes) | concurrent writers to one durable record → revision guard, reject stale writes |
 | **Lease/lock** | `core::coordination::Leases` over `LockRepo` (TTL lease, P9) + `Todos` process-owned lock over `TodoRepo` (P9) | cooperative cross-agent intent → owner `ProcessId`, auto-release on close (the `LockReleaser` hook, fanned out by `CompositeLockReleaser`) |
 | **Scheduler (Observer + self-supervised loop)** | `core::coordination::TimerScheduler` over the `TimerRepo` port (P9: timers done) | deferred/conditional delivery → a `Clock`-driven, event-subscribed loop that fires due timers and delivers a body as a fresh turn; idle conditions consume the C4 `AgentActivityChanged` events |
+| **Read-through cache (TTL memo)** | `core::cache::ReadCache` (shell-env capture, agent `--version` detection) | an expensive, repeatable off-runtime read a burst of callers would each redo → one `Clock`-driven, single-flighted TTL memo; add event-invalidation only when a consumer needs it (YAGNI) |
 
 Anti-patterns to refuse are fixed in `04` §13. The one most relevant to this app's growth: **a giant
 `match` over tool/provider/endpoint names**. When that set is open-ended, use a Registry or Strategy.

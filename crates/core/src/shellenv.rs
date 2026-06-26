@@ -17,10 +17,9 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use tokio::sync::Mutex;
-
+use crate::cache::ReadCache;
 use crate::ports::Clock;
 use crate::supervision::run_blocking;
 
@@ -77,20 +76,13 @@ impl ShellEnvProbe for NoopShellEnvProbe {
 /// every spawn consults the one cache and the shell runs at most once per interval.
 pub(crate) struct ShellEnv {
     probe: Arc<dyn ShellEnvProbe>,
-    clock: Arc<dyn Clock>,
     /// The app's own environment, captured once at the composition root. It is the
     /// spawner's inherited base, so the resolver only needs it for the fallback `PATH`
     /// (and `HOME`, to expand a `~` in [`FALLBACK_PATH_DIRS`]).
     app_env: BTreeMap<String, String>,
-    /// The cached capture, reused until older than [`CACHE_TTL`]. Behind a mutex held
-    /// across a capture so a burst of concurrent spawns runs one shell, not many.
-    cache: Mutex<Option<Cached>>,
-}
-
-/// One cached capture and when it was taken (per the resolver's [`Clock`]).
-struct Cached {
-    env: BTreeMap<String, String>,
-    at: Instant,
+    /// The capture, reused until older than [`CACHE_TTL`]. The cache single-flights, so a
+    /// burst of concurrent spawns runs one shell, not many.
+    cache: ReadCache<BTreeMap<String, String>>,
 }
 
 impl ShellEnv {
@@ -103,9 +95,8 @@ impl ShellEnv {
     ) -> Self {
         Self {
             probe,
-            clock,
             app_env,
-            cache: Mutex::new(None),
+            cache: ReadCache::new(clock, CACHE_TTL),
         }
     }
 
@@ -124,29 +115,18 @@ impl ShellEnv {
         env
     }
 
-    /// The captured layer, served from the cache when fresh and otherwise recaptured. On a
-    /// capture failure it is the [`fallback`](Self::fallback) `PATH` override.
+    /// The captured layer, served from the cache when fresh and otherwise recaptured. The
+    /// cache reuses a successful capture for [`CACHE_TTL`] and does not cache a failure, so
+    /// the next spawn retries rather than locking in a transient failure. On a capture
+    /// failure it is the [`fallback`](Self::fallback) `PATH` override.
     async fn captured_layer(&self) -> BTreeMap<String, String> {
-        let mut cache = self.cache.lock().await;
-        if let Some(cached) = cache.as_ref() {
-            if self.clock.now().saturating_duration_since(cached.at) < CACHE_TTL {
-                return cached.env.clone();
-            }
-        }
-        // Stale or never captured: run the shell once while holding the lock, so a burst
-        // of concurrent spawns waits for this one capture instead of each running its own.
-        // A successful capture is cached for the full TTL; a failure is not cached, so the
-        // next spawn retries rather than locking in a transient failure for ten minutes.
         let probe = self.probe.clone();
-        match run_blocking(move || probe.capture()).await {
-            Ok(captured) => {
-                let entry = Cached {
-                    env: captured.clone(),
-                    at: self.clock.now(),
-                };
-                *cache = Some(entry);
-                captured
-            }
+        match self
+            .cache
+            .get_or_try_init(|| async move { run_blocking(move || probe.capture()).await })
+            .await
+        {
+            Ok(captured) => captured,
             Err(_) => self.fallback(),
         }
     }
