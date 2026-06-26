@@ -93,8 +93,8 @@ pub use settings::{
     AgentSettings, Appearance, Binding, FontScale, FontWeight, HotkeyAction, HotkeyBindingView,
     HotkeyScope, Hotkeys, Integrations, LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups,
     NoopSettingsRepo, ProcessCpuThreshold, ProcessMemThreshold, ProjectCpuThreshold,
-    ProjectMemThreshold, Settings, SettingsRepo, SettingsStore, Sidebar, TerminalAppearance, Theme,
-    ToolDefaults,
+    ProjectMemThreshold, ProjectSettings, Settings, SettingsRepo, SettingsStore, Sidebar,
+    TerminalAppearance, Theme, ToolDefaults,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};
