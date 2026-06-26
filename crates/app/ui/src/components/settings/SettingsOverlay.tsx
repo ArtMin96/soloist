@@ -6,6 +6,7 @@ import { AppearancePanel } from "@/components/settings/AppearancePanel";
 import { IntegrationsPanel } from "@/components/settings/IntegrationsPanel";
 import { PlaceholderPanel } from "@/components/settings/PlaceholderPanel";
 import { SettingsTabRail } from "@/components/settings/SettingsTabRail";
+import { SidebarPanel } from "@/components/settings/SidebarPanel";
 import { ToolsPanel } from "@/components/settings/ToolsPanel";
 import {
   SETTINGS_TABS,
@@ -22,6 +23,7 @@ const PANELS: Partial<Record<SettingsTabId, ComponentType>> = {
   appearance: AppearancePanel,
   agents: AgentsPanel,
   integrations: IntegrationsPanel,
+  sidebar: SidebarPanel,
   tools: ToolsPanel,
 };
 

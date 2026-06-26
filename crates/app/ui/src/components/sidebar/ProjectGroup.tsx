@@ -77,7 +77,7 @@ export function ProjectGroup({
       </div>
       <Collapsible.Content>
         <div className="mt-0.5 flex flex-col gap-0.5 pb-0.5 pl-3">
-          {kinds.length === 0 ? (
+          {count.total === 0 ? (
             <p className="px-1 py-1 text-[0.6875rem] text-muted-foreground/70">No commands yet</p>
           ) : (
             kinds.map((group) => (
