@@ -58,11 +58,12 @@
   11a (slice 0c — I7a–I7e + the C1 shared/local move), which is NOT started and is the next step.** One pre-existing
   environmental red in `just test` (the I10 `crates/sys` shellenv capture times out — sandbox login shell ~6.8 s vs 3 s
   cap; orthogonal to settings, untouched, green in CI). See the top Decisions entry + "Next session should start with" §0.
-- **Per-project settings 11a (slice 0c) — BACKEND + IPC/read-model DONE & green (slices 1–3), on
-  `feat/phase-11a-project-settings` (stacked on #35 per the owner). NOT yet a PR; only the UI page (slice 4) remains.**
-  **Owner decisions this session:** base 0c on #35 (stacked on the 0b chain); `solo.yml` writes are
-  **comment-preserving + stability-first** (re-parse-verified, never corrupt) rather than a plain rewrite. Three
-  committed slices:
+- **Per-project settings 11a (slice 0c) — CODE-COMPLETE & green (slices 1–4), pushed on
+  `feat/phase-11a-project-settings` (stacked on #35 per the owner); PR opened (no self-merge). Only the USER-ONLY live
+  GUI / real-window e2e walk remains.** **Owner decisions this session:** base 0c on #35 (stacked on the 0b chain);
+  `solo.yml` writes are **comment-preserving + stability-first** (re-parse-verified, never corrupt) rather than a plain
+  rewrite; the per-project settings page is a **main-content view** (Option B) opened by a gear on the sidebar project
+  node, not a modal. Four committed slices:
   **Slice 1 (`ece28c5`)** — the app-local `ProjectSettings` document over the existing generic
   `SettingsStore<ProjectId, ProjectSettings>` base (`plan/06` §5.9): `auto_start_gate` (off), `editor_override`
   (resolver → global Tools default), `crash_exit_alerts`/`terminal_alerts` (on) + per-command alert overrides; SQLite
@@ -88,19 +89,29 @@
   one pre-existing env-red (the I10 `crates/sys` shellenv login-shell timeout, ~6.8 s vs 3 s cap) persists — untouched
   by 0c, green in CI. `domain.ts` is now a 5th file-size advisory outlier (426 lines) — left as-is per the
   single-`domain.ts` mandate (§16), non-gating.
-  **Remaining 0c — slice 4 (UI page, NOT started):** build the project settings page over the frozen IPC contract via
-  **`/impeccable`** (DESIGN.md) + the shadcn skill for any new primitive, reusing the landed 0b controls
-  (`SettingsSection`/`SettingRow`/`SettingSelect`/`CodeBlock`, `switch`/`select`/`badge`/`kbd`). Small presentational
-  components (no business logic; types from `domain.ts`; calls via `api.ts`): **OverviewSection** (directory + actions,
-  `solo.yml` ✓Valid/invalid badge from `config.valid` + refresh, running/total counts; icon rejects `.svg`),
-  **ProjectSettingsSection** (auto-start gate, editor override → resolved/global default, icon), **NotificationsSection**
-  (crash/exit + terminal alerts), **CommandList** + **CommandEditor** + **AddCommandModal**
-  (name/command/working_dir/auto_start/auto_restart/file-watch globs + the Save-to-`solo.yml`-vs-local radio). Auto-save
-  on change; text fields commit on blur/Enter. Find where the per-project page is reached in the UI (project detail
-  surface / sidebar node) — that wiring is part of slice 4. Then open the 0c PR (no self-merge). Live GUI + real-window
-  e2e (WebdriverIO + tauri-driver) are USER-ONLY. **Tracked follow-ups** (wire when their surface is touched):
-  **auto-start-gate enforcement** (suppress auto-start at project open when engaged), alert-toggle enforcement (C7),
-  and registering local commands into the supervisor on open so a local command actually runs.
+  **Slice 4 — the UI page (`676cc5c` icon backend + `c24eb6d` UI), DONE & green.** Backend gap closed first:
+  `Facade::set_project_icon` (shared `solo.yml` `icon:` write, rejects `.svg` → `ConfigWriteError::UnsupportedIcon`) +
+  its command + `api.ts` wrapper + 2 tests. The page itself (built via `/impeccable` + the shadcn skill, reusing the
+  0b controls): **navigation** = an `App.tsx` `selectedProjectId` state mutually exclusive with the selected process
+  (the main pane renders TerminalPane | ProjectSettingsPane | EmptyState), opened by a **gear on the sidebar project
+  node** (aria-label "Project settings", `stopPropagation` so collapse is untouched; callback threads App → Sidebar →
+  ProjectGroup). **Components** (`components/project-settings/`, small + presentational; only the Pane touches `api.ts`):
+  `ProjectSettingsPane` (owns the page read-model: load + reload-after-mutation + the 4 tabs), `OverviewSection`
+  (directory + copy-path, Valid/Invalid badge + error, refresh, running/total), `ProjectSettingsSection` (auto-start
+  gate, editor override → resolved/global default, icon path with the server's `.svg` rejection surfaced),
+  `NotificationsSection` (crash/exit + terminal alerts), `CommandList` + `CommandEditor`
+  (edit/rename/auto-start/auto-restart/terminal-alerts/file-watch globs/storage-move/delete, visibility-dispatched),
+  `AddCommandModal` (name/command/working_dir/auto_start/auto_restart/globs + the Save-to-`solo.yml`-vs-local radio).
+  Auto-save on change; text fields commit on blur/Enter. New vendored shadcn `radio-group` primitive (no new dep).
+  Tests: core **408** (+2 icon), UI vitest **111** (+4: Pane overview render, gate toggle → `set_project_auto_start_gate`,
+  AddCommandModal local → `add_local_command`, storage toggle → `make_command_local`); `just lint` exit 0; full
+  workspace test green except the one pre-existing shellenv env-red; `--no-default-features` + `vite build` OK.
+  **0c headless evidence for I7a–I7e is met; the matrix ✅ now has real backing.** What remains is **USER-ONLY**: the
+  live GUI walk + real-window e2e (WebdriverIO + tauri-driver, sudo deps) — flip 0c → `Verified` after the owner's walk.
+  **Tracked follow-ups** (wire when their surface is touched): **auto-start-gate enforcement** (suppress auto-start at
+  project open when engaged), alert-toggle enforcement (C7), registering local commands into the supervisor on open so
+  a local command actually runs, and the Overview open-folder/terminal/editor actions (I9). Icon edits re-render
+  `solo.yml` (not a `processes:` edit, so the in-place comment-preserving path doesn't apply — correct, fallback render).
 - **Phase 11 STARTED — slice 1: I10 env capture landed (2026-06-24).** Managed processes now launch with the
   user's interactive-login-shell environment, so version-manager PATHs (nvm/rbenv/pyenv) initialised from
   interactive rc files — which a plain `$SHELL -lc` command shell never sources — are visible. Clean hexagonal
