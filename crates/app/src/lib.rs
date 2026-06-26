@@ -169,6 +169,10 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Disk-backed key-value store for the webview's persisted read-model cache: the UI
+        // paints projects/app-info/agents from the last-known snapshot on launch, then
+        // reconciles to the live core. Display-only — the core stays authoritative.
+        .plugin(tauri_plugin_store::Builder::default().build())
         // Persist and restore the window's geometry and mode across launches. Size, position,
         // maximized, and fullscreen are tracked; decorations and visibility are deliberately not —
         // the custom titlebar keeps decorations off, and the window owns its own visibility.
