@@ -78,6 +78,7 @@ function mockBackend(processes: ProcessView[]) {
     if (cmd === "project_list") return [PROJECT];
     if (cmd === "appearance") return DEFAULT_APPEARANCE;
     if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
+    if (cmd === "hotkeys") return [];
     return undefined;
   });
 }
@@ -165,6 +166,7 @@ describe("App dashboard", () => {
       if (cmd === "project_list") return [PROJECT];
       if (cmd === "appearance") return DEFAULT_APPEARANCE;
       if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
+      if (cmd === "hotkeys") return [];
       if (cmd === "config_trust") {
         trusted = args as { project: number; name: string };
         return undefined;
@@ -190,6 +192,7 @@ describe("App dashboard", () => {
         if (cmd === "project_list") return [PROJECT];
         if (cmd === "appearance") return DEFAULT_APPEARANCE;
         if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
+        if (cmd === "hotkeys") return [];
         return undefined;
       },
       { shouldMockEvents: true },
