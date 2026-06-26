@@ -58,10 +58,11 @@
   11a (slice 0c — I7a–I7e + the C1 shared/local move), which is NOT started and is the next step.** One pre-existing
   environmental red in `just test` (the I10 `crates/sys` shellenv capture times out — sandbox login shell ~6.8 s vs 3 s
   cap; orthogonal to settings, untouched, green in CI). See the top Decisions entry + "Next session should start with" §0.
-- **Per-project settings 11a (slice 0c) — BACKEND DONE & green, on `feat/phase-11a-project-settings` (stacked on
-  #35 per the owner). NOT yet a PR; the two UI slices remain.** **Owner decisions this session:** base 0c on #35
-  (stacked on the 0b chain); `solo.yml` writes are **comment-preserving + stability-first** (re-parse-verified, never
-  corrupt) rather than a plain rewrite. Two committed slices:
+- **Per-project settings 11a (slice 0c) — BACKEND + IPC/read-model DONE & green (slices 1–3), on
+  `feat/phase-11a-project-settings` (stacked on #35 per the owner). NOT yet a PR; only the UI page (slice 4) remains.**
+  **Owner decisions this session:** base 0c on #35 (stacked on the 0b chain); `solo.yml` writes are
+  **comment-preserving + stability-first** (re-parse-verified, never corrupt) rather than a plain rewrite. Three
+  committed slices:
   **Slice 1 (`ece28c5`)** — the app-local `ProjectSettings` document over the existing generic
   `SettingsStore<ProjectId, ProjectSettings>` base (`plan/06` §5.9): `auto_start_gate` (off), `editor_override`
   (resolver → global Tools default), `crash_exit_alerts`/`terminal_alerts` (on) + per-command alert overrides; SQLite
@@ -74,17 +75,32 @@
   through C1, re-trust) + local add/edit/rename/delete (over `ProjectSettings.local_commands`, **never** written to
   `solo.yml`) + the shared⇄local **move** (add-to-destination-then-remove-from-source, rollback on failure — never
   copy/lose/dup). Per-project Solo facts + the write decision recorded in **`plan/05` §12** (clean-room §9).
-  Tests: core **403** (8 editor incl. comment-preservation/quoted-keys/fallback/round-trip, 3 `ConfigEngine::write`,
-  6 facade acceptance: append-one + re-trust, local byte-unchanged, move round-trip, duplicate refused), store **74**
-  (project_settings round-trip / per-project keying / reopen / FK-cascade); `just lint` exit 0; `cargo check -p
-  soloist-app --no-default-features` builds; UI **103** + `vite build` unaffected. The one pre-existing env-red (the
-  I10 `crates/sys` shellenv login-shell timeout, ~6.8 s vs 3 s cap) persists — untouched by 0c, green in CI.
-  **Remaining 0c: slice 3** = thin Tauri commands (one per Facade method) in `crates/app/src/commands/`, mirrored in
-  `domain.ts`/`api.ts`, + the page read-model (compose C1 config + `ProjectSettings` + C2 running/total counts +
-  `solo.yml` ✓Valid/invalid), mockIPC behavior tests; **slice 4** = the Overview/Settings/Notifications/Commands page
-  + AddCommandModal via `/impeccable`, reusing the 0b controls. Then open the 0c PR (no self-merge). Tracked
-  follow-ups (wire when their surface is touched): **auto-start-gate enforcement** (suppress auto-start at project
-  open when engaged), alert-toggle enforcement (C7), and registering local commands into the supervisor on open.
+  **Slice 3 (`e82de9a`)** — the Tauri IPC adapter + page read-model: new core `projects::page` (the `Visibility`
+  Shared/Local enum + `ProjectCommandView` with flattened spec fields so JSON is always complete + `ConfigStatus` +
+  `ProjectSettingsPage`); `Facade::project_settings_page` composes C1 `solo.yml` validity + the shared & local command
+  rosters with live per-command status from the supervisor snapshot + running/total counts + the local settings +
+  resolved editor; `ConfigEngine::current` exposes the last-synced config. **17 thin `#[tauri::command]`s** (one per
+  Facade method + the page read) in `crates/app/src/commands/project_settings.rs`, registered in `generate_handler!`
+  (app commands need no ACL); mirrored in the one `domain.ts` (types; `ProcessSpec` fields optional to match serde
+  skip) + `api.ts` (one typed `invoke` wrapper each — invoke string = Rust fn name, arg keys = param names, verified).
+  Tests: core **406** (+3 page-assembly), store **74**, UI vitest **107** (+4 mockIPC: page read, a setter, a shared
+  edit, a move); `just lint` exit 0; `cargo check -p soloist-app --no-default-features` builds; `vite build` OK. The
+  one pre-existing env-red (the I10 `crates/sys` shellenv login-shell timeout, ~6.8 s vs 3 s cap) persists — untouched
+  by 0c, green in CI. `domain.ts` is now a 5th file-size advisory outlier (426 lines) — left as-is per the
+  single-`domain.ts` mandate (§16), non-gating.
+  **Remaining 0c — slice 4 (UI page, NOT started):** build the project settings page over the frozen IPC contract via
+  **`/impeccable`** (DESIGN.md) + the shadcn skill for any new primitive, reusing the landed 0b controls
+  (`SettingsSection`/`SettingRow`/`SettingSelect`/`CodeBlock`, `switch`/`select`/`badge`/`kbd`). Small presentational
+  components (no business logic; types from `domain.ts`; calls via `api.ts`): **OverviewSection** (directory + actions,
+  `solo.yml` ✓Valid/invalid badge from `config.valid` + refresh, running/total counts; icon rejects `.svg`),
+  **ProjectSettingsSection** (auto-start gate, editor override → resolved/global default, icon), **NotificationsSection**
+  (crash/exit + terminal alerts), **CommandList** + **CommandEditor** + **AddCommandModal**
+  (name/command/working_dir/auto_start/auto_restart/file-watch globs + the Save-to-`solo.yml`-vs-local radio). Auto-save
+  on change; text fields commit on blur/Enter. Find where the per-project page is reached in the UI (project detail
+  surface / sidebar node) — that wiring is part of slice 4. Then open the 0c PR (no self-merge). Live GUI + real-window
+  e2e (WebdriverIO + tauri-driver) are USER-ONLY. **Tracked follow-ups** (wire when their surface is touched):
+  **auto-start-gate enforcement** (suppress auto-start at project open when engaged), alert-toggle enforcement (C7),
+  and registering local commands into the supervisor on open so a local command actually runs.
 - **Phase 11 STARTED — slice 1: I10 env capture landed (2026-06-24).** Managed processes now launch with the
   user's interactive-login-shell environment, so version-manager PATHs (nvm/rbenv/pyenv) initialised from
   interactive rc files — which a plain `$SHELL -lc` command shell never sources — are visible. Clean hexagonal
