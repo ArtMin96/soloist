@@ -5,7 +5,7 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { OrphanDialog } from "@/components/OrphanDialog";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
-import { Toolbar } from "@/components/Toolbar";
+import { Titlebar } from "@/components/titlebar/Titlebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TrustDialog } from "@/components/TrustDialog";
 import { useAgents } from "@/store/useAgents";
@@ -73,7 +73,7 @@ export default function App() {
     <SignalsProvider>
       <TooltipProvider delayDuration={400}>
         <div className="flex h-screen flex-col bg-background text-foreground">
-          <Toolbar
+          <Titlebar
             appName={info?.name ?? "Soloist"}
             appVersion={info?.version}
             onOpenProject={projects.open}
