@@ -121,6 +121,12 @@ fn a_record_missing_a_field_deserializes_to_the_default_for_that_field() {
         "an omitted field falls back to its default"
     );
     assert!(!partial.mcp_tool_groups.key_value);
+    // A record an older build wrote omits the whole `appearance` tab; it fills from the default.
+    assert_eq!(
+        partial.appearance,
+        Default::default(),
+        "an omitted sub-document falls back to its default"
+    );
 
     let empty: Settings = serde_json::from_str("{}").expect("parse empty");
     assert_eq!(empty, Settings::default());

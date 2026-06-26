@@ -90,7 +90,10 @@ pub use projects::{
     LoadProjectError, ProjectError, ProjectLoad, ProjectService, ProjectView, Projects,
 };
 pub use settings::{
-    McpFeatureGroup, McpToolGroups, NoopSettingsRepo, Settings, SettingsRepo, SettingsStore,
+    AgentSettings, Appearance, FontScale, FontWeight, Integrations, LetterSpacing, LineHeight,
+    McpFeatureGroup, McpToolGroups, NoopSettingsRepo, ProcessCpuThreshold, ProcessMemThreshold,
+    ProjectCpuThreshold, ProjectMemThreshold, Settings, SettingsRepo, SettingsStore, Sidebar,
+    TerminalAppearance, Theme, ToolDefaults,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};

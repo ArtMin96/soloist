@@ -21,6 +21,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::ports::StoreError;
 
+mod agents;
+mod appearance;
+mod integrations;
+mod sidebar;
+mod tools;
+
+pub use agents::AgentSettings;
+pub use appearance::{
+    Appearance, FontScale, FontWeight, LetterSpacing, LineHeight, TerminalAppearance, Theme,
+};
+pub use integrations::Integrations;
+pub use sidebar::{
+    ProcessCpuThreshold, ProcessMemThreshold, ProjectCpuThreshold, ProjectMemThreshold, Sidebar,
+};
+pub use tools::ToolDefaults;
+
 /// A toggleable MCP feature-tool group. The core groups (Project, Process, Output, Bulk,
 /// Services, Agent/Terminal, Coordination leases, Setup) are always served and are not
 /// represented here; only the feature groups can be turned off.
@@ -90,11 +106,17 @@ impl McpToolGroups {
     }
 }
 
-/// The durable settings document: one global record (not project-scoped). Every field carries a
-/// serde default so a record an older build wrote still deserializes after a field is added.
+/// The durable global settings document: one record (not project-scoped) holding one sub-document
+/// per Settings tab. Every field carries a serde default so a record an older build wrote still
+/// deserializes after a tab or field is added — the heart of the "add a field, not a store" recipe.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    pub appearance: Appearance,
+    pub sidebar: Sidebar,
+    pub agents: AgentSettings,
+    pub tools: ToolDefaults,
+    pub integrations: Integrations,
     pub mcp_tool_groups: McpToolGroups,
 }
 
