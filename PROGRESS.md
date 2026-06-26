@@ -58,6 +58,33 @@
   11a (slice 0c — I7a–I7e + the C1 shared/local move), which is NOT started and is the next step.** One pre-existing
   environmental red in `just test` (the I10 `crates/sys` shellenv capture times out — sandbox login shell ~6.8 s vs 3 s
   cap; orthogonal to settings, untouched, green in CI). See the top Decisions entry + "Next session should start with" §0.
+- **Per-project settings 11a (slice 0c) — BACKEND DONE & green, on `feat/phase-11a-project-settings` (stacked on
+  #35 per the owner). NOT yet a PR; the two UI slices remain.** **Owner decisions this session:** base 0c on #35
+  (stacked on the 0b chain); `solo.yml` writes are **comment-preserving + stability-first** (re-parse-verified, never
+  corrupt) rather than a plain rewrite. Two committed slices:
+  **Slice 1 (`ece28c5`)** — the app-local `ProjectSettings` document over the existing generic
+  `SettingsStore<ProjectId, ProjectSettings>` base (`plan/06` §5.9): `auto_start_gate` (off), `editor_override`
+  (resolver → global Tools default), `crash_exit_alerts`/`terminal_alerts` (on) + per-command alert overrides; SQLite
+  `SettingsRepo<ProjectId, ProjectSettings>` adapter + `project_settings` table (**migration v10**, FK cascade);
+  `CorePorts.project_settings_repo` (Noop default + builder) wired in `build_facade`; scoped Facade getters/setters.
+  **Slice 2 (`e9cb736`)** — the I7d/I7e command-editing backend: a **comment-preserving `solo.yml` write path**
+  (`config::edit` edits the `processes:` block in place, re-parses + verifies the result equals the intended config,
+  else falls back to a faithful render that keeps the file's leading comments and never injects our header; **atomic**
+  temp+rename; can never corrupt the file) behind `ConfigEngine::write`; Facade shared add/edit/rename/delete (route
+  through C1, re-trust) + local add/edit/rename/delete (over `ProjectSettings.local_commands`, **never** written to
+  `solo.yml`) + the shared⇄local **move** (add-to-destination-then-remove-from-source, rollback on failure — never
+  copy/lose/dup). Per-project Solo facts + the write decision recorded in **`plan/05` §12** (clean-room §9).
+  Tests: core **403** (8 editor incl. comment-preservation/quoted-keys/fallback/round-trip, 3 `ConfigEngine::write`,
+  6 facade acceptance: append-one + re-trust, local byte-unchanged, move round-trip, duplicate refused), store **74**
+  (project_settings round-trip / per-project keying / reopen / FK-cascade); `just lint` exit 0; `cargo check -p
+  soloist-app --no-default-features` builds; UI **103** + `vite build` unaffected. The one pre-existing env-red (the
+  I10 `crates/sys` shellenv login-shell timeout, ~6.8 s vs 3 s cap) persists — untouched by 0c, green in CI.
+  **Remaining 0c: slice 3** = thin Tauri commands (one per Facade method) in `crates/app/src/commands/`, mirrored in
+  `domain.ts`/`api.ts`, + the page read-model (compose C1 config + `ProjectSettings` + C2 running/total counts +
+  `solo.yml` ✓Valid/invalid), mockIPC behavior tests; **slice 4** = the Overview/Settings/Notifications/Commands page
+  + AddCommandModal via `/impeccable`, reusing the 0b controls. Then open the 0c PR (no self-merge). Tracked
+  follow-ups (wire when their surface is touched): **auto-start-gate enforcement** (suppress auto-start at project
+  open when engaged), alert-toggle enforcement (C7), and registering local commands into the supervisor on open.
 - **Phase 11 STARTED — slice 1: I10 env capture landed (2026-06-24).** Managed processes now launch with the
   user's interactive-login-shell environment, so version-manager PATHs (nvm/rbenv/pyenv) initialised from
   interactive rc files — which a plain `$SHELL -lc` command shell never sources — are visible. Clean hexagonal
