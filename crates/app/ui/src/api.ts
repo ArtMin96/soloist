@@ -6,13 +6,23 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
+  AgentSettings,
   AgentTool,
+  Appearance,
   AppInfo,
+  Binding,
   DetectedTool,
   DomainEvent,
+  HotkeyAction,
+  HotkeyBindingView,
+  Integrations,
+  McpFeatureGroup,
+  McpToolGroups,
   ProcessView,
   ProjectLoad,
   ProjectView,
+  Sidebar,
+  ToolDefaults,
 } from "@/domain";
 
 const DOMAIN_EVENT = "domain-event";
@@ -121,6 +131,79 @@ export function ptyDetach(): Promise<void> {
 // running") signals nothing.
 export function orphansResolve(pgids: number[]): Promise<void> {
   return invoke<void>("orphans_resolve", { pgids });
+}
+
+// ── Settings ────────────────────────────────────────────────────────────────
+// The durable global preference document. Reads return the stored value (or the documented
+// defaults when nothing is stored yet); each setter auto-saves the whole tab and returns the
+// stored value, so callers reflect exactly what was written without a re-read.
+
+export function appearance(): Promise<Appearance> {
+  return invoke<Appearance>("appearance");
+}
+
+export function setAppearance(appearance: Appearance): Promise<Appearance> {
+  return invoke<Appearance>("set_appearance", { appearance });
+}
+
+export function sidebarSettings(): Promise<Sidebar> {
+  return invoke<Sidebar>("sidebar_settings");
+}
+
+export function setSidebarSettings(sidebar: Sidebar): Promise<Sidebar> {
+  return invoke<Sidebar>("set_sidebar_settings", { sidebar });
+}
+
+export function hotkeys(): Promise<HotkeyBindingView[]> {
+  return invoke<HotkeyBindingView[]>("hotkeys");
+}
+
+export function remapHotkey(action: HotkeyAction, binding: Binding): Promise<HotkeyBindingView[]> {
+  return invoke<HotkeyBindingView[]>("remap_hotkey", { action, binding });
+}
+
+export function disableHotkey(action: HotkeyAction): Promise<HotkeyBindingView[]> {
+  return invoke<HotkeyBindingView[]>("disable_hotkey", { action });
+}
+
+export function resetHotkey(action: HotkeyAction): Promise<HotkeyBindingView[]> {
+  return invoke<HotkeyBindingView[]>("reset_hotkey", { action });
+}
+
+export function resetAllHotkeys(): Promise<HotkeyBindingView[]> {
+  return invoke<HotkeyBindingView[]>("reset_all_hotkeys");
+}
+
+export function agentSettings(): Promise<AgentSettings> {
+  return invoke<AgentSettings>("agent_settings");
+}
+
+export function setAgentSettings(agents: AgentSettings): Promise<AgentSettings> {
+  return invoke<AgentSettings>("set_agent_settings", { agents });
+}
+
+export function toolDefaults(): Promise<ToolDefaults> {
+  return invoke<ToolDefaults>("tool_defaults");
+}
+
+export function setToolDefaults(tools: ToolDefaults): Promise<ToolDefaults> {
+  return invoke<ToolDefaults>("set_tool_defaults", { tools });
+}
+
+export function integrationSettings(): Promise<Integrations> {
+  return invoke<Integrations>("integration_settings");
+}
+
+export function setIntegrationSettings(integrations: Integrations): Promise<Integrations> {
+  return invoke<Integrations>("set_integration_settings", { integrations });
+}
+
+export function mcpToolGroups(): Promise<McpToolGroups> {
+  return invoke<McpToolGroups>("mcp_tool_groups");
+}
+
+export function setMcpToolGroup(group: McpFeatureGroup, enabled: boolean): Promise<McpToolGroups> {
+  return invoke<McpToolGroups>("set_mcp_tool_group", { group, enabled });
 }
 
 export function onDomainEvent(handler: (event: DomainEvent) => void): Promise<UnlistenFn> {

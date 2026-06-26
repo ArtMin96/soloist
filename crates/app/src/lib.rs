@@ -277,6 +277,23 @@ pub fn run() {
             commands::pty_attach,
             commands::pty_detach,
             commands::orphans_resolve,
+            commands::appearance,
+            commands::set_appearance,
+            commands::sidebar_settings,
+            commands::set_sidebar_settings,
+            commands::hotkeys,
+            commands::remap_hotkey,
+            commands::disable_hotkey,
+            commands::reset_hotkey,
+            commands::reset_all_hotkeys,
+            commands::agent_settings,
+            commands::set_agent_settings,
+            commands::tool_defaults,
+            commands::set_tool_defaults,
+            commands::integration_settings,
+            commands::set_integration_settings,
+            commands::mcp_tool_groups,
+            commands::set_mcp_tool_group,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
