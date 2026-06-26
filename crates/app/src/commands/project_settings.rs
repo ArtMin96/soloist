@@ -224,3 +224,15 @@ pub async fn save_command_to_yaml(
         .save_command_to_yaml(project, &name)
         .map_err(|err| err.to_string())
 }
+
+/// Sets or clears (`null`) the project's `solo.yml` icon (shared). Rejects an `.svg` path.
+#[tauri::command]
+pub async fn set_project_icon(
+    project: ProjectId,
+    icon: Option<String>,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<(), String> {
+    facade
+        .set_project_icon(project, icon)
+        .map_err(|err| err.to_string())
+}

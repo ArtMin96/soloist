@@ -329,6 +329,11 @@ export function saveCommandToYaml(project: ProjectId, name: string): Promise<Tru
   return invoke<TrustReviewCommand[]>("save_command_to_yaml", { project, name });
 }
 
+// Sets or clears (null) the project's solo.yml icon (shared). Rejects an .svg path server-side.
+export function setProjectIcon(project: ProjectId, icon: string | null): Promise<void> {
+  return invoke<void>("set_project_icon", { project, icon });
+}
+
 export function onDomainEvent(handler: (event: DomainEvent) => void): Promise<UnlistenFn> {
   return listen<DomainEvent>(DOMAIN_EVENT, (event) => handler(event.payload));
 }

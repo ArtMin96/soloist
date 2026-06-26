@@ -190,3 +190,38 @@ fn a_duplicate_shared_add_is_refused_and_does_not_touch_the_file() {
         "a refused add leaves solo.yml untouched"
     );
 }
+
+#[test]
+fn an_svg_icon_is_rejected_and_leaves_the_file_untouched() {
+    let (facade, project, dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    let before = std::fs::read_to_string(config_path(dir.path())).unwrap();
+
+    let err = facade
+        .set_project_icon(project, Some("public/favicon.svg".into()))
+        .unwrap_err();
+
+    assert!(matches!(err, ConfigWriteError::UnsupportedIcon(p) if p.ends_with(".svg")));
+    assert_eq!(
+        std::fs::read_to_string(config_path(dir.path())).unwrap(),
+        before,
+        "a rejected icon leaves solo.yml untouched"
+    );
+}
+
+#[test]
+fn a_supported_icon_is_written_to_solo_yml() {
+    let (facade, project, dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+
+    facade
+        .set_project_icon(project, Some("assets/icon.png".into()))
+        .expect("set icon");
+
+    let parsed =
+        crate::config::parse(&std::fs::read_to_string(config_path(dir.path())).unwrap()).unwrap();
+    assert_eq!(
+        parsed.icon.as_deref(),
+        Some(std::path::Path::new("assets/icon.png"))
+    );
+}

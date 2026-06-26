@@ -46,6 +46,9 @@ pub enum ConfigWriteError {
     /// The mutation would add a command whose name is already taken in the config.
     #[error("a command named {0:?} already exists in solo.yml")]
     DuplicateCommand(String),
+    /// The icon path uses an unsupported image format (only png, jpg, gif, ico, webp are allowed).
+    #[error("unsupported icon format {0:?} (use png, jpg, gif, ico, or webp)")]
+    UnsupportedIcon(String),
     #[error(transparent)]
     Config(#[from] ConfigError),
     #[error(transparent)]

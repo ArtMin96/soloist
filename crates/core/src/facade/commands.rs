@@ -8,6 +8,8 @@
 //! from the source (and rolls back on failure), so a command is never lost and the two stores never
 //! both keep it after the move completes. One behaviour, many fronts.
 
+use std::path::PathBuf;
+
 use super::Facade;
 use crate::config::{ConfigWriteError, ProcessSpec, TrustReviewCommand};
 use crate::ids::ProjectId;
@@ -15,6 +17,27 @@ use crate::ports::StoreError;
 use crate::settings::ProjectSettings;
 
 impl Facade {
+    /// Sets or clears (`None`) the project's icon in `solo.yml` — a shared field. Rejects an `.svg`
+    /// path (only png/jpg/gif/ico/webp are supported), matching the editor. An icon change is not a
+    /// `processes:` edit, so the file is re-rendered rather than edited in place.
+    pub fn set_project_icon(
+        &self,
+        project: ProjectId,
+        icon: Option<String>,
+    ) -> Result<(), ConfigWriteError> {
+        if let Some(path) = &icon {
+            if path.to_ascii_lowercase().ends_with(".svg") {
+                return Err(ConfigWriteError::UnsupportedIcon(path.clone()));
+            }
+        }
+        self.config
+            .write(project, move |config| {
+                config.icon = icon.map(PathBuf::from);
+                Ok(())
+            })
+            .map(|_| ())
+    }
+
     /// Adds a command to the project's `solo.yml` (shared). Returns the commands the write left
     /// needing trust (the new command, until trusted).
     pub fn add_shared_command(

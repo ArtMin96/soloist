@@ -312,6 +312,7 @@ pub fn run() {
             commands::remove_local_command,
             commands::make_command_local,
             commands::save_command_to_yaml,
+            commands::set_project_icon,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
