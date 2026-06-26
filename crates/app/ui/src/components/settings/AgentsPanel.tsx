@@ -47,10 +47,7 @@ export function AgentsPanel() {
         description="The agent CLIs Soloist can launch, detected from your PATH."
       >
         {tools.map((detected) => (
-          <div
-            key={detected.tool.name}
-            className="flex items-center justify-between gap-6 py-3"
-          >
+          <div key={detected.tool.name} className="flex items-center justify-between gap-6 py-3">
             <div className="min-w-0">
               <div className="text-[0.8125rem] text-foreground">{detected.tool.name}</div>
               <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">

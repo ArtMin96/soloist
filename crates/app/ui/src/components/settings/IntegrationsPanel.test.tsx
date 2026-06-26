@@ -13,7 +13,12 @@ afterEach(() => {
 describe("Settings — Integrations", () => {
   it("loads the MCP tool-group enablement and toggles a group through the per-group setter", async () => {
     let lastSet: { group: McpFeatureGroup; enabled: boolean } | null = null;
-    const groups: McpToolGroups = { scratchpads: true, todos: true, timers: true, key_value: false };
+    const groups: McpToolGroups = {
+      scratchpads: true,
+      todos: true,
+      timers: true,
+      key_value: false,
+    };
     mockIPC((cmd, args) => {
       if (cmd === "mcp_tool_groups") return groups;
       if (cmd === "set_mcp_tool_group") {
@@ -34,7 +39,11 @@ describe("Settings — Integrations", () => {
   });
 
   it("shows the stdio MCP setup and the read-only HTTP API surface", () => {
-    mockIPC((cmd) => (cmd === "mcp_tool_groups" ? { scratchpads: true, todos: true, timers: true, key_value: false } : undefined));
+    mockIPC((cmd) =>
+      cmd === "mcp_tool_groups"
+        ? { scratchpads: true, todos: true, timers: true, key_value: false }
+        : undefined,
+    );
 
     render(<IntegrationsPanel />);
 
