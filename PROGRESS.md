@@ -25,6 +25,26 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Phase 11 — read-through cache slice landed (2026-06-27).** A reusable `core::cache::ReadCache<T>` (a
+  `Clock`-driven, single-flighted, success-cached/failure-not TTL memo) generalizes the bespoke memo the shell-env
+  resolver used. `ShellEnv` was refactored onto it (DRY — its hand-rolled `Mutex<Option<Cached>>` is gone), and
+  **`Agents::detect_installed` — the slow off-runtime `--version` probe sweep ("slower than `agent_list`" per its own
+  doc) — is now cached** for a 10-min TTL, so repeated launch-picker opens reuse one sweep instead of re-spawning N
+  `--version` probes. Caching is policy, not an OS concern, so it is a **pure-core util** (sibling to `sync`/`events`;
+  only `Clock` is a port) — **no new dependency; the dep-direction guard stays green (`soloist-core` framework-free).**
+  It is an additive engineering slice for UX smoothness, **not a parity row and not a Solo-behavior change** (so no
+  `plan/05`/`KNOWN-DIVERGENCES` entry). The pattern is registered single-source in `ARCHITECTURE.md` §2/§3 + `plan/04`
+  §9 + `plan/06` §3.1/§4 so a future session reuses it rather than re-rolling a third cache. **Measured headlessly** by
+  a counting fake probe: detection sweeps go **2 → 1** across two `detect_installed` calls within the TTL (and back to
+  2 after it) — the real wall-clock saving (N off-runtime `--version` spawns eliminated per reopen) is a runtime
+  spot-check for the acceptance walk, deliberately **not a fabricated millisecond number** (CLAUDE.md §6). **Gate
+  green:** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier, dep-direction framework-free;
+  file-size advisory only — 4 pre-existing outliers, none mine); `just test` exit 0 — **Rust 616 (+4: 3 `cache` + 1
+  detect-cache) / 3 ignored, UI 78.** Branch `feat/phase-11-read-cache`, commits `92f481a` (chore: a **pre-existing
+  `main`** prettier fix on `WindowControls.tsx`, kept as a separate commit) + `eab5b96` (the cache slice). **The user
+  pushes/opens the PR — no self-merge.** **Next cache sub-slice:** the frontend persisted half (`tauri-plugin-store`
+  stale-while-revalidate for projects/app-info/agent-list cold-start) + the sync `projects_snapshot` event-invalidated
+  cache (which adds `ReadCache::invalidate`).
 - **Phase 11 STARTED — slice 1: I10 env capture landed (2026-06-24).** Managed processes now launch with the
   user's interactive-login-shell environment, so version-manager PATHs (nvm/rbenv/pyenv) initialised from
   interactive rc files — which a plain `$SHELL -lc` command shell never sources — are visible. Clean hexagonal
@@ -3165,6 +3185,18 @@ review's one should-fix + the mechanical nits:
 ---
 
 ## Next session should start with
+
+**Cache (most recent, 2026-06-27): the backend read-through cache slice is committed on `feat/phase-11-read-cache`**
+(gate green — Rust 616 / UI 78; `core::cache::ReadCache` + `ShellEnv` refactor + cached `agent_detect`). **The user
+pushes/opens the PR (no self-merge).** Then build the **frontend persisted half** (the user chose the official
+`tauri-plugin-store`): add the Rust crate + `@tauri-apps/plugin-store` + a capability ACL — **invoke
+`tauri-plugin-permissions`/`tauri-capabilities`/`tauri-configuration`/`tauri-binary-size` and confirm the plugin API
+via context7 (CLAUDE.md §4/§5); measure the bundle delta** — wrap it in a single `store/cache/persistentCache.ts` (the
+only file that imports the plugin) + a generic `usePersistentSnapshot` stale-while-revalidate hook, and migrate
+`useProjects`/`useAppInfo`/the agent picker onto it (`useProcesses` = shape-only, never a stale "running"; trust stays
+display-only, never authoritative). Then the **sync `projects_snapshot` event-invalidated cache** (adds
+`ReadCache::invalidate`, fired where the Facade publishes `ProjectOpened`/`ConfigChanged`/`project_load`). Pattern
+reference: `ARCHITECTURE.md` §3 / `plan/06` §4.
 
 **0. Phase 11 (UX Polish & Execution Profiles) is the ACTIVE phase. PR #27 (I10) is MERGED (`17f0115`); slices 1–2 done.**
 Slice 2 (settings + MCP toggle) landed on **`feat/phase-11-settings-mcp-toggle`** (off `main` `17f0115`; commits
