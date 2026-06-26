@@ -122,6 +122,7 @@ against real stub agents on real PTYs); tool *param schemas* are clean-room (`pl
 | `domain.ts` | the **single** TS mirror of core enums / `DomainEvent` | one definition per type; mirrors serde output |
 | `api.ts` | typed `invoke`/`listen` + Channel | **every** command/event name string lives here once |
 | `store/` | read-model: pure reducers (`projection`, `grouping`) + hooks | reducers pure + unit-tested |
+| `store/cache/` | persisted read-model cache: `persistentCache.ts` (sole `tauri-plugin-store` importer) + the generic `usePersistentSnapshot` SWR hook | display-only; core wins on reconcile; live status stays uncached |
 | `lib/` | presentational helpers (`status.ts` = the single `ProcStatus`→glyph/color/label map) | no IPC, no state |
 | `components/` | small presentational components (`sidebar/`, `terminal/`) | props-in/callbacks-out; no logic, no `invoke` |
 

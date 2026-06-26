@@ -25,6 +25,49 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Phase 11 — frontend persisted cache slice landed (2026-06-27).** The display-side half of the cache
+  mechanism: a disk-backed, stale-while-revalidate read-model cache over the official **`tauri-plugin-store`**
+  (`2.4.3` Rust / `@tauri-apps/plugin-store ^2.4.3` npm), so the sidebar **projects**, the titlebar **app
+  identity**, and the **agent launch picker** paint the last-known snapshot **instantly on launch**, then
+  reconcile to the live core — **the core always wins; the cache is display-only, never a second source of
+  truth** (CLAUDE.md §15). **One module owns the plugin** (`ui/src/store/cache/persistentCache.ts` — the only
+  importer of `@tauri-apps/plugin-store`): named cache-key consts + a **schema-versioned envelope** so a blob
+  written by an older shape reads back as a **miss** (no magic strings; version-mismatch handled). A generic
+  **`usePersistentSnapshot(key, fetcher)`** hook (`ui/src/store/cache/usePersistentSnapshot.ts`) does
+  cache-read → revalidate → write-through; a fetcher may `emit` a fast partial (the picker lists tools before
+  `--version` detection, preserving the cold-open list-first paint). **Migrated `useAppInfo` / `useProjects` /
+  `useAgents` onto it** (the agent picker revalidates **only on open**, so launching the app probes **no** CLIs
+  — `revalidateOnMount: false`). **`useProcesses` is left fully live** (event-driven, uncached): its running
+  status must never be served stale (user-confirmed this session). **Least-privilege ACL** — only
+  `store:allow-{load,get,set,save}` in `capabilities/default.json`; plugin registered in `app/src/lib.rs`
+  alongside dialog/notification/window-state (the established plugin pattern). **Skills/sources (CLAUDE.md §4/§5):**
+  `tauri-plugin-permissions` + `tauri-binary-size` invoked; the `@tauri-apps/plugin-store` 2.4.x API
+  (`LazyStore`, `StoreOptions.defaults` required, the `store:default` superset) confirmed via context7 — granted
+  only the four commands the cache uses, not `store:default`. **Visible behavior confirmed by the user:**
+  stale-while-revalidate (instant last-known paint, silent reconcile, no skeletons) and `useProcesses` stays
+  live. **Measured (CLAUDE.md §6):** frontend bundle delta **+3,104 B raw / +950 B gzip** (main JS 713,030 →
+  716,134; `dist` 940K → 940K) — the plugin's JS shim is tiny because the work lives in the Rust plugin. The
+  **native `.deb`/`.AppImage` delta is deferred to the Phase-12 packaging measurement** (§6 measures real
+  artifacts there; the plugin is a thin serde_json KV wrapper reusing already-linked deps) — **not fabricated.**
+  **Cold-start time-to-first-paint is a GUI/runtime spot-check for the Phase-11 acceptance walk** (needs a
+  desktop `just dev`), **deliberately not a fabricated millisecond number** (mirrors how the backend slice
+  handled its wall-clock saving). `Cargo.lock` **additive only** — one package (`tauri-plugin-store`); **brotli
+  pins unchanged.** **Gate green:** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier,
+  dep-direction `soloist-core` **still framework-free** — the plugin is in the `app` adapter, not core;
+  file-size advisory only — the same 4 pre-existing outliers, none mine); `just test` exit 0 — **Rust 616 / 3
+  ignored (unchanged — no Rust logic, one plugin line), UI 89 (+11: 4 `persistentCache` hit/miss/version-mismatch/
+  read-failure + 7 `usePersistentSnapshot` stale-then-fresh/miss/backend-authoritative/error-keeps-stale/
+  defer-on-mount/partial-cold/no-downgrade).** Branch **`feat/phase-11-frontend-cache`** (off
+  `feat/phase-11-read-cache`, since **PR #38 is still OPEN, not merged**), commit `69edfc8`. **The user
+  pushes/opens the PR — no self-merge; PR #38 must merge first (this branch builds on it).** **Next cache
+  sub-slice (deliberately deferred, YAGNI):** the backend event-invalidated `projects_snapshot` cache — add
+  `ReadCache::invalidate` to `core::cache` and memoize `project_list` (icon-loading), invalidated where the
+  Facade publishes `ProjectOpened`/`ConfigChanged`/`project_load`. Per `plan/06` §4 / `ARCHITECTURE` §3 ("add
+  event-invalidation only when a consumer needs it"), do it when `project_list` is shown to be a measured cost
+  **or** as the planned completion of the cache mechanism. **DECIDED 2026-06-27 (user-confirmed): deferred until
+  `project_list` is shown to be a measured cost — do NOT build it speculatively. The next Phase-11 work is a v1
+  UI row, not this.** The cache mechanism is considered complete for now (backend read-through + frontend
+  persisted halves both landed).
 - **Phase 11 — read-through cache slice landed (2026-06-27).** A reusable `core::cache::ReadCache<T>` (a
   `Clock`-driven, single-flighted, success-cached/failure-not TTL memo) generalizes the bespoke memo the shell-env
   resolver used. `ShellEnv` was refactored onto it (DRY — its hand-rolled `Mutex<Option<Cached>>` is gone), and
@@ -3186,17 +3229,31 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-**Cache (most recent, 2026-06-27): the backend read-through cache slice is committed on `feat/phase-11-read-cache`**
-(gate green — Rust 616 / UI 78; `core::cache::ReadCache` + `ShellEnv` refactor + cached `agent_detect`). **The user
-pushes/opens the PR (no self-merge).** Then build the **frontend persisted half** (the user chose the official
-`tauri-plugin-store`): add the Rust crate + `@tauri-apps/plugin-store` + a capability ACL — **invoke
-`tauri-plugin-permissions`/`tauri-capabilities`/`tauri-configuration`/`tauri-binary-size` and confirm the plugin API
-via context7 (CLAUDE.md §4/§5); measure the bundle delta** — wrap it in a single `store/cache/persistentCache.ts` (the
-only file that imports the plugin) + a generic `usePersistentSnapshot` stale-while-revalidate hook, and migrate
-`useProjects`/`useAppInfo`/the agent picker onto it (`useProcesses` = shape-only, never a stale "running"; trust stays
-display-only, never authoritative). Then the **sync `projects_snapshot` event-invalidated cache** (adds
-`ReadCache::invalidate`, fired where the Facade publishes `ProjectOpened`/`ConfigChanged`/`project_load`). Pattern
-reference: `ARCHITECTURE.md` §3 / `plan/06` §4.
+**Cache (most recent, 2026-06-27): BOTH the backend read-through cache AND the frontend persisted half are
+committed.** The backend slice is on `feat/phase-11-read-cache` (**PR #38, still OPEN — not merged**: `core::cache::ReadCache`
++ `ShellEnv` refactor + cached `agent_detect`). The **frontend persisted half is on `feat/phase-11-frontend-cache`**
+(branched off `feat/phase-11-read-cache`; commit `69edfc8`) — the official `tauri-plugin-store` (`2.4.3` / `@tauri-apps/plugin-store
+^2.4.3`), a single `store/cache/persistentCache.ts` (schema-versioned envelope, named keys) + a generic
+`usePersistentSnapshot(key, fetcher)` stale-while-revalidate hook; `useProjects`/`useAppInfo`/the agent picker migrated onto
+it; `useProcesses` left fully live; least-privilege `store:allow-{load,get,set,save}` ACL; gate green (Rust 616 / UI 89,
++11). Measured: frontend bundle **+3,104 B raw / +950 B gzip**; native `.deb` delta deferred to Phase-12 packaging;
+cold-start TTFP is a GUI acceptance spot-check. See the top Current-state entry. **The user pushes/opens BOTH PRs (no
+self-merge); PR #38 merges first (the frontend branch builds on it), then sync `main`.**
+
+**The cache mechanism is COMPLETE for now** (backend read-through + frontend persisted halves both landed). The
+**backend event-invalidated `projects_snapshot` cache is DEFERRED until measured (user-confirmed 2026-06-27) — do
+NOT build it speculatively** (YAGNI; `plan/06` §4 / `ARCHITECTURE` §3: "add event-invalidation only when a consumer
+needs it"). If a future session shows `project_list`'s per-project icon load to be a measured cost, the slice is: add
+`ReadCache::invalidate` to `core::cache`, memoize `project_list`, and invalidate where the Facade publishes
+`ProjectOpened`/`ConfigChanged`/`project_load`.
+
+**So once PR #38 + the frontend-cache PR are merged and `main` is synced, the next Phase-11 work is a v1 UI row** —
+see item 0 below for the remaining set (`I1` drag-reorder, `I2` `Ctrl+K` palette, `I5` themes, `I6` keyboard nav, `I7`
+settings screen, `I9` open-in-editor). **`I9` open-in-editor is the recommended next slice** (mostly-backend: a new
+editor-launch port + adapter behind one `Facade` method + a small UI affordance — self-contained and not blocked on
+DESIGN.md visual decisions, unlike the theme/settings UI rows). The heavier UI rows (I5/I7) have their backend
+foundations done (`SettingsStore` migration v9 + `mcp_tool_groups`) but need `/impeccable` + per-CLAUDE.md §5 visual
+confirmation since DESIGN.md is deferred.
 
 **0. Phase 11 (UX Polish & Execution Profiles) is the ACTIVE phase. PR #27 (I10) is MERGED (`17f0115`); slices 1–2 done.**
 Slice 2 (settings + MCP toggle) landed on **`feat/phase-11-settings-mcp-toggle`** (off `main` `17f0115`; commits
