@@ -295,6 +295,23 @@ pub fn run() {
             commands::set_integration_settings,
             commands::mcp_tool_groups,
             commands::set_mcp_tool_group,
+            commands::project_settings_page,
+            commands::project_settings,
+            commands::set_project_auto_start_gate,
+            commands::set_project_editor_override,
+            commands::set_project_crash_exit_alerts,
+            commands::set_project_terminal_alerts,
+            commands::set_command_terminal_alerts,
+            commands::add_shared_command,
+            commands::edit_shared_command,
+            commands::rename_shared_command,
+            commands::remove_shared_command,
+            commands::add_local_command,
+            commands::edit_local_command,
+            commands::rename_local_command,
+            commands::remove_local_command,
+            commands::make_command_local,
+            commands::save_command_to_yaml,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

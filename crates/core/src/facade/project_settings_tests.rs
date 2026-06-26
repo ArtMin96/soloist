@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use super::*;
+use crate::config::{config_path, ProcessSpec};
 use crate::ids::ProjectId;
 use crate::ports::{CorePorts, TokioClock};
 use crate::settings::ToolDefaults;
@@ -127,4 +128,103 @@ fn clearing_the_editor_override_falls_back_to_the_global_default() {
         facade.resolved_project_editor(Q).unwrap().as_deref(),
         Some("code")
     );
+}
+
+fn spec(command: &str) -> ProcessSpec {
+    ProcessSpec {
+        command: command.into(),
+        working_dir: None,
+        auto_start: true,
+        auto_restart: false,
+        restart_when_changed: Vec::new(),
+        env: Default::default(),
+    }
+}
+
+/// Builds the façade, then opens a project from a temp dir seeded with `solo.yml` — registered so
+/// the page can resolve its root, and opened in the config engine so its shared commands are known.
+/// Returns the façade, the project id, its canonical root, and the temp dir.
+fn project_with_yaml(initial: &str) -> (Facade, ProjectId, std::path::PathBuf, tempfile::TempDir) {
+    let facade = facade_with_settings();
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(config_path(dir.path()), initial).expect("seed solo.yml");
+    let record = facade
+        .projects()
+        .add(dir.path(), None, None)
+        .expect("register project");
+    facade
+        .config()
+        .open(record.id, record.root.clone())
+        .expect("open seeds config state");
+    let root = record.root.clone();
+    (facade, record.id, root, dir)
+}
+
+#[test]
+fn the_settings_page_assembles_root_validity_counts_and_shared_commands() {
+    let (facade, project, root, _dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+
+    let page = facade
+        .project_settings_page(project)
+        .expect("page assembles");
+
+    assert_eq!(page.project, project);
+    assert_eq!(page.root, root.display().to_string());
+    assert!(
+        page.config.valid,
+        "a present, well-formed solo.yml is valid"
+    );
+    assert!(page.config.error.is_none());
+    assert_eq!(page.total, 1);
+    assert_eq!(page.running, 0, "nothing is started");
+    assert_eq!(page.commands.len(), 1);
+
+    let web = &page.commands[0];
+    assert_eq!(web.name, "Web");
+    assert_eq!(web.command, "npm run dev");
+    assert_eq!(web.visibility, Visibility::Shared);
+    assert!(
+        web.auto_start,
+        "auto_start defaults true and is flattened so it is always present"
+    );
+    assert!(web.terminal_alerts, "alerts default on");
+    assert!(web.status.is_none(), "no process is registered yet");
+}
+
+#[test]
+fn the_settings_page_lists_local_commands_as_local() {
+    let (facade, project, _root, _dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    facade
+        .add_local_command(project, "Logs", spec("tail -f log"))
+        .expect("local add");
+
+    let page = facade
+        .project_settings_page(project)
+        .expect("page assembles");
+
+    assert_eq!(page.total, 2, "one shared plus one local");
+    let shared = page
+        .commands
+        .iter()
+        .find(|c| c.name == "Web")
+        .expect("shared command present");
+    assert_eq!(shared.visibility, Visibility::Shared);
+    let local = page
+        .commands
+        .iter()
+        .find(|c| c.name == "Logs")
+        .expect("local command present");
+    assert_eq!(local.visibility, Visibility::Local);
+    assert_eq!(local.command, "tail -f log");
+}
+
+#[test]
+fn the_settings_page_errors_for_a_project_that_is_not_open() {
+    let facade = facade_with_settings();
+    let err = facade
+        .project_settings_page(ProjectId::from_raw(999))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::Backend(_)));
 }

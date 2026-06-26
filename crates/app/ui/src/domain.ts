@@ -354,3 +354,73 @@ export interface McpToolGroups {
   timers: boolean;
   key_value: boolean;
 }
+
+// ── Per-project settings (mirrors core::settings::project + core::projects::page) ────────────
+// The durable, app-local preference surface for one project plus the assembled settings-page read
+// model. Field names match the core's serde output; the command-spec fields on `ProcessSpec` are
+// optional to match the core's `skip_serializing_if` (they may be absent when left at their default).
+
+// A project's durable id (mirrors core::ProjectId — a number on the wire).
+export type ProjectId = number;
+
+// Where a command lives (mirrors core::Visibility): in the shared `solo.yml` ("shared", committed)
+// or the app-local overlay ("local", this machine only).
+export type Visibility = "shared" | "local";
+
+// One command definition (mirrors core::config::ProcessSpec). Defaulted fields are omitted by the
+// core's serde, so they are optional here; only `command` is always present.
+export interface ProcessSpec {
+  command: string;
+  working_dir?: string | null;
+  auto_start?: boolean;
+  auto_restart?: boolean;
+  restart_when_changed?: string[];
+  env?: Record<string, string>;
+}
+
+// One project's local settings (mirrors core::ProjectSettings) — the auto-start gate, editor
+// override, alert toggles, per-command alert overrides, and app-local commands.
+export interface ProjectSettings {
+  auto_start_gate: boolean;
+  editor_override: string | null;
+  crash_exit_alerts: boolean;
+  terminal_alerts: boolean;
+  command_terminal_alerts: Record<string, boolean>;
+  local_commands: Record<string, ProcessSpec>;
+}
+
+// One command on the settings page (mirrors core::ProjectCommandView). The spec fields are flattened
+// so they are always present; `visibility` is where it lives; `status` is its live state, or null
+// when no process of that name is registered.
+export interface ProjectCommandView {
+  name: string;
+  command: string;
+  working_dir: string | null;
+  auto_start: boolean;
+  auto_restart: boolean;
+  restart_when_changed: string[];
+  visibility: Visibility;
+  terminal_alerts: boolean;
+  status: ProcStatus | null;
+}
+
+// Whether the project's `solo.yml` currently loads (mirrors core::ConfigStatus); `error` carries the
+// parse/IO message when it does not.
+export interface ConfigStatus {
+  valid: boolean;
+  error: string | null;
+}
+
+// The assembled per-project settings page (mirrors core::ProjectSettingsPage) — one read the page
+// renders directly: the project's root, config validity, command roster, live counts, local
+// settings, and resolved editor.
+export interface ProjectSettingsPage {
+  project: ProjectId;
+  root: string;
+  config: ConfigStatus;
+  running: number;
+  total: number;
+  settings: ProjectSettings;
+  resolved_editor: string | null;
+  commands: ProjectCommandView[];
+}

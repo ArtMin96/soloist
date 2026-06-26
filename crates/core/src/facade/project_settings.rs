@@ -4,9 +4,13 @@
 //! `solo.yml` config (C1) and never written to it. Each setter routes through the store's single
 //! `update` write primitive, so the UI, CLI, and any other front drive the same record.
 
+use std::collections::HashMap;
+
 use super::Facade;
 use crate::ids::ProjectId;
 use crate::ports::StoreError;
+use crate::process::ProcStatus;
+use crate::projects::{ConfigStatus, ProjectCommandView, ProjectSettingsPage, Visibility};
 use crate::settings::ProjectSettings;
 
 impl Facade {
@@ -69,6 +73,82 @@ impl Facade {
         let command = command.to_owned();
         self.project_settings.update(&project, |s| {
             s.command_terminal_alerts.insert(command, enabled);
+        })
+    }
+
+    /// The assembled per-project settings page — one read the settings page renders directly: the
+    /// project's root, whether its `solo.yml` currently loads, the shared and app-local command
+    /// roster (each with its live status and resolved terminal-alert state), the live running/total
+    /// counts, the local settings, and the resolved editor. One assembly behind the façade, so every
+    /// front renders the same page from the same source.
+    pub fn project_settings_page(
+        &self,
+        project: ProjectId,
+    ) -> Result<ProjectSettingsPage, StoreError> {
+        let root = self
+            .projects
+            .get(project)?
+            .ok_or_else(|| StoreError::Backend("no such project is open".into()))?
+            .root;
+        let config = match crate::config::load(&crate::config::config_path(&root)) {
+            Ok(_) => ConfigStatus {
+                valid: true,
+                error: None,
+            },
+            Err(err) => ConfigStatus {
+                valid: false,
+                error: Some(err.to_string()),
+            },
+        };
+
+        let settings = self.project_settings.get(&project)?;
+        // The live status of each of this project's processes, keyed by its display label (the
+        // command name), so a command's row reflects whether it is running.
+        let statuses: HashMap<String, ProcStatus> = self
+            .supervisor
+            .snapshot()
+            .into_iter()
+            .filter(|view| view.project == project)
+            .map(|view| (view.label, view.status))
+            .collect();
+
+        let shared = self.config.current(project).unwrap_or_default().processes;
+        let mut commands = Vec::with_capacity(shared.len() + settings.local_commands.len());
+        for (name, spec) in &shared {
+            commands.push(ProjectCommandView::new(
+                name.clone(),
+                spec,
+                Visibility::Shared,
+                settings.terminal_alerts_for(name),
+                statuses.get(name).copied(),
+            ));
+        }
+        for (name, spec) in &settings.local_commands {
+            commands.push(ProjectCommandView::new(
+                name.clone(),
+                spec,
+                Visibility::Local,
+                settings.terminal_alerts_for(name),
+                statuses.get(name).copied(),
+            ));
+        }
+
+        let running = commands
+            .iter()
+            .filter(|command| command.status == Some(ProcStatus::Running))
+            .count();
+        let total = shared.len() + settings.local_commands.len();
+        let resolved_editor = self.resolved_project_editor(project)?;
+
+        Ok(ProjectSettingsPage {
+            project,
+            root: root.display().to_string(),
+            config,
+            running,
+            total,
+            settings,
+            resolved_editor,
+            commands,
         })
     }
 

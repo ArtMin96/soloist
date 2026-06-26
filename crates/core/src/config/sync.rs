@@ -206,6 +206,13 @@ impl ConfigEngine {
         states.get(&project)?.last.processes.get(name).cloned()
     }
 
+    /// The last-synced `solo.yml` for a loaded project, `None` when the project is not open. The
+    /// shared config as the engine last read or wrote it — the settings page reads this to list a
+    /// project's shared commands without touching the filesystem.
+    pub fn current(&self, project: ProjectId) -> Option<SoloYml> {
+        lock(&self.states).get(&project).map(|s| s.last.clone())
+    }
+
     fn snapshot(&self, project: ProjectId) -> Option<(PathBuf, Hash, SoloYml)> {
         let states = lock(&self.states);
         let state = states.get(&project)?;
