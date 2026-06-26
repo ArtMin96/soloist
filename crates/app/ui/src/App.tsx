@@ -3,11 +3,13 @@ import { AgentPicker } from "@/components/AgentPicker";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { OrphanDialog } from "@/components/OrphanDialog";
+import { SettingsOverlay } from "@/components/settings/SettingsOverlay";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
 import { Titlebar } from "@/components/titlebar/Titlebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TrustDialog } from "@/components/TrustDialog";
+import { AppearanceProvider } from "@/store/AppearanceProvider";
 import { useAgents } from "@/store/useAgents";
 import { useAppInfo } from "@/store/useAppInfo";
 import { useOrphans } from "@/store/useOrphans";
@@ -28,6 +30,7 @@ export default function App() {
   const agents = useAgents(store.reportError);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const selected = store.processes.find((process) => process.id === selectedId) ?? null;
 
@@ -47,12 +50,17 @@ export default function App() {
     setPickerOpen(true);
   }, [reloadAgents]);
 
-  // Cmd/Ctrl+T opens the picker from anywhere — the keyboard-first launch path.
+  // Cmd/Ctrl+T opens the picker; Cmd/Ctrl+, opens Settings — the keyboard-first paths. (The
+  // full remappable keymap drives these from the Hotkeys registry in a later increment.)
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "t") {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      if (event.key.toLowerCase() === "t") {
         event.preventDefault();
         openPicker();
+      } else if (event.key === ",") {
+        event.preventDefault();
+        setSettingsOpen(true);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -70,73 +78,77 @@ export default function App() {
   );
 
   return (
-    <SignalsProvider>
-      <TooltipProvider delayDuration={400}>
-        <div className="flex h-screen flex-col bg-background text-foreground">
-          <Titlebar
-            appName={info?.name ?? "Soloist"}
-            appVersion={info?.version}
-            onOpenProject={projects.open}
-            onLaunchAgent={openPicker}
-          />
-          {store.error && <ErrorBanner message={store.error} onDismiss={store.clearError} />}
-          <div className="flex min-h-0 flex-1">
-            <Sidebar
-              projects={projects.projects}
-              processes={store.processes}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              onStart={store.start}
-              onStop={store.stop}
-              onRestart={store.restart}
-              onTrust={trustById}
-              onStartAll={store.startAll}
-              onRestartRunning={store.restartRunning}
-              onStopAll={store.stopAll}
+    <AppearanceProvider>
+      <SignalsProvider>
+        <TooltipProvider delayDuration={400}>
+          <div className="flex h-screen flex-col bg-background text-foreground">
+            <Titlebar
+              appName={info?.name ?? "Soloist"}
+              appVersion={info?.version}
+              onOpenProject={projects.open}
+              onLaunchAgent={openPicker}
             />
-            <main className="min-w-0 flex-1">
-              {selected ? (
-                <TerminalPane
-                  key={selected.id}
-                  process={selected}
-                  onStart={() => store.start(selected.id)}
-                  onStop={() => store.stop(selected.id)}
-                  onRestart={() => store.restart(selected.id)}
-                  onTrust={() => trustById(selected.id)}
-                />
-              ) : (
-                <EmptyState
-                  hasProcesses={store.processes.length > 0}
-                  onOpenProject={projects.open}
-                  notice={projects.notice}
-                />
-              )}
-            </main>
+            {store.error && <ErrorBanner message={store.error} onDismiss={store.clearError} />}
+            <div className="flex min-h-0 flex-1">
+              <Sidebar
+                projects={projects.projects}
+                processes={store.processes}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                onStart={store.start}
+                onStop={store.stop}
+                onRestart={store.restart}
+                onTrust={trustById}
+                onStartAll={store.startAll}
+                onRestartRunning={store.restartRunning}
+                onStopAll={store.stopAll}
+                onOpenSettings={() => setSettingsOpen(true)}
+              />
+              <main className="min-w-0 flex-1">
+                {selected ? (
+                  <TerminalPane
+                    key={selected.id}
+                    process={selected}
+                    onStart={() => store.start(selected.id)}
+                    onStop={() => store.stop(selected.id)}
+                    onRestart={() => store.restart(selected.id)}
+                    onTrust={() => trustById(selected.id)}
+                  />
+                ) : (
+                  <EmptyState
+                    hasProcesses={store.processes.length > 0}
+                    onOpenProject={projects.open}
+                    notice={projects.notice}
+                  />
+                )}
+              </main>
+            </div>
+            <OrphanDialog
+              orphans={orphans.orphans}
+              onKillOne={orphans.killOne}
+              onKillAll={orphans.killAll}
+              onLeave={orphans.leave}
+            />
+            <TrustDialog
+              review={trust.review}
+              onTrustCommand={(name) => {
+                if (trust.review) trust.trust(trust.review.project, name);
+              }}
+              onTrustAll={trust.trustAll}
+              onDismiss={trust.dismiss}
+            />
+            <AgentPicker
+              open={pickerOpen}
+              onOpenChange={setPickerOpen}
+              tools={agents.tools}
+              projects={projects.projects}
+              activeProjectId={selected?.project ?? null}
+              onLaunch={onLaunchAgent}
+            />
+            <SettingsOverlay open={settingsOpen} onOpenChange={setSettingsOpen} />
           </div>
-          <OrphanDialog
-            orphans={orphans.orphans}
-            onKillOne={orphans.killOne}
-            onKillAll={orphans.killAll}
-            onLeave={orphans.leave}
-          />
-          <TrustDialog
-            review={trust.review}
-            onTrustCommand={(name) => {
-              if (trust.review) trust.trust(trust.review.project, name);
-            }}
-            onTrustAll={trust.trustAll}
-            onDismiss={trust.dismiss}
-          />
-          <AgentPicker
-            open={pickerOpen}
-            onOpenChange={setPickerOpen}
-            tools={agents.tools}
-            projects={projects.projects}
-            activeProjectId={selected?.project ?? null}
-            onLaunch={onLaunchAgent}
-          />
-        </div>
-      </TooltipProvider>
-    </SignalsProvider>
+        </TooltipProvider>
+      </SignalsProvider>
+    </AppearanceProvider>
   );
 }
