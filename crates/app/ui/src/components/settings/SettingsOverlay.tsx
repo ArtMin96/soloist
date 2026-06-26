@@ -2,6 +2,7 @@ import { useState, type ComponentType, type ReactNode } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { X } from "lucide-react";
 import { AppearancePanel } from "@/components/settings/AppearancePanel";
+import { IntegrationsPanel } from "@/components/settings/IntegrationsPanel";
 import { PlaceholderPanel } from "@/components/settings/PlaceholderPanel";
 import { SettingsTabRail } from "@/components/settings/SettingsTabRail";
 import { ToolsPanel } from "@/components/settings/ToolsPanel";
@@ -18,6 +19,7 @@ import { Button } from "@/components/ui/button";
 // rail can list every source tab without each one needing a panel yet.
 const PANELS: Partial<Record<SettingsTabId, ComponentType>> = {
   appearance: AppearancePanel,
+  integrations: IntegrationsPanel,
   tools: ToolsPanel,
 };
 
