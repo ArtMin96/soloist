@@ -29,7 +29,7 @@ use crate::ports::{Clock, CorePorts, PtySize, SpawnSpec, StoreError};
 use crate::portscan::{self, PortProbe, WaitForPortError};
 use crate::process::{ProcessKind, ProcessView};
 use crate::projects::{LoadProjectError, ProjectLoad, ProjectService, ProjectView, Projects};
-use crate::settings::SettingsStore;
+use crate::settings::{Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::trust::TrustStore;
 
@@ -71,7 +71,7 @@ pub struct Facade {
     timers: Timers,
     scratchpads: Scratchpads,
     todos: Todos,
-    settings: SettingsStore,
+    settings: SettingsStore<(), Settings>,
 }
 
 impl Facade {

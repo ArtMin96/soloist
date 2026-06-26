@@ -14,7 +14,7 @@ use crate::filewatch::{FileWatcher, NoopFileWatcher};
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
 use crate::notify::{NoopNotifier, Notifier};
 use crate::portscan::{NoopPortProbe, PortProbe};
-use crate::settings::{NoopSettingsRepo, SettingsRepo};
+use crate::settings::{NoopSettingsRepo, Settings, SettingsRepo};
 use crate::shellenv::{NoopShellEnvProbe, ShellEnvProbe};
 
 use super::{
@@ -55,7 +55,7 @@ pub struct CorePorts {
     pub(crate) agent_tools: Arc<dyn AgentToolRepo>,
     pub(crate) version_probe: Arc<dyn VersionProbe>,
     pub(crate) shell_env_probe: Arc<dyn ShellEnvProbe>,
-    pub(crate) settings_repo: Arc<dyn SettingsRepo>,
+    pub(crate) settings_repo: Arc<dyn SettingsRepo<(), Settings>>,
     pub(crate) app_env: BTreeMap<String, String>,
 }
 
@@ -220,7 +220,7 @@ impl CorePortsBuilder {
     /// Overrides the durable settings store the settings aggregate persists to (defaults to
     /// [`NoopSettingsRepo`], which stores nothing, so settings stay at their defaults). The real
     /// adapter is SQLite, the same store backing every other durable repository.
-    pub fn settings_repo(mut self, settings_repo: Arc<dyn SettingsRepo>) -> Self {
+    pub fn settings_repo(mut self, settings_repo: Arc<dyn SettingsRepo<(), Settings>>) -> Self {
         self.ports.settings_repo = settings_repo;
         self
     }

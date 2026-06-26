@@ -17,25 +17,25 @@ fn key_value_enabled() -> Settings {
 fn load_on_a_fresh_store_returns_none() {
     // Nothing stored yet, so the aggregate applies the documented defaults.
     let store = SqliteStore::open_in_memory().expect("in-memory store");
-    assert_eq!(store.load().unwrap(), None);
+    assert_eq!(store.load(&()).unwrap(), None);
 }
 
 #[test]
 fn save_then_load_round_trips() {
     let store = SqliteStore::open_in_memory().expect("in-memory store");
     let settings = key_value_enabled();
-    store.save(&settings).unwrap();
-    assert_eq!(store.load().unwrap(), Some(settings));
+    store.save(&(), &settings).unwrap();
+    assert_eq!(store.load(&()).unwrap(), Some(settings));
 }
 
 #[test]
 fn save_replaces_the_single_record() {
     // The `id = 1` singleton: a second save overwrites the first rather than adding a row.
     let store = SqliteStore::open_in_memory().expect("in-memory store");
-    store.save(&Settings::default()).unwrap();
-    store.save(&key_value_enabled()).unwrap();
+    store.save(&(), &Settings::default()).unwrap();
+    store.save(&(), &key_value_enabled()).unwrap();
 
-    assert_eq!(store.load().unwrap(), Some(key_value_enabled()));
+    assert_eq!(store.load(&()).unwrap(), Some(key_value_enabled()));
     let count: i64 = store
         .lock()
         .query_row("SELECT COUNT(*) FROM settings", [], |row| row.get(0))
@@ -52,12 +52,12 @@ fn settings_survive_a_store_reopen() {
     let settings = key_value_enabled();
     {
         let store = SqliteStore::open(&db).expect("open");
-        store.save(&settings).unwrap();
+        store.save(&(), &settings).unwrap();
     }
 
     let store = SqliteStore::open(&db).expect("reopen");
     assert_eq!(
-        store.load().unwrap(),
+        store.load(&()).unwrap(),
         Some(settings),
         "the settings record survives the reopen"
     );

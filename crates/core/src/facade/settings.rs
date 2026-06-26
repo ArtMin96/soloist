@@ -16,18 +16,21 @@ impl Facade {
     /// feature-tool groups to serve (core groups are always served). Absent settings read as the
     /// documented defaults.
     pub fn mcp_tool_groups(&self) -> Result<McpToolGroups, StoreError> {
-        self.settings.mcp_tool_groups()
+        Ok(self.settings.get(&())?.mcp_tool_groups)
     }
 
     /// Enables or disables one MCP feature group and persists it, returning the updated enablement.
     /// One method behind the façade, so a settings UI, the CLI, or an MCP tool all toggle the same
-    /// durable record.
+    /// durable record. Routes through the generic store's single `update` write primitive.
     pub fn set_mcp_tool_group(
         &self,
         group: McpFeatureGroup,
         enabled: bool,
     ) -> Result<McpToolGroups, StoreError> {
-        self.settings.set_mcp_tool_group(group, enabled)
+        Ok(self
+            .settings
+            .update(&(), |s| s.mcp_tool_groups.set(group, enabled))?
+            .mcp_tool_groups)
     }
 }
 

@@ -1,13 +1,19 @@
 //! Durable application settings (a focused context): user preferences that persist across runs,
-//! distinct from `solo.yml` project config (C1) and from ephemeral runtime state.
+//! distinct from `solo.yml` project config (C1, [`Visibility::Shared`](crate::config)) and from
+//! ephemeral runtime state.
 //!
-//! The first setting is the per-group MCP tool enablement. The MCP server's core tool groups are
-//! always served; the feature groups can be toggled — Scratchpads, Todos and Timers default on,
-//! Key-Value defaults off. The settings document is a single global record; the [`SettingsRepo`]
-//! port persists it (SQLite in the app, nothing under the `Noop` default), and the [`SettingsStore`]
-//! aggregate applies the defaults so an absent record reads as the documented defaults. The
-//! document carries serde defaults, so a build that adds a setting still reads a record an older
-//! build wrote.
+//! One generic base serves every settings surface. A [`SettingsStore<K, D>`] reads and writes a
+//! serde-default document `D` keyed by `K` through a [`SettingsRepo<K, D>`] port, applying the
+//! document defaults so an absent record reads as the defaults. The key selects the surface: the
+//! global preferences are [`Settings`] keyed by `()` (one singleton record); a per-project local
+//! document is keyed by [`ProjectId`](crate::ids::ProjectId) over the same base. Adding a setting
+//! is one `#[serde(default)]` field plus one façade getter/setter — never a new store. Because the
+//! document carries serde defaults, a build that adds a field still reads a record an older build
+//! wrote.
+//!
+//! The first global setting is the per-group MCP tool enablement: the MCP server's core tool groups
+//! are always served, while the feature groups can be toggled — Scratchpads, Todos and Timers
+//! default on, Key-Value defaults off.
 
 use std::sync::Arc;
 
@@ -92,66 +98,61 @@ pub struct Settings {
     pub mcp_tool_groups: McpToolGroups,
 }
 
-/// Durable settings repository: loads and saves the single global [`Settings`] record. `load`
-/// returns `None` when nothing has been stored yet (a fresh install); the aggregate maps that to
-/// the defaults. `save` replaces the whole record.
-pub trait SettingsRepo: Send + Sync {
-    /// The stored settings record, or `None` when none has been written yet.
-    fn load(&self) -> Result<Option<Settings>, StoreError>;
+/// Durable settings repository: loads and saves a document `D` keyed by `K`. `load` returns `None`
+/// when nothing has been stored for that key yet (a fresh install); the aggregate maps that to the
+/// defaults. `save` replaces the whole record. `K = ()` selects the global singleton record;
+/// `K = ProjectId` selects one project's local record. The generic parameters keep the trait
+/// object-safe, so an adapter is held as `Arc<dyn SettingsRepo<K, D>>`.
+pub trait SettingsRepo<K, D>: Send + Sync {
+    /// The stored record for `key`, or `None` when none has been written yet.
+    fn load(&self, key: &K) -> Result<Option<D>, StoreError>;
 
-    /// Stores `settings`, replacing any existing record.
-    fn save(&self, settings: &Settings) -> Result<(), StoreError>;
+    /// Stores `value` under `key`, replacing any existing record.
+    fn save(&self, key: &K, value: &D) -> Result<(), StoreError>;
 }
 
 /// A [`SettingsRepo`] that stores nothing — the default until the durable adapter is wired, so the
 /// core runs (settings stay at their defaults) without it. `load` always returns `None`; `save` is
-/// discarded.
+/// discarded. One value implements the port for every surface (`K`/`D` pair).
 #[derive(Clone, Copy, Default)]
 pub struct NoopSettingsRepo;
 
-impl SettingsRepo for NoopSettingsRepo {
-    fn load(&self) -> Result<Option<Settings>, StoreError> {
+impl<K, D> SettingsRepo<K, D> for NoopSettingsRepo {
+    fn load(&self, _key: &K) -> Result<Option<D>, StoreError> {
         Ok(None)
     }
-    fn save(&self, _settings: &Settings) -> Result<(), StoreError> {
+    fn save(&self, _key: &K, _value: &D) -> Result<(), StoreError> {
         Ok(())
     }
 }
 
-/// The settings aggregate: reads and updates the durable [`Settings`] record through the port,
-/// applying the documented defaults so an absent record reads as the defaults. The `Facade` owns
-/// one instance (mirrors [`TrustStore`](crate::trust::TrustStore) over its repo).
-pub struct SettingsStore {
-    repo: Arc<dyn SettingsRepo>,
+/// The settings aggregate: reads and updates a durable document `D` keyed by `K` through the port,
+/// applying the document defaults so an absent record reads as the defaults. The same base serves
+/// every surface — the `Facade` owns a `SettingsStore<(), Settings>` for global preferences, and a
+/// `SettingsStore<ProjectId, ProjectSettings>` for per-project local ones — so neither re-rolls
+/// persistence (mirrors [`TrustStore`](crate::trust::TrustStore) over its repo).
+pub struct SettingsStore<K, D> {
+    repo: Arc<dyn SettingsRepo<K, D>>,
 }
 
-impl SettingsStore {
-    pub fn new(repo: Arc<dyn SettingsRepo>) -> Self {
+impl<K, D: Default> SettingsStore<K, D> {
+    pub fn new(repo: Arc<dyn SettingsRepo<K, D>>) -> Self {
         Self { repo }
     }
 
-    /// The current settings — the stored record, or the defaults if none has been stored.
-    pub fn get(&self) -> Result<Settings, StoreError> {
-        Ok(self.repo.load()?.unwrap_or_default())
+    /// The current document for `key` — the stored record, or the defaults if none has been stored.
+    pub fn get(&self, key: &K) -> Result<D, StoreError> {
+        Ok(self.repo.load(key)?.unwrap_or_default())
     }
 
-    /// The current MCP feature-group enablement — the read the MCP server consults to decide which
-    /// feature-tool groups to serve.
-    pub fn mcp_tool_groups(&self) -> Result<McpToolGroups, StoreError> {
-        Ok(self.get()?.mcp_tool_groups)
-    }
-
-    /// Sets one MCP feature group's enablement and persists the whole record. Returns the updated
-    /// group enablement.
-    pub fn set_mcp_tool_group(
-        &self,
-        group: McpFeatureGroup,
-        enabled: bool,
-    ) -> Result<McpToolGroups, StoreError> {
-        let mut settings = self.get()?;
-        settings.mcp_tool_groups.set(group, enabled);
-        self.repo.save(&settings)?;
-        Ok(settings.mcp_tool_groups)
+    /// The single write primitive: read the current document, apply one `mutator`, persist the whole
+    /// record, and return the updated document. Every façade setter routes through this, so there is
+    /// one place a settings write happens.
+    pub fn update(&self, key: &K, mutator: impl FnOnce(&mut D)) -> Result<D, StoreError> {
+        let mut value = self.get(key)?;
+        mutator(&mut value);
+        self.repo.save(key, &value)?;
+        Ok(value)
     }
 }
 
