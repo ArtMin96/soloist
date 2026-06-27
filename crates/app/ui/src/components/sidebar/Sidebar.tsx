@@ -3,6 +3,7 @@ import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
 import { Button } from "@/components/ui/button";
 import { groupByProject, kindCollapseKey, projectCollapseKey } from "@/store/projects";
 import { useCollapseState } from "@/store/useCollapseState";
+import { useSidebarSettings } from "@/store/sidebarSettingsContext";
 import type { ProcessView, ProjectView } from "@/domain";
 
 interface SidebarProps {
@@ -37,7 +38,8 @@ export function Sidebar({
   onStopAll,
   onOpenSettings,
 }: SidebarProps) {
-  const trees = groupByProject(processes, projects);
+  const { sidebar } = useSidebarSettings();
+  const trees = groupByProject(processes, projects, sidebar.hide_empty_sections);
   const [collapsed, setCollapsed] = useCollapseState();
 
   return (
@@ -66,17 +68,19 @@ export function Sidebar({
           </div>
         ))}
       </nav>
-      <div className="border-t border-sidebar-border p-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start gap-2 px-2 text-muted-foreground hover:text-foreground"
-          onClick={onOpenSettings}
-        >
-          <Settings />
-          Settings
-        </Button>
-      </div>
+      {sidebar.show_settings_footer && (
+        <div className="border-t border-sidebar-border p-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 px-2 text-muted-foreground hover:text-foreground"
+            onClick={onOpenSettings}
+          >
+            <Settings />
+            Settings
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
