@@ -17,8 +17,15 @@ pub use repo::{AgentToolRepo, NoopAgentToolRepo};
 pub use tool::{AgentKind, AgentTool, PromptMode};
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use crate::ports::StoreError;
+use crate::cache::ReadCache;
+use crate::ports::{Clock, StoreError};
+
+/// How long an auto-detection sweep is reused before the CLIs are probed again. CLIs are
+/// installed or removed rarely, so a burst of picker opens shares one sweep; a fresh install
+/// shows after this window or an app restart. Mirrors the env-capture cadence ([`crate::shellenv`]).
+const DETECT_CACHE_TTL: Duration = Duration::from_secs(600);
 
 /// The agents context surface: the agent-tool registry plus auto-detection of which
 /// providers' CLIs are installed. Built once by the composition root from its two ports and
@@ -27,14 +34,23 @@ use crate::ports::StoreError;
 pub struct Agents {
     tools: Arc<dyn AgentToolRepo>,
     version_probe: Arc<dyn VersionProbe>,
+    /// A detection sweep reused for [`DETECT_CACHE_TTL`], so repeated picker opens share one
+    /// round of `--version` probes instead of re-running the slow probe each time.
+    detect_cache: ReadCache<Vec<DetectedTool>>,
 }
 
 impl Agents {
-    /// Assembles the context over its durable registry and its auto-detect probe.
-    pub fn new(tools: Arc<dyn AgentToolRepo>, version_probe: Arc<dyn VersionProbe>) -> Self {
+    /// Assembles the context over its durable registry, its auto-detect probe, and a `clock`
+    /// driving the detection cache's TTL.
+    pub fn new(
+        tools: Arc<dyn AgentToolRepo>,
+        version_probe: Arc<dyn VersionProbe>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
         Self {
             tools,
             version_probe,
+            detect_cache: ReadCache::new(clock, DETECT_CACHE_TTL),
         }
     }
 
@@ -58,21 +74,26 @@ impl Agents {
     /// `<command> --version`. A [`AgentKind::Generic`] tool is never probed (it is
     /// user-configured) and so reports not-installed. The probes run **off** the async
     /// runtime, so a missing or slow CLI never stalls a runtime worker; a failed probe simply
-    /// reports not-installed. Must run within a `tokio` runtime.
+    /// reports not-installed. The sweep is cached for [`DETECT_CACHE_TTL`], so repeated picker
+    /// opens reuse one round of probes. Must run within a `tokio` runtime.
     pub async fn detect_installed(&self) -> Result<Vec<DetectedTool>, StoreError> {
-        let tools = self.tools.list()?;
-        let probe = self.version_probe.clone();
-        Ok(crate::supervision::run_blocking(move || {
-            tools
-                .into_iter()
-                .map(|tool| {
-                    let installed =
-                        tool.kind.auto_detectable() && probe.is_installed(&tool.command);
-                    DetectedTool { tool, installed }
+        self.detect_cache
+            .get_or_try_init(|| async {
+                let tools = self.tools.list()?;
+                let probe = self.version_probe.clone();
+                Ok(crate::supervision::run_blocking(move || {
+                    tools
+                        .into_iter()
+                        .map(|tool| {
+                            let installed =
+                                tool.kind.auto_detectable() && probe.is_installed(&tool.command);
+                            DetectedTool { tool, installed }
+                        })
+                        .collect()
                 })
-                .collect()
-        })
-        .await)
+                .await)
+            })
+            .await
     }
 }
 

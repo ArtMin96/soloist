@@ -111,6 +111,7 @@ impl Facade {
             // The scheduler shares this wake handle with the aggregate (see `Timers`), so creating
             // or resuming a timer re-evaluates the schedule at once.
             timers: Timers::new(timer_repo, clock.clone(), Arc::new(Notify::new())),
+            agents: Agents::new(agent_tools, version_probe, clock.clone()),
             scratchpads: Scratchpads::new(scratchpad_repo),
             todos: Todos::new(todo_repo),
             settings: SettingsStore::new(settings_repo),
@@ -125,7 +126,6 @@ impl Facade {
             projects: Projects::new(projects),
             trust: TrustStore::new(trust.clone()),
             config: ConfigEngine::new(trust, bus.clone()),
-            agents: Agents::new(agent_tools, version_probe),
             idle: Arc::new(IdleTracker::new()),
             identity: Identity::new(),
             bus,

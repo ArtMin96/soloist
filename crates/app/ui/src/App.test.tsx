@@ -15,6 +15,14 @@ vi.mock("@/components/terminal/useTerminal", () => ({
   useTerminal: () => ({ hostRef: { current: null }, state: "not-started" as const }),
 }));
 
+// The persisted read-model cache is the disk boundary (tauri-plugin-store); stub it so the
+// dashboard revalidates against the mocked backend from a cold cache, deterministically.
+vi.mock("@/store/cache/persistentCache", () => ({
+  CacheKey: { projects: "projects", appInfo: "app-info", agents: "agents" },
+  readSnapshot: vi.fn(() => Promise.resolve(null)),
+  writeSnapshot: vi.fn(() => Promise.resolve()),
+}));
+
 import App from "@/App";
 
 const STACK: ProcessView[] = [

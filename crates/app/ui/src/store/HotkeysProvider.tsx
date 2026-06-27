@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import {
   disableHotkey,
   hotkeys as readHotkeys,
@@ -7,6 +7,7 @@ import {
   resetHotkey,
 } from "@/api";
 import { HotkeysContext } from "@/store/hotkeysContext";
+import { useLoadOnce } from "@/store/useLoadOnce";
 import type { Binding, HotkeyAction, HotkeyBindingView } from "@/domain";
 
 // Loads the keymap once and provides it to the whole app, so the global keyboard handler and the
@@ -16,17 +17,7 @@ import type { Binding, HotkeyAction, HotkeyBindingView } from "@/domain";
 export function HotkeysProvider({ children }: { children: ReactNode }) {
   const [bindings, setBindings] = useState<HotkeyBindingView[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    readHotkeys()
-      .then((list) => {
-        if (!cancelled) setBindings(list);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  useLoadOnce(readHotkeys, setBindings);
 
   const remap = useCallback((action: HotkeyAction, binding: Binding) => {
     void remapHotkey(action, binding)
