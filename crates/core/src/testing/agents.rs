@@ -3,6 +3,7 @@
 //! auto-detection logic are exercised headless, with no SQLite and no real subprocess.
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::agents::{AgentTool, AgentToolRepo, VersionProbe};
 use crate::ports::StoreError;
@@ -26,9 +27,11 @@ impl AgentToolRepo for FakeAgentToolRepo {
 }
 
 /// A [`VersionProbe`] that reports a fixed set of commands as installed, for headless
-/// auto-detection tests — no real `--version` subprocess is run.
+/// auto-detection tests — no real `--version` subprocess is run. It counts its probes so a
+/// test can assert the detection cache reused a sweep instead of re-probing.
 pub struct FakeVersionProbe {
     installed: HashSet<String>,
+    probes: AtomicUsize,
 }
 
 impl FakeVersionProbe {
@@ -36,12 +39,19 @@ impl FakeVersionProbe {
     pub fn new(installed: &[&str]) -> Self {
         Self {
             installed: installed.iter().map(|s| s.to_string()).collect(),
+            probes: AtomicUsize::new(0),
         }
+    }
+
+    /// How many times [`VersionProbe::is_installed`] has been called across the probe's life.
+    pub fn probes(&self) -> usize {
+        self.probes.load(Ordering::SeqCst)
     }
 }
 
 impl VersionProbe for FakeVersionProbe {
     fn is_installed(&self, command: &str) -> bool {
+        self.probes.fetch_add(1, Ordering::SeqCst);
         self.installed.contains(command)
     }
 }

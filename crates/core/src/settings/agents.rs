@@ -1,5 +1,5 @@
 //! Agents settings (global Agents tab): the auto-summarization opt-in. The agent *tool registry*
-//! itself (detect / add / edit / enable) lives in the C4 agents context (Phase 7) and is reused by
+//! itself (detect / add / edit / enable) lives in the C4 agents context and is reused by
 //! the tab, not duplicated here — this document holds only the summarization preference.
 //!
 //! Auto-summarization is OFF by default (a locked decision): the core must never hard-depend on an
