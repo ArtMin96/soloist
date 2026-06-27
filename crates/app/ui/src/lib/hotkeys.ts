@@ -87,6 +87,13 @@ export function bindingFromEvent(event: KeyboardEvent): Binding | null {
   };
 }
 
+// Whether a chord carries a command modifier (Ctrl/Alt/Super). Shift alone is still typing, so
+// it does not count. App-wide shortcuts with a command modifier fire even while a text field is
+// focused; bare-key shortcuts must yield to typing, so the live handler uses this to decide.
+export function hasCommandModifier(binding: Binding): boolean {
+  return binding.ctrl || binding.alt || binding.super;
+}
+
 export function bindingsEqual(a: Binding, b: Binding): boolean {
   return (
     a.ctrl === b.ctrl &&

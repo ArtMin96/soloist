@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bindingFromEvent, bindingsEqual, formatChord } from "@/lib/hotkeys";
+import { bindingFromEvent, bindingsEqual, formatChord, hasCommandModifier } from "@/lib/hotkeys";
 import type { Binding } from "@/domain";
 
 const chord = (over: Partial<Binding>): Binding => ({
@@ -44,5 +44,15 @@ describe("bindingsEqual", () => {
   it("compares every field", () => {
     expect(bindingsEqual(chord({ ctrl: true }), chord({ ctrl: true }))).toBe(true);
     expect(bindingsEqual(chord({ ctrl: true }), chord({ ctrl: true, shift: true }))).toBe(false);
+  });
+});
+
+describe("hasCommandModifier", () => {
+  it("treats Ctrl/Alt/Super as command modifiers but not Shift or a bare key", () => {
+    expect(hasCommandModifier(chord({ ctrl: true }))).toBe(true);
+    expect(hasCommandModifier(chord({ alt: true }))).toBe(true);
+    expect(hasCommandModifier(chord({ super: true }))).toBe(true);
+    expect(hasCommandModifier(chord({ shift: true }))).toBe(false);
+    expect(hasCommandModifier(chord({ key: "R" }))).toBe(false);
   });
 });
