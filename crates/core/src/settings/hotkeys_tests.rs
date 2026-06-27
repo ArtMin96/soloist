@@ -111,6 +111,11 @@ fn a_within_scope_collision_is_reported() {
     assert!(conflicts.contains(&HotkeyAction::QuickActions));
     // An untouched action in the same scope is not implicated.
     assert!(!conflicts.contains(&HotkeyAction::QuickJump));
+
+    // The view carries the same flag per row, so the UI never re-derives the rule.
+    assert!(row_for(&hotkeys, HotkeyAction::OpenCommandPalette).conflict);
+    assert!(row_for(&hotkeys, HotkeyAction::QuickActions).conflict);
+    assert!(!row_for(&hotkeys, HotkeyAction::QuickJump).conflict);
 }
 
 #[test]

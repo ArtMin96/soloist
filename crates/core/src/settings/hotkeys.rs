@@ -185,6 +185,9 @@ pub struct HotkeyBindingView {
     pub binding: Option<Binding>,
     /// Whether the effective binding is the code default (no user override).
     pub is_default: bool,
+    /// Whether this binding collides with another action in the same scope (`conflicts`) — the
+    /// rows the UI flags. Carried in the view so the frontend never re-derives the rule.
+    pub conflict: bool,
 }
 
 /// The Hotkeys tab document. Stores only deviations from the defaults: `Some(binding)` is a remap,
@@ -229,6 +232,8 @@ impl Hotkeys {
     /// The full keymap read model — every action with its scope, effective binding, and whether it
     /// is still the default.
     pub fn view(&self) -> Vec<HotkeyBindingView> {
+        let conflicts: std::collections::BTreeSet<HotkeyAction> =
+            self.conflicts().into_iter().collect();
         HotkeyAction::ALL
             .into_iter()
             .map(|action| HotkeyBindingView {
@@ -236,6 +241,7 @@ impl Hotkeys {
                 scope: action.scope(),
                 binding: self.binding(action),
                 is_default: !self.overrides.contains_key(&action),
+                conflict: conflicts.contains(&action),
             })
             .collect()
     }

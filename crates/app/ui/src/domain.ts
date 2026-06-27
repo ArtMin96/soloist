@@ -311,12 +311,14 @@ export interface Binding {
 }
 
 // One action's effective state in the keymap read model (mirrors core::HotkeyBindingView).
-// `binding` is null when the action is disabled; `is_default` is true when no override is set.
+// `binding` is null when the action is disabled; `is_default` is true when no override is set;
+// `conflict` is true when the binding collides with another action in the same scope.
 export interface HotkeyBindingView {
   action: HotkeyAction;
   scope: HotkeyScope;
   binding: Binding | null;
   is_default: boolean;
+  conflict: boolean;
 }
 
 // The Agents tab document (mirrors core::AgentSettings) — the auto-summarization opt-in only
