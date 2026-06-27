@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
+import { DEFAULT_APPEARANCE } from "@/lib/appearance";
 import type { ProcessView } from "@/domain";
 
 // The terminal hook drives the real xterm.js emulator against a measured DOM surface,
@@ -82,6 +83,7 @@ function mockBackend(processes: ProcessView[]) {
     if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
     if (cmd === "proc_list") return processes;
     if (cmd === "project_list") return [PROJECT];
+    if (cmd === "appearance") return DEFAULT_APPEARANCE;
     return undefined;
   });
 }
@@ -167,6 +169,7 @@ describe("App dashboard", () => {
       if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
       if (cmd === "proc_list") return STACK;
       if (cmd === "project_list") return [PROJECT];
+      if (cmd === "appearance") return DEFAULT_APPEARANCE;
       if (cmd === "config_trust") {
         trusted = args as { project: number; name: string };
         return undefined;
@@ -190,6 +193,7 @@ describe("App dashboard", () => {
         if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
         if (cmd === "proc_list") return STACK;
         if (cmd === "project_list") return [PROJECT];
+        if (cmd === "appearance") return DEFAULT_APPEARANCE;
         return undefined;
       },
       { shouldMockEvents: true },
