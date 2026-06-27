@@ -225,3 +225,107 @@ fn a_supported_icon_is_written_to_solo_yml() {
         Some(std::path::Path::new("assets/icon.png"))
     );
 }
+
+#[test]
+fn an_extensionless_icon_is_rejected() {
+    let (facade, project, _dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+
+    let err = facade
+        .set_project_icon(project, Some("assets/icon".into()))
+        .unwrap_err();
+
+    assert!(matches!(err, ConfigWriteError::UnsupportedIcon(p) if p == "assets/icon"));
+}
+
+#[test]
+fn setting_an_icon_refreshes_the_project_record_and_announces_it() {
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .project_settings_repo(Arc::new(FakeSettingsRepo::new()))
+        .build(),
+    );
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(
+        config_path(dir.path()),
+        "processes:\n  Web:\n    command: npm run dev\n",
+    )
+    .expect("seed solo.yml");
+    // Register the project so it has a durable record (the displayed icon's source), then open it.
+    let record = facade
+        .projects()
+        .add(dir.path(), None, None)
+        .expect("register project");
+    facade
+        .config()
+        .open(record.id, record.root.clone())
+        .expect("open config");
+    let mut events = facade.subscribe();
+
+    facade
+        .set_project_icon(record.id, Some("assets/icon.png".into()))
+        .expect("set icon");
+
+    // The durable record now carries the new icon, so project_list (the sidebar's source) shows it.
+    let refreshed = facade
+        .projects()
+        .get(record.id)
+        .expect("get")
+        .expect("record");
+    assert_eq!(
+        refreshed.icon.as_deref(),
+        Some(std::path::Path::new("assets/icon.png"))
+    );
+    // And the change was announced, so the project read model re-reads without a reopen.
+    assert!(matches!(
+        events.try_recv(),
+        Ok(DomainEvent::ProjectOpened { id }) if id == record.id
+    ));
+}
+
+#[test]
+fn saving_to_yaml_rolls_back_the_shared_add_when_clearing_the_local_copy_fails() {
+    let settings: Arc<FakeSettingsRepo<ProjectId, ProjectSettings>> =
+        Arc::new(FakeSettingsRepo::new());
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .project_settings_repo(settings.clone())
+        .build(),
+    );
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(
+        config_path(dir.path()),
+        "processes:\n  Web:\n    command: npm run dev\n",
+    )
+    .expect("seed solo.yml");
+    let project = ProjectId::from_raw(1);
+    facade
+        .config()
+        .open(project, dir.path().to_path_buf())
+        .expect("open config");
+    facade
+        .add_local_command(project, "Job", spec("php queue"))
+        .expect("add local");
+
+    // Make the local-remove step fail after the shared add has been written.
+    settings.fail_saves();
+    let err = facade.save_command_to_yaml(project, "Job").unwrap_err();
+
+    assert!(matches!(err, MoveCommandError::Store(_)));
+    // The shared add is rolled back, so the command is not left in solo.yml — never in both stores.
+    let text = std::fs::read_to_string(config_path(dir.path())).unwrap();
+    assert!(
+        !text.contains("Job"),
+        "the shared add is rolled back, leaving solo.yml without the command"
+    );
+}

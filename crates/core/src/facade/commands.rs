@@ -8,34 +8,75 @@
 //! from the source (and rolls back on failure), so a command is never lost and the two stores never
 //! both keep it after the move completes. One behaviour, many fronts.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::Facade;
-use crate::config::{ConfigWriteError, ProcessSpec, TrustReviewCommand};
+use crate::config::{ConfigWriteError, ProcessSpec, TrustReviewCommand, WriteError};
+use crate::events::DomainEvent;
 use crate::ids::ProjectId;
 use crate::ports::StoreError;
+use crate::projects::ProjectError;
 use crate::settings::ProjectSettings;
 
+/// The image formats a project icon may use, matched against the path extension so an
+/// unsupported file is rejected at the write rather than silently stored. The set mirrors the
+/// [`ConfigWriteError::UnsupportedIcon`] message and the read-side image sniff.
+const SUPPORTED_ICON_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "ico", "webp"];
+
+fn is_supported_icon(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| SUPPORTED_ICON_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
+}
+
 impl Facade {
-    /// Sets or clears (`None`) the project's icon in `solo.yml` — a shared field. Rejects an `.svg`
-    /// path (only png/jpg/gif/ico/webp are supported), matching the editor. An icon change is not a
-    /// `processes:` edit, so the file is re-rendered rather than edited in place.
+    /// Sets or clears (`None`) the project's icon in `solo.yml` — a shared field. Rejects a path
+    /// whose extension is not a supported raster format (png/jpg/jpeg/gif/ico/webp), matching the
+    /// editor. An icon change is not a `processes:` edit, so the file is re-rendered rather than
+    /// edited in place, and the project's display metadata is refreshed so the new icon shows
+    /// without reopening the project.
     pub fn set_project_icon(
         &self,
         project: ProjectId,
         icon: Option<String>,
     ) -> Result<(), ConfigWriteError> {
         if let Some(path) = &icon {
-            if path.to_ascii_lowercase().ends_with(".svg") {
+            if !is_supported_icon(path) {
                 return Err(ConfigWriteError::UnsupportedIcon(path.clone()));
             }
         }
-        self.config
-            .write(project, move |config| {
-                config.icon = icon.map(PathBuf::from);
-                Ok(())
-            })
-            .map(|_| ())
+        self.config.write(project, move |config| {
+            config.icon = icon.map(PathBuf::from);
+            Ok(())
+        })?;
+        self.refresh_project_metadata(project)
+    }
+
+    /// Re-registers a project's display metadata (name/icon) from its current `solo.yml` and
+    /// announces the change with [`DomainEvent::ProjectOpened`], so the project read model (sidebar
+    /// row, header) reflects a shared name/icon edit without reopening — an icon/name change is not
+    /// a `processes:` diff, so the config write itself publishes nothing and the durable project
+    /// record (which carries the displayed icon) would otherwise stay stale. A no-op when the
+    /// project is not registered.
+    fn refresh_project_metadata(&self, project: ProjectId) -> Result<(), ConfigWriteError> {
+        let Some(record) = self.projects.get(project)? else {
+            return Ok(());
+        };
+        let config = self.config.current(project);
+        let name = config.as_ref().and_then(|c| c.name.as_deref());
+        let icon = config.as_ref().and_then(|c| c.icon.as_deref());
+        self.projects
+            .add(&record.root, name, icon)
+            .map_err(|err| match err {
+                ProjectError::Store(source) => ConfigWriteError::Store(source),
+                ProjectError::Root { source } => ConfigWriteError::Write(WriteError::Write {
+                    path: record.root.clone(),
+                    source,
+                }),
+            })?;
+        self.bus.publish(DomainEvent::ProjectOpened { id: project });
+        Ok(())
     }
 
     /// Adds a command to the project's `solo.yml` (shared). Returns the commands the write left
@@ -231,8 +272,9 @@ impl Facade {
     }
 
     /// Moves an app-local command into `solo.yml` ("Save to solo.yml"). The command is written to
-    /// `solo.yml` first (re-trusting it); if that fails the local command is left intact. Returns the
-    /// commands the write left needing trust.
+    /// `solo.yml` first (re-trusting it); if that fails the local command is left intact, and if
+    /// clearing the local copy then fails the shared write is rolled back — so the command is never
+    /// lost or left in both stores. Returns the commands the write left needing trust.
     pub fn save_command_to_yaml(
         &self,
         project: ProjectId,
@@ -246,9 +288,14 @@ impl Facade {
             .cloned()
             .ok_or(MoveCommandError::NotLocal)?;
         let commands = self.add_shared_command(project, name, spec)?;
-        self.project_settings.update(&project, |s| {
+        if let Err(err) = self.project_settings.update(&project, |s| {
             s.local_commands.shift_remove(name);
-        })?;
+        }) {
+            // The shared write succeeded but clearing the local copy failed; remove the shared
+            // command again so it never lives in both stores (mirrors make_command_local).
+            let _ = self.remove_shared_command(project, name);
+            return Err(MoveCommandError::Store(err));
+        }
         Ok(commands)
     }
 }

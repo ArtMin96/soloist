@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use super::diff::{diff, ConfigSync};
 use super::edit;
-use super::load::{config_path, load_or_empty, ConfigError};
+use super::load::{config_path, load_or_empty, ConfigError, MAX_CONFIG_BYTES};
 use super::model::{ProcessSpec, SoloYml};
 use super::review::TrustReviewCommand;
 use super::write::WriteError;
@@ -153,8 +153,9 @@ impl ConfigEngine {
     /// returning the commands the change left needing trust (a shared add/edit re-trusts). A no-op
     /// mutation writes nothing; any error leaves the file untouched.
     ///
-    /// Blocking file I/O: an async caller must invoke it off-thread. Drive it from a single writer
-    /// per project, like [`Self::sync`].
+    /// Blocking file I/O — a settings write is small and infrequent, so the desktop adapter invokes
+    /// it directly; a caller batching large writes should move it off-thread (`spawn_blocking`).
+    /// Drive it from a single writer per project, like [`Self::sync`].
     pub fn write<F>(
         &self,
         project: ProjectId,
@@ -176,6 +177,14 @@ impl ConfigEngine {
         }
 
         let new_text = edit::rewrite(&text, &current, &intended)?;
+        // Never write past the read-side ceiling — a file that crossed it would be unreadable
+        // (`ConfigError::TooLarge`) on the next load. No buffer without a bound (CLAUDE.md §3/§8).
+        if new_text.len() as u64 > MAX_CONFIG_BYTES {
+            return Err(ConfigWriteError::Config(ConfigError::TooLarge {
+                path: path.clone(),
+                size: new_text.len() as u64,
+            }));
+        }
         atomic_write(&path, &new_text)?;
 
         let hash = content_hash(new_text.as_bytes());

@@ -150,3 +150,49 @@ fn a_quoted_key_entry_is_edited_in_place() {
     );
     assert!(out.contains("Queue:"), "the new entry is appended");
 }
+
+#[test]
+fn editing_one_command_in_a_rich_file_keeps_every_untouched_entry_byte_for_byte() {
+    // A multi-entry, multi-field, richly-commented file: editing one command's value must touch
+    // only that value and leave every other entry — keys, fields, and inline comments — verbatim.
+    let original = "\
+# Soloist stack — keep these notes
+processes:
+  Web:
+    command: npm run dev  # the vite frontend
+    working_dir: web
+  Api:
+    command: cargo run
+    working_dir: api
+    auto_restart: true
+  Worker:
+    command: php queue  # background jobs
+";
+    let mut intended = parse(original).unwrap();
+    intended.processes.get_mut("Api").unwrap().command = "cargo run --release".into();
+
+    let out = rewritten(original, &intended);
+
+    assert!(
+        out.contains("# Soloist stack — keep these notes\n"),
+        "leading comment survives"
+    );
+    assert!(
+        out.contains(
+            "  Web:\n    command: npm run dev  # the vite frontend\n    working_dir: web\n"
+        ),
+        "the untouched Web entry is kept byte-for-byte, comment and all"
+    );
+    assert!(
+        out.contains("  Worker:\n    command: php queue  # background jobs\n"),
+        "the untouched Worker entry is kept byte-for-byte, comment and all"
+    );
+    assert!(
+        out.contains("cargo run --release"),
+        "the Api command is updated"
+    );
+    assert!(
+        !out.contains("command: cargo run\n"),
+        "the old Api command value is gone"
+    );
+}
