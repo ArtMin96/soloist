@@ -33,6 +33,7 @@ afterEach(() => {
   cleanup();
   clearMocks();
   document.documentElement.classList.remove("dark");
+  window.localStorage?.clear();
 });
 
 describe("Settings — Appearance", () => {
@@ -66,5 +67,22 @@ describe("Settings — Appearance", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
 
     expect(screen.getByText(/have not been defined yet/i)).toBeTruthy();
+  });
+
+  it("moves the selection with arrow keys so the rail is keyboard-operable", async () => {
+    mockSettings(DEFAULT_APPEARANCE);
+    renderSettings();
+
+    const appearanceTab = screen.getByRole("tab", { name: "Appearance" });
+    expect(appearanceTab.getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(appearanceTab, { key: "ArrowDown" });
+    expect(screen.getByRole("tab", { name: "Sidebar" }).getAttribute("aria-selected")).toBe("true");
+    expect(appearanceTab.getAttribute("aria-selected")).toBe("false");
+
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Sidebar" }), { key: "Home" });
+    expect(screen.getByRole("tab", { name: "Appearance" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
   });
 });

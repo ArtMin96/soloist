@@ -1,24 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
-import { agentDetect, agentList } from "@/api";
+import { useAgentDetection } from "@/store/useAgentDetection";
 import type { DetectedTool } from "@/domain";
 
-// The configured agent tools with installed-detection, for the Agents settings registry. Lists
-// instantly (not-yet-detected), then merges the `--version` probe — the same two-step the launch
-// picker uses, without the launch action. Re-runnable from the panel via `detect`.
+// The detected agent tools for the Agents settings registry — the same shared, cached detection
+// the launch picker uses (one source, no re-rolled probe). The Agents tab revalidates when it
+// opens (the snapshot's default), so the panel shows last-known badges instantly and re-probes on
+// open; `detect` re-runs that probe on demand.
 export function useAgentTools(): { tools: DetectedTool[]; detect: () => void } {
-  const [tools, setTools] = useState<DetectedTool[]>([]);
-
-  const detect = useCallback(() => {
-    agentList()
-      .then((list) => {
-        setTools(list.map((tool) => ({ tool, installed: false })));
-        return agentDetect();
-      })
-      .then(setTools)
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => detect(), [detect]);
-
-  return { tools, detect };
+  const { tools, revalidate } = useAgentDetection();
+  return { tools, detect: revalidate };
 }

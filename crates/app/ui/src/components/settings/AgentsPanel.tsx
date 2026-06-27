@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { NullableSelect } from "@/components/settings/controls/NullableSelect";
 import { SettingRow } from "@/components/settings/controls/SettingRow";
-import { SettingSelect } from "@/components/settings/controls/SettingSelect";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SUMMARIZER_OFF, toolInvocation } from "@/lib/agents";
+import { toolInvocation } from "@/lib/agents";
 import type { Option } from "@/lib/appearance";
 import { useAgentSettings } from "@/store/useAgentSettings";
 import { useAgentTools } from "@/store/useAgentTools";
@@ -28,10 +28,10 @@ export function AgentsPanel() {
     if (next !== settings.summarizer_model) update({ ...settings, summarizer_model: next });
   }, [model, settings, update]);
 
-  // Off plus each configured tool; a stored tool absent from the detected list is kept as an
-  // option so the current selection always renders.
-  const toolOptions: Option<string>[] = [
-    { value: SUMMARIZER_OFF, label: "Off" },
+  // Off (the null option) plus each configured tool; a stored tool absent from the detected list
+  // is kept as an option so the current selection always renders.
+  const toolOptions: Option<string | null>[] = [
+    { value: null, label: "Off" },
     ...tools.map((detected) => ({ value: detected.tool.name, label: detected.tool.name })),
   ];
   if (settings.summarizer_tool && !tools.some((d) => d.tool.name === settings.summarizer_tool)) {
@@ -71,12 +71,10 @@ export function AgentsPanel() {
         description="Write a one-line summary when an agent or terminal goes idle. Off by default; choose a tool to opt in."
       >
         <SettingRow label="Summarizer tool" description="The agent CLI that writes the summary.">
-          <SettingSelect
-            value={settings.summarizer_tool ?? SUMMARIZER_OFF}
+          <NullableSelect<string>
+            value={settings.summarizer_tool}
             options={toolOptions}
-            onValueChange={(value) =>
-              update({ ...settings, summarizer_tool: value === SUMMARIZER_OFF ? null : value })
-            }
+            onValueChange={(summarizer_tool) => update({ ...settings, summarizer_tool })}
             ariaLabel="Summarizer tool"
             className="w-44"
           />
