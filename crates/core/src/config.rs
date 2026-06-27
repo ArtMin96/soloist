@@ -10,6 +10,7 @@
 
 pub mod detect;
 pub mod diff;
+mod edit;
 pub mod load;
 pub mod model;
 pub mod review;
@@ -23,5 +24,5 @@ pub use load::{
 };
 pub use model::{ProcessSpec, SoloYml};
 pub use review::TrustReviewCommand;
-pub use sync::{ConfigEngine, SyncError};
+pub use sync::{ConfigEngine, ConfigWriteError, SyncError};
 pub use write::{create_if_absent, WriteError};

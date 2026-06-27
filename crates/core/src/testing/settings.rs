@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::ports::StoreError;
@@ -15,12 +16,14 @@ use crate::sync::lock;
 /// re-rolls a settings fake.
 pub struct FakeSettingsRepo<K, D> {
     records: Mutex<HashMap<K, D>>,
+    fail_saves: AtomicBool,
 }
 
 impl<K, D> Default for FakeSettingsRepo<K, D> {
     fn default() -> Self {
         Self {
             records: Mutex::new(HashMap::new()),
+            fail_saves: AtomicBool::new(false),
         }
     }
 }
@@ -28,6 +31,12 @@ impl<K, D> Default for FakeSettingsRepo<K, D> {
 impl<K, D> FakeSettingsRepo<K, D> {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Makes every subsequent `save` fail, so a test can exercise a caller's rollback path (e.g.
+    /// the shared⇄local command move). Loads still succeed; off by default.
+    pub fn fail_saves(&self) {
+        self.fail_saves.store(true, Ordering::SeqCst);
     }
 }
 
@@ -41,6 +50,9 @@ where
     }
 
     fn save(&self, key: &K, value: &D) -> Result<(), StoreError> {
+        if self.fail_saves.load(Ordering::SeqCst) {
+            return Err(StoreError::Backend("save disabled for test".into()));
+        }
         lock(&self.records).insert(key.clone(), value.clone());
         Ok(())
     }

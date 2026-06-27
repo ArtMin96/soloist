@@ -3,6 +3,7 @@ import { AgentPicker } from "@/components/AgentPicker";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { OrphanDialog } from "@/components/OrphanDialog";
+import { ProjectSettingsPane } from "@/components/project-settings/ProjectSettingsPane";
 import { SettingsOverlay } from "@/components/settings/SettingsOverlay";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
@@ -40,10 +41,23 @@ export default function App() {
   const orphans = useOrphans();
   const agents = useAgents(store.reportError);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const selected = store.processes.find((process) => process.id === selectedId) ?? null;
+  const selectedProject = projects.projects.find((p) => p.id === selectedProjectId) ?? null;
+
+  // The main pane shows one of: a process terminal, a project's settings, or the empty state.
+  // Selecting a process clears the project selection and vice versa, so exactly one is active.
+  const selectProcess = useCallback((id: number) => {
+    setSelectedId(id);
+    setSelectedProjectId(null);
+  }, []);
+  const openProjectSettings = useCallback((projectId: number) => {
+    setSelectedProjectId(projectId);
+    setSelectedId(null);
+  }, []);
 
   // Trust a command by id: the row/header carries the project and name the gate needs.
   const trustById = useCallback(
@@ -76,10 +90,10 @@ export default function App() {
   const onLaunchAgent = useCallback(
     (project: number, tool: string, extraArgs: string[]) => {
       void launchAgent(project, tool, extraArgs).then((id) => {
-        if (id !== null) setSelectedId(id);
+        if (id !== null) selectProcess(id);
       });
     },
-    [launchAgent],
+    [launchAgent, selectProcess],
   );
 
   return (
@@ -102,7 +116,7 @@ export default function App() {
                     projects={projects.projects}
                     processes={store.processes}
                     selectedId={selectedId}
-                    onSelect={setSelectedId}
+                    onSelect={selectProcess}
                     onStart={store.start}
                     onStop={store.stop}
                     onRestart={store.restart}
@@ -111,6 +125,7 @@ export default function App() {
                     onRestartRunning={store.restartRunning}
                     onStopAll={store.stopAll}
                     onOpenSettings={() => setSettingsOpen(true)}
+                    onOpenProjectSettings={openProjectSettings}
                   />
                   <main className="min-w-0 flex-1">
                     {selected ? (
@@ -122,6 +137,8 @@ export default function App() {
                         onRestart={() => store.restart(selected.id)}
                         onTrust={() => trustById(selected.id)}
                       />
+                    ) : selectedProject ? (
+                      <ProjectSettingsPane key={selectedProject.id} project={selectedProject} />
                     ) : (
                       <EmptyState
                         hasProcesses={store.processes.length > 0}

@@ -24,6 +24,7 @@ function renderSidebar(settings: SidebarSettings) {
         onRestartRunning={noop}
         onStopAll={noop}
         onOpenSettings={noop}
+        onOpenProjectSettings={noop}
       />
     </SidebarSettingsContext>,
   );

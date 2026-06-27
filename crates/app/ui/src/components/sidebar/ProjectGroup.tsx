@@ -1,8 +1,9 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Settings } from "lucide-react";
 import { Collapsible } from "radix-ui";
 import { ProcessGroup } from "@/components/sidebar/ProcessGroup";
 import { ProjectControls } from "@/components/sidebar/ProjectControls";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import { monogram, type ProjectTree } from "@/store/projects";
 import type { ProcessKind } from "@/domain";
 
@@ -21,6 +22,7 @@ interface ProjectGroupProps {
   onStartAll: () => void;
   onRestartRunning: () => void;
   onStopAll: () => void;
+  onOpenProjectSettings: () => void;
 }
 
 // One project in the sidebar: a collapsible header (icon + name + running count + bulk
@@ -42,6 +44,7 @@ export function ProjectGroup({
   onStartAll,
   onRestartRunning,
   onStopAll,
+  onOpenProjectSettings,
 }: ProjectGroupProps) {
   const { project, kinds, count } = tree;
 
@@ -67,12 +70,25 @@ export function ProjectGroup({
         >
           {count.running}/{count.total}
         </span>
-        <div className="shrink-0 opacity-0 transition-opacity group-hover/project:opacity-100 group-focus-within/project:opacity-100">
+        <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/project:opacity-100 group-focus-within/project:opacity-100">
           <ProjectControls
             onStartAll={onStartAll}
             onRestartRunning={onRestartRunning}
             onStopAll={onStopAll}
           />
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Project settings"
+            title="Project settings"
+            onClick={(event) => {
+              // The header toggles the project's collapse; opening settings must not toggle it.
+              event.stopPropagation();
+              onOpenProjectSettings();
+            }}
+          >
+            <Settings />
+          </Button>
         </div>
       </div>
       <Collapsible.Content>

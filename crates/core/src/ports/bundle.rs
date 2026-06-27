@@ -11,10 +11,11 @@ use crate::coordination::{
     ScratchpadRepo, TimerRepo, TodoRepo,
 };
 use crate::filewatch::{FileWatcher, NoopFileWatcher};
+use crate::ids::ProjectId;
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
 use crate::notify::{NoopNotifier, Notifier};
 use crate::portscan::{NoopPortProbe, PortProbe};
-use crate::settings::{NoopSettingsRepo, Settings, SettingsRepo};
+use crate::settings::{NoopSettingsRepo, ProjectSettings, Settings, SettingsRepo};
 use crate::shellenv::{NoopShellEnvProbe, ShellEnvProbe};
 
 use super::{
@@ -29,7 +30,7 @@ use super::{
 /// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `todo_repo`,
 /// `kv_repo`, `runtime`, `orphan_control`, `metrics`,
 /// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`, `shell_env_probe`,
-/// `settings_repo`)
+/// `settings_repo`, `project_settings_repo`)
 /// default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
 /// forces every existing composition root to change. `app_env` (the app's own environment,
 /// captured at the composition root for the shell-environment resolver) defaults to empty.
@@ -56,6 +57,7 @@ pub struct CorePorts {
     pub(crate) version_probe: Arc<dyn VersionProbe>,
     pub(crate) shell_env_probe: Arc<dyn ShellEnvProbe>,
     pub(crate) settings_repo: Arc<dyn SettingsRepo<(), Settings>>,
+    pub(crate) project_settings_repo: Arc<dyn SettingsRepo<ProjectId, ProjectSettings>>,
     pub(crate) app_env: BTreeMap<String, String>,
 }
 
@@ -90,6 +92,7 @@ impl CorePorts {
                 version_probe: Arc::new(NoopVersionProbe),
                 shell_env_probe: Arc::new(NoopShellEnvProbe),
                 settings_repo: Arc::new(NoopSettingsRepo),
+                project_settings_repo: Arc::new(NoopSettingsRepo),
                 app_env: BTreeMap::new(),
             },
         }
@@ -222,6 +225,18 @@ impl CorePortsBuilder {
     /// adapter is SQLite, the same store backing every other durable repository.
     pub fn settings_repo(mut self, settings_repo: Arc<dyn SettingsRepo<(), Settings>>) -> Self {
         self.ports.settings_repo = settings_repo;
+        self
+    }
+
+    /// Overrides the durable per-project local-settings store the per-project settings aggregate
+    /// persists to (defaults to [`NoopSettingsRepo`], which stores nothing, so per-project settings
+    /// stay at their defaults). The real adapter is SQLite, the same store backing every other
+    /// durable repository; the same generic port keyed by `ProjectId` rather than `()`.
+    pub fn project_settings_repo(
+        mut self,
+        project_settings_repo: Arc<dyn SettingsRepo<ProjectId, ProjectSettings>>,
+    ) -> Self {
+        self.ports.project_settings_repo = project_settings_repo;
         self
     }
 

@@ -12,6 +12,7 @@ mod kv;
 mod leases;
 mod meta;
 mod migrate;
+mod project_settings;
 mod projects;
 mod runtime;
 mod scratchpads;
