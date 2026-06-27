@@ -79,9 +79,40 @@ impl Facade {
         Ok(())
     }
 
-    /// Adds a command to the project's `solo.yml` (shared). Returns the commands the write left
-    /// needing trust (the new command, until trusted).
+    /// Whether a command of `name` already lives in the project's shared `solo.yml` (the last-synced
+    /// snapshot). Paired with the local-overlay check, this keeps a command name unique across the
+    /// two stores, so a name is never ambiguous between shared and local.
+    fn shared_command_exists(&self, project: ProjectId, name: &str) -> bool {
+        self.config
+            .current(project)
+            .is_some_and(|config| config.processes.contains_key(name))
+    }
+
+    /// Adds a command to the project's `solo.yml` (shared). Refused if the name is already taken by
+    /// a local command, so the two stores never hold the same name. Returns the commands the write
+    /// left needing trust (the new command, until trusted).
     pub fn add_shared_command(
+        &self,
+        project: ProjectId,
+        name: &str,
+        spec: ProcessSpec,
+    ) -> Result<Vec<TrustReviewCommand>, ConfigWriteError> {
+        if self
+            .project_settings
+            .get(&project)?
+            .local_commands
+            .contains_key(name)
+        {
+            return Err(ConfigWriteError::DuplicateCommand(name.to_owned()));
+        }
+        self.insert_shared_command(project, name, spec)
+    }
+
+    /// The raw shared insert: writes the command to `solo.yml`, refusing only a same-name shared
+    /// command. Used by [`add_shared_command`](Self::add_shared_command) (after its local-name
+    /// guard) and by [`save_command_to_yaml`](Self::save_command_to_yaml) — the move adds the
+    /// command while it still lives in the local overlay, so it must not run the cross-store guard.
+    fn insert_shared_command(
         &self,
         project: ProjectId,
         name: &str,
@@ -116,13 +147,23 @@ impl Facade {
     }
 
     /// Renames a shared command in `solo.yml`, keeping its position. A pure rename preserves trust
-    /// (trust is keyed on the command variant, not the name).
+    /// (trust is keyed on the command variant, not the name). Refused if the new name is already
+    /// taken by a local command, so the two stores never collide.
     pub fn rename_shared_command(
         &self,
         project: ProjectId,
         from: &str,
         to: &str,
     ) -> Result<Vec<TrustReviewCommand>, ConfigWriteError> {
+        if from != to
+            && self
+                .project_settings
+                .get(&project)?
+                .local_commands
+                .contains_key(to)
+        {
+            return Err(ConfigWriteError::DuplicateCommand(to.to_owned()));
+        }
         let (from, to) = (from.to_owned(), to.to_owned());
         self.config.write(project, move |config| {
             if !config.processes.contains_key(&from) {
@@ -156,13 +197,17 @@ impl Facade {
         })
     }
 
-    /// Adds an app-local command (never written to `solo.yml`). Returns the updated settings.
+    /// Adds an app-local command (never written to `solo.yml`). Refused if the name is already taken
+    /// by a shared command, so the two stores never hold the same name. Returns the updated settings.
     pub fn add_local_command(
         &self,
         project: ProjectId,
         name: &str,
         spec: ProcessSpec,
     ) -> Result<ProjectSettings, LocalCommandError> {
+        if self.shared_command_exists(project, name) {
+            return Err(LocalCommandError::Duplicate(name.to_owned()));
+        }
         if self
             .project_settings
             .get(&project)?
@@ -198,7 +243,8 @@ impl Facade {
         })?)
     }
 
-    /// Renames an app-local command, keeping its position.
+    /// Renames an app-local command, keeping its position. Refused if the new name is already taken
+    /// by a shared command, so the two stores never collide.
     pub fn rename_local_command(
         &self,
         project: ProjectId,
@@ -209,7 +255,7 @@ impl Facade {
         if !local.contains_key(from) {
             return Err(LocalCommandError::Unknown);
         }
-        if from != to && local.contains_key(to) {
+        if from != to && (local.contains_key(to) || self.shared_command_exists(project, to)) {
             return Err(LocalCommandError::Duplicate(to.to_owned()));
         }
         let (from, to) = (from.to_owned(), to.to_owned());
@@ -287,7 +333,7 @@ impl Facade {
             .get(name)
             .cloned()
             .ok_or(MoveCommandError::NotLocal)?;
-        let commands = self.add_shared_command(project, name, spec)?;
+        let commands = self.insert_shared_command(project, name, spec)?;
         if let Err(err) = self.project_settings.update(&project, |s| {
             s.local_commands.shift_remove(name);
         }) {
@@ -303,8 +349,9 @@ impl Facade {
 /// Why an app-local command edit failed.
 #[derive(Debug, thiserror::Error)]
 pub enum LocalCommandError {
-    /// A local command with that name already exists.
-    #[error("a local command named {0:?} already exists")]
+    /// A command with that name already exists in this project (in the local overlay or in
+    /// `solo.yml`), so the name is unavailable for a local command.
+    #[error("a command named {0:?} already exists")]
     Duplicate(String),
     /// No local command of that name exists.
     #[error("no such local command")]

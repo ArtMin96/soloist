@@ -21,6 +21,9 @@ export function useTerminal(process: ProcessView) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const attachedRef = useRef(false);
+  // The id of the pending coalescing frame, so unmount can cancel it before disposing the terminal
+  // (otherwise a frame scheduled in the last ~16 ms would write to a disposed emulator).
+  const frameRef = useRef(0);
   const [state, setState] = useState<TerminalState>("attaching");
 
   const { appearance, dark } = useAppearance();
@@ -38,9 +41,11 @@ export function useTerminal(process: ProcessView) {
     setState("attaching");
 
     let pending: Uint8Array[] = [];
-    let frame = 0;
     const flush = () => {
-      frame = 0;
+      frameRef.current = 0;
+      // The effect's cleanup nulls termRef before this frame could run after a dispose; bail so a
+      // late frame never writes to a disposed emulator.
+      if (termRef.current !== term) return;
       const batch = pending;
       pending = [];
       for (const chunk of batch) term.write(chunk);
@@ -48,7 +53,7 @@ export function useTerminal(process: ProcessView) {
 
     void ptyAttach(id, (bytes) => {
       pending.push(bytes);
-      if (!frame) frame = requestAnimationFrame(flush);
+      if (!frameRef.current) frameRef.current = requestAnimationFrame(flush);
     })
       .then(() => setState("live"))
       .catch(() => {
@@ -94,6 +99,10 @@ export function useTerminal(process: ProcessView) {
     return () => {
       observer.disconnect();
       onData.dispose();
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = 0;
+      }
       void ptyDetach().catch(() => {});
       term.dispose();
       termRef.current = null;

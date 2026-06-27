@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { persistThenReconcile } from "@/store/persist";
 import { useLoadOnce } from "@/store/useLoadOnce";
 
 // Loads a settings document once from the core, then auto-saves changes optimistically: the
@@ -19,11 +20,9 @@ export function useSettingsResource<T>(
   const update = useCallback(
     (next: T) => {
       setValue(next);
-      void save(next)
-        .then(setValue)
-        .catch(() => {});
+      persistThenReconcile(save(next), load, setValue);
     },
-    [save],
+    [save, load],
   );
 
   return { value, update };

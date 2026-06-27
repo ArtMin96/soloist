@@ -1,7 +1,7 @@
 // The Integrations tab's display data and the MCP tool-group enablement contract. The per-group
 // enablement is the real, enforced MCP control surface (G10): the soloist-mcp server composes
 // only the enabled feature groups. The MCP transport (stdio, no network port — D4) and the
-// local HTTP API surface (Phase 10) are shown read-only so a client or script can be wired up.
+// local HTTP API surface are shown read-only so a client or script can be wired up.
 
 import type { McpFeatureGroup, McpToolGroups } from "@/domain";
 
@@ -53,8 +53,8 @@ export const MCP_CLIENT_CONFIG = `{
   }
 }`;
 
-// The local HTTP API (Phase 10), shown read-only so a script can be pointed at it. Loopback
-// only; mutations require the X-Soloist-Local-Auth header.
+// The local HTTP API, shown read-only so a script can be pointed at it. Loopback only; mutations
+// require the X-Soloist-Local-Auth header.
 export const HTTP_API_BASE_URL = "http://127.0.0.1:24678";
 
 // The documented HTTP surface (docs/http-api.md): six reads + nine actions. Listed so the user

@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe("Settings — Tools", () => {
-  it("loads the stored tool defaults from the facade on mount", async () => {
+  it("loads the stored tool defaults and binds them into the selects", async () => {
     const stored: ToolDefaults = { default_editor: "zed", default_terminal: "kitty" };
     const calls: string[] = [];
     mockIPC((cmd) => {
@@ -23,7 +23,14 @@ describe("Settings — Tools", () => {
     render(<ToolsPanel />);
 
     await waitFor(() => expect(calls).toContain("tool_defaults"));
-    expect(screen.getByText("Default editor")).toBeTruthy();
-    expect(screen.getByText("Default terminal")).toBeTruthy();
+
+    // The stored launch names bind into the controls (their labels, not the raw names): "zed" →
+    // "Zed", "kitty" → "kitty". A panel that dropped the loaded value would still render the labels
+    // but show "System default" here.
+    const editor = screen.getByRole("combobox", { name: "Default editor" });
+    const terminal = screen.getByRole("combobox", { name: "Default terminal" });
+    await waitFor(() => expect(editor.textContent).toContain("Zed"));
+    expect(terminal.textContent).toContain("kitty");
+    expect(editor.textContent).not.toContain("System default");
   });
 });

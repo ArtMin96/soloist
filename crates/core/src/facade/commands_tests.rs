@@ -329,3 +329,125 @@ fn saving_to_yaml_rolls_back_the_shared_add_when_clearing_the_local_copy_fails()
         "the shared add is rolled back, leaving solo.yml without the command"
     );
 }
+
+#[test]
+fn making_a_command_local_rolls_back_when_the_shared_remove_fails() {
+    let (facade, project, dir) = project_with_yaml(
+        "processes:\n  Web:\n    command: npm run dev\n  Api:\n    command: cargo run\n",
+    );
+    // Force the shared remove to fail: delete solo.yml so the config write reloads an empty config
+    // and the remove finds no such command. The engine's in-memory snapshot still lists Api, so
+    // make_command_local proceeds past the spec lookup and then hits the failing shared remove.
+    std::fs::remove_file(config_path(dir.path())).expect("remove solo.yml");
+
+    let err = facade.make_command_local(project, "Api").unwrap_err();
+
+    assert!(matches!(err, MoveCommandError::Config(_)));
+    // The local add is rolled back, so the command is never left in both stores when the shared
+    // remove fails (mirrors save_command_to_yaml's rollback in the other direction).
+    assert!(
+        !facade
+            .project_settings(project)
+            .unwrap()
+            .local_commands
+            .contains_key("Api"),
+        "the local add is rolled back when the shared remove fails"
+    );
+}
+
+#[test]
+fn adding_a_local_command_whose_name_is_already_shared_is_refused() {
+    let (facade, project, dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    let before = std::fs::read_to_string(config_path(dir.path())).unwrap();
+
+    let err = facade
+        .add_local_command(project, "Web", spec("other"))
+        .unwrap_err();
+
+    assert!(matches!(err, LocalCommandError::Duplicate(name) if name == "Web"));
+    assert!(
+        facade
+            .project_settings(project)
+            .unwrap()
+            .local_commands
+            .is_empty(),
+        "a name already used by a shared command cannot become a local command"
+    );
+    assert_eq!(
+        std::fs::read_to_string(config_path(dir.path())).unwrap(),
+        before,
+        "a refused local add leaves solo.yml untouched"
+    );
+}
+
+#[test]
+fn adding_a_shared_command_whose_name_is_already_local_is_refused() {
+    let (facade, project, dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    facade
+        .add_local_command(project, "Job", spec("php queue"))
+        .expect("add local");
+    let before = std::fs::read_to_string(config_path(dir.path())).unwrap();
+
+    let err = facade
+        .add_shared_command(project, "Job", spec("php queue"))
+        .unwrap_err();
+
+    assert!(matches!(err, ConfigWriteError::DuplicateCommand(name) if name == "Job"));
+    // The shared file is untouched and the local command is intact — no half-move into both stores.
+    assert_eq!(
+        std::fs::read_to_string(config_path(dir.path())).unwrap(),
+        before,
+        "a refused shared add leaves solo.yml untouched"
+    );
+    assert!(facade
+        .project_settings(project)
+        .unwrap()
+        .local_commands
+        .contains_key("Job"));
+}
+
+#[test]
+fn renaming_a_local_command_onto_a_shared_name_is_refused() {
+    let (facade, project, _dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    facade
+        .add_local_command(project, "Logs", spec("tail -f log"))
+        .expect("add local");
+
+    let err = facade
+        .rename_local_command(project, "Logs", "Web")
+        .unwrap_err();
+
+    assert!(matches!(err, LocalCommandError::Duplicate(name) if name == "Web"));
+    assert!(
+        facade
+            .project_settings(project)
+            .unwrap()
+            .local_commands
+            .contains_key("Logs"),
+        "a refused rename leaves the local command under its original name"
+    );
+}
+
+#[test]
+fn renaming_a_shared_command_onto_a_local_name_is_refused() {
+    let (facade, project, dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    facade
+        .add_local_command(project, "Logs", spec("tail -f log"))
+        .expect("add local");
+    let before = std::fs::read_to_string(config_path(dir.path())).unwrap();
+
+    let err = facade
+        .rename_shared_command(project, "Web", "Logs")
+        .unwrap_err();
+
+    assert!(matches!(err, ConfigWriteError::DuplicateCommand(name) if name == "Logs"));
+    assert_eq!(
+        std::fs::read_to_string(config_path(dir.path())).unwrap(),
+        before,
+        "a refused shared rename leaves solo.yml untouched"
+    );
+}

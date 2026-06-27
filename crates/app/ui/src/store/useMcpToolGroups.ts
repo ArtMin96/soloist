@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { mcpToolGroups, setMcpToolGroup } from "@/api";
 import { DEFAULT_MCP_TOOL_GROUPS } from "@/lib/integrations";
+import { persistThenReconcile } from "@/store/persist";
 import { useLoadOnce } from "@/store/useLoadOnce";
 import type { McpFeatureGroup, McpToolGroups } from "@/domain";
 
@@ -18,9 +19,7 @@ export function useMcpToolGroups(): {
 
   const setGroup = useCallback((group: McpFeatureGroup, enabled: boolean) => {
     setGroups((prev) => ({ ...prev, [group]: enabled }));
-    void setMcpToolGroup(group, enabled)
-      .then(setGroups)
-      .catch(() => {});
+    persistThenReconcile(setMcpToolGroup(group, enabled), mcpToolGroups, setGroups);
   }, []);
 
   return { groups, setGroup };

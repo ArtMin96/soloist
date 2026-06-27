@@ -12,7 +12,7 @@ import { useMcpToolGroups } from "@/store/useMcpToolGroups";
 
 // The Integrations tab: which MCP tool groups the soloist-mcp server exposes (the enforced G10
 // surface), plus read-only setup for the stdio MCP transport (no network port — D4) and the
-// local HTTP API (Phase 10). Pure presentation over the projected enablement read model.
+// local HTTP API. Pure presentation over the projected enablement read model.
 export function IntegrationsPanel() {
   const { groups, setGroup } = useMcpToolGroups();
 

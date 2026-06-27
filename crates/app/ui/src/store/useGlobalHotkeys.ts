@@ -28,14 +28,14 @@ export function useGlobalHotkeys(handlers: Partial<Record<HotkeyAction, () => vo
       if (!hasCommandModifier(pressed) && isEditableTarget(event.target)) return;
       for (const row of bindings) {
         if (row.scope !== "general" || !row.binding) continue;
-        if (bindingsEqual(row.binding, pressed)) {
-          const handler = handlers[row.action];
-          if (handler) {
-            event.preventDefault();
-            handler();
-          }
-          return;
-        }
+        if (!bindingsEqual(row.binding, pressed)) continue;
+        const handler = handlers[row.action];
+        // Skip a matching but unwired action so it can't swallow a chord a later, handled action
+        // is bound to (a user-made conflict otherwise loses the working binding to array order).
+        if (!handler) continue;
+        event.preventDefault();
+        handler();
+        return;
       }
     }
     window.addEventListener("keydown", onKey);

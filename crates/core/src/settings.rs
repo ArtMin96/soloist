@@ -15,7 +15,7 @@
 //! are always served, while the feature groups can be toggled — Scratchpads, Todos and Timers
 //! default on, Key-Value defaults off.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
@@ -160,11 +160,20 @@ impl<K, D> SettingsRepo<K, D> for NoopSettingsRepo {
 /// persistence (mirrors [`TrustStore`](crate::trust::TrustStore) over its repo).
 pub struct SettingsStore<K, D> {
     repo: Arc<dyn SettingsRepo<K, D>>,
+    /// Serializes the read-modify-write so two concurrent [`update`](Self::update)s on this store
+    /// can't lose one another's change. The record is a single row holding one document; a setter
+    /// replaces a whole sub-document, so an interleaved read-then-write would clobber a change made
+    /// between the read and the save. Holding this across the whole cycle makes the write atomic
+    /// even when several fronts (the settings UI, the CLI, an MCP tool) drive the same record.
+    write_lock: Mutex<()>,
 }
 
 impl<K, D: Default> SettingsStore<K, D> {
     pub fn new(repo: Arc<dyn SettingsRepo<K, D>>) -> Self {
-        Self { repo }
+        Self {
+            repo,
+            write_lock: Mutex::new(()),
+        }
     }
 
     /// The current document for `key` — the stored record, or the defaults if none has been stored.
@@ -174,8 +183,13 @@ impl<K, D: Default> SettingsStore<K, D> {
 
     /// The single write primitive: read the current document, apply one `mutator`, persist the whole
     /// record, and return the updated document. Every façade setter routes through this, so there is
-    /// one place a settings write happens.
+    /// one place a settings write happens. The read-modify-write is serialized by `write_lock`, so
+    /// concurrent setters apply in turn rather than clobbering each other.
     pub fn update(&self, key: &K, mutator: impl FnOnce(&mut D)) -> Result<D, StoreError> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let mut value = self.get(key)?;
         mutator(&mut value);
         self.repo.save(key, &value)?;

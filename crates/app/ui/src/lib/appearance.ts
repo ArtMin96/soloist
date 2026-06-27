@@ -99,6 +99,12 @@ export function interfaceRootFontPx(scale: FontScale): number {
   return ROOT_FONT_PX * INTERFACE_SCALE[scale];
 }
 
+// The single place the document root font size is set — shared by the pre-paint hint (main entry)
+// and the live provider, so the interface scale has one application path (like applyDarkClass).
+export function applyInterfaceRootFont(scale: FontScale): void {
+  document.documentElement.style.fontSize = `${interfaceRootFontPx(scale)}px`;
+}
+
 export function fontWeightValue(weight: FontWeight): TerminalFontWeight {
   return FONT_WEIGHT_VALUE[weight];
 }
@@ -251,6 +257,29 @@ export const FONT_SCALE_LABEL: Record<FontScale, string> = {
   large: "Large",
   extra_large: "Extra large",
 };
+
+// The webview-local synchronous mirror of the chosen interface scale — the companion to the theme
+// hint, so the first paint sizes the rem-based UI correctly before the persisted record loads
+// (otherwise a non-medium scale reflows from medium on cold start). Validated against the closed
+// scale set so a stale value can't apply a bogus size; the core stays authoritative.
+const INTERFACE_SCALE_HINT_KEY = "soloist.interface-scale-hint";
+
+export function readInterfaceScaleHint(): FontScale | null {
+  try {
+    const value = window.localStorage.getItem(INTERFACE_SCALE_HINT_KEY);
+    return value && FONT_SCALE_ORDER.includes(value as FontScale) ? (value as FontScale) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeInterfaceScaleHint(scale: FontScale): void {
+  try {
+    window.localStorage.setItem(INTERFACE_SCALE_HINT_KEY, scale);
+  } catch {
+    // Storage unavailable (a headless test host); the IPC-loaded record stays the source of truth.
+  }
+}
 
 export const FONT_WEIGHT_OPTIONS: Option<FontWeight>[] = (
   Object.keys(FONT_WEIGHT_VALUE) as FontWeight[]

@@ -2,15 +2,18 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { appearance as readAppearance, setAppearance as writeAppearance } from "@/api";
 import {
   applyDarkClass,
+  applyInterfaceRootFont,
   DEFAULT_APPEARANCE,
-  interfaceRootFontPx,
+  readInterfaceScaleHint,
   readThemeHint,
   resolveDark,
   systemPrefersDark,
   watchSystemDark,
+  writeInterfaceScaleHint,
   writeThemeHint,
 } from "@/lib/appearance";
 import { AppearanceContext } from "@/store/appearanceContext";
+import { persistThenReconcile } from "@/store/persist";
 import { useLoadOnce } from "@/store/useLoadOnce";
 import type { Appearance } from "@/domain";
 
@@ -21,20 +24,27 @@ import type { Appearance } from "@/domain";
 // is the sole runtime authority for the `.dark` class; the entry point only seeds the first
 // paint from the theme hint before this mounts.
 export function AppearanceProvider({ children }: { children: ReactNode }) {
-  // Seed the theme from the same webview-local hint the pre-paint used, so the provider's first
-  // render matches what is already on screen (no flash) until the persisted record loads.
+  // Seed the theme and interface scale from the same webview-local hints the pre-paint used, so the
+  // provider's first render matches what is already on screen (no flash, no reflow) until the
+  // persisted record loads.
   const [appearance, setAppearance] = useState<Appearance>(() => ({
     ...DEFAULT_APPEARANCE,
     theme: readThemeHint() ?? DEFAULT_APPEARANCE.theme,
+    interface_font_scale: readInterfaceScaleHint() ?? DEFAULT_APPEARANCE.interface_font_scale,
   }));
   const [systemDark, setSystemDark] = useState(systemPrefersDark);
 
+  // Adopt an appearance into local state and refresh the pre-paint hints, so the next cold start is
+  // correct. The one place this provider applies a value, whether seeded, loaded, or saved.
+  const adopt = useCallback((next: Appearance) => {
+    setAppearance(next);
+    writeThemeHint(next.theme);
+    writeInterfaceScaleHint(next.interface_font_scale);
+  }, []);
+
   // The facade returns the documented defaults when nothing is stored, so this resolves to the
-  // authoritative starting values (superseding the seeded theme) and refreshes the hint.
-  useLoadOnce(readAppearance, (loaded) => {
-    setAppearance(loaded);
-    writeThemeHint(loaded.theme);
-  });
+  // authoritative starting values (superseding the seeded hints) and refreshes them.
+  useLoadOnce(readAppearance, adopt);
 
   useEffect(() => watchSystemDark(setSystemDark), []);
 
@@ -45,29 +55,19 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   }, [dark]);
 
   useEffect(() => {
-    document.documentElement.style.fontSize = `${interfaceRootFontPx(appearance.interface_font_scale)}px`;
+    applyInterfaceRootFont(appearance.interface_font_scale);
   }, [appearance.interface_font_scale]);
 
   // Optimistic update then persist; the facade auto-saves and echoes the stored value, which
-  // reconciles the local state with what was written. If the persist fails, re-read the stored
-  // record so the UI falls back to disk truth rather than silently diverging.
-  const save = useCallback((next: Appearance) => {
-    setAppearance(next);
-    writeThemeHint(next.theme);
-    void writeAppearance(next)
-      .then((stored) => {
-        setAppearance(stored);
-        writeThemeHint(stored.theme);
-      })
-      .catch(() => {
-        void readAppearance()
-          .then((stored) => {
-            setAppearance(stored);
-            writeThemeHint(stored.theme);
-          })
-          .catch(() => {});
-      });
-  }, []);
+  // reconciles the local state with what was written. If the persist fails, fall back to the stored
+  // record so the UI never silently diverges (the shared reconcile the other settings hooks use).
+  const save = useCallback(
+    (next: Appearance) => {
+      adopt(next);
+      persistThenReconcile(writeAppearance(next), readAppearance, adopt);
+    },
+    [adopt],
+  );
 
   return (
     <AppearanceContext value={{ appearance, dark, setAppearance: save }}>
