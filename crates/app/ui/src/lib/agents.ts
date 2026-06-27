@@ -12,10 +12,6 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   summarizer_model: null,
 };
 
-// Radix Select forbids a null value, so "off" (no summarizer) rides a sentinel mapped to/from
-// null at the panel edge.
-export const SUMMARIZER_OFF = "__off__";
-
 // A tool's full launch invocation: the command plus its always-appended args (shown as data).
 export function toolInvocation(tool: DetectedTool["tool"]): string {
   return [tool.command, ...tool.default_args].join(" ");

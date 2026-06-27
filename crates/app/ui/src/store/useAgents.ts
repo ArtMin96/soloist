@@ -1,7 +1,6 @@
 import { useCallback } from "react";
-import { agentDetect, agentLaunch, agentList } from "@/api";
-import { CacheKey } from "@/store/cache/persistentCache";
-import { usePersistentSnapshot } from "@/store/cache/usePersistentSnapshot";
+import { agentLaunch } from "@/api";
+import { useAgentDetection } from "@/store/useAgentDetection";
 import type { DetectedTool } from "@/domain";
 
 export interface AgentStore {
@@ -16,23 +15,13 @@ export interface AgentStore {
   launch: (project: number, tool: string, extraArgs: string[]) => Promise<number | null>;
 }
 
-// The agents read-model (C4) on the frontend: the tools the launch picker shows and the one
-// launch action. The detected tools are a persisted stale-while-revalidate snapshot, so a
-// warm picker opens instantly against the last-known detection; revalidation runs only on
-// `reload` (the picker opening), never at launch, so opening the app probes no CLIs. On a
-// cold open the fetcher lists the tools at once (not-yet-detected) and then refines them with
-// the `--version` probe, so the list never blocks on detection. `launch` routes to the single
+// The agents read-model (C4) for the launch picker: the detected tools plus the one launch
+// action. Detection runs through the shared `useAgentDetection` cache; the picker never probes
+// at startup (`revalidateOnMount: false`) — it seeds from the last-known snapshot and revalidates
+// only when opened (`reload`), so launching the app probes no CLIs. `launch` routes to the single
 // core behaviour; a failure surfaces via `onError` and resolves null so the caller no-ops.
 export function useAgents(onError: (message: string) => void): AgentStore {
-  const { value, revalidate } = usePersistentSnapshot<DetectedTool[]>(
-    CacheKey.agents,
-    async (emit) => {
-      const list = await agentList();
-      emit(list.map((tool) => ({ tool, installed: false })));
-      return agentDetect();
-    },
-    { revalidateOnMount: false },
-  );
+  const { tools, revalidate } = useAgentDetection({ revalidateOnMount: false });
 
   const launch = useCallback(
     (project: number, tool: string, extraArgs: string[]): Promise<number | null> =>
@@ -43,5 +32,5 @@ export function useAgents(onError: (message: string) => void): AgentStore {
     [onError],
   );
 
-  return { tools: value ?? [], reload: revalidate, launch };
+  return { tools, reload: revalidate, launch };
 }
