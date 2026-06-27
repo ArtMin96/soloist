@@ -11,6 +11,14 @@ vi.mock("@/api", () => ({
   onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
 }));
 
+// The persisted cache is the disk boundary; mock it so the hook revalidates against `@/api`
+// from a cold cache (a miss) without touching tauri-plugin-store under test.
+vi.mock("@/store/cache/persistentCache", () => ({
+  CacheKey: { projects: "projects", appInfo: "app-info", agents: "agents" },
+  readSnapshot: vi.fn(() => Promise.resolve(null)),
+  writeSnapshot: vi.fn(() => Promise.resolve()),
+}));
+
 import { onDomainEvent, openProjectDirectory, projectList, projectLoad } from "@/api";
 import { useProjects } from "@/store/projects/useProjects";
 import type { DomainEvent } from "@/domain";

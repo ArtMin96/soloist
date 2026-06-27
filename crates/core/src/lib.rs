@@ -41,6 +41,7 @@ pub mod supervisor;
 pub mod terminal;
 pub mod trust;
 
+mod cache;
 mod supervision;
 mod sync;
 
