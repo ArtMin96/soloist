@@ -1,9 +1,12 @@
-import { useState, type ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { X } from "lucide-react";
+import { AgentsPanel } from "@/components/settings/AgentsPanel";
 import { AppearancePanel } from "@/components/settings/AppearancePanel";
+import { IntegrationsPanel } from "@/components/settings/IntegrationsPanel";
 import { PlaceholderPanel } from "@/components/settings/PlaceholderPanel";
 import { SettingsTabRail } from "@/components/settings/SettingsTabRail";
+import { ToolsPanel } from "@/components/settings/ToolsPanel";
 import {
   SETTINGS_TABS,
   settingsTabButtonId,
@@ -12,8 +15,19 @@ import {
 } from "@/components/settings/tabs";
 import { Button } from "@/components/ui/button";
 
+// The built panel for each tab — the single place a tab maps to its component. Tabs absent here
+// fall through to a placeholder (undefined-in-source vs. still-to-come, decided below), so the
+// rail can list every source tab without each one needing a panel yet.
+const PANELS: Partial<Record<SettingsTabId, ComponentType>> = {
+  appearance: AppearancePanel,
+  agents: AgentsPanel,
+  integrations: IntegrationsPanel,
+  tools: ToolsPanel,
+};
+
 function panelFor(id: SettingsTabId): ReactNode {
-  if (id === "appearance") return <AppearancePanel />;
+  const Panel = PANELS[id];
+  if (Panel) return <Panel />;
   const label = SETTINGS_TABS.find((tab) => tab.id === id)?.label ?? "Settings";
   return UNDEFINED_TABS.has(id) ? (
     <PlaceholderPanel title={label} message="These settings have not been defined yet." />
