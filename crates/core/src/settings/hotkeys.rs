@@ -8,9 +8,9 @@
 //!
 //! Each action has a [`HotkeyScope`]; the same key may bind different actions in different scopes
 //! (e.g. "previous project" in the sidebar and "previous process" in the terminal), so a conflict is
-//! only ever within one scope. macOS `⌘`/`⌥` from Solo's reference are remapped to Ctrl/Alt for Linux
-//! (`plan/05` §10). Key tokens follow the web `KeyboardEvent.key` convention so the frontend matches
-//! a real key event directly.
+//! only ever within one scope. macOS `⌘`/`⌥` from Solo's reference are remapped to Ctrl/Alt for Linux.
+//! Key tokens follow the web `KeyboardEvent.key` convention so the frontend matches a real key event
+//! directly.
 
 use std::collections::BTreeMap;
 

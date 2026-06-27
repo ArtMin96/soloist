@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { NullableSelect } from "@/components/settings/controls/NullableSelect";
 import { SegmentedControl } from "@/components/settings/controls/SegmentedControl";
 import { SettingRow } from "@/components/settings/controls/SettingRow";
 import { SettingSelect } from "@/components/settings/controls/SettingSelect";
@@ -11,7 +12,6 @@ import {
   LETTER_SPACING_OPTIONS,
   LINE_HEIGHT_OPTIONS,
   MONO_FONT_OPTIONS,
-  type Option,
   THEME_OPTIONS,
 } from "@/lib/appearance";
 import { useAppearance } from "@/store/appearanceContext";
@@ -23,15 +23,6 @@ import type {
   TerminalAppearance,
   Theme,
 } from "@/domain";
-
-// Radix Select cannot use null/empty as an item value, so "no chosen family" rides a sentinel
-// that maps to/from null at this edge only.
-const FONT_FAMILY_DEFAULT = "__default__";
-
-const FONT_FAMILY_OPTIONS: Option<string>[] = MONO_FONT_OPTIONS.map((option) => ({
-  value: option.value ?? FONT_FAMILY_DEFAULT,
-  label: option.label,
-}));
 
 // The Appearance tab: theme + interface size, then the terminal typography, with a live preview.
 // Every control reads the projected appearance and raises an immutable update through the store's
@@ -82,12 +73,10 @@ export function AppearancePanel() {
           />
         </SettingRow>
         <SettingRow label="Font family" description="The monospace font used in the terminal.">
-          <SettingSelect
-            value={t.font_family ?? FONT_FAMILY_DEFAULT}
-            options={FONT_FAMILY_OPTIONS}
-            onValueChange={(value) =>
-              setTerminal({ font_family: value === FONT_FAMILY_DEFAULT ? null : value })
-            }
+          <NullableSelect<string>
+            value={t.font_family}
+            options={MONO_FONT_OPTIONS}
+            onValueChange={(font_family) => setTerminal({ font_family })}
             ariaLabel="Font family"
             className="w-44"
           />

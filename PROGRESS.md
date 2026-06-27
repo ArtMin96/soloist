@@ -58,6 +58,69 @@
   11a (slice 0c — I7a–I7e + the C1 shared/local move), which is NOT started and is the next step.** One pre-existing
   environmental red in `just test` (the I10 `crates/sys` shellenv capture times out — sandbox login shell ~6.8 s vs 3 s
   cap; orthogonal to settings, untouched, green in CI). See the top Decisions entry + "Next session should start with" §0.
+- **Phase 11 — frontend persisted cache slice landed (2026-06-27).** The display-side half of the cache
+  mechanism: a disk-backed, stale-while-revalidate read-model cache over the official **`tauri-plugin-store`**
+  (`2.4.3` Rust / `@tauri-apps/plugin-store ^2.4.3` npm), so the sidebar **projects**, the titlebar **app
+  identity**, and the **agent launch picker** paint the last-known snapshot **instantly on launch**, then
+  reconcile to the live core — **the core always wins; the cache is display-only, never a second source of
+  truth** (CLAUDE.md §15). **One module owns the plugin** (`ui/src/store/cache/persistentCache.ts` — the only
+  importer of `@tauri-apps/plugin-store`): named cache-key consts + a **schema-versioned envelope** so a blob
+  written by an older shape reads back as a **miss** (no magic strings; version-mismatch handled). A generic
+  **`usePersistentSnapshot(key, fetcher)`** hook (`ui/src/store/cache/usePersistentSnapshot.ts`) does
+  cache-read → revalidate → write-through; a fetcher may `emit` a fast partial (the picker lists tools before
+  `--version` detection, preserving the cold-open list-first paint). **Migrated `useAppInfo` / `useProjects` /
+  `useAgents` onto it** (the agent picker revalidates **only on open**, so launching the app probes **no** CLIs
+  — `revalidateOnMount: false`). **`useProcesses` is left fully live** (event-driven, uncached): its running
+  status must never be served stale (user-confirmed this session). **Least-privilege ACL** — only
+  `store:allow-{load,get,set,save}` in `capabilities/default.json`; plugin registered in `app/src/lib.rs`
+  alongside dialog/notification/window-state (the established plugin pattern). **Skills/sources (CLAUDE.md §4/§5):**
+  `tauri-plugin-permissions` + `tauri-binary-size` invoked; the `@tauri-apps/plugin-store` 2.4.x API
+  (`LazyStore`, `StoreOptions.defaults` required, the `store:default` superset) confirmed via context7 — granted
+  only the four commands the cache uses, not `store:default`. **Visible behavior confirmed by the user:**
+  stale-while-revalidate (instant last-known paint, silent reconcile, no skeletons) and `useProcesses` stays
+  live. **Measured (CLAUDE.md §6):** frontend bundle delta **+3,104 B raw / +950 B gzip** (main JS 713,030 →
+  716,134; `dist` 940K → 940K) — the plugin's JS shim is tiny because the work lives in the Rust plugin. The
+  **native `.deb`/`.AppImage` delta is deferred to the Phase-12 packaging measurement** (§6 measures real
+  artifacts there; the plugin is a thin serde_json KV wrapper reusing already-linked deps) — **not fabricated.**
+  **Cold-start time-to-first-paint is a GUI/runtime spot-check for the Phase-11 acceptance walk** (needs a
+  desktop `just dev`), **deliberately not a fabricated millisecond number** (mirrors how the backend slice
+  handled its wall-clock saving). `Cargo.lock` **additive only** — one package (`tauri-plugin-store`); **brotli
+  pins unchanged.** **Gate green:** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier,
+  dep-direction `soloist-core` **still framework-free** — the plugin is in the `app` adapter, not core;
+  file-size advisory only — the same 4 pre-existing outliers, none mine); `just test` exit 0 — **Rust 616 / 3
+  ignored (unchanged — no Rust logic, one plugin line), UI 89 (+11: 4 `persistentCache` hit/miss/version-mismatch/
+  read-failure + 7 `usePersistentSnapshot` stale-then-fresh/miss/backend-authoritative/error-keeps-stale/
+  defer-on-mount/partial-cold/no-downgrade).** Branch **`feat/phase-11-frontend-cache`** (off
+  `feat/phase-11-read-cache`, since **PR #38 is still OPEN, not merged**), commit `69edfc8`. **The user
+  pushes/opens the PR — no self-merge; PR #38 must merge first (this branch builds on it).** **Next cache
+  sub-slice (deliberately deferred, YAGNI):** the backend event-invalidated `projects_snapshot` cache — add
+  `ReadCache::invalidate` to `core::cache` and memoize `project_list` (icon-loading), invalidated where the
+  Facade publishes `ProjectOpened`/`ConfigChanged`/`project_load`. Per `plan/06` §4 / `ARCHITECTURE` §3 ("add
+  event-invalidation only when a consumer needs it"), do it when `project_list` is shown to be a measured cost
+  **or** as the planned completion of the cache mechanism. **DECIDED 2026-06-27 (user-confirmed): deferred until
+  `project_list` is shown to be a measured cost — do NOT build it speculatively. The next Phase-11 work is a v1
+  UI row, not this.** The cache mechanism is considered complete for now (backend read-through + frontend
+  persisted halves both landed).
+- **Phase 11 — read-through cache slice landed (2026-06-27).** A reusable `core::cache::ReadCache<T>` (a
+  `Clock`-driven, single-flighted, success-cached/failure-not TTL memo) generalizes the bespoke memo the shell-env
+  resolver used. `ShellEnv` was refactored onto it (DRY — its hand-rolled `Mutex<Option<Cached>>` is gone), and
+  **`Agents::detect_installed` — the slow off-runtime `--version` probe sweep ("slower than `agent_list`" per its own
+  doc) — is now cached** for a 10-min TTL, so repeated launch-picker opens reuse one sweep instead of re-spawning N
+  `--version` probes. Caching is policy, not an OS concern, so it is a **pure-core util** (sibling to `sync`/`events`;
+  only `Clock` is a port) — **no new dependency; the dep-direction guard stays green (`soloist-core` framework-free).**
+  It is an additive engineering slice for UX smoothness, **not a parity row and not a Solo-behavior change** (so no
+  `plan/05`/`KNOWN-DIVERGENCES` entry). The pattern is registered single-source in `ARCHITECTURE.md` §2/§3 + `plan/04`
+  §9 + `plan/06` §3.1/§4 so a future session reuses it rather than re-rolling a third cache. **Measured headlessly** by
+  a counting fake probe: detection sweeps go **2 → 1** across two `detect_installed` calls within the TTL (and back to
+  2 after it) — the real wall-clock saving (N off-runtime `--version` spawns eliminated per reopen) is a runtime
+  spot-check for the acceptance walk, deliberately **not a fabricated millisecond number** (CLAUDE.md §6). **Gate
+  green:** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier, dep-direction framework-free;
+  file-size advisory only — 4 pre-existing outliers, none mine); `just test` exit 0 — **Rust 616 (+4: 3 `cache` + 1
+  detect-cache) / 3 ignored, UI 78.** Branch `feat/phase-11-read-cache`, commits `92f481a` (chore: a **pre-existing
+  `main`** prettier fix on `WindowControls.tsx`, kept as a separate commit) + `eab5b96` (the cache slice). **The user
+  pushes/opens the PR — no self-merge.** **Next cache sub-slice:** the frontend persisted half (`tauri-plugin-store`
+  stale-while-revalidate for projects/app-info/agent-list cold-start) + the sync `projects_snapshot` event-invalidated
+  cache (which adds `ReadCache::invalidate`).
 - **Phase 11 STARTED — slice 1: I10 env capture landed (2026-06-24).** Managed processes now launch with the
   user's interactive-login-shell environment, so version-manager PATHs (nvm/rbenv/pyenv) initialised from
   interactive rc files — which a plain `$SHELL -lc` command shell never sources — are visible. Clean hexagonal
@@ -3415,6 +3478,38 @@ docs, `c0de87c` base, `73ed5d7` data tabs, `fe57dca` hotkeys — see the top Dec
 
 The older "next slice" notes below predate this work — `I7`/`I5`/`I6` are now the settings work above; `I1`/`I2`/`I9` and
 the `later` rows are unchanged. **v1 rows remaining:** `I1` drag-reorder, `I2` command palette (`Ctrl+K`), `I5` light/dark/system
+**Cache (most recent, 2026-06-27): BOTH the backend read-through cache AND the frontend persisted half are
+committed.** The backend slice is on `feat/phase-11-read-cache` (**PR #38, still OPEN — not merged**: `core::cache::ReadCache`
++ `ShellEnv` refactor + cached `agent_detect`). The **frontend persisted half is on `feat/phase-11-frontend-cache`**
+(branched off `feat/phase-11-read-cache`; commit `69edfc8`) — the official `tauri-plugin-store` (`2.4.3` / `@tauri-apps/plugin-store
+^2.4.3`), a single `store/cache/persistentCache.ts` (schema-versioned envelope, named keys) + a generic
+`usePersistentSnapshot(key, fetcher)` stale-while-revalidate hook; `useProjects`/`useAppInfo`/the agent picker migrated onto
+it; `useProcesses` left fully live; least-privilege `store:allow-{load,get,set,save}` ACL; gate green (Rust 616 / UI 89,
++11). Measured: frontend bundle **+3,104 B raw / +950 B gzip**; native `.deb` delta deferred to Phase-12 packaging;
+cold-start TTFP is a GUI acceptance spot-check. See the top Current-state entry. **The user pushes/opens BOTH PRs (no
+self-merge); PR #38 merges first (the frontend branch builds on it), then sync `main`.**
+
+**The cache mechanism is COMPLETE for now** (backend read-through + frontend persisted halves both landed). The
+**backend event-invalidated `projects_snapshot` cache is DEFERRED until measured (user-confirmed 2026-06-27) — do
+NOT build it speculatively** (YAGNI; `plan/06` §4 / `ARCHITECTURE` §3: "add event-invalidation only when a consumer
+needs it"). If a future session shows `project_list`'s per-project icon load to be a measured cost, the slice is: add
+`ReadCache::invalidate` to `core::cache`, memoize `project_list`, and invalidate where the Facade publishes
+`ProjectOpened`/`ConfigChanged`/`project_load`.
+
+**So once PR #38 + the frontend-cache PR are merged and `main` is synced, the next Phase-11 work is a v1 UI row** —
+see item 0 below for the remaining set (`I1` drag-reorder, `I2` `Ctrl+K` palette, `I5` themes, `I6` keyboard nav, `I7`
+settings screen, `I9` open-in-editor). **`I9` open-in-editor is the recommended next slice** (mostly-backend: a new
+editor-launch port + adapter behind one `Facade` method + a small UI affordance — self-contained and not blocked on
+DESIGN.md visual decisions, unlike the theme/settings UI rows). The heavier UI rows (I5/I7) have their backend
+foundations done (`SettingsStore` migration v9 + `mcp_tool_groups`) but need `/impeccable` + per-CLAUDE.md §5 visual
+confirmation since DESIGN.md is deferred.
+
+**0. Phase 11 (UX Polish & Execution Profiles) is the ACTIVE phase. PR #27 (I10) is MERGED (`17f0115`); slices 1–2 done.**
+Slice 2 (settings + MCP toggle) landed on **`feat/phase-11-settings-mcp-toggle`** (off `main` `17f0115`; commits
+`59a5037` Phase-10-Verified doc, `0e4a7e4` settings backend, `dbf88b7` MCP gating) — **PR to open; the user merges, no
+self-merge.** Gate green: `just lint` exit 0; `just test` exit 0 — **Rust 612 / 3 ignored, UI 78**; feature matrix builds;
+`Cargo.lock` unchanged. **First: open the PR for `feat/phase-11-settings-mcp-toggle`; once it merges, sync `main`;** then
+pick the next v1 slice. **v1 rows remaining:** `I1` drag-reorder, `I2` command palette (`Ctrl+K`), `I5` light/dark/system
 themes (app + xterm), `I6` keyboard-first nav, `I7` settings screen (Appearance/Terminal/Notifications/Sidebar/Agents/
 Tools/**MCP**/Hotkeys), `I9` open-in-editor. **`later` rows I3/I4/I8/I11–I14 are tracked, NOT v1 — do not gold-plate.**
 **Backend now done for G10 + the I5/I7 persistence foundation** (slice 2): `core::settings` (`SettingsStore` over

@@ -11,7 +11,13 @@ interface WindowControlButtonProps extends ComponentProps<"button"> {
 // A single window-chrome control. Deliberately not the app's shadcn Button: window
 // controls are a specialized OS affordance — a uniform square hit target, a hover-only
 // surface, and a red close — rather than an application action.
-function WindowControlButton({ label, danger, className, children, ...props }: WindowControlButtonProps) {
+function WindowControlButton({
+  label,
+  danger,
+  className,
+  children,
+  ...props
+}: WindowControlButtonProps) {
   return (
     <button
       type="button"
@@ -41,7 +47,12 @@ interface WindowControlsProps {
 
 // The minimize / maximize-restore / close cluster, right-aligned in the titlebar. The
 // middle control toggles and reflects the live maximized state.
-export function WindowControls({ isMaximized, onMinimize, onToggleMaximize, onClose }: WindowControlsProps) {
+export function WindowControls({
+  isMaximized,
+  onMinimize,
+  onToggleMaximize,
+  onClose,
+}: WindowControlsProps) {
   return (
     <div className="flex items-center gap-0.5">
       <WindowControlButton label="Minimize" onClick={onMinimize}>

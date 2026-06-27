@@ -117,6 +117,40 @@ export function terminalFontFamily(family: string | null): string {
   return family ? `"${family}", ${DEFAULT_MONO_STACK}` : DEFAULT_MONO_STACK;
 }
 
+// The webview-local synchronous mirror of the chosen theme. The persisted appearance loads
+// async over IPC, so an explicit Light/Dark choice that differs from the OS preference would
+// flash the OS theme on cold start; this hint — the one store readable synchronously before
+// React mounts — lets the first paint be correct. The core stays authoritative: the hint is
+// written through on every load/save and superseded by the loaded record.
+const THEME_HINT_KEY = "soloist.theme-hint";
+
+// The last chosen theme from the webview-local hint, or null when absent/unreadable (a headless
+// test host has no localStorage). Never throws — a miss just means the OS preference is used.
+export function readThemeHint(): Theme | null {
+  try {
+    const value = window.localStorage.getItem(THEME_HINT_KEY);
+    return value === "light" || value === "dark" || value === "system" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+// Persist the chosen theme for the next cold start's pre-paint. Never throws — a failed write
+// just leaves the next start to fall back to the OS preference until the record loads.
+export function writeThemeHint(theme: Theme): void {
+  try {
+    window.localStorage.setItem(THEME_HINT_KEY, theme);
+  } catch {
+    // Storage unavailable (a headless test host); the IPC-loaded record stays the source of truth.
+  }
+}
+
+// The single place the `.dark` class is written on the document root — shared by the pre-paint
+// hint (main entry) and the live provider, so there is one theme-application path.
+export function applyDarkClass(dark: boolean): void {
+  document.documentElement.classList.toggle("dark", dark);
+}
+
 // Resolve the effective dark/light from the theme choice and the OS preference (the latter
 // only decides when the choice is "system").
 export function resolveDark(theme: Theme, systemPrefersDark: boolean): boolean {
@@ -150,25 +184,27 @@ export function watchSystemDark(onChange: (dark: boolean) => void): () => void {
   return () => media.removeEventListener("change", handler);
 }
 
-// The terminal surface colors that follow the app theme. Program output keeps its own ANSI;
-// only the chrome (background/foreground/cursor/selection) tracks light vs dark, kept as
-// plain hex so the emulator never parses the OKLCH design tokens.
+// The terminal's own surface palette, tracking the app light/dark theme. Program output keeps
+// its own ANSI; only the chrome (background/foreground/cursor/selection) follows the theme.
+// This is the one place the terminal chrome colors live — a surface distinct from the app
+// `--background` tokens (DESIGN.md), kept as concrete hex because xterm.js cannot parse the
+// OKLCH design tokens. The cursor's contrast color is always the surface behind it, so it is
+// derived from the background rather than restated.
 export function terminalColors(dark: boolean): TerminalColors {
-  return dark
+  const surface = dark
     ? {
         background: "#1b1e25",
         foreground: "#e6e8ec",
         cursor: "#8ab4f8",
-        cursorAccent: "#1b1e25",
         selectionBackground: "#33405a",
       }
     : {
         background: "#fbfbfd",
         foreground: "#23262c",
         cursor: "#3b6fd4",
-        cursorAccent: "#fbfbfd",
         selectionBackground: "#cfdcf5",
       };
+  return { ...surface, cursorAccent: surface.background };
 }
 
 // The xterm.js options derived from the appearance document — applied at creation and pushed
