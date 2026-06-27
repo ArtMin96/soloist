@@ -1,6 +1,8 @@
-//! Unit tests for the settings aggregate and its document — defaults (Key-Value off, the rest on),
-//! per-group enablement, default-on-absent, persistence through a fake repo, and serde
-//! backward-compatibility for a record an older build wrote.
+//! Unit tests for the generic settings aggregate and the global document — defaults (Key-Value
+//! off, the rest on), per-group enablement, default-on-absent, the `update` write primitive over a
+//! fake repo, and serde backward-compatibility for a record an older build wrote. The generic base
+//! is exercised here with `K = ()` and `D = Settings`; the per-project `K = ProjectId` surface
+//! reuses the same `get`/`update` and is covered through its own document's tests.
 
 use std::sync::Arc;
 
@@ -39,40 +41,44 @@ fn enabled_reflects_set_for_every_group() {
 
 #[test]
 fn an_empty_store_reads_the_defaults() {
-    let store = SettingsStore::new(Arc::new(FakeSettingsRepo::new()));
+    let store: SettingsStore<(), Settings> = SettingsStore::new(Arc::new(FakeSettingsRepo::new()));
 
-    let groups = store.mcp_tool_groups().expect("read defaults");
+    let settings = store.get(&()).expect("read defaults");
 
-    assert_eq!(groups, McpToolGroups::default());
-    assert!(!groups.key_value);
+    assert_eq!(settings, Settings::default());
+    assert!(!settings.mcp_tool_groups.key_value);
 }
 
 #[test]
 fn a_noop_repo_keeps_the_defaults_even_after_a_write() {
     // The Noop port discards writes, so the core runs at the defaults without a durable adapter.
-    let store = SettingsStore::new(Arc::new(NoopSettingsRepo));
+    let store: SettingsStore<(), Settings> = SettingsStore::new(Arc::new(NoopSettingsRepo));
 
     store
-        .set_mcp_tool_group(McpFeatureGroup::KeyValue, true)
+        .update(&(), |s| {
+            s.mcp_tool_groups.set(McpFeatureGroup::KeyValue, true)
+        })
         .expect("Noop write succeeds");
 
-    assert!(!store.mcp_tool_groups().expect("re-read").key_value);
+    assert!(!store.get(&()).expect("re-read").mcp_tool_groups.key_value);
 }
 
 #[test]
-fn set_mcp_tool_group_persists_and_reads_back() {
-    let store = SettingsStore::new(Arc::new(FakeSettingsRepo::new()));
+fn update_persists_one_change_and_reads_back() {
+    let store: SettingsStore<(), Settings> = SettingsStore::new(Arc::new(FakeSettingsRepo::new()));
 
     let returned = store
-        .set_mcp_tool_group(McpFeatureGroup::KeyValue, true)
+        .update(&(), |s| {
+            s.mcp_tool_groups.set(McpFeatureGroup::KeyValue, true)
+        })
         .expect("enable key-value");
     assert!(
-        returned.key_value,
-        "the call returns the updated enablement"
+        returned.mcp_tool_groups.key_value,
+        "update returns the persisted document"
     );
 
     // A fresh read sees the persisted change, and the untouched groups keep their defaults.
-    let groups = store.mcp_tool_groups().expect("re-read");
+    let groups = store.get(&()).expect("re-read").mcp_tool_groups;
     assert!(groups.key_value);
     assert!(groups.scratchpads);
     assert!(groups.todos);
@@ -80,14 +86,24 @@ fn set_mcp_tool_group_persists_and_reads_back() {
 }
 
 #[test]
-fn turning_a_default_on_group_off_persists() {
-    let store = SettingsStore::new(Arc::new(FakeSettingsRepo::new()));
+fn update_leaves_unrelated_fields_at_their_stored_values() {
+    let store: SettingsStore<(), Settings> = SettingsStore::new(Arc::new(FakeSettingsRepo::new()));
 
     store
-        .set_mcp_tool_group(McpFeatureGroup::Todos, false)
+        .update(&(), |s| {
+            s.mcp_tool_groups.set(McpFeatureGroup::Todos, false)
+        })
         .expect("disable todos");
+    // A second, independent write must not resurrect the first field's default.
+    store
+        .update(&(), |s| {
+            s.mcp_tool_groups.set(McpFeatureGroup::KeyValue, true)
+        })
+        .expect("enable key-value");
 
-    assert!(!store.mcp_tool_groups().expect("re-read").todos);
+    let groups = store.get(&()).expect("re-read").mcp_tool_groups;
+    assert!(!groups.todos, "the earlier change survives a later one");
+    assert!(groups.key_value);
 }
 
 #[test]
@@ -105,6 +121,12 @@ fn a_record_missing_a_field_deserializes_to_the_default_for_that_field() {
         "an omitted field falls back to its default"
     );
     assert!(!partial.mcp_tool_groups.key_value);
+    // A record an older build wrote omits the whole `appearance` tab; it fills from the default.
+    assert_eq!(
+        partial.appearance,
+        Default::default(),
+        "an omitted sub-document falls back to its default"
+    );
 
     let empty: Settings = serde_json::from_str("{}").expect("parse empty");
     assert_eq!(empty, Settings::default());

@@ -7,6 +7,14 @@
 //! status and config changes ride the domain-event bus from `lib.rs`.
 //!
 //! [`Channel`]: tauri::ipc::Channel
+//!
+//! The durable-settings commands live in the [`settings`] submodule and are re-exported, so
+//! the whole command surface stays under one `commands::` namespace in the invoke handler.
+
+mod project_settings;
+mod settings;
+pub use project_settings::*;
+pub use settings::*;
 
 use std::path::Path;
 use std::sync::Arc;

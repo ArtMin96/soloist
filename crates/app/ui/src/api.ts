@@ -6,13 +6,28 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
+  AgentSettings,
   AgentTool,
+  Appearance,
   AppInfo,
+  Binding,
   DetectedTool,
   DomainEvent,
+  HotkeyAction,
+  HotkeyBindingView,
+  Integrations,
+  McpFeatureGroup,
+  McpToolGroups,
+  ProcessSpec,
   ProcessView,
+  ProjectId,
   ProjectLoad,
+  ProjectSettings,
+  ProjectSettingsPage,
   ProjectView,
+  Sidebar,
+  ToolDefaults,
+  TrustReviewCommand,
 } from "@/domain";
 
 const DOMAIN_EVENT = "domain-event";
@@ -121,6 +136,202 @@ export function ptyDetach(): Promise<void> {
 // running") signals nothing.
 export function orphansResolve(pgids: number[]): Promise<void> {
   return invoke<void>("orphans_resolve", { pgids });
+}
+
+// ── Settings ────────────────────────────────────────────────────────────────
+// The durable global preference document. Reads return the stored value (or the documented
+// defaults when nothing is stored yet); each setter auto-saves the whole tab and returns the
+// stored value, so callers reflect exactly what was written without a re-read.
+
+export function appearance(): Promise<Appearance> {
+  return invoke<Appearance>("appearance");
+}
+
+export function setAppearance(appearance: Appearance): Promise<Appearance> {
+  return invoke<Appearance>("set_appearance", { appearance });
+}
+
+export function sidebarSettings(): Promise<Sidebar> {
+  return invoke<Sidebar>("sidebar_settings");
+}
+
+export function setSidebarSettings(sidebar: Sidebar): Promise<Sidebar> {
+  return invoke<Sidebar>("set_sidebar_settings", { sidebar });
+}
+
+export function hotkeys(): Promise<HotkeyBindingView[]> {
+  return invoke<HotkeyBindingView[]>("hotkeys");
+}
+
+export function remapHotkey(action: HotkeyAction, binding: Binding): Promise<HotkeyBindingView[]> {
+  return invoke<HotkeyBindingView[]>("remap_hotkey", { action, binding });
+}
+
+export function disableHotkey(action: HotkeyAction): Promise<HotkeyBindingView[]> {
+  return invoke<HotkeyBindingView[]>("disable_hotkey", { action });
+}
+
+export function resetHotkey(action: HotkeyAction): Promise<HotkeyBindingView[]> {
+  return invoke<HotkeyBindingView[]>("reset_hotkey", { action });
+}
+
+export function resetAllHotkeys(): Promise<HotkeyBindingView[]> {
+  return invoke<HotkeyBindingView[]>("reset_all_hotkeys");
+}
+
+export function agentSettings(): Promise<AgentSettings> {
+  return invoke<AgentSettings>("agent_settings");
+}
+
+export function setAgentSettings(agents: AgentSettings): Promise<AgentSettings> {
+  return invoke<AgentSettings>("set_agent_settings", { agents });
+}
+
+export function toolDefaults(): Promise<ToolDefaults> {
+  return invoke<ToolDefaults>("tool_defaults");
+}
+
+export function setToolDefaults(tools: ToolDefaults): Promise<ToolDefaults> {
+  return invoke<ToolDefaults>("set_tool_defaults", { tools });
+}
+
+export function integrationSettings(): Promise<Integrations> {
+  return invoke<Integrations>("integration_settings");
+}
+
+export function setIntegrationSettings(integrations: Integrations): Promise<Integrations> {
+  return invoke<Integrations>("set_integration_settings", { integrations });
+}
+
+export function mcpToolGroups(): Promise<McpToolGroups> {
+  return invoke<McpToolGroups>("mcp_tool_groups");
+}
+
+export function setMcpToolGroup(group: McpFeatureGroup, enabled: boolean): Promise<McpToolGroups> {
+  return invoke<McpToolGroups>("set_mcp_tool_group", { group, enabled });
+}
+
+// ── Per-project settings ──────────────────────────────────────────────────────
+// The durable, app-local preferences for one project. The page query assembles the whole settings
+// view in one call; each setter auto-saves and returns the stored settings; shared-command edits
+// return the commands the `solo.yml` write left needing trust; the move transfers a command between
+// the shared and local stores.
+
+// The assembled settings page — root, config validity, command roster, and live counts.
+export function projectSettingsPage(project: ProjectId): Promise<ProjectSettingsPage> {
+  return invoke<ProjectSettingsPage>("project_settings_page", { project });
+}
+
+export function projectSettings(project: ProjectId): Promise<ProjectSettings> {
+  return invoke<ProjectSettings>("project_settings", { project });
+}
+
+export function setProjectAutoStartGate(
+  project: ProjectId,
+  engaged: boolean,
+): Promise<ProjectSettings> {
+  return invoke<ProjectSettings>("set_project_auto_start_gate", { project, engaged });
+}
+
+export function setProjectEditorOverride(
+  project: ProjectId,
+  editor: string | null,
+): Promise<ProjectSettings> {
+  return invoke<ProjectSettings>("set_project_editor_override", { project, editor });
+}
+
+export function setProjectCrashExitAlerts(
+  project: ProjectId,
+  enabled: boolean,
+): Promise<ProjectSettings> {
+  return invoke<ProjectSettings>("set_project_crash_exit_alerts", { project, enabled });
+}
+
+export function setProjectTerminalAlerts(
+  project: ProjectId,
+  enabled: boolean,
+): Promise<ProjectSettings> {
+  return invoke<ProjectSettings>("set_project_terminal_alerts", { project, enabled });
+}
+
+export function setCommandTerminalAlerts(
+  project: ProjectId,
+  command: string,
+  enabled: boolean,
+): Promise<ProjectSettings> {
+  return invoke<ProjectSettings>("set_command_terminal_alerts", { project, command, enabled });
+}
+
+export function addSharedCommand(
+  project: ProjectId,
+  name: string,
+  spec: ProcessSpec,
+): Promise<TrustReviewCommand[]> {
+  return invoke<TrustReviewCommand[]>("add_shared_command", { project, name, spec });
+}
+
+export function editSharedCommand(
+  project: ProjectId,
+  name: string,
+  spec: ProcessSpec,
+): Promise<TrustReviewCommand[]> {
+  return invoke<TrustReviewCommand[]>("edit_shared_command", { project, name, spec });
+}
+
+export function renameSharedCommand(
+  project: ProjectId,
+  from: string,
+  to: string,
+): Promise<TrustReviewCommand[]> {
+  return invoke<TrustReviewCommand[]>("rename_shared_command", { project, from, to });
+}
+
+export function removeSharedCommand(
+  project: ProjectId,
+  name: string,
+): Promise<TrustReviewCommand[]> {
+  return invoke<TrustReviewCommand[]>("remove_shared_command", { project, name });
+}
+
+export function addLocalCommand(
+  project: ProjectId,
+  name: string,
+  spec: ProcessSpec,
+): Promise<ProjectSettings> {
+  return invoke<ProjectSettings>("add_local_command", { project, name, spec });
+}
+
+export function editLocalCommand(
+  project: ProjectId,
+  name: string,
+  spec: ProcessSpec,
+): Promise<ProjectSettings> {
+  return invoke<ProjectSettings>("edit_local_command", { project, name, spec });
+}
+
+export function renameLocalCommand(
+  project: ProjectId,
+  from: string,
+  to: string,
+): Promise<ProjectSettings> {
+  return invoke<ProjectSettings>("rename_local_command", { project, from, to });
+}
+
+export function removeLocalCommand(project: ProjectId, name: string): Promise<ProjectSettings> {
+  return invoke<ProjectSettings>("remove_local_command", { project, name });
+}
+
+export function makeCommandLocal(project: ProjectId, name: string): Promise<ProjectSettings> {
+  return invoke<ProjectSettings>("make_command_local", { project, name });
+}
+
+export function saveCommandToYaml(project: ProjectId, name: string): Promise<TrustReviewCommand[]> {
+  return invoke<TrustReviewCommand[]>("save_command_to_yaml", { project, name });
+}
+
+// Sets or clears (null) the project's solo.yml icon (shared). Rejects an .svg path server-side.
+export function setProjectIcon(project: ProjectId, icon: string | null): Promise<void> {
+  return invoke<void>("set_project_icon", { project, icon });
 }
 
 export function onDomainEvent(handler: (event: DomainEvent) => void): Promise<UnlistenFn> {

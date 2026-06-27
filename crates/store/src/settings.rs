@@ -1,16 +1,17 @@
-//! The application-settings repository — the core [`SettingsRepo`] port.
+//! The global application-settings repository — the core [`SettingsRepo<(), Settings>`] port.
 //!
-//! A single global row (`id = 1`) in the `settings` table; the document is stored as JSON text, so
-//! the persisted shape is the serialized [`Settings`] type and cannot drift. `save` is an upsert
-//! (`INSERT OR REPLACE`). Settings are global (not project-scoped) and are never cleared on launch.
+//! A single global row (`id = 1`) in the `settings` table, so the key is `()`; the document is
+//! stored as JSON text, so the persisted shape is the serialized [`Settings`] type and cannot
+//! drift. `save` is an upsert (`INSERT OR REPLACE`). Settings are global (not project-scoped) and
+//! are never cleared on launch.
 
 use rusqlite::OptionalExtension;
 use soloist_core::{Settings, SettingsRepo, StoreError};
 
 use crate::{sql_err, SqliteStore};
 
-impl SettingsRepo for SqliteStore {
-    fn load(&self) -> Result<Option<Settings>, StoreError> {
+impl SettingsRepo<(), Settings> for SqliteStore {
+    fn load(&self, _key: &()) -> Result<Option<Settings>, StoreError> {
         self.lock()
             .query_row("SELECT doc FROM settings WHERE id = 1", [], |row| {
                 row.get::<_, String>(0)
@@ -21,7 +22,7 @@ impl SettingsRepo for SqliteStore {
             .transpose()
     }
 
-    fn save(&self, settings: &Settings) -> Result<(), StoreError> {
+    fn save(&self, _key: &(), settings: &Settings) -> Result<(), StoreError> {
         let json = settings_to_json(settings)?;
         self.lock()
             .execute(

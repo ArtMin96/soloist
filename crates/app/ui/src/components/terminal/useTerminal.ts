@@ -3,40 +3,34 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { ptyAttach, ptyDetach, ptyResize, ptyWrite } from "@/api";
+import { terminalOptions } from "@/lib/appearance";
 import { isActive } from "@/lib/status";
+import { useAppearance } from "@/store/appearanceContext";
 import type { ProcessView } from "@/domain";
 
 export type TerminalState = "attaching" | "live" | "not-started";
 
-// Terminal colors that match DESIGN.md's cool-slate surface, kept as plain values so the
-// emulator never has to parse the OKLCH design tokens. Program output keeps its own ANSI.
-function terminalTheme(dark: boolean) {
-  return dark
-    ? {
-        background: "#1b1e25",
-        foreground: "#e6e8ec",
-        cursor: "#8ab4f8",
-        cursorAccent: "#1b1e25",
-        selectionBackground: "#33405a",
-      }
-    : {
-        background: "#fbfbfd",
-        foreground: "#23262c",
-        cursor: "#3b6fd4",
-        cursorAccent: "#fbfbfd",
-        selectionBackground: "#cfdcf5",
-      };
-}
-
 // Owns one xterm.js instance bound to the selected process: it replays the raw scrollback
 // then streams live PTY bytes (coalesced per animation frame so a chatty process can't
 // thrash the main thread), routes keystrokes back via `pty_write`, and keeps the PTY
-// winsize in step with the pane via `pty_resize`. Detaches deterministically on unmount.
+// winsize in step with the pane via `pty_resize`. Theme and terminal typography follow the
+// Appearance settings — applied to the live emulator on change, never recreating it.
+// Detaches deterministically on unmount.
 export function useTerminal(process: ProcessView) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
   const attachedRef = useRef(false);
+  // The id of the pending coalescing frame, so unmount can cancel it before disposing the terminal
+  // (otherwise a frame scheduled in the last ~16 ms would write to a disposed emulator).
+  const frameRef = useRef(0);
   const [state, setState] = useState<TerminalState>("attaching");
+
+  const { appearance, dark } = useAppearance();
+  // The latest appearance, read by the creation effect to seed the emulator without depending
+  // on it — a typography change restyles the live terminal (the effect below), never recreates.
+  const appearanceRef = useRef({ appearance, dark });
+  appearanceRef.current = { appearance, dark };
 
   const id = process.id;
 
@@ -47,9 +41,11 @@ export function useTerminal(process: ProcessView) {
     setState("attaching");
 
     let pending: Uint8Array[] = [];
-    let frame = 0;
     const flush = () => {
-      frame = 0;
+      frameRef.current = 0;
+      // The effect's cleanup nulls termRef before this frame could run after a dispose; bail so a
+      // late frame never writes to a disposed emulator.
+      if (termRef.current !== term) return;
       const batch = pending;
       pending = [];
       for (const chunk of batch) term.write(chunk);
@@ -57,7 +53,7 @@ export function useTerminal(process: ProcessView) {
 
     void ptyAttach(id, (bytes) => {
       pending.push(bytes);
-      if (!frame) frame = requestAnimationFrame(flush);
+      if (!frameRef.current) frameRef.current = requestAnimationFrame(flush);
     })
       .then(() => setState("live"))
       .catch(() => {
@@ -70,18 +66,17 @@ export function useTerminal(process: ProcessView) {
     const host = hostRef.current;
     if (!host) return;
 
+    const seed = appearanceRef.current;
     const term = new Terminal({
-      fontFamily: '"Geist Mono Variable", ui-monospace, monospace',
-      fontSize: 13,
-      lineHeight: 1.15,
       cursorBlink: true,
       scrollback: 5000,
-      theme: terminalTheme(document.documentElement.classList.contains("dark")),
+      ...terminalOptions(seed.appearance, seed.dark),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
     termRef.current = term;
+    fitRef.current = fit;
     attachedRef.current = false;
 
     const sync = () => {
@@ -104,12 +99,39 @@ export function useTerminal(process: ProcessView) {
     return () => {
       observer.disconnect();
       onData.dispose();
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = 0;
+      }
       void ptyDetach().catch(() => {});
       term.dispose();
       termRef.current = null;
+      fitRef.current = null;
       attachedRef.current = false;
     };
   }, [id, attach]);
+
+  // Restyle the live emulator when the theme or terminal typography changes — set on the
+  // existing instance, then re-fit since the font metrics moved (so the PTY winsize tracks the
+  // new cell size). One assignment per change; no recreation, no per-keystroke work.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    const options = terminalOptions(appearance, dark);
+    term.options.fontFamily = options.fontFamily;
+    term.options.fontSize = options.fontSize;
+    term.options.fontWeight = options.fontWeight;
+    term.options.fontWeightBold = options.fontWeightBold;
+    term.options.lineHeight = options.lineHeight;
+    term.options.letterSpacing = options.letterSpacing;
+    term.options.theme = options.theme;
+    try {
+      fitRef.current?.fit();
+    } catch {
+      return;
+    }
+    void ptyResize(id, term.cols, term.rows).catch(() => {});
+  }, [appearance, dark, id]);
 
   // A process selected before it started has no terminal to attach to; attach once it
   // goes live so its output appears without re-selecting.

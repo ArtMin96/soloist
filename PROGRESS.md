@@ -25,6 +25,93 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Settings build-out (11a/11b) IN PROGRESS — the generic base (I7s) + all six SHOWN global tabs' core behavior are
+  DONE & green (2026-06-26, branch `feat/phase-11-settings-ui`).** `SettingsStore<K, D>` (one base for global `K=()` +
+  per-project `K=ProjectId`); the global `Settings` document now carries Appearance/Sidebar/Agents/Tools/Integrations
+  sub-docs + the Hotkeys remappable registry, each with a whole-tab `Facade` getter/setter (auto-save) routed through
+  one `update` primitive; 22 settings tests green; `just lint` exit 0. **Slice 0a (the Tauri command adapter) DONE &
+  green (2026-06-26, `dcd85c0`):** one thin `#[tauri::command]` per Facade settings method (17 commands) in a new
+  `crates/app/src/commands/settings.rs` (the flat `commands.rs` became `commands/mod.rs` to keep both files under the
+  file-size smell), registered in `invoke_handler`, mirrored in the one `domain.ts` (settings document types) + `api.ts`
+  (typed `invoke` wrappers). Confirmed against the Tauri docs + the `tauri-calling-rust`/`tauri-capabilities` skills:
+  **app-defined commands need no capability/ACL entries** (the existing 14 commands prove it; the ACL gates only
+  plugin/core commands), so none were added. `just lint` exit 0; UI vitest 78; Rust suite green. **Slice 0b — the
+  Settings window shell + the Appearance tab (I5) DONE & green (2026-06-26, `176b2b1`), via `/impeccable`:** an in-app
+  full-surface overlay (Radix Dialog focus-trap + Esc) opened from the sidebar footer + `Ctrl+,`, with a left section
+  rail (the eight source tabs; azure full-height selection marker) over a projected read-model. The Appearance tab wires
+  theme + all terminal typography; **I5 met** — one `lib/appearance.ts` maps each closed enum to its CSS/xterm value
+  (single source); an `AppearanceProvider` loads once, follows the OS preference for System, and applies theme (`.dark`)
+  + interface scale to the document root; `useTerminal` reads the same document and restyles the live xterm.js options
+  (never recreated, re-fit on change) — so theme + typography restyle the app AND the terminal immediately and after
+  restart. Notifications/Account render the explicit "to be defined" stub (no invented fields); the other tabs a
+  "coming" placeholder. New shadcn `switch`/`select`; controls reuse Radix; no business logic in components. 3 behavior
+  tests (theme applied to root, change persists + restyles, undefined-tab stub); UI vitest **81**; `just lint` exit 0;
+  production bundle builds. **PR structure (owner's request):** the work is **two stacked PRs** — **PR #31**
+  (`feat/phase-11-settings-ui`) = the generic base + global-tab core behavior + the **0a** Tauri command adapter; **PR
+  #32** (`feat/phase-11-settings-window`, stacked on #31) = the **0b** Settings window UI. Merge #31 first. **ALL FIVE
+  remaining 0b global panels DONE & gate-green (2026-06-26) as their own stacked PRs** (owner directive: a new stacked PR
+  per change): **#33** = Tools/Integrations/Agents (I7j/I7k/I7i), **#34** = Sidebar (I7g), **#35** = Hotkeys (I7h)+I6 (with
+  the core `HotkeyBindingView.conflict` flag). Full chain **#31 → #32 → #33 → #34 → #35** — merge in order, no self-merge;
+  UI vitest 81→103, +8 core hotkeys. 11b's SHOWN-tab code is now complete (`Done — pending verify`). **Remaining:** the
+  user-only real-window e2e + GUI walk (WebdriverIO+tauri-driver, sudo deps), the recorded deferrals (Integrations master
+  toggles enforcement, Sidebar filter/badges/hover features, Agents add/edit, I6 scoped dispatch), and **all of per-project
+  11a (slice 0c — I7a–I7e + the C1 shared/local move), which is NOT started and is the next step.** One pre-existing
+  environmental red in `just test` (the I10 `crates/sys` shellenv capture times out — sandbox login shell ~6.8 s vs 3 s
+  cap; orthogonal to settings, untouched, green in CI). See the top Decisions entry + "Next session should start with" §0.
+- **Per-project settings 11a (slice 0c) — CODE-COMPLETE & green (slices 1–4), pushed on
+  `feat/phase-11a-project-settings` (stacked on #35 per the owner); PR opened (no self-merge). Only the USER-ONLY live
+  GUI / real-window e2e walk remains.** **Owner decisions this session:** base 0c on #35 (stacked on the 0b chain);
+  `solo.yml` writes are **comment-preserving + stability-first** (re-parse-verified, never corrupt) rather than a plain
+  rewrite; the per-project settings page is a **main-content view** (Option B) opened by a gear on the sidebar project
+  node, not a modal. Four committed slices:
+  **Slice 1 (`ece28c5`)** — the app-local `ProjectSettings` document over the existing generic
+  `SettingsStore<ProjectId, ProjectSettings>` base (`plan/06` §5.9): `auto_start_gate` (off), `editor_override`
+  (resolver → global Tools default), `crash_exit_alerts`/`terminal_alerts` (on) + per-command alert overrides; SQLite
+  `SettingsRepo<ProjectId, ProjectSettings>` adapter + `project_settings` table (**migration v10**, FK cascade);
+  `CorePorts.project_settings_repo` (Noop default + builder) wired in `build_facade`; scoped Facade getters/setters.
+  **Slice 2 (`e9cb736`)** — the I7d/I7e command-editing backend: a **comment-preserving `solo.yml` write path**
+  (`config::edit` edits the `processes:` block in place, re-parses + verifies the result equals the intended config,
+  else falls back to a faithful render that keeps the file's leading comments and never injects our header; **atomic**
+  temp+rename; can never corrupt the file) behind `ConfigEngine::write`; Facade shared add/edit/rename/delete (route
+  through C1, re-trust) + local add/edit/rename/delete (over `ProjectSettings.local_commands`, **never** written to
+  `solo.yml`) + the shared⇄local **move** (add-to-destination-then-remove-from-source, rollback on failure — never
+  copy/lose/dup). Per-project Solo facts + the write decision recorded in **`plan/05` §12** (clean-room §9).
+  **Slice 3 (`e82de9a`)** — the Tauri IPC adapter + page read-model: new core `projects::page` (the `Visibility`
+  Shared/Local enum + `ProjectCommandView` with flattened spec fields so JSON is always complete + `ConfigStatus` +
+  `ProjectSettingsPage`); `Facade::project_settings_page` composes C1 `solo.yml` validity + the shared & local command
+  rosters with live per-command status from the supervisor snapshot + running/total counts + the local settings +
+  resolved editor; `ConfigEngine::current` exposes the last-synced config. **17 thin `#[tauri::command]`s** (one per
+  Facade method + the page read) in `crates/app/src/commands/project_settings.rs`, registered in `generate_handler!`
+  (app commands need no ACL); mirrored in the one `domain.ts` (types; `ProcessSpec` fields optional to match serde
+  skip) + `api.ts` (one typed `invoke` wrapper each — invoke string = Rust fn name, arg keys = param names, verified).
+  Tests: core **406** (+3 page-assembly), store **74**, UI vitest **107** (+4 mockIPC: page read, a setter, a shared
+  edit, a move); `just lint` exit 0; `cargo check -p soloist-app --no-default-features` builds; `vite build` OK. The
+  one pre-existing env-red (the I10 `crates/sys` shellenv login-shell timeout, ~6.8 s vs 3 s cap) persists — untouched
+  by 0c, green in CI. `domain.ts` is now a 5th file-size advisory outlier (426 lines) — left as-is per the
+  single-`domain.ts` mandate (§16), non-gating.
+  **Slice 4 — the UI page (`676cc5c` icon backend + `c24eb6d` UI), DONE & green.** Backend gap closed first:
+  `Facade::set_project_icon` (shared `solo.yml` `icon:` write, rejects `.svg` → `ConfigWriteError::UnsupportedIcon`) +
+  its command + `api.ts` wrapper + 2 tests. The page itself (built via `/impeccable` + the shadcn skill, reusing the
+  0b controls): **navigation** = an `App.tsx` `selectedProjectId` state mutually exclusive with the selected process
+  (the main pane renders TerminalPane | ProjectSettingsPane | EmptyState), opened by a **gear on the sidebar project
+  node** (aria-label "Project settings", `stopPropagation` so collapse is untouched; callback threads App → Sidebar →
+  ProjectGroup). **Components** (`components/project-settings/`, small + presentational; only the Pane touches `api.ts`):
+  `ProjectSettingsPane` (owns the page read-model: load + reload-after-mutation + the 4 tabs), `OverviewSection`
+  (directory + copy-path, Valid/Invalid badge + error, refresh, running/total), `ProjectSettingsSection` (auto-start
+  gate, editor override → resolved/global default, icon path with the server's `.svg` rejection surfaced),
+  `NotificationsSection` (crash/exit + terminal alerts), `CommandList` + `CommandEditor`
+  (edit/rename/auto-start/auto-restart/terminal-alerts/file-watch globs/storage-move/delete, visibility-dispatched),
+  `AddCommandModal` (name/command/working_dir/auto_start/auto_restart/globs + the Save-to-`solo.yml`-vs-local radio).
+  Auto-save on change; text fields commit on blur/Enter. New vendored shadcn `radio-group` primitive (no new dep).
+  Tests: core **408** (+2 icon), UI vitest **111** (+4: Pane overview render, gate toggle → `set_project_auto_start_gate`,
+  AddCommandModal local → `add_local_command`, storage toggle → `make_command_local`); `just lint` exit 0; full
+  workspace test green except the one pre-existing shellenv env-red; `--no-default-features` + `vite build` OK.
+  **0c headless evidence for I7a–I7e is met; the matrix ✅ now has real backing.** What remains is **USER-ONLY**: the
+  live GUI walk + real-window e2e (WebdriverIO + tauri-driver, sudo deps) — flip 0c → `Verified` after the owner's walk.
+  **Tracked follow-ups** (wire when their surface is touched): **auto-start-gate enforcement** (suppress auto-start at
+  project open when engaged), alert-toggle enforcement (C7), registering local commands into the supervisor on open so
+  a local command actually runs, and the Overview open-folder/terminal/editor actions (I9). Icon edits re-render
+  `solo.yml` (not a `processes:` edit, so the in-place comment-preserving path doesn't apply — correct, fallback render).
 - **Phase 11 — frontend persisted cache slice landed (2026-06-27).** The display-side half of the cache
   mechanism: a disk-backed, stale-while-revalidate read-model cache over the official **`tauri-plugin-store`**
   (`2.4.3` Rust / `@tauri-apps/plugin-store ^2.4.3` npm), so the sidebar **projects**, the titlebar **app
@@ -807,6 +894,8 @@ Status vocabulary: `Not started` · `In progress` · `Done — pending verify` �
 | 9 | Coordination layer (scratchpads/todos/timers/leases/kv) | **Verified** | **PR #25 merged to `main` (`9dc1857`); all v1 coordination Verify checks (G1–G11 + E7) pass; gate re-confirmed green on `main` `369f3a0` (2026-06-24): Rust 541 / 3 ignored, UI 78, `just lint` + `cargo check -p soloist-app --no-default-features` exit 0. The mutation-verified E7 orchestration test (`crates/pty/tests/orchestration.rs`, real PTY + idle sampler + scheduler) is the headless acceptance evidence — coordination needs no GUI walk. One tracked cross-phase deferral: the Key-Value "default off" tool gate (G10 / phase-09 Task 6) → Phase 11 (per-group toggle); G10's gating Verify ("JSON state round-trips") is met, so it does not block this phase.** **One intentional cross-phase deferral:** the **Key-Value "default off" tool gate (G10 / phase-09 Task 6) is Phase 11** — it needs the per-group enablement toggle/settings the phase-09 task itself defers ("per-group settings (Phase 11 surfaces toggles)"; plan/05 §7: Key-Value is a feature-group toggle that "defaults OFF"). Building it standalone now is impossible without breaking G10's own round-trip Verify (no enable path → kv unusable). Phase 9 ships the kv aggregate + tools (always-on) + persistence; Phase 11 adds the off-by-default toggle. **kv persistence test added (2026-06-24):** `kv_survives_a_store_reopen` (`crates/store/src/kv_tests.rs`) closed the one G11 test gap — kv had only in-memory tests while every sibling had a reopen test; Rust **540→541**. **E7 end-to-end orchestration — landed (2026-06-24):** `crates/pty/tests/orchestration.rs` runs the full "lead → spawn worker → assign a locked todo → fire-when-idle-all → integrate on wake" loop through the one `Facade` over the **real PTY spawner + real idle sampler + real timer scheduler**, so the worker reaches idle the genuine way (terminal output settling, classified by the C4 idle FSM) — proving token-free fire-when-idle, not the backstop (max-wait 3600 s). Asserts `locked_by == lead`, `already_idle == false` / `waiting_on == [worker]` at arm, the body delivered to the lead's PTY on wake, then the fired timer consumed (`timer_list` empty). **Mutation-verified** (a never-idle worker fails the wake assertion). Robustness: snapshot-polling for status (order-independent, load-robust) on a **`multi_thread`** runtime. **No production code changed** — pure integration test over existing C4+C6. **kv (G10) — landed (2026-06-24, commit `3e5afc8`, in PR #25):** the simplest C6 aggregate — `Kv` over `KvRepo`/`NoopKvRepo`, project-scoped arbitrary-JSON `kv_set/get/delete/list` (no revision guard, no process ownership), SQLite `SqliteKvRepo` + **migration v8**, scoped `Facade::kv_*`, 4 MCP tools in `tools/kv.rs`; served-surface guard **65→69**. Gate green: **Rust 540 / 3 ignored / UI 78**; `just lint` + `just test` + `cargo check -p soloist-app --no-default-features` all exit 0. _Prior slices below._ **Fourth slice — todos (G3–G5) — landed (2026-06-24, branch `feat/phase-9-todos` off `main` `67787bc`; PR #25 open, merge is the user's call):** the disciplined shared work-item aggregate, same ports/adapters vertical as scratchpads. New `core/coordination/{todo.rs,todo_repo.rs,todo_releaser.rs}` — the `Todos` aggregate over a typed `TodoDoc {title,description,acceptance_criteria[],risks[],status}` (validated on write), with **live columns** (tags, **blockers**, comments, process-owned lock) around the **revision-guarded** document; `TodoRepo` port + `NoopTodoRepo` (every state-dependent step atomic); durable store-assigned `TodoId` (a sibling can name it as a blocker). **G4 blocker gate:** `todo_complete`/`update→Done` refused (`TodoBlocked`) while any blocker still exists and isn't done; a *deleted* blocker counts as met (no deadlock); `status` is the agent-declared label, the gate is the blocker set (one source of truth). **G5 lock:** `todo_lock`/`_unlock` process-owned ("signals, not ownership"), auto-released on close via the existing `LockReleaser` hook fanned out by a new `CompositeLockReleaser` (leases + todos), and launch-cleared (the todo itself survives, G11). SQLite `TodoRepo` (doc/tags/blockers/comments as JSON, `locked_by` column) + **migration v7**. Scoped `Facade::todo_*` (18 methods; content ops need only project scope, the 2 lock ops need a bound owner) + 7 new `CoordinationError` variants. ipc: 18 requests + `Todo`/`Todos`/`TodoComment`/`TodoComments`/`TodoTags`/`TodoDeleted` responses (reuse core view types). mcp: new `tools/todo.rs` (18 tools — the create/update params *are* the disciplined fields; a wire `TodoStatusArg` keeps core schemars-free); served-surface guard **47→65**. Clean-room divergence `KNOWN-DIVERGENCES.md` **D-8** + `plan/05` §12 (7 rows). **Tidy:** split `testing/coordination.rs`→`testing/coordination_todo.rs` (FakeTodoRepo) so both are back under the file-size smell. Gate green: **core 333 (+19) / store 54 (+7) / ipc 14 / app 30 / mcp 57 (+7) / sys 5 (+10) / pty 1 (+12, +3 soak ign) / UI 78**; `just lint` + `just test` + `cargo check -p soloist-app --no-default-features` all pass. **`ipc_server.rs` (461) crosses the advisory (non-gating) file-size smell — left intact deliberately: the single exhaustive `match` over `IpcRequest` is a compiler-checked dispatch invariant (every wire request handled), so weakening it with a catch-all would be a worse trade; the clean split (extract C6 arm bodies to per-category free functions, preserving the exhaustive routing match — like R8 did for the MCP router) is a tracked follow-up.** **Remaining: kv G10 → E7 end-to-end.** _Prior slices below._ **Third slice — scratchpads (G1/G2) — landed (2026-06-24, branch `feat/phase-9-scratchpads` off `main` `e1435dc`, commit `6e4d758`; merged to `main` via PR #24 `67787bc`):** the disciplined shared-document aggregate. New `core/coordination/{scratchpad.rs,scratchpad_repo.rs}` — the `Scratchpads` aggregate over a typed `ScratchpadDoc` (objective/context/plan[]/acceptance_criteria[]/risks[]/status/notes?), validated on write and rendered to one canonical Markdown layout; **revision-guarded writes** (G2 optimistic concurrency — the pattern that was "to add"); `ScratchpadRepo` port + `NoopScratchpadRepo` (every step atomic); durable store-assigned `ScratchpadId` addressed by a unique `name`. **Scratchpads are durable shared content that SURVIVES restart (G11) — no launch-reconcile clear**, unlike the process-owned leases/timers. SQLite `ScratchpadRepo` (doc + tags as JSON) + **migration v6** (`scratchpads`, FK cascade, UNIQUE(project,name), AUTOINCREMENT). Scoped `Facade::scratchpad_*` (project scope only, **no owner** — external single-project callers can use them; reuses `coordination_scope`) + 4 new `CoordinationError` variants. ipc: 9 requests + `Scratchpad`/`Scratchpads`/`ScratchpadTags`/`ScratchpadDeleted` responses. mcp: `tools/scratchpad.rs` (9 tools — the write schema *is* the disciplined fields); served-surface guard **38→47**. **Disciplined structure is a clean-room divergence from Solo's free-form note (project-owner directive):** `KNOWN-DIVERGENCES.md` **D-7** + `plan/05` §12 (6 rows). **Tidy:** split `ipc/protocol.rs`→`ipc/error.rs` + extracted `facade/loops.rs` (both file-size-smell files I introduced, now under the smell). Gate green: **core 314 / store 46 / ipc 14 / app 30 / mcp 50 / sys 5 (+10) / pty 1 (+12, +3 soak ign) / UI 78**; clippy `-D`, fmt, tsc, eslint, dep-direction, file-size, `--no-default-features` all pass. **Deferred (tracked):** free-form tools (`_append`/`_edit`/`_append_section`/`_tail`/`_find`/`_clear`), `_transfer`, file-io (`_save_to_file`/`_load_from_file`, security pass). **Remaining after this scratchpads slice (now superseded — todos done, see top of cell): kv G10 → E7 end-to-end.** _Prior slices below._ **First slice — lease locks (G6) — landed (2026-06-24):** the C6 substrate end-to-end. New `core/coordination/` module (`Leases` aggregate + `LockRepo` port/`NoopLockRepo` + `LeaseReleaser`), the real `LockReleaser` wired into the supervisor close hook (G5 seam), SQLite `LockRepo` + **migration v4** (`leases` table, FK cascade), `Clock::now_unix_millis` added for persistable TTL, scoped `Facade::lock_acquire/lock_status/lock_release`, 3 MCP tools in new `tools/lock.rs` (served-surface guard 28→31 tools), ipc arms + `CoordinationError`→wire mapping, launch reconcile (clears stale leases). **Review-fixed (2026-06-24):** `LockRepo` made atomic (one conditional upsert closes the concurrent-acquire race — proven by a 16-thread store test) and the TTL default/bounds (5 min, 1 s…1 h) moved into the core (`ttl_ms` now `Option`). Gate green: core 268 / store 25 / ipc 14 / app 30 / mcp 37 / sys 5 (+10) / pty 1 (+12, +3 soak ign) / UI 78; clippy `-D`, fmt, tsc, eslint, dep-direction, file-size, `--no-default-features` all pass. Clean-room G6 decisions in `plan/05` §12. **Second slice — timers (G7–G9) — landed (2026-06-24, branch `feat/phase-9-timers` off `main` `9600b6e`, commit `1532251`; PR #23 open, merge is the user's call):** the headline token-free fire-when-idle. New `core/coordination/{timer.rs,timer_repo.rs,scheduler.rs}` — the `Timers` aggregate (`FireCond {At, WhenIdleAny, WhenIdleAll}` + `IdleMode`/`TimerStatus`/`TimerView`/`SetWhenIdleOutcome`; owns the delay/max-wait policy), the `TimerRepo` port + `NoopTimerRepo` (every state-dependent step atomic, like `LockRepo`), and a self-supervised `TimerScheduler` (mirrors `MetricsSampler`: `Clock`-driven + `Notify`-woken + bus-subscribed `select!` loop) that claims each due timer atomically and **delivers `body` to the owner as a fresh turn via the one `Supervisor::write_stdin`** (body + `\r`). Per the **user's design pick**, fire-when-idle **subscribes to the C4 `AgentActivityChanged` events** (C6 depends only on the shared `DomainEvent`); `already_idle`/`waiting_on` is read from C4's idle state via the façade (new `IdleTracker::activity`). SQLite `TimerRepo` (`fire` as `FireCond` JSON, `deadline` a column) + **migration v5** (`timers` table, FK cascade, `AUTOINCREMENT`). Scoped `Facade::timer_set`/`timer_fire_when_idle`/`timer_cancel`/`_pause`/`_resume`/`_list` (reuse the lease scope/owner helpers) + `timer_scheduler_loop()` + `reconcile_timers()`; 7 MCP tools in new `tools/timer.rs` (served-surface guard **31→38**); 7 ipc requests + 4 responses (reuse core view types). **Like leases, timers are process-owned → launch reconcile clears them** (per-run ids recycled). Clean-room timer semantics in `plan/05` §12 (6 rows). **Review-fixed (2026-06-24):** single-sourced the "is a watched process idle" rule and the any/all quorum — extracted `coordination::watched_is_idle` + `IdleMode::quorum_met`, used by **both** the scheduler (firing) and the façade (the `already_idle`/`waiting_on` report), so the report can no longer disagree with what fires (the façade was registry-blind, reporting a watched process that had **left the registry** as still pending though the scheduler counts a gone process as idle); guarded by a new façade test + a scheduler test. Generalized the lease-specific helper names/docs now shared by timers (`coordination_scope`/`coordination_owner`, the `NoBoundProcess` message, store/facade module docs). Gate green: **core 290 / store 38 / ipc 14 / app 30 / mcp 44 / sys 5 (+10) / pty 1 (+12, +3 soak ign) / UI 78**; `just lint` + `just test` + `cargo check -p soloist-app --no-default-features` all pass. **Remaining (sequence):** scratchpads G1/G2 (revision-guarded — optimistic concurrency, migration v6) → todos G3–G5 (process-owned locks reuse the `LockReleaser` hook) → kv G10 → E7 end-to-end. |
 | 10 | HTTP API & CLI (`127.0.0.1:24678` + `soloist` CLI) | **Verified** | **Acceptance walk PASSED (2026-06-25, user-confirmed): live `soloist status` / `restart <name>` / `logs`, the CLI restart routes through the same `Facade::restart` as the UI button, app-down → "Soloist is not running" (exit 1), `POST /processes/:id/restart` → 200 with `x-soloist-local-auth: 1` vs 401 without, foreign-`Origin` CORS refused. H1–H4 all pass at runtime. PR #26 MERGED to `main` (merge `7db4004`, incl. review-cleanup `a83ac19`); gate re-confirmed on `main` 2026-06-25 (post-#27): Rust 593 / 3 ignored, UI 78, `just lint` exit 0.** **All four slices landed on `feat/phase-10-http-api` (PR #26, merged).** **Slice 1 (`48aac8f`):** `crates/httpapi` core-only `axum` server on `127.0.0.1:24678` (auto-fallback over the next 16 ports then an OS port + the `http-api.json` runtime file via `ipc::http`), localhost-only `tower-http` CORS, the 6 read endpoints over one `Facade` method each (reusing `ProcessView`/`ProjectView`); in-process behind the `http` Cargo feature (removable both ways); app moved to `Arc<Facade>` so the core-only server shares the one core. **Slice 2 (`6407ef7`):** the 9 mutation endpoints (`POST /processes/:id/{start\|stop\|restart}`, `/projects/:id/{start-auto\|start-all\|stop-all\|restart-running\|restart-all}`, `/focus`), each a 1:1 delegation to the core method the UI/MCP drive, behind an `X-Soloist-Local-Auth` `route_layer` gate (missing/wrong → 401; reads stay open); error→status mapping 403/404/500; `/focus` callback wired from the composition root — **H1 complete.** **Slice 3 (`a3a82c1`):** `crates/cli` = the `soloist` CLI (`clap` + `ureq`, core-isolated via `ipc`), subcommands `status`/`start`/`stop`/`restart`/`logs`/`focus` each routed to the same `Facade` method, port/auth from `ipc::http::read_runtime()`, app-down → "Soloist is not running" (exit 1); added the `GET /processes/:id/output` read endpoint for `logs`. **Slice 4 (this session):** `docs/http-api.md` (the HTTP API + CLI reference, single-sourced from the code, humanizer-passed) + a README cross-link — no source change. **H1–H4 all `✅` in `plan/02`.** `reload`/`spawn`/`open` are tracked deferrals (`plan/05` §12). Gate green: `just lint` + `just test` exit 0 — **Rust 579 / 3 ignored (29 suites) / UI 78**; feature matrix (`--features http` / `--no-default-features` / `--features mcp`) all build; CLI release binary ≈ 1.1 MB; `Cargo.lock` brotli pins unchanged. **Only step to `Verified`: the user-only runtime acceptance walk (desktop `just dev`) — see "Next session" A.4.** |
 | 11 | UX polish & execution profiles (palettes, deep links, themes) | **In progress** | **Slice 1 — I10 env capture landed (2026-06-24; committed `4b81e3a` on `feat/phase-11-env-capture`, PR #27 open — the user merges).** New `core::shellenv` (`ShellEnvProbe` port + `NoopShellEnvProbe` + the pure `ShellEnv` resolver: ~10-min `Clock`-cache, precedence process `env` > captured `-ilc` > app, `PATH`-prepend fallback) wired through `CorePorts`(`shell_env_probe`+`app_env`) → `Supervisor`(`Arc<ShellEnv>`) → `ActorPorts`, resolved at the actor's single spawn chokepoint. Real adapter `soloist_sys::CommandShellEnvProbe` (`$SHELL -ilc 'env -0'`, bounded 3 s, threaded drain, NUL parse dropping invalid names + `PWD`/`OLDPWD`/`SHLVL`/`_`); composition root wires it + `app_env=std::env::vars()`. `nix 0.29` (`user`) added to `crates/sys` (already in the lock; 1 edge, no brotli churn). Decisions in `plan/05` §12. **Gate green: Rust 593 (+13) / 3 ignored, UI 78; `just lint` exit 0; feature matrix builds.** I10 Verify ("version-manager PATH visible") met by the real-shell integration test + the through-the-`Supervisor` wiring proof. **Slice 2 — settings + MCP toggle (2026-06-25, `feat/phase-11-settings-mcp-toggle`, PR to open):** new `core::settings` focused context (`Settings` doc + `McpToolGroups` [Key-Value default-OFF] + closed `McpFeatureGroup` + `SettingsRepo`/`NoopSettingsRepo` + `SettingsStore` aggregate), single-row `settings` table + **migration v9**, `Facade::mcp_tool_groups`/`set_mcp_tool_group`, wired through `CorePorts` + composition root + `FakeSettingsRepo`; the `soloist-mcp` server gates feature-tool groups via a Registry of `(group → sub-router)` composed only when enabled (reads the enablement at startup over a global `IpcRequest::McpToolGroups`), so a disabled group is unlisted + uncallable and **G10 is satisfied** (Key-Value off by default). Decisions in `plan/05` §12. Gate green: **Rust 612 (+19) / 3 ignored, UI 78**, `just lint` exit 0, feature matrix builds, `Cargo.lock` unchanged. **v1 rows remaining: I1 (drag-reorder), I2 (command palette), I5 (themes), I6 (keyboard nav), I7 (settings UI — its MCP tab now has its backend), I9 (open-in-editor).** `later` rows I3/I4/I8/I11–I14 tracked, not pulled into v1. |
+| 11a | Per-project settings (project page; shared-vs-local storage) | In progress | Decomposes I7. **Base I7s DONE** (the generic `SettingsStore<K, D>` both surfaces reuse — `feat/phase-11-settings-ui`, `c0de87c`). Per-project page + the C1 shared/local move (I7a–I7e) **not started** — that is the remaining 11a work. Plan: `plan/phases/phase-11a-project-settings.md`. Field inventory sourced frame-by-frame from the Solo demo (no fabrication). |
+| 11b | Global settings (8-tab Settings window) on the reusable settings base | **Done — pending verify** | Decomposes I7. **Core behavior of all six SHOWN tabs DONE & green** (`feat/phase-11-settings-ui`): Appearance/Sidebar/Agents/Tools/Integrations data documents (`73ed5d7`) + the Hotkeys remappable registry (`fe57dca`), each a `#[serde(default)]` sub-document on the singleton `Settings` with a whole-tab `Facade` getter/setter (auto-save) routed through the one `update` primitive. **Slice 0a (Tauri command adapter) DONE & green** (`dcd85c0`): 17 thin `#[tauri::command]`s in `commands/settings.rs` + `domain.ts`/`api.ts` mirror; app commands need no ACL entry (confirmed). **Slice 0b (Settings window shell + Appearance tab, I5) DONE & green** (`176b2b1`, via `/impeccable`): in-app overlay + left tab rail; the Appearance panel restyles the app tokens AND the live xterm.js renderer (theme + terminal typography) from one `lib/appearance.ts` source via an `AppearanceProvider`; Notifications/Account stubbed "to be defined"; 3 behavior tests, UI vitest 81. **ALL FIVE remaining 0b panels DONE & gate-green (2026-06-26)** as stacked PRs: **Tools/Integrations/Agents (I7j/I7k/I7i) — #33**, **Sidebar (I7g) — #34**, **Hotkeys (I7h)+I6 — #35** (chain #31→#32→#33→#34→#35; merge in order, no self-merge; UI vitest 81→103, +8 core hotkeys for the new `conflict` flag). **Carried deferrals (recorded follow-ups):** Integrations master MCP/HTTP toggles (no backend enforcement of `integration_settings`); Sidebar filter/header-badges/hover persist-only ("gate what exists" — I7g partial-Verify gap); Agents add/edit custom tool (no backend); I6 scoped (Sidebar/Terminal) dispatch (General only today). **Remaining for 11b → Verified:** the user-only real-window e2e (WebdriverIO+tauri-driver, sudo deps) + the live GUI/xterm walk. **Notifications/Account tabs (I7l/I7m) were never opened in the source — contents are a pending owner decision, stubbed "to be defined", not built blind.** Plan: `plan/phases/phase-11b-global-settings.md`. **11b SHOWN-tab code is now complete → `Done — pending verify` (owes only the user-only acceptance walk).** |
 | 12 | Packaging (`.deb` + `.AppImage`, x86_64) | Not started | Add containerized 20.04 AppImage smoke (webkit 4.0 runtime) here |
 | 13 | Parity QA + longevity gate | Not started | The v1 definition-of-done; runs the soak/leak gate and parity walk |
 
@@ -816,6 +905,168 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Settings build-out — the five remaining global 0b panels landed as stacked PRs (2026-06-26)
+All of 0b's non-Appearance global tabs, each its own **new stacked PR** (the owner's directive: "this changes must be
+in a new stacked PR"). Chain **#31 → #32 → #33 → #34 → #35** (merge in order; no self-merge). Every panel replicates the
+one approved Appearance pattern (small presentational panel over a projected read-model; no business logic; enum→value
+maps in one `lib/` place), driven through **`/impeccable` craft** against the "Instrument Panel" `DESIGN.md`, with the
+**shadcn** + **tauri-*** skills where a primitive or a Rust surface was touched. Pattern infra: one shared
+`store/useSettingsResource` hook (the load-once + optimistic-save logic factored out of `AppearanceProvider`) and the
+overlay's `panelFor` converted to a tab→component **registry** (`plan/06` §4).
+- **PR #33 `feat/phase-11-settings-panels`** = **Tools (I7j)**, **Integrations (I7k)**, **Agents (I7i)** + a `style`
+  commit fixing local-prettier (3.8.4) reflow on the landed files (an earlier `npx prettier` used a newer version — the
+  gate uses the pinned local one; lesson: always check with `./node_modules/.bin/prettier`).
+- **PR #34 `feat/phase-11-settings-sidebar`** = **Sidebar (I7g)**.
+- **PR #35 `feat/phase-11-settings-hotkeys`** = **Hotkeys (I7h)** + **I6** (core `conflict` flag + live registry handler).
+- **Decisions (user-approved this session):** (1) **Integrations master MCP/HTTP toggles DEFERRED** — `integration_settings`
+  is stored but no backend reads it, so a non-functional "Enable server" toggle would violate honest-status; ship the
+  per-group toggles (real G10) + read-only setup/endpoints; enforcement is a recorded backend follow-up. (2) **Sidebar =
+  "gate what exists"** — wire the footer button + empty-section hiding (the two with a live target today); the filter
+  input, header usage badges, and project hover actions don't exist, so those settings persist with a panel note and a
+  recorded **I7g partial-Verify gap**. (3) **Agents registry is read-only** (list + detect); add/edit of custom tools
+  needs a backend method — follow-up. (4) **Hotkeys conflict** is exposed via a new `HotkeyBindingView.conflict: bool`
+  computed from the existing `Hotkeys::conflicts()` (single source) — no new Tauri command (app commands need no ACL,
+  confirmed slice 0a). (5) **I6 live dispatch is General-scope only** — scoped (Sidebar/Terminal) actions are remappable
+  but dispatch lands with their features (most have no handler yet, e.g. command palette I2).
+- **Gate (each slice, green):** `just lint` (tsc/eslint/prettier; + fmt/clippy/dep-direction for the Hotkeys core touch)
+  + UI vitest (**78 → 103**) + `vite build`. Core: **+8** hotkeys (the conflict-flag view assertion) / settings 22 green;
+  `cargo check -p soloist-app` builds. **One pre-existing environmental red carries forward, untouched** (the I10
+  `crates/sys` shellenv login-shell capture times out ~6.8 s vs the 3 s sandbox cap; orthogonal, green in CI — NOT
+  weakened). **Live GUI / xterm-restyle / real-window e2e remain user-only.** **0c (per-project 11a) is the next step** —
+  see "Next session should start with" §0c.
+
+### Settings build-out — Slice 0b: the Settings window + the Appearance tab (I5) landed (2026-06-26)
+Branch **`feat/phase-11-settings-window`** (commits **`176b2b1`** UI + **`1e1d28f`** progress), a **stacked PR #32**
+**based on `feat/phase-11-settings-ui`** (PR #31 = the base + 0a adapter). At the owner's request the UI vertical is its
+own PR on top of the adapter PR, so #31 must merge first. The first UI vertical, driven through
+**`/impeccable`** (`craft` flow) against the approved `DESIGN.md` (the "Instrument Panel" system). User-confirmed the
+shape (in-app overlay, left rail, Appearance-first) before any code. This harness has no native image generation, so the
+visual-direction-by-generation step was skipped — `DESIGN.md` was the contract.
+
+- **The surface:** a full-window in-app overlay (`components/settings/SettingsOverlay.tsx`) on the Radix Dialog primitive
+  (focus-trap + Escape; a keyboard-first destination, not a centered card), opened from a new sidebar **footer** button +
+  **`Ctrl+,`** (matches the existing `Ctrl+T` keydown precedent; the full remappable keymap drives these from the Hotkeys
+  registry in a later increment). A left **tab rail** lists the eight source tabs with the **azure full-height selection
+  marker** (the same affordance as a selected sidebar row, not a side-stripe — DESIGN-compliant).
+- **Appearance tab** (`AppearancePanel.tsx`): theme (segmented Light/Dark/System), interface size (stepper), and the
+  terminal typography (focus-on-click switch; font family / weight / bold-weight / size / line-height / letter-spacing)
+  with a **live terminal preview**. Auto-saves on change. Notifications/Account render the explicit **"to be defined"**
+  stub (no invented fields, per `plan/05` §12); the remaining shown tabs a "coming" placeholder.
+- **I5 wiring (the marquee criterion, met):** **one** `lib/appearance.ts` maps every closed enum → its concrete CSS /
+  xterm value + holds the picker option sets (the single source — no magic numbers in components). A new
+  `store/AppearanceProvider` loads the document once, tracks the OS preference (a `matchMedia` listener, guarded for
+  jsdom) so **System** follows it live, and applies the resolved theme (`.dark` on the document root) + the interface
+  scale (root font-size) — restyling the whole app. `useTerminal` reads the **same** document and pushes
+  `fontFamily/fontSize/fontWeight/lineHeight/letterSpacing/theme` into the **live** xterm.js `options` then re-fits (the
+  emulator is restyled, never recreated; one assignment per change, no per-keystroke work — §6). So theme + terminal
+  typography restyle the app **and** the terminal immediately and after restart, from one persisted record.
+- **Primitives & discipline:** new shadcn-style `ui/switch.tsx` + `ui/select.tsx` (the unified `radix-ui` package, already
+  a dep — no new heavy dependency); `SegmentedControl` on Radix `ToggleGroup` (roving-tab keyboard nav), a `SizeStepper`,
+  and small `SettingsSection`/`SettingRow`/`SettingSelect` layout primitives reused across tabs. No business logic in
+  components (types from `domain.ts`, data/effects from the store hook); each file single-purpose and well under the
+  file-size smell. Removed an unused `ui/label.tsx` (dead code, §8/§15).
+- **Tests:** `components/settings/SettingsOverlay.test.tsx` — 3 behavior tests under jsdom/mockIPC (the stored theme is
+  applied to the document root; choosing a theme persists via `set_appearance` AND restyles immediately; an undefined tab
+  shows the "to be defined" stub). The 2 App integration tests that use inline IPC mocks were taught to answer the new
+  `appearance` mount-load.
+- **Gate:** `just lint` exit 0 (clippy `-D`, fmt, tsc, eslint, prettier, dep-direction; file-size advisory = the 4
+  pre-existing outliers only — every new settings file is small). UI vitest **81** (+3). Production `vite build` succeeds
+  (758 KB / 216 KB gzip — the chunk-size warning is pre-existing; bundle size is the Phase-12 measured concern). The one
+  pre-existing `soloist-sys` shellenv environmental red is unchanged and untouched.
+- **Verification reality:** the live GUI visual check + the xterm-restyle-at-runtime walk are **user-only** (host
+  `DISPLAY=:0`, like every prior phase's GUI verification); the real-window e2e is the tracked **WebdriverIO + tauri-driver**
+  path (needs `sudo apt install webkit2gtk-driver xvfb` + `cargo install tauri-driver`), not Playwright (WebKitGTK exposes
+  no CDP — Phase-5 finding). The mockIPC behavior test is the headless evidence for this slice.
+
+### Settings build-out — Slice 0a: the Tauri command adapter landed (2026-06-26)
+Branch **`feat/phase-11-settings-ui`**, commit **`dcd85c0`** (off `7437f0a`). The deterministic next slice — one thin
+`#[tauri::command]` per already-written `Facade` settings method, no design work, ends green.
+
+- **17 commands** in a new **`crates/app/src/commands/settings.rs`**, each an `async` pass-through that marshals args
+  and maps `StoreError` to a string the UI renders (mirrors the existing `config_trust` shape): `appearance`/
+  `set_appearance`, `sidebar_settings`/`set_sidebar_settings`, `hotkeys`/`remap_hotkey`/`disable_hotkey`/`reset_hotkey`/
+  `reset_all_hotkeys`, `agent_settings`/`set_agent_settings`, `tool_defaults`/`set_tool_defaults`, `integration_settings`/
+  `set_integration_settings`, `mcp_tool_groups`/`set_mcp_tool_group`. Registered in the app's `invoke_handler`.
+- **File-size discipline:** the flat `commands.rs` (237 lines) became `commands/mod.rs` + the new `commands/settings.rs`
+  (~163), so neither crosses the ~400 smell (a combined file would have been ~417). Same `commands::` namespace in the
+  handler via `pub use settings::*`.
+- **TS mirror (the one sanctioned Rust↔TS duplication):** added the settings document types to the single `domain.ts`
+  (serde `snake_case` enum string values verified against the core enums) and the typed `invoke` wrappers to `api.ts`.
+- **Capabilities/ACL — confirmed, none needed (CLAUDE.md §4):** invoked `tauri-calling-rust` + `tauri-capabilities` and
+  cross-checked the official Tauri docs. **App-defined commands (`#[tauri::command]` in the app's own
+  `generate_handler!`) require no capability/permission entry** — the ACL gates plugin/core commands only. The existing
+  14 Soloist commands prove this empirically (none in `capabilities/default.json`, all working). So the §0a hand-off's
+  "add the capability/ACL entries" does not apply to app commands; nothing was added to `default.json`.
+- **Gate:** `just lint` exit 0 (clippy `-D`, fmt, tsc, eslint, prettier, dep-direction; file-size advisory = the 4
+  pre-existing outliers only). `just test`: Rust **603 passed / 3 ignored** across the workspace **excluding
+  `soloist-sys`** (the one known environmental red — `crates/sys/tests/shellenv.rs` login-shell capture times out at the
+  3 s cap in this sandbox; orthogonal, untouched, green in CI — NOT weakened, per §12); UI vitest **78**. No new tests:
+  the command wrappers are pure marshalling (behavior is tested in core `facade/settings_tests.rs`), so per §15 they have
+  no test yet — honest, not a gap.
+
+### Settings build-out — Slice 0 (base I7s) + the global-settings core behavior (11b backend) landed (2026-06-26)
+Branch **`feat/phase-11-settings-ui`** off `main` (`195b152`). The one non-negotiable rule was honored: **both
+settings surfaces reuse ONE base** — no duplicate store, no per-adapter persistence. Five commits, each ending
+green (`just lint` exit 0; the affected Rust suites green). Honest caveat: `just test` has **one pre-existing,
+environmental red** — `crates/sys/tests/shellenv.rs` (the I10 real-login-shell capture) times out because the
+sandbox login shell takes ~6.8 s vs the capture's 3 s cap. It is in `crates/sys` (untouched by this work),
+orthogonal to settings, and passes in a normal-speed env/CI. Reported per CLAUDE.md §12, not weakened.
+
+- **`12c2ee2` docs(plan):** committed the two phase docs (11a/11b) + the granular `I7s`/`I7a–I7m` matrix rows +
+  the `plan/06` §5.9 "add a setting" recipe (the prior session left them uncommitted).
+- **`c0de87c` refactor(settings) — I7s, Slice 0:** generalized the landed non-generic `SettingsStore`/`SettingsRepo`
+  into **`SettingsStore<K, D>` over `SettingsRepo<K, D>`** with `get(key)` (absent → `D::default()`) + a single
+  **`update(key, mutator)`** write primitive. The global instance is `SettingsStore<(), Settings>` and
+  `set_mcp_tool_group` routes through `update(&(), …)`. `NoopSettingsRepo` and the test `FakeSettingsRepo` are now
+  generic over every surface; the SQLite adapter implements `SettingsRepo<(), Settings>`. **Adding a setting stays
+  one serde-default field + one façade getter/setter — no new store, table, or migration.** Unblocks both 11a and
+  11b. 16 settings tests green (10 core + 4 store + 2 app IPC).
+- **`73ed5d7` feat(settings) — 11b data tabs (I7f,g,i,j,k):** extended the global `Settings` document with one
+  serde-default sub-document per SHOWN data tab — **Appearance** (theme Light/Dark/System; interface + terminal
+  font-scale steppers; terminal font/bold weight as CSS 100–900; line-height; letter-spacing; focus-on-click),
+  **Sidebar** (filter/empty-section/footer + project hover-action toggles; per-header CPU/mem usage thresholds as
+  closed enums with distinct project-vs-process option sets), **Agents** (auto-summarization opt-in tool+model,
+  **OFF by default** — locked decision; the tool registry itself reuses C4 Phase-7), **Tools** (default editor +
+  terminal), **Integrations** (master MCP + HTTP-API toggles; per-group MCP reuses `McpToolGroups`). Discrete
+  pickers are **closed enums** (single source; enum→CSS mapping lives once in the frontend), never bare
+  strings/numbers (§15, plan/06 §5.9). `settings.rs` became a context folder (`settings.rs` + `settings/`)
+  mirroring `coordination.rs`. One whole-tab façade getter/setter per tab (auto-save). 13 core tests.
+- **`fe57dca` feat(settings) — 11b Hotkeys registry (I7h):** a closed `HotkeyAction` set with a **code-defined
+  default binding per action** (single source), each in a `HotkeyScope` (General/Sidebar/Terminal); Solo's macOS
+  reference remapped **`⌘`→Ctrl, `⌥`→Alt** for Linux. The document stores **only deviations** (a remap or a
+  disable), so "Reset all to defaults" clears the overrides and a future default change reaches anyone who hasn't
+  overridden the action. A binding is a typed chord (modifier flags + `KeyboardEvent.key` token); **conflicts are
+  reported only within a scope**, so a key shared across scopes (Ctrl+ArrowUp = previous-project AND
+  previous-process) is legal — the I7h acceptance criterion. Façade: `hotkeys()` read model + remap/disable/reset/
+  reset_all. 9 tests.
+- **Clean-room (§9):** the video-sourced global-tab facts + our discretization decisions (the discrete step-sets,
+  the unshown defaults, the Cmd→Ctrl/Option→Alt hotkey remap, the override-only persistence, the scope-conflict
+  rule, and the Notifications/Account "decide, don't invent" stub) are recorded in **`plan/05` §12** (4 new rows).
+- **Still owed before 11b → Verified:** the Tauri command adapter (each method → one command, via the `tauri-*`
+  skills + official-doc confirmation), the `domain.ts`/`api.ts` TS mirror, the Settings window UI through
+  `/impeccable`, the Appearance→xterm restyle (I5), and the Playwright acceptance checks. **11a (the per-project
+  page + the C1 shared/local move, I7a–I7e) is not started.**
+
+### Settings build-out planned from the source demo + wired in (2026-06-26)
+- **Studied the Solo demo** "Your new agentic development environment" (Aaron Francis,
+  `youtube.com/watch?v=kVyFCcP6B28`) frame-by-frame and captured **every** settings field shown — both the
+  per-project page and the global 8-tab Settings window — with **no fabrication**. The global
+  **Notifications** and **Account** tabs were never opened on camera, so their fields are left undefined
+  (decision pending), not invented.
+- **Added two phase docs** (the only new files): `plan/phases/phase-11a-project-settings.md` (per-project)
+  and `phase-11b-global-settings.md` (global). They sort between Phase 11 and Phase 12 and **decompose I7**
+  — they do **not** replace Phase 11's remaining v1 work; they build on the Phase 11 slice-2 settings
+  backend (`core::settings`, migration v9).
+- **One reusable settings base (no duplication):** both surfaces reuse a generic `SettingsStore<K, D>`
+  over a serde-default document + `SettingsRepo<K, D>` port — `K = ()` global, `K = ProjectId` per-project
+  local. Adding a setting = one serde-default field + one `Facade` getter/setter. Design + "add a setting"
+  recipe: **`plan/06` §4 (pattern) + §5.9 (recipe + domain split from `solo.yml` config C1)**.
+- **Wired for pickup:** `plan/02` I-table now carries the granular settings rows (`I7a`–`I7m` + base
+  `I7s`); the `README` phase map and the Phase-status table above both list 11a/11b. A future session
+  reaching the settings work now has the contract + the plan.
+- **Follow-up still owed (before either phase is `Verified`):** record the video-sourced Solo facts in
+  `plan/05` §12 (clean-room §9), and decide the Notifications/Account tab contents (don't build blind).
 
 ### Phase 10 → `Verified` (acceptance walk passed) + Phase 11 slice 2 begun (2026-06-25)
 - **Phase 10 acceptance walk PASSED (user-confirmed 2026-06-25).** Ran the user-only desktop walk
@@ -3229,6 +3480,58 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
+**0. Settings build-out (phases 11a/11b) is IN PROGRESS on `feat/phase-11-settings-ui` (off `main` `195b152`).** The
+**generic base (I7s) and the global-settings core behavior of all six SHOWN tabs are DONE & green** (commits `12c2ee2`
+docs, `c0de87c` base, `73ed5d7` data tabs, `fe57dca` hotkeys — see the top Decisions entry). The next steps, in order:
+
+  **0a. The Tauri command adapter for settings. ✅ DONE & green (2026-06-26, `dcd85c0`).** 17 thin
+  `#[tauri::command]`s in a new `crates/app/src/commands/settings.rs` (`commands.rs` → `commands/mod.rs` for file-size),
+  each → one `Facade` method, registered in `invoke_handler`, mirrored in the one `domain.ts` + `api.ts`. **Confirmed
+  via `tauri-calling-rust` + `tauri-capabilities` + the official docs: app-defined commands need NO capability/ACL
+  entry** (the ACL gates plugin/core commands only; the existing 14 commands prove it) — so none were added; the hand-off
+  note's "add capability/ACL entries" does not apply to app commands. `just lint` exit 0; UI vitest 78; Rust 603/3-ignored
+  (excl. the known `soloist-sys` shellenv env-red). See the top Decisions entry.
+
+  **0b. The Settings window UI — drive through `/impeccable` (MANDATORY, §5); `PRODUCT.md`/`DESIGN.md` are the design
+  source of truth.** **Shell + Appearance tab (I5) DONE (`176b2b1`)** — see the top Decisions entry: in-app overlay +
+  left tab rail; `lib/appearance.ts` (the single enum→CSS/xterm map) + `AppearanceProvider` + the `useTerminal` live
+  restyle satisfy I5 (app + xterm, immediate + after restart); Notifications/Account stubbed "to be defined". **ALL FIVE
+  remaining 0b panels DONE & gate-green (2026-06-26), as their own stacked PRs on top of #32** (the owner's "new stacked
+  PR per change" directive — chain **#31 → #32 → #33 → #34 → #35**, merge in order, no self-merge). Each is the one
+  Appearance pattern: a small presentational panel over a projected read-model, no business logic, enum→value maps in one
+  `lib/` place; a shared `useSettingsResource` (load-once + optimistic-save) backs the overlay-only panels, and `panelFor`
+  is now a tab→component registry. See the top Decisions entry.
+  - **Tools** (I7j) — `#33`: default editor + terminal `SettingSelect`s over `tool_defaults`; curated Linux option list.
+  - **Integrations** (I7k) — `#33`: per-group MCP toggles (the enforced G10 surface) + read-only stdio MCP client config
+    (no port, D4) + the loopback HTTP endpoint list (H1). **Master MCP/HTTP toggles DEFERRED** — they only persist today
+    (no backend reads `integration_settings`), so surfacing them would break honest-status; recorded backend follow-up.
+  - **Agents** (I7i) — `#33`: read-only detectable-tool registry (`agent_list`/`agent_detect` + Detect) + the
+    summarization opt-in (tool+model, OFF by default). **Add/edit of custom tools needs a backend method — follow-up.**
+  - **Sidebar** (I7g) — `#34`: a root `SidebarSettingsProvider`; `show_settings_footer` gates the footer button and
+    `hide_empty_sections` drives `groupByProject` (new `hideEmptyKinds` flag). **Owner-approved "gate what exists":** the
+    filter input, header CPU/mem badges, and project hover actions don't exist yet, so those settings persist with a panel
+    note and apply when those sidebar features land. **I7g partially Verified (the persist-only controls are the gap).**
+  - **Hotkeys** (I7h) + **I6** — `#35`: searchable scope-grouped keymap (chord capture, hover-to-disable, reset/reset-all,
+    conflict badge). **Core change:** `HotkeyBindingView` gained a `conflict: bool` computed from `Hotkeys::conflicts()`
+    (single source; no new Tauri command). **I6 closed:** a root `HotkeysProvider` + `useGlobalHotkeys` replace the
+    hardcoded `Ctrl+T`/`Ctrl+,` — a remapped **General** chord dispatches live; **scoped (Sidebar/Terminal) dispatch lands
+    with those features** (their actions have no handler yet). Gate: core 8 hotkeys tests + UI vitest 103 + clippy/fmt.
+  - **e2e:** the real-window walk is **WebdriverIO + tauri-driver** (NOT Playwright — WebKitGTK has no CDP; Phase-5
+    finding), needs `sudo apt install webkit2gtk-driver xvfb` + `cargo install tauri-driver`. The mockIPC behavior tests
+    are the headless layer. Live visual/xterm-restyle verification is user-only (`just dev`, host `DISPLAY=:0`).
+
+  **0c. Per-project settings (11a, I7a–I7e) — NOT STARTED. ◀ NEXT.** Its own PR (ask the owner whether to stack on #35
+  or branch off `main`). `ProjectSettings` via `SettingsStore<ProjectId, ProjectSettings>` (a new `project_settings`
+  SQLite table + migration v10 + `project_settings_repo` on `CorePorts` — `Noop` default + builder method; the test
+  `FakeSettingsRepo` is already generic over the key, reuse it) + composition-root wiring + Facade getters/setters +
+  Tauri commands + the project settings page (Overview / Settings / Notifications / Commands) + the "Add command" modal +
+  the Make-local move. The C1 shared/local write path: a shared command edit is an explicit minimal-diff `solo.yml` write
+  (hash-diff + debounce + re-trust); a local command touches ONLY app state and is NEVER written to `solo.yml` — assert
+  the `solo.yml` bytes are byte-unchanged in a test. Record the per-project Solo facts in `plan/05` §12 (clean-room §9)
+  and decide Notifications/Account tab contents WITH the owner before building.
+
+The older "next slice" notes below predate this work — `I7`/`I5`/`I6` are now the settings work above; `I1`/`I2`/`I9` and
+the `later` rows are unchanged. **v1 rows remaining:** `I1` drag-reorder, `I2` command palette (`Ctrl+K`), `I5` light/dark/system
 **Cache (most recent, 2026-06-27): BOTH the backend read-through cache AND the frontend persisted half are
 committed.** The backend slice is on `feat/phase-11-read-cache` (**PR #38, still OPEN — not merged**: `core::cache::ReadCache`
 + `ShellEnv` refactor + cached `agent_detect`). The **frontend persisted half is on `feat/phase-11-frontend-cache`**

@@ -29,20 +29,23 @@ use crate::ports::{Clock, CorePorts, PtySize, SpawnSpec, StoreError};
 use crate::portscan::{self, PortProbe, WaitForPortError};
 use crate::process::{ProcessKind, ProcessView};
 use crate::projects::{LoadProjectError, ProjectLoad, ProjectService, ProjectView, Projects};
-use crate::settings::SettingsStore;
+use crate::settings::{ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::trust::TrustStore;
 
+mod commands;
 mod coordination;
 mod kv;
 mod loops;
 mod output;
+mod project_settings;
 mod scoped;
 mod scratchpad;
 mod session;
 mod settings;
 mod todo;
 
+pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
 pub use scoped::{ScopedActionError, SpawnAgentError};
 
@@ -71,7 +74,8 @@ pub struct Facade {
     timers: Timers,
     scratchpads: Scratchpads,
     todos: Todos,
-    settings: SettingsStore,
+    settings: SettingsStore<(), Settings>,
+    project_settings: SettingsStore<ProjectId, ProjectSettings>,
 }
 
 impl Facade {
@@ -97,6 +101,7 @@ impl Facade {
             scratchpad_repo,
             todo_repo,
             settings_repo,
+            project_settings_repo,
             ..
         } = ports;
         Self {
@@ -110,6 +115,7 @@ impl Facade {
             scratchpads: Scratchpads::new(scratchpad_repo),
             todos: Todos::new(todo_repo),
             settings: SettingsStore::new(settings_repo),
+            project_settings: SettingsStore::new(project_settings_repo),
             clock,
             metrics,
             port_probe,

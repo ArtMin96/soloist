@@ -114,7 +114,8 @@ fn build_facade(app: AppHandle) -> Facade {
         .scratchpad_repo(store.clone())
         .todo_repo(store.clone())
         .kv_repo(store.clone())
-        .settings_repo(store)
+        .settings_repo(store.clone())
+        .project_settings_repo(store)
         .locks(Arc::new(lock_releaser))
         .build(),
     )
@@ -281,6 +282,41 @@ pub fn run() {
             commands::pty_attach,
             commands::pty_detach,
             commands::orphans_resolve,
+            commands::appearance,
+            commands::set_appearance,
+            commands::sidebar_settings,
+            commands::set_sidebar_settings,
+            commands::hotkeys,
+            commands::remap_hotkey,
+            commands::disable_hotkey,
+            commands::reset_hotkey,
+            commands::reset_all_hotkeys,
+            commands::agent_settings,
+            commands::set_agent_settings,
+            commands::tool_defaults,
+            commands::set_tool_defaults,
+            commands::integration_settings,
+            commands::set_integration_settings,
+            commands::mcp_tool_groups,
+            commands::set_mcp_tool_group,
+            commands::project_settings_page,
+            commands::project_settings,
+            commands::set_project_auto_start_gate,
+            commands::set_project_editor_override,
+            commands::set_project_crash_exit_alerts,
+            commands::set_project_terminal_alerts,
+            commands::set_command_terminal_alerts,
+            commands::add_shared_command,
+            commands::edit_shared_command,
+            commands::rename_shared_command,
+            commands::remove_shared_command,
+            commands::add_local_command,
+            commands::edit_local_command,
+            commands::rename_local_command,
+            commands::remove_local_command,
+            commands::make_command_local,
+            commands::save_command_to_yaml,
+            commands::set_project_icon,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
