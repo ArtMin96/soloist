@@ -66,6 +66,13 @@
     real-window walk is **WebdriverIO + tauri-driver (user-only, sudo deps)** — *not* Playwright. The phase file's
     "Playwright" line was reconciled to this. **The live glyph-flip / nesting visual walk is the USER-ONLY step
     that flips O3/O4 → `Verified`.**
+  - **Known follow-up (owner-deferred 2026-06-28):** the orchestration tree currently renders **every managed
+    process** in the project (Commands + Terminals + Agents), because orch-00's read-model was specified as "each
+    managed process" (`plan/05 §12`) and `orchestration_snapshot` applies no `kind` filter. Orchestration is
+    agent-to-agent, so the faithful behavior is **agents-only** (leads + workers; a future `spawn_process` worker
+    re-qualifies via its recorded parent). The owner verified this and chose to **leave it as-is for now** — the
+    agent-only filter (one line in the Facade assembly + a `plan/05 §12` wording fix + a "a Command is excluded"
+    core test) is a tracked follow-up, not done this phase.
   - **Gate (evidence):** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier, dep-direction OK;
     file-size advisory only — `domain.ts` now 538). **Rust `cargo test --workspace` 615 passed / 0 failed / 3
     ignored** (soak); the known `soloist-sys` shellenv env-red did **not** recur this run. **UI vitest 135 passed
