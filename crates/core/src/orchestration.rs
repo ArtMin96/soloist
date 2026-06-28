@@ -1,0 +1,52 @@
+//! The orchestration read-model (a query projection over contexts C2/C4/C6).
+//!
+//! [`OrchestrationSnapshot`] is the single read the orchestration UI renders: the project's agent
+//! lineage tree plus its coordination state (todos, timers, leases, scratchpads, key-value). It is
+//! **derived on read** from the live process registry (C2), the idle tracker (C4), and the durable
+//! coordination aggregates (C6) — never a separately stored copy of that state, so it cannot drift
+//! from the source of truth. The Facade assembles it ([`crate::facade::Facade::orchestration_snapshot`]);
+//! adapters project it and re-read it when a coordination [`DomainEvent`](crate::events::DomainEvent)
+//! signals a change, rather than carrying domain payloads on every event.
+
+use serde::Serialize;
+
+use crate::agents::AgentActivity;
+use crate::coordination::{KvEntry, LeaseView, ScratchpadSummary, TimerView, TodoView};
+use crate::ids::{ProcessId, ProjectId};
+use crate::process::{ProcStatus, ProcessKind};
+
+/// One node in the agent lineage tree: a managed process the orchestration UI shows, with its
+/// supervision status and — for agents — its live idle activity. `parent` is the process that
+/// spawned it; it is `None` until spawn lineage is recorded, so every node is currently a root and
+/// the UI renders a flat list that becomes a tree once `parent` is populated.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AgentNode {
+    pub id: ProcessId,
+    pub parent: Option<ProcessId>,
+    pub kind: ProcessKind,
+    pub status: ProcStatus,
+    /// The five-state idle activity for an [`Agent`](ProcessKind::Agent); `None` for a command or
+    /// terminal (which the idle FSM does not track) or an agent not yet classified.
+    pub activity: Option<AgentActivity>,
+}
+
+/// The orchestration read-model for one project: the agent tree and the coordination state agents
+/// share to orchestrate each other. Assembled purely from existing reads, in stable order so the UI
+/// diffs it cleanly. Every field is a projection — the durable source of truth stays in the C6
+/// aggregates and the C2 registry.
+#[derive(Clone, Debug, Serialize)]
+pub struct OrchestrationSnapshot {
+    pub project: ProjectId,
+    /// The project's managed processes as lineage nodes, in registry order.
+    pub agents: Vec<AgentNode>,
+    /// Open todos as full views (blockers, comments, lock owner, the derived `blocked` flag).
+    pub todos: Vec<TodoView>,
+    /// Armed and paused timers in the project, ordered by id.
+    pub timers: Vec<TimerView>,
+    /// Live leases in the project, ordered by key.
+    pub leases: Vec<LeaseView>,
+    /// One-line scratchpad summaries in the project.
+    pub scratchpads: Vec<ScratchpadSummary>,
+    /// Key-value entries in the project, ordered by key.
+    pub kv: Vec<KvEntry>,
+}

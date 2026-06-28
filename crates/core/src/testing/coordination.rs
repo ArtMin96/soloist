@@ -64,6 +64,21 @@ impl LockRepo for FakeLockRepo {
         }
     }
 
+    fn live_in_project(
+        &self,
+        project: ProjectId,
+        now: u64,
+    ) -> Result<Vec<StoredLease>, StoreError> {
+        let rows = lock(&self.rows);
+        let mut live: Vec<StoredLease> = rows
+            .values()
+            .filter(|lease| lease.project == project && lease.expires_unix_millis > now)
+            .cloned()
+            .collect();
+        live.sort_by(|a, b| a.key.cmp(&b.key));
+        Ok(live)
+    }
+
     fn release(&self, project: ProjectId, key: &str, owner: ProcessId) -> Result<bool, StoreError> {
         let mut rows = lock(&self.rows);
         let slot = (project.get(), key.to_owned());
@@ -337,6 +352,16 @@ impl TimerRepo for FakeTimerRepo {
             }
             _ => Ok(false),
         }
+    }
+
+    fn list_in_project(&self, project: ProjectId) -> Result<Vec<StoredTimer>, StoreError> {
+        let mut timers: Vec<StoredTimer> = lock(&self.rows)
+            .values()
+            .filter(|timer| timer.project == project)
+            .cloned()
+            .collect();
+        timers.sort_by_key(|timer| timer.id.get());
+        Ok(timers)
     }
 
     fn list(&self, owner: ProcessId) -> Result<Vec<StoredTimer>, StoreError> {

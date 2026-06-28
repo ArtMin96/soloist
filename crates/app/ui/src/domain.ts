@@ -193,11 +193,119 @@ export type DomainEvent =
   // An agent's activity changed (the five-state idle FSM). Edge-triggered (only on a
   // transition), so the agent's row updates without polling; Permission/Error raise attention.
   | { type: "AgentActivityChanged"; id: number; state: AgentActivity }
-  | { type: "OrphansFound"; orphans: OrphanInfo[] };
+  | { type: "OrphansFound"; orphans: OrphanInfo[] }
+  // Coordination change-notifications (C6) for the orchestration read-model. Each carries ids
+  // only — the UI re-reads orchestration_snapshot (coalesced) rather than trusting a payload.
+  | { type: "TodoChanged"; project: number; id: number }
+  | { type: "TimerArmed"; owner: number; id: number }
+  // A timer fired: its body was delivered to the owner as a fresh turn and it left the armed set.
+  | { type: "TimerFired"; owner: number; id: number }
+  | { type: "TimerCleared"; owner: number; id: number }
+  | { type: "LeaseChanged"; project: number; key: string }
+  // Keyed by the scratchpad's `name` handle (the addressing key its surface uses).
+  | { type: "ScratchpadChanged"; project: number; name: string }
+  | { type: "KvChanged"; project: number; key: string };
 
 export interface AppInfo {
   name: string;
   version: string;
+}
+
+// ── Coordination read-model (mirrors core::coordination view types) ──────────
+// Projected by the orchestration snapshot; the orchestration UI renders these.
+// Enum string values are the core's serde `snake_case` output. Ids serialize as numbers.
+
+export type TodoStatus = "open" | "blocked" | "in_progress" | "done";
+
+// The disciplined, revision-guarded specification a todo carries.
+export interface TodoDoc {
+  title: string;
+  description: string;
+  acceptance_criteria: string[];
+  risks: string[];
+  status: TodoStatus;
+}
+
+// A comment on a todo (its per-todo sequential id and body).
+export interface Comment {
+  id: number;
+  body: string;
+}
+
+// A todo as the board reads it: the document plus its live columns (tags, blockers, the unmet
+// subset, the derived blocked flag, comments, lock owner) and the revision to guard the next write.
+export interface TodoView {
+  id: number;
+  doc: TodoDoc;
+  tags: string[];
+  blockers: number[];
+  blocked_by: number[];
+  blocked: boolean;
+  comments: Comment[];
+  locked_by: number | null;
+  revision: number;
+}
+
+// What a timer waits for (serde tag = "kind").
+export type FireCond =
+  | { kind: "at" }
+  | { kind: "when_idle_any"; watched: number[] }
+  | { kind: "when_idle_all"; watched: number[] };
+
+export type TimerStatus = "armed" | "paused";
+
+// A timer as the panel reads it: its body, fire condition, status, and absolute deadline.
+export interface TimerView {
+  id: number;
+  body: string;
+  fire: FireCond;
+  status: TimerStatus;
+  deadline_unix_millis: number;
+}
+
+// A live lease: its key, the process that holds it, and the absolute expiry.
+export interface LeaseView {
+  key: string;
+  owner: number;
+  expires_unix_millis: number;
+}
+
+// A scratchpad in a listing (identity, handle, tags, archived flag, revision, objective gist).
+export interface ScratchpadSummary {
+  id: number;
+  name: string;
+  tags: string[];
+  archived: boolean;
+  revision: number;
+  objective: string;
+}
+
+// A project-scoped key-value entry; `value` is arbitrary JSON.
+export interface KvEntry {
+  key: string;
+  value: unknown;
+}
+
+// ── Orchestration read-model (mirrors core::orchestration) ───────────────────
+// One node in the agent lineage tree. `parent` stays null until spawn lineage is recorded.
+export interface AgentNode {
+  id: number;
+  parent: number | null;
+  kind: ProcessKind;
+  status: ProcStatus;
+  activity: AgentActivity | null;
+}
+
+// The orchestration read-model for one project: its agent tree plus the coordination state agents
+// share. Produced by the `orchestration_snapshot` query (exposed to the UI by a Tauri command).
+export interface OrchestrationSnapshot {
+  project: number;
+  agents: AgentNode[];
+  todos: TodoView[];
+  timers: TimerView[];
+  leases: LeaseView[];
+  scratchpads: ScratchpadSummary[];
+  kv: KvEntry[];
 }
 
 // ── Settings (mirrors core::settings) ───────────────────────────────────────

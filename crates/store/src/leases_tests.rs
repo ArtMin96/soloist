@@ -240,6 +240,38 @@ fn leases_are_isolated_per_project() {
 }
 
 #[test]
+fn live_in_project_returns_only_this_project_s_unexpired_leases_ordered_by_key() {
+    let dir = tempdir().expect("temp dir");
+    let store = SqliteStore::open(&dir.path().join("soloist.db")).expect("open");
+    let a = project(&store, "/p/a");
+    let b = project(&store, "/p/b");
+    // Two live and one already-expired lease in project a, plus one in project b.
+    store
+        .acquire(&lease(a, "migrate", 1, 1_000, 50_000), 1_000)
+        .expect("a migrate");
+    store
+        .acquire(&lease(a, "deploy", 2, 1_000, 50_000), 1_000)
+        .expect("a deploy");
+    store
+        .acquire(&lease(a, "stale", 3, 1_000, 2_000), 1_000)
+        .expect("a stale");
+    store
+        .acquire(&lease(b, "deploy", 4, 1_000, 50_000), 1_000)
+        .expect("b deploy");
+
+    // At a `now` past the stale lease's expiry: only project a's two live leases, ordered by key,
+    // and never project b's.
+    let live = store.live_in_project(a, 10_000).expect("live_in_project");
+    let keys: Vec<&str> = live.iter().map(|lease| lease.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        vec!["deploy", "migrate"],
+        "live leases, ordered by key"
+    );
+    assert_eq!(live[0].owner, ProcessId::from_raw(2));
+}
+
+#[test]
 fn concurrent_acquires_of_one_key_grant_exactly_one_winner() {
     // The race the atomic acquire fixes: many processes acquire the same free key at once. Exactly
     // one must win; every other must be told the (single, stable) holder — never two grants.

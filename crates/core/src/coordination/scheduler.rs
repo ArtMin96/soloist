@@ -90,6 +90,13 @@ impl TimerScheduler {
                     // Claim atomically: a timer the owner paused or cancelled since we read the
                     // armed set is no longer claimable, so it is not fired.
                     if let Ok(Some(claimed)) = self.repo.take_if_armed(timer.id) {
+                        // The timer fired (it is claimed and removed); announce it before delivery
+                        // so the wake-cycle UI sees it leave the armed set even when delivery is a
+                        // best-effort no-op (the owner has since closed).
+                        self.bus.publish(DomainEvent::TimerFired {
+                            owner: claimed.owner,
+                            id: claimed.id,
+                        });
                         deliver(&supervisor, claimed).await;
                     }
                 } else {

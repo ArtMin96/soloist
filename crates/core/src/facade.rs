@@ -37,6 +37,7 @@ mod commands;
 mod coordination;
 mod kv;
 mod loops;
+mod orchestration;
 mod output;
 mod project_settings;
 mod scoped;

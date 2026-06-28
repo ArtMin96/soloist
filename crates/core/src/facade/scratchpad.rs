@@ -14,8 +14,9 @@ use super::Facade;
 use crate::coordination::{
     RenameError, ScratchpadDoc, ScratchpadSummary, ScratchpadView, WriteError,
 };
+use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
-use crate::ids::SessionId;
+use crate::ids::{ProjectId, SessionId};
 
 impl Facade {
     /// Creates or replaces the scratchpad `name` in the session's effective project with the
@@ -31,15 +32,18 @@ impl Facade {
         expected: Option<u64>,
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.scratchpads
-            .write(project, name, doc, expected)
-            .map_err(|err| match err {
-                WriteError::Invalid(message) => CoordinationError::InvalidScratchpad(message),
-                WriteError::Conflict { expected, actual } => {
-                    CoordinationError::RevisionConflict { expected, actual }
-                }
-                WriteError::Store(err) => CoordinationError::Store(err),
-            })
+        self.emit_scratchpad(
+            project,
+            self.scratchpads
+                .write(project, name, doc, expected)
+                .map_err(|err| match err {
+                    WriteError::Invalid(message) => CoordinationError::InvalidScratchpad(message),
+                    WriteError::Conflict { expected, actual } => {
+                        CoordinationError::RevisionConflict { expected, actual }
+                    }
+                    WriteError::Store(err) => CoordinationError::Store(err),
+                }),
+        )
     }
 
     /// The scratchpad `name` in the session's effective project, or
@@ -73,13 +77,16 @@ impl Facade {
         to: &str,
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.scratchpads
-            .rename(project, from, to)
-            .map_err(|err| match err {
-                RenameError::NotFound => CoordinationError::UnknownScratchpad,
-                RenameError::NameTaken => CoordinationError::ScratchpadNameTaken,
-                RenameError::Store(err) => CoordinationError::Store(err),
-            })
+        self.emit_scratchpad(
+            project,
+            self.scratchpads
+                .rename(project, from, to)
+                .map_err(|err| match err {
+                    RenameError::NotFound => CoordinationError::UnknownScratchpad,
+                    RenameError::NameTaken => CoordinationError::ScratchpadNameTaken,
+                    RenameError::Store(err) => CoordinationError::Store(err),
+                }),
+        )
     }
 
     /// Adds `tags` to the scratchpad `name` in the session's effective project, returning the
@@ -91,9 +98,12 @@ impl Facade {
         tags: &[String],
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.scratchpads
-            .add_tags(project, name, tags)?
-            .ok_or(CoordinationError::UnknownScratchpad)
+        self.emit_scratchpad(
+            project,
+            self.scratchpads
+                .add_tags(project, name, tags)?
+                .ok_or(CoordinationError::UnknownScratchpad),
+        )
     }
 
     /// Removes `tags` from the scratchpad `name` in the session's effective project, returning the
@@ -105,9 +115,12 @@ impl Facade {
         tags: &[String],
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.scratchpads
-            .remove_tags(project, name, tags)?
-            .ok_or(CoordinationError::UnknownScratchpad)
+        self.emit_scratchpad(
+            project,
+            self.scratchpads
+                .remove_tags(project, name, tags)?
+                .ok_or(CoordinationError::UnknownScratchpad),
+        )
     }
 
     /// The distinct tags used across the session's effective project's scratchpads, sorted.
@@ -129,9 +142,12 @@ impl Facade {
         archived: bool,
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.scratchpads
-            .set_archived(project, name, archived)?
-            .ok_or(CoordinationError::UnknownScratchpad)
+        self.emit_scratchpad(
+            project,
+            self.scratchpads
+                .set_archived(project, name, archived)?
+                .ok_or(CoordinationError::UnknownScratchpad),
+        )
     }
 
     /// Deletes the scratchpad `name` in the session's effective project, returning whether one was
@@ -142,7 +158,31 @@ impl Facade {
         name: &str,
     ) -> Result<bool, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        Ok(self.scratchpads.delete(project, name)?)
+        let removed = self.scratchpads.delete(project, name)?;
+        if removed {
+            self.bus.publish(DomainEvent::ScratchpadChanged {
+                project,
+                name: name.to_owned(),
+            });
+        }
+        Ok(removed)
+    }
+
+    /// Publishes a [`DomainEvent::ScratchpadChanged`] for the scratchpad a successful mutation
+    /// returned (keyed by its `name` handle), then passes the result through — the single emission
+    /// seam every scratchpad write routes through. A failed write emits nothing.
+    fn emit_scratchpad(
+        &self,
+        project: ProjectId,
+        result: Result<ScratchpadView, CoordinationError>,
+    ) -> Result<ScratchpadView, CoordinationError> {
+        if let Ok(view) = &result {
+            self.bus.publish(DomainEvent::ScratchpadChanged {
+                project,
+                name: view.name.clone(),
+            });
+        }
+        result
     }
 }
 

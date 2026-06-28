@@ -15,6 +15,7 @@ use super::Facade;
 use crate::coordination::{
     watched_is_idle, AcquireOutcome, IdleMode, LeaseView, SetWhenIdleOutcome, TimerView,
 };
+use crate::events::DomainEvent;
 use crate::ids::{ProcessId, ProjectId, SessionId, TimerId, TodoId};
 use crate::ports::StoreError;
 
@@ -94,7 +95,16 @@ impl Facade {
     ) -> Result<AcquireOutcome, CoordinationError> {
         let project = self.coordination_scope(session)?;
         let owner = self.coordination_owner(session)?;
-        Ok(self.leases.acquire(project, key, owner, ttl)?)
+        let outcome = self.leases.acquire(project, key, owner, ttl)?;
+        // Only a grant or renewal changed the lease; a `Held` outcome left another owner's lease
+        // untouched, so it raises no change.
+        if matches!(outcome, AcquireOutcome::Acquired(_)) {
+            self.bus.publish(DomainEvent::LeaseChanged {
+                project,
+                key: key.to_owned(),
+            });
+        }
+        Ok(outcome)
     }
 
     /// The current holder of the lease `key` in the session's effective project, or `None` if it
@@ -114,7 +124,14 @@ impl Facade {
     pub fn lock_release(&self, session: SessionId, key: &str) -> Result<bool, CoordinationError> {
         let project = self.coordination_scope(session)?;
         let owner = self.coordination_owner(session)?;
-        Ok(self.leases.release(project, key, owner)?)
+        let released = self.leases.release(project, key, owner)?;
+        if released {
+            self.bus.publish(DomainEvent::LeaseChanged {
+                project,
+                key: key.to_owned(),
+            });
+        }
+        Ok(released)
     }
 
     /// Clears every stale lease on launch — see [`Leases::reconcile`](crate::coordination::Leases::reconcile).
@@ -135,7 +152,12 @@ impl Facade {
     ) -> Result<TimerView, CoordinationError> {
         let project = self.coordination_scope(session)?;
         let owner = self.coordination_owner(session)?;
-        Ok(self.timers.set(project, owner, body, after)?)
+        let timer = self.timers.set(project, owner, body, after)?;
+        self.bus.publish(DomainEvent::TimerArmed {
+            owner,
+            id: timer.id,
+        });
+        Ok(timer)
     }
 
     /// Arms a fire-when-idle timer owned by the session's bound process: it delivers `body` to
@@ -164,6 +186,10 @@ impl Facade {
         let timer = self
             .timers
             .set_when_idle(project, owner, body, processes, mode, max_wait)?;
+        self.bus.publish(DomainEvent::TimerArmed {
+            owner,
+            id: timer.id,
+        });
         Ok(SetWhenIdleOutcome {
             timer,
             already_idle,
@@ -178,7 +204,12 @@ impl Facade {
         timer: TimerId,
     ) -> Result<bool, CoordinationError> {
         let owner = self.coordination_owner(session)?;
-        Ok(self.timers.cancel(timer, owner)?)
+        let cancelled = self.timers.cancel(timer, owner)?;
+        if cancelled {
+            self.bus
+                .publish(DomainEvent::TimerCleared { owner, id: timer });
+        }
+        Ok(cancelled)
     }
 
     /// Pauses a timer the session's bound process owns (freezing the time that remains), returning

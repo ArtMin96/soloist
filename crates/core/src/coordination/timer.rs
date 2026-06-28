@@ -259,6 +259,18 @@ impl Timers {
             .collect())
     }
 
+    /// Every timer in `project` (armed or paused), as views, ordered by id — the read the
+    /// orchestration snapshot projects. Keyed by project, not owner, so the snapshot shows every
+    /// timer in the project regardless of which process owns it.
+    pub fn list_project(&self, project: ProjectId) -> Result<Vec<TimerView>, StoreError> {
+        Ok(self
+            .repo
+            .list_in_project(project)?
+            .into_iter()
+            .map(|stored| stored.into_view())
+            .collect())
+    }
+
     /// Clears every timer — launch reconciliation. Like a lease, a timer is process-owned and
     /// per-run process ids are recycled, so a timer left by a previous run names an owner that no
     /// longer exists and could never deliver; clearing the table on launch is the safe reconcile.

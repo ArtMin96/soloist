@@ -86,6 +86,12 @@ pub trait TimerRepo: Send + Sync {
     /// are one step.
     fn resume(&self, id: TimerId, owner: ProcessId, now: u64) -> Result<bool, StoreError>;
 
+    /// Every timer in `project` (armed or paused), ordered by id — the project-scoped read the
+    /// orchestration snapshot projects. A plain read; unlike [`list`](Self::list) it is keyed by
+    /// project, not owner, so the snapshot shows every timer in the project regardless of which
+    /// process owns it.
+    fn list_in_project(&self, project: ProjectId) -> Result<Vec<StoredTimer>, StoreError>;
+
     /// Every timer `owner` holds (armed or paused) — the rows `timer_list` returns.
     fn list(&self, owner: ProcessId) -> Result<Vec<StoredTimer>, StoreError>;
 
@@ -122,6 +128,9 @@ impl TimerRepo for NoopTimerRepo {
     }
     fn resume(&self, _id: TimerId, _owner: ProcessId, _now: u64) -> Result<bool, StoreError> {
         Ok(false)
+    }
+    fn list_in_project(&self, _project: ProjectId) -> Result<Vec<StoredTimer>, StoreError> {
+        Ok(Vec::new())
     }
     fn list(&self, _owner: ProcessId) -> Result<Vec<StoredTimer>, StoreError> {
         Ok(Vec::new())

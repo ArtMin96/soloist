@@ -222,6 +222,18 @@ impl Todos {
             .collect()
     }
 
+    /// Every todo in `project` as a full [`TodoView`] (blockers, comments, lock owner, the derived
+    /// `blocked` flag), in creation order — the read the orchestration to-do board projects. Reuses
+    /// the same store read as [`list`](Self::list) and the same per-row [`view`](Self::view)
+    /// mapping, so it is no more costly than the summary list and stays a single source of truth.
+    pub fn views(&self, project: ProjectId) -> Result<Vec<TodoView>, StoreError> {
+        self.repo
+            .list(project)?
+            .into_iter()
+            .map(|stored| self.view(stored))
+            .collect()
+    }
+
     /// Replaces the document of todo `id` in `project` with `doc`, **revision-guarded** by `expected`.
     /// Validates the document, refuses a stale write ([`TodoError::Conflict`]), and — when the new
     /// status is [`Done`](TodoStatus::Done) — enforces the blocker gate ([`TodoError::Blocked`]).

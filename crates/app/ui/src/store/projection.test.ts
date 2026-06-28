@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyEvent } from "@/store/projection";
-import type { ProcessView } from "@/domain";
+import type { DomainEvent, ProcessView } from "@/domain";
 
 const starting: ProcessView = {
   id: 1,
@@ -116,5 +116,23 @@ describe("applyEvent", () => {
     expect(applyEvent([starting], { type: "MetricsTick", id: 1, cpu_pct: 12, rss: 4096 })).toEqual([
       starting,
     ]);
+  });
+
+  it("leaves the process list untouched for coordination events (the orchestration snapshot owns them)", () => {
+    const coordination: DomainEvent[] = [
+      { type: "TodoChanged", project: 1, id: 7 },
+      { type: "TimerArmed", owner: 1, id: 2 },
+      { type: "TimerFired", owner: 1, id: 2 },
+      { type: "TimerCleared", owner: 1, id: 2 },
+      { type: "LeaseChanged", project: 1, key: "deploy" },
+      { type: "ScratchpadChanged", project: 1, name: "plan" },
+      { type: "KvChanged", project: 1, key: "config" },
+    ];
+    const input = [starting];
+    for (const event of coordination) {
+      // Referential identity: the reducer returns the same array, never re-allocating for a
+      // delta that does not touch the process list.
+      expect(applyEvent(input, event)).toBe(input);
+    }
   });
 });

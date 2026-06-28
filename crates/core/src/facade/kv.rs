@@ -10,6 +10,7 @@ use serde_json::Value;
 
 use super::Facade;
 use crate::coordination::KvEntry;
+use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
 use crate::ids::SessionId;
 
@@ -25,7 +26,9 @@ impl Facade {
         let project = self.coordination_scope(session)?;
         self.kv
             .set(project, &key, &value)
-            .map_err(CoordinationError::Store)
+            .map_err(CoordinationError::Store)?;
+        self.bus.publish(DomainEvent::KvChanged { project, key });
+        Ok(())
     }
 
     /// The value at `key` in the session's effective project, or `None` if there is none.
@@ -42,9 +45,14 @@ impl Facade {
     /// present.
     pub fn kv_delete(&self, session: SessionId, key: String) -> Result<bool, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.kv
+        let removed = self
+            .kv
             .delete(project, &key)
-            .map_err(CoordinationError::Store)
+            .map_err(CoordinationError::Store)?;
+        if removed {
+            self.bus.publish(DomainEvent::KvChanged { project, key });
+        }
+        Ok(removed)
     }
 
     /// Every key-value entry in the session's effective project, ordered by key.

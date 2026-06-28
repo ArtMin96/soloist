@@ -25,8 +25,12 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
-- **Orchestrator track PLANNED — queued for upcoming sessions (2026-06-26, user-directed).** A standalone
-  build track now lives in [`plan/orchestrator/`](plan/orchestrator/) — a charter
+- **Orchestrator track IN PROGRESS — orch-00 DONE (2026-06-28), orch-01 next.** **orch-00 (read-model O1 +
+  coordination events O2) is code-complete & gate-green** on branch `feat/orch-00-read-model-and-events` (the user
+  pushes/opens the PR): `Facade::orchestration_snapshot` + `core::orchestration` + the 7 `DomainEvent`s + the TS
+  mirror, with `plan/02` carrying **O1–O14** and `plan/05 §12` the orchestrator gap + O12/O13/O14 decisions. Full
+  Phase-9 suite + E7 stay green. See the top Decisions entry + "Next session should start with → ★". The track lives in
+  [`plan/orchestrator/`](plan/orchestrator/) — a charter
   ([`README.md`](plan/orchestrator/README.md)) + six phase files **orch-00 … orch-05**. **Key finding from
   citation-grade research:** the orchestration *mechanism* from the Solo demo (lead spawns workers →
   blockered todos → `timer_fire_when_idle(All)` → sleep token-free → wake to read/verify worker output) is
@@ -936,6 +940,53 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### orch-00 IMPLEMENTED — charter records + orchestration read-model + coordination events (2026-06-28)
+**Branch `feat/orch-00-read-model-and-events`** (off `orchestrator` `490174a`); the user pushes/opens the PR (no
+self-merge). Delivers **O1** (read-model) + **O2** (coordination events) — the pure CQRS-lite read side over the
+**frozen** G1–G11 writes; no write semantics changed.
+
+- **Task 1 — records (docs only).** `plan/02` gained an **`O — Orchestrator`** group with rows **O1–O14** (+ the demo
+  as the `🟡` UX source). `plan/05` §12 gained: an **Orchestrator (clean-room composition)** gap row; an
+  **Orchestration read-model & coordination events (O1/O2)** design row (the emission seam, the `ScratchpadChanged`-by-
+  `name` and pause/resume-deferred decisions); the **O13** spawn-preamble decision; the **O14** `solo://` promotion; and
+  the **O12** comment-author *reversal* reworded onto the `todo_comment_*` row (a correction toward the demo —
+  implementation is orch-02). **No `KNOWN-DIVERGENCES` entry forced** (O12/O13/O14 move toward the demo; D-7/D-8 stay).
+- **Task 2 — project-scoped reads (additive, write paths untouched).** New `LockRepo::live_in_project` +
+  `Leases::list(project)`; `TimerRepo::list_in_project` + `Timers::list_project(project)` (SQLite impls + `Noop` + the
+  `core::testing` fakes, all three implementors). `Todos::views(project)` reuses the **existing** `repo.list` + the
+  existing `view()` mapping — **no new repo method**, same cost as `list`.
+- **Task 3 — read-model (O1).** New pure-core **`core::orchestration`** module (`OrchestrationSnapshot` + `AgentNode`,
+  reusing the existing coordination view types). **`Facade::orchestration_snapshot(project) -> Result<_, StoreError>`**
+  (`facade/orchestration.rs`): filters `supervisor.snapshot()` by project, attaches `idle.activity`, gathers the five
+  aggregate reads. **Derived on read** — never a cached copy. `parent: None` until lineage lands (O3, orch-01).
+- **Task 4 — events (O2).** Seven additive `DomainEvent`s — `TodoChanged{project,id}`,
+  `TimerArmed`/`TimerFired`/`TimerCleared{owner,id}`, `LeaseChanged{project,key}`, `ScratchpadChanged{project,name}`,
+  `KvChanged{project,key}`. **Emitted at the one C8 `Facade` write seam** (a mutation from *any* adapter — incl. an agent
+  over MCP — emits once; the C6 aggregates stay pure), **except `TimerFired`**, emitted by the C6 `TimerScheduler` (it
+  fires autonomously and already holds the bus). Close-driven releases (lease/todo-lock on process close) are **not**
+  re-emitted — observed via the existing process-lifecycle events the read-model re-queries on. `AgentActivityChanged`
+  (C4) reused for the tree. The app forwards events generically (`domain-event`), so no adapter change.
+- **Task 5 — TS mirror.** The 7 variants mirrored in the one `domain.ts` `DomainEvent` union + added to the exhaustive
+  `projection.ts` switch (no-ops for the process list — the orchestration re-query lands in orch-01). `OrchestrationSnapshot`
+  + `AgentNode` + the coordination sub-view types (`TodoView`/`TimerView`/`LeaseView`/`ScratchpadSummary`/`KvEntry` and
+  their enums) mirrored once in `domain.ts` (the single-source contract orch-01 consumes; its Tauri command/hook are
+  orch-01, not here). `"domain-event"` stays one const per side.
+- **Tests (honest, real behaviour).** Core `facade/orchestration_tests.rs` (9): snapshot assembles the tree + a blocked
+  todo + an armed fire-when-idle timer + a held lease + scratchpad + kv from seeded fakes; project scoping; each mutation
+  (create/complete todo, acquire/release lease, arm/cancel timer, write scratchpad, set kv) emits **exactly one** event of
+  the right shape. `coordination/scheduler_tests.rs` (+1): firing emits `TimerFired`. Store `leases_tests`/`timers_tests`
+  (+1 each): the new SQLite project-scoped reads filter by project, drop expired, order correctly. UI `projection.test.ts`
+  (+1): coordination events return the same process array (referential identity).
+- **Gate green.** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier, **dep-direction `soloist-core`
+  framework-free**; file-size advisory only — `domain.ts` is now **534** lines, the largest outlier, intentional per the
+  single-`domain.ts` mandate §16, non-gating). `just test` exit 0 — **Rust 431 core / 78 store / 32 app, 0 failed, 3
+  ignored (soak)**; the mutation-verified **E7 `crates/pty/tests/orchestration.rs` stays green** (the regression guard);
+  **UI vitest 125**. Feature matrix builds: `--no-default-features`, `--features http`, `--features mcp`. (The previously-
+  flaky I10 shellenv sandbox timeout passed this run, 0.14 s.)
+- **Next:** **orch-01** — agent lineage (O3) + the live orchestration tree UI (O4): record `parent` on `spawn_agent`,
+  add the Tauri `orchestration_snapshot` command + an `api.ts` wrapper + a store hook that re-queries on the coordination
+  events, and the tree component (via `/impeccable`). The read-model + events this phase built are its seam.
 
 ### Orchestrator track readied for implementation — demo re-verified frame-by-frame (2026-06-28, user-directed)
 - **Goal (user):** start the orchestrator feature; make the `orch-NN` phases **fully ready and faithful to
@@ -3560,13 +3611,21 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-**★ ORCHESTRATOR TRACK — READY TO IMPLEMENT (user's directive; readied 2026-06-28). START AT
-[`orch-00`](plan/orchestrator/orch-00-charter-gap-and-read-model.md).** The track was re-verified against
-the demo frame-by-frame and the docs were made faithful + complete: the charter + phases now carry
-**O1–O14** (the three demo-fidelity rows O12 comment-author / O13 spawn preamble / O14 `solo://` handoff
-were folded into v1 this session — see the top Decisions entry), and `orch-00` Task 1 propagates them into
-`plan/02`/`plan/05 §12`. The `main` merge is resolved (`bcb99e5`); the tree is clean. Proceed **orch-00 →
-orch-01 → orch-02 → orch-03 → orch-04 → orch-05**.
+**★ ORCHESTRATOR TRACK — orch-00 DONE; START AT
+[`orch-01`](plan/orchestrator/orch-01-agent-lineage-and-tree-ui.md).** **orch-00 is code-complete & gate-green
+on branch `feat/orch-00-read-model-and-events`** (off `orchestrator` `490174a`; the user pushes/opens the PR —
+no self-merge): it delivered **O1** (`Facade::orchestration_snapshot` + the `core::orchestration` read-model) +
+**O2** (the seven coordination `DomainEvent`s + the TS mirror), recorded **O1–O14** in `plan/02` and the
+orchestrator gap + O12/O13/O14 decisions in `plan/05 §12`, with the full Phase-9 suite + `crates/pty/tests/
+orchestration.rs` (E7) staying green — see the top Decisions entry for evidence.
+
+**orch-01 (the next phase) — agent lineage (O3) + live orchestration tree UI (O4):** record the parent
+`ProcessId` on `spawn_agent` (so `AgentNode.parent` nests workers under their lead — today it is always `None`);
+add the **Tauri `orchestration_snapshot` command** + an `api.ts` typed wrapper + a `store/` hook that paints the
+snapshot and **re-queries (coalesced) on the coordination events** orch-00 added; build the tree component via
+`/impeccable` against `PRODUCT.md`/`DESIGN.md` (per-agent activity glyphs from the C4 idle FSM). The read-model +
+events are the seam — orch-01 is a thin presentational + lineage layer, no new coordination primitive. Then
+**orch-02 → orch-03 → orch-04 → orch-05**. The `main` merge is resolved (`bcb99e5`); proceed on the track.
 
 A standalone track was planned in [`plan/orchestrator/`](plan/orchestrator/) (charter
 `README.md` + six phase files **orch-00 … orch-05**); the orchestration *mechanism* is already built +

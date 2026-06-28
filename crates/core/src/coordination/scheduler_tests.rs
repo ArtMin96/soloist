@@ -143,6 +143,30 @@ async fn advance_until<F: Fn() -> bool>(clock: &MockClock, step: Duration, pred:
     panic!("condition not met within the budget");
 }
 
+/// Advances the clock and drains the event stream until one satisfying `pred` is seen, returning
+/// whether it arrived within the budget — for asserting a deadline-driven emission.
+async fn advance_until_event(
+    clock: &MockClock,
+    step: Duration,
+    rx: &mut broadcast::Receiver<DomainEvent>,
+    pred: impl Fn(&DomainEvent) -> bool,
+) -> bool {
+    for _ in 0..400 {
+        clock.advance(step);
+        settle().await;
+        loop {
+            match rx.try_recv() {
+                Ok(event) if pred(&event) => return true,
+                Ok(_) => continue,
+                Err(broadcast::error::TryRecvError::Empty) => break,
+                Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(broadcast::error::TryRecvError::Closed) => return false,
+            }
+        }
+    }
+    false
+}
+
 /// Yields until `pred` holds without advancing time, or fails after a bounded budget — for the
 /// event-driven (idle/removal) paths, where advancing the clock could trip an unrelated backstop.
 async fn settle_until<F: Fn() -> bool>(pred: F) {
@@ -184,6 +208,32 @@ async fn an_at_timer_fires_at_its_deadline_and_delivers_the_body_as_a_fresh_turn
     })
     .await;
     assert!(!h.exists(owner, view.id), "a fired timer is gone");
+}
+
+#[tokio::test]
+async fn firing_a_timer_emits_a_timer_fired_event() {
+    let h = harness(FakeSpawner::exits_on_kill());
+    let owner = h.running_process().await;
+    h.spawn_scheduler();
+    settle().await;
+    // Subscribe after setup, so the only events seen are the timer's.
+    let mut rx = h.bus.subscribe();
+
+    let view = h
+        .timers
+        .set(PROJECT, owner, "go".into(), Some(Duration::from_secs(5)))
+        .expect("set");
+
+    // Past the deadline the scheduler claims and fires the timer, announcing it on the bus so the
+    // wake-cycle UI can surface that the lead woke.
+    let fired = advance_until_event(&h.clock, Duration::from_secs(10), &mut rx, |event| {
+        matches!(event, DomainEvent::TimerFired { owner: o, id } if *o == owner && *id == view.id)
+    })
+    .await;
+    assert!(
+        fired,
+        "the scheduler emits TimerFired for the timer it fired"
+    );
 }
 
 #[tokio::test]

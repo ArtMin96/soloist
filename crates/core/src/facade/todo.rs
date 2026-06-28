@@ -12,8 +12,9 @@
 
 use super::Facade;
 use crate::coordination::{Comment, CommentOutcome, TodoDoc, TodoError, TodoSummary, TodoView};
+use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
-use crate::ids::{SessionId, TodoId};
+use crate::ids::{ProjectId, SessionId, TodoId};
 use crate::ports::StoreError;
 
 impl Facade {
@@ -25,7 +26,10 @@ impl Facade {
         doc: TodoDoc,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.todos.create(project, doc).map_err(map_todo_error)
+        self.emit_todo(
+            project,
+            self.todos.create(project, doc).map_err(map_todo_error),
+        )
     }
 
     /// Every todo in the session's effective project, as one-line summaries.
@@ -52,9 +56,12 @@ impl Facade {
         expected: u64,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.todos
-            .update(project, id, doc, expected)
-            .map_err(map_todo_error)
+        self.emit_todo(
+            project,
+            self.todos
+                .update(project, id, doc, expected)
+                .map_err(map_todo_error),
+        )
     }
 
     /// Marks todo `id` done in the session's effective project — refused with
@@ -65,13 +72,20 @@ impl Facade {
         id: TodoId,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.todos.complete(project, id).map_err(map_todo_error)
+        self.emit_todo(
+            project,
+            self.todos.complete(project, id).map_err(map_todo_error),
+        )
     }
 
     /// Deletes todo `id` in the session's effective project, returning whether one was removed.
     pub fn todo_delete(&self, session: SessionId, id: TodoId) -> Result<bool, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        Ok(self.todos.delete(project, id)?)
+        let removed = self.todos.delete(project, id)?;
+        if removed {
+            self.bus.publish(DomainEvent::TodoChanged { project, id });
+        }
+        Ok(removed)
     }
 
     /// The distinct tags used across the session's effective project's todos, sorted.
@@ -89,9 +103,12 @@ impl Facade {
         tag: &str,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.todos
-            .add_tag(project, id, tag)?
-            .ok_or(CoordinationError::UnknownTodo)
+        self.emit_todo(
+            project,
+            self.todos
+                .add_tag(project, id, tag)?
+                .ok_or(CoordinationError::UnknownTodo),
+        )
     }
 
     /// Removes `tag` from todo `id` in the session's effective project, returning the updated todo,
@@ -103,9 +120,12 @@ impl Facade {
         tag: &str,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.todos
-            .remove_tag(project, id, tag)?
-            .ok_or(CoordinationError::UnknownTodo)
+        self.emit_todo(
+            project,
+            self.todos
+                .remove_tag(project, id, tag)?
+                .ok_or(CoordinationError::UnknownTodo),
+        )
     }
 
     /// Replaces the blockers of todo `id` in the session's effective project, after validating each
@@ -117,9 +137,12 @@ impl Facade {
         blockers: Vec<TodoId>,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.todos
-            .set_blockers(project, id, blockers)
-            .map_err(map_todo_error)
+        self.emit_todo(
+            project,
+            self.todos
+                .set_blockers(project, id, blockers)
+                .map_err(map_todo_error),
+        )
     }
 
     /// Adds `blocker` to todo `id` in the session's effective project, after the same checks.
@@ -130,9 +153,12 @@ impl Facade {
         blocker: TodoId,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.todos
-            .add_blocker(project, id, blocker)
-            .map_err(map_todo_error)
+        self.emit_todo(
+            project,
+            self.todos
+                .add_blocker(project, id, blocker)
+                .map_err(map_todo_error),
+        )
     }
 
     /// Removes `blocker` from todo `id` in the session's effective project, returning the updated
@@ -144,9 +170,12 @@ impl Facade {
         blocker: TodoId,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.todos
-            .remove_blocker(project, id, blocker)?
-            .ok_or(CoordinationError::UnknownTodo)
+        self.emit_todo(
+            project,
+            self.todos
+                .remove_blocker(project, id, blocker)?
+                .ok_or(CoordinationError::UnknownTodo),
+        )
     }
 
     /// Locks todo `id` in the session's effective project for the caller's bound process —
@@ -155,9 +184,12 @@ impl Facade {
     pub fn todo_lock(&self, session: SessionId, id: TodoId) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
         let owner = self.coordination_owner(session)?;
-        self.todos
-            .lock(project, id, owner)?
-            .ok_or(CoordinationError::UnknownTodo)
+        self.emit_todo(
+            project,
+            self.todos
+                .lock(project, id, owner)?
+                .ok_or(CoordinationError::UnknownTodo),
+        )
     }
 
     /// Releases the lock on todo `id` in the session's effective project if held by the caller's
@@ -170,9 +202,12 @@ impl Facade {
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
         let owner = self.coordination_owner(session)?;
-        self.todos
-            .unlock(project, id, owner)?
-            .ok_or(CoordinationError::UnknownTodo)
+        self.emit_todo(
+            project,
+            self.todos
+                .unlock(project, id, owner)?
+                .ok_or(CoordinationError::UnknownTodo),
+        )
     }
 
     /// Adds a comment to todo `id` in the session's effective project, returning the updated todo and
@@ -184,9 +219,12 @@ impl Facade {
         body: &str,
     ) -> Result<(TodoView, u64), CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.todos
+        let created = self
+            .todos
             .comment_create(project, id, body)?
-            .ok_or(CoordinationError::UnknownTodo)
+            .ok_or(CoordinationError::UnknownTodo)?;
+        self.bus.publish(DomainEvent::TodoChanged { project, id });
+        Ok(created)
     }
 
     /// Updates comment `comment` of todo `id` in the session's effective project.
@@ -198,7 +236,10 @@ impl Facade {
         body: &str,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        map_comment(self.todos.comment_update(project, id, comment, body)?)
+        self.emit_todo(
+            project,
+            map_comment(self.todos.comment_update(project, id, comment, body)?),
+        )
     }
 
     /// Deletes comment `comment` of todo `id` in the session's effective project.
@@ -209,7 +250,10 @@ impl Facade {
         comment: u64,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        map_comment(self.todos.comment_delete(project, id, comment)?)
+        self.emit_todo(
+            project,
+            map_comment(self.todos.comment_delete(project, id, comment)?),
+        )
     }
 
     /// The comments on todo `id` in the session's effective project, or
@@ -230,6 +274,24 @@ impl Facade {
     /// persist; only their process-owned locks (whose per-run owners are gone) are dropped.
     pub fn reconcile_todo_locks(&self) -> Result<usize, StoreError> {
         self.todos.reconcile()
+    }
+
+    /// Publishes a [`DomainEvent::TodoChanged`] for the todo a successful mutation returned, then
+    /// passes the result through unchanged — the single emission seam every todo write routes
+    /// through, so a change reaches every adapter (UI, MCP, HTTP) once. A failed write emits
+    /// nothing.
+    fn emit_todo(
+        &self,
+        project: ProjectId,
+        result: Result<TodoView, CoordinationError>,
+    ) -> Result<TodoView, CoordinationError> {
+        if let Ok(view) = &result {
+            self.bus.publish(DomainEvent::TodoChanged {
+                project,
+                id: view.id,
+            });
+        }
+        result
     }
 }
 
