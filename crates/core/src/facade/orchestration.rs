@@ -17,8 +17,13 @@ impl Facade {
     /// The orchestration read-model for `project`: its agent lineage tree (each managed process with
     /// its supervision status and, for agents, live idle activity) plus the coordination state agents
     /// share — todos, timers, leases, scratchpads, and key-value. Assembled purely from existing
-    /// reads; it starts no work and mutates nothing. Scoped to `project` (the caller — the local UI —
-    /// already has full access to its own projects, like [`snapshot`](Self::snapshot)).
+    /// reads; it starts no work and mutates nothing.
+    ///
+    /// **Authorization is the caller's.** Like [`snapshot`](Self::snapshot) this is a local read: it
+    /// filters by the `project` it is handed and trusts the caller to be entitled to it — sound for the
+    /// local UI, which already has full access to its own projects. It must therefore never take a
+    /// `project` straight from an untrusted surface: an adapter exposing it over MCP or HTTP has to
+    /// derive `project` from the caller's bound, identity-checked scope, never a value the caller chose.
     pub fn orchestration_snapshot(
         &self,
         project: ProjectId,
