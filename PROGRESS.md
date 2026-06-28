@@ -26,8 +26,8 @@
 > session should start with" → A.
 
 - **Orchestrator track IN PROGRESS — orch-00 DONE (2026-06-28), orch-01 next.** **orch-00 (read-model O1 +
-  coordination events O2) is code-complete & gate-green** on branch `feat/orch-00-read-model-and-events` (the user
-  pushes/opens the PR): `Facade::orchestration_snapshot` + `core::orchestration` + the 7 `DomainEvent`s + the TS
+  coordination events O2) is code-complete & gate-green** on branch `feat/orch-00-read-model-and-events`
+  (**PR #40**, base `orchestrator`): `Facade::orchestration_snapshot` + `core::orchestration` + the 7 `DomainEvent`s + the TS
   mirror, with `plan/02` carrying **O1–O14** and `plan/05 §12` the orchestrator gap + O12/O13/O14 decisions. Full
   Phase-9 suite + E7 stay green. See the top Decisions entry + "Next session should start with → ★". The track lives in
   [`plan/orchestrator/`](plan/orchestrator/) — a charter
@@ -942,8 +942,9 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ## Decisions / changes this session
 
 ### orch-00 IMPLEMENTED — charter records + orchestration read-model + coordination events (2026-06-28)
-**Branch `feat/orch-00-read-model-and-events`** (off `orchestrator` `490174a`); the user pushes/opens the PR (no
-self-merge). Delivers **O1** (read-model) + **O2** (coordination events) — the pure CQRS-lite read side over the
+**Branch `feat/orch-00-read-model-and-events`** (off `orchestrator` `490174a`); **PR #40 open** against `orchestrator`
+([github.com/ArtMin96/soloist/pull/40](https://github.com/ArtMin96/soloist/pull/40)) — **no self-merge; the owner
+merges.** Delivers **O1** (read-model) + **O2** (coordination events) — the pure CQRS-lite read side over the
 **frozen** G1–G11 writes; no write semantics changed.
 
 - **Task 1 — records (docs only).** `plan/02` gained an **`O — Orchestrator`** group with rows **O1–O14** (+ the demo
@@ -3613,8 +3614,8 @@ review's one should-fix + the mechanical nits:
 
 **★ ORCHESTRATOR TRACK — orch-00 DONE; START AT
 [`orch-01`](plan/orchestrator/orch-01-agent-lineage-and-tree-ui.md).** **orch-00 is code-complete & gate-green
-on branch `feat/orch-00-read-model-and-events`** (off `orchestrator` `490174a`; the user pushes/opens the PR —
-no self-merge): it delivered **O1** (`Facade::orchestration_snapshot` + the `core::orchestration` read-model) +
+on branch `feat/orch-00-read-model-and-events`** (off `orchestrator` `490174a`; **PR #40** open against
+`orchestrator`, no self-merge): it delivered **O1** (`Facade::orchestration_snapshot` + the `core::orchestration` read-model) +
 **O2** (the seven coordination `DomainEvent`s + the TS mirror), recorded **O1–O14** in `plan/02` and the
 orchestrator gap + O12/O13/O14 decisions in `plan/05 §12`, with the full Phase-9 suite + `crates/pty/tests/
 orchestration.rs` (E7) staying green — see the top Decisions entry for evidence.
