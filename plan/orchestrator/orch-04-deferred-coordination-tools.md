@@ -7,11 +7,16 @@ over MCP, vs the existing known-agent `spawn_agent`) with its **trust treatment*
 documented for Solo ([`05` §7](../05-solo-reference-and-sources.md)); their schemas + safety semantics
 are ours and were explicitly deferred ([`05` §8/§12](../05-solo-reference-and-sources.md), `PROGRESS.md`).
 
-**Delivers:** O9, O10. **Architecture:** new MCP tools as thin handlers over **new `Facade` behavior**,
-following the add-an-MCP-tool recipe ([`06` §5.3](../06-codebase-blueprint-and-cleanup.md)); trust + scope
-enforced **in the core** ([`04` §12](../04-engineering-architecture-and-patterns.md)). Invoke
+**Delivers:** O9, O10, **O13** (the spawn orchestration-context preamble). **Architecture:** new MCP tools
+as thin handlers over **new `Facade` behavior**, following the add-an-MCP-tool recipe ([`06` §5.3](../06-codebase-blueprint-and-cleanup.md));
+trust + scope enforced **in the core** ([`04` §12](../04-engineering-architecture-and-patterns.md)). Invoke
 `mcp-builder` + confirm against `modelcontextprotocol.io` / `code.claude.com/llms.txt` / `rmcp` docs
 before writing (CLAUDE.md §5).
+
+**Note on O13's independence:** the preamble (Task 6) is **not** gated on the arbitrary-spawn trust design
+(Tasks 1–2) — it is injected content, not a new attack surface, and applies to the already-built,
+already-trusted `spawn_agent`. It is grouped here because this is the spawn-semantics phase, but it can
+land first within the phase (or be pulled earlier) without the O9 security work.
 
 ## Scope
 **In:** the trust-treatment design + implementation for `spawn_process`; the cross-scope authorization
@@ -53,12 +58,28 @@ need their own project-root FS-scoping pass — keep deferred, [`05` §12](../05
 5. **Safety + schemas (O9/O10, [`04` §12](../04-engineering-architecture-and-patterns.md)):** every action
    honors the trust gate + effective scope **in the core**; document each tool's clean-room JSON Schema
    ([`05` §12](../05-solo-reference-and-sources.md) "MCP param schemas"); update the MCP tool-count guard.
+6. **Spawn orchestration-context preamble (O13, [`06` §5.1](../06-codebase-blueprint-and-cleanup.md)):**
+   on spawn — **both** the existing `spawn_agent` and the new `spawn_process` — deliver a first-turn
+   `[SOLO ORCHESTRATION CONTEXT]` preamble to the new worker: its **identity** (Solo process id, process
+   name, project + id, the actor it binds as) and the **coordination tools** it has (`whoami`, scratchpads,
+   todos, locks/leases, kv, `timer_set`/`timer_fire_when_idle`/`timer_cancel`), the **"don't busy-poll —
+   set a fire-when-idle timer and end your turn"** rule, and how **`solo://` links resolve** (O14). The
+   text is a **single clean-room template in `core`** (one source; our words, never Solo's strings),
+   rendered with the worker's identity, and exposed two ways to match the demo's `include_agent_instructions`:
+   returned as the spawn tool's `agent_instructions` result **and/or** delivered as the worker's first input
+   turn via the existing `Supervisor::write_stdin` path (the same delivery the timer wake reuses — one
+   path, [`04` §2](../04-engineering-architecture-and-patterns.md)). A caller may opt out
+   (`include_agent_instructions: false`). This is the **runtime** complement to orch-05's static
+   AGENTS.md/CLAUDE.md guidance (Task 2 there). No trust gating (see the independence note above).
 
 ## Interfaces
 ```rust
 impl Facade {
   // trust-gated, scoped — same guarantee as a manual command start (04 §12):
   async fn spawn_process(&self, scope: ProjectId, owner: ProcessId, command: SpawnSpec) -> Result<ProcessId, SpawnRefused>;
+  // O13: one clean-room template rendered with the worker's identity; returned as `agent_instructions`
+  // and/or written as the worker's first turn when include_agent_instructions is set (applies to spawn_agent too):
+  fn orchestration_preamble(&self, worker: ProcessId) -> String;
   // authorized only when the caller is scope-authenticated to BOTH projects (extends F13):
   fn todo_transfer(&self, from: ProjectId, to: ProjectId, id: TodoId, caller: ProcessId) -> Result<TodoId, TransferRefused>;
   fn scratchpad_transfer(&self, from: ProjectId, to: ProjectId, id: ScratchpadId, caller: ProcessId) -> Result<ScratchpadId, TransferRefused>;
@@ -72,6 +93,10 @@ impl Facade {
 - `todo_transfer` to a project the caller is scope-authenticated for moves the todo preserving
   comments/completion and clearing blockers/locks (documented semantics); a transfer to an
   **unauthorized** project is refused (`ForeignProject`).
+- **(O13)** A spawned worker (via `spawn_agent` **or** `spawn_process`, with `include_agent_instructions`)
+  receives the `[SOLO ORCHESTRATION CONTEXT]` preamble — naming its identity + the coordination tools — and
+  can use the primitives (`whoami`, todo/scratchpad/timer) **with no skills loaded**; opting out suppresses
+  it; the preamble text is one `core` template (no per-call string duplication).
 - Each new tool has a documented clean-room JSON Schema; the tool-count guard is updated; the trust/scope
   decisions are recorded in [`05` §12](../05-solo-reference-and-sources.md) (and `KNOWN-DIVERGENCES` if a
   documented behavior is diverged).
@@ -83,6 +108,9 @@ impl Facade {
 - **Integration (MCP over stdio, headless — the Phase 8 harness):** a scripted client spawns a trusted
   command and observes it in the app event stream; an untrusted/cross-project call is refused; a transfer
   honors/refuses scope. Action tools mutate real state.
+- **(O13)** a spawn with `include_agent_instructions` returns/delivers the preamble naming the worker's
+  identity + the coordination tools; opt-out omits it; the template is asserted to render once from the
+  `core` source (no duplicated string in the handler).
 - **Regression:** existing `spawn_agent`, todo/scratchpad, and `crates/pty/tests/orchestration.rs` stay green.
 
 ## Risks & mitigations
@@ -94,4 +122,5 @@ impl Facade {
   stay deferred behind their own security pass ([`05` §12](../05-solo-reference-and-sources.md)).
 
 ## Effort
-~4–6 days (design-first security work dominates; the implementations are small over existing C2/C6).
+~5–7 days (design-first security work dominates; the implementations are small over existing C2/C6; the
+O13 preamble is a small clean-room template + a delivery toggle on the existing spawn path).

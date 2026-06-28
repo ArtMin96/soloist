@@ -937,6 +937,33 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Orchestrator track readied for implementation — demo re-verified frame-by-frame (2026-06-28, user-directed)
+- **Goal (user):** start the orchestrator feature; make the `orch-NN` phases **fully ready and faithful to
+  the Solo demo** before implementing (others may stay deferred).
+- **Re-analysed the demo `WAKGhlzpYgs` frame-by-frame** (the on-screen MCP tool calls, not just the
+  narration) and **independently audited the code**. **Confirmed** the charter's central claim: the
+  orchestration *mechanism* is built — `timer_fire_when_idle_all` → `scheduler.rs` injects `body + "\r"`
+  to the lead's PTY, proven by `crates/pty/tests/orchestration.rs` (E7). The "UX + formalization + deferred
+  tools, not new primitives" framing holds.
+- **Found four faithful-to-demo details the first planning pass missed.** Owner decided (asked + answered)
+  to fold the first three into **v1**: **O12** todo **comment authorship** (`author_actor_id`; reverses
+  the `plan/05` "no author attribution" decision — the demo's `todo_get` shows it); **O13** the per-spawn
+  **`[SOLO ORCHESTRATION CONTEXT]` preamble** (the demo's `include_agent_instructions`; today only
+  `SOLOIST_PROCESS_ID` is injected); **O14** the **`solo://` copy-link handoff** (the demo's core human
+  handoff; promotes the orchestrator slice of `later` row I4 to v1). The fourth (minor) — the wake turn
+  naming **why** it woke — folded into **O8**.
+- **Amended the track docs only** (no source, no canonical-contract edits — those remain **orch-00 Task 1**,
+  per the established discipline): the charter ([`plan/orchestrator/README.md`](plan/orchestrator/README.md))
+  gap table + O-row table now carry **O12/O13/O14** (O1–O14); **orch-02** gains O12 + O14, **orch-04** gains
+  O13 (decoupled from the arbitrary-spawn trust work), **orch-03** O8 gains the wake-reason prefix, **orch-05**
+  recipe threads all three; **orch-00 Task 1** now propagates **O1–O14** + the three decisions into
+  `plan/02`/`plan/05 §12`. No KNOWN-DIVERGENCE forced — the three corrections move us **toward** the demo.
+- **Branch health:** the in-progress **`main` → `orchestrator` merge** (settings 11a/11b) was completed —
+  the lone conflict, `PROGRESS.md`, resolved by **union** (both session narratives preserved); merge commit
+  `bcb99e5`; working tree clean. The youtube-notetaker deep-dive for `WAKGhlzpYgs` was refreshed in the
+  local video library (slides re-anchored to the markdown's timestamps).
+- **Next:** implement the track starting at **orch-00** (its Task 1 writes the canonical-doc records first).
+
 ### Orchestrator track planned (no implementation) — user-directed (2026-06-26)
 - **The user asked to plan a multi-agent "orchestrator" capability** (from researching the Solo demo
   "Agent orchestration, simplified", Aaron Francis, `youtube.com/watch?v=WAKGhlzpYgs`) into phase files,
@@ -3533,10 +3560,17 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-**★ ORCHESTRATOR TRACK — the user's directive (2026-06-26): implement this across upcoming sessions.**
-A standalone track was planned this session in [`plan/orchestrator/`](plan/orchestrator/) (charter
-`README.md` + six phase files **orch-00 … orch-05**); **nothing was implemented** and **no canonical doc
-was edited** (per the user). The orchestration *mechanism* is already built + `Verified` (the passing
+**★ ORCHESTRATOR TRACK — READY TO IMPLEMENT (user's directive; readied 2026-06-28). START AT
+[`orch-00`](plan/orchestrator/orch-00-charter-gap-and-read-model.md).** The track was re-verified against
+the demo frame-by-frame and the docs were made faithful + complete: the charter + phases now carry
+**O1–O14** (the three demo-fidelity rows O12 comment-author / O13 spawn preamble / O14 `solo://` handoff
+were folded into v1 this session — see the top Decisions entry), and `orch-00` Task 1 propagates them into
+`plan/02`/`plan/05 §12`. The `main` merge is resolved (`bcb99e5`); the tree is clean. Proceed **orch-00 →
+orch-01 → orch-02 → orch-03 → orch-04 → orch-05**.
+
+A standalone track was planned in [`plan/orchestrator/`](plan/orchestrator/) (charter
+`README.md` + six phase files **orch-00 … orch-05**); the orchestration *mechanism* is already built +
+`Verified` (the passing
 `crates/pty/tests/orchestration.rs`, E7), so this track is **UX + formalization + deferred tools, not new
 primitives**. **Start with [`orch-00`](plan/orchestrator/orch-00-charter-gap-and-read-model.md)** — its
 Task 1 propagates the new `O`-rows into `plan/02` and the orchestrator **gap decision** into `plan/05 §12`

@@ -50,6 +50,13 @@ block forever — surfacing it turns an invisible safety net into an observable 
    `Supervisor::write_stdin`); the UI marks the wake on a small **orchestration timeline** (armed →
    waiting on N → fired → delivered) and removes the timer from the panel. The UI **does not** inject the
    turn — it observes the existing delivery (one behavior, one path, [`04` §2](../04-engineering-architecture-and-patterns.md)).
+   **Wake-reason prefix (the demo's `[Solo timer #id] [wait for all: all watched idle: …]` header):** the
+   scheduler prepends a **compact, clean-room** reason line to the delivered body — the timer id and
+   whether it fired because **all `waiting_on` went idle** vs the **max-wait backstop elapsed** (and which
+   processes) — so the **woken agent itself** (not only the UI) can tell "all peers finished" from "I was
+   timed out." One bounded format string in `core` next to the existing `deliver` (G7/G8); the headless
+   `crates/pty/tests/orchestration.rs` assertion updates from the bare body to `body`-with-prefix. Record
+   this small delivery refinement in [`05` §12](../05-solo-reference-and-sources.md).
 5. **`/impeccable` pass (CLAUDE.md §5):** design the panel + timeline through `/impeccable`; the countdown
    and wake must animate with intent and a reduced-motion fallback; calm density; match the demo's *feel*,
    not its assets (CLAUDE.md §9). Pair with `webapp-testing`.
@@ -66,8 +73,9 @@ struct TimerView { id: TimerId, owner: ProcessId, fire: FireCond, waiting_on: Ve
 - An armed `timer_fire_when_idle(All)` shows its **`waiting_on`** workers and a **countdown** to the
   max-wait deadline; pausing freezes the remaining time and resuming re-arms it.
 - When all watched workers go idle, the timer **fires**: the `body` appears on the **lead's** terminal as
-  a fresh turn (existing delivery), the orchestration timeline marks the wake, and the timer leaves the
-  panel — with **no UI-side injection**.
+  a fresh turn (existing delivery), **prefixed with a compact wake-reason header** (timer id + all-idle vs
+  backstop) so the agent knows why it woke; the orchestration timeline marks the wake, and the timer leaves
+  the panel — with **no UI-side injection**.
 - A timer that hits its **backstop** (max-wait) fires the same way; the countdown reaching zero is
   observable, not a silent hang.
 - Management actions are scoped to the owner; the UI never fires/clears another process's timer; gates green.

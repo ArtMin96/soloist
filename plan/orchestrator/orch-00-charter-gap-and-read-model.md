@@ -25,13 +25,27 @@ A single query + an event stream is the seam that lets orch-01/02/03 be thin pre
 keeps the dependency rule intact (UI → Facade, never UI → a context internal, [`06` §5.5/§5.7](../06-codebase-blueprint-and-cleanup.md)).
 
 ## Tasks
-1. **Record the gap + expand the matrix (O-rows):** add an "Orchestrator (clean-room composition)" gap
-   row to [`05` §12](../05-solo-reference-and-sources.md) (the concept is undocumented for Solo — it is
-   ours; [README](README.md) §1); add rows **O1–O11** to [`02-feature-parity-matrix.md`](../02-feature-parity-matrix.md)
-   with a new `O — Orchestrator` group header; cross-link the demo as the `🟡` UX source. Add a
-   `KNOWN-DIVERGENCES.md` entry **only** where we observably differ from a *documented* Solo behavior
-   (none is expected — net-new UI/tools are not divergences; the disciplined-schema choices are already
-   `D-7`/`D-8`). No source code in this task.
+1. **Record the gap + expand the matrix (O-rows) + fold in the three demo-fidelity decisions:** add an
+   "Orchestrator (clean-room composition)" gap row to [`05` §12](../05-solo-reference-and-sources.md) (the
+   concept is undocumented for Solo — it is ours; [README](README.md) §1); add rows **O1–O14** to
+   [`02-feature-parity-matrix.md`](../02-feature-parity-matrix.md) with a new `O — Orchestrator` group
+   header; cross-link the demo as the `🟡` UX source. **Then record the three 2026-06-28 re-verification
+   decisions (the demo's small load-bearing details, owner-approved as v1 — [README](README.md) §0/§1):**
+   - **O12 (comment authorship):** update the `MCP todo_comment_*` row in [`05` §12](../05-solo-reference-and-sources.md)
+     to **attribute a comment to its creating bound actor** (`author_actor_id`), citing the demo's
+     `todo_get` showing `author`/`author_actor_id` — this **reverses** that row's earlier "no author
+     attribution" decision (it is a correction toward the demo, so it *removes* a latent divergence rather
+     than adding one).
+   - **O13 (spawn orchestration-context preamble):** add a gap-decision recording that `spawn_agent`/
+     `spawn_process` inject a first-turn `[SOLO ORCHESTRATION CONTEXT]` preamble (identity + the
+     coordination tools), citing the demo's `include_agent_instructions`. Net-new behavior toward the
+     demo; clean-room content (our preamble text, not Solo's).
+   - **O14 (`solo://` handoff):** record that the orchestrator slice of the documented `solo://` deep
+     links ([`05` §10](../05-solo-reference-and-sources.md)) is **promoted from `later` (I4) to v1** — a
+     scratchpad/todo link + resolver for the agent handoff.
+   Add a `KNOWN-DIVERGENCES.md` entry **only** where we observably differ from a *documented* Solo
+   behavior (none is expected — net-new UI/tools and these three corrections move us toward the demo, not
+   away; the disciplined-schema choices remain `D-7`/`D-8`). No source code in this task.
 2. **`OrchestrationSnapshot` read-model (O1, [`04` §5](../04-engineering-architecture-and-patterns.md)):**
    a serde read type in `core` projecting, for an effective project: the **agent lineage tree** (each
    managed `Agent`/`Command`/`Terminal` with `ProcStatus`, and — once orch-01 lands lineage — its
@@ -71,8 +85,10 @@ enum DomainEvent { /* …existing… */ TodoChanged{project:ProjectId,id:TodoId}
 ```
 
 ## Acceptance criteria
-- `02`/`05 §12` carry the `O`-rows + the orchestrator gap decision; the matrix has an `O` group; no
-  `KNOWN-DIVERGENCES` entry was forced where there is no documented-behavior divergence.
+- `02`/`05 §12` carry the **O1–O14** rows + the orchestrator gap decision; the matrix has an `O` group;
+  the three re-verification decisions are recorded (O12 comment-author reversal, O13 spawn preamble, O14
+  `solo://` promotion); no `KNOWN-DIVERGENCES` entry was forced where there is no documented-behavior
+  divergence.
 - `orchestration_snapshot(project)` returns the live tree + todos + timers + leases + scratchpads + kv,
   scoped to the project, assembled purely from existing reads.
 - Creating/completing a todo, arming/firing a timer, acquiring/releasing a lease, and writing a

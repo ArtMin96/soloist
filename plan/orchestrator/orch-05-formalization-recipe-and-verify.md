@@ -14,7 +14,7 @@ no new domain behavior.
 ## Scope
 **In:** an orchestrator recipe doc (clean-room composition of documented primitives); agent-facing
 guidance content (the orchestration primitives + the "just talk to the agent" pattern, for
-`AGENTS.md`/`CLAUDE.md`); a full-loop UI acceptance walk (Playwright); the `O1–O11` parity walk + ledger
+`AGENTS.md`/`CLAUDE.md`); a full-loop UI acceptance walk (Playwright); the `O1–O14` parity walk + ledger
 update. **Out:** new tools/UI/behavior (everything was delivered orch-00…orch-04); LLM summarization of
 worker output (E6, `later`/OFF — the recipe must work heuristic-only, CLAUDE.md §3); pulling the `later`
 `setup_agent_integration` MCP tool (F12) into v1 — the recipe is the v1 deliverable; if/when F12 lands it
@@ -29,23 +29,29 @@ Solo (CLAUDE.md §9).
 
 ## Tasks
 1. **Orchestrator recipe (O11, [`06` §5](../06-codebase-blueprint-and-cleanup.md) style):** document the
-   full pattern as a recipe — *charter a scratchpad → derive a blockered todo chain → promote a lead →
-   `spawn_agent` workers (bound, lineage) → assign locked todos → `timer_fire_when_idle(All)` and end the
-   turn → wake on the delivered `body` → read worker output (`get_process_output`) + verify → complete/
-   unblock → dispatch the next slice*. Map each step to its primitive + parity row (G/E/F/O) and its UI
-   surface (orch-01/02/03). State that it works **heuristic-only** (no summarizer required).
+   full pattern as a recipe — *charter a scratchpad → **copy its `solo://` link** and hand it to a lead
+   (O14) → derive a blockered todo chain → promote a lead → `spawn_agent` workers (bound, lineage, **each
+   receiving the `[SOLO ORCHESTRATION CONTEXT]` preamble** so it discovers the primitives with no skills —
+   O13) → assign locked todos → `timer_fire_when_idle(All)` and end the turn → wake on the delivered
+   `body` (with its wake-reason prefix) → read worker output (`get_process_output`) + verify → comment on
+   the todos (**authored by the lead** — O12) + complete/unblock → dispatch the next slice*. Map each step
+   to its primitive + parity row (G/E/F/O) and its UI surface (orch-01/02/03). State that it works
+   **heuristic-only** (no summarizer required), and that the **runtime preamble (O13)** — not a loaded
+   skill — is what makes "just talk to the agent" hold.
 2. **Agent-facing guidance (O11):** write the orchestration section for `AGENTS.md`/`CLAUDE.md`
    (primitives, identity/binding, fire-when-idle, the "don't busy-poll, set a timer and sleep" rule) so a
-   freshly bound agent can discover and use the loop with **no skills loaded** — matching the demo. This
-   is content; the `setup_agent_integration` tool (F12, `later`) is its eventual delivery vehicle, not a
-   dependency.
+   freshly bound agent can discover and use the loop with **no skills loaded** — matching the demo. The
+   **runtime O13 preamble (orch-04) is the primary discovery path** (it reaches a spawned worker the
+   moment it starts); this static `AGENTS.md` content is its **complement** for human-launched / externally
+   bound agents that never received a preamble. The `setup_agent_integration` tool (F12, `later`) is the
+   eventual delivery vehicle for this content, not a dependency.
 3. **Full-loop UI acceptance walk (Playwright):** drive the whole loop and assert it is **visible** end to
    end — workers nest under the lead (orch-01), the todo chain shows blockers/locks and the gate (orch-02),
    the living scratchpad updates (orch-02), the `fire_when_idle` timer shows `waiting_on` + countdown and
    then the wake delivers the `body` to the lead (orch-03). Reuse the `crates/pty/tests/orchestration.rs`
    driver pattern so the worker reaches idle the genuine way (terminal output settling → C4 FSM), not the
    backstop.
-4. **Parity walk + evidence (O1–O11):** run each `O`-row's Verify, record pass/fail with evidence (test
+4. **Parity walk + evidence (O1–O14):** run each `O`-row's Verify, record pass/fail with evidence (test
    names, the e2e run, screenshots from the `/impeccable` `live` pass) — the orchestrator analogue of the
    Phase 13 walk. Confirm CI gates (`clippy -D warnings`, `rustfmt`, `tsc`, ESLint, dependency-direction)
    and that `crates/core` still imports no adapter.
@@ -59,7 +65,7 @@ Solo (CLAUDE.md §9).
 - The Playwright acceptance walk runs the **entire loop** and asserts each stage is **visible** (tree,
   todos+gate, living scratchpad, fire-when-idle countdown, wake delivery) — green, and **mutation-verified**
   (a never-idle worker fails the wake assertion, mirroring the E7 test).
-- Every `v1` `O`-row (O1–O11) passes its Verify with recorded evidence; all CI gates green; the
+- Every `v1` `O`-row (O1–O14) passes its Verify with recorded evidence; all CI gates green; the
   dependency-direction guard green.
 - `../../PROGRESS.md` reflects the track as `Verified` with evidence; `02`/`05 §12`/`KNOWN-DIVERGENCES`
   are consistent with what shipped.
