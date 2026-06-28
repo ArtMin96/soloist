@@ -63,6 +63,15 @@ describe("groupByProject", () => {
     expect(infra.count).toEqual({ running: 1, total: 1 });
   });
 
+  it("keeps every subtype group when empty sections are not hidden", () => {
+    const processes = [withProject(process(1, "Command", "web"), 1, "Running")];
+    // hideEmptyKinds = false (the "hide empty sections" setting off): a command-only project
+    // still shows Agents and Terminals, in the fixed order.
+    const trees = groupByProject(processes, [projectView(1, "app")], false);
+    expect(trees[0].kinds.map((group) => group.kind)).toEqual(["Agent", "Terminal", "Command"]);
+    expect(trees[0].kinds.map((group) => group.processes.length)).toEqual([0, 0, 1]);
+  });
+
   it("shows an opened project with no processes as an empty node", () => {
     const processes = [withProject(process(1, "Command", "web"), 1, "Running")];
     // Project 2 is opened but owns no live process yet — it still appears (so the user sees

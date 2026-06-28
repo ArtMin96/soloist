@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
+import { DEFAULT_APPEARANCE } from "@/lib/appearance";
+import { DEFAULT_SIDEBAR } from "@/lib/sidebar";
 import type { ProcessView } from "@/domain";
 
 // The terminal hook drives the real xterm.js emulator against a measured DOM surface,
@@ -11,6 +13,14 @@ import type { ProcessView } from "@/domain";
 // the IPC -> read-model -> render/selection path that is the integration's real risk.
 vi.mock("@/components/terminal/useTerminal", () => ({
   useTerminal: () => ({ hostRef: { current: null }, state: "not-started" as const }),
+}));
+
+// The persisted read-model cache is the disk boundary (tauri-plugin-store); stub it so the
+// dashboard revalidates against the mocked backend from a cold cache, deterministically.
+vi.mock("@/store/cache/persistentCache", () => ({
+  CacheKey: { projects: "projects", appInfo: "app-info", agents: "agents" },
+  readSnapshot: vi.fn(() => Promise.resolve(null)),
+  writeSnapshot: vi.fn(() => Promise.resolve()),
 }));
 
 import App from "@/App";
@@ -74,6 +84,9 @@ function mockBackend(processes: ProcessView[]) {
     if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
     if (cmd === "proc_list") return processes;
     if (cmd === "project_list") return [PROJECT];
+    if (cmd === "appearance") return DEFAULT_APPEARANCE;
+    if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
+    if (cmd === "hotkeys") return [];
     return undefined;
   });
 }
@@ -159,6 +172,9 @@ describe("App dashboard", () => {
       if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
       if (cmd === "proc_list") return STACK;
       if (cmd === "project_list") return [PROJECT];
+      if (cmd === "appearance") return DEFAULT_APPEARANCE;
+      if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
+      if (cmd === "hotkeys") return [];
       if (cmd === "config_trust") {
         trusted = args as { project: number; name: string };
         return undefined;
@@ -182,6 +198,9 @@ describe("App dashboard", () => {
         if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
         if (cmd === "proc_list") return STACK;
         if (cmd === "project_list") return [PROJECT];
+        if (cmd === "appearance") return DEFAULT_APPEARANCE;
+        if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
+        if (cmd === "hotkeys") return [];
         return undefined;
       },
       { shouldMockEvents: true },

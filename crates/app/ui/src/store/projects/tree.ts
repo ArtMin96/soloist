@@ -24,16 +24,23 @@ export interface ProjectTree {
 }
 
 // The sidebar's two-level tree: one node per opened project, its processes bucketed into the
-// subtype groups (empty subgroups dropped, so a command-only project shows just "Commands")
-// with its running count. Every opened project appears — including one with no processes yet
-// (an empty node) — so the user always sees what they opened, not a sidebar that silently
-// stays blank. Pure: the project read model and the process read model joined by id.
-export function groupByProject(processes: ProcessView[], projects: ProjectView[]): ProjectTree[] {
+// subtype groups with its running count. Every opened project appears — including one with no
+// processes yet (an empty node) — so the user always sees what they opened, not a sidebar that
+// silently stays blank. `hideEmptyKinds` (the Sidebar "hide empty sections" setting) drops the
+// subtype groups with no processes when set, so a command-only project shows just "Commands";
+// when clear, all three subtype groups always show. Pure: the project read model and the
+// process read model joined by id.
+export function groupByProject(
+  processes: ProcessView[],
+  projects: ProjectView[],
+  hideEmptyKinds = true,
+): ProjectTree[] {
   return projects.map((project) => {
     const own = processes.filter((process) => process.project === project.id);
+    const kinds = groupByKind(own);
     return {
       project,
-      kinds: groupByKind(own).filter((group) => group.processes.length > 0),
+      kinds: hideEmptyKinds ? kinds.filter((group) => group.processes.length > 0) : kinds,
       count: runningCount(own),
     };
   });

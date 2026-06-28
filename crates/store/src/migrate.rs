@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 9;
+pub(crate) const SCHEMA_VERSION: i64 = 10;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -177,6 +177,21 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         .map_err(sql_err)?;
     }
 
+    if version < 10 {
+        // Per-project local settings: one row per project, keyed by `project_id`, holding the
+        // `ProjectSettings` document as JSON so the persisted shape is the domain type and cannot
+        // drift (serde defaults fill any field a newer build adds). The project foreign key
+        // cascades, so removing a project drops its local settings; durable, never cleared on
+        // launch. Stored apart from the project's shared `solo.yml` config (C1) — never merged.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS project_settings (
+                 project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+                 doc        TEXT NOT NULL
+             );",
+        )
+        .map_err(sql_err)?;
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
@@ -229,6 +244,8 @@ mod tests {
             "scratchpads",
             "todos",
             "kv",
+            "settings",
+            "project_settings",
         ] {
             let exists = conn
                 .query_row(

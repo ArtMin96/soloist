@@ -13,6 +13,11 @@ mod notifier;
 mod peer_cred;
 mod pty_bridge;
 
+// The two dev diagnostics each install a global tracing subscriber; enabling both would make
+// the second registration fail at runtime. Force the choice at compile time instead.
+#[cfg(all(feature = "devtools", feature = "tokio-console"))]
+compile_error!("enable either `devtools` or `tokio-console`, not both");
+
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -26,6 +31,7 @@ use soloist_sys::{
     CommandShellEnvProbe, CommandVersionProbe, NotifyFileWatcher, ProcMetricsProbe, ProcPortProbe,
 };
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_window_state::StateFlags;
 use tokio::sync::broadcast::error::RecvError;
 
 use notifier::TauriNotifier;
@@ -108,7 +114,8 @@ fn build_facade(app: AppHandle) -> Facade {
         .scratchpad_repo(store.clone())
         .todo_repo(store.clone())
         .kv_repo(store.clone())
-        .settings_repo(store)
+        .settings_repo(store.clone())
+        .project_settings_repo(store)
         .locks(Arc::new(lock_releaser))
         .build(),
     )
@@ -133,9 +140,53 @@ fn forward_events(app: AppHandle) {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    // Install the tokio-console subscriber before anything spawns, so every supervised actor
+    // and sampler is instrumented from the first task. Dev-only (`tokio-console` feature).
+    #[cfg(feature = "tokio-console")]
+    console_subscriber::init();
+
+    // Build the CrabNebula DevTools plugin as early as possible so it captures startup spans.
+    // Dev-only (`devtools` feature); release and default builds never link it.
+    #[cfg(feature = "devtools")]
+    let devtools = tauri_plugin_devtools::init();
+
+    #[cfg_attr(
+        not(any(feature = "devtools", feature = "agent-bridge")),
+        allow(unused_mut)
+    )]
+    let mut builder = tauri::Builder::default();
+    #[cfg(feature = "devtools")]
+    {
+        builder = builder.plugin(devtools);
+    }
+    // Dev-only MCP bridge: lets an AI agent inspect IPC calls and drive the webview for
+    // debugging over @hypothesi/tauri-mcp-server. Compiled in only under the `agent-bridge`
+    // feature; release and default builds never link it.
+    #[cfg(feature = "agent-bridge")]
+    {
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Disk-backed key-value store for the webview's persisted read-model cache: the UI
+        // paints projects/app-info/agents from the last-known snapshot on launch, then
+        // reconciles to the live core. Display-only — the core stays authoritative.
+        .plugin(tauri_plugin_store::Builder::default().build())
+        // Persist and restore the window's geometry and mode across launches. Size, position,
+        // maximized, and fullscreen are tracked; decorations and visibility are deliberately not —
+        // the custom titlebar keeps decorations off, and the window owns its own visibility.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    StateFlags::SIZE
+                        | StateFlags::POSITION
+                        | StateFlags::MAXIMIZED
+                        | StateFlags::FULLSCREEN,
+                )
+                .build(),
+        )
         .manage(PtyBridge::default())
         .setup(|app| {
             // Build the façade here (not in the builder chain) so the desktop notifier can
@@ -231,6 +282,41 @@ pub fn run() {
             commands::pty_attach,
             commands::pty_detach,
             commands::orphans_resolve,
+            commands::appearance,
+            commands::set_appearance,
+            commands::sidebar_settings,
+            commands::set_sidebar_settings,
+            commands::hotkeys,
+            commands::remap_hotkey,
+            commands::disable_hotkey,
+            commands::reset_hotkey,
+            commands::reset_all_hotkeys,
+            commands::agent_settings,
+            commands::set_agent_settings,
+            commands::tool_defaults,
+            commands::set_tool_defaults,
+            commands::integration_settings,
+            commands::set_integration_settings,
+            commands::mcp_tool_groups,
+            commands::set_mcp_tool_group,
+            commands::project_settings_page,
+            commands::project_settings,
+            commands::set_project_auto_start_gate,
+            commands::set_project_editor_override,
+            commands::set_project_crash_exit_alerts,
+            commands::set_project_terminal_alerts,
+            commands::set_command_terminal_alerts,
+            commands::add_shared_command,
+            commands::edit_shared_command,
+            commands::rename_shared_command,
+            commands::remove_shared_command,
+            commands::add_local_command,
+            commands::edit_local_command,
+            commands::rename_local_command,
+            commands::remove_local_command,
+            commands::make_command_local,
+            commands::save_command_to_yaml,
+            commands::set_project_icon,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -9,6 +9,24 @@ default:
 dev:
     cd {{app}} && cargo tauri dev
 
+# Run dev with CrabNebula DevTools — a viewer opens showing IPC command timings, events, and
+# spans. Dev-only; the `devtools` feature is never in a release build.
+devtools:
+    cd {{app}} && cargo tauri dev --features devtools
+
+# Run dev with tokio-console instrumentation, then attach the `tokio-console` CLI in another
+# shell (install once: `cargo install --locked tokio-console`). Surfaces live task states,
+# poll times, and lock contention. Dev-only; needs the tokio_unstable cfg, set here.
+tokio-console:
+    cd {{app}} && RUSTFLAGS="--cfg tokio_unstable" cargo tauri dev --features tokio-console
+
+# Run dev with the MCP bridge so an AI agent (via @hypothesi/tauri-mcp-server, registered in the
+# Claude Code MCP config) can inspect IPC calls and drive the webview on ws://localhost:9223.
+# Dev-only: the feature plus the withGlobalTauri/capability override in tauri.dev.conf.json never
+# enter a release build. Grants the agent broad webview access — run only in a trusted session.
+agent-bridge:
+    cd {{app}} && cargo tauri dev --features agent-bridge --config tauri.dev.conf.json
+
 # Build only the .deb bundle (mirrors CI; faster than the full release set).
 deb:
     cd {{app}} && cargo tauri build --bundles deb
@@ -37,6 +55,11 @@ lint:
     pnpm -C {{ui}} run format:check
     ./scripts/check-core-deps.sh
     ./scripts/check-file-size.sh
+
+# Audit the Rust dependency tree against RustSec advisories, the license allow-list, and
+# source provenance (policy in deny.toml). Needs `cargo install --locked cargo-deny`.
+audit:
+    cargo deny check
 
 # Auto-format Rust and UI sources.
 fmt:

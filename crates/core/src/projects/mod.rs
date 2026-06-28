@@ -12,10 +12,12 @@
 //! [`Facade`](crate::facade::Facade), adapters, the UI — call into here; they do not
 //! decide how a project is identified, named, shown, or opened.
 
+mod page;
 mod registry;
 mod service;
 mod view;
 
+pub use page::{ConfigStatus, ProjectCommandView, ProjectSettingsPage, Visibility};
 pub use registry::{ProjectError, Projects};
 pub use service::{LoadProjectError, ProjectLoad, ProjectService};
 pub use view::ProjectView;

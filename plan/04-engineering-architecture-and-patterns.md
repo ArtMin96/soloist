@@ -225,6 +225,7 @@ Every unbounded thing is a future crash. Hard rules:
 | Lease/lock | C6 coordination | cooperative multi-agent, auto-release |
 | Newtype IDs + closed enums | domain types | compiler-enforced correctness |
 | Strategy (per-provider) | C4 idle heuristics, agent tool types | Claude/Codex/Gemini differ cleanly |
+| Read-through cache (TTL memo) | `core::cache::ReadCache` (shell-env capture, agent detect) | reuse an expensive off-runtime read; single-flight + TTL |
 | Anti-corruption layer | C8 façade | adapters never see core internals |
 
 ---

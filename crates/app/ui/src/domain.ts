@@ -199,3 +199,228 @@ export interface AppInfo {
   name: string;
   version: string;
 }
+
+// ── Settings (mirrors core::settings) ───────────────────────────────────────
+// The durable global preference document, one sub-document per Settings tab. Enum string
+// values are the core's serde `snake_case` output; discrete pickers are closed enums (never
+// bare strings/numbers) so the valid set is the single source of truth, mapped to a concrete
+// CSS/xterm value in one `lib/` place on the frontend.
+
+// The app color scheme (mirrors core::Theme). "system" follows the OS light/dark preference.
+export type Theme = "light" | "dark" | "system";
+
+// A discrete text-size step for the interface/terminal size pickers (mirrors core::FontScale).
+export type FontScale = "extra_small" | "small" | "medium" | "large" | "extra_large";
+
+// A terminal font weight — the CSS 100–900 steps (mirrors core::FontWeight).
+export type FontWeight =
+  | "w100"
+  | "w200"
+  | "w300"
+  | "w400"
+  | "w500"
+  | "w600"
+  | "w700"
+  | "w800"
+  | "w900";
+
+// Terminal line height — vertical spacing between rows (mirrors core::LineHeight).
+export type LineHeight = "compact" | "default" | "comfortable" | "spacious";
+
+// Terminal letter spacing — horizontal spacing between characters (mirrors core::LetterSpacing).
+export type LetterSpacing = "tight" | "default" | "wide" | "wider";
+
+// Terminal typography (mirrors core::TerminalAppearance) — the xterm.js renderer is restyled
+// from these. `font_family` is null to use the app default.
+export interface TerminalAppearance {
+  focus_on_click: boolean;
+  font_family: string | null;
+  font_weight: FontWeight;
+  bold_font_weight: FontWeight;
+  font_scale: FontScale;
+  line_height: LineHeight;
+  letter_spacing: LetterSpacing;
+}
+
+// The Appearance tab document (mirrors core::Appearance).
+export interface Appearance {
+  theme: Theme;
+  interface_font_scale: FontScale;
+  terminal: TerminalAppearance;
+}
+
+// When a project header shows its CPU/memory badge (mirrors the core Sidebar threshold enums).
+// The option sets differ between project and process headers, so each is its own closed enum.
+export type ProjectCpuThreshold = "always" | "pct25" | "pct50" | "pct100" | "pct200" | "never";
+export type ProjectMemThreshold = "always" | "mb500" | "gb1" | "gb2" | "gb8" | "never";
+export type ProcessCpuThreshold = "always" | "pct10" | "pct30" | "pct60" | "pct90" | "never";
+export type ProcessMemThreshold = "always" | "mb100" | "mb500" | "gb1" | "gb2" | "never";
+
+// The Sidebar tab document (mirrors core::Sidebar) — what the process-tree sidebar shows.
+export interface Sidebar {
+  show_filter_input: boolean;
+  hide_empty_sections: boolean;
+  project_cpu_threshold: ProjectCpuThreshold;
+  project_mem_threshold: ProjectMemThreshold;
+  project_open_in_editor: boolean;
+  project_open_in_terminal: boolean;
+  project_reveal_in_file_manager: boolean;
+  process_cpu_threshold: ProcessCpuThreshold;
+  process_mem_threshold: ProcessMemThreshold;
+  show_settings_footer: boolean;
+}
+
+// The context a hotkey is active in (mirrors core::HotkeyScope). Bindings only conflict within
+// the same scope.
+export type HotkeyScope = "general" | "sidebar" | "terminal";
+
+// A named, remappable action (mirrors core::HotkeyAction). The closed set is the single source
+// the settings panel and the keyboard handler iterate.
+export type HotkeyAction =
+  | "open_command_palette"
+  | "quick_actions"
+  | "quick_jump"
+  | "new_agent_or_terminal"
+  | "open_settings"
+  | "open_terminal_search"
+  | "close_agent_or_terminal"
+  | "next_project_group"
+  | "prev_project_group"
+  | "next_section"
+  | "prev_section"
+  | "jump_to_agents"
+  | "jump_to_commands"
+  | "jump_to_terminals"
+  | "collapse_or_section"
+  | "jump_to_parent_project"
+  | "expand_project"
+  | "restart_selection"
+  | "previous_process"
+  | "next_process"
+  | "increase_terminal_font_size"
+  | "decrease_terminal_font_size";
+
+// A key chord (mirrors core::Binding): the modifier flags plus the main key (a
+// `KeyboardEvent.key` token, e.g. "K", "ArrowDown", "="). `super` is the core's `super_key`.
+export interface Binding {
+  ctrl: boolean;
+  alt: boolean;
+  shift: boolean;
+  super: boolean;
+  key: string;
+}
+
+// One action's effective state in the keymap read model (mirrors core::HotkeyBindingView).
+// `binding` is null when the action is disabled; `is_default` is true when no override is set;
+// `conflict` is true when the binding collides with another action in the same scope.
+export interface HotkeyBindingView {
+  action: HotkeyAction;
+  scope: HotkeyScope;
+  binding: Binding | null;
+  is_default: boolean;
+  conflict: boolean;
+}
+
+// The Agents tab document (mirrors core::AgentSettings) — the auto-summarization opt-in only
+// (OFF by default: both null). The agent tool registry itself is the Phase-7 surface.
+export interface AgentSettings {
+  summarizer_tool: string | null;
+  summarizer_model: string | null;
+}
+
+// The Tools tab document (mirrors core::ToolDefaults) — the default editor and terminal launch
+// names (null = use the system default).
+export interface ToolDefaults {
+  default_editor: string | null;
+  default_terminal: string | null;
+}
+
+// The Integrations tab document (mirrors core::Integrations) — the two master integration
+// toggles. The per-group MCP enablement is `McpToolGroups`.
+export interface Integrations {
+  mcp_enabled: boolean;
+  http_api_enabled: boolean;
+}
+
+// A toggleable MCP feature-tool group (mirrors core::McpFeatureGroup). Core groups are always
+// served and are not represented here.
+export type McpFeatureGroup = "scratchpads" | "todos" | "timers" | "key_value";
+
+// Which MCP feature-tool groups the server exposes (mirrors core::McpToolGroups). Scratchpads,
+// Todos and Timers default on; Key-Value defaults off.
+export interface McpToolGroups {
+  scratchpads: boolean;
+  todos: boolean;
+  timers: boolean;
+  key_value: boolean;
+}
+
+// ── Per-project settings (mirrors core::settings::project + core::projects::page) ────────────
+// The durable, app-local preference surface for one project plus the assembled settings-page read
+// model. Field names match the core's serde output; the command-spec fields on `ProcessSpec` are
+// optional to match the core's `skip_serializing_if` (they may be absent when left at their default).
+
+// A project's durable id (mirrors core::ProjectId — a number on the wire).
+export type ProjectId = number;
+
+// Where a command lives (mirrors core::Visibility): in the shared `solo.yml` ("shared", committed)
+// or the app-local overlay ("local", this machine only).
+export type Visibility = "shared" | "local";
+
+// One command definition (mirrors core::config::ProcessSpec). Defaulted fields are omitted by the
+// core's serde, so they are optional here; only `command` is always present.
+export interface ProcessSpec {
+  command: string;
+  working_dir?: string | null;
+  auto_start?: boolean;
+  auto_restart?: boolean;
+  restart_when_changed?: string[];
+  env?: Record<string, string>;
+}
+
+// One project's local settings (mirrors core::ProjectSettings) — the auto-start gate, editor
+// override, alert toggles, per-command alert overrides, and app-local commands.
+export interface ProjectSettings {
+  auto_start_gate: boolean;
+  editor_override: string | null;
+  crash_exit_alerts: boolean;
+  terminal_alerts: boolean;
+  command_terminal_alerts: Record<string, boolean>;
+  local_commands: Record<string, ProcessSpec>;
+}
+
+// One command on the settings page (mirrors core::ProjectCommandView). The spec fields are flattened
+// so they are always present; `visibility` is where it lives; `status` is its live state, or null
+// when no process of that name is registered.
+export interface ProjectCommandView {
+  name: string;
+  command: string;
+  working_dir: string | null;
+  auto_start: boolean;
+  auto_restart: boolean;
+  restart_when_changed: string[];
+  visibility: Visibility;
+  terminal_alerts: boolean;
+  status: ProcStatus | null;
+}
+
+// Whether the project's `solo.yml` currently loads (mirrors core::ConfigStatus); `error` carries the
+// parse/IO message when it does not.
+export interface ConfigStatus {
+  valid: boolean;
+  error: string | null;
+}
+
+// The assembled per-project settings page (mirrors core::ProjectSettingsPage) — one read the page
+// renders directly: the project's root, config validity, command roster, live counts, local
+// settings, and resolved editor.
+export interface ProjectSettingsPage {
+  project: ProjectId;
+  root: string;
+  config: ConfigStatus;
+  running: number;
+  total: number;
+  settings: ProjectSettings;
+  resolved_editor: string | null;
+  commands: ProjectCommandView[];
+}

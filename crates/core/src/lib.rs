@@ -41,6 +41,7 @@ pub mod supervisor;
 pub mod terminal;
 pub mod trust;
 
+mod cache;
 mod supervision;
 mod sync;
 
@@ -52,8 +53,8 @@ pub use agents::{
     PromptMode, VersionProbe,
 };
 pub use config::{
-    ConfigEngine, ConfigError, ConfigSync, ProcessSpec, Rename, SoloYml, SyncError,
-    TrustReviewCommand,
+    ConfigEngine, ConfigError, ConfigSync, ConfigWriteError, ProcessSpec, Rename, SoloYml,
+    SyncError, TrustReviewCommand,
 };
 pub use coordination::{
     AcquireOutcome, Comment, CommentEdit, CommentOutcome, FireCond, IdleMode, Kv, KvEntry, KvRepo,
@@ -67,8 +68,8 @@ pub use coordination::{
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
-    CoordinationError, Facade, LaunchAgentError, ScopedActionError, SpawnAgentError,
-    TrustCommandError,
+    CoordinationError, Facade, LaunchAgentError, LocalCommandError, MoveCommandError,
+    ScopedActionError, SpawnAgentError, TrustCommandError,
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
@@ -87,10 +88,15 @@ pub use ports::{
 pub use portscan::{wait_for_port, NoopPortProbe, PortProbe, PortScanner, WaitForPortError};
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView, Readiness};
 pub use projects::{
-    LoadProjectError, ProjectError, ProjectLoad, ProjectService, ProjectView, Projects,
+    ConfigStatus, LoadProjectError, ProjectCommandView, ProjectError, ProjectLoad, ProjectService,
+    ProjectSettingsPage, ProjectView, Projects, Visibility,
 };
 pub use settings::{
-    McpFeatureGroup, McpToolGroups, NoopSettingsRepo, Settings, SettingsRepo, SettingsStore,
+    AgentSettings, Appearance, Binding, FontScale, FontWeight, HotkeyAction, HotkeyBindingView,
+    HotkeyScope, Hotkeys, Integrations, LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups,
+    NoopSettingsRepo, ProcessCpuThreshold, ProcessMemThreshold, ProjectCpuThreshold,
+    ProjectMemThreshold, ProjectSettings, Settings, SettingsRepo, SettingsStore, Sidebar,
+    TerminalAppearance, Theme, ToolDefaults,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};

@@ -89,6 +89,7 @@ builds and runs" (§8).
 | `ports` | cross-cutting | every port trait + its `Noop*` default | live |
 | `ids` | cross-cutting | newtype IDs (`ProcessId`, `ProjectId`, …) | live |
 | `sync` | internal util | poison-safe `lock()` helper | live |
+| `cache` | internal util | `ReadCache` — `Clock`-driven, single-flight TTL memo for derived read-models | live |
 | `testing` | test support | fakes + `MockClock` (see §6) | live, test-gated |
 
 **The placeholder-module rule (the one allowed empty module).** An empty `pub mod foo;` is acceptable
@@ -120,6 +121,7 @@ do). Inside it:
 | `domain.ts` | the **single** TS mirror of core enums/`DomainEvent` | one definition per type; mirrors serde output; nowhere else |
 | `api.ts` | typed `invoke`/`listen` + Channel only | **every** Tauri command/event name string lives here once |
 | `store/` | read-model: pure reducers (`projection`, `grouping`) + hooks (`useProcesses`, …) | reducers are pure + unit-tested; hooks own subscriptions |
+| `store/cache/` | the persisted read-model cache: `persistentCache.ts` (the **only** `tauri-plugin-store` importer — named keys + a schema-versioned envelope) + the generic `usePersistentSnapshot(key, fetcher)` stale-while-revalidate hook | display-only last-known projection for instant cold-start paint; the core **always wins** on reconcile; reuse the hook, never re-roll a second persistence path. Live status (e.g. `useProcesses`) stays uncached |
 | `lib/` | pure presentational helpers (`status.ts` = the single `ProcStatus`→glyph/color/label map) | no IPC, no state |
 | `components/` | small presentational components, grouped by surface (`sidebar/`, `terminal/`) | props-in/callbacks-out; **no** business logic, **no** `invoke` |
 | `*.test.ts(x)` | vitest, beside the unit they test | exercises real logic; deletable-on-sight if tautological |
@@ -144,6 +146,7 @@ trigger that tells you to reach for it. Use a pattern when its trigger fires —
 | **Observer (event bus)** | `events::EventBus` (broadcast) | a state change must reach N adapters → emit a `DomainEvent`; never call adapters back directly |
 | **CQRS-lite** | `Facade::snapshot` (query) vs `supervisor.start` (command) | reads must not block writes → cheap projection for reads, owning context for writes |
 | **Repository** | `store` (`ProjectRepo`/`TrustRepo`/…); future Todo/Scratchpad/Kv/Lock repos | durable aggregate → one focused trait per aggregate, SQLite behind it |
+| **Settings document + generic store** | `core::settings` — `Settings` global singleton (migration v9) today; **to add (11a/11b)** a generic `SettingsStore<K, D>` reused by global (`K = ()`) and per-project local (`K = ProjectId`) | a durable typed **preference** record — no revision guard, not `solo.yml` config (C1) → one serde-default document + `get(key)`/`update(key, mutator)` over a `SettingsRepo<K, D>` port; **add a field, not a store** (recipe §5.9) |
 | **Newtype + closed enum** | `ids.rs`, `process.rs` | a domain id/state → newtype/enum, never a bare `String`/`int` |
 | **Null Object** | `Noop{LockReleaser,RuntimeState,OrphanControl}` in `ports/mod.rs` | a **driven** subsystem is optional → ship a `Noop` default so the core runs without the real adapter (§8) |
 | **Parameter Object / Builder** | `core::ports::CorePorts` + `CorePortsBuilder` — the port set for `Facade::new`/`Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) → group them in a struct/builder |
@@ -152,6 +155,7 @@ trigger that tells you to reach for it. Use a pattern when its trigger fires —
 | **Optimistic concurrency** | `core::coordination::{Scratchpads, Todos}` over their repos (P9: scratchpads + todos done — revision-guarded document writes) | concurrent writers to one durable record → revision guard, reject stale writes |
 | **Lease/lock** | `core::coordination::Leases` over `LockRepo` (TTL lease, P9) + `Todos` process-owned lock over `TodoRepo` (P9) | cooperative cross-agent intent → owner `ProcessId`, auto-release on close (the `LockReleaser` hook, fanned out by `CompositeLockReleaser`) |
 | **Scheduler (Observer + self-supervised loop)** | `core::coordination::TimerScheduler` over the `TimerRepo` port (P9: timers done) | deferred/conditional delivery → a `Clock`-driven, event-subscribed loop that fires due timers and delivers a body as a fresh turn; idle conditions consume the C4 `AgentActivityChanged` events |
+| **Read-through cache (TTL memo)** | `core::cache::ReadCache` (shell-env capture, agent `--version` detection) | an expensive, repeatable off-runtime read a burst of callers would each redo → one `Clock`-driven, single-flighted TTL memo; add event-invalidation only when a consumer needs it (YAGNI) |
 
 Anti-patterns to refuse are fixed in `04` §13. The one most relevant to this app's growth: **a giant
 `match` over tool/provider/endpoint names**. When that set is open-ended, use a Registry or Strategy.
@@ -268,6 +272,43 @@ MCP, and HTTP/CLI behave identically (one behavior, many fronts).
 
 > This is the **target** design — C6 is a placeholder until Phase 9. It is grounded in `05` §7 + `01`'s
 > data-flow walkthroughs; per-tool param schemas and exact semantics are designed in Phase 8/9, not here.
+
+### 5.9 Add a setting — the one settings base (global + per-project)
+
+Settings are durable typed **preference** records — distinct from coordinated aggregates (no revision
+guard, §5.8) and from shared `solo.yml` config (C1, `Visibility::Shared`). The global Settings window
+(Phase 11b) and the per-project local settings (Phase 11a) reuse **one base** in `core::settings`, so
+neither surface re-rolls persistence and adding a setting is one field — never a new store.
+
+- **Document `D`** (`Clone + Default + Serialize + DeserializeOwned`): every field `#[serde(default)]`, so a
+  record an older build wrote still reads after a field is added. One source of truth per concept; a
+  discrete picker (theme, a CPU/mem threshold) is a **closed enum**, never a bare string/number (§15).
+- **Port `SettingsRepo<K, D>`**: `load(&K) -> Option<D>`, `save(&K, &D)`; `Noop` default + SQLite adapter
+  (§5.2). The key selects the surface: `K = ()` for the global singleton (the migration-v9 `settings`
+  row), `K = ProjectId` for per-project local settings.
+- **Aggregate `SettingsStore<K, D>`**: `get(key)` (absent → `D::default()`) plus the **single write
+  primitive** `update(key, mutator)` (apply one change, persist the whole record). Generalize the existing
+  non-generic `core::settings::SettingsStore` into this in 11a; the global instance is then
+  `SettingsStore<(), Settings>`, so `set_mcp_tool_group` is just `update((), …)`.
+- **Façade**: one thin getter + setter per field over `get`/`update`, so the settings UI, CLI, and an MCP
+  tool all drive the same record (one behavior, many fronts).
+
+**To add a setting:** (1) add a `#[serde(default)]` field — or a sub-struct for a whole new tab/group — to
+the matching document (`Settings` global, `ProjectSettings` per-project local); (2) add **one** `Facade`
+getter + setter calling `store.update(key, |d| d.x = v)` (§5.1; §5.5 for the Tauri command); (3) render it
+from the projected read-model in the tab/section panel (§5.7), auto-saving on change. No new port, no new
+table, no new migration (it is one JSON document), no duplicated store. A brand-new settings *surface*
+(e.g. per-agent settings) is one more `SettingsStore<AgentId, AgentSettings>` — same base, same recipe.
+
+**Domain separation (so the two surfaces never duplicate or merge):**
+- **`core::settings`** owns durable preferences: global `Settings` + per-project local `ProjectSettings`.
+  Pure core; persistence behind `SettingsRepo<K, D>`.
+- **`core::config` (C1)** owns shared project config — `solo.yml` (name/icon/commands/env,
+  `Visibility::Shared`). Unchanged by this work.
+- The per-project settings **page** is a **read-model composition**: shared fields projected from C1 +
+  local fields from the settings store, shown together but **stored apart**. The "Make local / Save to
+  solo.yml" control **moves** a command between the two stores via one core command — it never copies
+  state between them.
 
 ---
 
