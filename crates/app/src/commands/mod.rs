@@ -11,8 +11,10 @@
 //! The durable-settings commands live in the [`settings`] submodule and are re-exported, so
 //! the whole command surface stays under one `commands::` namespace in the invoke handler.
 
+mod orchestration;
 mod project_settings;
 mod settings;
+pub use orchestration::*;
 pub use project_settings::*;
 pub use settings::*;
 

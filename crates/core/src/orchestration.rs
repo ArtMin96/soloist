@@ -16,13 +16,16 @@ use crate::ids::{ProcessId, ProjectId};
 use crate::process::{ProcStatus, ProcessKind};
 
 /// One node in the agent lineage tree: a managed process the orchestration UI shows, with its
-/// supervision status and — for agents — its live idle activity. `parent` is the process that
-/// spawned it; it is `None` until spawn lineage is recorded, so every node is currently a root and
-/// the UI renders a flat list that becomes a tree once `parent` is populated.
+/// display label, supervision status, and — for agents — its live idle activity. `parent` is the
+/// agent that spawned it (a worker under its lead), or `None` for a manually launched agent, a
+/// command, or a terminal — those render as roots. A node whose parent has left the registry is
+/// re-rooted on read, so a closed lead never strands its workers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct AgentNode {
     pub id: ProcessId,
     pub parent: Option<ProcessId>,
+    /// The process's display label — the tree row's name.
+    pub label: String,
     pub kind: ProcessKind,
     pub status: ProcStatus,
     /// The five-state idle activity for an [`Agent`](ProcessKind::Agent); `None` for a command or

@@ -8,8 +8,10 @@
 //! drift from the state it mirrors. A live UI pairs this with the coordination
 //! [`DomainEvent`](crate::events::DomainEvent)s, re-reading the snapshot when one signals a change.
 
+use std::collections::HashSet;
+
 use super::Facade;
-use crate::ids::ProjectId;
+use crate::ids::{ProcessId, ProjectId};
 use crate::orchestration::{AgentNode, OrchestrationSnapshot};
 use crate::ports::StoreError;
 
@@ -28,14 +30,24 @@ impl Facade {
         &self,
         project: ProjectId,
     ) -> Result<OrchestrationSnapshot, StoreError> {
-        let agents = self
+        let views: Vec<_> = self
             .snapshot()
             .into_iter()
             .filter(|view| view.project == project)
+            .collect();
+        let present: HashSet<ProcessId> = views.iter().map(|view| view.id).collect();
+        let agents = views
+            .into_iter()
             .map(|view| AgentNode {
                 id: view.id,
-                // Spawn lineage is not recorded yet; until then every node is a root.
-                parent: None,
+                // A recorded parent is an edge only while that lead is still present: a lead
+                // that has left the registry re-roots its workers, so a closed lead never
+                // strands a node (the registry is the source of truth for who exists).
+                parent: self
+                    .lineage
+                    .parent_of(view.id)
+                    .filter(|parent| present.contains(parent)),
+                label: view.label,
                 kind: view.kind,
                 status: view.status,
                 activity: self.idle.activity(view.id),

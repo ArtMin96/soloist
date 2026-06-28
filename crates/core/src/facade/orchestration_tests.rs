@@ -9,17 +9,20 @@ use std::time::Duration;
 
 use tokio::sync::broadcast;
 
+use std::path::Path;
+
 use super::*;
+use crate::agents::{AgentKind, AgentTool, PromptMode};
 use crate::coordination::{IdleMode, ScratchpadDoc, TodoDoc, TodoStatus};
 use crate::events::DomainEvent;
 use crate::ids::{ProcessId, ProjectId, SessionId};
-use crate::ports::{CorePorts, PtySize, SpawnSpec};
+use crate::ports::{CorePorts, ProjectRepo, PtySize, SpawnSpec};
 use crate::process::ProcessKind;
 use crate::supervisor::Registration;
 use crate::testing::{
-    authentic_session, terminal_registration, FakeKvRepo, FakeLockRepo, FakeProjectRepo,
-    FakeScratchpadRepo, FakeSpawner, FakeTimerRepo, FakeTodoRepo, FakeTrustRepo, MockClock,
-    TEST_PEER_PGID,
+    authentic_session, terminal_registration, FakeAgentToolRepo, FakeKvRepo, FakeLockRepo,
+    FakeProjectRepo, FakeScratchpadRepo, FakeSpawner, FakeTimerRepo, FakeTodoRepo, FakeTrustRepo,
+    MockClock, TEST_PEER_PGID,
 };
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);
@@ -157,8 +160,9 @@ fn the_snapshot_projects_the_tree_todos_timers_leases_scratchpads_and_kv_for_a_p
         .orchestration_snapshot(PROJECT)
         .expect("assemble the snapshot");
 
-    // The tree carries the bound terminal owner plus the three agents, each a root mirroring the
-    // registry's status, with no activity yet (an unsampled agent) and no lineage recorded yet.
+    // The tree carries the bound terminal owner plus the three agents. Each was registered
+    // directly (no spawning lead), so each is a root mirroring the registry's status and label,
+    // with no activity yet (an unsampled agent).
     assert_eq!(snap.project, PROJECT);
     let ids: Vec<ProcessId> = snap.agents.iter().map(|node| node.id).collect();
     for id in [owner, lead, worker_a, worker_b] {
@@ -170,7 +174,14 @@ fn the_snapshot_projects_the_tree_todos_timers_leases_scratchpads_and_kv_for_a_p
         .find(|node| node.id == lead)
         .expect("the lead is a node");
     assert_eq!(lead_node.kind, ProcessKind::Agent);
-    assert_eq!(lead_node.parent, None, "spawn lineage is not recorded yet");
+    assert_eq!(
+        lead_node.label, "lead",
+        "the node carries its display label"
+    );
+    assert_eq!(
+        lead_node.parent, None,
+        "a directly-registered agent is a root"
+    );
     assert_eq!(
         lead_node.activity, None,
         "an unsampled agent has no activity"
@@ -357,4 +368,124 @@ fn setting_a_kv_entry_emits_one_kv_changed() {
         &events[0],
         DomainEvent::KvChanged { project, key } if *project == PROJECT && key == "config"
     ));
+}
+
+/// A façade with one project loaded and one launchable agent tool, so `spawn_agent` runs end to
+/// end against fakes. Returns the façade and the loaded project's id (the sole project, so an
+/// unbound session still resolves its scope to it).
+fn facade_with_agent_tool() -> (Facade, ProjectId) {
+    let projects = Arc::new(FakeProjectRepo::new());
+    let project = projects
+        .upsert(Path::new("/"), Some("proj"), None)
+        .expect("seed a project")
+        .id;
+    let tool = AgentTool {
+        name: "worker".into(),
+        command: "true".into(),
+        default_args: Vec::new(),
+        kind: AgentKind::Generic,
+        prompt_mode: PromptMode::AppendedArg,
+    };
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(MockClock::new()),
+            Arc::new(FakeTrustRepo::new()),
+            projects,
+        )
+        .agent_tools(Arc::new(FakeAgentToolRepo::new(vec![tool])))
+        .build(),
+    );
+    (facade, project)
+}
+
+#[tokio::test]
+async fn a_worker_spawned_by_a_bound_lead_nests_under_it() {
+    let (facade, project) = facade_with_agent_tool();
+    // A lead agent in the project, with a session bound to it as its own MCP client would bind.
+    let lead = agent(&facade, project, "lead");
+    let session = authentic_session(&facade, lead, TEST_PEER_PGID);
+    facade
+        .bind_session_process(session, lead)
+        .expect("bind the lead to its own process");
+
+    let worker = facade
+        .spawn_agent(session, "worker", Vec::new())
+        .expect("spawn the worker under the lead");
+
+    let snap = facade
+        .orchestration_snapshot(project)
+        .expect("assemble the snapshot");
+    let worker_node = snap
+        .agents
+        .iter()
+        .find(|node| node.id == worker)
+        .expect("the worker is a node");
+    assert_eq!(
+        worker_node.parent,
+        Some(lead),
+        "a worker spawned by a bound lead nests under it",
+    );
+}
+
+#[tokio::test]
+async fn an_unbound_spawn_is_a_root() {
+    let (facade, project) = facade_with_agent_tool();
+    // A session with no bound process: it still resolves its scope to the sole project, but has
+    // no lead to spawn under.
+    let session = facade.open_session(None);
+
+    let worker = facade
+        .spawn_agent(session, "worker", Vec::new())
+        .expect("spawn the worker with no bound lead");
+
+    let snap = facade
+        .orchestration_snapshot(project)
+        .expect("assemble the snapshot");
+    let worker_node = snap
+        .agents
+        .iter()
+        .find(|node| node.id == worker)
+        .expect("the worker is a node");
+    assert_eq!(
+        worker_node.parent, None,
+        "an unbound spawn has no parent and is a root",
+    );
+}
+
+#[tokio::test]
+async fn closing_a_lead_re_parents_its_worker_to_root() {
+    let (facade, project) = facade_with_agent_tool();
+    let lead = agent(&facade, project, "lead");
+    let session = authentic_session(&facade, lead, TEST_PEER_PGID);
+    facade
+        .bind_session_process(session, lead)
+        .expect("bind the lead to its own process");
+    let worker = facade
+        .spawn_agent(session, "worker", Vec::new())
+        .expect("spawn the worker under the lead");
+
+    // The lead leaves the registry; its worker must not be stranded.
+    facade
+        .supervisor()
+        .close(lead)
+        .await
+        .expect("close the lead");
+
+    let snap = facade
+        .orchestration_snapshot(project)
+        .expect("assemble the snapshot");
+    assert!(
+        snap.agents.iter().all(|node| node.id != lead),
+        "the closed lead leaves the tree",
+    );
+    let worker_node = snap
+        .agents
+        .iter()
+        .find(|node| node.id == worker)
+        .expect("the worker is still a node");
+    assert_eq!(
+        worker_node.parent, None,
+        "the worker re-parents to root when its lead closes",
+    );
 }

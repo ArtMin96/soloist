@@ -18,6 +18,7 @@ import type {
   Integrations,
   McpFeatureGroup,
   McpToolGroups,
+  OrchestrationSnapshot,
   ProcessSpec,
   ProcessView,
   ProjectId,
@@ -38,6 +39,13 @@ export function appInfo(): Promise<AppInfo> {
 
 export function procList(): Promise<ProcessView[]> {
   return invoke<ProcessView[]>("proc_list");
+}
+
+// The orchestration read model for one project — its agent lineage tree plus the coordination
+// state agents share. Seeds the orchestration tree; a coordination or process-lifecycle domain
+// event prompts a re-read (snapshot-then-deltas).
+export function orchestrationSnapshot(project: number): Promise<OrchestrationSnapshot> {
+  return invoke<OrchestrationSnapshot>("orchestration_snapshot", { project });
 }
 
 // The project read model — every opened project's identity with its icon already rendered

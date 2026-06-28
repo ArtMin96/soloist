@@ -53,13 +53,15 @@ single small backend addition; everything else is presentation over orch-00's sn
 
 ## Interfaces
 ```rust
-struct AgentNode { id: ProcessId, parent: Option<ProcessId>, kind: ProcessKind, status: ProcStatus, activity: Option<AgentActivity> }
+struct AgentNode { id: ProcessId, parent: Option<ProcessId>, label: String, kind: ProcessKind, status: ProcStatus, activity: Option<AgentActivity> }
 #[tauri::command] async fn orchestration_snapshot(project: ProjectId) -> OrchestrationSnapshot; // → Facade
 ```
 ```ts
 // ui/src/store/useOrchestration.ts — pure read-model hook over the snapshot + domain events
-type AgentNode = { id: string; parent: string | null; kind: ProcessKind; status: ProcStatus; activity?: AgentActivity }
+type AgentNode = { id: number; parent: number | null; label: string; kind: ProcessKind; status: ProcStatus; activity?: AgentActivity }
 ```
+`label` (the row's name) is filled from the existing `ProcessView` during snapshot assembly, so the
+tree renders from one self-contained projection rather than joining a second read-model.
 
 ## Acceptance criteria
 - A lead that `spawn_agent`s a worker shows that worker **nested under it** in the tree; a manually
@@ -75,8 +77,12 @@ type AgentNode = { id: string; parent: string | null; kind: ProcessKind; status:
   re-parent-to-root on lead close.
 - **Unit (UI, Vitest):** the read-model hook builds the correct parent→children shape from a snapshot +
   a sequence of lineage/activity events.
-- **Playwright e2e (required from Phase 5, CLAUDE.md §14):** drive a stub lead that spawns two stub
-  workers; assert the nested tree renders and a worker's glyph flips on an activity event.
+- **Headless IPC + real-window e2e:** the Phase-5 finding (recorded in `PROGRESS.md`) is that WebKitGTK
+  exposes no CDP, so the real-window walk is **WebdriverIO + tauri-driver** (sudo deps, user-only), and
+  the **headless layer is mockIPC behavior tests** — *not* Playwright. orch-01's headless coverage: the
+  pure `buildOrchestrationTree` (parent→children shape over a sequence of snapshots), the
+  `OrchestrationTree` component (nested treeitems, kind, empty state), and a mockIPC `orchestration_snapshot`
+  wrapper round-trip. The live glyph-flip on an activity event is part of the user-only real-window walk.
 
 ## Risks & mitigations
 - **"Quiet ≠ done" idle ambiguity (D-5, [`05` §12](../05-solo-reference-and-sources.md))** → the tree

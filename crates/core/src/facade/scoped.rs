@@ -161,7 +161,10 @@ impl Facade {
     /// [`Facade::launch_agent`] for the one launch behaviour; the worker always
     /// lands in the caller's own project (the resolved scope), so it can never spawn into
     /// another and needs no project argument. The new agent auto-binds via the injected
-    /// `SOLOIST_PROCESS_ID`. Must run within a `tokio` runtime (starting spawns the actor).
+    /// `SOLOIST_PROCESS_ID`. When the calling session is bound to a lead process, the worker's
+    /// lineage is recorded under that lead so the orchestration tree nests it; an unbound or
+    /// external caller's spawn is a root. Must run within a `tokio` runtime (starting spawns the
+    /// actor).
     pub fn spawn_agent(
         &self,
         session: SessionId,
@@ -171,7 +174,13 @@ impl Facade {
         let project = self
             .effective_project(session)
             .ok_or(SpawnAgentError::NoProjectScope)?;
-        Ok(self.launch_agent(project, tool, extra_args)?)
+        let worker = self.launch_agent(project, tool, extra_args)?;
+        // A worker spawned by a bound lead nests under it in the orchestration tree; an
+        // unbound or external caller's spawn records no parent and so reads back as a root.
+        if let Some(lead) = self.identity.origin(session).process() {
+            self.lineage.record(worker, lead);
+        }
+        Ok(worker)
     }
 
     /// Starts every trusted command in the session's effective project, regardless of
