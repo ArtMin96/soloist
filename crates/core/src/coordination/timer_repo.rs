@@ -41,15 +41,21 @@ pub struct StoredTimer {
 }
 
 impl StoredTimer {
-    /// Projects this row to the caller-facing [`TimerView`], dropping the store-only paused
-    /// remainder.
+    /// Projects this row to the caller-facing [`TimerView`], carrying the paused remainder through
+    /// as [`paused_remaining_millis`](TimerView::paused_remaining_millis) so a paused timer reports
+    /// its frozen remaining time. `waiting_on` and `already_idle` default to their empty/false
+    /// sentinels; the façade enriches them from live idle state before returning to a caller.
     pub fn into_view(self) -> TimerView {
         TimerView {
             id: self.id,
+            owner: self.owner,
             body: self.body,
             fire: self.fire,
             status: self.status,
             deadline_unix_millis: self.deadline_unix_millis,
+            waiting_on: Vec::new(),
+            already_idle: false,
+            paused_remaining_millis: self.remaining_on_pause_millis,
         }
     }
 }

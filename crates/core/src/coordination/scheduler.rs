@@ -27,7 +27,7 @@ use crate::ports::Clock;
 use crate::supervision::supervise;
 use crate::supervisor::Supervisor;
 
-use super::timer::watched_is_idle;
+use super::timer::{watched_is_idle, FireCond};
 use super::timer_repo::{StoredTimer, TimerRepo};
 
 /// Fires due coordination timers. Cloneable so the supervising [`run`](TimerScheduler::run) can
@@ -97,7 +97,12 @@ impl TimerScheduler {
                             owner: claimed.owner,
                             id: claimed.id,
                         });
-                        deliver(&supervisor, claimed).await;
+                        // Determine whether the backstop fired rather than the idle quorum: the
+                        // deadline is computed before the idle check inside `is_due`, so a timer
+                        // whose deadline passed but whose quorum was also met is correctly labelled
+                        // as "deadline" (the backstop triggered the evaluation).
+                        let fired_at_backstop = timer.deadline_unix_millis <= now;
+                        deliver(&supervisor, claimed, fired_at_backstop).await;
                     }
                 } else {
                     next_deadline =
@@ -153,13 +158,50 @@ impl TimerScheduler {
     }
 }
 
-/// Delivers a fired timer's body to its owner as a fresh user turn: the body followed by a
-/// carriage return so the agent CLI submits it. Best-effort — the timer is already claimed and
-/// removed, so an owner that has since gone simply means the body is not delivered.
-async fn deliver(supervisor: &Supervisor, timer: StoredTimer) {
-    let mut input = timer.body.into_bytes();
+/// Delivers a fired timer's body to its owner as a fresh user turn: a compact wake-reason header
+/// (so the woken agent knows *why* it woke) followed by the body and a carriage return so the
+/// agent CLI submits it. Best-effort — the timer is already claimed and removed, so an owner that
+/// has since gone simply means the body is not delivered.
+async fn deliver(supervisor: &Supervisor, timer: StoredTimer, fired_at_backstop: bool) {
+    let header = wake_reason_header(&timer, fired_at_backstop);
+    let mut input = format!("{header}\n{}", timer.body).into_bytes();
     input.push(b'\r');
     let _ = supervisor.write_stdin(timer.owner, input).await;
+}
+
+/// A compact, clean-room wake-reason header prepended to the delivered body so the woken agent can
+/// tell "all peers finished" from "I was timed out" — per-fire context for the lead.
+/// Format is `[Soloist timer #<id>] <reason>`.
+fn wake_reason_header(timer: &StoredTimer, fired_at_backstop: bool) -> String {
+    let id = timer.id;
+    match &timer.fire {
+        FireCond::At => format!("[Soloist timer #{id}] scheduled delivery"),
+        FireCond::WhenIdleAny { watched } => {
+            if fired_at_backstop {
+                format!(
+                    "[Soloist timer #{id}] max-wait backstop elapsed \
+                     (when-any-idle, {} watched)",
+                    watched.len()
+                )
+            } else {
+                format!("[Soloist timer #{id}] a watched agent is idle (any-idle condition met)")
+            }
+        }
+        FireCond::WhenIdleAll { watched } => {
+            if fired_at_backstop {
+                format!(
+                    "[Soloist timer #{id}] max-wait backstop elapsed \
+                     (when-all-idle, {} watched)",
+                    watched.len()
+                )
+            } else {
+                format!(
+                    "[Soloist timer #{id}] all {} watched agents are idle",
+                    watched.len()
+                )
+            }
+        }
+    }
 }
 
 /// Sleeps until the absolute `deadline` (Unix milliseconds) per the clock, or forever when none is

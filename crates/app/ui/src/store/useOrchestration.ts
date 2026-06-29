@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { onDomainEvent, orchestrationSnapshot } from "@/api";
 import { buildOrchestrationTree, type OrchestrationTreeNode } from "@/store/orchestrationTree";
-import type { AgentNode, DomainEvent, ScratchpadSummary, TodoView } from "@/domain";
+import type { AgentNode, DomainEvent, ScratchpadSummary, TimerView, TodoView } from "@/domain";
 
 // Domain events that change anything the orchestration surface renders: a process entering or
-// leaving the registry, a status / label / activity change (the agent tree), or a todo or scratchpad
-// mutation (the coordination panels). The snapshot is derived on read and its events carry ids only,
-// so the hook re-reads the one snapshot rather than folding deltas.
+// leaving the registry, a status / label / activity change (the agent tree), or a todo, scratchpad,
+// or timer mutation (the coordination panels). The snapshot is derived on read and its events carry
+// ids only, so the hook re-reads the one snapshot rather than folding deltas. Timer pause/resume
+// events are included so the panel reflects the new status without polling.
 const SNAPSHOT_EVENTS: ReadonlySet<DomainEvent["type"]> = new Set([
   "ProcessSpawned",
   "ProcessStatusChanged",
@@ -15,6 +16,11 @@ const SNAPSHOT_EVENTS: ReadonlySet<DomainEvent["type"]> = new Set([
   "AgentActivityChanged",
   "TodoChanged",
   "ScratchpadChanged",
+  "TimerArmed",
+  "TimerFired",
+  "TimerCleared",
+  "TimerPaused",
+  "TimerResumed",
 ]);
 
 export interface OrchestrationStore {
@@ -23,6 +29,8 @@ export interface OrchestrationStore {
   agents: AgentNode[];
   todos: TodoView[];
   scratchpads: ScratchpadSummary[];
+  /** Armed and paused timers in the project, ordered by id. */
+  timers: TimerView[];
   error: string | null;
   refresh: () => void;
 }
@@ -32,6 +40,7 @@ const EMPTY: Omit<OrchestrationStore, "error" | "refresh"> = {
   agents: [],
   todos: [],
   scratchpads: [],
+  timers: [],
 };
 
 // The orchestration read model for one project — the agent tree plus the coordination state the
@@ -58,6 +67,7 @@ export function useOrchestration(project: number | null): OrchestrationStore {
           agents: snap.agents,
           todos: snap.todos,
           scratchpads: snap.scratchpads,
+          timers: snap.timers,
         }),
       )
       .catch(fail);

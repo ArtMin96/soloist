@@ -228,7 +228,12 @@ impl Facade {
         timer: TimerId,
     ) -> Result<bool, CoordinationError> {
         let owner = self.coordination_owner(session)?;
-        Ok(self.timers.pause(timer, owner)?)
+        let paused = self.timers.pause(timer, owner)?;
+        if paused {
+            self.bus
+                .publish(DomainEvent::TimerPaused { owner, id: timer });
+        }
+        Ok(paused)
     }
 
     /// Resumes a paused timer the session's bound process owns (re-arming it with the time that
@@ -239,7 +244,43 @@ impl Facade {
         timer: TimerId,
     ) -> Result<bool, CoordinationError> {
         let owner = self.coordination_owner(session)?;
-        Ok(self.timers.resume(timer, owner)?)
+        let resumed = self.timers.resume(timer, owner)?;
+        if resumed {
+            self.bus
+                .publish(DomainEvent::TimerResumed { owner, id: timer });
+        }
+        Ok(resumed)
+    }
+
+    /// Cancels a timer owned by `owner` — the local, trusted Tauri surface passes the owner
+    /// process id directly (no session scope needed; the local UI already has full project access).
+    pub fn timer_cancel_for(&self, owner: ProcessId, timer: TimerId) -> Result<bool, StoreError> {
+        let cancelled = self.timers.cancel(timer, owner)?;
+        if cancelled {
+            self.bus
+                .publish(DomainEvent::TimerCleared { owner, id: timer });
+        }
+        Ok(cancelled)
+    }
+
+    /// Pauses a timer owned by `owner` — the local, trusted Tauri surface.
+    pub fn timer_pause_for(&self, owner: ProcessId, timer: TimerId) -> Result<bool, StoreError> {
+        let paused = self.timers.pause(timer, owner)?;
+        if paused {
+            self.bus
+                .publish(DomainEvent::TimerPaused { owner, id: timer });
+        }
+        Ok(paused)
+    }
+
+    /// Resumes a paused timer owned by `owner` — the local, trusted Tauri surface.
+    pub fn timer_resume_for(&self, owner: ProcessId, timer: TimerId) -> Result<bool, StoreError> {
+        let resumed = self.timers.resume(timer, owner)?;
+        if resumed {
+            self.bus
+                .publish(DomainEvent::TimerResumed { owner, id: timer });
+        }
+        Ok(resumed)
     }
 
     /// Every timer the session's bound process owns (armed or paused).

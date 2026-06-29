@@ -1,19 +1,20 @@
 import { useState } from "react";
 import { OrchestrationTree } from "@/components/orchestration/OrchestrationTree";
 import { ScratchpadPanel } from "@/components/orchestration/ScratchpadPanel";
+import { TimersPanel } from "@/components/orchestration/TimersPanel";
 import { TodoBoard } from "@/components/orchestration/TodoBoard";
 import { useOrchestration } from "@/store/useOrchestration";
 import { cn } from "@/lib/utils";
 import type { ProjectView } from "@/domain";
 
-type View = "agents" | "todos" | "scratchpads";
+type View = "agents" | "todos" | "scratchpads" | "timers";
 
 // The orchestration surface for one project: a live view of the lead→worker agent tree and the
-// shared coordination documents (scratchpads now; todos and timers in the later panels). Owns the
-// read-model hook — the only place here that reaches IPC — and switches the body between views. Each
-// view is presentational over the one snapshot the hook keeps live (snapshot-then-deltas).
+// shared coordination documents (todos, scratchpads, timers). Owns the read-model hook — the only
+// place here that reaches IPC — and switches the body between views. Each view is presentational
+// over the one snapshot the hook keeps live (snapshot-then-deltas).
 export function OrchestrationPane({ project }: { project: ProjectView }) {
-  const { tree, agents, todos, scratchpads, error } = useOrchestration(project.id);
+  const { tree, agents, todos, scratchpads, timers, error } = useOrchestration(project.id);
   const [view, setView] = useState<View>("agents");
 
   return (
@@ -32,6 +33,13 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
           <Tab active={view === "scratchpads"} onClick={() => setView("scratchpads")}>
             Scratchpads
           </Tab>
+          <Tab
+            active={view === "timers"}
+            onClick={() => setView("timers")}
+            count={timers.length > 0 ? timers.length : undefined}
+          >
+            Timers
+          </Tab>
         </nav>
       </header>
       {error && <p className="px-3 pt-2 text-xs text-destructive">{error}</p>}
@@ -45,6 +53,7 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
         {view === "scratchpads" && (
           <ScratchpadPanel project={project.id} scratchpads={scratchpads} />
         )}
+        {view === "timers" && <TimersPanel timers={timers} agents={agents} project={project.id} />}
       </div>
     </section>
   );
@@ -53,10 +62,12 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
 function Tab({
   active,
   onClick,
+  count,
   children,
 }: {
   active: boolean;
   onClick: () => void;
+  count?: number;
   children: string;
 }) {
   return (
@@ -65,11 +76,22 @@ function Tab({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "relative flex h-9 items-center px-1 text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+        "relative flex h-9 items-center gap-1.5 px-1 text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
         active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
       )}
     >
       {children}
+      {count != null && (
+        <span
+          className={cn(
+            "text-[0.6875rem] tabular-nums",
+            active ? "text-muted-foreground" : "text-muted-foreground/60",
+          )}
+          aria-label={`${count} ${children}`}
+        >
+          {count}
+        </span>
+      )}
       {active && <span aria-hidden className="absolute inset-x-0 -bottom-px h-0.5 bg-primary" />}
     </button>
   );

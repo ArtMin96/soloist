@@ -124,6 +124,25 @@ export function todoLink(project: number, todo: number): Promise<string> {
   return invoke<string>("todo_link", { project, todo });
 }
 
+// ── Timer management ──────────────────────────────────────────────────────────
+// Routes to the existing core timer_cancel/pause/resume_for façade methods. `owner` is the process
+// id of the timer's owning agent; `timer` is the timer id. Returns whether one was affected.
+
+/** Cancels a timer owned by `owner`. */
+export function timerCancel(owner: number, timer: number): Promise<boolean> {
+  return invoke<boolean>("timer_cancel", { owner, timer });
+}
+
+/** Pauses a timer owned by `owner` (freezes the remaining time). */
+export function timerPause(owner: number, timer: number): Promise<boolean> {
+  return invoke<boolean>("timer_pause", { owner, timer });
+}
+
+/** Resumes a paused timer owned by `owner` (re-arms with remaining time). */
+export function timerResume(owner: number, timer: number): Promise<boolean> {
+  return invoke<boolean>("timer_resume", { owner, timer });
+}
+
 // The project read model — every opened project's identity with its icon already rendered
 // (a data: URL). Seeds the sidebar's project tree; a `ProjectOpened` event prompts a re-read.
 export function projectList(): Promise<ProjectView[]> {
