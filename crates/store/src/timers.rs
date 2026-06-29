@@ -112,6 +112,15 @@ impl TimerRepo for SqliteStore {
             .map_err(sql_err)
     }
 
+    fn list_in_project(&self, project: ProjectId) -> Result<Vec<StoredTimer>, StoreError> {
+        let conn = self.lock();
+        collect_timers(
+            &conn,
+            &format!("SELECT {TIMER_COLUMNS} FROM timers WHERE project_id = ?1 ORDER BY id"),
+            [project.get() as i64],
+        )
+    }
+
     fn list(&self, owner: ProcessId) -> Result<Vec<StoredTimer>, StoreError> {
         let conn = self.lock();
         collect_timers(

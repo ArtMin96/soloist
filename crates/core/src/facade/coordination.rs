@@ -15,6 +15,7 @@ use super::Facade;
 use crate::coordination::{
     watched_is_idle, AcquireOutcome, IdleMode, LeaseView, SetWhenIdleOutcome, TimerView,
 };
+use crate::events::DomainEvent;
 use crate::ids::{ProcessId, ProjectId, SessionId, TimerId, TodoId};
 use crate::ports::StoreError;
 
@@ -76,6 +77,14 @@ pub enum CoordinationError {
     /// A comment action named one that does not exist on the todo.
     #[error("no comment under that id on that todo")]
     UnknownComment,
+    /// A `solo://` link could not be parsed — it is not in the
+    /// `solo://proj/<project>/scratchpad|todo/<id>` shape.
+    #[error("not a valid solo:// link")]
+    MalformedLink,
+    /// A `solo://` link named a project other than the caller's effective one, so it is refused
+    /// rather than resolved to another project's content (the never-leak scope discipline).
+    #[error("that link points outside your effective project")]
+    ForeignScopeLink,
     /// A durable read or write failed.
     #[error(transparent)]
     Store(#[from] StoreError),
@@ -94,7 +103,16 @@ impl Facade {
     ) -> Result<AcquireOutcome, CoordinationError> {
         let project = self.coordination_scope(session)?;
         let owner = self.coordination_owner(session)?;
-        Ok(self.leases.acquire(project, key, owner, ttl)?)
+        let outcome = self.leases.acquire(project, key, owner, ttl)?;
+        // Only a grant or renewal changed the lease; a `Held` outcome left another owner's lease
+        // untouched, so it raises no change.
+        if matches!(outcome, AcquireOutcome::Acquired(_)) {
+            self.bus.publish(DomainEvent::LeaseChanged {
+                project,
+                key: key.to_owned(),
+            });
+        }
+        Ok(outcome)
     }
 
     /// The current holder of the lease `key` in the session's effective project, or `None` if it
@@ -114,7 +132,14 @@ impl Facade {
     pub fn lock_release(&self, session: SessionId, key: &str) -> Result<bool, CoordinationError> {
         let project = self.coordination_scope(session)?;
         let owner = self.coordination_owner(session)?;
-        Ok(self.leases.release(project, key, owner)?)
+        let released = self.leases.release(project, key, owner)?;
+        if released {
+            self.bus.publish(DomainEvent::LeaseChanged {
+                project,
+                key: key.to_owned(),
+            });
+        }
+        Ok(released)
     }
 
     /// Clears every stale lease on launch — see [`Leases::reconcile`](crate::coordination::Leases::reconcile).
@@ -135,7 +160,12 @@ impl Facade {
     ) -> Result<TimerView, CoordinationError> {
         let project = self.coordination_scope(session)?;
         let owner = self.coordination_owner(session)?;
-        Ok(self.timers.set(project, owner, body, after)?)
+        let timer = self.timers.set(project, owner, body, after)?;
+        self.bus.publish(DomainEvent::TimerArmed {
+            owner,
+            id: timer.id,
+        });
+        Ok(timer)
     }
 
     /// Arms a fire-when-idle timer owned by the session's bound process: it delivers `body` to
@@ -164,6 +194,10 @@ impl Facade {
         let timer = self
             .timers
             .set_when_idle(project, owner, body, processes, mode, max_wait)?;
+        self.bus.publish(DomainEvent::TimerArmed {
+            owner,
+            id: timer.id,
+        });
         Ok(SetWhenIdleOutcome {
             timer,
             already_idle,
@@ -178,7 +212,12 @@ impl Facade {
         timer: TimerId,
     ) -> Result<bool, CoordinationError> {
         let owner = self.coordination_owner(session)?;
-        Ok(self.timers.cancel(timer, owner)?)
+        let cancelled = self.timers.cancel(timer, owner)?;
+        if cancelled {
+            self.bus
+                .publish(DomainEvent::TimerCleared { owner, id: timer });
+        }
+        Ok(cancelled)
     }
 
     /// Pauses a timer the session's bound process owns (freezing the time that remains), returning
@@ -189,7 +228,12 @@ impl Facade {
         timer: TimerId,
     ) -> Result<bool, CoordinationError> {
         let owner = self.coordination_owner(session)?;
-        Ok(self.timers.pause(timer, owner)?)
+        let paused = self.timers.pause(timer, owner)?;
+        if paused {
+            self.bus
+                .publish(DomainEvent::TimerPaused { owner, id: timer });
+        }
+        Ok(paused)
     }
 
     /// Resumes a paused timer the session's bound process owns (re-arming it with the time that
@@ -200,7 +244,43 @@ impl Facade {
         timer: TimerId,
     ) -> Result<bool, CoordinationError> {
         let owner = self.coordination_owner(session)?;
-        Ok(self.timers.resume(timer, owner)?)
+        let resumed = self.timers.resume(timer, owner)?;
+        if resumed {
+            self.bus
+                .publish(DomainEvent::TimerResumed { owner, id: timer });
+        }
+        Ok(resumed)
+    }
+
+    /// Cancels a timer owned by `owner` — the local, trusted Tauri surface passes the owner
+    /// process id directly (no session scope needed; the local UI already has full project access).
+    pub fn timer_cancel_for(&self, owner: ProcessId, timer: TimerId) -> Result<bool, StoreError> {
+        let cancelled = self.timers.cancel(timer, owner)?;
+        if cancelled {
+            self.bus
+                .publish(DomainEvent::TimerCleared { owner, id: timer });
+        }
+        Ok(cancelled)
+    }
+
+    /// Pauses a timer owned by `owner` — the local, trusted Tauri surface.
+    pub fn timer_pause_for(&self, owner: ProcessId, timer: TimerId) -> Result<bool, StoreError> {
+        let paused = self.timers.pause(timer, owner)?;
+        if paused {
+            self.bus
+                .publish(DomainEvent::TimerPaused { owner, id: timer });
+        }
+        Ok(paused)
+    }
+
+    /// Resumes a paused timer owned by `owner` — the local, trusted Tauri surface.
+    pub fn timer_resume_for(&self, owner: ProcessId, timer: TimerId) -> Result<bool, StoreError> {
+        let resumed = self.timers.resume(timer, owner)?;
+        if resumed {
+            self.bus
+                .publish(DomainEvent::TimerResumed { owner, id: timer });
+        }
+        Ok(resumed)
     }
 
     /// Every timer the session's bound process owns (armed or paused).

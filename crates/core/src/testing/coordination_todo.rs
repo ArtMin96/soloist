@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use crate::coordination::{
-    Comment, CommentEdit, StoredTodo, TodoDoc, TodoRepo, TodoStatus, TodoWriteResult,
+    Comment, CommentAuthor, CommentEdit, StoredTodo, TodoDoc, TodoRepo, TodoStatus, TodoWriteResult,
 };
 use crate::ids::{ProcessId, ProjectId, TodoId};
 use crate::ports::StoreError;
@@ -216,6 +216,7 @@ impl TodoRepo for FakeTodoRepo {
         project: ProjectId,
         id: TodoId,
         body: &str,
+        author: Option<CommentAuthor>,
     ) -> Result<Option<(StoredTodo, u64)>, StoreError> {
         let mut rows = lock(&self.rows);
         let Some(todo) = rows
@@ -228,6 +229,7 @@ impl TodoRepo for FakeTodoRepo {
         todo.comments.push(Comment {
             id: comment,
             body: body.to_owned(),
+            author,
         });
         Ok(Some((todo.clone(), comment)))
     }

@@ -56,7 +56,9 @@ keeps the dependency rule intact (UI → Facade, never UI → a context internal
 3. **`Facade` query methods (O1, [`06` §5.1](../06-codebase-blueprint-and-cleanup.md)):**
    `orchestration_snapshot(project) -> OrchestrationSnapshot` (and any focused sub-queries the panels
    need, e.g. `todos(project)`, `timers(project)`), mirroring the existing `snapshot()` query shape.
-   Read-only; honors effective project scope in the core ([`04` §12](../04-engineering-architecture-and-patterns.md)).
+   Read-only; project-filtered like `snapshot()` — a local read that trusts the caller for `project`.
+   Any later MCP/HTTP exposure must derive `project` from the caller's bound, identity-checked scope,
+   never a caller-supplied id ([`04` §12](../04-engineering-architecture-and-patterns.md)).
 4. **Coordination `DomainEvent`s (O2, [`06` §5.6](../06-codebase-blueprint-and-cleanup.md)):** add the
    variants a live UI needs that aren't already emitted — `TodoChanged{project,id}`,
    `TimerArmed/TimerFired/TimerCleared{owner,id}`, `LeaseChanged{project,key}`,

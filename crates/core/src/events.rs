@@ -14,7 +14,7 @@ use tokio::sync::broadcast;
 
 use crate::agents::AgentActivity;
 use crate::config::{ConfigSync, TrustReviewCommand};
-use crate::ids::{ProcessId, ProjectId};
+use crate::ids::{ProcessId, ProjectId, TimerId, TodoId};
 use crate::orphans::OrphanInfo;
 use crate::process::{ProcStatus, ProcessKind};
 
@@ -109,6 +109,34 @@ pub enum DomainEvent {
     /// known command, awaiting a user Kill / Kill All / Leave decision surfaced by the
     /// UI. The core only reports them; it neither kills nor keeps them on its own.
     OrphansFound { orphans: Vec<OrphanInfo> },
+    /// A coordination todo in `project` changed (created, updated, completed, deleted, or one of
+    /// its live columns — tags, blockers, comments, lock — was edited). A change-notification
+    /// carrying ids only: the orchestration UI re-reads the snapshot rather than trusting a
+    /// payload, so a chatty run coalesces to one re-query per frame.
+    TodoChanged { project: ProjectId, id: TodoId },
+    /// A coordination timer owned by `owner` was armed (created or set fire-when-idle). Carries the
+    /// owner and timer id so the orchestration UI re-reads that owner's timers.
+    TimerArmed { owner: ProcessId, id: TimerId },
+    /// A coordination timer owned by `owner` fired: its body was delivered to the owner as a fresh
+    /// turn and the timer was removed. Distinct from [`TimerCleared`](Self::TimerCleared) so a
+    /// wake-cycle view can surface *why* the lead woke, not just that the timer left.
+    TimerFired { owner: ProcessId, id: TimerId },
+    /// A coordination timer owned by `owner` was cleared without firing (the owner cancelled it).
+    TimerCleared { owner: ProcessId, id: TimerId },
+    /// A coordination timer owned by `owner` was paused: the countdown is frozen and the timer
+    /// will not fire until resumed.
+    TimerPaused { owner: ProcessId, id: TimerId },
+    /// A coordination timer owned by `owner` was resumed: the countdown re-armed with the time
+    /// that remained when it was paused.
+    TimerResumed { owner: ProcessId, id: TimerId },
+    /// A coordination lease `key` in `project` changed (acquired, renewed, or released by its
+    /// owner). The UI re-reads the project's live leases.
+    LeaseChanged { project: ProjectId, key: String },
+    /// A coordination scratchpad `name` in `project` changed (written, renamed, retagged, archived,
+    /// or deleted). Keyed by the scratchpad's `name` handle — the addressing key its surface uses.
+    ScratchpadChanged { project: ProjectId, name: String },
+    /// A coordination key-value entry `key` in `project` changed (set or deleted).
+    KvChanged { project: ProjectId, key: String },
 }
 
 /// The outbound event port: anything the core publishes domain events through.

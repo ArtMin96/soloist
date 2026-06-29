@@ -11,7 +11,7 @@
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
-use soloist_core::ScratchpadDoc;
+use soloist_core::{is_link, ScratchpadDoc};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
@@ -37,12 +37,16 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Read one scratchpad by name. Returns its disciplined document (objective, context, plan, acceptance_criteria, risks, status, notes), its tags, its canonical Markdown rendering, and the revision — pass that revision back to scratchpad_write to update it safely."
+        description = "Read one scratchpad by its name or a solo:// link to it. Returns its disciplined document (objective, context, plan, acceptance_criteria, risks, status, notes), its tags, its canonical Markdown rendering, and the revision — pass that revision back to scratchpad_write to update it safely."
     )]
     pub(crate) async fn scratchpad_read(
         &self,
         Parameters(ScratchpadNameArg { name }): Parameters<ScratchpadNameArg>,
     ) -> Result<CallToolResult, ErrorData> {
+        // A copied solo:// link routes to the scope-checked resolver; a bare value is a name.
+        if is_link(&name) {
+            return self.read_solo_link(name).await;
+        }
         match self
             .client
             .request(IpcRequest::ScratchpadRead { name })

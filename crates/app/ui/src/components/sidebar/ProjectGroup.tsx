@@ -1,4 +1,4 @@
-import { ChevronRight, Settings } from "lucide-react";
+import { ChevronRight, Network, Settings } from "lucide-react";
 import { Collapsible } from "radix-ui";
 import { ProcessGroup } from "@/components/sidebar/ProcessGroup";
 import { ProjectControls } from "@/components/sidebar/ProjectControls";
@@ -23,6 +23,7 @@ interface ProjectGroupProps {
   onRestartRunning: () => void;
   onStopAll: () => void;
   onOpenProjectSettings: () => void;
+  onOpenOrchestration: () => void;
 }
 
 // One project in the sidebar: a collapsible header (icon + name + running count + bulk
@@ -45,6 +46,7 @@ export function ProjectGroup({
   onRestartRunning,
   onStopAll,
   onOpenProjectSettings,
+  onOpenOrchestration,
 }: ProjectGroupProps) {
   const { project, kinds, count } = tree;
 
@@ -76,6 +78,19 @@ export function ProjectGroup({
             onRestartRunning={onRestartRunning}
             onStopAll={onStopAll}
           />
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Orchestration"
+            title="Orchestration"
+            onClick={(event) => {
+              // The header toggles the project's collapse; opening the view must not toggle it.
+              event.stopPropagation();
+              onOpenOrchestration();
+            }}
+          >
+            <Network />
+          </Button>
           <Button
             variant="ghost"
             size="icon-xs"

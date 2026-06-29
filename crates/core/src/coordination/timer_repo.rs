@@ -41,15 +41,21 @@ pub struct StoredTimer {
 }
 
 impl StoredTimer {
-    /// Projects this row to the caller-facing [`TimerView`], dropping the store-only paused
-    /// remainder.
+    /// Projects this row to the caller-facing [`TimerView`], carrying the paused remainder through
+    /// as [`paused_remaining_millis`](TimerView::paused_remaining_millis) so a paused timer reports
+    /// its frozen remaining time. `waiting_on` and `already_idle` default to their empty/false
+    /// sentinels; the façade enriches them from live idle state before returning to a caller.
     pub fn into_view(self) -> TimerView {
         TimerView {
             id: self.id,
+            owner: self.owner,
             body: self.body,
             fire: self.fire,
             status: self.status,
             deadline_unix_millis: self.deadline_unix_millis,
+            waiting_on: Vec::new(),
+            already_idle: false,
+            paused_remaining_millis: self.remaining_on_pause_millis,
         }
     }
 }
@@ -85,6 +91,12 @@ pub trait TimerRepo: Send + Sync {
     /// `now + remaining`; returns whether one was resumed. Atomic: the paused check and the re-arm
     /// are one step.
     fn resume(&self, id: TimerId, owner: ProcessId, now: u64) -> Result<bool, StoreError>;
+
+    /// Every timer in `project` (armed or paused), ordered by id — the project-scoped read the
+    /// orchestration snapshot projects. A plain read; unlike [`list`](Self::list) it is keyed by
+    /// project, not owner, so the snapshot shows every timer in the project regardless of which
+    /// process owns it.
+    fn list_in_project(&self, project: ProjectId) -> Result<Vec<StoredTimer>, StoreError>;
 
     /// Every timer `owner` holds (armed or paused) — the rows `timer_list` returns.
     fn list(&self, owner: ProcessId) -> Result<Vec<StoredTimer>, StoreError>;
@@ -122,6 +134,9 @@ impl TimerRepo for NoopTimerRepo {
     }
     fn resume(&self, _id: TimerId, _owner: ProcessId, _now: u64) -> Result<bool, StoreError> {
         Ok(false)
+    }
+    fn list_in_project(&self, _project: ProjectId) -> Result<Vec<StoredTimer>, StoreError> {
+        Ok(Vec::new())
     }
     fn list(&self, _owner: ProcessId) -> Result<Vec<StoredTimer>, StoreError> {
         Ok(Vec::new())

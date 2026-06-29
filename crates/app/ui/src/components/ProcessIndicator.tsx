@@ -2,10 +2,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ACTIVITY } from "@/lib/activity";
 import { STATUS, type StatusDisplay } from "@/lib/status";
 import { cn } from "@/lib/utils";
-import type { AgentActivity, ProcessView } from "@/domain";
+import type { AgentActivity, ProcStatus } from "@/domain";
 
 interface ProcessIndicatorProps {
-  process: ProcessView;
+  /** The process's supervision status — the state shown unless a running agent's activity
+   *  overrides it. Taken as the bare value so both a `ProcessView` row and an orchestration
+   *  `AgentNode` reuse this one indicator. */
+  status: ProcStatus;
   /** The agent's current activity, present only while a tracked agent is running. */
   activity?: AgentActivity;
   /** Show the text label beside the glyph (the roomy terminal header). Off in the dense
@@ -19,12 +22,10 @@ interface ProcessIndicatorProps {
 // state without color, the hue reinforces it, the label names it — so state survives color
 // blindness and a grayscale screenshot (DESIGN.md). The `data-status`/`data-activity`
 // attribute keys styling and tests off the value, not scraped text.
-export function ProcessIndicator({ process, activity, showLabel = true }: ProcessIndicatorProps) {
-  const showActivity = process.status === "Running" && activity != null;
-  const display: StatusDisplay = showActivity ? ACTIVITY[activity] : STATUS[process.status];
-  const dataProps = showActivity
-    ? { "data-activity": activity }
-    : { "data-status": process.status };
+export function ProcessIndicator({ status, activity, showLabel = true }: ProcessIndicatorProps) {
+  const showActivity = status === "Running" && activity != null;
+  const display: StatusDisplay = showActivity ? ACTIVITY[activity] : STATUS[status];
+  const dataProps = showActivity ? { "data-activity": activity } : { "data-status": status };
 
   const glyph = (
     <span

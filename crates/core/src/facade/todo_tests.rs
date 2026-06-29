@@ -187,3 +187,46 @@ fn comments_round_trip_and_report_unknown_targets() {
         Err(CoordinationError::UnknownComment)
     ));
 }
+
+#[test]
+fn an_unbound_callers_comment_is_unattributed() {
+    // `scoped_facade` is an unbound single-project session: it can comment, but the core stamps no
+    // author — there is no bound actor and the caller cannot supply one (no spoofing).
+    let (facade, session) = scoped_facade();
+    let todo = facade
+        .todo_create(session, doc("x", TodoStatus::Open))
+        .expect("create");
+    let (view, _) = facade
+        .todo_comment_create(session, todo.id, "drive-by note")
+        .expect("comment");
+    assert_eq!(view.comments[0].author, None);
+}
+
+#[test]
+fn a_bound_process_stamps_its_actor_on_a_comment() {
+    let facade = facade_with(Arc::new(FakeProjectRepo::new()));
+    let project = ProjectId::from_raw(1);
+    let owner = facade
+        .supervisor()
+        .register(terminal_registration(project, "term", "sleep 60"));
+    let session = authentic_session(&facade, owner, TEST_PEER_PGID);
+    facade
+        .bind_session_process(session, owner)
+        .expect("authentic bind");
+
+    let todo = facade
+        .todo_create(session, doc("x", TodoStatus::Open))
+        .expect("create");
+    let (view, _) = facade
+        .todo_comment_create(session, todo.id, "reviewed")
+        .expect("comment");
+    // The core resolves the author from the bound identity — its id and the process's label — so a
+    // caller can never forge a different author (the API takes no author argument at all).
+    assert_eq!(
+        view.comments[0].author,
+        Some(CommentAuthor::Process {
+            id: owner,
+            label: "term".into(),
+        })
+    );
+}

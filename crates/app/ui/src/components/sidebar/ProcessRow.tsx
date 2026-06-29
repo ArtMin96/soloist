@@ -58,7 +58,7 @@ export function ProcessRow({
           className="absolute top-1 bottom-1 left-0 w-0.5 rounded-full bg-sidebar-primary"
         />
       )}
-      <ProcessIndicator process={process} activity={activity} showLabel={false} />
+      <ProcessIndicator status={process.status} activity={activity} showLabel={false} />
       <span className="min-w-0 flex-1 truncate">{process.label}</span>
       {/* The right zone stacks at-rest telemetry under the controls in one grid cell, so the
           cell keeps the width of whichever is wider and the name never reflows on hover. */}

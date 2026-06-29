@@ -50,6 +50,12 @@ pub trait LockRepo: Send + Sync {
         now: u64,
     ) -> Result<Option<StoredLease>, StoreError>;
 
+    /// Every live (not-yet-expired at `now`) lease in `project`, ordered by key — the project-scoped
+    /// read the orchestration snapshot projects. A pure read: it filters expired rows out of the
+    /// result but, unlike [`live`](Self::live), never prunes them (a derived read makes no write).
+    fn live_in_project(&self, project: ProjectId, now: u64)
+        -> Result<Vec<StoredLease>, StoreError>;
+
     /// Releases `(project, key)` only if `owner` holds it, returning whether a lease was removed.
     /// The ownership check is part of the removal, so a release can never drop another owner's
     /// lease — including one a concurrent caller acquired between.
@@ -88,6 +94,13 @@ impl LockRepo for NoopLockRepo {
         _now: u64,
     ) -> Result<Option<StoredLease>, StoreError> {
         Ok(None)
+    }
+    fn live_in_project(
+        &self,
+        _project: ProjectId,
+        _now: u64,
+    ) -> Result<Vec<StoredLease>, StoreError> {
+        Ok(Vec::new())
     }
     fn release(
         &self,

@@ -30,6 +30,7 @@ pub mod idle;
 pub mod ids;
 pub mod metrics;
 pub mod notify;
+pub mod orchestration;
 pub mod orphans;
 pub mod ports;
 pub mod portscan;
@@ -57,13 +58,14 @@ pub use config::{
     SyncError, TrustReviewCommand,
 };
 pub use coordination::{
-    AcquireOutcome, Comment, CommentEdit, CommentOutcome, FireCond, IdleMode, Kv, KvEntry, KvRepo,
-    LeaseReleaser, LeaseView, Leases, LockRepo, NewTimer, NoopKvRepo, NoopLockRepo,
-    NoopScratchpadRepo, NoopTimerRepo, NoopTodoRepo, RenameError, RenameResult, ScratchpadDoc,
-    ScratchpadRepo, ScratchpadSummary, ScratchpadView, Scratchpads, SetWhenIdleOutcome,
-    StoredLease, StoredScratchpad, StoredTimer, StoredTodo, TimerRepo, TimerScheduler, TimerStatus,
-    TimerView, Timers, TodoDoc, TodoError, TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary,
-    TodoView, TodoWriteResult, Todos, WriteError, WriteResult,
+    is_link, AcquireOutcome, Comment, CommentAuthor, CommentEdit, CommentOutcome, FireCond,
+    IdleMode, Kv, KvEntry, KvRepo, LeaseReleaser, LeaseView, Leases, Link, LinkContent, LinkError,
+    LinkTarget, LockRepo, NewTimer, NoopKvRepo, NoopLockRepo, NoopScratchpadRepo, NoopTimerRepo,
+    NoopTodoRepo, RenameError, RenameResult, ScratchpadDoc, ScratchpadRepo, ScratchpadSummary,
+    ScratchpadView, Scratchpads, SetWhenIdleOutcome, StoredLease, StoredScratchpad, StoredTimer,
+    StoredTodo, TimerRepo, TimerScheduler, TimerStatus, TimerView, Timers, TodoDoc, TodoError,
+    TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView, TodoWriteResult, Todos,
+    WriteError, WriteResult,
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
@@ -77,6 +79,7 @@ pub use identity::{Identity, IdentityError, Origin, Whoami, PROCESS_ID_ENV};
 pub use ids::{ProcessId, ProjectId, ScratchpadId, SessionId, TimerId, TodoId};
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use notify::{NoopNotifier, Notification, NotificationReactor, Notifier};
+pub use orchestration::{AgentNode, OrchestrationSnapshot};
 pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{
     Clock, CompositeLockReleaser, CorePorts, CorePortsBuilder, ExitFuture, ExitStatus,

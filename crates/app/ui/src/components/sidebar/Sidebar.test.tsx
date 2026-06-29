@@ -25,6 +25,7 @@ function renderSidebar(settings: SidebarSettings) {
         onStopAll={noop}
         onOpenSettings={noop}
         onOpenProjectSettings={noop}
+        onOpenOrchestration={noop}
       />
     </SidebarSettingsContext>,
   );

@@ -69,6 +69,38 @@ impl LockRepo for SqliteStore {
         self.live_locked(&conn, project, key, now)
     }
 
+    fn live_in_project(
+        &self,
+        project: ProjectId,
+        now: u64,
+    ) -> Result<Vec<StoredLease>, StoreError> {
+        let conn = self.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT key, owner, acquired_unix_millis, expires_unix_millis
+                 FROM leases
+                 WHERE project_id = ?1 AND expires_unix_millis > ?2
+                 ORDER BY key",
+            )
+            .map_err(sql_err)?;
+        let rows = stmt
+            .query_map((project.get() as i64, now as i64), |row| {
+                let key: String = row.get(0)?;
+                let owner: i64 = row.get(1)?;
+                let acquired: i64 = row.get(2)?;
+                let expires: i64 = row.get(3)?;
+                Ok(StoredLease {
+                    project,
+                    key,
+                    owner: ProcessId::from_raw(owner as u64),
+                    acquired_unix_millis: acquired as u64,
+                    expires_unix_millis: expires as u64,
+                })
+            })
+            .map_err(sql_err)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sql_err)
+    }
+
     fn release(&self, project: ProjectId, key: &str, owner: ProcessId) -> Result<bool, StoreError> {
         self.lock()
             .execute(

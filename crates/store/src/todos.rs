@@ -12,8 +12,8 @@
 
 use rusqlite::{Connection, OptionalExtension, Row};
 use soloist_core::{
-    Comment, CommentEdit, ProcessId, ProjectId, StoreError, StoredTodo, TodoDoc, TodoId, TodoRepo,
-    TodoWriteResult,
+    Comment, CommentAuthor, CommentEdit, ProcessId, ProjectId, StoreError, StoredTodo, TodoDoc,
+    TodoId, TodoRepo, TodoWriteResult,
 };
 
 use crate::{sql_err, SqliteStore};
@@ -225,6 +225,7 @@ impl TodoRepo for SqliteStore {
         project: ProjectId,
         id: TodoId,
         body: &str,
+        author: Option<CommentAuthor>,
     ) -> Result<Option<(StoredTodo, u64)>, StoreError> {
         let conn = self.lock();
         let Some(mut stored) = read_one(&conn, project, id)? else {
@@ -234,6 +235,7 @@ impl TodoRepo for SqliteStore {
         stored.comments.push(Comment {
             id: comment,
             body: body.to_owned(),
+            author,
         });
         write_comments(&conn, project, id, &stored.comments)?;
         Ok(Some((stored, comment)))

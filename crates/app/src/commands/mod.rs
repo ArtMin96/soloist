@@ -11,10 +11,16 @@
 //! The durable-settings commands live in the [`settings`] submodule and are re-exported, so
 //! the whole command surface stays under one `commands::` namespace in the invoke handler.
 
+mod coordination;
+mod orchestration;
 mod project_settings;
 mod settings;
+mod timers;
+pub use coordination::*;
+pub use orchestration::*;
 pub use project_settings::*;
 pub use settings::*;
+pub use timers::*;
 
 use std::path::Path;
 use std::sync::Arc;

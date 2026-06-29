@@ -14,7 +14,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::Notify;
 
 use crate::agents::AgentActivity;
-use crate::coordination::{IdleMode, TimerRepo, Timers};
+use crate::coordination::{FireCond, IdleMode, StoredTimer, TimerRepo, TimerStatus, Timers};
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId, TimerId};
 use crate::ports::{CorePorts, PtySize, SpawnSpec};
@@ -143,6 +143,30 @@ async fn advance_until<F: Fn() -> bool>(clock: &MockClock, step: Duration, pred:
     panic!("condition not met within the budget");
 }
 
+/// Advances the clock and drains the event stream until one satisfying `pred` is seen, returning
+/// whether it arrived within the budget — for asserting a deadline-driven emission.
+async fn advance_until_event(
+    clock: &MockClock,
+    step: Duration,
+    rx: &mut broadcast::Receiver<DomainEvent>,
+    pred: impl Fn(&DomainEvent) -> bool,
+) -> bool {
+    for _ in 0..400 {
+        clock.advance(step);
+        settle().await;
+        loop {
+            match rx.try_recv() {
+                Ok(event) if pred(&event) => return true,
+                Ok(_) => continue,
+                Err(broadcast::error::TryRecvError::Empty) => break,
+                Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(broadcast::error::TryRecvError::Closed) => return false,
+            }
+        }
+    }
+    false
+}
+
 /// Yields until `pred` holds without advancing time, or fails after a bounded budget — for the
 /// event-driven (idle/removal) paths, where advancing the clock could trip an unrelated backstop.
 async fn settle_until<F: Fn() -> bool>(pred: F) {
@@ -177,13 +201,41 @@ async fn an_at_timer_fires_at_its_deadline_and_delivers_the_body_as_a_fresh_turn
     settle().await;
     assert!(h.armed(view.id), "the timer waits until its deadline");
 
-    // Past the deadline it fires: claimed from the store and delivered to the owner with a trailing
-    // carriage return, so the agent receives it as a submitted fresh turn.
+    // Past the deadline it fires: claimed from the store and delivered to the owner with the
+    // wake-reason header prepended and a trailing carriage return, so the agent receives it as a
+    // submitted fresh turn and can tell why it woke (the header format is tested separately via
+    // `wake_reason_header` — here we only assert the body text is present).
     advance_until(&h.clock, Duration::from_secs(10), || {
-        lock(&recorder).as_slice() == b"resume work\r"
+        String::from_utf8_lossy(&lock(&recorder)).contains("resume work")
     })
     .await;
     assert!(!h.exists(owner, view.id), "a fired timer is gone");
+}
+
+#[tokio::test]
+async fn firing_a_timer_emits_a_timer_fired_event() {
+    let h = harness(FakeSpawner::exits_on_kill());
+    let owner = h.running_process().await;
+    h.spawn_scheduler();
+    settle().await;
+    // Subscribe after setup, so the only events seen are the timer's.
+    let mut rx = h.bus.subscribe();
+
+    let view = h
+        .timers
+        .set(PROJECT, owner, "go".into(), Some(Duration::from_secs(5)))
+        .expect("set");
+
+    // Past the deadline the scheduler claims and fires the timer, announcing it on the bus so the
+    // wake-cycle UI can surface that the lead woke.
+    let fired = advance_until_event(&h.clock, Duration::from_secs(10), &mut rx, |event| {
+        matches!(event, DomainEvent::TimerFired { owner: o, id } if *o == owner && *id == view.id)
+    })
+    .await;
+    assert!(
+        fired,
+        "the scheduler emits TimerFired for the timer it fired"
+    );
 }
 
 #[tokio::test]
@@ -388,4 +440,55 @@ async fn closing_the_owner_drops_its_timers() {
     // The owner closes: the scheduler sees the removal and drops the timers it owned.
     h.bus.publish(DomainEvent::ProcessRemoved { id: owner });
     settle_until(|| !h.exists(owner, view.id)).await;
+}
+
+/// A minimal stored timer with the given fire condition, for the pure wake-reason header tests.
+fn stored_timer(id: u64, fire: FireCond) -> StoredTimer {
+    StoredTimer {
+        id: TimerId::from_raw(id),
+        project: PROJECT,
+        owner: ProcessId::from_raw(1),
+        body: "resume".into(),
+        fire,
+        deadline_unix_millis: 1_000,
+        status: TimerStatus::Armed,
+        remaining_on_pause_millis: None,
+    }
+}
+
+#[test]
+fn the_wake_reason_header_names_a_scheduled_delivery_for_an_at_timer() {
+    let timer = stored_timer(3, FireCond::At);
+    assert_eq!(
+        super::wake_reason_header(&timer, false),
+        "[Soloist timer #3] scheduled delivery"
+    );
+}
+
+#[test]
+fn the_wake_reason_header_distinguishes_all_idle_from_the_backstop() {
+    let watched = vec![ProcessId::from_raw(2), ProcessId::from_raw(3)];
+    let timer = stored_timer(4, FireCond::WhenIdleAll { watched });
+    assert_eq!(
+        super::wake_reason_header(&timer, false),
+        "[Soloist timer #4] all 2 watched agents are idle"
+    );
+    assert_eq!(
+        super::wake_reason_header(&timer, true),
+        "[Soloist timer #4] max-wait backstop elapsed (when-all-idle, 2 watched)"
+    );
+}
+
+#[test]
+fn the_wake_reason_header_distinguishes_any_idle_from_the_backstop() {
+    let watched = vec![ProcessId::from_raw(9)];
+    let timer = stored_timer(5, FireCond::WhenIdleAny { watched });
+    assert_eq!(
+        super::wake_reason_header(&timer, false),
+        "[Soloist timer #5] a watched agent is idle (any-idle condition met)"
+    );
+    assert_eq!(
+        super::wake_reason_header(&timer, true),
+        "[Soloist timer #5] max-wait backstop elapsed (when-any-idle, 1 watched)"
+    );
 }
