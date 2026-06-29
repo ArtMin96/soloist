@@ -25,8 +25,48 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
-- **Orchestrator track IN PROGRESS — orch-00 DONE, orch-01 DONE (code-complete & gate-green, 2026-06-28),
-  orch-02 next.** **orch-01 (agent lineage O3 + live orchestration tree UI O4) is code-complete & gate-green**
+- **Orchestrator track IN PROGRESS — orch-00 DONE, orch-01 DONE, orch-02 IN PROGRESS (backend slice landed
+  2026-06-29; UI slices next).** **orch-02 (scratchpad & to-do coordination panels) Slice 1 — the entire
+  coordination-backend (O12 + O14) — is code-complete & gate-green** on branch
+  `feat/orch-02-coordination-panels` (stacked on the orch-00/01 branch `feat/orch-00-read-model-and-events`
+  @ `0a2e61e`; owner merges, no self-merge). Three commits:
+  - **O12 todo comment authorship (`3050fb2`):** a new C6 `CommentAuthor` enum (`Process { id, label } |
+    External { label }`) + an `author: Option<CommentAuthor>` (`#[serde(default)]`) on `Comment`. The façade
+    stamps it from the caller's identity (`identity.origin(session)` → bound process id + its `ProcessView.label`,
+    or external label, or `None` for unbound) — **the caller never supplies it, so an author cannot be forged;
+    an unbound caller is unattributed.** The author rides the existing `TodoView.comments` into the
+    `orchestration_snapshot` (no read-model change). **No migration:** comments are a JSON blob column, and the
+    defaulted field reads old rows as `author: None`. Threaded through `TodoRepo::comment_create` (trait + Noop +
+    `FakeTodoRepo` + SQLite) + the `Todos` aggregate + the one TS `domain.ts` mirror (`CommentAuthor` + `Comment.author`).
+    Reverses the `plan/05 §12` "no author attribution" decision (already recorded as O12 in orch-00 Task 1). Tests:
+    bound process stamps its actor, unbound is unattributed, author survives the SQLite round-trip, legacy comment
+    reads back unattributed.
+  - **O14 `solo://` link helper + scope-guarded resolver (`b926e8c`):** a pure `core::coordination::link` module
+    (`Link`/`LinkTarget`/`LinkContent`/`LinkError` + `to_link`/`parse`/`is_link`; scheme + segments named once) for
+    `solo://proj/<project>/scratchpad|todo/<id>`, keyed by **durable ids** so a link survives rename/restart.
+    `Facade::resolve_link(session, link)` maps a parsed link to its content **enforcing effective project scope in
+    the core** — a foreign-scope link is `ForeignScopeLink` (refused, never resolved to another project's content),
+    a malformed link `MalformedLink`, an unknown id `UnknownScratchpad`/`UnknownTodo`. Resolves a scratchpad by id
+    via the existing list+read (no repo-trait change). Tests: round-trip, 9 malformed cases, in-scope resolve
+    (scratchpad + todo), foreign-scope refused, unknown reported.
+  - **O14 IPC + MCP wiring (`4fced91`):** `IpcRequest::ResolveLink` + `IpcResponse::Link(LinkContent)` →
+    `Facade::resolve_link`; the two new errors are caller-fixable (`is_request_error` → MCP tool errors). The
+    `scratchpad_read` and `todo_get` MCP tools now accept a `solo://` link as well as a bare name/id (a shared
+    `read_solo_link` helper; `todo_get` gains a `TodoRef` id-or-link arg) — so a human copies a link and hands it
+    to a bound agent, which reads the target in-scope. Tests: scratchpad_read resolves a link, todo_get resolves a
+    link, todo_get still reads a bare id.
+  - **Gate (evidence, 2026-06-29):** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier,
+    dep-direction OK; file-size advisory only — `domain.ts` 546, `coordination/todo.rs` 540, both pre-existing
+    smells nudged a little by the O12 types). Rust per-crate green: core **+** new author/link tests, store 78,
+    ipc 14, mcp 63, app 32. The **only** `just test` red is the pre-existing sandbox `crates/sys` shellenv
+    capture timeout (`Capture("timed out")`, untouched by orch-02, green in CI).
+  - **Remaining orch-02 (next):** Slice 2 — thin **project-scoped** Tauri commands for the panels (mirroring
+    `orchestration_snapshot(project)`'s trusted local-read pattern: take `ProjectId`, route to the aggregates; the
+    board is **display-only for locks** — never steals one) + `api.ts`/`domain.ts`; Slice 3 — **scratchpad panel
+    (O5)** via `/impeccable` (structured editor, revision-conflict UX, live-refresh on `ScratchpadChanged`); Slice 4
+    — **to-do board (O6)** via `/impeccable` (blocker gate + lock owner + comments-with-author + the O14 "Copy link"
+    affordance) + the user-only Playwright/WebdriverIO e2e walk that flips O5/O6 → `Verified`.
+- **(prior) orch-01 (agent lineage O3 + live orchestration tree UI O4) is code-complete & gate-green**
   on branch `feat/orch-01-agent-lineage-and-tree-ui` (**stacked on `feat/orch-00-read-model-and-events`** per the
   owner — branched off the open PR #40, not yet merged; owner merges, no self-merge). What landed:
   - **O3 lineage (core C4):** a new single-purpose `core::agents::AgentLineage` tracker (child→parent map,
