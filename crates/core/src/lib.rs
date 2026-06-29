@@ -58,13 +58,13 @@ pub use config::{
     SyncError, TrustReviewCommand,
 };
 pub use coordination::{
-    AcquireOutcome, Comment, CommentEdit, CommentOutcome, FireCond, IdleMode, Kv, KvEntry, KvRepo,
-    LeaseReleaser, LeaseView, Leases, LockRepo, NewTimer, NoopKvRepo, NoopLockRepo,
-    NoopScratchpadRepo, NoopTimerRepo, NoopTodoRepo, RenameError, RenameResult, ScratchpadDoc,
-    ScratchpadRepo, ScratchpadSummary, ScratchpadView, Scratchpads, SetWhenIdleOutcome,
-    StoredLease, StoredScratchpad, StoredTimer, StoredTodo, TimerRepo, TimerScheduler, TimerStatus,
-    TimerView, Timers, TodoDoc, TodoError, TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary,
-    TodoView, TodoWriteResult, Todos, WriteError, WriteResult,
+    AcquireOutcome, Comment, CommentAuthor, CommentEdit, CommentOutcome, FireCond, IdleMode, Kv,
+    KvEntry, KvRepo, LeaseReleaser, LeaseView, Leases, LockRepo, NewTimer, NoopKvRepo,
+    NoopLockRepo, NoopScratchpadRepo, NoopTimerRepo, NoopTodoRepo, RenameError, RenameResult,
+    ScratchpadDoc, ScratchpadRepo, ScratchpadSummary, ScratchpadView, Scratchpads,
+    SetWhenIdleOutcome, StoredLease, StoredScratchpad, StoredTimer, StoredTodo, TimerRepo,
+    TimerScheduler, TimerStatus, TimerView, Timers, TodoDoc, TodoError, TodoLockReleaser, TodoRepo,
+    TodoStatus, TodoSummary, TodoView, TodoWriteResult, Todos, WriteError, WriteResult,
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};

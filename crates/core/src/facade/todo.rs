@@ -11,9 +11,12 @@
 //! typed outcomes to the shared [`CoordinationError`].
 
 use super::Facade;
-use crate::coordination::{Comment, CommentOutcome, TodoDoc, TodoError, TodoSummary, TodoView};
+use crate::coordination::{
+    Comment, CommentAuthor, CommentOutcome, TodoDoc, TodoError, TodoSummary, TodoView,
+};
 use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
+use crate::identity::Origin;
 use crate::ids::{ProjectId, SessionId, TodoId};
 use crate::ports::StoreError;
 
@@ -219,12 +222,31 @@ impl Facade {
         body: &str,
     ) -> Result<(TodoView, u64), CoordinationError> {
         let project = self.coordination_scope(session)?;
+        let author = self.comment_author(session);
         let created = self
             .todos
-            .comment_create(project, id, body)?
+            .comment_create(project, id, body, author)?
             .ok_or(CoordinationError::UnknownTodo)?;
         self.bus.publish(DomainEvent::TodoChanged { project, id });
         Ok(created)
+    }
+
+    /// The author to stamp on a new comment, resolved in the core from the caller's identity: a
+    /// bound process (its id plus the label resolved now and kept durably), an external caller (its
+    /// label), or `None` for an unbound caller. The caller never supplies this, so the author of a
+    /// comment cannot be forged.
+    fn comment_author(&self, session: SessionId) -> Option<CommentAuthor> {
+        match self.identity.origin(session) {
+            Origin::Process(id) => Some(CommentAuthor::Process {
+                id,
+                label: self
+                    .process_view(id)
+                    .map(|view| view.label)
+                    .unwrap_or_else(|| format!("process {}", id.get())),
+            }),
+            Origin::External(label) => Some(CommentAuthor::External { label }),
+            Origin::Unbound => None,
+        }
     }
 
     /// Updates comment `comment` of todo `id` in the session's effective project.

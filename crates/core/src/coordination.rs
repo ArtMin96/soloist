@@ -46,7 +46,8 @@ pub(crate) use timer::watched_is_idle;
 pub use timer::{FireCond, IdleMode, SetWhenIdleOutcome, TimerStatus, TimerView, Timers};
 pub use timer_repo::{NewTimer, NoopTimerRepo, StoredTimer, TimerRepo};
 pub use todo::{
-    Comment, CommentOutcome, TodoDoc, TodoError, TodoStatus, TodoSummary, TodoView, Todos,
+    Comment, CommentAuthor, CommentOutcome, TodoDoc, TodoError, TodoStatus, TodoSummary, TodoView,
+    Todos,
 };
 pub use todo_releaser::TodoLockReleaser;
 pub use todo_repo::{CommentEdit, NoopTodoRepo, StoredTodo, TodoRepo, TodoWriteResult};

@@ -3,7 +3,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 
 use soloist_core::{
-    ProcessId, ProjectId, ProjectRepo, StoredTodo, TodoDoc, TodoRepo, TodoStatus, TodoWriteResult,
+    CommentAuthor, ProcessId, ProjectId, ProjectRepo, StoredTodo, TodoDoc, TodoRepo, TodoStatus,
+    TodoWriteResult,
 };
 use tempfile::tempdir;
 
@@ -52,8 +53,12 @@ fn create_then_read_round_trips_every_column_through_json() {
     store
         .set_blockers(project, created.id, &[blocker.id])
         .expect("blockers");
+    let author = CommentAuthor::Process {
+        id: ProcessId::from_raw(3),
+        label: "Web".into(),
+    };
     store
-        .comment_create(project, created.id, "looks good")
+        .comment_create(project, created.id, "looks good", Some(author.clone()))
         .expect("comment");
     TodoRepo::lock(&store, project, created.id, ProcessId::from_raw(7)).expect("lock");
 
@@ -66,6 +71,11 @@ fn create_then_read_round_trips_every_column_through_json() {
     assert_eq!(read.blockers, vec![blocker.id]);
     assert_eq!(read.comments.len(), 1);
     assert_eq!(read.comments[0].body, "looks good");
+    assert_eq!(
+        read.comments[0].author,
+        Some(author),
+        "the comment author survives the JSON round-trip"
+    );
     assert_eq!(read.locked_by, Some(ProcessId::from_raw(7)));
 }
 

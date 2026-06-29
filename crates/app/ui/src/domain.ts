@@ -226,10 +226,18 @@ export interface TodoDoc {
   status: TodoStatus;
 }
 
-// A comment on a todo (its per-todo sequential id and body).
+// Who wrote a comment, stamped by the core from the caller's identity (serde tag = "kind"). A bound
+// process carries its live id plus the durable label the board shows; an external caller carries its
+// label. `null` author (below) means the caller was unbound.
+export type CommentAuthor =
+  | { kind: "process"; id: number; label: string }
+  | { kind: "external"; label: string };
+
+// A comment on a todo (its per-todo sequential id, body, and author when attributable).
 export interface Comment {
   id: number;
   body: string;
+  author: CommentAuthor | null;
 }
 
 // A todo as the board reads it: the document plus its live columns (tags, blockers, the unmet

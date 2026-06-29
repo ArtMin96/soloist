@@ -12,7 +12,7 @@
 //! and per-run, so [`clear_locks`](TodoRepo::clear_locks) drops every lock on launch while keeping the
 //! todos.
 
-use super::todo::{Comment, TodoDoc};
+use super::todo::{Comment, CommentAuthor, TodoDoc};
 use crate::ids::{ProcessId, ProjectId, TodoId};
 use crate::ports::StoreError;
 
@@ -157,13 +157,15 @@ pub trait TodoRepo: Send + Sync {
         owner: ProcessId,
     ) -> Result<Option<StoredTodo>, StoreError>;
 
-    /// Appends a comment with `body` to `(project, id)`, assigning the next per-todo comment id —
-    /// atomic. Returns the updated row and the new comment id, or `None` if the todo is absent.
+    /// Appends a comment with `body` (attributed to `author`) to `(project, id)`, assigning the next
+    /// per-todo comment id — atomic. Returns the updated row and the new comment id, or `None` if the
+    /// todo is absent.
     fn comment_create(
         &self,
         project: ProjectId,
         id: TodoId,
         body: &str,
+        author: Option<CommentAuthor>,
     ) -> Result<Option<(StoredTodo, u64)>, StoreError>;
 
     /// Updates comment `comment` of `(project, id)` to `body` — atomic read-modify-write.
@@ -301,6 +303,7 @@ impl TodoRepo for NoopTodoRepo {
         _project: ProjectId,
         _id: TodoId,
         _body: &str,
+        _author: Option<CommentAuthor>,
     ) -> Result<Option<(StoredTodo, u64)>, StoreError> {
         Ok(None)
     }
