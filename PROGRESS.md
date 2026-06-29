@@ -29,7 +29,7 @@
   (2026-06-29); orch-03 CODE-COMPLETE & gate-green (2026-06-29). User-only real-window e2e walks
   remain for orch-02 (O5/O6) and orch-03 (O7/O8).**
 - **orch-03 (timers & wake-cycle UI, O7/O8) CODE-COMPLETE & gate-green (2026-06-29).** Branch
-  `feat/orch-03-timers-and-wake-cycle` stacked on `feat/orch-02-panels-ui` (PRs #42/#43 OPEN).
+  `feat/orch-03-timers-and-wake-cycle` stacked on `feat/orch-02-panels-ui` (PRs #42/#43 OPEN); **PR #44** opened.
   One commit `3812a0f` covers everything (backend + UI slices landed together — skills-lock delta
   dominated the diffstat):
   - **Backend (O7/O8):** `TimerView` gains `owner: ProcessId`, `waiting_on: Vec<ProcessId>`, `already_idle: bool` (the first is stored; the last two are derived at read time by `orchestration_snapshot` from `self.idle.activity(p)` and `self.supervisor.view(p)` — dynamic, not persisted). `DomainEvent` adds `TimerPaused`/`TimerResumed {owner, id}` (deferred from orch-00 O2); `timer_pause`/`timer_resume` now emit them. Three `*_for` local-trusted Facade methods (`timer_{cancel,pause,resume}_for(owner, timer)`) serve the Tauri UI without session scope. The `TimerScheduler::deliver()` prepends a compact clean-room wake-reason header: `[Soloist timer #<id>] <reason>` (all-idle, any-idle, backstop, or scheduled) + newline before the body so the woken agent knows why it woke (O8 requirement; recorded in `plan/05 §12`). All 450 core tests + ipc/mcp/store/pty/app suites green (448 Rust tests; scheduler test updated to `contains("resume work")` to accept the prefix).
