@@ -302,6 +302,7 @@ pub fn run() {
             commands::project_settings_page,
             commands::project_settings,
             commands::set_project_auto_start_gate,
+            commands::set_project_auto_trust_command_changes,
             commands::set_project_editor_override,
             commands::set_project_crash_exit_alerts,
             commands::set_project_terminal_alerts,

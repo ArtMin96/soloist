@@ -15,10 +15,10 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | A2 | Per-process fields: `command`,`working_dir`,`auto_start`,`auto_restart`,`restart_when_changed`,`env` | ✅ | 2 | v1 | Each field honored at runtime |
 | A3 | 1 MB file limit; empty/comment-only = empty config | ✅ | 2 | v1 | Oversize rejected; empty file valid |
 | A4 | Validation with precise errors (no panic) | ❓ | 2 | v1 | Bad field → named error |
-| A5 | JSON Schema for editor autocomplete | ❓ | 2 | later | `solo.schema.json` validates fixtures |
+| A5 | JSON Schema for editor autocomplete | ❓ | 2 | later | `solo.schema.json` validates fixtures. **Delivered ahead of schedule (user request 2026-06-29):** `solo.schema.json` is generated from the `SoloYml` model (`schemars`, off-by-default `schema` feature) and committed at the repo root; a drift-guard + structural test (`config::schema`) runs in CI and `just lint`; generated `solo.yml` files carry a `# yaml-language-server: $schema=…` modeline (`plan/05 §12`). |
 | A6 | Trust gate (untrusted blocks start/auto/restart/watch) | ✅ | 2 | v1 | Untrusted command cannot run by any path |
 | A7 | Trust scoped to (project, command-variant hash); rename preserves | ✅ | 2 | v1 | Edit command → re-trust required; rename keeps trust |
-| A8 | "Automatically trust command changes" setting | ✅ | 2 | later | User-saved change auto-trusts; external change does not |
+| A8 | "Automatically trust command changes" setting | ✅ | 2 | later | User-saved change auto-trusts; external change does not. **Delivered ahead of schedule (user request 2026-06-29):** a **per-project**, default-**off** setting (`ProjectSettings.auto_trust_command_changes`); a user save auto-trusts via `Facade::write_shared_command`, while `ConfigEngine::sync` never trusts — proven headless (`facade::commands` tests incl. `an_external_solo_yml_edit_never_auto_trusts_even_with_the_setting_on`). Tauri command + Trust-section toggle wired; default/scope gap recorded in `plan/05 §12`. |
 | A9 | Sync on change: debounce + hash-diff; add/update/remove; preserve renames | ✅ | 2 | v1 | Edit file → sync prompt with correct diff; no auto-start |
 | A10 | Command auto-detection on first add | ✅ | 2 | **v1** | Open a folder with no `solo.yml` → one is auto-created from detected commands (npm/Cargo/Go/Procfile/Make/Just/Compose), trust-gated; nothing detected → a clean starter file. Delivered in the Phase-5 follow-up (user decision 2026-06-19). |
 | A11 | Multiple projects + registry | ✅ | 2 | v1 | Two projects switchable |

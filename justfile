@@ -40,6 +40,11 @@ test:
     cargo test --workspace
     pnpm -C {{ui}} test
 
+# Regenerate solo.schema.json (the editor JSON Schema for solo.yml) from the SoloYml model.
+# Run after changing the config model; the drift guard in `just lint` fails if it is stale.
+schema:
+    cargo run -q -p soloist-core --features schema --example gen_solo_schema > solo.schema.json
+
 # Run the longevity soak — the leak gate. These tests are #[ignore]d (the regular `test`
 # recipe and per-change CI skip them) and run nightly in CI. Serialized because each test
 # measures the whole process's file-descriptor, thread, and task counts.
@@ -55,6 +60,7 @@ lint:
     pnpm -C {{ui}} run format:check
     ./scripts/check-core-deps.sh
     ./scripts/check-file-size.sh
+    cargo test -q -p soloist-core --features schema config::schema
 
 # Audit the Rust dependency tree against RustSec advisories, the license allow-list, and
 # source provenance (policy in deny.toml). Needs `cargo install --locked cargo-deny`.

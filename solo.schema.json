@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SoloYml",
+  "description": "A parsed `solo.yml`. Top-level keys mirror Solo's schema (`name`, `icon`,\n`processes`); `processes` preserves the file's order via [`IndexMap`] so the\nsidebar lists commands as written.\n\n[`Serialize`] is the single source for writing a `solo.yml` (auto-detection,\n[`super::write`]): `skip_serializing_if` omits fields left at their defaults so the\ngenerated file stays minimal, and a round-trip through [`super::load::parse`] is the\nidentity.",
+  "type": "object",
+  "properties": {
+    "icon": {
+      "description": "Optional icon path, relative to the project root.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Optional display name shown on first load.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "processes": {
+      "description": "The managed commands, keyed by display name. Empty when the `processes` key\nis absent — an empty or comment-only file is a valid, empty config. Always\nwritten (even when empty) so a generated file shows the `processes:` key.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ProcessSpec"
+      },
+      "default": {}
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "ProcessSpec": {
+      "description": "One command definition from `solo.yml`. Field defaults encode our documented\ndecisions: `auto_start` defaults **true** (the `auto_start` schema gap — we\nauto-start a project's stack); everything else defaults to off/empty.",
+      "type": "object",
+      "properties": {
+        "auto_restart": {
+          "description": "Whether to relaunch after an unexpected exit. Defaults to `false`.",
+          "type": "boolean"
+        },
+        "auto_start": {
+          "description": "Whether to start this command when the project opens. Defaults to `true`, so it\nis written only when `false`.",
+          "type": "boolean"
+        },
+        "command": {
+          "description": "The shell command to run. Required.",
+          "type": "string"
+        },
+        "env": {
+          "description": "Per-process environment overrides. A sorted map so the variant hash does not\ndepend on declaration order.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "restart_when_changed": {
+          "description": "Globs (relative to the project root) whose changes trigger a restart.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "working_dir": {
+          "description": "Working directory, relative to the project root. `None` means the root.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ]
+    }
+  }
+}

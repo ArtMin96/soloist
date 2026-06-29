@@ -13,6 +13,7 @@ import {
   saveCommandToYaml,
   setCommandTerminalAlerts,
   setProjectAutoStartGate,
+  setProjectAutoTrustCommandChanges,
   setProjectCrashExitAlerts,
   setProjectEditorOverride,
   setProjectIcon,
@@ -143,6 +144,9 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
                   settings={page.settings}
                   resolvedEditor={page.resolved_editor}
                   onAutoStartGate={(v) => mutate(() => setProjectAutoStartGate(id, v))}
+                  onAutoTrustCommandChanges={(v) =>
+                    mutate(() => setProjectAutoTrustCommandChanges(id, v))
+                  }
                   onEditorOverride={(v) => mutate(() => setProjectEditorOverride(id, v))}
                   onSetIcon={setIcon}
                 />
