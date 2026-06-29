@@ -8,8 +8,9 @@ core, and a React/TypeScript UI.
 ### System libraries
 
 Tauri v2 requires **WebKitGTK 4.1**, which ships on Ubuntu 22.04 and newer. Build on
-22.04+; Ubuntu 20.04 is supported only as a *runtime* target via the AppImage, which
-bundles its own WebKit.
+22.04+. The supported floor for the shipped artifacts is **Ubuntu 22.04+** — Ubuntu 20.04
+is **not** supported (its glibc 2.31 is too old for a 22.04 build; see
+[`KNOWN-DIVERGENCES.md`](KNOWN-DIVERGENCES.md) D-11).
 
 **Ubuntu 22.04+ (build host):**
 
@@ -19,8 +20,8 @@ sudo apt update && sudo apt install -y \
   libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev
 ```
 
-Ubuntu 20.04 ships only `libwebkit2gtk-4.0-dev`, which Tauri v2 does not support; build
-the AppImage on 22.04 and run it on 20.04+.
+Ubuntu 20.04 ships only `libwebkit2gtk-4.0-dev`, which Tauri v2 does not support; build on
+22.04+ and ship to 22.04+ (the `.AppImage` bundles WebKit but its glibc floor is still 22.04).
 
 > **Build distributable artifacts on Ubuntu 22.04 — not on a newer host.** A Rust binary
 > links against its build host's glibc, so a `.deb` built on, say, 24.04 (glibc 2.39+)
@@ -57,8 +58,25 @@ just dev      # run the desktop app with hot reload
 just test     # Rust workspace tests + UI unit tests (vitest)
 just lint     # rustfmt, clippy, eslint, prettier, tsc, and the dependency-direction guard
 just fmt      # auto-format Rust and UI sources
-just bundle   # build the .deb (and .AppImage) bundles
+just deb      # build only the .deb bundle (fastest; mirrors the per-PR CI gate)
+just bundle   # build the .deb + .AppImage bundles
 ```
+
+## Packaging & releases
+
+Soloist ships a `.deb` (Ubuntu 22.04+) and a portable `.AppImage`, both x86_64.
+
+- **[`docs/packaging.md`](docs/packaging.md)** — what the bundles contain: the desktop
+  entry, icons, the `solo.yml` MIME association, the system tray, opt-in launch-on-login,
+  and the opt-in in-app updater.
+- **[`docs/releasing.md`](docs/releasing.md)** — the step-by-step runbook for cutting a
+  versioned GitHub release (the tag-driven `release.yml` pipeline signs the artifacts,
+  publishes a draft release with `SHA256SUMS`, and smoke-tests the AppImage on a clean
+  Ubuntu 22.04 with no WebKit installed).
+
+Per-PR CI (`.github/workflows/ci.yml`) builds **both** bundles on `ubuntu-22.04` and
+installs the `.deb` in a clean 22.04 container to catch ABI drift; the distributable,
+signed artifacts come from the release pipeline.
 
 ## Layout
 

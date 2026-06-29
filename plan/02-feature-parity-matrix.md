@@ -211,7 +211,7 @@ charter, dependencies, and per-phase definition of done: [`orchestrator/README.m
 | ID | Feature | Src | Phase | Target | Verify |
 |----|---------|-----|------:|--------|--------|
 | J1 | `.deb` install on Ubuntu 22.04 (x86_64) | ✅ | 12 | v1 | apt install → launches |
-| J2 | `.AppImage` runs on clean Ubuntu 20.04 (bundled webkit) | ✅ | 12 | v1 | Runs without manual deps |
+| J2 | `.AppImage` runs on clean Ubuntu 22.04+ (bundled webkit; 20.04 infeasible — `KNOWN-DIVERGENCES` D-11) | ✅ | 12 | v1 | Runs without a manual webkit install |
 | J3 | Desktop entry + icon (our own art) + MIME for `solo.yml` | ❓ | 12 | v1 | Menu entry + icon present |
 | J4 | In-app update check / release feed | 🟡 | 12 | later | Checks feed; manual update |
 | J5 | Checksums / provenance | ❓ | 12 | later | SHA-256 published |

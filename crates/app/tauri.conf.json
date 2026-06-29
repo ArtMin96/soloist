@@ -49,13 +49,32 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "category": "Utility",
+    "category": "DeveloperTool",
+    "copyright": "Soloist contributors",
     "shortDescription": "Process supervisor and AI-agent coordination workspace.",
     "longDescription": "Soloist runs your dev stack and CLI coding agents from one dashboard, keeps them alive, and gives them a shared, project-scoped workspace over MCP.",
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+        "section": "devel",
+        "recommends": ["shared-mime-info", "desktop-file-utils"],
+        "desktopTemplate": "bundle/soloist.desktop",
+        "files": {
+          "/usr/share/mime/packages/soloist.xml": "bundle/soloist-mimetype.xml"
+        },
+        "postInstallScript": "bundle/deb-postinst.sh",
+        "postRemoveScript": "bundle/deb-postrm.sh"
+      },
+      "appimage": {
+        "bundleMediaFramework": false
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZDQjU2OTMzREY5MTEzRjEKUldUeEU1SGZNMm0xL0JxNnZ5WlY4TlMrcDNoSTcxbUpwVzdCd1hTU3l5cnBjQmc5OXo2STZjeFoK",
+      "endpoints": [
+        "https://github.com/ArtMin96/soloist/releases/latest/download/latest.json"
+      ]
     }
   }
 }

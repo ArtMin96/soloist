@@ -342,3 +342,30 @@ visually identical. A canvas tier cannot be offered without downgrading xterm to
 (WebGL) renderer with an automatic non-GPU fallback — with the fallback tier being DOM rather than the
 since-removed canvas. The runtime visual/FPS check is a user-only step (no display in CI). The
 undocumented renderer-selection **mechanism** is recorded in `plan/05` §12.
+
+## D-11 — The distributable floor is Ubuntu 22.04, not 20.04 (J1/J2) 🟡
+
+**Introduced:** Phase 12 (packaging). **Decision (D2):** *"Ubuntu 20.04+, x86_64; `.deb` targets 22.04;
+`.AppImage` (self-contained webkit) covers 20.04."*
+
+**The plan's assumption:** the `.deb` links the system WebKitGTK 4.1 (so it targets 22.04+), and a
+self-contained `.AppImage` would bundle its own WebKit and therefore run on a clean **20.04**.
+
+**What Phase-12 testing proved (containerized smokes, glibc 2.31 image):** the `.AppImage` does **not**
+run on Ubuntu 20.04. The chain is unavoidable: Tauri v2 requires **WebKitGTK 4.1**, which 20.04 does not
+ship and cannot be built against there, so the bundle must be built on **22.04** (glibc 2.35). The
+AppImage correctly bundles WebKit, but the libraries `linuxdeploy` pulls from the 22.04 host
+(`libudev`, `libbsd`, `libelf`, `libmd`, …) reference **GLIBC_2.33/2.34**, which 20.04's **glibc 2.31**
+lacks → `version 'GLIBC_2.34' not found`. Force-bundling more would not help: the GPU/display libraries
+(`libGL`/`libEGL`/`libgbm`/`libdrm`/`libX11`) are deliberately left to the host so they match its
+driver, and they too would drag newer glibc. There is no 20.04-compatible build path for a Tauri-v2 app
+short of backporting WebKitGTK 4.1 onto a 20.04 build host (out of scope, fragile).
+
+**Soloist (clean-room decision):** the supported floor for **both** the `.deb` and the `.AppImage` is
+**Ubuntu 22.04+, x86_64**. The `.AppImage`'s value stands — it is portable and carries its own WebKit, so
+it needs no `apt` install of WebKit on 22.04+ desktops (the J2 promise, scoped to 22.04+).
+
+**Effect on parity:** **J1** (`.deb` on 22.04) and **J3** (desktop entry + icon + `solo.yml` MIME) pass
+on a clean 22.04 container. **J2** passes as *"the `.AppImage` runs on a clean 22.04+ desktop without a
+manual WebKit install"* — its literal *"20.04"* wording is not achievable and is revised to 22.04+ here.
+Recorded in `README.md` (Platform support), `plan/02` J2, `plan/03` D2, and `plan/05` §12.
