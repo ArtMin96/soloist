@@ -94,18 +94,19 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
         setForm(docToForm(view.doc));
         setBaseRevision(view.revision);
       })
-      .catch(() => {
+      .catch((reason) => {
         // The write was refused. Re-read to tell a stale revision (a concurrent edit landed — surface
-        // a conflict and leave the user's edits intact) from a genuine rejection (an invalid document).
+        // a conflict and leave the user's edits intact) from any other rejection (e.g. an invalid
+        // document), which we surface verbatim from the core rather than guessing a reason.
         scratchpadRead(project, name)
           .then((fresh) => {
             if (baseRevision != null && fresh.revision !== baseRevision) {
               setConflict({ actual: fresh.revision });
             } else {
-              setError("This scratchpad could not be saved — check every field is filled.");
+              setError(String(reason));
             }
           })
-          .catch((reason) => setError(String(reason)));
+          .catch((readReason) => setError(String(readReason)));
       })
       .finally(() => setSaving(false));
   }, [project, name, form, baseRevision]);

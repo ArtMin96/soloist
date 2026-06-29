@@ -11,7 +11,7 @@ export const TODO_STATUS: Record<TodoStatus, string> = {
   done: "Done",
 };
 
-// The display name for a comment's author (O12), resolved once so every surface names it the same.
+// The display name for a comment's author, resolved once so every surface names it the same.
 // A bound process shows its durable label; an external caller its label; an unbound caller's comment
 // is "unattributed" — the core never forges one, so the UI never invents one either.
 export function commentAuthorLabel(author: CommentAuthor | null): string {

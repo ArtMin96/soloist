@@ -21,7 +21,7 @@ interface TodoItemProps {
 
 // One todo on the board: a row with its declared status, the derived blocked gate, and its lock
 // owner, expanding to the disciplined document, its blockers (the unmet ones stand out — the gate),
-// its comments with their authors (O12), and the actions. Presentational: completing routes to the
+// its comments with their authors, and the actions. Presentational: completing routes to the
 // core, which refuses a blocked todo with a message surfaced below — the UI never pre-empts the gate.
 export function TodoItem({
   todo,

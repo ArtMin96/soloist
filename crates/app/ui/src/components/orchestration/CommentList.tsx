@@ -1,7 +1,7 @@
 import { commentAuthorLabel } from "@/lib/todo";
 import type { Comment } from "@/domain";
 
-// A todo's comments, each named by its author (O12). The author is whatever the core stamped — a
+// A todo's comments, each named by its author. The author is whatever the core stamped — a
 // bound process's label, an external caller's label, or "unattributed" — never invented here.
 export function CommentList({ comments }: { comments: Comment[] }) {
   if (comments.length === 0) return null;
