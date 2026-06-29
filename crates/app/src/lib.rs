@@ -9,9 +9,11 @@ mod commands;
 #[cfg(feature = "mcp")]
 mod ipc_server;
 mod notifier;
+mod open_project;
 #[cfg(feature = "mcp")]
 mod peer_cred;
 mod pty_bridge;
+mod tray;
 
 // The two dev diagnostics each install a global tracing subscriber; enabling both would make
 // the second registration fail at runtime. Force the choice at compile time instead.
@@ -154,7 +156,17 @@ pub fn run() {
         not(any(feature = "devtools", feature = "agent-bridge")),
         allow(unused_mut)
     )]
-    let mut builder = tauri::Builder::default();
+    // The single-instance plugin must be registered first: a second `soloist` launch (for
+    // example double-clicking a solo.yml) forwards its arguments to the running app, which
+    // opens that project and focuses its window instead of starting a rival process that
+    // would fight over the same data dir, IPC socket, and loopback port.
+    let mut builder =
+        tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // A second launch focuses the running window and, if it carried a path (the
+            // solo.yml association or a folder argument), opens that project there.
+            open_project::open_from_args(app, argv);
+            open_project::reveal(app);
+        }));
     #[cfg(feature = "devtools")]
     {
         builder = builder.plugin(devtools);
@@ -170,6 +182,16 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // The auto-updater, disabled by default: it never checks on its own. The tray's
+        // "Check for Updates…" item is the only trigger, and each update is verified against
+        // the bundled public key before it installs.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // Launch-on-login, opt-in: the tray's "Start on login" checkbox is the only toggle,
+        // off until the user enables it.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         // Disk-backed key-value store for the webview's persisted read-model cache: the UI
         // paints projects/app-info/agents from the last-known snapshot on launch, then
         // reconciles to the live core. Display-only — the core stays authoritative.
@@ -260,6 +282,14 @@ pub fn run() {
                 });
                 tauri::async_runtime::spawn(soloist_httpapi::serve(http_facade, focus));
             }
+            // Install the system tray (status icon + show, launch-on-login, update check,
+            // quit). A failure here is non-fatal — the app runs without a tray.
+            if let Err(err) = tray::install(app.handle()) {
+                eprintln!("soloist: could not install the system tray ({err})");
+            }
+            // If Soloist was launched with a path (the solo.yml file association, or a
+            // folder argument), open that project now that the core is ready.
+            open_project::open_from_args(app.handle(), std::env::args());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

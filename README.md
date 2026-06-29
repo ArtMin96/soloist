@@ -21,6 +21,17 @@ with source URLs.
 | D5 | `solo.yml` | **Byte-compatible** with Solo's documented schema | Real schema now known (ref §3) |
 | D6 | Storage | **SQLite** for durable state; in-memory for runtime | See architecture §7 |
 
+## Platform support
+
+| | |
+|---|---|
+| ✅ **Supported** | **Ubuntu 22.04+, x86_64** — install the `.deb` (apt) or run the portable `.AppImage`. |
+| ❌ **Not supported** | **Ubuntu 20.04** — Tauri v2 needs WebKitGTK 4.1 (absent on 20.04), so the bundle is built on 22.04 and its glibc 2.33+ artifacts will not run on 20.04's glibc 2.31. **arm64, macOS, Windows** — out of scope (D2). |
+
+> D2 set a 20.04 floor expecting the self-contained `.AppImage` to cover it; Phase-12 testing
+> proved that infeasible (see [`KNOWN-DIVERGENCES.md`](KNOWN-DIVERGENCES.md) D-11). The effective
+> floor for both artifacts is **Ubuntu 22.04+**.
+
 ## The `solo.yml` project file
 
 `solo.yml` lives at a project's root and declares the commands Soloist supervises. It is

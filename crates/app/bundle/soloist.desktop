@@ -1,0 +1,10 @@
+[Desktop Entry]
+Categories=Development;Utility;
+Comment={{comment}}
+Exec={{exec}} %F
+Icon={{icon}}
+Name={{name}}
+Terminal=false
+Type=Application
+MimeType=application/vnd.soloist.project+yaml;
+StartupWMClass={{exec}}

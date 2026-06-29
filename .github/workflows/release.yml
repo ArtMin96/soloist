@@ -1,0 +1,126 @@
+name: Release
+
+# Tag a commit `vX.Y.Z` (matching the version in crates/app/tauri.conf.json) to build the
+# signed .deb + .AppImage on x86_64, publish them to a draft GitHub Release with SHA-256
+# checksums, and verify the AppImage runs on a clean Ubuntu 22.04 (bundled webkit, no
+# manual install). The updater artifacts are signed here with TAURI_SIGNING_PRIVATE_KEY;
+# the base build (CI, local) stays keyless because createUpdaterArtifacts lives only in
+# the release overlay applied below.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    outputs:
+      appVersion: ${{ steps.tauri.outputs.appVersion }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: crates/app/ui/pnpm-lock.yaml
+
+      - name: Install UI dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: crates/app/ui
+
+      - name: Build, sign, and publish the release
+        id: tauri
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: crates/app
+          tagName: v__VERSION__
+          releaseName: 'Soloist v__VERSION__'
+          releaseBody: 'Download the .deb (Ubuntu 22.04+) or the portable .AppImage. Verify your download against SHA256SUMS.'
+          releaseDraft: true
+          prerelease: false
+          args: --config bundle/release.conf.json
+
+      - name: Compute SHA-256 checksums
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/SHA256SUMS"
+          : > "$out"
+          find target/release/bundle -type f \( -name '*.deb' -o -name '*.AppImage' \) -print0 \
+            | sort -z \
+            | while IFS= read -r -d '' artifact; do
+                ( cd "$(dirname "$artifact")" && sha256sum "$(basename "$artifact")" ) >> "$out"
+              done
+          cat "$out"
+          cp "$out" SHA256SUMS
+
+      - name: Attach checksums to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "v${{ steps.tauri.outputs.appVersion }}" SHA256SUMS --clobber
+
+      - name: Upload the AppImage for the clean-22.04 smoke
+        uses: actions/upload-artifact@v4
+        with:
+          name: soloist-appimage
+          path: target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+  smoke-appimage:
+    needs: release
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download the AppImage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: soloist-appimage
+          path: appimage
+
+      - name: Run the AppImage on a clean Ubuntu 22.04 (desktop base, NO webkit installed)
+        run: |
+          cp appimage/*.AppImage app.AppImage && chmod +x app.AppImage
+          docker run --rm -v "$PWD/app.AppImage:/app.AppImage:ro" ubuntu:22.04 bash -c '
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            cp /app.AppImage /tmp/app.AppImage && chmod +x /tmp/app.AppImage
+            apt-get update -qq
+            # The desktop runtime base any 22.04 desktop has (GTK + GL/DRM + X11 + fonts) +
+            # Xvfb. Deliberately NO libwebkit2gtk: the AppImage must carry its own WebKit.
+            apt-get install -y -qq libgtk-3-0 libgl1-mesa-dri libgl1 libglx-mesa0 \
+              libgles2 libegl1 libegl-mesa0 libopengl0 libgbm1 libdrm2 libx11-6 \
+              libx11-xcb1 libxcb1 libfontconfig1 libfreetype6 libharfbuzz0b \
+              xvfb dbus-x11 libfuse2 ca-certificates >/dev/null
+            test "$(ldconfig -p | grep -c webkit2gtk)" = 0 || { echo "::error::webkit present; not a clean test"; exit 1; }
+            xvfb-run -a /tmp/app.AppImage --appimage-extract-and-run >/tmp/run.log 2>&1 &
+            pid=$!; sleep 8
+            if kill -0 "$pid" 2>/dev/null; then
+              echo "AppImage ran on a clean Ubuntu 22.04 with no manual WebKit install"
+              kill "$pid" 2>/dev/null || true
+            else
+              echo "::error::AppImage exited early on a clean Ubuntu 22.04"; cat /tmp/run.log || true; exit 1
+            fi
+          '

@@ -112,14 +112,20 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --locked
 
-      - name: Build .deb bundle
-        run: cargo tauri build --bundles deb
+      - name: Build .deb + .AppImage bundles
+        run: cargo tauri build --bundles deb,appimage
         working-directory: crates/app
 
       - uses: actions/upload-artifact@v4
         with:
           name: soloist-deb
           path: target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: soloist-appimage
+          path: target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
   smoke:

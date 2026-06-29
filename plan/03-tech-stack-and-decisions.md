@@ -23,8 +23,11 @@ referenced as "ref §N" point to [`05-solo-reference-and-sources.md`](05-solo-re
 | Pure Rust TUI (ratatui) | tiny; SSH-able | can't match GUI (sidebar, themes, scratchpad editors) | Rejected |
 
 ## D2 — Platform & packaging
-- **Ubuntu 20.04+, x86_64.** `.deb` targets 22.04 (`webkit2gtk-4.1`); `.AppImage` (self-contained
-  webkit) covers 20.04 (`4.0`). No arm64, macOS, or Windows.
+- **x86_64 only; supported floor Ubuntu 22.04+.** Both the `.deb` (system `webkit2gtk-4.1`) and the
+  `.AppImage` (self-contained webkit) target **22.04+**. D2's original 20.04 floor assumed the
+  self-contained `.AppImage` would cover 20.04; **Phase-12 testing proved that infeasible** — Tauri v2
+  needs WebKitGTK 4.1 (absent on 20.04), forcing a 22.04 build whose glibc-2.33+ artifacts will not run
+  on 20.04's glibc 2.31 (`KNOWN-DIVERGENCES` D-11). No arm64, macOS, or Windows.
 
 ## D6 — Storage layer
 - **SQLite** (via `rusqlite` or `sqlx`), WAL mode, versioned migrations. Holds: trust decisions,
