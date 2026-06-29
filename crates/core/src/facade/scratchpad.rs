@@ -32,6 +32,30 @@ impl Facade {
         expected: Option<u64>,
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope(session)?;
+        self.scratchpad_write_in(project, name, doc, expected)
+    }
+
+    /// The scratchpad `name` in the session's effective project, or
+    /// [`CoordinationError::UnknownScratchpad`] if there is none.
+    pub fn scratchpad_read(
+        &self,
+        session: SessionId,
+        name: &str,
+    ) -> Result<ScratchpadView, CoordinationError> {
+        let project = self.coordination_scope(session)?;
+        self.scratchpad_read_in(project, name)
+    }
+
+    /// [`scratchpad_write`](Self::scratchpad_write) scoped to `project` directly — the local-UI path
+    /// (the panels), mirroring [`orchestration_snapshot`](Self::orchestration_snapshot): it trusts the
+    /// caller to be entitled to `project`, so it must never take a `project` from an untrusted surface.
+    pub fn scratchpad_write_in(
+        &self,
+        project: ProjectId,
+        name: &str,
+        doc: ScratchpadDoc,
+        expected: Option<u64>,
+    ) -> Result<ScratchpadView, CoordinationError> {
         self.emit_scratchpad(
             project,
             self.scratchpads
@@ -46,14 +70,13 @@ impl Facade {
         )
     }
 
-    /// The scratchpad `name` in the session's effective project, or
-    /// [`CoordinationError::UnknownScratchpad`] if there is none.
-    pub fn scratchpad_read(
+    /// [`scratchpad_read`](Self::scratchpad_read) scoped to `project` directly — the local-UI path
+    /// (trusts the caller to be entitled to `project`; see [`scratchpad_write_in`](Self::scratchpad_write_in)).
+    pub fn scratchpad_read_in(
         &self,
-        session: SessionId,
+        project: ProjectId,
         name: &str,
     ) -> Result<ScratchpadView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
         self.scratchpads
             .read(project, name)?
             .ok_or(CoordinationError::UnknownScratchpad)
