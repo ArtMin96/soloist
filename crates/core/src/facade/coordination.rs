@@ -77,6 +77,14 @@ pub enum CoordinationError {
     /// A comment action named one that does not exist on the todo.
     #[error("no comment under that id on that todo")]
     UnknownComment,
+    /// A `solo://` link could not be parsed — it is not in the
+    /// `solo://proj/<project>/scratchpad|todo/<id>` shape.
+    #[error("not a valid solo:// link")]
+    MalformedLink,
+    /// A `solo://` link named a project other than the caller's effective one, so it is refused
+    /// rather than resolved to another project's content (the never-leak scope discipline).
+    #[error("that link points outside your effective project")]
+    ForeignScopeLink,
     /// A durable read or write failed.
     #[error(transparent)]
     Store(#[from] StoreError),

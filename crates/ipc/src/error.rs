@@ -74,6 +74,12 @@ pub enum IpcError {
     /// A comment action named one that does not exist on the todo.
     #[error("no comment under that id on that todo")]
     UnknownComment,
+    /// A `solo://` link could not be parsed.
+    #[error("not a valid solo:// link")]
+    MalformedLink,
+    /// A `solo://` link named a project other than the caller's effective one — refused, not resolved.
+    #[error("that link points outside your effective project")]
+    ForeignScopeLink,
     /// The referenced process belongs to a different project than the session's scope.
     #[error("that process belongs to a different project")]
     OutOfScope,
@@ -114,6 +120,8 @@ impl IpcError {
             | IpcError::UnknownBlocker
             | IpcError::SelfBlocker
             | IpcError::UnknownComment
+            | IpcError::MalformedLink
+            | IpcError::ForeignScopeLink
             | IpcError::OutOfScope
             | IpcError::Untrusted
             | IpcError::UnknownTool => true,
@@ -186,6 +194,8 @@ impl From<CoordinationError> for IpcError {
             CoordinationError::UnknownBlocker => IpcError::UnknownBlocker,
             CoordinationError::SelfBlocker => IpcError::SelfBlocker,
             CoordinationError::UnknownComment => IpcError::UnknownComment,
+            CoordinationError::MalformedLink => IpcError::MalformedLink,
+            CoordinationError::ForeignScopeLink => IpcError::ForeignScopeLink,
             CoordinationError::Store(err) => IpcError::Internal(err.to_string()),
         }
     }

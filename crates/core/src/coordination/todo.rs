@@ -108,11 +108,32 @@ fn check_list<'a>(
     }
 }
 
-/// A comment on a todo: a per-todo sequential `id` (so an update or delete can name it) and its body.
+/// Who wrote a comment, captured when it was created so the to-do board can name the author. A
+/// bound process records its per-run [`ProcessId`] — informational only, since process ids are
+/// recycled across runs — alongside the `label` resolved at creation, which is durable and is what
+/// the board shows. An external caller records only its label. The core stamps this from the
+/// caller's resolved identity, so an author can never be forged; an unbound caller leaves a comment
+/// unattributed ([`Comment::author`] is `None`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CommentAuthor {
+    /// A Soloist-supervised process: the live id it was bound to and the durable label shown.
+    Process { id: ProcessId, label: String },
+    /// An external (non-supervised) caller, identified by the label it registered under.
+    External { label: String },
+}
+
+/// A comment on a todo: a per-todo sequential `id` (so an update or delete can name it), its body,
+/// and its author when the creating caller was attributable ([`None`] for an unbound caller).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Comment {
     pub id: u64,
     pub body: String,
+    /// Who created the comment, stamped by the core from the caller's identity (never caller-set).
+    /// `None` when the caller was unbound. Defaulted so comments written before authorship existed
+    /// read back unattributed.
+    #[serde(default)]
+    pub author: Option<CommentAuthor>,
 }
 
 /// A todo as a caller reads it: its durable id, the disciplined document, its tags, the ids of the
@@ -354,15 +375,17 @@ impl Todos {
         self.view_opt(self.repo.unlock(project, id, owner)?)
     }
 
-    /// Adds a comment to todo `id` in `project`, returning the updated todo and the new comment's id,
-    /// or `None` if there is none.
+    /// Adds a comment to todo `id` in `project`, attributed to `author` (stamped by the façade from
+    /// the caller's identity), returning the updated todo and the new comment's id, or `None` if
+    /// there is none.
     pub fn comment_create(
         &self,
         project: ProjectId,
         id: TodoId,
         body: &str,
+        author: Option<CommentAuthor>,
     ) -> Result<Option<(TodoView, u64)>, StoreError> {
-        match self.repo.comment_create(project, id, body)? {
+        match self.repo.comment_create(project, id, body, author)? {
             Some((stored, comment)) => Ok(Some((self.view(stored)?, comment))),
             None => Ok(None),
         }
