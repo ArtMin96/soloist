@@ -124,7 +124,7 @@ export function todoLink(project: number, todo: number): Promise<string> {
   return invoke<string>("todo_link", { project, todo });
 }
 
-// ── Timer management (orch-03, O7) ────────────────────────────────────────────
+// ── Timer management ──────────────────────────────────────────────────────────
 // Routes to the existing core timer_cancel/pause/resume_for façade methods. `owner` is the process
 // id of the timer's owning agent; `timer` is the timer id. Returns whether one was affected.
 

@@ -87,7 +87,7 @@ function Tab({
             "text-[0.6875rem] tabular-nums",
             active ? "text-muted-foreground" : "text-muted-foreground/60",
           )}
-          aria-label={`${count} active`}
+          aria-label={`${count} ${children}`}
         >
           {count}
         </span>

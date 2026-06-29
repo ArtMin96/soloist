@@ -21,11 +21,12 @@ interface Props {
   project: number;
 }
 
-// The timers panel (orch-03, O7): lists every armed and paused timer in the project, grouped by
-// owning agent. Each timer shows its fire condition, waiting-on agents, a live countdown to the
-// max-wait deadline, and a body preview. Pause/resume/cancel route to the core.
-// The countdown is computed client-side from `deadline_unix_millis` via requestAnimationFrame —
-// no per-second backend events; respects `prefers-reduced-motion` (numeric update only, no pulse).
+// The timers panel: lists every armed and paused timer in the project, grouped by owning agent.
+// Each timer shows its fire condition, waiting-on agents, a live countdown to the max-wait
+// deadline, and a body preview. Pause/resume/cancel route to the core. An armed timer's countdown
+// is computed client-side from `deadline_unix_millis` via requestAnimationFrame (no per-second
+// backend events); a paused timer shows its frozen remaining time. Respects `prefers-reduced-motion`
+// (numeric update only, no pulse).
 export function TimersPanel({ timers, agents }: Props) {
   const labelOf = useCallback(
     (id: number) => agents.find((a) => a.id === id)?.label ?? `#${id}`,
@@ -186,14 +187,14 @@ function TimerRow({ timer, labelOf }: RowProps) {
 function CountdownCell({ timer }: { timer: TimerView }) {
   const [display, setDisplay] = useState(() =>
     timer.status === "paused"
-      ? formatPausedRemaining(timer.deadline_unix_millis)
+      ? formatPausedRemaining(timer.paused_remaining_millis ?? 0)
       : formatCountdown(timer.deadline_unix_millis - Date.now()),
   );
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (timer.status === "paused") {
-      setDisplay(formatPausedRemaining(timer.deadline_unix_millis));
+      setDisplay(formatPausedRemaining(timer.paused_remaining_millis ?? 0));
       return;
     }
 
@@ -208,7 +209,7 @@ function CountdownCell({ timer }: { timer: TimerView }) {
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [timer.deadline_unix_millis, timer.status]);
+  }, [timer.deadline_unix_millis, timer.status, timer.paused_remaining_millis]);
 
   return (
     <span

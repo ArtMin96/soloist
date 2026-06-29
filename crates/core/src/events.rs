@@ -124,10 +124,10 @@ pub enum DomainEvent {
     /// A coordination timer owned by `owner` was cleared without firing (the owner cancelled it).
     TimerCleared { owner: ProcessId, id: TimerId },
     /// A coordination timer owned by `owner` was paused: the countdown is frozen and the timer
-    /// will not fire until resumed. Deferred from orch-00 (O2) to orch-03 (the timers panel).
+    /// will not fire until resumed.
     TimerPaused { owner: ProcessId, id: TimerId },
     /// A coordination timer owned by `owner` was resumed: the countdown re-armed with the time
-    /// that remained when it was paused. Deferred from orch-00 (O2) to orch-03 (the timers panel).
+    /// that remained when it was paused.
     TimerResumed { owner: ProcessId, id: TimerId },
     /// A coordination lease `key` in `project` changed (acquired, renewed, or released by its
     /// owner). The UI re-reads the project's live leases.

@@ -1,4 +1,4 @@
-//! Timer management commands — the local, trusted Tauri surface for the timers panel (orch-03).
+//! Timer management commands — the local, trusted Tauri surface for the timers panel.
 //!
 //! Each command routes to the one core behaviour via the `*_for` façade methods, which take an
 //! explicit `owner: ProcessId` rather than resolving it from a session (the local UI is trusted and

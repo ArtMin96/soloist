@@ -14,7 +14,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::Notify;
 
 use crate::agents::AgentActivity;
-use crate::coordination::{IdleMode, TimerRepo, Timers};
+use crate::coordination::{FireCond, IdleMode, StoredTimer, TimerRepo, TimerStatus, Timers};
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId, TimerId};
 use crate::ports::{CorePorts, PtySize, SpawnSpec};
@@ -440,4 +440,55 @@ async fn closing_the_owner_drops_its_timers() {
     // The owner closes: the scheduler sees the removal and drops the timers it owned.
     h.bus.publish(DomainEvent::ProcessRemoved { id: owner });
     settle_until(|| !h.exists(owner, view.id)).await;
+}
+
+/// A minimal stored timer with the given fire condition, for the pure wake-reason header tests.
+fn stored_timer(id: u64, fire: FireCond) -> StoredTimer {
+    StoredTimer {
+        id: TimerId::from_raw(id),
+        project: PROJECT,
+        owner: ProcessId::from_raw(1),
+        body: "resume".into(),
+        fire,
+        deadline_unix_millis: 1_000,
+        status: TimerStatus::Armed,
+        remaining_on_pause_millis: None,
+    }
+}
+
+#[test]
+fn the_wake_reason_header_names_a_scheduled_delivery_for_an_at_timer() {
+    let timer = stored_timer(3, FireCond::At);
+    assert_eq!(
+        super::wake_reason_header(&timer, false),
+        "[Soloist timer #3] scheduled delivery"
+    );
+}
+
+#[test]
+fn the_wake_reason_header_distinguishes_all_idle_from_the_backstop() {
+    let watched = vec![ProcessId::from_raw(2), ProcessId::from_raw(3)];
+    let timer = stored_timer(4, FireCond::WhenIdleAll { watched });
+    assert_eq!(
+        super::wake_reason_header(&timer, false),
+        "[Soloist timer #4] all 2 watched agents are idle"
+    );
+    assert_eq!(
+        super::wake_reason_header(&timer, true),
+        "[Soloist timer #4] max-wait backstop elapsed (when-all-idle, 2 watched)"
+    );
+}
+
+#[test]
+fn the_wake_reason_header_distinguishes_any_idle_from_the_backstop() {
+    let watched = vec![ProcessId::from_raw(9)];
+    let timer = stored_timer(5, FireCond::WhenIdleAny { watched });
+    assert_eq!(
+        super::wake_reason_header(&timer, false),
+        "[Soloist timer #5] a watched agent is idle (any-idle condition met)"
+    );
+    assert_eq!(
+        super::wake_reason_header(&timer, true),
+        "[Soloist timer #5] max-wait backstop elapsed (when-any-idle, 1 watched)"
+    );
 }

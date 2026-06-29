@@ -1,5 +1,5 @@
-// Pure helpers for the timers panel (orch-03, O7). No IPC, no state — only derivations over
-// `TimerView` values from the orchestration snapshot, so these are straightforwardly testable.
+// Pure helpers for the timers panel. No IPC, no state — only derivations over `TimerView` values
+// from the orchestration snapshot, so these are straightforwardly testable.
 
 import type { FireCond, TimerView } from "@/domain";
 
@@ -31,12 +31,12 @@ export function formatCountdown(remainingMs: number): string {
 }
 
 /**
- * Formats a frozen remaining duration for a paused timer: `Xh Ym remaining`.
- * The remaining time is `deadline_unix_millis - now` for a paused timer whose deadline was
- * re-armed with remaining time, so this reads naturally as "time left before it fires".
+ * Formats a paused timer's frozen remaining duration as `Xh Ym remaining`. Takes the milliseconds
+ * that remained when the timer was paused (`TimerView.paused_remaining_millis`) directly, so the
+ * value stays constant while paused instead of drifting with the wall clock.
  */
-export function formatPausedRemaining(deadlineMs: number): string {
-  const remaining = deadlineMs - Date.now();
+export function formatPausedRemaining(remainingMillis: number): string {
+  const remaining = remainingMillis;
   if (remaining <= 0) return "0s remaining";
   const total = Math.floor(remaining / 1000);
   const h = Math.floor(total / 3600);

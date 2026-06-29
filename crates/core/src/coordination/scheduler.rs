@@ -170,7 +170,7 @@ async fn deliver(supervisor: &Supervisor, timer: StoredTimer, fired_at_backstop:
 }
 
 /// A compact, clean-room wake-reason header prepended to the delivered body so the woken agent can
-/// tell "all peers finished" from "I was timed out" — the demo's per-fire context (orch-03, O8).
+/// tell "all peers finished" from "I was timed out" — per-fire context for the lead.
 /// Format is `[Soloist timer #<id>] <reason>`.
 fn wake_reason_header(timer: &StoredTimer, fired_at_backstop: bool) -> String {
     let id = timer.id;

@@ -234,6 +234,7 @@ fn every_response_variant_round_trips_through_json() {
             deadline_unix_millis: 1_700_000_005_000,
             waiting_on: vec![],
             already_idle: false,
+            paused_remaining_millis: None,
         }),
         IpcResponse::TimerWhenIdle(SetWhenIdleOutcome {
             timer: TimerView {
@@ -247,6 +248,7 @@ fn every_response_variant_round_trips_through_json() {
                 deadline_unix_millis: 1_700_000_060_000,
                 waiting_on: vec![ProcessId::from_raw(2), ProcessId::from_raw(3)],
                 already_idle: false,
+                paused_remaining_millis: None,
             },
             already_idle: false,
             waiting_on: vec![ProcessId::from_raw(2), ProcessId::from_raw(3)],
@@ -263,6 +265,7 @@ fn every_response_variant_round_trips_through_json() {
             deadline_unix_millis: 0,
             waiting_on: vec![ProcessId::from_raw(9)],
             already_idle: false,
+            paused_remaining_millis: Some(45_000),
         }]),
     ];
     for response in responses {

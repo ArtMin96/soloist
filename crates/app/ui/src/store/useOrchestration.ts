@@ -7,7 +7,7 @@ import type { AgentNode, DomainEvent, ScratchpadSummary, TimerView, TodoView } f
 // leaving the registry, a status / label / activity change (the agent tree), or a todo, scratchpad,
 // or timer mutation (the coordination panels). The snapshot is derived on read and its events carry
 // ids only, so the hook re-reads the one snapshot rather than folding deltas. Timer pause/resume
-// events (orch-03) are included so the panel reflects the new status without polling.
+// events are included so the panel reflects the new status without polling.
 const SNAPSHOT_EVENTS: ReadonlySet<DomainEvent["type"]> = new Set([
   "ProcessSpawned",
   "ProcessStatusChanged",
@@ -29,7 +29,7 @@ export interface OrchestrationStore {
   agents: AgentNode[];
   todos: TodoView[];
   scratchpads: ScratchpadSummary[];
-  /** Armed and paused timers in the project, ordered by id (orch-03). */
+  /** Armed and paused timers in the project, ordered by id. */
   timers: TimerView[];
   error: string | null;
   refresh: () => void;

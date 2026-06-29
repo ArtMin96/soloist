@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { fireBadge, formatCountdown, bodyPreview, groupByOwner } from "./timerPanel";
+import {
+  bodyPreview,
+  fireBadge,
+  formatCountdown,
+  formatPausedRemaining,
+  groupByOwner,
+} from "./timerPanel";
 import type { TimerView } from "@/domain";
 
 describe("fireBadge", () => {
@@ -35,6 +41,21 @@ describe("formatCountdown", () => {
   });
 });
 
+describe("formatPausedRemaining", () => {
+  it("returns 0s remaining for zero or negative", () => {
+    expect(formatPausedRemaining(0)).toBe("0s remaining");
+    expect(formatPausedRemaining(-1)).toBe("0s remaining");
+  });
+  it("formats the frozen remainder directly, independent of the wall clock", () => {
+    expect(formatPausedRemaining(45_000)).toBe("45s remaining");
+    expect(formatPausedRemaining(70_000)).toBe("1m 10s remaining");
+    expect(formatPausedRemaining(2 * 3600 * 1000 + 15 * 60 * 1000)).toBe("2h 15m remaining");
+  });
+  it("does not drift — the same remainder always reads the same", () => {
+    expect(formatPausedRemaining(70_000)).toBe(formatPausedRemaining(70_000));
+  });
+});
+
 describe("bodyPreview", () => {
   it("returns the first line when short", () => {
     expect(bodyPreview("review the output")).toBe("review the output");
@@ -64,6 +85,7 @@ function makeTimer(id: number, owner: number): TimerView {
     deadline_unix_millis: 0,
     waiting_on: [],
     already_idle: false,
+    paused_remaining_millis: null,
   };
 }
 

@@ -954,6 +954,7 @@ fn sample_timer(id: u64) -> TimerView {
         deadline_unix_millis: 1_700_000_005_000,
         waiting_on: vec![],
         already_idle: false,
+        paused_remaining_millis: None,
     }
 }
 
@@ -1006,6 +1007,7 @@ async fn timer_fire_when_idle_all_threads_the_processes_and_projects_the_outcome
                     deadline_unix_millis: 0,
                     waiting_on: processes.clone(),
                     already_idle: false,
+                    paused_remaining_millis: None,
                 },
                 already_idle: false,
                 waiting_on: processes,

@@ -148,6 +148,11 @@ pub struct TimerView {
     /// ever `true` for a fire-when-idle timer whose quorum was met at read time.
     #[serde(default)]
     pub already_idle: bool,
+    /// For a paused timer, the milliseconds that remained when it was paused — the frozen value a
+    /// caller shows so a paused countdown does not drift with the wall clock. `None` for an armed
+    /// timer, whose remaining time is derived from [`deadline_unix_millis`](Self::deadline_unix_millis).
+    #[serde(default)]
+    pub paused_remaining_millis: Option<u64>,
 }
 
 /// The outcome of arming a fire-when-idle timer: the timer itself, whether its idle condition is
@@ -319,6 +324,7 @@ impl Timers {
             deadline_unix_millis,
             waiting_on: Vec::new(),
             already_idle: false,
+            paused_remaining_millis: None,
         })
     }
 }
