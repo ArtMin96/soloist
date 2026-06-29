@@ -35,8 +35,12 @@ interactive prompts. Pipes break this; a PTY makes interactivity (C3) and ANSI (
    > resolve). `COLUMNS`/`LINES` are *intentionally not* exported — the PTY winsize is authoritative and
    > the shell derives them from it; exporting them would conflict on resize. There are no Soloist-internal
    > vars to strip yet (`SOLOIST_PROCESS_ID` injection lands in Phase 8). Tracked in `PROGRESS.md`.
-9. **Frontend terminal:** xterm.js + fit + webgl (canvas fallback) bound to `pty:<id>`; send input via
-   `pty_write`; this is consumed by the Phase 5 dashboard.
+9. **Frontend terminal:** xterm.js + fit + webgl (DOM fallback — xterm v6 removed the canvas renderer)
+   bound to `pty:<id>`; send input via `pty_write`; this is consumed by the Phase 5 dashboard.
+   > **GPU renderer (C8) delivered** (a `later` row pulled forward at the owner's request): the WebGL
+   > addon is lazy-loaded and activated after the terminal opens, degrading to xterm's built-in DOM
+   > renderer when WebGL is unavailable or its context is lost. Selection logic in
+   > `ui/src/lib/terminalRenderer.ts`; divergence recorded in `KNOWN-DIVERGENCES.md` D-10 + `plan/05` §12.
 
 ## Interfaces
 
