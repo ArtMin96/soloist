@@ -54,6 +54,8 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             ITEM_QUIT => app.exit(0),
             _ => {}
         })
+        // Left-click reveals the window. Best-effort: some Linux tray backends (libayatana
+        // appindicator) deliver only menu events, so "Show Soloist" is the reliable path there.
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,

@@ -2,7 +2,7 @@ name: Release
 
 # Tag a commit `vX.Y.Z` (matching the version in crates/app/tauri.conf.json) to build the
 # signed .deb + .AppImage on x86_64, publish them to a draft GitHub Release with SHA-256
-# checksums, and verify the AppImage runs on a clean Ubuntu 20.04 (bundled webkit, no
+# checksums, and verify the AppImage runs on a clean Ubuntu 22.04 (bundled webkit, no
 # manual install). The updater artifacts are signed here with TAURI_SIGNING_PRIVATE_KEY;
 # the base build (CI, local) stays keyless because createUpdaterArtifacts lives only in
 # the release overlay applied below.
@@ -83,7 +83,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "v${{ steps.tauri.outputs.appVersion }}" SHA256SUMS --clobber
 
-      - name: Upload the AppImage for the clean-20.04 smoke
+      - name: Upload the AppImage for the clean-22.04 smoke
         uses: actions/upload-artifact@v4
         with:
           name: soloist-appimage

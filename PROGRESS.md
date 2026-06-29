@@ -9,6 +9,8 @@
 
 ## Current state
 
+> **PHASE 12 (Packaging — `.deb`/`.AppImage`, x86_64) — `Done — pending verify` (2026-06-30, branch `feat/phase-12-packaging`):** v1 rows J1/J2/J3 + the owner-requested J4/J5/tray are gate-green and container-smoked; only the user-only real-desktop GUI walk and the `git tag`→release publish remain. **D-11: the supported floor is Ubuntu 22.04+** (20.04 infeasible — Tauri v2 needs WebKitGTK 4.1). Details in the Phase 12 Decisions entry and "Next session should start with".
+>
 > **ACTIVE PHASE: 11 (UX Polish & Execution Profiles) — STARTED. Slice 1 landed: I10 env capture (`$SHELL -ilc env`, ~10-min cache, precedence process > captured > app). Slice 2 landed (2026-06-25): `SettingsRepo` (migration v9) + the per-group MCP tool-enablement Registry (G10 Key-Value default-OFF) — **PR #28 MERGED to `main` (`1356f44`)**. Phase 10 (HTTP API & CLI) is `Verified` — the user-only runtime acceptance walk PASSED 2026-06-25 (status/restart/logs against a live app, CLI/UI restart route identically, app-down → "Soloist is not running"/exit 1, mutation auth 200-vs-401, foreign-Origin CORS refused). Phase 9 (Coordination, C6) is `Verified`.**
 > PR #26 (Phase 10 — H1–H4) is **merged to `main`** (merge commit `7db4004`, incl. the review-cleanup `a83ac19`);
 > the merge was reconciled this session (`main` == `origin/main`, working tree clean) and the gate **re-confirmed
