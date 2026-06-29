@@ -54,8 +54,9 @@ referenced as "ref §N" point to [`05-solo-reference-and-sources.md`](05-solo-re
 
 ## D10 — Terminal stack
 - Backend PTY: `portable-pty` (wezterm) + `nix` for process-group signals. Frontend: `xterm.js` +
-  `@xterm/addon-fit` + `@xterm/addon-webgl` (canvas fallback). `TERM=xterm-256color`; no custom
-  terminfo (ref §12).
+  `@xterm/addon-fit` + `@xterm/addon-webgl` (lazy-loaded; **DOM fallback** — xterm v6 removed the
+  canvas renderer, see `KNOWN-DIVERGENCES.md` D-10). `TERM=xterm-256color`; no custom terminfo
+  (ref §12).
 
 ## Library choices
 

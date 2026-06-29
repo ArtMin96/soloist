@@ -313,3 +313,32 @@ affordance still appears exactly where Solo documents it (a stopped agent), and 
 resumable agent offers Resume. The only observable difference from a literal "Start *xor* Resume"
 reading is that Start remains present beside Resume. The undocumented resume **mechanism** (the
 per-provider invocation, and the Amp/Generic gaps) is recorded in `plan/05` §12.
+
+## D-10 — GPU terminal renderer falls back to the DOM renderer, not canvas 🟢
+
+**Introduced:** C8 ("GPU/smooth rendering"), delivered ahead of schedule (a `later` row pulled forward
+at the owner's request).
+
+**Solo (ref `plan/05` §10/§11):** the main-pane PTY uses a **GPU renderer** (added in Solo v0.6.0).
+The matrix C8 row records the contemporaneous xterm.js model as *"webgl renderer; canvas fallback"*
+(`plan/02`, `plan/03` D1) — at the time, xterm.js offered a WebGL renderer with a 2-D **canvas**
+renderer as the middle fallback tier.
+
+**Soloist:** we render with the **WebGL** addon (`@xterm/addon-webgl`) and fall back to xterm's
+built-in **DOM** renderer when WebGL is unavailable — there is **no canvas tier**. The reason is a
+library reality, not a behavior choice: Soloist pins **xterm.js v6** (`@xterm/xterm@6.0.0`), which
+**removed the canvas renderer** (`@xterm/addon-canvas@0.7.0` peer-depends `@xterm/xterm@^5.0.0` and was
+not carried to v6). So v6's only renderers are WebGL (addon) and DOM (built-in), and DOM is the sole
+fallback. Two failure modes degrade to DOM: WebGL2 unavailable at activation (no GPU/driver/blocked
+context), and a GPU context lost at runtime (driver reset, sleep/resume) — handled via the addon's
+`onContextLoss`. The addon is **lazy-loaded** (a dynamic-import chunk, ~123 kB / ~35 kB gzip) so it is
+fetched only when a terminal first mounts (`CLAUDE.md` §6).
+
+**Rationale:** WebGL is the GPU path Solo's behavior calls for; DOM is the only available fallback in
+xterm v6 and is the renderer the terminal already opens with, so the upgrade-or-degrade is seamless and
+visually identical. A canvas tier cannot be offered without downgrading xterm to v5.
+
+**Effect on parity:** C8's Verify ("webgl renderer; canvas fallback") is met in substance — a GPU
+(WebGL) renderer with an automatic non-GPU fallback — with the fallback tier being DOM rather than the
+since-removed canvas. The runtime visual/FPS check is a user-only step (no display in CI). The
+undocumented renderer-selection **mechanism** is recorded in `plan/05` §12.

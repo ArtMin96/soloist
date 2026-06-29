@@ -175,6 +175,38 @@
   session** (per the user) and **no canonical doc was edited** — propagating the `O`-rows into `plan/02`
   and the gap into `plan/05 §12` is **orch-00 Task 1**. The track depends only on Phases 7/8/9 (all done/
   `Verified`). **Next sessions implement orch-00 → orch-05; see "Next session should start with" → ★.**
+- **Deferred `later` row C8 ("GPU/smooth rendering") delivered ahead of schedule (user request) —
+  CODE-COMPLETE & gate-green.** A Phase-4 (C3) `later` row pulled forward at the owner's request; recorded
+  as a scheduled pull-forward (not a v1 re-scope), like A5/A8/B9. **Frontend-only** (no Rust/core/ports/
+  Facade touched; dep-direction guard green). Treated as a **§6 performance pass** (owner-confirmed): no
+  visual/design delta — WebGL renders pixel-identical output — so `/impeccable` had no surface to act on;
+  every API/version verified from primary sources (npm registry + xterm docs via context7 + the
+  `tauri-binary-size`/`tauri-csp` skills), no fabrication.
+  - **The renderer (`ui/src/lib/terminalRenderer.ts`):** a single-source `activateTerminalRenderer(term, load?)`
+    that **lazy-loads** `@xterm/addon-webgl@^0.19.0` (dynamic import → its own bundle chunk, fetched only when
+    a terminal mounts — `CLAUDE.md` §6), activates the **WebGL** renderer after `term.open()`, and **falls back
+    to xterm's built-in DOM renderer** on two failure modes: WebGL2 unavailable at activation (`loadAddon`
+    throws → caught) and a GPU context lost at runtime (`onContextLoss` → dispose). The loader is injected so
+    the fallback logic is unit-testable without a real WebGL2 context (jsdom has none).
+  - **Version evidence (no guessing):** `@xterm/addon-webgl@0.19.0` published in the **same release wave** as
+    the installed `@xterm/xterm@6.0.0` + `@xterm/addon-fit@0.11.0` (all 2025-12-22T13:5x, per `npm view … time`).
+    **xterm v6 removed the canvas renderer** (`@xterm/addon-canvas@0.7.0` peer-deps `@xterm/xterm@^5.0.0`), so
+    the fallback is DOM, not canvas — the only library-reality divergence (`KNOWN-DIVERGENCES.md` **D-10**,
+    `plan/05 §12`; `plan/03 D10` + `phase-04` Task 9 wording fixed; `plan/02` C8 row updated, kept `later`).
+  - **Wiring (`useTerminal.ts`):** activate after `term.open(host)`; deterministic dispose on unmount with an
+    async-resolves-after-unmount guard (`tornDown` flag) so a late chunk-load never leaks an addon. Appearance
+    restyle unchanged (WebGL reads `term.options` live).
+  - **Measure (§6, before→after, `pnpm build`):** WebGL addon code-split into its **own on-demand chunk**
+    `addon-webgl-*.js` **123.43 kB (gzip 34.67 kB)**; main `index.js` **833.92 → 835.52 kB** (**+1.6 kB**,
+    gzip +0.66 kB); total `dist` 1.1M → 1.2M. Initial-load cost essentially unchanged; the GPU code is paid for
+    only when a terminal opens. CSP unchanged — WebGL compiles GLSL on the GPU, not JS `eval`/workers, so the
+    existing `default-src 'self'` (no `'unsafe-eval'`) covers it (runtime devtools confirmation is the user walk).
+  - **Gate (evidence):** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier, dep-direction;
+    file-size advisory only — none of the new files). **UI vitest 172 passed / 37 files** (+5 new
+    `lib/terminalRenderer.test.ts`: webgl-loads, context-loss-reverts-to-DOM, handle-dispose, fallback-when-WebGL2-
+    unavailable, fallback-when-chunk-fails). Production bundle builds. **Remaining (user-only):** real-window walk —
+    open a terminal, confirm WebGL renders (devtools: no CSP violation; `canvas` present) and a chatty process stays
+    smooth; this env has no display.
 - **Deferred `later` row B9 ("Resume last session" for stopped agents) delivered ahead of schedule
   (user request, 2026-06-29) — CODE-COMPLETE & gate-green.** A Phase-3 (C2/C4) `later` row pulled forward
   at the owner's request; recorded as a scheduled pull-forward (not a v1 re-scope), like A5/A8. **Full

@@ -5,6 +5,7 @@ import "@xterm/xterm/css/xterm.css";
 import { ptyAttach, ptyDetach, ptyResize, ptyWrite } from "@/api";
 import { terminalOptions } from "@/lib/appearance";
 import { isActive } from "@/lib/status";
+import { activateTerminalRenderer, type RendererHandle } from "@/lib/terminalRenderer";
 import { useAppearance } from "@/store/appearanceContext";
 import type { ProcessView } from "@/domain";
 
@@ -95,6 +96,17 @@ export function useTerminal(process: ProcessView) {
     fitRef.current = fit;
     attachedRef.current = false;
 
+    // Swap in the GPU (WebGL) renderer now that the terminal is in the DOM. The load is
+    // async; until it resolves — and if WebGL is unavailable — the built-in DOM renderer
+    // drives the same output, so the upgrade is seamless. The promise can resolve after the
+    // effect tears down, so dispose immediately in that case.
+    let renderer: RendererHandle | null = null;
+    let tornDown = false;
+    void activateTerminalRenderer(term).then((handle) => {
+      if (tornDown) handle.dispose();
+      else renderer = handle;
+    });
+
     const onData = term.onData((input) => void ptyWrite(id, input).catch(() => {}));
     const observer = new ResizeObserver(() => syncSize());
     observer.observe(host);
@@ -104,6 +116,7 @@ export function useTerminal(process: ProcessView) {
     term.focus();
 
     return () => {
+      tornDown = true;
       observer.disconnect();
       onData.dispose();
       if (frameRef.current) {
@@ -111,6 +124,7 @@ export function useTerminal(process: ProcessView) {
         frameRef.current = 0;
       }
       void ptyDetach().catch(() => {});
+      renderer?.dispose();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
