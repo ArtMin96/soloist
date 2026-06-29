@@ -26,6 +26,7 @@ fn store_with_projects() -> SqliteStore {
 fn non_default() -> ProjectSettings {
     ProjectSettings {
         auto_start_gate: true,
+        auto_trust_command_changes: true,
         editor_override: Some("zed".into()),
         crash_exit_alerts: false,
         ..Default::default()

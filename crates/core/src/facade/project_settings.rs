@@ -31,6 +31,19 @@ impl Facade {
             .update(&project, |s| s.auto_start_gate = engaged)
     }
 
+    /// Enables or disables auto-trusting this project's user-saved command changes and persists it
+    /// (auto-save), returning the updated settings. When on, a command the user creates or edits
+    /// through Soloist is trusted on save; a `solo.yml` edit made outside Soloist still syncs in
+    /// untrusted and requires explicit trust.
+    pub fn set_project_auto_trust_command_changes(
+        &self,
+        project: ProjectId,
+        enabled: bool,
+    ) -> Result<ProjectSettings, StoreError> {
+        self.project_settings
+            .update(&project, |s| s.auto_trust_command_changes = enabled)
+    }
+
     /// Sets (or clears, with `None`) this project's editor override and persists it. A cleared
     /// override falls back to the global Tools default (see [`Self::resolved_project_editor`]).
     pub fn set_project_editor_override(

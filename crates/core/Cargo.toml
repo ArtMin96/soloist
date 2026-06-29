@@ -13,12 +13,17 @@ repository.workspace = true
 # (adapters reuse the one fake set instead of re-rolling them). Off by default,
 # so the fakes never compile into a production build.
 testing = []
+# Generates the `solo.yml` JSON Schema (`config::schema`) from the model. Off by default
+# so `schemars` is a build-time-only dependency the shipped binary never carries — the
+# schema is an artifact an editor reads, not something the app serves at runtime.
+schema = ["dep:schemars"]
 
 [dependencies]
 async-trait = "0.1"
 base64 = "0.21"
 globset = "0.4"
 indexmap = { version = "2", features = ["serde"] }
+schemars = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_norway = "0.9"
@@ -27,6 +32,12 @@ thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tokio-util = "0.7"
 vte = "0.15"
+
+# Generates `solo.schema.json` from the model; only builds under the `schema` feature, so the
+# default `--all-targets` build (clippy, tests) never compiles it without `schemars` present.
+[[example]]
+name = "gen_solo_schema"
+required-features = ["schema"]
 
 [dev-dependencies]
 tempfile = "3"

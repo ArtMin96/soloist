@@ -19,6 +19,7 @@ const project: ProjectView = {
 
 const settings: ProjectSettings = {
   auto_start_gate: false,
+  auto_trust_command_changes: false,
   editor_override: null,
   crash_exit_alerts: true,
   terminal_alerts: true,
@@ -90,6 +91,19 @@ describe("Per-project settings page", () => {
     fireEvent.click(await screen.findByLabelText("Suppress auto-start"));
 
     await waitFor(() => expect(calls).toContain("set_project_auto_start_gate"));
+  });
+
+  it("persists the auto-trust-command-changes toggle through the core command", async () => {
+    const calls: string[] = [];
+    mockPage(calls);
+
+    render(<ProjectSettingsPane project={project} />);
+    await waitFor(() => expect(calls).toContain("project_settings_page"));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+    fireEvent.click(await screen.findByLabelText("Automatically trust command changes"));
+
+    await waitFor(() => expect(calls).toContain("set_project_auto_trust_command_changes"));
   });
 
   it("moves a shared command to local storage via make_command_local", async () => {

@@ -20,6 +20,7 @@ afterEach(() => {
 
 const SETTINGS: ProjectSettings = {
   auto_start_gate: false,
+  auto_trust_command_changes: false,
   editor_override: null,
   crash_exit_alerts: true,
   terminal_alerts: true,
