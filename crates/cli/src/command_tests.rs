@@ -12,6 +12,7 @@ fn process(id: u64, project: u64, label: &str, status: ProcStatus, ports: Vec<u1
         status,
         exit_code: None,
         requires_trust: false,
+        resumable: false,
         ports,
         ready: Readiness::Ungated,
     }

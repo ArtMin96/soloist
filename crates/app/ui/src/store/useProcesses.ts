@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  agentResume,
   onDomainEvent,
   procList,
   procRestart,
@@ -22,6 +23,8 @@ export interface ProcessStore {
   start: (id: number) => void;
   stop: (id: number) => void;
   restart: (id: number) => void;
+  /** Resume a stopped resumable agent's last session (vs `start`, which begins fresh). */
+  resume: (id: number) => void;
   /** Bulk operations are scoped to a project so each project's header controls its own stack. */
   startAll: (project: number) => void;
   stopAll: (project: number) => void;
@@ -45,6 +48,7 @@ export function useProcesses(): ProcessStore {
   const start = useCallback((id: number) => void procStart(id).catch(fail), [fail]);
   const stop = useCallback((id: number) => void procStop(id).catch(fail), [fail]);
   const restart = useCallback((id: number) => void procRestart(id).catch(fail), [fail]);
+  const resume = useCallback((id: number) => void agentResume(id).catch(fail), [fail]);
 
   const startAll = useCallback((project: number) => void stackStart(project).catch(fail), [fail]);
   const stopAll = useCallback((project: number) => void stackStop(project).catch(fail), [fail]);
@@ -83,6 +87,7 @@ export function useProcesses(): ProcessStore {
     start,
     stop,
     restart,
+    resume,
     startAll,
     stopAll,
     restartRunning,

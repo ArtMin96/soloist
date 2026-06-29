@@ -11,6 +11,7 @@ function process(id: number, kind: ProcessView["kind"], label: string): ProcessV
     status: "Stopped",
     exit_code: null,
     requires_trust: false,
+    resumable: false,
     ports: [],
     ready: "Ungated",
   };

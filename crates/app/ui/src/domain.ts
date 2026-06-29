@@ -29,6 +29,10 @@ export interface ProcessView {
   // True for a trust-gated command whose variant is not yet trusted; the UI blocks its
   // start and offers a trust affordance.
   requires_trust: boolean;
+  // True for an agent whose provider supports "Resume last session"; when it rests, the UI
+  // offers resuming the most recent conversation alongside starting fresh. Always false for
+  // commands, terminals, and agents whose provider has no documented resume.
+  resumable: boolean;
   // TCP ports the process is currently listening on (discovered while it runs, cleared when
   // it stops). Empty until discovery finds any.
   ports: number[];
@@ -146,6 +150,7 @@ export type DomainEvent =
       label: string;
       status: ProcStatus;
       requires_trust: boolean;
+      resumable: boolean;
     }
   | {
       type: "ProcessStatusChanged";

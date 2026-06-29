@@ -419,6 +419,81 @@ async fn launch_agent_runs_a_stub_in_the_project_dir_inheriting_the_environment(
 }
 
 #[tokio::test]
+async fn resume_relaunches_a_stub_agent_with_its_providers_resume_command() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use soloist_core::testing::{FakeAgentToolRepo, FakeProjectRepo, FakeTrustRepo};
+    use soloist_core::{AgentKind, AgentTool, PromptMode};
+
+    // A stub "agent" that appends the arguments it was launched with, then exits. A fresh
+    // launch passes none; a resume passes the provider's resume flag, so the recorded args
+    // prove which command line ran. The tool's kind is Claude, whose resume invocation is
+    // `--continue` — so the stub stands in for the real CLI without needing it installed.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let script = dir.path().join("stub-agent.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nprintf 'ARGS=[%s]\\n' \"$*\" >> resume-output.txt\n",
+    )
+    .expect("write stub agent");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod stub");
+
+    let stub = AgentTool {
+        name: "Stub".into(),
+        command: script.to_string_lossy().into_owned(),
+        default_args: Vec::new(),
+        kind: AgentKind::Claude,
+        prompt_mode: PromptMode::AppendedArg,
+    };
+
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(PtyProcessSpawner),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .agent_tools(Arc::new(FakeAgentToolRepo::new(vec![stub])))
+        .build(),
+    );
+    let mut events = facade.subscribe();
+    let project = facade
+        .projects()
+        .add(dir.path(), None, None)
+        .expect("register the project");
+
+    // Fresh launch: the stub runs with no arguments, then exits and rests.
+    let id = facade
+        .launch_agent(project.id, "Stub", Vec::new())
+        .expect("launch the stub agent");
+    assert!(
+        facade
+            .snapshot()
+            .into_iter()
+            .find(|view| view.id == id)
+            .is_some_and(|view| view.resumable),
+        "a Claude-kind agent is resumable"
+    );
+    wait_for_status(&mut events, ProcStatus::Running).await;
+    wait_for_status(&mut events, ProcStatus::Stopped).await;
+
+    // Resume: the same process relaunches with the provider's resume command.
+    facade
+        .supervisor()
+        .resume(id)
+        .expect("resume the stub agent");
+    wait_for_status(&mut events, ProcStatus::Running).await;
+    wait_for_status(&mut events, ProcStatus::Stopped).await;
+
+    let output = std::fs::read_to_string(project.root.join("resume-output.txt"))
+        .expect("the stub wrote its arguments");
+    assert_eq!(
+        output, "ARGS=[]\nARGS=[--continue]\n",
+        "the fresh launch ran with no args; the resume ran with --continue: {output:?}"
+    );
+}
+
+#[tokio::test]
 async fn spawn_agent_launches_a_worker_in_the_sessions_project() {
     use std::os::unix::fs::PermissionsExt;
 

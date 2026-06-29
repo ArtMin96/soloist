@@ -58,6 +58,8 @@ pub enum SupervisorError {
     NotFound(ProcessId),
     #[error("command is not trusted to run in this project")]
     Untrusted,
+    #[error("process {0} has no last session to resume")]
+    NotResumable(ProcessId),
     #[error(transparent)]
     Store(#[from] StoreError),
 }
@@ -152,8 +154,12 @@ impl Supervisor {
             auto_start,
             auto_restart,
             restart_when_changed,
+            resume_command,
         } = registration;
         let requires_trust = self.requires_trust(project, trust_variant.as_ref());
+        // A resume command was composed for this process iff its provider can resume its last
+        // session, so its presence is the single source for the resumable read-model flag.
+        let resumable = resume_command.is_some();
         let view = ProcessView {
             id,
             project,
@@ -162,6 +168,7 @@ impl Supervisor {
             status: ProcStatus::Stopped,
             exit_code: None,
             requires_trust,
+            resumable,
             ports: Vec::new(),
             ready: Readiness::Ungated,
         };
@@ -173,6 +180,7 @@ impl Supervisor {
             auto_start,
             auto_restart,
             restart_when_changed,
+            resume_command,
         );
         self.bus.publish(DomainEvent::ProcessSpawned {
             id,
@@ -181,6 +189,7 @@ impl Supervisor {
             label,
             status: ProcStatus::Stopped,
             requires_trust,
+            resumable,
         });
         id
     }
@@ -253,6 +262,33 @@ impl Supervisor {
         } else {
             self.launch_actor(id, info.launch, None);
         }
+        Ok(())
+    }
+
+    /// Resumes a resting process from its stored resume command — an agent's "Resume last
+    /// session", relaunching its CLI on the conversation it left rather than a fresh one. The
+    /// resume command runs **in place of** the fresh `launch.command` for this launch only; the
+    /// stored fresh command is untouched, so a later plain [`start`](Self::start) still starts
+    /// fresh (Start and Resume are independent affordances). Trust is re-checked and crash
+    /// history cleared exactly as a start. Refused with [`SupervisorError::NotResumable`] if the
+    /// process has no resume command (a command, terminal, or unsupported-provider agent);
+    /// resuming an already-active process is a no-op.
+    pub fn resume(&self, id: ProcessId) -> Result<(), SupervisorError> {
+        let info = self
+            .registry
+            .describe(id)
+            .ok_or(SupervisorError::NotFound(id))?;
+        let Some(resume_command) = info.resume_command else {
+            return Err(SupervisorError::NotResumable(id));
+        };
+        if info.status.is_active() {
+            return Ok(());
+        }
+        self.guard_trust(info.project, info.trust_variant.as_ref())?;
+        self.restart_policy.forget(id);
+        let mut spec = info.launch;
+        spec.command = resume_command;
+        self.launch_actor(id, spec, None);
         Ok(())
     }
 
@@ -415,6 +451,9 @@ mod test_support;
 
 #[cfg(test)]
 mod lifecycle_tests;
+
+#[cfg(test)]
+mod resume_tests;
 
 #[cfg(test)]
 mod tests {

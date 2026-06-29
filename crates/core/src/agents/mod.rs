@@ -10,6 +10,7 @@ mod detect;
 pub mod idle;
 mod lineage;
 mod repo;
+mod resume;
 mod tool;
 
 pub use detect::{DetectedTool, NoopVersionProbe, VersionProbe};

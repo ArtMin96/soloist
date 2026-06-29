@@ -284,3 +284,32 @@ supply and pass the structured fields), and completion is gated on blockers. Cro
 `todo_transfer` is a **tracked deferral** — it raises the same cross-scope question as the scratchpad
 `_transfer` (D-7) and is held for the same focused follow-up; G4's Verify (the blocker gate) does not
 depend on it. The clean-room per-tool semantics are recorded in `plan/05` §12.
+
+## D-9 — A stopped resumable agent offers both Start and Resume 🟢
+
+**Introduced:** B9 ("Resume last session"), delivered ahead of schedule 2026-06-29 (a `later` row
+pulled forward at the owner's request).
+
+**Solo (ref `plan/05` §10):** a stopped process's main pane shows an in-pane **Start** *or*, for an
+agent, **"Resume last session"** — the documentation presents them as alternatives ("Start (or Resume
+last session)").
+
+**Soloist:** for a stopped agent whose provider supports resume, we offer **both** controls — Start
+(begins a fresh session) and Resume last session (relaunches with the provider's resume-last
+invocation, reopening the most recent conversation). Resume is a one-off relaunch that does **not**
+overwrite the process's stored fresh command, so the two affordances stay independent across
+stop/start cycles. The controls render in the existing ghost-icon `ProcessControls` cluster (sidebar
+row + terminal header), gated on `ProcessView.resumable && canStart(status)`; a non-resumable process
+(command, terminal, or unsupported-provider agent such as Amp or Generic) shows only Start.
+
+**Rationale:** the two actions are genuinely distinct — continue the prior conversation vs. start clean
+— and a user wants both available without having to launch a second agent to get a fresh session.
+Offering both is a faithful **superset** of the documented behavior, not a contradiction: the Resume
+affordance still appears exactly where Solo documents it (a stopped agent), and Start is never removed.
+`resumable` is a static per-process property, so the control set never reflows as the agent cycles
+(DESIGN.md: disable, don't remove).
+
+**Effect on parity:** B9 ("stopped agent offers resume") verifies as the matrix specifies — a stopped
+resumable agent offers Resume. The only observable difference from a literal "Start *xor* Resume"
+reading is that Start remains present beside Resume. The undocumented resume **mechanism** (the
+per-provider invocation, and the Amp/Generic gaps) is recorded in `plan/05` §12.

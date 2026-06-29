@@ -19,6 +19,11 @@ use crate::sync::lock;
 /// [`FakeSpawner::records_spec_env`] so a test can read back what reached a process.
 type SpecEnvLog = Arc<Mutex<Vec<BTreeMap<String, String>>>>;
 
+/// A shared buffer of the command line of each spawn, recorded by
+/// [`FakeSpawner::records_command`] so a test can read back which command line launched a
+/// process — e.g. the fresh launch versus the resume command line.
+type CommandLog = Arc<Mutex<Vec<String>>>;
+
 /// Signal numbers a simulated kill records on a fake child's exit status.
 const SIGKILL: i32 = 9;
 const SIGTERM: i32 = 15;
@@ -65,6 +70,10 @@ enum Behavior {
     /// buffer — so a test can prove what env reached a process (e.g. the captured shell
     /// environment merged with the per-process overrides).
     RecordsSpecEnv(SpecEnvLog),
+    /// Stays alive until killed and records the command line of each spawn into a shared
+    /// buffer — so a test can prove which command line launched a process (e.g. a resume
+    /// replays the resume command while a fresh start uses the original).
+    RecordsCommand(CommandLog),
 }
 
 /// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is chosen
@@ -172,6 +181,19 @@ impl FakeSpawner {
         (
             Self {
                 behavior: Behavior::RecordsSpecEnv(recorder.clone()),
+            },
+            recorder,
+        )
+    }
+
+    /// A long-lived child that records the command line of each spawn, returning the spawner
+    /// and the shared buffer the test reads (one entry per launch, in order). Used to prove a
+    /// resume replays the resume command while a fresh start uses the original.
+    pub fn records_command() -> (Self, CommandLog) {
+        let recorder = Arc::new(Mutex::new(Vec::new()));
+        (
+            Self {
+                behavior: Behavior::RecordsCommand(recorder.clone()),
             },
             recorder,
         )
@@ -296,6 +318,25 @@ impl ProcessSpawner for FakeSpawner {
                     Box::pin(async move { exit_rx.await.unwrap_or_else(|_| killed_by(SIGKILL)) });
                 Ok(Spawned {
                     pid: Some(424245),
+                    output: no_output(),
+                    exit,
+                    control,
+                    io: Box::new(NoopPtyIo),
+                })
+            }
+            Behavior::RecordsCommand(recorder) => {
+                lock(recorder).push(spec.command.clone());
+                let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
+                // Exits promptly on SIGTERM so a test can cycle stop → resume → stop without
+                // stepping the grace window each time.
+                let control = Box::new(OneshotControl {
+                    exit_tx: Mutex::new(Some(exit_tx)),
+                    dies_on: DiesOn::Terminate,
+                });
+                let exit: ExitFuture =
+                    Box::pin(async move { exit_rx.await.unwrap_or_else(|_| killed_by(SIGKILL)) });
+                Ok(Spawned {
+                    pid: Some(424246),
                     output: no_output(),
                     exit,
                     control,

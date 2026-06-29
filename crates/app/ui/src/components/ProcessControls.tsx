@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Play, RotateCw, ShieldCheck, Square } from "lucide-react";
+import { History, Play, RotateCw, ShieldCheck, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { canRestart, canStart, canStop } from "@/lib/status";
 import type { ProcStatus } from "@/domain";
@@ -16,6 +16,11 @@ interface ProcessControlsProps {
   requiresTrust?: boolean;
   /** Trust the command; when provided and `requiresTrust`, a trust affordance is shown. */
   onTrust?: () => void;
+  /** A stopped agent whose provider supports "Resume last session" — when set with
+   *  `onResume`, a Resume control sits beside Start, enabled from the same resting states. */
+  resumable?: boolean;
+  /** Resume the agent's last session; shown only for a `resumable` process. */
+  onResume?: () => void;
 }
 
 // The per-process start / restart / stop cluster, reused in the sidebar row and the
@@ -30,6 +35,8 @@ export function ProcessControls({
   size = "icon-sm",
   requiresTrust = false,
   onTrust,
+  resumable = false,
+  onResume,
 }: ProcessControlsProps) {
   return (
     <div className="flex items-center gap-0.5">
@@ -46,6 +53,16 @@ export function ProcessControls({
       >
         <Play />
       </Control>
+      {resumable && onResume && (
+        <Control
+          label="Resume last session"
+          size={size}
+          disabled={!canStart(status)}
+          onClick={onResume}
+        >
+          <History />
+        </Control>
+      )}
       <Control label="Restart" size={size} disabled={!canRestart(status)} onClick={onRestart}>
         <RotateCw />
       </Control>

@@ -12,6 +12,7 @@ interface ProcessGroupProps {
   onStart: (id: number) => void;
   onStop: (id: number) => void;
   onRestart: (id: number) => void;
+  onResume: (id: number) => void;
   onTrust: (id: number) => void;
 }
 
@@ -26,6 +27,7 @@ export function ProcessGroup({
   onStart,
   onStop,
   onRestart,
+  onResume,
   onTrust,
 }: ProcessGroupProps) {
   return (
@@ -53,6 +55,7 @@ export function ProcessGroup({
               onStart={() => onStart(process.id)}
               onStop={() => onStop(process.id)}
               onRestart={() => onRestart(process.id)}
+              onResume={() => onResume(process.id)}
               onTrust={() => onTrust(process.id)}
             />
           ))}

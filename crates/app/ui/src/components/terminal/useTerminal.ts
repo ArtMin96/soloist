@@ -62,6 +62,22 @@ export function useTerminal(process: ProcessView) {
       });
   }, [id]);
 
+  // Fit the emulator to its host, then push the resulting winsize to the PTY. Reads the live
+  // refs so it can run from any effect — initial layout, a host resize, an appearance change,
+  // or a relaunch (a new PTY is spawned at a default winsize and must be re-synced to the pane).
+  const syncSize = useCallback(() => {
+    const term = termRef.current;
+    const fit = fitRef.current;
+    if (!term || !fit) return;
+    try {
+      fit.fit();
+    } catch {
+      // The host has no measurable size yet; the ResizeObserver fires again once laid out.
+      return;
+    }
+    void ptyResize(id, term.cols, term.rows).catch(() => {});
+  }, [id]);
+
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -79,21 +95,12 @@ export function useTerminal(process: ProcessView) {
     fitRef.current = fit;
     attachedRef.current = false;
 
-    const sync = () => {
-      try {
-        fit.fit();
-      } catch {
-        // The host has no measurable size yet; the ResizeObserver fires again once laid out.
-        return;
-      }
-      void ptyResize(id, term.cols, term.rows).catch(() => {});
-    };
     const onData = term.onData((input) => void ptyWrite(id, input).catch(() => {}));
-    const observer = new ResizeObserver(() => sync());
+    const observer = new ResizeObserver(() => syncSize());
     observer.observe(host);
 
     attach();
-    sync();
+    syncSize();
     term.focus();
 
     return () => {
@@ -109,7 +116,7 @@ export function useTerminal(process: ProcessView) {
       fitRef.current = null;
       attachedRef.current = false;
     };
-  }, [id, attach]);
+  }, [id, attach, syncSize]);
 
   // Restyle the live emulator when the theme or terminal typography changes — set on the
   // existing instance, then re-fit since the font metrics moved (so the PTY winsize tracks the
@@ -125,19 +132,23 @@ export function useTerminal(process: ProcessView) {
     term.options.lineHeight = options.lineHeight;
     term.options.letterSpacing = options.letterSpacing;
     term.options.theme = options.theme;
-    try {
-      fitRef.current?.fit();
-    } catch {
-      return;
-    }
-    void ptyResize(id, term.cols, term.rows).catch(() => {});
-  }, [appearance, dark, id]);
+    // Cell metrics moved with the font change, so re-fit and track the PTY winsize.
+    syncSize();
+  }, [appearance, dark, syncSize]);
 
   // A process selected before it started has no terminal to attach to; attach once it
   // goes live so its output appears without re-selecting.
   useEffect(() => {
     if (!attachedRef.current && isActive(process.status)) attach();
   }, [process.status, attach]);
+
+  // A relaunch (resume, restart, or start-after-stop) spawns a *new* PTY at a default winsize
+  // while the existing emulator and its live stream are reused; re-sync the pane's size to the
+  // new PTY once the process is active again, so the agent re-renders to the full pane instead
+  // of the spawn default — otherwise its output leaves gaps on the right and bottom.
+  useEffect(() => {
+    if (isActive(process.status)) syncSize();
+  }, [process.status, syncSize]);
 
   return { hostRef, state };
 }

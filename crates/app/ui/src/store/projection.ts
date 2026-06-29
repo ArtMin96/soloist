@@ -23,6 +23,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
           status: event.status,
           exit_code: null,
           requires_trust: event.requires_trust,
+          resumable: event.resumable,
           ports: [],
           ready: "Ungated",
         },

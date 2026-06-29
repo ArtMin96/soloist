@@ -17,6 +17,7 @@ const running: ProcessView = {
   status: "Running",
   exit_code: null,
   requires_trust: false,
+  resumable: false,
   ports: [],
   ready: "Ungated",
 };
@@ -32,6 +33,7 @@ function renderRow(process: ProcessView, signals: SignalState = EMPTY_SIGNALS) {
           onStart={noop}
           onStop={noop}
           onRestart={noop}
+          onResume={noop}
           onTrust={noop}
         />
       </SignalsContext>

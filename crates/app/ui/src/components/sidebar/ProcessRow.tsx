@@ -12,6 +12,7 @@ interface ProcessRowProps {
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
+  onResume: () => void;
   onTrust: () => void;
 }
 
@@ -26,6 +27,7 @@ export function ProcessRow({
   onStart,
   onStop,
   onRestart,
+  onResume,
   onTrust,
 }: ProcessRowProps) {
   const { metrics, attempt, activity } = useSignal(process.id);
@@ -97,6 +99,8 @@ export function ProcessRow({
             onStart={onStart}
             onStop={onStop}
             onRestart={onRestart}
+            resumable={process.resumable}
+            onResume={onResume}
             requiresTrust={process.requires_trust}
             onTrust={onTrust}
           />
