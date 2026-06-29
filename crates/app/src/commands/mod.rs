@@ -136,6 +136,17 @@ pub async fn proc_restart(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(),
         .map_err(|err| err.to_string())
 }
 
+/// Resumes a stopped agent's last session ("Resume last session"): relaunches it with its
+/// provider's resume command instead of starting fresh. Errors if the process has no last
+/// session to resume (a command, terminal, or unsupported-provider agent).
+#[tauri::command]
+pub async fn agent_resume(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
+    facade
+        .supervisor()
+        .resume(ProcessId::from_raw(id))
+        .map_err(|err| err.to_string())
+}
+
 /// Starts every trusted auto-start command in a project (untrusted ones are skipped).
 #[tauri::command]
 pub async fn stack_start(project: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {

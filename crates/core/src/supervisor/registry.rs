@@ -42,6 +42,12 @@ struct Managed {
     /// Globs (relative to `project_root`) whose changes file-watch-restart this command.
     /// Empty for terminals, agents, and commands that declare no `restart_when_changed`.
     restart_when_changed: Vec<String>,
+    /// An alternate command line that relaunches this process resuming its last session
+    /// (an agent's "Resume last session"), or `None`. Stored and replayed verbatim — never
+    /// interpreted; [`Supervisor::resume`](super::Supervisor::resume) launches it in place of
+    /// the fresh `launch.command`, leaving that command untouched so a later plain start is
+    /// still fresh.
+    resume_command: Option<String>,
     handle: Option<ActorHandle>,
     /// The leader pgid of the running OS process group, while one is live. Recorded by the
     /// actor after spawn and cleared when the child is reaped, so monitoring can sample the
@@ -57,6 +63,9 @@ pub(crate) struct EntryInfo {
     pub(crate) trust_variant: Option<Hash>,
     pub(crate) auto_restart: bool,
     pub(crate) launch: SpawnSpec,
+    /// The resume command line, if this process can resume its last session — replayed by
+    /// [`Supervisor::resume`](super::Supervisor::resume).
+    pub(crate) resume_command: Option<String>,
 }
 
 /// A start candidate: its id, trust variant (if trust-gated), and launch spec.
@@ -84,6 +93,7 @@ impl Registry {
         auto_start: bool,
         auto_restart: bool,
         restart_when_changed: Vec<String>,
+        resume_command: Option<String>,
     ) {
         let mut guard = lock(&self.inner);
         guard.insert(
@@ -96,6 +106,7 @@ impl Registry {
                 auto_start,
                 auto_restart,
                 restart_when_changed,
+                resume_command,
                 handle: None,
                 pgid: None,
             },
@@ -253,6 +264,7 @@ impl Registry {
             trust_variant: entry.trust_variant,
             auto_restart: entry.auto_restart,
             launch: entry.launch.clone(),
+            resume_command: entry.resume_command.clone(),
         })
     }
 
@@ -414,6 +426,7 @@ mod tests {
             status: ProcStatus::Stopped,
             exit_code: None,
             requires_trust: false,
+            resumable: false,
             ports: Vec::new(),
             ready: Readiness::Ungated,
         };
@@ -431,6 +444,7 @@ mod tests {
             false,
             false,
             Vec::new(),
+            None,
         );
         registry.set_status(id, status, None);
         (registry, id)

@@ -12,13 +12,21 @@ interface TerminalPaneProps {
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
+  onResume: () => void;
   onTrust: () => void;
 }
 
 // The interactive PTY for the selected process: a header naming it with its status and
 // controls, over the live xterm.js surface. The emulator and IPC live in `useTerminal`;
 // this stays presentational.
-export function TerminalPane({ process, onStart, onStop, onRestart, onTrust }: TerminalPaneProps) {
+export function TerminalPane({
+  process,
+  onStart,
+  onStop,
+  onRestart,
+  onResume,
+  onTrust,
+}: TerminalPaneProps) {
   const { hostRef, state } = useTerminal(process);
   const { title, ringing } = useTerminalChrome(process.id);
   const { metrics, attempt, activity } = useSignal(process.id);
@@ -51,6 +59,8 @@ export function TerminalPane({ process, onStart, onStop, onRestart, onTrust }: T
             onStart={onStart}
             onStop={onStop}
             onRestart={onRestart}
+            resumable={process.resumable}
+            onResume={onResume}
             requiresTrust={process.requires_trust}
             onTrust={onTrust}
           />
@@ -60,9 +70,20 @@ export function TerminalPane({ process, onStart, onStop, onRestart, onTrust }: T
         <div ref={hostRef} className="absolute inset-2" data-testid="terminal-host" />
         {state === "not-started" && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center">
-            <p className="text-sm text-muted-foreground">
-              This process hasn’t started yet. Press{" "}
-              <span className="font-medium text-foreground">Start</span> to run it.
+            <p className="max-w-sm text-sm text-pretty text-muted-foreground">
+              {process.resumable ? (
+                <>
+                  This agent isn’t running. Press{" "}
+                  <span className="font-medium text-foreground">Resume last session</span> to
+                  continue where it left off, or{" "}
+                  <span className="font-medium text-foreground">Start</span> to begin fresh.
+                </>
+              ) : (
+                <>
+                  This process hasn’t started yet. Press{" "}
+                  <span className="font-medium text-foreground">Start</span> to run it.
+                </>
+              )}
             </p>
           </div>
         )}

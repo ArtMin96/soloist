@@ -66,6 +66,10 @@ impl From<SupervisorError> for ScopedActionError {
             SupervisorError::NotFound(_) => ScopedActionError::UnknownProcess,
             SupervisorError::Untrusted => ScopedActionError::Untrusted,
             SupervisorError::Store(err) => ScopedActionError::Store(err),
+            // Resume is a local-only affordance (the UI's "Resume last session"), never a
+            // scoped session action, so a scoped call cannot produce this — map it to the
+            // closest scoped refusal for exhaustiveness.
+            SupervisorError::NotResumable(_) => ScopedActionError::UnknownProcess,
         }
     }
 }

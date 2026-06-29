@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::resume::resume_strategy_for;
+
 /// The agent CLI providers Soloist knows out of the box, plus [`AgentKind::Generic`] for any
 /// other CLI the user configures. A closed enum so auto-detection — and the per-provider idle
 /// heuristics that build on it — handle every provider through an exhaustive `match` rather
@@ -69,18 +71,39 @@ pub struct AgentTool {
 impl AgentTool {
     /// The shell command line that launches this tool with `extra_args` for one launch:
     /// the command, then the default args (appended on every launch), then the per-launch
-    /// extra args, in that order. Each token is POSIX-quoted so it survives the login shell
-    /// (`$SHELL -lc <line>`) as exactly one argument — an arg with spaces or shell
-    /// metacharacters stays a single argument rather than being word-split.
-    ///
-    /// This is the single source for how a tool's command line is composed; the supervisor
-    /// runs the returned line verbatim through the login shell, so PATH and version managers
-    /// still resolve.
+    /// extra args, in that order. The supervisor runs the returned line verbatim through the
+    /// login shell, so PATH and version managers still resolve.
     pub fn launch_command_line(&self, extra_args: &[String]) -> String {
-        std::iter::once(&self.command)
-            .chain(self.default_args.iter())
-            .chain(extra_args.iter())
-            .map(|token| shell_quote(token))
+        self.command_line_with_prefix(&[], extra_args)
+    }
+
+    /// The command line that relaunches this tool resuming its most recent session in the
+    /// working directory, composed with the same `extra_args` as the original launch — or
+    /// `None` when the provider has no documented id-less resume (Amp resumes only by a thread
+    /// id Soloist does not capture; Generic is user-configured). The per-provider invocation
+    /// is owned by [`resume_strategy_for`], the single place that knows how each provider
+    /// resumes; this just composes it onto the tool's command and args.
+    pub fn resume_command_line(&self, extra_args: &[String]) -> Option<String> {
+        resume_strategy_for(self.kind).resume_command_line(self, extra_args)
+    }
+
+    /// Composes the tool's command line with `prefix` tokens inserted immediately after the
+    /// command and before the args: command, prefix, default args (appended every launch),
+    /// then per-launch extra args. Each token is POSIX-quoted so it survives `$SHELL -lc
+    /// <line>` as exactly one argument — an arg with spaces or shell metacharacters stays a
+    /// single argument rather than being word-split. The single source for how this tool's
+    /// command line is built: a fresh launch passes an empty prefix, a resume passes the
+    /// provider's resume verb or flag.
+    pub(super) fn command_line_with_prefix(
+        &self,
+        prefix: &[&str],
+        extra_args: &[String],
+    ) -> String {
+        std::iter::once(self.command.as_str())
+            .chain(prefix.iter().copied())
+            .chain(self.default_args.iter().map(String::as_str))
+            .chain(extra_args.iter().map(String::as_str))
+            .map(shell_quote)
             .collect::<Vec<_>>()
             .join(" ")
     }

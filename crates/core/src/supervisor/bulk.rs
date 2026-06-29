@@ -99,7 +99,12 @@ impl Supervisor {
     fn restart_each(&self, ids: Vec<ProcessId>) -> Result<(), SupervisorError> {
         for id in ids {
             match self.restart(id) {
-                Ok(()) | Err(SupervisorError::Untrusted) | Err(SupervisorError::NotFound(_)) => {}
+                // `restart` never yields `NotResumable` (only `resume` does); listed for
+                // exhaustiveness alongside the other tolerated, non-fatal skips.
+                Ok(())
+                | Err(SupervisorError::Untrusted)
+                | Err(SupervisorError::NotFound(_))
+                | Err(SupervisorError::NotResumable(_)) => {}
                 Err(err @ SupervisorError::Store(_)) => return Err(err),
             }
         }

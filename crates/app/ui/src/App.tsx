@@ -132,6 +132,7 @@ export default function App() {
                     onStart={store.start}
                     onStop={store.stop}
                     onRestart={store.restart}
+                    onResume={store.resume}
                     onTrust={trustById}
                     onStartAll={store.startAll}
                     onRestartRunning={store.restartRunning}
@@ -148,6 +149,7 @@ export default function App() {
                         onStart={() => store.start(selected.id)}
                         onStop={() => store.stop(selected.id)}
                         onRestart={() => store.restart(selected.id)}
+                        onResume={() => store.resume(selected.id)}
                         onTrust={() => trustById(selected.id)}
                       />
                     ) : selectedProject ? (

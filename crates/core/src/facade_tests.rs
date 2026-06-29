@@ -214,6 +214,36 @@ async fn launch_agent_registers_and_starts_an_agent_in_the_project() {
 }
 
 #[tokio::test]
+async fn launch_agent_marks_resumable_for_a_supported_provider_only() {
+    // The façade composes each agent's resume command from its provider strategy at launch, so
+    // the read-model's `resumable` flag reflects whether that provider has a documented resume.
+    let facade = facade_with_tools(FakeSpawner::exits_on_terminate());
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load");
+
+    let claude = facade
+        .launch_agent(project.id, "Claude", Vec::new())
+        .expect("launch claude");
+    let amp = facade
+        .launch_agent(project.id, "Amp", Vec::new())
+        .expect("launch amp");
+
+    let resumable = |id| {
+        facade
+            .snapshot()
+            .into_iter()
+            .find(|p| p.id == id)
+            .expect("launched agent in snapshot")
+            .resumable
+    };
+    assert!(resumable(claude), "Claude resumes its most recent session");
+    assert!(
+        !resumable(amp),
+        "Amp has no documented id-less resume, so it is not resumable"
+    );
+}
+
+#[tokio::test]
 async fn launch_agent_rejects_an_unknown_tool() {
     let facade = facade_with_tools(FakeSpawner::exits_on_terminate());
     let dir = tempfile::tempdir().expect("temp dir");

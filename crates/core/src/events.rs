@@ -33,6 +33,11 @@ pub enum DomainEvent {
         label: String,
         status: ProcStatus,
         requires_trust: bool,
+        /// True for an agent whose provider supports resuming its last session (see
+        /// [`crate::process::ProcessView::resumable`]); the UI offers "Resume last session"
+        /// when it rests. Carried on spawn so a row created from this event — not only from a
+        /// snapshot — knows it.
+        resumable: bool,
     },
     /// A process moved between lifecycle states. `exit_code` is set on a terminal
     /// transition driven by the child exiting on its own (`None` when terminated by a

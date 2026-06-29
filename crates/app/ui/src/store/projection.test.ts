@@ -10,6 +10,7 @@ const starting: ProcessView = {
   status: "Starting",
   exit_code: null,
   requires_trust: false,
+  resumable: false,
   ports: [],
   ready: "Ungated",
 };
@@ -24,6 +25,7 @@ describe("applyEvent", () => {
       label: "web",
       status: "Starting",
       requires_trust: false,
+      resumable: false,
     });
     expect(next).toEqual([starting]);
   });
@@ -37,8 +39,23 @@ describe("applyEvent", () => {
       label: "api",
       status: "Stopped",
       requires_trust: true,
+      resumable: false,
     });
     expect(next[0]?.requires_trust).toBe(true);
+  });
+
+  it("carries a spawned agent's resumable flag", () => {
+    const next = applyEvent([], {
+      type: "ProcessSpawned",
+      id: 3,
+      project: 1,
+      kind: "Agent",
+      label: "assistant",
+      status: "Stopped",
+      requires_trust: false,
+      resumable: true,
+    });
+    expect(next[0]?.resumable).toBe(true);
   });
 
   it("ignores a duplicate spawn for the same id", () => {
@@ -50,6 +67,7 @@ describe("applyEvent", () => {
       label: "web",
       status: "Starting",
       requires_trust: false,
+      resumable: false,
     });
     expect(next).toHaveLength(1);
   });

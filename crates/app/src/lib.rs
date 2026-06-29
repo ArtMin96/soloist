@@ -274,6 +274,7 @@ pub fn run() {
             commands::proc_start,
             commands::proc_stop,
             commands::proc_restart,
+            commands::agent_resume,
             commands::stack_start,
             commands::stack_stop,
             commands::stack_restart_running,

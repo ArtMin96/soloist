@@ -37,7 +37,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | B6 | Graceful stop: SIGTERM→grace→SIGKILL on process group | ❓ | 3 | v1 | Stop leaves zero child PIDs |
 | B7 | Stop releases that process's todo locks; clears crash tracking | ✅ | 3 | v1 | Locks freed on stop |
 | B8 | Orphan adoption/cleanup on relaunch (match project+name+command) | ✅ | 3 | v1 | Leftover child adopted or prompted |
-| B9 | "Resume last session" for stopped agents | 🟡 | 3 | later | Stopped agent offers resume |
+| B9 | "Resume last session" for stopped agents | 🟡 | 3 | later | Stopped agent offers resume. **Delivered ahead of schedule (user request 2026-06-29):** a stopped resumable agent offers **Resume last session** beside Start; resume relaunches it with its provider's documented resume-last invocation (per-provider **Strategy** in `core::agents::resume` — Claude `--continue`, Codex `resume --last`, Gemini `--resume`, OpenCode/Copilot/Kimi `--continue`; Amp + Generic are recorded gaps, no fabricated flag), composed once at launch and replayed by `Supervisor::resume` without touching the fresh command. Surfaced on `ProcessView.resumable`. Headless evidence: `core::agents::resume` (6), `supervisor::resume_tests` (4), `facade_tests` resumable-per-provider, and a real-PTY `pty/tests/integration.rs::resume_relaunches_a_stub_agent_with_its_providers_resume_command`. UI (ProcessControls + TerminalPane via `/impeccable`, 4 vitest) → its real-window walk is the user-only step. Clean-room gap recorded in `plan/05 §12` + `KNOWN-DIVERGENCES.md` D-9. |
 
 ## C. Terminal I/O (Phase 4)
 

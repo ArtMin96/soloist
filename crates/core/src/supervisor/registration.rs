@@ -32,6 +32,12 @@ pub struct Registration {
     /// [`ProcessSpec::restart_when_changed`]; always empty for a launched terminal or agent
     /// (only `solo.yml` commands are file-watched).
     pub restart_when_changed: Vec<String>,
+    /// An alternate command line that relaunches this process resuming its last session, when
+    /// its provider supports it (an agent's "Resume last session"); `None` otherwise. The
+    /// supervisor stores and replays it verbatim, never interpreting it — the per-provider
+    /// resume invocation is decided in the agents context and composed by the façade. Its
+    /// presence is what makes a process [`resumable`](crate::process::ProcessView::resumable).
+    pub resume_command: Option<String>,
 }
 
 impl Registration {
@@ -58,6 +64,8 @@ impl Registration {
             auto_start: spec.auto_start,
             auto_restart: spec.auto_restart,
             restart_when_changed: spec.restart_when_changed.clone(),
+            // A `solo.yml` command has no agent-style session to resume.
+            resume_command: None,
         }
     }
 
@@ -82,6 +90,16 @@ impl Registration {
             auto_start: false,
             auto_restart: false,
             restart_when_changed: Vec::new(),
+            // Set by [`Self::resumable_with`] for an agent whose provider can resume.
+            resume_command: None,
         }
+    }
+
+    /// Records the command line that resumes this process's last session, marking it
+    /// [`resumable`](crate::process::ProcessView::resumable). Used by the agent launch path for
+    /// a provider that supports "Resume last session"; a `None` leaves it non-resumable.
+    pub fn resumable_with(mut self, resume_command: Option<String>) -> Self {
+        self.resume_command = resume_command;
+        self
     }
 }

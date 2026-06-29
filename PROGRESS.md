@@ -175,6 +175,61 @@
   session** (per the user) and **no canonical doc was edited** — propagating the `O`-rows into `plan/02`
   and the gap into `plan/05 §12` is **orch-00 Task 1**. The track depends only on Phases 7/8/9 (all done/
   `Verified`). **Next sessions implement orch-00 → orch-05; see "Next session should start with" → ★.**
+- **Deferred `later` row B9 ("Resume last session" for stopped agents) delivered ahead of schedule
+  (user request, 2026-06-29) — CODE-COMPLETE & gate-green.** A Phase-3 (C2/C4) `later` row pulled forward
+  at the owner's request; recorded as a scheduled pull-forward (not a v1 re-scope), like A5/A8. **Full
+  stack** (core + Tauri command + UI), built **multi-provider** per the owner's explicit directive ("not
+  only Claude Code; use a design pattern — a single call that understands each provider's resume"). Every
+  provider invocation was verified from official docs (no fabrication).
+  - **C4 resume Strategy (the single dispatch, `core/src/agents/resume.rs`):** a `ResumeStrategy` trait +
+    `resume_strategy_for(kind)` dispatch with one **cited** arm per provider (mirrors the idle FSM's
+    `strategy_for`) — **Claude** `--continue`, **Codex** `resume --last` (subcommand), **Gemini**
+    `--resume`, **OpenCode**/**Copilot**/**Kimi** `--continue`; **Amp** (resumes only by a thread id we
+    don't capture) and **Generic** (user-configured) are `NoResume` **gaps**, no fabricated flag. Every
+    supported provider resumes "most recent conversation in the cwd", so resume needs **no session-id
+    tracking** (the agent process already pins its working dir to the project root). `AgentTool::resume_command_line`
+    delegates to the dispatch and reuses one POSIX-quoting `command_line_with_prefix` helper (DRY with
+    `launch_command_line`).
+  - **C2 supervisor (store + replay):** the resume command is composed **once at launch** (`Facade::launch_agent`,
+    same extra args as the fresh launch) and stored on the registry entry as an **opaque alternate command**
+    (`Registration::resumable_with` → `Managed.resume_command` → `EntryInfo`). `Supervisor::resume(id)`
+    replays it via `launch_actor` with a one-off spec, **without mutating the stored fresh command** — so
+    **Start (fresh) and Resume (continue) are both offered** for a stopped resumable agent. `SupervisorError::NotResumable`
+    for a process with no resume command. `ProcessView.resumable` (= resume_command present) + the
+    `ProcessSpawned` event carry it, so a row created from the event (not just a snapshot) knows it.
+  - **Adapter + UI:** thin `agent_resume(id)` Tauri command (`tauri-calling-rust` skill) → `supervisor().resume`
+    (same pattern as `proc_restart`); registered in `lib.rs`. TS: `ProcessView.resumable` + `ProcessSpawned.resumable`
+    in the one `domain.ts`, `agentResume` wrapper in `api.ts`, projection carries `resumable`. UI via
+    **`/impeccable` + shadcn** (owner-confirmed visuals): a Resume ghost-icon control (`History` icon, distinct
+    from Restart's RotateCw) in `ProcessControls` beside Start, shown for `resumable && canStart(status)` and
+    always-present-but-disabled while active (no row reflow, per DESIGN.md); `TerminalPane` not-started copy
+    teaches both paths for a resumable agent; threaded App → Sidebar → ProjectGroup → ProcessGroup → ProcessRow
+    and App → TerminalPane via a new `store.resume`.
+  - **Relaunch winsize fix (found in the owner's live test, 2026-06-29):** after resume the terminal
+    showed gaps on the right/bottom — a relaunch spawns a **new PTY at the default winsize** (the existing
+    emulator + live stream are reused), and `useTerminal` only synced the winsize on mount / host-resize /
+    appearance-change, never on a relaunch, so the agent re-rendered into 80×24 inside a larger grid. Fixed:
+    the fit-and-`pty_resize` logic is factored into one `syncSize` callback (DRY with the appearance effect)
+    and re-run whenever the process becomes active again, so a resume/restart/start-after-stop re-fits the new
+    PTY to the pane (the agent gets a SIGWINCH and re-renders full-size). tsc/eslint/prettier clean; the fit
+    measurement isn't jsdom-testable, so it's verified in the owner's live retest.
+  - **Gate (evidence, 2026-06-29):** `just lint` **exit 0** (clippy `-D warnings`, fmt, tsc, eslint, prettier,
+    dep-direction OK; file-size advisory only — `supervisor.rs` 448, `testing/spawner.rs` 424, nudged a little,
+    non-gating). `cargo test --workspace` **all green**: core **467** (incl. `agents::resume` 6, `supervisor::resume_tests`
+    4, `facade_tests` resumable-per-provider), a real-PTY `pty/tests/integration.rs::resume_relaunches_a_stub_agent_with_its_providers_resume_command`,
+    mcp 63, store 78, ipc 14, app 32 (3 ignored = soak). UI **vitest 167** (+4 `ProcessControls` resume, +1 projection);
+    production bundle builds. Docs: `plan/05 §12` B9 gap row (per-provider cited table + Amp/Generic gaps + within-app-run
+    scope), `plan/02` B9 updated, `KNOWN-DIVERGENCES.md` **D-9** (both Start+Resume offered).
+  - **Scope note:** resume is **UI-local** (the `agent_resume` Tauri command, like `orchestration_snapshot`) —
+    not exposed over MCP/HTTP. The single `Supervisor::resume` makes a future MCP/HTTP exposure trivial; not in B9's scope.
+  - **Remaining (the only thing left → `Verified`): the user-only real-window walk** — now cataloged in the
+    new **e2e testing track** ([`plan/e2e/`](plan/e2e/README.md), §3): launch a Claude (or
+    Codex/Gemini/OpenCode/Copilot/Kimi) agent, stop it, assert a **Resume last session** control appears beside
+    Start in both the sidebar row and the terminal header; click it and assert the agent relaunches continuing its
+    prior conversation (e.g. `claude --continue`); confirm a non-resumable target (Amp, Generic, or a
+    command/terminal) shows **only** Start, and the resumed terminal fits the pane (no right/bottom gaps). Runs via
+    WebdriverIO + `tauri-driver` once e2e-00 lands (sudo deps + a display — owner-driven setup). The in-browser
+    `/impeccable` visual pass is part of that same walk (no display in this environment).
 - **Deferred `later` rows A5 + A8 delivered ahead of schedule (user request, 2026-06-29) — CODE-COMPLETE
   & gate-green.** Both are Phase-2 (C1) `later` rows pulled forward at the owner's request; recorded as a
   scheduled pull-forward (not a v1 re-scope). Full `just lint` gate green for everything touched (clippy
@@ -3783,6 +3838,19 @@ review's one should-fix + the mechanical nits:
 ---
 
 ## Next session should start with
+
+**◆ B9 "Resume last session" — CODE-COMPLETE & gate-green (2026-06-29); only the USER-ONLY real-window walk
+remains.** A `later` row pulled forward at the owner's request (full stack, multi-provider — see the top
+Current-state entry). Everything is headless-verified (`just lint` exit 0; core 467 incl. `agents::resume`/`supervisor::resume_tests`,
+a real-PTY resume integration test, UI vitest 167; docs in `plan/05 §12`, `plan/02` B9, `KNOWN-DIVERGENCES.md` D-9).
+**The only thing left to flip B9 → `Verified`:** launch an agent (Claude/Codex/Gemini/OpenCode/Copilot/Kimi),
+stop it, assert a **Resume last session** control appears beside Start in the sidebar row + terminal header,
+click it and assert the agent relaunches continuing its prior session; confirm a non-resumable target (Amp,
+Generic, command, terminal) shows only Start. This walk is now cataloged in the new **e2e testing track**
+([`plan/e2e/`](plan/e2e/README.md)) — a standalone WebdriverIO + `tauri-driver` harness (owner-driven setup,
+sudo deps + a display) that turns every owed real-window walk (B9, orchestrator UI O3–O8, dashboard, settings,
+notifications) into an automated spec. **Start that track at [`e2e-00`](plan/e2e/e2e-00-harness-and-ci.md)**
+(harness + CI + a smoke spec), then add a spec per catalog row. Orthogonal to the orchestrator/Phase-11 work below.
 
 **★ ORCHESTRATOR TRACK — orch-00 DONE, orch-01 DONE; START AT
 [`orch-02`](plan/orchestrator/orch-02-coordination-panels-ui.md).** **orch-01 (agent lineage O3 + live tree

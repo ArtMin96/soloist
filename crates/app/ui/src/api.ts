@@ -198,6 +198,12 @@ export function procRestart(id: number): Promise<void> {
   return invoke<void>("proc_restart", { id });
 }
 
+// Resumes a stopped agent's last session: relaunches it with its provider's resume command
+// instead of starting fresh. Only meaningful for a resumable agent (ProcessView.resumable).
+export function agentResume(id: number): Promise<void> {
+  return invoke<void>("agent_resume", { id });
+}
+
 export function stackStart(project: number): Promise<void> {
   return invoke<void>("stack_start", { project });
 }

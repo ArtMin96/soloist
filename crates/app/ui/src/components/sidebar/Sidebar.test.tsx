@@ -19,6 +19,7 @@ function renderSidebar(settings: SidebarSettings) {
         onStart={noop}
         onStop={noop}
         onRestart={noop}
+        onResume={noop}
         onTrust={noop}
         onStartAll={noop}
         onRestartRunning={noop}

@@ -89,6 +89,7 @@ fn sample_view(id: u64) -> ProcessView {
         status: ProcStatus::Running,
         exit_code: None,
         requires_trust: false,
+        resumable: false,
         ports: Vec::new(),
         ready: Readiness::Ungated,
     }

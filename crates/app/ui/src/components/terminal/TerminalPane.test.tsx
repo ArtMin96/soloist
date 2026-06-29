@@ -21,6 +21,7 @@ const PROCESS: ProcessView = {
   status: "Running",
   exit_code: null,
   requires_trust: false,
+  resumable: false,
   ports: [],
   ready: "Ungated",
 };
@@ -49,6 +50,7 @@ describe("TerminalPane chrome", () => {
         onStart={noop}
         onStop={noop}
         onRestart={noop}
+        onResume={noop}
         onTrust={noop}
       />,
     );
@@ -74,6 +76,7 @@ describe("TerminalPane chrome", () => {
         onStart={noop}
         onStop={noop}
         onRestart={noop}
+        onResume={noop}
         onTrust={noop}
       />,
     );
@@ -93,6 +96,7 @@ describe("TerminalPane chrome", () => {
         onStart={noop}
         onStop={noop}
         onRestart={noop}
+        onResume={noop}
         onTrust={noop}
       />,
     );

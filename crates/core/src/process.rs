@@ -112,6 +112,11 @@ pub struct ProcessView {
     pub status: ProcStatus,
     pub exit_code: Option<i32>,
     pub requires_trust: bool,
+    /// True for an agent whose provider supports "Resume last session": when it rests, the UI
+    /// offers resuming the most recent conversation as well as starting fresh. Always false for
+    /// commands, terminals, and agents whose provider has no documented id-less resume. A
+    /// static property of the process, set once at registration.
+    pub resumable: bool,
     pub ports: Vec<u16>,
     pub ready: Readiness,
 }

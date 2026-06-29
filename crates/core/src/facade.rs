@@ -280,6 +280,12 @@ impl Facade {
             .get(project)?
             .ok_or(LaunchAgentError::UnknownProject)?
             .root;
+        let kind = tool.kind;
+        // The resume invocation is composed once here, from the same extra args as this
+        // launch, by the single per-provider strategy ([`AgentTool::resume_command_line`]);
+        // the supervisor stores it and replays it for "Resume last session". `None` for a
+        // provider with no documented resume, leaving the process non-resumable.
+        let resume_command = tool.resume_command_line(&extra_args);
         let spec = SpawnSpec {
             command: tool.launch_command_line(&extra_args),
             working_dir: root,
@@ -288,13 +294,10 @@ impl Facade {
             env: BTreeMap::new(),
             size: PtySize::default(),
         };
-        let kind = tool.kind;
-        let id = self.supervisor.register(Registration::launched(
-            project,
-            ProcessKind::Agent,
-            tool.name,
-            spec,
-        ));
+        let id = self.supervisor.register(
+            Registration::launched(project, ProcessKind::Agent, tool.name, spec)
+                .resumable_with(resume_command),
+        );
         self.supervisor.start(id)?;
         // Track the agent's idle activity from now on; the idle sampler reclassifies it each
         // interval using its provider's heuristic.

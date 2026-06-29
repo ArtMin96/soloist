@@ -162,6 +162,7 @@ fn every_response_variant_round_trips_through_json() {
         status: ProcStatus::Running,
         exit_code: None,
         requires_trust: false,
+        resumable: false,
         ports: Vec::new(),
         ready: Readiness::Ungated,
     };

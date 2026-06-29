@@ -45,6 +45,9 @@ fn status_for(err: &SupervisorError) -> StatusCode {
         SupervisorError::NotFound(_) => StatusCode::NOT_FOUND,
         SupervisorError::Untrusted => StatusCode::FORBIDDEN,
         SupervisorError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        // Resume is a local UI affordance, not an HTTP mutation, so this cannot arise here;
+        // mapped for exhaustiveness as a `404`, like an action on an unresumable target.
+        SupervisorError::NotResumable(_) => StatusCode::NOT_FOUND,
     }
 }
 
