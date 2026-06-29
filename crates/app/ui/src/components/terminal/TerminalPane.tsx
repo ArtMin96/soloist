@@ -29,7 +29,7 @@ export function TerminalPane({ process, onStart, onStop, onRestart, onTrust }: T
         <span className="truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">
           {title ?? process.label}
         </span>
-        <ProcessIndicator process={process} activity={activity} />
+        <ProcessIndicator status={process.status} activity={activity} />
         <ProcessMeta
           status={process.status}
           ready={process.ready}

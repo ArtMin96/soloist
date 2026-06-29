@@ -25,7 +25,62 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
-- **Orchestrator track IN PROGRESS — orch-00 DONE (2026-06-28), orch-01 next.** **orch-00 (read-model O1 +
+- **Orchestrator track IN PROGRESS — orch-00 DONE, orch-01 DONE (code-complete & gate-green, 2026-06-28),
+  orch-02 next.** **orch-01 (agent lineage O3 + live orchestration tree UI O4) is code-complete & gate-green**
+  on branch `feat/orch-01-agent-lineage-and-tree-ui` (**stacked on `feat/orch-00-read-model-and-events`** per the
+  owner — branched off the open PR #40, not yet merged; owner merges, no self-merge). What landed:
+  - **O3 lineage (core C4):** a new single-purpose `core::agents::AgentLineage` tracker (child→parent map,
+    mirroring `IdleTracker`); `spawn_agent` records the worker under its **bound lead** (`identity.origin(session).process()`),
+    while a manual/unbound launch records nothing (a root). `orchestration_snapshot` fills `AgentNode.parent`
+    from it **filtered by the live registry**, so a closed lead **re-roots its workers on read** (the `whoami`
+    drop-dangling pattern) — no event, no migration. Bounded (§8): the idle sampler prunes lineage via
+    `retain_live` alongside the idle tracker (inside `idle_sampler_loop`; no composition-root change). Lineage is
+    per-run, in-memory (never persisted).
+  - **O3 live-restructure signal (DRY decision):** **NO new `ProcessLineageChanged` variant** — the tree
+    re-queries on the existing `ProcessSpawned` / `ProcessRemoved` / `ProcessStatusChanged` / `ProcessRenamed` /
+    `AgentActivityChanged` events (exactly as `plan/05 §12` prescribes: close-driven changes observed via the
+    existing lifecycle events; `AgentActivityChanged` reused for the tree). Reuse beat a second event.
+  - **O4 Tauri bridge:** a thin `#[tauri::command] orchestration_snapshot(project)` in a new
+    `crates/app/src/commands/orchestration.rs` (one-line Facade call, no logic), registered in `generate_handler!`
+    (app command → no ACL); typed `orchestrationSnapshot(project)` wrapper in the one `api.ts`; TS `AgentNode.label`
+    added to the one `domain.ts`. **Scope contract honored:** local-only, like `snapshot()` — NOT routed through
+    MCP/HTTP.
+  - **O4 tree UI (via `/impeccable` + `shadcn`):** `store/orchestrationTree.ts` (pure `buildOrchestrationTree`
+    parent→children, re-roots an absent parent), `store/useOrchestration.ts` (snapshot-then-deltas; re-query
+    **coalesced per animation frame** on the tree-relevant events; null project clears), and presentational
+    `components/orchestration/{OrchestrationNode,OrchestrationTree,OrchestrationPane}.tsx` — nested lead→worker
+    rows reusing the Sidebar/Process-tree visual language (h-7, full-height azure marker idiom, hairlines, radix
+    `Collapsible`, `ChevronRight`), per-lead collapse (in-session, keyed by ephemeral id), ARIA tree roles, empty
+    state. **`ProcessIndicator` refactored** to take `{ status, activity }` instead of the whole `ProcessView`, so
+    both a `ProcessView` row and an `AgentNode` reuse the one 5-state glyph (DRY); 3 callers + its test updated.
+    Mounted as a project-scoped **main-pane view** opened by a sidebar **Network-icon affordance** beside the
+    existing gear (threaded App → Sidebar → ProjectGroup, mirroring `onOpenProjectSettings`); a third
+    mutually-exclusive main-pane selection in `App.tsx`.
+  - **Decisions (asked+answered this session):** (1) timer **pause/resume DomainEvent stays DEFERRED to orch-03**
+    (the timers panel) — orch-01's tree doesn't surface timers, so no code change (handoff #4). (2) Added
+    **`AgentNode.label`** (Rust + TS) so the snapshot is a self-contained tree projection — surfaced per §12; the
+    label is free during assembly (already on `ProcessView`). orch-01 phase file Interfaces + e2e line updated to
+    match. **Handoff #1 was already resolved** before this session: the PR-#40 review scope-contract doc fix is
+    committed (`2b3a49e`) and pushed — nothing to commit there.
+  - **e2e reality (Phase-5 finding, recorded):** WebKitGTK has no CDP, so the headless layer is **mockIPC**, the
+    real-window walk is **WebdriverIO + tauri-driver (user-only, sudo deps)** — *not* Playwright. The phase file's
+    "Playwright" line was reconciled to this. **The live glyph-flip / nesting visual walk is the USER-ONLY step
+    that flips O3/O4 → `Verified`.**
+  - **Known follow-up (owner-deferred 2026-06-28):** the orchestration tree currently renders **every managed
+    process** in the project (Commands + Terminals + Agents), because orch-00's read-model was specified as "each
+    managed process" (`plan/05 §12`) and `orchestration_snapshot` applies no `kind` filter. Orchestration is
+    agent-to-agent, so the faithful behavior is **agents-only** (leads + workers; a future `spawn_process` worker
+    re-qualifies via its recorded parent). The owner verified this and chose to **leave it as-is for now** — the
+    agent-only filter (one line in the Facade assembly + a `plan/05 §12` wording fix + a "a Command is excluded"
+    core test) is a tracked follow-up, not done this phase.
+  - **Gate (evidence):** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier, dep-direction OK;
+    file-size advisory only — `domain.ts` now 538). **Rust `cargo test --workspace` 615 passed / 0 failed / 3
+    ignored** (soak); the known `soloist-sys` shellenv env-red did **not** recur this run. **UI vitest 135 passed
+    / 32 files** (+10: `orchestrationTree` 6, `OrchestrationTree` component 3, `api` orchestration 1). Core
+    lineage evidence: `agents::lineage::tests` (3) + `facade::orchestration::tests` lineage acceptance
+    (`a_worker_spawned_by_a_bound_lead_nests_under_it`, `an_unbound_spawn_is_a_root`,
+    `closing_a_lead_re_parents_its_worker_to_root`). E7 `crates/pty/tests/orchestration.rs` stays green.
+- **(prior) orch-00 (read-model O1 +
   coordination events O2) is code-complete & gate-green** on branch `feat/orch-00-read-model-and-events`
   (**PR #40**, base `orchestrator`): `Facade::orchestration_snapshot` + `core::orchestration` + the 7 `DomainEvent`s + the TS
   mirror, with `plan/02` carrying **O1–O14** and `plan/05 §12` the orchestrator gap + O12/O13/O14 decisions. Full
@@ -3612,21 +3667,25 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-**★ ORCHESTRATOR TRACK — orch-00 DONE; START AT
-[`orch-01`](plan/orchestrator/orch-01-agent-lineage-and-tree-ui.md).** **orch-00 is code-complete & gate-green
-on branch `feat/orch-00-read-model-and-events`** (off `orchestrator` `490174a`; **PR #40** open against
-`orchestrator`, no self-merge): it delivered **O1** (`Facade::orchestration_snapshot` + the `core::orchestration` read-model) +
-**O2** (the seven coordination `DomainEvent`s + the TS mirror), recorded **O1–O14** in `plan/02` and the
-orchestrator gap + O12/O13/O14 decisions in `plan/05 §12`, with the full Phase-9 suite + `crates/pty/tests/
-orchestration.rs` (E7) staying green — see the top Decisions entry for evidence.
+**★ ORCHESTRATOR TRACK — orch-00 DONE, orch-01 DONE; START AT
+[`orch-02`](plan/orchestrator/orch-02-coordination-panels-ui.md).** **orch-01 (agent lineage O3 + live tree
+UI O4) is code-complete & gate-green** on branch `feat/orch-01-agent-lineage-and-tree-ui` (**stacked on
+`feat/orch-00-read-model-and-events`**; orch-00's PR #40 is still open against `orchestrator`, not yet merged —
+owner merges, no self-merge). See the top Current-state entry for the full evidence. **What remains for orch-01:
+the USER-ONLY real-window walk** (WebdriverIO + tauri-driver; sudo deps) to watch a bound lead spawn workers that
+nest under it, a manual launch sit as a root, a worker's glyph flip on an activity event, and a closed lead
+re-root its workers — that walk flips **O3/O4 → `Verified`**. Headless coverage (mockIPC + pure builder +
+component + core lineage tests) is all green.
 
-**orch-01 (the next phase) — agent lineage (O3) + live orchestration tree UI (O4):** record the parent
-`ProcessId` on `spawn_agent` (so `AgentNode.parent` nests workers under their lead — today it is always `None`);
-add the **Tauri `orchestration_snapshot` command** + an `api.ts` typed wrapper + a `store/` hook that paints the
-snapshot and **re-queries (coalesced) on the coordination events** orch-00 added; build the tree component via
-`/impeccable` against `PRODUCT.md`/`DESIGN.md` (per-agent activity glyphs from the C4 idle FSM). The read-model +
-events are the seam — orch-01 is a thin presentational + lineage layer, no new coordination primitive. Then
-**orch-02 → orch-03 → orch-04 → orch-05**. The `main` merge is resolved (`bcb99e5`); proceed on the track.
+**Sequencing note:** orch-01 is stacked on orch-00. **Merge order: PR #40 (orch-00 → `orchestrator`) first, then
+orch-01's PR.** The owner opens/merges PRs — `feat/orch-01-agent-lineage-and-tree-ui` is committed locally and
+ready to push.
+
+**orch-02 (the next phase) — scratchpad panel (O5) + to-do board (O6) + O12 comment authorship + O14 `solo://`
+copy-link handoff:** read [`orch-02`](plan/orchestrator/orch-02-coordination-panels-ui.md) end-to-end. It
+consumes the orch-00 read-model (`OrchestrationSnapshot.todos`/`.scratchpads` + the `TodoChanged`/`ScratchpadChanged`
+events) the same way orch-01's tree consumes the agent lineage — a thin presentational layer over the existing C6
+behavior, extending the `OrchestrationPane` surface this phase introduced. Then **orch-03 → orch-04 → orch-05**.
 
 A standalone track was planned in [`plan/orchestrator/`](plan/orchestrator/) (charter
 `README.md` + six phase files **orch-00 … orch-05**); the orchestration *mechanism* is already built +

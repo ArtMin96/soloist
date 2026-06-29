@@ -287,10 +287,14 @@ export interface KvEntry {
 }
 
 // ── Orchestration read-model (mirrors core::orchestration) ───────────────────
-// One node in the agent lineage tree. `parent` stays null until spawn lineage is recorded.
+// One node in the agent lineage tree: a worker nests under the lead that spawned it (`parent`); a
+// manually launched agent, a command, or a terminal is a root (`parent` null). A node whose parent
+// has left the registry is re-rooted, so a closed lead never strands its workers.
 export interface AgentNode {
   id: number;
   parent: number | null;
+  // The process's display label — the tree row's name.
+  label: string;
   kind: ProcessKind;
   status: ProcStatus;
   activity: AgentActivity | null;

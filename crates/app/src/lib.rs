@@ -317,6 +317,7 @@ pub fn run() {
             commands::make_command_local,
             commands::save_command_to_yaml,
             commands::set_project_icon,
+            commands::orchestration_snapshot,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

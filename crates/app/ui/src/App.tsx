@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { AgentPicker } from "@/components/AgentPicker";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { OrchestrationPane } from "@/components/orchestration/OrchestrationPane";
 import { OrphanDialog } from "@/components/OrphanDialog";
 import { ProjectSettingsPane } from "@/components/project-settings/ProjectSettingsPane";
 import { SettingsOverlay } from "@/components/settings/SettingsOverlay";
@@ -42,21 +43,32 @@ export default function App() {
   const agents = useAgents(store.reportError);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
+  const [orchestrationProjectId, setOrchestrationProjectId] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const selected = store.processes.find((process) => process.id === selectedId) ?? null;
   const selectedProject = projects.projects.find((p) => p.id === selectedProjectId) ?? null;
+  const orchestrationProject =
+    projects.projects.find((p) => p.id === orchestrationProjectId) ?? null;
 
-  // The main pane shows one of: a process terminal, a project's settings, or the empty state.
-  // Selecting a process clears the project selection and vice versa, so exactly one is active.
+  // The main pane shows one of: a process terminal, a project's settings, its orchestration tree,
+  // or the empty state. The three selections are mutually exclusive, so opening one clears the
+  // others and exactly one view is active.
   const selectProcess = useCallback((id: number) => {
     setSelectedId(id);
     setSelectedProjectId(null);
+    setOrchestrationProjectId(null);
   }, []);
   const openProjectSettings = useCallback((projectId: number) => {
     setSelectedProjectId(projectId);
     setSelectedId(null);
+    setOrchestrationProjectId(null);
+  }, []);
+  const openOrchestration = useCallback((projectId: number) => {
+    setOrchestrationProjectId(projectId);
+    setSelectedId(null);
+    setSelectedProjectId(null);
   }, []);
 
   // Trust a command by id: the row/header carries the project and name the gate needs.
@@ -126,6 +138,7 @@ export default function App() {
                     onStopAll={store.stopAll}
                     onOpenSettings={() => setSettingsOpen(true)}
                     onOpenProjectSettings={openProjectSettings}
+                    onOpenOrchestration={openOrchestration}
                   />
                   <main className="min-w-0 flex-1">
                     {selected ? (
@@ -139,6 +152,11 @@ export default function App() {
                       />
                     ) : selectedProject ? (
                       <ProjectSettingsPane key={selectedProject.id} project={selectedProject} />
+                    ) : orchestrationProject ? (
+                      <OrchestrationPane
+                        key={orchestrationProject.id}
+                        project={orchestrationProject}
+                      />
                     ) : (
                       <EmptyState
                         hasProcesses={store.processes.length > 0}
