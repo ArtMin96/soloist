@@ -26,7 +26,11 @@ import type {
   ProjectSettings,
   ProjectSettingsPage,
   ProjectView,
+  ScratchpadDoc,
+  ScratchpadView,
   Sidebar,
+  TodoDoc,
+  TodoView,
   ToolDefaults,
   TrustReviewCommand,
 } from "@/domain";
@@ -46,6 +50,78 @@ export function procList(): Promise<ProcessView[]> {
 // event prompts a re-read (snapshot-then-deltas).
 export function orchestrationSnapshot(project: number): Promise<OrchestrationSnapshot> {
   return invoke<OrchestrationSnapshot>("orchestration_snapshot", { project });
+}
+
+// --- Coordination panels: the scratchpad panel and the to-do board read/write through these.
+// Each routes to the project-scoped core method; writes emit the domain event the panel re-reads on.
+
+// The full scratchpad to open and edit (its disciplined document, rendering, and revision).
+export function scratchpadRead(project: number, name: string): Promise<ScratchpadView> {
+  return invoke<ScratchpadView>("scratchpad_read", { project, name });
+}
+
+// Save the scratchpad, revision-guarded by `expectedRevision` (null to create). A stale write
+// rejects with the conflict message for the panel to surface.
+export function scratchpadWrite(
+  project: number,
+  name: string,
+  doc: ScratchpadDoc,
+  expectedRevision: number | null,
+): Promise<ScratchpadView> {
+  return invoke<ScratchpadView>("scratchpad_write", {
+    project,
+    name,
+    doc,
+    expectedRevision,
+  });
+}
+
+// Create a todo from its disciplined document.
+export function todoCreate(project: number, doc: TodoDoc): Promise<TodoView> {
+  return invoke<TodoView>("todo_create", { project, doc });
+}
+
+// Replace a todo's document, revision-guarded by `expectedRevision`.
+export function todoUpdate(
+  project: number,
+  id: number,
+  doc: TodoDoc,
+  expectedRevision: number,
+): Promise<TodoView> {
+  return invoke<TodoView>("todo_update", { project, id, doc, expectedRevision });
+}
+
+// Mark a todo done; rejects while a blocker is unmet (the board surfaces the gate).
+export function todoComplete(project: number, id: number): Promise<TodoView> {
+  return invoke<TodoView>("todo_complete", { project, id });
+}
+
+// Replace a todo's blockers.
+export function todoSetBlockers(
+  project: number,
+  id: number,
+  blockers: number[],
+): Promise<TodoView> {
+  return invoke<TodoView>("todo_set_blockers", { project, id, blockers });
+}
+
+// Add one blocker to a todo.
+export function todoAddBlocker(project: number, id: number, blocker: number): Promise<TodoView> {
+  return invoke<TodoView>("todo_add_blocker", { project, id, blocker });
+}
+
+// Remove one blocker from a todo.
+export function todoRemoveBlocker(project: number, id: number, blocker: number): Promise<TodoView> {
+  return invoke<TodoView>("todo_remove_blocker", { project, id, blocker });
+}
+
+// The solo:// link to a scratchpad / todo, for the "Copy link" affordance.
+export function scratchpadLink(project: number, scratchpad: number): Promise<string> {
+  return invoke<string>("scratchpad_link", { project, scratchpad });
+}
+
+export function todoLink(project: number, todo: number): Promise<string> {
+  return invoke<string>("todo_link", { project, todo });
 }
 
 // The project read model — every opened project's identity with its icon already rendered

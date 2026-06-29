@@ -25,11 +25,13 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
-- **Orchestrator track IN PROGRESS — orch-00 DONE, orch-01 DONE, orch-02 IN PROGRESS (backend slice landed
-  2026-06-29; UI slices next).** **orch-02 (scratchpad & to-do coordination panels) Slice 1 — the entire
-  coordination-backend (O12 + O14) — is code-complete & gate-green** on branch
-  `feat/orch-02-coordination-panels` (stacked on the orch-00/01 branch `feat/orch-00-read-model-and-events`
-  @ `0a2e61e`; owner merges, no self-merge). Three commits:
+- **Orchestrator track IN PROGRESS — orch-00 DONE, orch-01 DONE, orch-02 CODE-COMPLETE & gate-green
+  (2026-06-29); only the user-only real-window e2e walk remains.** **orch-02 (scratchpad & to-do
+  coordination panels, O5/O6/O12/O14)** spans **two stacked PRs** (owner directive: backend its own PR):
+  **PR #42** = the coordination backend (Slice 1) on `feat/orch-02-coordination-panels` (stacked on the
+  orch-00/01 branch `feat/orch-00-read-model-and-events` @ `0a2e61e`); the **UI** (Slices 2–4) on
+  `feat/orch-02-panels-ui` (stacked on #42's branch). Owner merges in order, no self-merge. **Slice 1 — the
+  coordination-backend (O12 + O14)** — three commits:
   - **O12 todo comment authorship (`3050fb2`):** a new C6 `CommentAuthor` enum (`Process { id, label } |
     External { label }`) + an `author: Option<CommentAuthor>` (`#[serde(default)]`) on `Comment`. The façade
     stamps it from the caller's identity (`identity.origin(session)` → bound process id + its `ProcessView.label`,
@@ -60,12 +62,34 @@
     smells nudged a little by the O12 types). Rust per-crate green: core **+** new author/link tests, store 78,
     ipc 14, mcp 63, app 32. The **only** `just test` red is the pre-existing sandbox `crates/sys` shellenv
     capture timeout (`Capture("timed out")`, untouched by orch-02, green in CI).
-  - **Remaining orch-02 (next):** Slice 2 — thin **project-scoped** Tauri commands for the panels (mirroring
-    `orchestration_snapshot(project)`'s trusted local-read pattern: take `ProjectId`, route to the aggregates; the
-    board is **display-only for locks** — never steals one) + `api.ts`/`domain.ts`; Slice 3 — **scratchpad panel
-    (O5)** via `/impeccable` (structured editor, revision-conflict UX, live-refresh on `ScratchpadChanged`); Slice 4
-    — **to-do board (O6)** via `/impeccable` (blocker gate + lock owner + comments-with-author + the O14 "Copy link"
-    affordance) + the user-only Playwright/WebdriverIO e2e walk that flips O5/O6 → `Verified`.
+  - **Slice 2 — project-scoped Tauri commands (`9d99345`):** each session-scoped coordination façade method now
+    delegates to a project-scoped `*_in` sibling (DRY: scope resolves once, the aggregate call + event emission
+    live once), mirroring `orchestration_snapshot`'s trusted local-read pattern — `*_in` take `ProjectId` directly
+    and must never see an untrusted caller's project. Ten thin `#[tauri::command]`s (scratchpad_read/write,
+    todo_create/update/complete/set_blockers/add_blocker/remove_blocker, scratchpad_link/todo_link) route to them;
+    the board is **display-only for locks**. Mirrored in the one `api.ts` + `domain.ts` (`ScratchpadDoc`/`ScratchpadView`).
+  - **Slice 3 — scratchpad panel (O5, `8dcdc23`), via `/impeccable`:** a Scratchpads view on the orchestration
+    surface (a new segmented Agents/To-dos/Scratchpads switch) — a live roster beside a **structured editor** over
+    the disciplined `ScratchpadDoc` (a field per section, not a free textarea). Saves are revision-guarded; a stale
+    save is refused by the core and surfaced as a **non-destructive conflict banner** (the hook re-reads to tell a
+    moved revision from an invalid doc — no magic string, no clobber) with a Reload to the other edit. Live-refresh
+    on `ScratchpadChanged` (the `useOrchestration` hook now carries the snapshot's todos + scratchpads, coalesced per
+    frame). Copy link → clipboard. New `textarea` primitive; pure `scratchpadForm` mapping (6 vitest).
+  - **Slice 4 — to-do board (O6, `b6b9f3c`), via `/impeccable`:** a To-dos view — the project's todos from the live
+    snapshot, each expanding to its document, blockers (unmet ones stand out, **monochrome** — saturated colour stays
+    on process status), lock owner resolved to its agent label (display-only), and **comments WITH their author
+    (O12)**. Complete routes to the core, which refuses a still-blocked todo with `TodoBlocked` surfaced **verbatim**
+    (never pre-empted). Copy link → clipboard. Live-refresh on `TodoChanged`. Single-source `TODO_STATUS` +
+    `commentAuthorLabel` in `lib/todo` (2 vitest). UI vitest **143** (33→34 files); production bundle builds.
+  - **UI gate (evidence, 2026-06-29):** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier,
+    dep-direction OK; file-size advisory only). UI **vitest 143**, Rust suite unchanged from Slice 1 (UI-only slices).
+  - **Remaining (the only thing left for O5/O6 → `Verified`):** the **user-only real-window walk** —
+    WebdriverIO + `tauri-driver` (sudo deps, a display), per the Phase-5 e2e reality: edit + save a scratchpad and
+    force a conflict; create a blocker chain and assert complete is refused then allowed; assert a comment renders
+    its author; "Copy link" places the `solo://` URL on the clipboard. The visual `/impeccable` in-browser iteration
+    (craft.md Step 5) is part of that same user-only walk — this environment has no display to screenshot the Tauri
+    window. **Tracked follow-ups (not gating):** a UI todo-create + blocker-edit authoring affordance (agents do
+    both over MCP today; the board observes them live), and orch-03's timers/leases/kv panels.
 - **(prior) orch-01 (agent lineage O3 + live orchestration tree UI O4) is code-complete & gate-green**
   on branch `feat/orch-01-agent-lineage-and-tree-ui` (**stacked on `feat/orch-00-read-model-and-events`** per the
   owner — branched off the open PR #40, not yet merged; owner merges, no self-merge). What landed:

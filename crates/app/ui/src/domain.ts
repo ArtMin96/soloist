@@ -288,6 +288,30 @@ export interface ScratchpadSummary {
   objective: string;
 }
 
+// A scratchpad's disciplined, typed document — the fields ARE the required structure (each list
+// needs at least one non-blank entry); `status` is a free label and `notes` optional Markdown.
+export interface ScratchpadDoc {
+  objective: string;
+  context: string;
+  plan: string[];
+  acceptance_criteria: string[];
+  risks: string[];
+  status: string;
+  notes: string | null;
+}
+
+// A scratchpad as the panel reads it: the disciplined document plus its tags, revision (to guard the
+// next write), and the canonical Markdown rendering the core derives.
+export interface ScratchpadView {
+  id: number;
+  name: string;
+  tags: string[];
+  archived: boolean;
+  revision: number;
+  doc: ScratchpadDoc;
+  rendered: string;
+}
+
 // A project-scoped key-value entry; `value` is arbitrary JSON.
 export interface KvEntry {
   key: string;

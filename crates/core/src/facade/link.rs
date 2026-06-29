@@ -9,9 +9,20 @@
 use super::Facade;
 use crate::coordination::{Link, LinkContent, LinkTarget};
 use crate::facade::CoordinationError;
-use crate::ids::SessionId;
+use crate::ids::{ProjectId, ScratchpadId, SessionId, TodoId};
 
 impl Facade {
+    /// The `solo://` link to scratchpad `id` in `project` — the string the local-UI "Copy link"
+    /// affordance writes to the clipboard. Routed through [`Link`] so the scheme is single-sourced.
+    pub fn scratchpad_link(&self, project: ProjectId, id: ScratchpadId) -> String {
+        Link::scratchpad(project, id).to_link()
+    }
+
+    /// The `solo://` link to todo `id` in `project` (see [`scratchpad_link`](Self::scratchpad_link)).
+    pub fn todo_link(&self, project: ProjectId, id: TodoId) -> String {
+        Link::todo(project, id).to_link()
+    }
+
     /// Resolves a `solo://proj/<project>/scratchpad|todo/<id>` link to its content within the
     /// session's effective project. A malformed link is [`CoordinationError::MalformedLink`]; a link
     /// to another project is [`CoordinationError::ForeignScopeLink`] (refused, never resolved); an id

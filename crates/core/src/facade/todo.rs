@@ -29,10 +29,7 @@ impl Facade {
         doc: TodoDoc,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.emit_todo(
-            project,
-            self.todos.create(project, doc).map_err(map_todo_error),
-        )
+        self.todo_create_in(project, doc)
     }
 
     /// Every todo in the session's effective project, as one-line summaries.
@@ -59,12 +56,7 @@ impl Facade {
         expected: u64,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.emit_todo(
-            project,
-            self.todos
-                .update(project, id, doc, expected)
-                .map_err(map_todo_error),
-        )
+        self.todo_update_in(project, id, doc, expected)
     }
 
     /// Marks todo `id` done in the session's effective project — refused with
@@ -75,10 +67,7 @@ impl Facade {
         id: TodoId,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.emit_todo(
-            project,
-            self.todos.complete(project, id).map_err(map_todo_error),
-        )
+        self.todo_complete_in(project, id)
     }
 
     /// Deletes todo `id` in the session's effective project, returning whether one was removed.
@@ -140,12 +129,7 @@ impl Facade {
         blockers: Vec<TodoId>,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.emit_todo(
-            project,
-            self.todos
-                .set_blockers(project, id, blockers)
-                .map_err(map_todo_error),
-        )
+        self.todo_set_blockers_in(project, id, blockers)
     }
 
     /// Adds `blocker` to todo `id` in the session's effective project, after the same checks.
@@ -156,12 +140,7 @@ impl Facade {
         blocker: TodoId,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
-        self.emit_todo(
-            project,
-            self.todos
-                .add_blocker(project, id, blocker)
-                .map_err(map_todo_error),
-        )
+        self.todo_add_blocker_in(project, id, blocker)
     }
 
     /// Removes `blocker` from todo `id` in the session's effective project, returning the updated
@@ -173,6 +152,92 @@ impl Facade {
         blocker: TodoId,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope(session)?;
+        self.todo_remove_blocker_in(project, id, blocker)
+    }
+
+    // The project-scoped write surface the local-UI to-do board drives. Each mirrors its
+    // session-scoped sibling above with `project` supplied directly, trusting the caller to be
+    // entitled to it — like [`orchestration_snapshot`](Self::orchestration_snapshot), so none must
+    // ever take a `project` from an untrusted surface. Locking stays session/owner-scoped only: the
+    // board observes a lock but never acquires one ("signals, not ownership").
+
+    /// [`todo_create`](Self::todo_create) scoped to `project` directly (local-UI path).
+    pub fn todo_create_in(
+        &self,
+        project: ProjectId,
+        doc: TodoDoc,
+    ) -> Result<TodoView, CoordinationError> {
+        self.emit_todo(
+            project,
+            self.todos.create(project, doc).map_err(map_todo_error),
+        )
+    }
+
+    /// [`todo_update`](Self::todo_update) scoped to `project` directly (local-UI path).
+    pub fn todo_update_in(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        doc: TodoDoc,
+        expected: u64,
+    ) -> Result<TodoView, CoordinationError> {
+        self.emit_todo(
+            project,
+            self.todos
+                .update(project, id, doc, expected)
+                .map_err(map_todo_error),
+        )
+    }
+
+    /// [`todo_complete`](Self::todo_complete) scoped to `project` directly (local-UI path).
+    pub fn todo_complete_in(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+    ) -> Result<TodoView, CoordinationError> {
+        self.emit_todo(
+            project,
+            self.todos.complete(project, id).map_err(map_todo_error),
+        )
+    }
+
+    /// [`todo_set_blockers`](Self::todo_set_blockers) scoped to `project` directly (local-UI path).
+    pub fn todo_set_blockers_in(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        blockers: Vec<TodoId>,
+    ) -> Result<TodoView, CoordinationError> {
+        self.emit_todo(
+            project,
+            self.todos
+                .set_blockers(project, id, blockers)
+                .map_err(map_todo_error),
+        )
+    }
+
+    /// [`todo_add_blocker`](Self::todo_add_blocker) scoped to `project` directly (local-UI path).
+    pub fn todo_add_blocker_in(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        blocker: TodoId,
+    ) -> Result<TodoView, CoordinationError> {
+        self.emit_todo(
+            project,
+            self.todos
+                .add_blocker(project, id, blocker)
+                .map_err(map_todo_error),
+        )
+    }
+
+    /// [`todo_remove_blocker`](Self::todo_remove_blocker) scoped to `project` directly (local-UI path).
+    pub fn todo_remove_blocker_in(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        blocker: TodoId,
+    ) -> Result<TodoView, CoordinationError> {
         self.emit_todo(
             project,
             self.todos

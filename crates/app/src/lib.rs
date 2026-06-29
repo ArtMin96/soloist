@@ -318,6 +318,16 @@ pub fn run() {
             commands::save_command_to_yaml,
             commands::set_project_icon,
             commands::orchestration_snapshot,
+            commands::scratchpad_read,
+            commands::scratchpad_write,
+            commands::todo_create,
+            commands::todo_update,
+            commands::todo_complete,
+            commands::todo_set_blockers,
+            commands::todo_add_blocker,
+            commands::todo_remove_blocker,
+            commands::scratchpad_link,
+            commands::todo_link,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
