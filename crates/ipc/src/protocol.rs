@@ -9,9 +9,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AcquireOutcome, AgentTool, Comment, KvEntry, LeaseView, McpToolGroups, ProcessId, ProcessView,
-    ProjectId, ProjectView, ScratchpadDoc, ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome,
-    StartSummary, TimerId, TimerView, TodoDoc, TodoId, TodoSummary, TodoView, Whoami,
+    AcquireOutcome, AgentTool, Comment, KvEntry, LeaseView, LinkContent, McpToolGroups, ProcessId,
+    ProcessView, ProjectId, ProjectView, ScratchpadDoc, ScratchpadSummary, ScratchpadView,
+    SetWhenIdleOutcome, StartSummary, TimerId, TimerView, TodoDoc, TodoId, TodoSummary, TodoView,
+    Whoami,
 };
 
 use crate::error::IpcError;
@@ -204,6 +205,9 @@ pub enum IpcRequest {
     TodoCommentDelete { todo: TodoId, comment: u64 },
     /// The comments on `todo` in the session's effective project.
     TodoCommentList { todo: TodoId },
+    /// Resolve a `solo://proj/<project>/scratchpad|todo/<id>` link to its content, within the
+    /// session's effective project (a foreign-scope or malformed link is refused, not resolved).
+    ResolveLink { link: String },
     /// Store `value` at `key` in the session's effective project's kv store (create or replace).
     KvSet {
         key: String,
@@ -298,6 +302,9 @@ pub enum IpcResponse {
     TodoComment { todo: TodoView, comment: u64 },
     /// The comments on a todo (answer to [`IpcRequest::TodoCommentList`]).
     TodoComments(Vec<Comment>),
+    /// The content a `solo://` link resolved to (answer to [`IpcRequest::ResolveLink`]) — the
+    /// in-scope scratchpad or todo it points to. Reuses the core view so the wire shape cannot drift.
+    Link(LinkContent),
     /// The distinct todo tags in scope (answer to [`IpcRequest::TodoTagsList`]).
     TodoTags(Vec<String>),
     /// Whether a todo was deleted (answer to [`IpcRequest::TodoDelete`]).

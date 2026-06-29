@@ -12,12 +12,12 @@
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
-use soloist_core::{TodoDoc, TodoId};
+use soloist_core::{LinkContent, TodoDoc, TodoId};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
     TodoArg, TodoBlockerArg, TodoBlockersArg, TodoCommentCreateArg, TodoCommentEditArg,
-    TodoCommentRefArg, TodoCreateArg, TodoTagArg, TodoUpdateArg,
+    TodoCommentRefArg, TodoCreateArg, TodoGetArg, TodoRef, TodoTagArg, TodoUpdateArg,
 };
 use crate::server::SoloistMcp;
 use crate::tools::reply::{app_error, structured, unexpected};
@@ -36,16 +36,21 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Read one todo by id. Returns its disciplined document (title, description, acceptance_criteria, risks, status), tags, blockers, which blockers are still unmet, comments, lock, and the revision — pass that revision back to todo_update to update it safely."
+        description = "Read one todo by its id or a solo:// link to it. Returns its disciplined document (title, description, acceptance_criteria, risks, status), tags, blockers, which blockers are still unmet, comments, lock, and the revision — pass that revision back to todo_update to update it safely."
     )]
     pub(crate) async fn todo_get(
         &self,
-        Parameters(TodoArg { todo }): Parameters<TodoArg>,
+        Parameters(TodoGetArg { todo }): Parameters<TodoGetArg>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.todo_view(IpcRequest::TodoGet {
-            todo: TodoId::from_raw(todo),
-        })
-        .await
+        match todo {
+            TodoRef::Id(id) => {
+                self.todo_view(IpcRequest::TodoGet {
+                    todo: TodoId::from_raw(id),
+                })
+                .await
+            }
+            TodoRef::Link(link) => self.read_solo_link(link).await,
+        }
     }
 
     #[tool(
@@ -308,6 +313,18 @@ impl SoloistMcp {
     async fn todo_view(&self, request: IpcRequest) -> Result<CallToolResult, ErrorData> {
         match self.client.request(request).await {
             Ok(IpcResponse::Todo(view)) => structured(&view),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    /// Resolves a `solo://` link to its content and renders the scratchpad or todo it points to —
+    /// shared by `scratchpad_read` and `todo_get` so a copied link reads the same from either, and
+    /// scope is enforced in the core (a foreign-scope or malformed link comes back as a tool error).
+    pub(crate) async fn read_solo_link(&self, link: String) -> Result<CallToolResult, ErrorData> {
+        match self.client.request(IpcRequest::ResolveLink { link }).await {
+            Ok(IpcResponse::Link(LinkContent::Scratchpad(view))) => structured(&view),
+            Ok(IpcResponse::Link(LinkContent::Todo(view))) => structured(&view),
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }

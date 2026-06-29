@@ -9,7 +9,7 @@
 
 ## Current state
 
-> **ACTIVE PHASE: 11 (UX Polish & Execution Profiles) — STARTED. Slice 1 landed: I10 env capture (`$SHELL -ilc env`, ~10-min cache, precedence process > captured > app). Slice 2 landed (2026-06-25): `SettingsRepo` (migration v9) + the per-group MCP tool-enablement Registry (G10 Key-Value default-OFF) — branch `feat/phase-11-settings-mcp-toggle`, PR to open. Phase 10 (HTTP API & CLI) is `Verified` — the user-only runtime acceptance walk PASSED 2026-06-25 (status/restart/logs against a live app, CLI/UI restart route identically, app-down → "Soloist is not running"/exit 1, mutation auth 200-vs-401, foreign-Origin CORS refused). Phase 9 (Coordination, C6) is `Verified`.**
+> **ACTIVE PHASE: 11 (UX Polish & Execution Profiles) — STARTED. Slice 1 landed: I10 env capture (`$SHELL -ilc env`, ~10-min cache, precedence process > captured > app). Slice 2 landed (2026-06-25): `SettingsRepo` (migration v9) + the per-group MCP tool-enablement Registry (G10 Key-Value default-OFF) — **PR #28 MERGED to `main` (`1356f44`)**. Phase 10 (HTTP API & CLI) is `Verified` — the user-only runtime acceptance walk PASSED 2026-06-25 (status/restart/logs against a live app, CLI/UI restart route identically, app-down → "Soloist is not running"/exit 1, mutation auth 200-vs-401, foreign-Origin CORS refused). Phase 9 (Coordination, C6) is `Verified`.**
 > PR #26 (Phase 10 — H1–H4) is **merged to `main`** (merge commit `7db4004`, incl. the review-cleanup `a83ac19`);
 > the merge was reconciled this session (`main` == `origin/main`, working tree clean) and the gate **re-confirmed
 > green on `main` `7db4004`: Rust 580 / 3 ignored, UI 78, `just lint` exit 0**. Phase 10's H1–H4 are all ✅ in
@@ -25,6 +25,156 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Orchestrator track IN PROGRESS — orch-00 DONE, orch-01 DONE, orch-02 CODE-COMPLETE & gate-green
+  (2026-06-29); orch-03 CODE-COMPLETE & gate-green (2026-06-29). User-only real-window e2e walks
+  remain for orch-02 (O5/O6) and orch-03 (O7/O8).**
+- **orch-03 (timers & wake-cycle UI, O7/O8) CODE-COMPLETE & gate-green (2026-06-29).** Branch
+  `feat/orch-03-timers-and-wake-cycle` stacked on `feat/orch-02-panels-ui` (PRs #42/#43 OPEN); **PR #44** opened.
+  One commit `3812a0f` covers everything (backend + UI slices landed together — skills-lock delta
+  dominated the diffstat):
+  - **Backend (O7/O8):** `TimerView` gains `owner: ProcessId`, `waiting_on: Vec<ProcessId>`, `already_idle: bool` (the first is stored; the last two are derived at read time by `orchestration_snapshot` from `self.idle.activity(p)` and `self.supervisor.view(p)` — dynamic, not persisted). `DomainEvent` adds `TimerPaused`/`TimerResumed {owner, id}` (deferred from orch-00 O2); `timer_pause`/`timer_resume` now emit them. Three `*_for` local-trusted Facade methods (`timer_{cancel,pause,resume}_for(owner, timer)`) serve the Tauri UI without session scope. The `TimerScheduler::deliver()` prepends a compact clean-room wake-reason header: `[Soloist timer #<id>] <reason>` (all-idle, any-idle, backstop, or scheduled) + newline before the body so the woken agent knows why it woke (O8 requirement; recorded in `plan/05 §12`). All 450 core tests + ipc/mcp/store/pty/app suites green (448 Rust tests; scheduler test updated to `contains("resume work")` to accept the prefix).
+  - **Tauri bridge:** new `crates/app/src/commands/timers.rs` with `timer_cancel`/`timer_pause`/`timer_resume` commands registered in `lib.rs`. `domain.ts` updated: `TimerView.owner/waiting_on/already_idle` + `TimerPaused`/`TimerResumed` events. `api.ts`: `timerCancel`/`timerPause`/`timerResume` wrappers. `projection.ts`: new events pass through.
+  - **UI (O7 + O8, via `/impeccable` + shadcn):** `useOrchestration` adds `timers` to the store + 5 new events to `SNAPSHOT_EVENTS` (TimerArmed/Fired/Cleared/Paused/Resumed). Pure helpers in `store/timerPanel.ts` (`fireBadge`, `formatCountdown`, `formatPausedRemaining`, `bodyPreview`, `groupByOwner`; 15 Vitest). `TimersPanel` component: empty state with MCP tool names, timers grouped by owning agent, per-timer row with fire-condition badge, `WaitingOnChips` (up to 3 visible + overflow), `CountdownCell` (RAF loop, no CSS animation → respects `prefers-reduced-motion` natively), body preview with Tooltip for the full body, pause/resume/cancel ghost icon buttons with Tooltip + inline error. Paused timers render on `bg-sidebar` with "Paused" badge. `OrchestrationPane` adds a **Timers** tab (Agents / To-dos / Scratchpads / **Timers**) with a muted count badge when `timers.length > 0`.
+  - **Gate (evidence, 2026-06-29):** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier, dep-direction; file-size advisory only — pre-existing). Rust 450 passed / 3 ignored. UI Vitest 158 (up from 143, +15 new `timerPanel` tests). Production bundle builds.
+  - **Remaining (user-only):** real-window walk — open the Timers tab while a `timer_fire_when_idle` is armed via MCP, assert countdown visible + waiting-on chips; drive workers to idle, assert the timer leaves the panel + body appears in the lead's terminal (with the wake-reason prefix). WebdriverIO + tauri-driver (sudo deps, display needed).
+- **Orchestrator track IN PROGRESS — orch-00 DONE, orch-01 DONE, orch-02 CODE-COMPLETE & gate-green
+  (2026-06-29); only the user-only real-window e2e walk remains.** **orch-02 (scratchpad & to-do
+  coordination panels, O5/O6/O12/O14)** spans **two stacked PRs** (owner directive: backend its own PR):
+  **PR #42** = the coordination backend (Slice 1) on `feat/orch-02-coordination-panels` (stacked on the
+  orch-00/01 branch `feat/orch-00-read-model-and-events` @ `0a2e61e`); the **UI** (Slices 2–4) on
+  `feat/orch-02-panels-ui` (stacked on #42's branch). Owner merges in order, no self-merge. **Slice 1 — the
+  coordination-backend (O12 + O14)** — three commits:
+  - **O12 todo comment authorship (`3050fb2`):** a new C6 `CommentAuthor` enum (`Process { id, label } |
+    External { label }`) + an `author: Option<CommentAuthor>` (`#[serde(default)]`) on `Comment`. The façade
+    stamps it from the caller's identity (`identity.origin(session)` → bound process id + its `ProcessView.label`,
+    or external label, or `None` for unbound) — **the caller never supplies it, so an author cannot be forged;
+    an unbound caller is unattributed.** The author rides the existing `TodoView.comments` into the
+    `orchestration_snapshot` (no read-model change). **No migration:** comments are a JSON blob column, and the
+    defaulted field reads old rows as `author: None`. Threaded through `TodoRepo::comment_create` (trait + Noop +
+    `FakeTodoRepo` + SQLite) + the `Todos` aggregate + the one TS `domain.ts` mirror (`CommentAuthor` + `Comment.author`).
+    Reverses the `plan/05 §12` "no author attribution" decision (already recorded as O12 in orch-00 Task 1). Tests:
+    bound process stamps its actor, unbound is unattributed, author survives the SQLite round-trip, legacy comment
+    reads back unattributed.
+  - **O14 `solo://` link helper + scope-guarded resolver (`b926e8c`):** a pure `core::coordination::link` module
+    (`Link`/`LinkTarget`/`LinkContent`/`LinkError` + `to_link`/`parse`/`is_link`; scheme + segments named once) for
+    `solo://proj/<project>/scratchpad|todo/<id>`, keyed by **durable ids** so a link survives rename/restart.
+    `Facade::resolve_link(session, link)` maps a parsed link to its content **enforcing effective project scope in
+    the core** — a foreign-scope link is `ForeignScopeLink` (refused, never resolved to another project's content),
+    a malformed link `MalformedLink`, an unknown id `UnknownScratchpad`/`UnknownTodo`. Resolves a scratchpad by id
+    via the existing list+read (no repo-trait change). Tests: round-trip, 9 malformed cases, in-scope resolve
+    (scratchpad + todo), foreign-scope refused, unknown reported.
+  - **O14 IPC + MCP wiring (`4fced91`):** `IpcRequest::ResolveLink` + `IpcResponse::Link(LinkContent)` →
+    `Facade::resolve_link`; the two new errors are caller-fixable (`is_request_error` → MCP tool errors). The
+    `scratchpad_read` and `todo_get` MCP tools now accept a `solo://` link as well as a bare name/id (a shared
+    `read_solo_link` helper; `todo_get` gains a `TodoRef` id-or-link arg) — so a human copies a link and hands it
+    to a bound agent, which reads the target in-scope. Tests: scratchpad_read resolves a link, todo_get resolves a
+    link, todo_get still reads a bare id.
+  - **Gate (evidence, 2026-06-29):** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier,
+    dep-direction OK; file-size advisory only — `domain.ts` 546, `coordination/todo.rs` 540, both pre-existing
+    smells nudged a little by the O12 types). Rust per-crate green: core **+** new author/link tests, store 78,
+    ipc 14, mcp 63, app 32. The **only** `just test` red is the pre-existing sandbox `crates/sys` shellenv
+    capture timeout (`Capture("timed out")`, untouched by orch-02, green in CI).
+  - **Slice 2 — project-scoped Tauri commands (`9d99345`):** each session-scoped coordination façade method now
+    delegates to a project-scoped `*_in` sibling (DRY: scope resolves once, the aggregate call + event emission
+    live once), mirroring `orchestration_snapshot`'s trusted local-read pattern — `*_in` take `ProjectId` directly
+    and must never see an untrusted caller's project. Ten thin `#[tauri::command]`s (scratchpad_read/write,
+    todo_create/update/complete/set_blockers/add_blocker/remove_blocker, scratchpad_link/todo_link) route to them;
+    the board is **display-only for locks**. Mirrored in the one `api.ts` + `domain.ts` (`ScratchpadDoc`/`ScratchpadView`).
+  - **Slice 3 — scratchpad panel (O5, `8dcdc23`), via `/impeccable`:** a Scratchpads view on the orchestration
+    surface (a new segmented Agents/To-dos/Scratchpads switch) — a live roster beside a **structured editor** over
+    the disciplined `ScratchpadDoc` (a field per section, not a free textarea). Saves are revision-guarded; a stale
+    save is refused by the core and surfaced as a **non-destructive conflict banner** (the hook re-reads to tell a
+    moved revision from an invalid doc — no magic string, no clobber) with a Reload to the other edit. Live-refresh
+    on `ScratchpadChanged` (the `useOrchestration` hook now carries the snapshot's todos + scratchpads, coalesced per
+    frame). Copy link → clipboard. New `textarea` primitive; pure `scratchpadForm` mapping (6 vitest).
+  - **Slice 4 — to-do board (O6, `b6b9f3c`), via `/impeccable`:** a To-dos view — the project's todos from the live
+    snapshot, each expanding to its document, blockers (unmet ones stand out, **monochrome** — saturated colour stays
+    on process status), lock owner resolved to its agent label (display-only), and **comments WITH their author
+    (O12)**. Complete routes to the core, which refuses a still-blocked todo with `TodoBlocked` surfaced **verbatim**
+    (never pre-empted). Copy link → clipboard. Live-refresh on `TodoChanged`. Single-source `TODO_STATUS` +
+    `commentAuthorLabel` in `lib/todo` (2 vitest). UI vitest **143** (33→34 files); production bundle builds.
+  - **UI gate (evidence, 2026-06-29):** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier,
+    dep-direction OK; file-size advisory only). UI **vitest 143**, Rust suite unchanged from Slice 1 (UI-only slices).
+  - **Remaining (the only thing left for O5/O6 → `Verified`):** the **user-only real-window walk** —
+    WebdriverIO + `tauri-driver` (sudo deps, a display), per the Phase-5 e2e reality: edit + save a scratchpad and
+    force a conflict; create a blocker chain and assert complete is refused then allowed; assert a comment renders
+    its author; "Copy link" places the `solo://` URL on the clipboard. The visual `/impeccable` in-browser iteration
+    (craft.md Step 5) is part of that same user-only walk — this environment has no display to screenshot the Tauri
+    window. **Tracked follow-ups (not gating):** a UI todo-create + blocker-edit authoring affordance (agents do
+    both over MCP today; the board observes them live), and orch-03's timers/leases/kv panels.
+- **(prior) orch-01 (agent lineage O3 + live orchestration tree UI O4) is code-complete & gate-green**
+  on branch `feat/orch-01-agent-lineage-and-tree-ui` (**stacked on `feat/orch-00-read-model-and-events`** per the
+  owner — branched off the open PR #40, not yet merged; owner merges, no self-merge). What landed:
+  - **O3 lineage (core C4):** a new single-purpose `core::agents::AgentLineage` tracker (child→parent map,
+    mirroring `IdleTracker`); `spawn_agent` records the worker under its **bound lead** (`identity.origin(session).process()`),
+    while a manual/unbound launch records nothing (a root). `orchestration_snapshot` fills `AgentNode.parent`
+    from it **filtered by the live registry**, so a closed lead **re-roots its workers on read** (the `whoami`
+    drop-dangling pattern) — no event, no migration. Bounded (§8): the idle sampler prunes lineage via
+    `retain_live` alongside the idle tracker (inside `idle_sampler_loop`; no composition-root change). Lineage is
+    per-run, in-memory (never persisted).
+  - **O3 live-restructure signal (DRY decision):** **NO new `ProcessLineageChanged` variant** — the tree
+    re-queries on the existing `ProcessSpawned` / `ProcessRemoved` / `ProcessStatusChanged` / `ProcessRenamed` /
+    `AgentActivityChanged` events (exactly as `plan/05 §12` prescribes: close-driven changes observed via the
+    existing lifecycle events; `AgentActivityChanged` reused for the tree). Reuse beat a second event.
+  - **O4 Tauri bridge:** a thin `#[tauri::command] orchestration_snapshot(project)` in a new
+    `crates/app/src/commands/orchestration.rs` (one-line Facade call, no logic), registered in `generate_handler!`
+    (app command → no ACL); typed `orchestrationSnapshot(project)` wrapper in the one `api.ts`; TS `AgentNode.label`
+    added to the one `domain.ts`. **Scope contract honored:** local-only, like `snapshot()` — NOT routed through
+    MCP/HTTP.
+  - **O4 tree UI (via `/impeccable` + `shadcn`):** `store/orchestrationTree.ts` (pure `buildOrchestrationTree`
+    parent→children, re-roots an absent parent), `store/useOrchestration.ts` (snapshot-then-deltas; re-query
+    **coalesced per animation frame** on the tree-relevant events; null project clears), and presentational
+    `components/orchestration/{OrchestrationNode,OrchestrationTree,OrchestrationPane}.tsx` — nested lead→worker
+    rows reusing the Sidebar/Process-tree visual language (h-7, full-height azure marker idiom, hairlines, radix
+    `Collapsible`, `ChevronRight`), per-lead collapse (in-session, keyed by ephemeral id), ARIA tree roles, empty
+    state. **`ProcessIndicator` refactored** to take `{ status, activity }` instead of the whole `ProcessView`, so
+    both a `ProcessView` row and an `AgentNode` reuse the one 5-state glyph (DRY); 3 callers + its test updated.
+    Mounted as a project-scoped **main-pane view** opened by a sidebar **Network-icon affordance** beside the
+    existing gear (threaded App → Sidebar → ProjectGroup, mirroring `onOpenProjectSettings`); a third
+    mutually-exclusive main-pane selection in `App.tsx`.
+  - **Decisions (asked+answered this session):** (1) timer **pause/resume DomainEvent stays DEFERRED to orch-03**
+    (the timers panel) — orch-01's tree doesn't surface timers, so no code change (handoff #4). (2) Added
+    **`AgentNode.label`** (Rust + TS) so the snapshot is a self-contained tree projection — surfaced per §12; the
+    label is free during assembly (already on `ProcessView`). orch-01 phase file Interfaces + e2e line updated to
+    match. **Handoff #1 was already resolved** before this session: the PR-#40 review scope-contract doc fix is
+    committed (`2b3a49e`) and pushed — nothing to commit there.
+  - **e2e reality (Phase-5 finding, recorded):** WebKitGTK has no CDP, so the headless layer is **mockIPC**, the
+    real-window walk is **WebdriverIO + tauri-driver (user-only, sudo deps)** — *not* Playwright. The phase file's
+    "Playwright" line was reconciled to this. **The live glyph-flip / nesting visual walk is the USER-ONLY step
+    that flips O3/O4 → `Verified`.**
+  - **Known follow-up (owner-deferred 2026-06-28):** the orchestration tree currently renders **every managed
+    process** in the project (Commands + Terminals + Agents), because orch-00's read-model was specified as "each
+    managed process" (`plan/05 §12`) and `orchestration_snapshot` applies no `kind` filter. Orchestration is
+    agent-to-agent, so the faithful behavior is **agents-only** (leads + workers; a future `spawn_process` worker
+    re-qualifies via its recorded parent). The owner verified this and chose to **leave it as-is for now** — the
+    agent-only filter (one line in the Facade assembly + a `plan/05 §12` wording fix + a "a Command is excluded"
+    core test) is a tracked follow-up, not done this phase.
+  - **Gate (evidence):** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier, dep-direction OK;
+    file-size advisory only — `domain.ts` now 538). **Rust `cargo test --workspace` 615 passed / 0 failed / 3
+    ignored** (soak); the known `soloist-sys` shellenv env-red did **not** recur this run. **UI vitest 135 passed
+    / 32 files** (+10: `orchestrationTree` 6, `OrchestrationTree` component 3, `api` orchestration 1). Core
+    lineage evidence: `agents::lineage::tests` (3) + `facade::orchestration::tests` lineage acceptance
+    (`a_worker_spawned_by_a_bound_lead_nests_under_it`, `an_unbound_spawn_is_a_root`,
+    `closing_a_lead_re_parents_its_worker_to_root`). E7 `crates/pty/tests/orchestration.rs` stays green.
+- **(prior) orch-00 (read-model O1 +
+  coordination events O2) is code-complete & gate-green** on branch `feat/orch-00-read-model-and-events`
+  (**PR #40**, base `orchestrator`): `Facade::orchestration_snapshot` + `core::orchestration` + the 7 `DomainEvent`s + the TS
+  mirror, with `plan/02` carrying **O1–O14** and `plan/05 §12` the orchestrator gap + O12/O13/O14 decisions. Full
+  Phase-9 suite + E7 stay green. See the top Decisions entry + "Next session should start with → ★". The track lives in
+  [`plan/orchestrator/`](plan/orchestrator/) — a charter
+  ([`README.md`](plan/orchestrator/README.md)) + six phase files **orch-00 … orch-05**. **Key finding from
+  citation-grade research:** the orchestration *mechanism* from the Solo demo (lead spawns workers →
+  blockered todos → `timer_fire_when_idle(All)` → sleep token-free → wake to read/verify worker output) is
+  **already built and `Verified`** — it is the passing `crates/pty/tests/orchestration.rs` (E7). So the
+  track is **UX + formalization + deferred tools, NOT new primitives**: orch-00 read-model + live events
+  (O1/O2) → orch-01 agent-lineage tree UI (O3/O4) → orch-02 scratchpad+todo panels (O5/O6) → orch-03
+  timers/fire-when-idle/wake-cycle UI (O7/O8) → orch-04 deferred tools `spawn_process`+`*_transfer`
+  (O9/O10) → orch-05 recipe+docs+parity verify (O11). Per the user's scope decisions (asked+answered this
+  session): **standalone `orch-NN`** numbering; an **explicit matrix expansion** (new `O`-rows) recorded as
+  a clean-room **gap decision** (orchestrator is absent from `plan/05`). **Nothing was implemented this
+  session** (per the user) and **no canonical doc was edited** — propagating the `O`-rows into `plan/02`
+  and the gap into `plan/05 §12` is **orch-00 Task 1**. The track depends only on Phases 7/8/9 (all done/
+  `Verified`). **Next sessions implement orch-00 → orch-05; see "Next session should start with" → ★.**
 - **Deferred `later` rows A5 + A8 delivered ahead of schedule (user request, 2026-06-29) — CODE-COMPLETE
   & gate-green.** Both are Phase-2 (C1) `later` rows pulled forward at the owner's request; recorded as a
   scheduled pull-forward (not a v1 re-scope). Full `just lint` gate green for everything touched (clippy
@@ -940,6 +1090,22 @@ Status vocabulary: `Not started` · `In progress` · `Done — pending verify` �
 | 12 | Packaging (`.deb` + `.AppImage`, x86_64) | Not started | Add containerized 20.04 AppImage smoke (webkit 4.0 runtime) here |
 | 13 | Parity QA + longevity gate | Not started | The v1 definition-of-done; runs the soak/leak gate and parity walk |
 
+### Orchestrator track (standalone, `plan/orchestrator/` — planned 2026-06-26, queued)
+
+A user-directed track layered on the `Verified` Phase 7/8/9 core: **UX + formalization + deferred tools,
+not new primitives** (the mechanism is the passing E7 test, `crates/pty/tests/orchestration.rs`). Charter
++ the `O`-row matrix expansion: [`plan/orchestrator/README.md`](plan/orchestrator/README.md). Build order:
+orch-00 unblocks the three UI phases; orch-04 is backend-independent; orch-05 closes the track.
+
+| Phase | Name | Status | Delivers |
+|------:|------|--------|----------|
+| orch-00 | Charter, gap decision & read-model | **Not started** | O1, O2 — read-model + live coordination events; propagate `O`-rows to `plan/02` + the gap to `plan/05 §12` |
+| orch-01 | Agent lineage & live orchestration tree (UI) | **Not started** | O3, O4 — parent-on-spawn + nested lead→worker tree with live activity |
+| orch-02 | Scratchpad & to-do coordination panels (UI) | **Not started** | O5, O6 — disciplined-doc editors; revision-guard + blocker-gate visible |
+| orch-03 | Timers, fire-when-idle & wake-cycle (UI) | **Not started** | O7, O8 — `waiting_on` + max-wait countdown + injected-turn wake |
+| orch-04 | Deferred coordination tools | **Not started** | O9, O10 — `spawn_process` (trust) + cross-project `*_transfer` (scope) |
+| orch-05 | Formalization, recipe, docs & parity verify | **Not started** | O11 — orchestrator recipe + agent guidance + full-loop e2e + the `O`-row walk |
+
 Estimated v1 critical path: **~14–18 focused weeks** (one experienced Rust+TS dev); Phases 3, 8, 9 carry
 the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the per-phase breakdown.
 
@@ -947,6 +1113,103 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### orch-00 IMPLEMENTED — charter records + orchestration read-model + coordination events (2026-06-28)
+**Branch `feat/orch-00-read-model-and-events`** (off `orchestrator` `490174a`); **PR #40 open** against `orchestrator`
+([github.com/ArtMin96/soloist/pull/40](https://github.com/ArtMin96/soloist/pull/40)) — **no self-merge; the owner
+merges.** Delivers **O1** (read-model) + **O2** (coordination events) — the pure CQRS-lite read side over the
+**frozen** G1–G11 writes; no write semantics changed.
+
+- **Task 1 — records (docs only).** `plan/02` gained an **`O — Orchestrator`** group with rows **O1–O14** (+ the demo
+  as the `🟡` UX source). `plan/05` §12 gained: an **Orchestrator (clean-room composition)** gap row; an
+  **Orchestration read-model & coordination events (O1/O2)** design row (the emission seam, the `ScratchpadChanged`-by-
+  `name` and pause/resume-deferred decisions); the **O13** spawn-preamble decision; the **O14** `solo://` promotion; and
+  the **O12** comment-author *reversal* reworded onto the `todo_comment_*` row (a correction toward the demo —
+  implementation is orch-02). **No `KNOWN-DIVERGENCES` entry forced** (O12/O13/O14 move toward the demo; D-7/D-8 stay).
+- **Task 2 — project-scoped reads (additive, write paths untouched).** New `LockRepo::live_in_project` +
+  `Leases::list(project)`; `TimerRepo::list_in_project` + `Timers::list_project(project)` (SQLite impls + `Noop` + the
+  `core::testing` fakes, all three implementors). `Todos::views(project)` reuses the **existing** `repo.list` + the
+  existing `view()` mapping — **no new repo method**, same cost as `list`.
+- **Task 3 — read-model (O1).** New pure-core **`core::orchestration`** module (`OrchestrationSnapshot` + `AgentNode`,
+  reusing the existing coordination view types). **`Facade::orchestration_snapshot(project) -> Result<_, StoreError>`**
+  (`facade/orchestration.rs`): filters `supervisor.snapshot()` by project, attaches `idle.activity`, gathers the five
+  aggregate reads. **Derived on read** — never a cached copy. `parent: None` until lineage lands (O3, orch-01).
+- **Task 4 — events (O2).** Seven additive `DomainEvent`s — `TodoChanged{project,id}`,
+  `TimerArmed`/`TimerFired`/`TimerCleared{owner,id}`, `LeaseChanged{project,key}`, `ScratchpadChanged{project,name}`,
+  `KvChanged{project,key}`. **Emitted at the one C8 `Facade` write seam** (a mutation from *any* adapter — incl. an agent
+  over MCP — emits once; the C6 aggregates stay pure), **except `TimerFired`**, emitted by the C6 `TimerScheduler` (it
+  fires autonomously and already holds the bus). Close-driven releases (lease/todo-lock on process close) are **not**
+  re-emitted — observed via the existing process-lifecycle events the read-model re-queries on. `AgentActivityChanged`
+  (C4) reused for the tree. The app forwards events generically (`domain-event`), so no adapter change.
+- **Task 5 — TS mirror.** The 7 variants mirrored in the one `domain.ts` `DomainEvent` union + added to the exhaustive
+  `projection.ts` switch (no-ops for the process list — the orchestration re-query lands in orch-01). `OrchestrationSnapshot`
+  + `AgentNode` + the coordination sub-view types (`TodoView`/`TimerView`/`LeaseView`/`ScratchpadSummary`/`KvEntry` and
+  their enums) mirrored once in `domain.ts` (the single-source contract orch-01 consumes; its Tauri command/hook are
+  orch-01, not here). `"domain-event"` stays one const per side.
+- **Tests (honest, real behaviour).** Core `facade/orchestration_tests.rs` (9): snapshot assembles the tree + a blocked
+  todo + an armed fire-when-idle timer + a held lease + scratchpad + kv from seeded fakes; project scoping; each mutation
+  (create/complete todo, acquire/release lease, arm/cancel timer, write scratchpad, set kv) emits **exactly one** event of
+  the right shape. `coordination/scheduler_tests.rs` (+1): firing emits `TimerFired`. Store `leases_tests`/`timers_tests`
+  (+1 each): the new SQLite project-scoped reads filter by project, drop expired, order correctly. UI `projection.test.ts`
+  (+1): coordination events return the same process array (referential identity).
+- **Gate green.** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier, **dep-direction `soloist-core`
+  framework-free**; file-size advisory only — `domain.ts` is now **534** lines, the largest outlier, intentional per the
+  single-`domain.ts` mandate §16, non-gating). `just test` exit 0 — **Rust 431 core / 78 store / 32 app, 0 failed, 3
+  ignored (soak)**; the mutation-verified **E7 `crates/pty/tests/orchestration.rs` stays green** (the regression guard);
+  **UI vitest 125**. Feature matrix builds: `--no-default-features`, `--features http`, `--features mcp`. (The previously-
+  flaky I10 shellenv sandbox timeout passed this run, 0.14 s.)
+- **Next:** **orch-01** — agent lineage (O3) + the live orchestration tree UI (O4): record `parent` on `spawn_agent`,
+  add the Tauri `orchestration_snapshot` command + an `api.ts` wrapper + a store hook that re-queries on the coordination
+  events, and the tree component (via `/impeccable`). The read-model + events this phase built are its seam.
+
+### Orchestrator track readied for implementation — demo re-verified frame-by-frame (2026-06-28, user-directed)
+- **Goal (user):** start the orchestrator feature; make the `orch-NN` phases **fully ready and faithful to
+  the Solo demo** before implementing (others may stay deferred).
+- **Re-analysed the demo `WAKGhlzpYgs` frame-by-frame** (the on-screen MCP tool calls, not just the
+  narration) and **independently audited the code**. **Confirmed** the charter's central claim: the
+  orchestration *mechanism* is built — `timer_fire_when_idle_all` → `scheduler.rs` injects `body + "\r"`
+  to the lead's PTY, proven by `crates/pty/tests/orchestration.rs` (E7). The "UX + formalization + deferred
+  tools, not new primitives" framing holds.
+- **Found four faithful-to-demo details the first planning pass missed.** Owner decided (asked + answered)
+  to fold the first three into **v1**: **O12** todo **comment authorship** (`author_actor_id`; reverses
+  the `plan/05` "no author attribution" decision — the demo's `todo_get` shows it); **O13** the per-spawn
+  **`[SOLO ORCHESTRATION CONTEXT]` preamble** (the demo's `include_agent_instructions`; today only
+  `SOLOIST_PROCESS_ID` is injected); **O14** the **`solo://` copy-link handoff** (the demo's core human
+  handoff; promotes the orchestrator slice of `later` row I4 to v1). The fourth (minor) — the wake turn
+  naming **why** it woke — folded into **O8**.
+- **Amended the track docs only** (no source, no canonical-contract edits — those remain **orch-00 Task 1**,
+  per the established discipline): the charter ([`plan/orchestrator/README.md`](plan/orchestrator/README.md))
+  gap table + O-row table now carry **O12/O13/O14** (O1–O14); **orch-02** gains O12 + O14, **orch-04** gains
+  O13 (decoupled from the arbitrary-spawn trust work), **orch-03** O8 gains the wake-reason prefix, **orch-05**
+  recipe threads all three; **orch-00 Task 1** now propagates **O1–O14** + the three decisions into
+  `plan/02`/`plan/05 §12`. No KNOWN-DIVERGENCE forced — the three corrections move us **toward** the demo.
+- **Branch health:** the in-progress **`main` → `orchestrator` merge** (settings 11a/11b) was completed —
+  the lone conflict, `PROGRESS.md`, resolved by **union** (both session narratives preserved); merge commit
+  `bcb99e5`; working tree clean. The youtube-notetaker deep-dive for `WAKGhlzpYgs` was refreshed in the
+  local video library (slides re-anchored to the markdown's timestamps).
+- **Next:** implement the track starting at **orch-00** (its Task 1 writes the canonical-doc records first).
+
+### Orchestrator track planned (no implementation) — user-directed (2026-06-26)
+- **The user asked to plan a multi-agent "orchestrator" capability** (from researching the Solo demo
+  "Agent orchestration, simplified", Aaron Francis, `youtube.com/watch?v=WAKGhlzpYgs`) into phase files,
+  then **explicitly: do not implement anything now — upcoming sessions implement the whole track.**
+- **Created [`plan/orchestrator/`](plan/orchestrator/):** a charter (`README.md`) + six phase files
+  **orch-00 … orch-05**, in the `plan/phases/` format with `04`/`05`/`06`/`02` references. **No source code.**
+- **Citation-grade research first** (the four reference docs + this ledger): the orchestration mechanism
+  the demo shows is **already built and `Verified`** — `spawn_agent` (F11), todos+blockers+locks (G3–G5),
+  `timer_fire_when_idle(IdleMode::All)` + `TimerScheduler` (G7–G9), the idle FSM (E5), output-read tools
+  (F9), scratchpads (G1/G2) — and the exact loop is the passing `crates/pty/tests/orchestration.rs` (E7).
+  So the track is scoped to the genuine delta: **(a)** the human-facing orchestration UI (none exists
+  today; the agent-tree row I14 was `later`), **(b)** the deferred coordination sub-tools (`spawn_process`,
+  cross-project `*_transfer`), **(c)** formalizing the pattern as a documented first-class capability.
+- **User scope decisions (asked + answered):** deliver UX + formalization + deferred tools (the full
+  track); **standalone `orch-NN`** numbering; treat scope as an **explicit matrix expansion** (new
+  `O1–O11` rows) recorded as a clean-room **gap decision** ("orchestrator" is absent from `plan/05`).
+- **Discipline held:** did **not** edit the canonical contracts (`plan/02`, `plan/05 §12`,
+  `KNOWN-DIVERGENCES.md`) — the charter *proposes* the `O`-rows + gap text, and **propagation is orch-00
+  Task 1**. Each phase keeps CLAUDE.md discipline (one `Facade`, read-model not logic in React,
+  `/impeccable` for UI, trust/scope in core, no `later` gold-plating beyond the recorded expansion).
+- **The UX north star is the demo's *feel* only** (clean-room, CLAUDE.md §9) — no Solo assets/screenshots/
+  strings; visuals are produced fresh via `/impeccable` against `PRODUCT.md`/`DESIGN.md`.
 ### Settings build-out — the five remaining global 0b panels landed as stacked PRs (2026-06-26)
 All of 0b's non-Appearance global tabs, each its own **new stacked PR** (the owner's directive: "this changes must be
 in a new stacked PR"). Chain **#31 → #32 → #33 → #34 → #35** (merge in order; no self-merge). Every panel replicates the
@@ -3521,6 +3784,39 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
+**★ ORCHESTRATOR TRACK — orch-00 DONE, orch-01 DONE; START AT
+[`orch-02`](plan/orchestrator/orch-02-coordination-panels-ui.md).** **orch-01 (agent lineage O3 + live tree
+UI O4) is code-complete & gate-green** on branch `feat/orch-01-agent-lineage-and-tree-ui` (**stacked on
+`feat/orch-00-read-model-and-events`**; orch-00's PR #40 is still open against `orchestrator`, not yet merged —
+owner merges, no self-merge). See the top Current-state entry for the full evidence. **What remains for orch-01:
+the USER-ONLY real-window walk** (WebdriverIO + tauri-driver; sudo deps) to watch a bound lead spawn workers that
+nest under it, a manual launch sit as a root, a worker's glyph flip on an activity event, and a closed lead
+re-root its workers — that walk flips **O3/O4 → `Verified`**. Headless coverage (mockIPC + pure builder +
+component + core lineage tests) is all green.
+
+**Sequencing note:** orch-01 is stacked on orch-00. **Merge order: PR #40 (orch-00 → `orchestrator`) first, then
+orch-01's PR.** The owner opens/merges PRs — `feat/orch-01-agent-lineage-and-tree-ui` is committed locally and
+ready to push.
+
+**orch-02 (the next phase) — scratchpad panel (O5) + to-do board (O6) + O12 comment authorship + O14 `solo://`
+copy-link handoff:** read [`orch-02`](plan/orchestrator/orch-02-coordination-panels-ui.md) end-to-end. It
+consumes the orch-00 read-model (`OrchestrationSnapshot.todos`/`.scratchpads` + the `TodoChanged`/`ScratchpadChanged`
+events) the same way orch-01's tree consumes the agent lineage — a thin presentational layer over the existing C6
+behavior, extending the `OrchestrationPane` surface this phase introduced. Then **orch-03 → orch-04 → orch-05**.
+
+A standalone track was planned in [`plan/orchestrator/`](plan/orchestrator/) (charter
+`README.md` + six phase files **orch-00 … orch-05**); the orchestration *mechanism* is already built +
+`Verified` (the passing
+`crates/pty/tests/orchestration.rs`, E7), so this track is **UX + formalization + deferred tools, not new
+primitives**. **Start with [`orch-00`](plan/orchestrator/orch-00-charter-gap-and-read-model.md)** — its
+Task 1 propagates the new `O`-rows into `plan/02` and the orchestrator **gap decision** into `plan/05 §12`
+(an explicit, recorded matrix expansion), then it builds the read-model (O1) + live coordination events
+(O2) that unblock every UI phase. Then **orch-01 → orch-02 → orch-03** (the three UI slices, each driven
+through `/impeccable` + Playwright), **orch-04** (deferred `spawn_process` + `*_transfer`, security-design
+first), **orch-05** (recipe + docs + full-loop e2e + the `O`-row parity walk). The track depends only on
+Phases 7/8/9 (all done/`Verified`); follow each phase file end-to-end — it carries its own tasks,
+acceptance criteria, test plan, and risks. Phase 11 (item 0 below) remains in progress and is **not**
+abandoned — sequence per the user.
 **0. Settings build-out (phases 11a/11b) is IN PROGRESS on `feat/phase-11-settings-ui` (off `main` `195b152`).** The
 **generic base (I7s) and the global-settings core behavior of all six SHOWN tabs are DONE & green** (commits `12c2ee2`
 docs, `c0de87c` base, `73ed5d7` data tabs, `fe57dca` hotkeys — see the top Decisions entry). The next steps, in order:
@@ -3600,11 +3896,11 @@ foundations done (`SettingsStore` migration v9 + `mcp_tool_groups`) but need `/i
 confirmation since DESIGN.md is deferred.
 
 **0. Phase 11 (UX Polish & Execution Profiles) is the ACTIVE phase. PR #27 (I10) is MERGED (`17f0115`); slices 1–2 done.**
-Slice 2 (settings + MCP toggle) landed on **`feat/phase-11-settings-mcp-toggle`** (off `main` `17f0115`; commits
-`59a5037` Phase-10-Verified doc, `0e4a7e4` settings backend, `dbf88b7` MCP gating) — **PR to open; the user merges, no
-self-merge.** Gate green: `just lint` exit 0; `just test` exit 0 — **Rust 612 / 3 ignored, UI 78**; feature matrix builds;
-`Cargo.lock` unchanged. **First: open the PR for `feat/phase-11-settings-mcp-toggle`; once it merges, sync `main`;** then
-pick the next v1 slice. **v1 rows remaining:** `I1` drag-reorder, `I2` command palette (`Ctrl+K`), `I5` light/dark/system
+Slice 2 (settings + MCP toggle) **MERGED to `main` via PR #28 (merge commit `1356f44`; commits `59a5037`
+Phase-10-Verified doc, `0e4a7e4` settings backend, `dbf88b7` MCP gating).** State reconciled at the start of the
+next session (2026-06-25): `main` == `origin/main`, working tree clean, **gate re-confirmed green on `main` `1356f44`:
+`just lint` exit 0; `just test` exit 0 — Rust 612 / 3 ignored, UI 78** (matches the slice-2 hand-off exactly);
+feature matrix builds; `Cargo.lock` unchanged. **Next: pick the next v1 slice.** **v1 rows remaining:** `I1` drag-reorder, `I2` command palette (`Ctrl+K`), `I5` light/dark/system
 themes (app + xterm), `I6` keyboard-first nav, `I7` settings screen (Appearance/Terminal/Notifications/Sidebar/Agents/
 Tools/**MCP**/Hotkeys), `I9` open-in-editor. **`later` rows I3/I4/I8/I11–I14 are tracked, NOT v1 — do not gold-plate.**
 **Backend now done for G10 + the I5/I7 persistence foundation** (slice 2): `core::settings` (`SettingsStore` over

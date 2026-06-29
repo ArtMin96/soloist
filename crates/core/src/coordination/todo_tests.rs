@@ -229,11 +229,11 @@ fn comments_create_update_delete_and_list() {
         .unwrap();
 
     let (_, first) = todos
-        .comment_create(PROJECT, todo.id, "looks good")
+        .comment_create(PROJECT, todo.id, "looks good", None)
         .unwrap()
         .unwrap();
     let (_, second) = todos
-        .comment_create(PROJECT, todo.id, "ship it")
+        .comment_create(PROJECT, todo.id, "ship it", None)
         .unwrap()
         .unwrap();
     assert_ne!(first, second);
@@ -255,4 +255,31 @@ fn comments_create_update_delete_and_list() {
         .expect("the todo exists");
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].body, "looks great");
+}
+
+#[test]
+fn a_comment_carries_the_author_it_was_stamped_with() {
+    let todos = todos();
+    let todo = todos
+        .create(PROJECT, doc("discuss", TodoStatus::Open))
+        .unwrap();
+    let author = CommentAuthor::Process {
+        id: ProcessId::from_raw(2),
+        label: "Web".into(),
+    };
+    let (view, _) = todos
+        .comment_create(PROJECT, todo.id, "looks good", Some(author.clone()))
+        .unwrap()
+        .expect("the todo exists");
+    assert_eq!(view.comments[0].author, Some(author));
+}
+
+#[test]
+fn a_comment_persisted_before_authorship_reads_back_unattributed() {
+    // The author field is `#[serde(default)]`, so a comment written before authorship existed
+    // deserializes with no author rather than failing — no migration is needed.
+    let legacy: Comment =
+        serde_json::from_str(r#"{"id":1,"body":"shipped"}"#).expect("legacy json");
+    assert_eq!(legacy.author, None);
+    assert_eq!(legacy.body, "shipped");
 }

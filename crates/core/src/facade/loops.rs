@@ -50,6 +50,7 @@ impl Facade {
         IdleSampler::new(
             self.clock.clone(),
             self.idle.clone(),
+            self.lineage.clone(),
             self.bus.clone(),
             Arc::downgrade(&self.supervisor),
         )

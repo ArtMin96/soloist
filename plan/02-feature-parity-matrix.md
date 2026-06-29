@@ -171,6 +171,41 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | I7l | Global **Notifications** tab | ❓ | 11b | v1 | **NOT SHOWN in source — decide from `plan/05`/docs before building; do not invent** |
 | I7m | Global **Account** tab | ❓ | 11b | later | **NOT SHOWN; N/A under D3 (no licensing). Proposed: app info / data dir / reset — needs decision** |
 
+## O. Orchestrator (track `orch-00`–`orch-05`)
+
+A standalone build track that makes the multi-agent **orchestrator** experience legible and first-class.
+The orchestration *mechanism* (a lead spawns workers, hands out blockered todos, waits token-free on a
+fire-when-idle timer, wakes to integrate) is **already built and `Verified`** — the passing
+`crates/pty/tests/orchestration.rs` (E7). This track is therefore **UX + formalization + deferred tools,
+not new primitives**: every row *consumes* the existing C6/C4/C2 behavior through the one `Facade`. Full
+charter, dependencies, and per-phase definition of done: [`orchestrator/README.md`](orchestrator/README.md).
+
+> **UX source (`🟡`):** the public Solo demo "Agent orchestration, simplified" (Aaron Francis,
+> `youtube.com/watch?v=WAKGhlzpYgs`), re-verified frame-by-frame 2026-06-28 — matched for *feel* only,
+> never assets/strings (clean-room, `CLAUDE.md` §9). "Orchestrator" is not a documented Solo concept; it
+> is a Soloist-original composition recorded as a gap decision in [`05` §12](05-solo-reference-and-sources.md).
+> `Src`: `✅` documented name · `🟡` stated by the demo · `❓` our design.
+
+| ID | Feature | Src | Phase | Target | Verify |
+|----|---------|-----|------|--------|--------|
+| O1 | Orchestration read-model: one `Facade` query projecting the lead→worker tree, todos, timers, leases, scratchpads, kv per project | ❓ | orch-00 | v1 | Query returns the snapshot; reflects a mutation |
+| O2 | Coordination `DomainEvent`s (todo / timer / lease / scratchpad / kv changed) for a live UI | ❓ | orch-00 | v1 | A mutation emits its event; UI updates without polling |
+| O3 | Agent lineage: parent `ProcessId` recorded on `spawn_agent`; nested lead→worker tree (promotes `later` row I14) | 🟡 | orch-01 | v1 | A spawned worker nests under its lead |
+| O4 | Live orchestration tree UI with per-agent activity (Working/Thinking/Idle/Permission/Error) | 🟡 | orch-01 | v1 | Tree renders lead + workers with live glyphs |
+| O5 | Scratchpad panel — disciplined `ScratchpadDoc`, revision-guarded edit, living-doc view | ❓ | orch-02 | v1 | Read/edit a scratchpad; stale edit → conflict |
+| O6 | To-do board UI — blockers / locks / comments / status, blocker-gate visible | ❓ | orch-02 | v1 | Blocker gating + lock owner shown; complete refused when blocked |
+| O7 | Timers & fire-when-idle panel — armed timers, `waiting_on`, max-wait countdown, injected-turn `body` preview | 🟡 | orch-03 | v1 | A `fire_when_idle` arm shows `waiting_on` + countdown |
+| O8 | Wake-cycle visibility — timer fires → `body` delivered as a fresh turn (named with *why* it woke), surfaced on the lead | 🟡 | orch-03 | v1 | Fired timer's body appears on the lead; timer leaves the panel |
+| O9 | `spawn_process` (arbitrary terminal over MCP) with its trust treatment | ✅ name / ❓ trust | orch-04 | v1 | Trusted spawn works; untrusted / cross-project refused |
+| O10 | Cross-project `scratchpad_transfer` / `todo_transfer` with cross-scope authorization | ✅ name / ❓ scope | orch-04 | v1 | In-scope transfer works; cross-scope refused |
+| O11 | Orchestrator capability — documented recipe + setup guidance + first-class status | ❓ | orch-05 | v1 | Recipe doc + `setup_agent_integration` guidance; E2E walk passes |
+| O12 | Todo **comment authorship** — a comment records its creating bound actor (`author_actor_id` + display author), populated by the core on create; surfaced on the to-do board | 🟡 | orch-02 | v1 | A comment created by a bound process records its actor; the board shows who wrote each comment; reverses the `05` "no author attribution" decision |
+| O13 | **Spawn orchestration-context preamble** — `spawn_agent`/`spawn_process` deliver a first-turn `[SOLO ORCHESTRATION CONTEXT]` preamble (the worker's identity + the coordination tools), mirroring the demo's `include_agent_instructions` | 🟡 | orch-04 | v1 | A spawned worker receives the preamble as its first turn and can use the primitives with no skills loaded; applies to the built `spawn_agent` (not gated on the O9 arbitrary-spawn trust work) |
+| O14 | **`solo://` copy-link handoff** — a stable `solo://proj/<id>/scratchpad\|todo/<id>` link + a "Copy link" affordance + a core resolver so a receiving agent reads the target; promotes the orchestrator slice of I4 to v1 | 🟡 name (`05` §10) / ❓ shape | orch-02 | v1 | Copy a scratchpad's link; a bound agent given the link reads it; a malformed / foreign-scope link is refused |
+
+> `later` (tracked, non-gating — do **not** gold-plate): a deep cross-project "Activity Monitor" (I12),
+> prompt-template UI (I13), and LLM auto-summarization of worker output (E6, OFF by default).
+
 ## J. Packaging (Phase 12)
 
 | ID | Feature | Src | Phase | Target | Verify |

@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use tokio::sync::{broadcast, Notify};
 
-use crate::agents::{Agents, IdleTracker};
+use crate::agents::{AgentLineage, Agents, IdleTracker};
 use crate::config::ConfigEngine;
 use crate::coordination::{Kv, Leases, Scratchpads, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
@@ -36,7 +36,9 @@ use crate::trust::TrustStore;
 mod commands;
 mod coordination;
 mod kv;
+mod link;
 mod loops;
+mod orchestration;
 mod output;
 mod project_settings;
 mod scoped;
@@ -68,6 +70,7 @@ pub struct Facade {
     config: ConfigEngine,
     agents: Agents,
     idle: Arc<IdleTracker>,
+    lineage: Arc<AgentLineage>,
     identity: Identity,
     kv: Kv,
     leases: Leases,
@@ -127,6 +130,7 @@ impl Facade {
             trust: TrustStore::new(trust.clone()),
             config: ConfigEngine::new(trust, bus.clone()),
             idle: Arc::new(IdleTracker::new()),
+            lineage: Arc::new(AgentLineage::new()),
             identity: Identity::new(),
             bus,
         }

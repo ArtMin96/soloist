@@ -8,11 +8,13 @@
 
 mod detect;
 pub mod idle;
+mod lineage;
 mod repo;
 mod tool;
 
 pub use detect::{DetectedTool, NoopVersionProbe, VersionProbe};
 pub use idle::{AgentActivity, IdleSampler, IdleTracker};
+pub use lineage::AgentLineage;
 pub use repo::{AgentToolRepo, NoopAgentToolRepo};
 pub use tool::{AgentKind, AgentTool, PromptMode};
 

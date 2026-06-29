@@ -193,11 +193,173 @@ export type DomainEvent =
   // An agent's activity changed (the five-state idle FSM). Edge-triggered (only on a
   // transition), so the agent's row updates without polling; Permission/Error raise attention.
   | { type: "AgentActivityChanged"; id: number; state: AgentActivity }
-  | { type: "OrphansFound"; orphans: OrphanInfo[] };
+  | { type: "OrphansFound"; orphans: OrphanInfo[] }
+  // Coordination change-notifications (C6) for the orchestration read-model. Each carries ids
+  // only — the UI re-reads orchestration_snapshot (coalesced) rather than trusting a payload.
+  | { type: "TodoChanged"; project: number; id: number }
+  | { type: "TimerArmed"; owner: number; id: number }
+  // A timer fired: its body was delivered to the owner as a fresh turn and it left the armed set.
+  | { type: "TimerFired"; owner: number; id: number }
+  | { type: "TimerCleared"; owner: number; id: number }
+  // A paused timer's countdown is frozen; a resumed one re-arms with the time that remained.
+  | { type: "TimerPaused"; owner: number; id: number }
+  | { type: "TimerResumed"; owner: number; id: number }
+  | { type: "LeaseChanged"; project: number; key: string }
+  // Keyed by the scratchpad's `name` handle (the addressing key its surface uses).
+  | { type: "ScratchpadChanged"; project: number; name: string }
+  | { type: "KvChanged"; project: number; key: string };
 
 export interface AppInfo {
   name: string;
   version: string;
+}
+
+// ── Coordination read-model (mirrors core::coordination view types) ──────────
+// Projected by the orchestration snapshot; the orchestration UI renders these.
+// Enum string values are the core's serde `snake_case` output. Ids serialize as numbers.
+
+export type TodoStatus = "open" | "blocked" | "in_progress" | "done";
+
+// The disciplined, revision-guarded specification a todo carries.
+export interface TodoDoc {
+  title: string;
+  description: string;
+  acceptance_criteria: string[];
+  risks: string[];
+  status: TodoStatus;
+}
+
+// Who wrote a comment, stamped by the core from the caller's identity (serde tag = "kind"). A bound
+// process carries its live id plus the durable label the board shows; an external caller carries its
+// label. `null` author (below) means the caller was unbound.
+export type CommentAuthor =
+  | { kind: "process"; id: number; label: string }
+  | { kind: "external"; label: string };
+
+// A comment on a todo (its per-todo sequential id, body, and author when attributable).
+export interface Comment {
+  id: number;
+  body: string;
+  author: CommentAuthor | null;
+}
+
+// A todo as the board reads it: the document plus its live columns (tags, blockers, the unmet
+// subset, the derived blocked flag, comments, lock owner) and the revision to guard the next write.
+export interface TodoView {
+  id: number;
+  doc: TodoDoc;
+  tags: string[];
+  blockers: number[];
+  blocked_by: number[];
+  blocked: boolean;
+  comments: Comment[];
+  locked_by: number | null;
+  revision: number;
+}
+
+// What a timer waits for (serde tag = "kind").
+export type FireCond =
+  | { kind: "at" }
+  | { kind: "when_idle_any"; watched: number[] }
+  | { kind: "when_idle_all"; watched: number[] };
+
+export type TimerStatus = "armed" | "paused";
+
+// A timer as the panel reads it: its body, fire condition, status, absolute deadline, and — for
+// fire-when-idle timers — which watched processes are not yet idle and whether the quorum was
+// already met at read time. `waiting_on` and `already_idle` are computed by the façade from live
+// idle state and default to [] / false for plain `At` timers (serde `default`).
+export interface TimerView {
+  id: number;
+  /** The process that owns this timer (the delivery target). */
+  owner: number;
+  body: string;
+  fire: FireCond;
+  status: TimerStatus;
+  deadline_unix_millis: number;
+  /** Watched processes not yet idle — empty for `At` timers and once the quorum is met. */
+  waiting_on: number[];
+  /** Whether the idle condition was already satisfied at the moment the snapshot was built. */
+  already_idle: boolean;
+  /**
+   * For a paused timer, the milliseconds that remained when it was paused — the frozen value the
+   * panel shows, so a paused countdown does not drift with the wall clock. `null` for an armed
+   * timer, whose remaining time is derived from `deadline_unix_millis`.
+   */
+  paused_remaining_millis: number | null;
+}
+
+// A live lease: its key, the process that holds it, and the absolute expiry.
+export interface LeaseView {
+  key: string;
+  owner: number;
+  expires_unix_millis: number;
+}
+
+// A scratchpad in a listing (identity, handle, tags, archived flag, revision, objective gist).
+export interface ScratchpadSummary {
+  id: number;
+  name: string;
+  tags: string[];
+  archived: boolean;
+  revision: number;
+  objective: string;
+}
+
+// A scratchpad's disciplined, typed document — the fields ARE the required structure (each list
+// needs at least one non-blank entry); `status` is a free label and `notes` optional Markdown.
+export interface ScratchpadDoc {
+  objective: string;
+  context: string;
+  plan: string[];
+  acceptance_criteria: string[];
+  risks: string[];
+  status: string;
+  notes: string | null;
+}
+
+// A scratchpad as the panel reads it: the disciplined document plus its tags, revision (to guard the
+// next write), and the canonical Markdown rendering the core derives.
+export interface ScratchpadView {
+  id: number;
+  name: string;
+  tags: string[];
+  archived: boolean;
+  revision: number;
+  doc: ScratchpadDoc;
+  rendered: string;
+}
+
+// A project-scoped key-value entry; `value` is arbitrary JSON.
+export interface KvEntry {
+  key: string;
+  value: unknown;
+}
+
+// ── Orchestration read-model (mirrors core::orchestration) ───────────────────
+// One node in the agent lineage tree: a worker nests under the lead that spawned it (`parent`); a
+// manually launched agent, a command, or a terminal is a root (`parent` null). A node whose parent
+// has left the registry is re-rooted, so a closed lead never strands its workers.
+export interface AgentNode {
+  id: number;
+  parent: number | null;
+  // The process's display label — the tree row's name.
+  label: string;
+  kind: ProcessKind;
+  status: ProcStatus;
+  activity: AgentActivity | null;
+}
+
+// The orchestration read-model for one project: its agent tree plus the coordination state agents
+// share. Produced by the `orchestration_snapshot` query (exposed to the UI by a Tauri command).
+export interface OrchestrationSnapshot {
+  project: number;
+  agents: AgentNode[];
+  todos: TodoView[];
+  timers: TimerView[];
+  leases: LeaseView[];
+  scratchpads: ScratchpadSummary[];
+  kv: KvEntry[];
 }
 
 // ── Settings (mirrors core::settings) ───────────────────────────────────────

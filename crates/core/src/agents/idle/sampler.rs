@@ -7,10 +7,11 @@
 //! supervisor, so it ends when the app shuts down (the facade drops) rather than keeping it
 //! alive — start it once from the composition root.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
+use crate::agents::AgentLineage;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProcessId;
 use crate::ports::Clock;
@@ -31,22 +32,26 @@ const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 pub struct IdleSampler {
     clock: Arc<dyn Clock>,
     tracker: Arc<IdleTracker>,
+    lineage: Arc<AgentLineage>,
     bus: EventBus,
     supervisor: Weak<Supervisor>,
 }
 
 impl IdleSampler {
-    /// Builds a sampler over the idle tracker, clock, and event bus, watching the given
-    /// supervisor weakly (so it never keeps the app alive).
+    /// Builds a sampler over the idle tracker, the spawn-lineage tracker, the clock, and the
+    /// event bus, watching the given supervisor weakly (so it never keeps the app alive). Each
+    /// tick also prunes both C4 per-agent maps to the live registry.
     pub fn new(
         clock: Arc<dyn Clock>,
         tracker: Arc<IdleTracker>,
+        lineage: Arc<AgentLineage>,
         bus: EventBus,
         supervisor: Weak<Supervisor>,
     ) -> Self {
         Self {
             clock,
             tracker,
+            lineage,
             bus,
             supervisor,
         }
@@ -81,9 +86,10 @@ impl IdleSampler {
                 .into_iter()
                 .map(|view| (view.id, view.status))
                 .collect();
-            // Forget agents that have left the registry, so the tracker never outgrows it.
-            self.tracker
-                .retain_live(&status_by_id.keys().copied().collect());
+            // Forget agents that have left the registry, so neither C4 per-agent map outgrows it.
+            let live: HashSet<ProcessId> = status_by_id.keys().copied().collect();
+            self.tracker.retain_live(&live);
+            self.lineage.retain_live(&live);
             for id in tracked {
                 match status_by_id.get(&id) {
                     // A running agent is reclassified from its current terminal signals.

@@ -2,8 +2,8 @@ use super::*;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, Comment, FireCond, LeaseView, McpToolGroups, Origin,
-    ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, PromptMode, Readiness,
+    AcquireOutcome, AgentKind, AgentTool, Comment, FireCond, LeaseView, LinkContent, McpToolGroups,
+    Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, PromptMode, Readiness,
     ScratchpadDoc, ScratchpadId, ScratchpadSummary, ScratchpadView, SessionId, SetWhenIdleOutcome,
     StartSummary, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary,
     TodoView, Whoami,
@@ -19,7 +19,7 @@ use crate::args::{
     LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, RenameArg, ScratchpadArchiveArg,
     ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg, SelectProjectArg,
     SendInputArg, SpawnAgentArg, TimerArg, TimerFireWhenIdleArg, TimerSetArg, TodoArg,
-    TodoCommentCreateArg, TodoCreateArg, TodoStatusArg, WaitForPortArg,
+    TodoCommentCreateArg, TodoCreateArg, TodoGetArg, TodoRef, TodoStatusArg, WaitForPortArg,
 };
 
 /// Spawns a fake app on `socket` that answers each request via `respond` until the client
@@ -947,10 +947,14 @@ async fn lock_release_reports_whether_the_caller_held_it() {
 fn sample_timer(id: u64) -> TimerView {
     TimerView {
         id: TimerId::from_raw(id),
+        owner: ProcessId::from_raw(1),
         body: "resume work".into(),
         fire: FireCond::At,
         status: TimerStatus::Armed,
         deadline_unix_millis: 1_700_000_005_000,
+        waiting_on: vec![],
+        already_idle: false,
+        paused_remaining_millis: None,
     }
 }
 
@@ -994,12 +998,16 @@ async fn timer_fire_when_idle_all_threads_the_processes_and_projects_the_outcome
             Ok(IpcResponse::TimerWhenIdle(SetWhenIdleOutcome {
                 timer: TimerView {
                     id: TimerId::from_raw(9),
+                    owner: ProcessId::from_raw(1),
                     body,
                     fire: FireCond::WhenIdleAll {
                         watched: processes.clone(),
                     },
                     status: TimerStatus::Armed,
                     deadline_unix_millis: 0,
+                    waiting_on: processes.clone(),
+                    already_idle: false,
+                    paused_remaining_millis: None,
                 },
                 already_idle: false,
                 waiting_on: processes,
@@ -1219,6 +1227,72 @@ async fn scratchpad_read_projects_the_view() {
         .expect("scratchpad_read succeeds");
     let back: ScratchpadView = serde_json::from_value(structured_of(result)).expect("decode view");
     assert_eq!(back.doc, sample_doc());
+}
+
+#[tokio::test]
+async fn scratchpad_read_resolves_a_solo_link() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // A solo:// link routes to the scope-checked resolver (not a bare-name read); the resolved
+    // scratchpad is projected just like a direct read.
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::ResolveLink { link } if link == "solo://proj/1/scratchpad/1" => Ok(
+            IpcResponse::Link(LinkContent::Scratchpad(sample_scratchpad("plan"))),
+        ),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .scratchpad_read(Parameters(ScratchpadNameArg {
+            name: "solo://proj/1/scratchpad/1".into(),
+        }))
+        .await
+        .expect("scratchpad_read resolves the link");
+    let back: ScratchpadView = serde_json::from_value(structured_of(result)).expect("decode view");
+    assert_eq!(back.name, "plan");
+}
+
+#[tokio::test]
+async fn todo_get_resolves_a_solo_link() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::ResolveLink { link } if link == "solo://proj/1/todo/7" => {
+            Ok(IpcResponse::Link(LinkContent::Todo(sample_todo(7))))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .todo_get(Parameters(TodoGetArg {
+            todo: TodoRef::Link("solo://proj/1/todo/7".into()),
+        }))
+        .await
+        .expect("todo_get resolves the link");
+    let back: TodoView = serde_json::from_value(structured_of(result)).expect("decode view");
+    assert_eq!(back.id, TodoId::from_raw(7));
+}
+
+#[tokio::test]
+async fn todo_get_reads_a_bare_id() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // A numeric id still routes to the plain get — the link form does not change the id path.
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TodoGet { todo } if todo == TodoId::from_raw(7) => {
+            Ok(IpcResponse::Todo(sample_todo(7)))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .todo_get(Parameters(TodoGetArg {
+            todo: TodoRef::Id(7),
+        }))
+        .await
+        .expect("todo_get reads the id");
+    let back: TodoView = serde_json::from_value(structured_of(result)).expect("decode view");
+    assert_eq!(back.id, TodoId::from_raw(7));
 }
 
 #[tokio::test]
@@ -1494,6 +1568,7 @@ async fn todo_comment_list_projects_the_comments() {
             Ok(IpcResponse::TodoComments(vec![Comment {
                 id: 1,
                 body: "looks good".into(),
+                author: None,
             }]))
         }
         _ => Err(IpcError::Internal("unexpected request".into())),

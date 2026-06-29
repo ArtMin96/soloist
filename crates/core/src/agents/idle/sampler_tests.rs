@@ -11,7 +11,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::agents::{AgentActivity, AgentKind, IdleSampler, IdleTracker};
+use crate::agents::{AgentActivity, AgentKind, AgentLineage, IdleSampler, IdleTracker};
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{CorePorts, PtySize, SpawnSpec};
@@ -32,6 +32,7 @@ const ADVANCE_STEP: Duration = Duration::from_secs(10);
 struct Setup {
     sup: Arc<Supervisor>,
     tracker: Arc<IdleTracker>,
+    lineage: Arc<AgentLineage>,
     clock: MockClock,
     bus: EventBus,
     rx: broadcast::Receiver<DomainEvent>,
@@ -52,6 +53,7 @@ fn setup(spawner: FakeSpawner) -> Setup {
     Setup {
         sup,
         tracker: Arc::new(IdleTracker::new()),
+        lineage: Arc::new(AgentLineage::new()),
         clock,
         bus,
         rx,
@@ -82,6 +84,7 @@ impl Setup {
             IdleSampler::new(
                 Arc::new(self.clock.clone()),
                 self.tracker.clone(),
+                self.lineage.clone(),
                 self.bus.clone(),
                 Arc::downgrade(&self.sup),
             )

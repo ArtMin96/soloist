@@ -237,6 +237,22 @@ pub(crate) struct TodoArg {
     pub(crate) todo: u64,
 }
 
+/// A reference to a todo for `todo_get`: either its numeric id or a `solo://` link someone handed
+/// you. A number is read as the id; a string is read as a link.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub(crate) enum TodoRef {
+    Id(u64),
+    Link(String),
+}
+
+/// Arguments for reading one todo, by its id or a `solo://` link to it.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoGetArg {
+    /// The todo to read: its numeric id (from `todo_list`/`todo_create`) or a `solo://` link to it.
+    pub(crate) todo: TodoRef,
+}
+
 /// Arguments for creating a todo's disciplined document. The fields ARE the required structure —
 /// every todo records the same sections, so they stay consistent and informative.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

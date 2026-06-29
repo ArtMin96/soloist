@@ -113,6 +113,19 @@ impl Leases {
         Ok(self.repo.live(project, key, now)?.map(LeaseView::of))
     }
 
+    /// Every live lease in `project`, ordered by key — the read the orchestration snapshot projects.
+    /// Expired leases are filtered out against the current clock; the read prunes nothing (it is a
+    /// derived projection, not a mutation).
+    pub fn list(&self, project: ProjectId) -> Result<Vec<LeaseView>, StoreError> {
+        let now = self.clock.now_unix_millis();
+        Ok(self
+            .repo
+            .live_in_project(project, now)?
+            .into_iter()
+            .map(LeaseView::of)
+            .collect())
+    }
+
     /// Releases `(project, key)` if it is held by `owner`, returning whether a lease the caller
     /// owned was released. Releasing a key held by another process does nothing (returns `false`)
     /// — a caller cannot steal or drop another's lease; owner-close handles the rest.

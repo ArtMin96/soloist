@@ -273,3 +273,24 @@ fn concurrent_claims_of_one_armed_timer_grant_exactly_one_winner() {
     let winners = claims.iter().filter(|&&claimed| claimed).count();
     assert_eq!(winners, 1, "exactly one pass may claim a timer to fire it");
 }
+
+#[test]
+fn list_in_project_returns_this_project_s_timers_armed_and_paused_ordered_by_id() {
+    let (_dir, store) = open();
+    let a = project(&store, "/p/a");
+    let b = project(&store, "/p/b");
+    // Two timers in project a (one of them paused) and one in project b.
+    let armed = store.create(&at_timer(a, 1, "armed", 10_000)).expect("a1");
+    let paused = store.create(&at_timer(a, 2, "paused", 10_000)).expect("a2");
+    store.create(&at_timer(b, 3, "other", 10_000)).expect("b1");
+    assert!(store
+        .pause(paused, ProcessId::from_raw(2), 1_000)
+        .expect("pause"));
+
+    // Project a's timers only — both the armed and the paused one — ordered by id.
+    let listed = store.list_in_project(a).expect("list_in_project");
+    let ids: Vec<_> = listed.iter().map(|timer| timer.id).collect();
+    assert_eq!(ids, vec![armed, paused], "both a's timers, ordered by id");
+    assert_eq!(listed[0].status, TimerStatus::Armed);
+    assert_eq!(listed[1].status, TimerStatus::Paused);
+}

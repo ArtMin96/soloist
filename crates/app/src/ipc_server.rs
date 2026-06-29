@@ -421,6 +421,10 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .todo_comment_list(session, todo)
             .map(IpcResponse::TodoComments)
             .map_err(IpcError::from),
+        IpcRequest::ResolveLink { link } => facade
+            .resolve_link(session, &link)
+            .map(IpcResponse::Link)
+            .map_err(IpcError::from),
         IpcRequest::KvSet { key, value } => facade
             .kv_set(session, key, value)
             .map(|()| IpcResponse::KvValue(None))

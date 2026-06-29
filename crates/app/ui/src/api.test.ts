@@ -4,10 +4,12 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import {
   addSharedCommand,
   makeCommandLocal,
+  orchestrationSnapshot,
   projectSettingsPage,
   setProjectAutoStartGate,
 } from "@/api";
 import type {
+  OrchestrationSnapshot,
   ProcessSpec,
   ProjectSettings,
   ProjectSettingsPage,
@@ -109,5 +111,35 @@ describe("api — per-project settings wrappers", () => {
 
     expect(seen).toEqual({ cmd: "make_command_local", args: { project: 1, name: "Api" } });
     expect(result.local_commands.Api.command).toBe("cargo run");
+  });
+});
+
+describe("api — orchestration read-model wrapper", () => {
+  it("orchestrationSnapshot invokes orchestration_snapshot with the project id and returns the lineage snapshot", async () => {
+    const snapshot: OrchestrationSnapshot = {
+      project: 4,
+      agents: [
+        {
+          id: 1,
+          parent: null,
+          label: "lead",
+          kind: "Agent",
+          status: "Running",
+          activity: "Working",
+        },
+        { id: 2, parent: 1, label: "worker", kind: "Agent", status: "Running", activity: "Idle" },
+      ],
+      todos: [],
+      timers: [],
+      leases: [],
+      scratchpads: [],
+      kv: [],
+    };
+    const seen = captureIpc("orchestration_snapshot", snapshot);
+
+    const result = await orchestrationSnapshot(4);
+
+    expect(seen).toEqual({ cmd: "orchestration_snapshot", args: { project: 4 } });
+    expect(result.agents.find((node) => node.id === 2)?.parent).toBe(1);
   });
 });
