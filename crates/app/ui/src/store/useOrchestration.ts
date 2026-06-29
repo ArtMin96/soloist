@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { onDomainEvent, orchestrationSnapshot } from "@/api";
 import { buildOrchestrationTree, type OrchestrationTreeNode } from "@/store/orchestrationTree";
-import type { DomainEvent, ScratchpadSummary, TodoView } from "@/domain";
+import type { AgentNode, DomainEvent, ScratchpadSummary, TodoView } from "@/domain";
 
 // Domain events that change anything the orchestration surface renders: a process entering or
 // leaving the registry, a status / label / activity change (the agent tree), or a todo or scratchpad
@@ -19,6 +19,8 @@ const SNAPSHOT_EVENTS: ReadonlySet<DomainEvent["type"]> = new Set([
 
 export interface OrchestrationStore {
   tree: OrchestrationTreeNode[];
+  /** The flat agent list (registry order) — the tree's source, kept for id→label lookups. */
+  agents: AgentNode[];
   todos: TodoView[];
   scratchpads: ScratchpadSummary[];
   error: string | null;
@@ -27,6 +29,7 @@ export interface OrchestrationStore {
 
 const EMPTY: Omit<OrchestrationStore, "error" | "refresh"> = {
   tree: [],
+  agents: [],
   todos: [],
   scratchpads: [],
 };
@@ -52,6 +55,7 @@ export function useOrchestration(project: number | null): OrchestrationStore {
       .then((snap) =>
         setSnapshot({
           tree: buildOrchestrationTree(snap.agents),
+          agents: snap.agents,
           todos: snap.todos,
           scratchpads: snap.scratchpads,
         }),

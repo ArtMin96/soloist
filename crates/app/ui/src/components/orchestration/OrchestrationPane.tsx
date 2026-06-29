@@ -1,18 +1,19 @@
 import { useState } from "react";
 import { OrchestrationTree } from "@/components/orchestration/OrchestrationTree";
 import { ScratchpadPanel } from "@/components/orchestration/ScratchpadPanel";
+import { TodoBoard } from "@/components/orchestration/TodoBoard";
 import { useOrchestration } from "@/store/useOrchestration";
 import { cn } from "@/lib/utils";
 import type { ProjectView } from "@/domain";
 
-type View = "agents" | "scratchpads";
+type View = "agents" | "todos" | "scratchpads";
 
 // The orchestration surface for one project: a live view of the lead→worker agent tree and the
 // shared coordination documents (scratchpads now; todos and timers in the later panels). Owns the
 // read-model hook — the only place here that reaches IPC — and switches the body between views. Each
 // view is presentational over the one snapshot the hook keeps live (snapshot-then-deltas).
 export function OrchestrationPane({ project }: { project: ProjectView }) {
-  const { tree, scratchpads, error } = useOrchestration(project.id);
+  const { tree, agents, todos, scratchpads, error } = useOrchestration(project.id);
   const [view, setView] = useState<View>("agents");
 
   return (
@@ -25,6 +26,9 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
           <Tab active={view === "agents"} onClick={() => setView("agents")}>
             Agents
           </Tab>
+          <Tab active={view === "todos"} onClick={() => setView("todos")}>
+            To-dos
+          </Tab>
           <Tab active={view === "scratchpads"} onClick={() => setView("scratchpads")}>
             Scratchpads
           </Tab>
@@ -32,11 +36,13 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
       </header>
       {error && <p className="px-3 pt-2 text-xs text-destructive">{error}</p>}
       <div className="min-h-0 flex-1 overflow-hidden">
-        {view === "agents" ? (
+        {view === "agents" && (
           <div className="h-full overflow-auto p-3">
             <OrchestrationTree tree={tree} />
           </div>
-        ) : (
+        )}
+        {view === "todos" && <TodoBoard project={project.id} todos={todos} agents={agents} />}
+        {view === "scratchpads" && (
           <ScratchpadPanel project={project.id} scratchpads={scratchpads} />
         )}
       </div>
