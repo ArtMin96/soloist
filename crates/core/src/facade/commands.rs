@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 
 use super::Facade;
-use crate::config::{ConfigWriteError, ProcessSpec, TrustReviewCommand, WriteError};
+use crate::config::{ConfigWriteError, ProcessSpec, SoloYml, TrustReviewCommand, WriteError};
 use crate::events::DomainEvent;
 use crate::ids::ProjectId;
 use crate::ports::StoreError;
@@ -88,6 +88,52 @@ impl Facade {
             .is_some_and(|config| config.processes.contains_key(name))
     }
 
+    /// Applies a **user-initiated** mutation to the project's `solo.yml` and then, when the project
+    /// auto-trusts command changes, trusts whatever the write left needing trust. The one shared
+    /// entry point for every command edit a user makes through Soloist, so the auto-trust policy is
+    /// applied in exactly one place. An external `solo.yml` edit never reaches here — it syncs
+    /// through [`ConfigEngine::sync`](crate::config::ConfigEngine::sync), which holds no settings
+    /// and never trusts — so a change made outside Soloist still requires explicit trust.
+    fn write_shared_command<F>(
+        &self,
+        project: ProjectId,
+        mutate: F,
+    ) -> Result<Vec<TrustReviewCommand>, ConfigWriteError>
+    where
+        F: FnOnce(&mut SoloYml) -> Result<(), ConfigWriteError>,
+    {
+        let pending = self.config.write(project, mutate)?;
+        self.auto_trust_user_writes(project, pending)
+    }
+
+    /// Trusts the commands a user-initiated write left needing trust when this project's
+    /// "automatically trust command changes" setting is on, returning the commands still needing
+    /// trust (empty once auto-trust handled them); with the setting off it returns `pending`
+    /// unchanged for the trust-review prompt. Trusting routes through the same path as an explicit
+    /// grant ([`Self::trust_command`]) — the durable variant plus the live read model — so an
+    /// auto-trusted command is startable at once.
+    fn auto_trust_user_writes(
+        &self,
+        project: ProjectId,
+        pending: Vec<TrustReviewCommand>,
+    ) -> Result<Vec<TrustReviewCommand>, ConfigWriteError> {
+        if pending.is_empty()
+            || !self
+                .project_settings
+                .get(&project)?
+                .auto_trust_command_changes
+        {
+            return Ok(pending);
+        }
+        for command in &pending {
+            if let Some(spec) = self.config.spec(project, &command.name) {
+                self.trust.trust(project, &spec)?;
+                self.supervisor.mark_trusted(project, &spec.variant_hash());
+            }
+        }
+        Ok(Vec::new())
+    }
+
     /// Adds a command to the project's `solo.yml` (shared). Refused if the name is already taken by
     /// a local command, so the two stores never hold the same name. Returns the commands the write
     /// left needing trust (the new command, until trusted).
@@ -119,7 +165,7 @@ impl Facade {
         spec: ProcessSpec,
     ) -> Result<Vec<TrustReviewCommand>, ConfigWriteError> {
         let name = name.to_owned();
-        self.config.write(project, move |config| {
+        self.write_shared_command(project, move |config| {
             if config.processes.contains_key(&name) {
                 return Err(ConfigWriteError::DuplicateCommand(name));
             }
@@ -137,7 +183,7 @@ impl Facade {
         spec: ProcessSpec,
     ) -> Result<Vec<TrustReviewCommand>, ConfigWriteError> {
         let name = name.to_owned();
-        self.config.write(project, move |config| {
+        self.write_shared_command(project, move |config| {
             if !config.processes.contains_key(&name) {
                 return Err(ConfigWriteError::UnknownCommand);
             }
@@ -165,7 +211,7 @@ impl Facade {
             return Err(ConfigWriteError::DuplicateCommand(to.to_owned()));
         }
         let (from, to) = (from.to_owned(), to.to_owned());
-        self.config.write(project, move |config| {
+        self.write_shared_command(project, move |config| {
             if !config.processes.contains_key(&from) {
                 return Err(ConfigWriteError::UnknownCommand);
             }
@@ -188,7 +234,7 @@ impl Facade {
         name: &str,
     ) -> Result<Vec<TrustReviewCommand>, ConfigWriteError> {
         let name = name.to_owned();
-        self.config.write(project, move |config| {
+        self.write_shared_command(project, move |config| {
             config
                 .processes
                 .shift_remove(&name)

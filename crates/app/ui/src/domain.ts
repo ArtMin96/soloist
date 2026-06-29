@@ -540,10 +540,12 @@ export interface ProcessSpec {
   env?: Record<string, string>;
 }
 
-// One project's local settings (mirrors core::ProjectSettings) — the auto-start gate, editor
-// override, alert toggles, per-command alert overrides, and app-local commands.
+// One project's local settings (mirrors core::ProjectSettings) — the auto-start gate, the
+// auto-trust-command-changes toggle, editor override, alert toggles, per-command alert overrides,
+// and app-local commands.
 export interface ProjectSettings {
   auto_start_gate: boolean;
+  auto_trust_command_changes: boolean;
   editor_override: string | null;
   crash_exit_alerts: boolean;
   terminal_alerts: boolean;

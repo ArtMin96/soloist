@@ -14,6 +14,8 @@ mod edit;
 pub mod load;
 pub mod model;
 pub mod review;
+#[cfg(feature = "schema")]
+pub mod schema;
 pub mod sync;
 pub mod write;
 

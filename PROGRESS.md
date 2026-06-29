@@ -175,6 +175,47 @@
   session** (per the user) and **no canonical doc was edited** — propagating the `O`-rows into `plan/02`
   and the gap into `plan/05 §12` is **orch-00 Task 1**. The track depends only on Phases 7/8/9 (all done/
   `Verified`). **Next sessions implement orch-00 → orch-05; see "Next session should start with" → ★.**
+- **Deferred `later` rows A5 + A8 delivered ahead of schedule (user request, 2026-06-29) — CODE-COMPLETE
+  & gate-green.** Both are Phase-2 (C1) `later` rows pulled forward at the owner's request; recorded as a
+  scheduled pull-forward (not a v1 re-scope). Full `just lint` gate green for everything touched (clippy
+  `-D warnings`, fmt, dep-direction, file-size advisory-only; the new `config::schema` drift gate added to
+  `just lint` + CI); the **only** workspace test red is the pre-existing sandbox `crates/sys` shellenv
+  capture timeout (`captures_a_real_login_shell_environment_with_path`, green in CI — untouched here).
+  - **A5 — `solo.yml` editor JSON Schema.** Generated **from the `SoloYml` model** (single source) via
+    `schemars`, behind an **off-by-default `schema` feature** so the shipped binary carries no schema-gen
+    dep (`schemars` appears in the tree only under the feature; default build/clippy/dep-guard unaffected).
+    `config::schema::solo_schema_json()` + a `gen_solo_schema` example (`required-features`) + `just schema`
+    regenerate the committed **`solo.schema.json`** (repo root). A feature-gated test (`config::schema`)
+    drift-guards the committed file against the model and asserts the enforcement keywords
+    (`additionalProperties:false` both levels, `required:[command]`, field types); wired into CI (`cargo
+    test -p soloist-core --features schema config::schema`) and `just lint`. Generated `solo.yml` files now
+    carry a `# yaml-language-server: $schema=<raw GitHub URL>` modeline (`config/write.rs`, single
+    `SCHEMA_MODELINE` const) — a **forward reference** that resolves once `solo.schema.json` is public
+    (owner decision 2026-06-29; harmless until then). Behavioral accept/reject over fixtures stays in
+    `config::load` (the loader is the schema's contract); no JSON-Schema-validator dep added (`jsonschema`
+    pulls a TLS/HTTP stack failing the license allow-list — §6). Evidence: `config::schema` 2 tests,
+    `config::write` 7 (incl. `a_generated_config_carries_the_schema_modeline_as_an_ignored_comment`).
+  - **A8 — "Automatically trust command changes".** A **per-project**, default-**off** setting
+    (`ProjectSettings.auto_trust_command_changes`, owner decisions 2026-06-29). On a **user-initiated**
+    shared `solo.yml` write, the façade routes through one new `write_shared_command` →
+    `auto_trust_user_writes` chokepoint that, when the setting is on, trusts the pending variant via the
+    same `trust + supervisor.mark_trusted` path as an explicit grant (so the command is startable at once)
+    and returns nothing needing trust. An **external** edit arrives via `ConfigEngine::sync`, which holds
+    no settings and never trusts — so a change made outside Soloist still prompts. Full slice: core +
+    façade getter/setter + Tauri command (`set_project_auto_trust_command_changes`, registered) + TS mirror
+    (`domain.ts`/`api.ts`) + a **Trust** section toggle on the project-settings page (built on the existing
+    `SettingsSection`/`SettingRow`/`Switch` design system; placement/label confirmed with the owner). Gap
+    (Solo's default + scope undocumented) recorded in `plan/05 §12`. Evidence — Rust: `facade::commands`
+    incl. `a_user_save_auto_trusts_the_command_when_the_setting_is_on`,
+    `a_user_save_requires_trust_when_the_setting_is_off`,
+    `an_external_solo_yml_edit_never_auto_trusts_even_with_the_setting_on`; store round-trip extended to
+    carry the field. UI: `ProjectSettingsPane.test.tsx` toggle test; UI vitest **162** green, typecheck +
+    prettier + eslint clean.
+  - **Remaining (user-only):** A8 — a real-window walk of the Trust toggle (open project settings, flip it,
+    save a command, confirm no trust prompt; flip off, confirm prompt) via WebdriverIO + tauri-driver
+    (display needed). A5 — publish `solo.schema.json` so the modeline URL resolves (a packaging/release
+    follow-up; flip the one `SCHEMA_MODELINE` const if the canonical URL changes). Neither blocks the
+    headless Verify, which passes.
 - **Settings build-out (11a/11b) IN PROGRESS — the generic base (I7s) + all six SHOWN global tabs' core behavior are
   DONE & green (2026-06-26, branch `feat/phase-11-settings-ui`).** `SettingsStore<K, D>` (one base for global `K=()` +
   per-project `K=ProjectId`); the global `Settings` document now carries Appearance/Sidebar/Agents/Tools/Integrations

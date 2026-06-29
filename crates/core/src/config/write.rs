@@ -1,5 +1,6 @@
-//! Writing a `solo.yml` — serialize the [`SoloYml`] model and prepend a plain-language
-//! header. Used to auto-create a project's config from detected commands.
+//! Writing a `solo.yml` — serialize the [`SoloYml`] model and prepend the editor-schema
+//! modeline plus a plain-language header. Used to auto-create a project's config from detected
+//! commands.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -7,6 +8,13 @@ use std::path::{Path, PathBuf};
 use super::detect::detect_in;
 use super::load::config_path;
 use super::model::SoloYml;
+
+/// The `yaml-language-server` modeline prepended to a generated `solo.yml`. It points editors at
+/// the published `solo.yml` JSON Schema (`config::schema`), so they validate and autocomplete the
+/// file. The URL is the canonical raw location of the committed `solo.schema.json` and lives here
+/// once — change it in this one place. It resolves once that file is public; until then editors
+/// simply skip a schema they cannot fetch, so the reference is harmless.
+const SCHEMA_MODELINE: &str = "# yaml-language-server: $schema=https://raw.githubusercontent.com/ArtMin96/soloist/main/solo.schema.json\n";
 
 /// The header prepended to a generated `solo.yml`. `serde_norway` writes data, not
 /// comments, so this explains the file to the person who opens it — in plain language,
@@ -35,12 +43,13 @@ pub enum WriteError {
     },
 }
 
-/// Renders a [`SoloYml`] to file text: the header followed by the serialized model.
-/// Round-trips: [`super::load::parse`] of the result is the input (the header is
-/// comments, which parsing ignores; default fields are omitted by the model).
+/// Renders a [`SoloYml`] to file text: the editor-schema modeline, then the plain-language
+/// header, then the serialized model. Round-trips: [`super::load::parse`] of the result is the
+/// input (the modeline and header are comments, which parsing ignores; default fields are omitted
+/// by the model).
 pub fn render(config: &SoloYml) -> Result<String, WriteError> {
     let body = serde_norway::to_string(config).map_err(WriteError::Serialize)?;
-    Ok(format!("{HEADER}{body}"))
+    Ok(format!("{SCHEMA_MODELINE}{HEADER}{body}"))
 }
 
 /// Auto-creates `solo.yml` in `root` from detected commands when none exists. Returns
@@ -101,10 +110,17 @@ mod tests {
         ]))
         .expect("render");
 
-        assert!(rendered.starts_with("# solo.yml"), "header is present");
-        // Assert on the serialized data, not the header (whose plain-language guidance
+        assert!(
+            rendered.starts_with(SCHEMA_MODELINE),
+            "the schema modeline is the first line"
+        );
+        assert!(rendered.contains("# solo.yml"), "the header is present");
+        // Assert on the serialized data, not the modeline/header (whose plain-language guidance
         // mentions `auto_start: true` as an example).
-        let body = rendered.strip_prefix(HEADER).expect("header prefix");
+        let body = rendered
+            .strip_prefix(SCHEMA_MODELINE)
+            .and_then(|rest| rest.strip_prefix(HEADER))
+            .expect("modeline + header prefix");
         // `auto_start` defaults true, so the dev command omits it; build (false) keeps it.
         assert!(body.contains("command: npm run dev"));
         assert!(!body.contains("auto_start: true"));
@@ -125,8 +141,22 @@ mod tests {
     #[test]
     fn an_empty_config_renders_and_parses_clean() {
         let rendered = render(&SoloYml::default()).expect("render");
-        assert!(rendered.starts_with("# solo.yml"));
+        assert!(rendered.starts_with(SCHEMA_MODELINE));
         assert!(parse(&rendered).expect("parse").processes.is_empty());
+    }
+
+    #[test]
+    fn a_generated_config_carries_the_schema_modeline_as_an_ignored_comment() {
+        let rendered = render(&config_with(&[("dev", "npm run dev", true)])).expect("render");
+        // The modeline is line one so the YAML language server applies the schema…
+        let first_line = rendered.lines().next().expect("a first line");
+        assert!(first_line.starts_with("# yaml-language-server: $schema="));
+        assert!(first_line.contains("solo.schema.json"));
+        // …and it is a YAML comment, so it never changes the parsed config.
+        assert_eq!(
+            parse(&rendered).expect("parse"),
+            config_with(&[("dev", "npm run dev", true)])
+        );
     }
 
     #[test]

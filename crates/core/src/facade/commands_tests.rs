@@ -432,6 +432,98 @@ fn renaming_a_local_command_onto_a_shared_name_is_refused() {
 }
 
 #[test]
+fn a_user_save_auto_trusts_the_command_when_the_setting_is_on() {
+    let (facade, project, _dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    facade
+        .set_project_auto_trust_command_changes(project, true)
+        .expect("enable auto-trust");
+
+    let pending = facade
+        .add_shared_command(project, "Queue", spec("php queue"))
+        .expect("shared add");
+
+    // With auto-trust on, the user's save trusts the command — nothing is left needing trust…
+    assert!(
+        pending.is_empty(),
+        "an auto-trusted save leaves no command needing trust"
+    );
+    // …and the command's variant is trusted, so it can start without a prompt.
+    assert!(
+        facade
+            .trust()
+            .is_trusted(project, &spec("php queue"))
+            .unwrap(),
+        "the saved command is trusted"
+    );
+}
+
+#[test]
+fn a_user_save_requires_trust_when_the_setting_is_off() {
+    // Off is the default — a fresh project never auto-trusts.
+    let (facade, project, _dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+
+    let pending = facade
+        .add_shared_command(project, "Queue", spec("php queue"))
+        .expect("shared add");
+
+    assert_eq!(pending.len(), 1, "the new command needs trust");
+    assert!(
+        !facade
+            .trust()
+            .is_trusted(project, &spec("php queue"))
+            .unwrap(),
+        "without auto-trust the saved command stays untrusted"
+    );
+}
+
+#[test]
+fn an_external_solo_yml_edit_never_auto_trusts_even_with_the_setting_on() {
+    let (facade, project, dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    // Auto-trust is on — but it must apply only to user saves, never to a change made to the file
+    // outside Soloist (which arrives via sync, not the façade's write path).
+    facade
+        .set_project_auto_trust_command_changes(project, true)
+        .expect("enable auto-trust");
+    let mut events = facade.subscribe();
+
+    // Simulate an external editor adding a command directly to solo.yml, then sync the change.
+    std::fs::write(
+        config_path(dir.path()),
+        "processes:\n  Web:\n    command: npm run dev\n  Queue:\n    command: php queue\n",
+    )
+    .expect("external edit");
+    facade
+        .config()
+        .sync(project)
+        .expect("sync the external edit");
+
+    // The sync flags the new command for trust and does not trust it…
+    let event = events.try_recv().expect("a ConfigChanged event");
+    match event {
+        DomainEvent::ConfigChanged {
+            requires_trust,
+            commands,
+            ..
+        } => {
+            assert!(requires_trust, "an external command change requires trust");
+            assert!(commands.iter().any(|command| command.name == "Queue"));
+        }
+        other => panic!("expected ConfigChanged, got {other:?}"),
+    }
+    // …so a change made outside Soloist still requires explicit trust, even with auto-trust on.
+    assert!(
+        !facade
+            .trust()
+            .is_trusted(project, &spec("php queue"))
+            .unwrap(),
+        "an external edit is never auto-trusted"
+    );
+}
+
+#[test]
 fn renaming_a_shared_command_onto_a_local_name_is_refused() {
     let (facade, project, dir) =
         project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");

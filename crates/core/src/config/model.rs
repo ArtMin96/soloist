@@ -17,6 +17,7 @@ use crate::hash::{Hash, Hasher};
 /// generated file stays minimal, and a round-trip through [`super::load::parse`] is the
 /// identity.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct SoloYml {
     /// Optional display name shown on first load.
@@ -28,7 +29,13 @@ pub struct SoloYml {
     /// The managed commands, keyed by display name. Empty when the `processes` key
     /// is absent — an empty or comment-only file is a valid, empty config. Always
     /// written (even when empty) so a generated file shows the `processes:` key.
+    // `IndexMap` and `BTreeMap` serialize identically (a JSON object keyed by name), so the
+    // schema borrows `BTreeMap`'s — a map of `ProcessSpec` — and needs no `indexmap` feature.
     #[serde(default)]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "std::collections::BTreeMap<String, ProcessSpec>")
+    )]
     pub processes: IndexMap<String, ProcessSpec>,
 }
 
@@ -44,6 +51,7 @@ impl SoloYml {
 /// decisions: `auto_start` defaults **true** (the `auto_start` schema gap — we
 /// auto-start a project's stack); everything else defaults to off/empty.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct ProcessSpec {
     /// The shell command to run. Required.

@@ -16,6 +16,7 @@ export function ProjectSettingsSection({
   settings,
   resolvedEditor,
   onAutoStartGate,
+  onAutoTrustCommandChanges,
   onEditorOverride,
   onSetIcon,
 }: {
@@ -24,6 +25,7 @@ export function ProjectSettingsSection({
   settings: ProjectSettings;
   resolvedEditor: string | null;
   onAutoStartGate: (engaged: boolean) => void;
+  onAutoTrustCommandChanges: (enabled: boolean) => void;
   onEditorOverride: (editor: string | null) => void;
   onSetIcon: (icon: string) => Promise<void>;
 }) {
@@ -52,6 +54,19 @@ export function ProjectSettingsSection({
             checked={settings.auto_start_gate}
             onCheckedChange={onAutoStartGate}
             aria-label="Suppress auto-start"
+          />
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Trust">
+        <SettingRow
+          label="Automatically trust command changes"
+          description="Trust a command when you create or edit it here, so it can start without a separate prompt. An edit made to solo.yml outside Soloist still needs trust."
+        >
+          <Switch
+            checked={settings.auto_trust_command_changes}
+            onCheckedChange={onAutoTrustCommandChanges}
+            aria-label="Automatically trust command changes"
           />
         </SettingRow>
       </SettingsSection>

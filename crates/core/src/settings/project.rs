@@ -25,6 +25,12 @@ pub struct ProjectSettings {
     /// default, so a fresh project keeps the normal behaviour (commands with `auto_start` launch on
     /// open). A project-level gate, distinct from the per-command `auto_start` in `solo.yml`.
     pub auto_start_gate: bool,
+    /// When enabled (`true`), a command the user creates or edits in this project's `solo.yml`
+    /// **through Soloist** is trusted automatically, so it can start without a separate trust
+    /// prompt. Applies only to user-initiated saves; a change made to `solo.yml` outside Soloist
+    /// still syncs in untrusted and requires explicit trust. Off by default, so trust stays
+    /// explicit unless the user opts in.
+    pub auto_trust_command_changes: bool,
     /// Editor launch name overriding the global Tools default for this project. `None` falls back
     /// to the global default (see [`Self::resolved_editor`]).
     pub editor_override: Option<String>,
@@ -47,6 +53,7 @@ impl Default for ProjectSettings {
     fn default() -> Self {
         Self {
             auto_start_gate: false,
+            auto_trust_command_changes: false,
             editor_override: None,
             crash_exit_alerts: true,
             terminal_alerts: true,

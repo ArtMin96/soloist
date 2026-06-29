@@ -49,6 +49,20 @@ pub async fn set_project_auto_start_gate(
         .map_err(|err| err.to_string())
 }
 
+/// Enables or disables auto-trusting this project's user-saved command changes (auto-save). When
+/// on, a command the user creates or edits through Soloist is trusted on save; an external
+/// `solo.yml` edit still requires explicit trust.
+#[tauri::command]
+pub async fn set_project_auto_trust_command_changes(
+    project: ProjectId,
+    enabled: bool,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<ProjectSettings, String> {
+    facade
+        .set_project_auto_trust_command_changes(project, enabled)
+        .map_err(|err| err.to_string())
+}
+
 /// Sets (or clears, with `null`) this project's editor override (auto-save).
 #[tauri::command]
 pub async fn set_project_editor_override(

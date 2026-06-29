@@ -336,6 +336,13 @@ export function setProjectAutoStartGate(
   return invoke<ProjectSettings>("set_project_auto_start_gate", { project, engaged });
 }
 
+export function setProjectAutoTrustCommandChanges(
+  project: ProjectId,
+  enabled: boolean,
+): Promise<ProjectSettings> {
+  return invoke<ProjectSettings>("set_project_auto_trust_command_changes", { project, enabled });
+}
+
 export function setProjectEditorOverride(
   project: ProjectId,
   editor: string | null,
