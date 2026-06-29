@@ -227,20 +227,26 @@ fn every_response_variant_round_trips_through_json() {
         IpcResponse::LeaseReleased(true),
         IpcResponse::TimerArmed(TimerView {
             id: TimerId::from_raw(3),
+            owner: ProcessId::from_raw(1),
             body: "ping".into(),
             fire: FireCond::At,
             status: TimerStatus::Armed,
             deadline_unix_millis: 1_700_000_005_000,
+            waiting_on: vec![],
+            already_idle: false,
         }),
         IpcResponse::TimerWhenIdle(SetWhenIdleOutcome {
             timer: TimerView {
                 id: TimerId::from_raw(4),
+                owner: ProcessId::from_raw(1),
                 body: "all done".into(),
                 fire: FireCond::WhenIdleAll {
                     watched: vec![ProcessId::from_raw(2), ProcessId::from_raw(3)],
                 },
                 status: TimerStatus::Armed,
                 deadline_unix_millis: 1_700_000_060_000,
+                waiting_on: vec![ProcessId::from_raw(2), ProcessId::from_raw(3)],
+                already_idle: false,
             },
             already_idle: false,
             waiting_on: vec![ProcessId::from_raw(2), ProcessId::from_raw(3)],
@@ -248,12 +254,15 @@ fn every_response_variant_round_trips_through_json() {
         IpcResponse::TimerChanged(true),
         IpcResponse::Timers(vec![TimerView {
             id: TimerId::from_raw(5),
+            owner: ProcessId::from_raw(1),
             body: "paused".into(),
             fire: FireCond::WhenIdleAny {
                 watched: vec![ProcessId::from_raw(9)],
             },
             status: TimerStatus::Paused,
             deadline_unix_millis: 0,
+            waiting_on: vec![ProcessId::from_raw(9)],
+            already_idle: false,
         }]),
     ];
     for response in responses {

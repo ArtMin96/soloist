@@ -328,6 +328,9 @@ pub fn run() {
             commands::todo_remove_blocker,
             commands::scratchpad_link,
             commands::todo_link,
+            commands::timer_cancel,
+            commands::timer_pause,
+            commands::timer_resume,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

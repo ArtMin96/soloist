@@ -63,6 +63,8 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "TimerArmed":
     case "TimerFired":
     case "TimerCleared":
+    case "TimerPaused":
+    case "TimerResumed":
     case "LeaseChanged":
     case "ScratchpadChanged":
     case "KvChanged":

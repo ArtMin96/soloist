@@ -201,10 +201,12 @@ async fn an_at_timer_fires_at_its_deadline_and_delivers_the_body_as_a_fresh_turn
     settle().await;
     assert!(h.armed(view.id), "the timer waits until its deadline");
 
-    // Past the deadline it fires: claimed from the store and delivered to the owner with a trailing
-    // carriage return, so the agent receives it as a submitted fresh turn.
+    // Past the deadline it fires: claimed from the store and delivered to the owner with the
+    // wake-reason header prepended and a trailing carriage return, so the agent receives it as a
+    // submitted fresh turn and can tell why it woke (the header format is tested separately via
+    // `wake_reason_header` — here we only assert the body text is present).
     advance_until(&h.clock, Duration::from_secs(10), || {
-        lock(&recorder).as_slice() == b"resume work\r"
+        String::from_utf8_lossy(&lock(&recorder)).contains("resume work")
     })
     .await;
     assert!(!h.exists(owner, view.id), "a fired timer is gone");

@@ -126,15 +126,28 @@ pub enum TimerStatus {
 
 /// A timer as a caller sees it (the answer to setting one and the rows `timer_list` returns):
 /// its id, the body it will deliver, what it is waiting for, when its deadline is, and whether
-/// it is armed or paused. Built from a [`StoredTimer`](super::StoredTimer) so the wire shape
-/// cannot drift from the persisted one.
+/// it is armed or paused. `waiting_on` and `already_idle` are computed at read time by the
+/// façade from the live idle state — they default to empty/false here and are enriched by the
+/// caller that has access to idle state (the orchestration snapshot and `timer_list`).
+/// Built from a [`StoredTimer`](super::StoredTimer) so the wire shape cannot drift from the
+/// persisted one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimerView {
     pub id: TimerId,
+    /// The process that owns this timer — the one its body is delivered to on fire.
+    pub owner: ProcessId,
     pub body: String,
     pub fire: FireCond,
     pub status: TimerStatus,
     pub deadline_unix_millis: u64,
+    /// Watched processes not yet idle — computed from live idle state at read time. Empty for a
+    /// plain [`FireCond::At`] timer and after the quorum is met.
+    #[serde(default)]
+    pub waiting_on: Vec<ProcessId>,
+    /// Whether the idle condition was already satisfied at the moment this view was built. Only
+    /// ever `true` for a fire-when-idle timer whose quorum was met at read time.
+    #[serde(default)]
+    pub already_idle: bool,
 }
 
 /// The outcome of arming a fire-when-idle timer: the timer itself, whether its idle condition is
@@ -299,10 +312,13 @@ impl Timers {
         self.wake.notify_one();
         Ok(TimerView {
             id,
+            owner,
             body: new.body,
             fire: new.fire,
             status: TimerStatus::Armed,
             deadline_unix_millis,
+            waiting_on: Vec::new(),
+            already_idle: false,
         })
     }
 }

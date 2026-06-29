@@ -199,8 +199,12 @@ export type DomainEvent =
   | { type: "TodoChanged"; project: number; id: number }
   | { type: "TimerArmed"; owner: number; id: number }
   // A timer fired: its body was delivered to the owner as a fresh turn and it left the armed set.
+  // A timer fired: its body was delivered to the owner as a fresh turn and it left the armed set.
   | { type: "TimerFired"; owner: number; id: number }
   | { type: "TimerCleared"; owner: number; id: number }
+  // Pause/resume lifecycle — deferred from orch-00 (O2) to orch-03 (the timers panel).
+  | { type: "TimerPaused"; owner: number; id: number }
+  | { type: "TimerResumed"; owner: number; id: number }
   | { type: "LeaseChanged"; project: number; key: string }
   // Keyed by the scratchpad's `name` handle (the addressing key its surface uses).
   | { type: "ScratchpadChanged"; project: number; name: string }
@@ -262,13 +266,22 @@ export type FireCond =
 
 export type TimerStatus = "armed" | "paused";
 
-// A timer as the panel reads it: its body, fire condition, status, and absolute deadline.
+// A timer as the panel reads it: its body, fire condition, status, absolute deadline, and — for
+// fire-when-idle timers — which watched processes are not yet idle and whether the quorum was
+// already met at read time. `waiting_on` and `already_idle` are computed by the façade from live
+// idle state and default to [] / false for plain `At` timers (serde `default`).
 export interface TimerView {
   id: number;
+  /** The process that owns this timer (the delivery target). */
+  owner: number;
   body: string;
   fire: FireCond;
   status: TimerStatus;
   deadline_unix_millis: number;
+  /** Watched processes not yet idle — empty for `At` timers and once the quorum is met. */
+  waiting_on: number[];
+  /** Whether the idle condition was already satisfied at the moment the snapshot was built. */
+  already_idle: boolean;
 }
 
 // A live lease: its key, the process that holds it, and the absolute expiry.
