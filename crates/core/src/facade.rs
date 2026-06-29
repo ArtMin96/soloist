@@ -36,6 +36,7 @@ use crate::trust::TrustStore;
 mod commands;
 mod coordination;
 mod kv;
+mod link;
 mod loops;
 mod orchestration;
 mod output;

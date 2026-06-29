@@ -19,6 +19,7 @@
 mod kv;
 mod kv_repo;
 mod lease;
+mod link;
 mod releaser;
 mod repo;
 mod scheduler;
@@ -33,6 +34,7 @@ mod todo_repo;
 pub use kv::Kv;
 pub use kv_repo::{KvEntry, KvRepo, NoopKvRepo};
 pub use lease::{AcquireOutcome, LeaseView, Leases};
+pub use link::{is_link, Link, LinkContent, LinkError, LinkTarget};
 pub use releaser::LeaseReleaser;
 pub use repo::{LockRepo, NoopLockRepo, StoredLease};
 pub use scheduler::TimerScheduler;
