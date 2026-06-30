@@ -250,6 +250,20 @@ with the full state set (default, hover, focus-visible, active, disabled, select
 - **Disabled:** 40% opacity, no hover. Controls disable during a `Transition` status, never
   vanish — the row must not reflow when a process is starting.
 
+### Toolbar / Window chrome
+The unified macOS toolbar stands in for the native decorations (turned off in `tauri.conf.json`).
+Leading: the **app logo + "Soloist" wordmark** as a quiet identity anchor. Trailing: the global
+actions as calm bezeled/ghost toolbar buttons, a short divider, then the **window controls** —
+deliberately kept **top-right** (restyled), where a Linux/GNOME user expects them, not faked
+traffic lights on the left. The whole strip is a drag region except the controls; double-click
+toggles maximize. The terminal and orchestration content panes wear the same `h-11` toolbar tone.
+
+### Segmented Control
+The app's one **view-switch** vocabulary (the orchestration views, the Appearance theme switch): a
+recessed muted track with the active segment **lifted to the content surface** (tonal layering, no
+shadow). One shared component — never a second underline-tab style competing with it. An optional
+count rides a segment as a quiet **monochrome** badge (saturated hue stays on status).
+
 ### Status Indicator (signature component)
 The heartbeat of the app. A small inline cluster: **glyph + dot color + text label**, reading
 the `ProcStatus`→token map from §2. The glyph (●/◐/○/✕/⚠) carries state without color; the hue
@@ -258,6 +272,7 @@ with the full label in a tooltip and on the selected-process header — but the 
 dropped**. A `Transition` state may use a slow 1.5s opacity pulse on the glyph (reduced-motion:
 static). Never encode status by color alone, anywhere.
 
+### Sidebar / Process Tree (signature component)
 A macOS **source list**: an inset, rounded-selection tree the user scans at a glance. Reads
 unmistakably mac-native while keeping the status vocabulary and density rules above.
 
@@ -292,10 +307,19 @@ unmistakably mac-native while keeping the status vocabulary and density rules ab
 - **Focus:** Border shifts to Azure Accent + a 2px ring; no glow.
 - **Disabled:** Cool Surface fill, muted text.
 
-### Dialogs (trust review, orphan resolution — built next slice)
-- Centered modal on a dim cool backdrop, Dialog shadow, `rounded.lg`. Headline + body type;
-  the diff/command detail in Data (mono). Actions right-aligned: one Primary + Ghost
-  alternatives. Modals are reserved for genuine decisions (trust, orphan) — not for flow.
+### Settings & grouped lists
+Settings follow the **macOS System-Settings idiom**: a section is a quiet sentence-case label above
+an **inset rounded card** whose rows are split by inset hairline dividers (label left, control
+right). The global Settings overlay floats its cards on the sidebar tone so they read as cards;
+inline panes (project settings) border-define them. A list of reviewable items inside a dialog uses
+the **same grouped well** — one rounded, hairline-divided container, not a stack of separately
+bordered cards.
+
+### Dialogs (trust review, orphan resolution)
+- Centered modal on a dim cool backdrop, Dialog shadow, `rounded.lg`. Headline + body type; the
+  diff/command detail in Data (mono); reviewable items in a grouped well (above). Actions
+  right-aligned: one Primary + Ghost alternatives. Modals are reserved for genuine decisions
+  (trust, orphan) — not for flow.
 
 ## 6. Do's and Don'ts
 

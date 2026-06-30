@@ -40,12 +40,9 @@ export function OrphanDialog({ orphans, onKillOne, onKillAll, onLeave }: OrphanD
           </DialogDescription>
         </DialogHeader>
 
-        <ul className="flex max-h-64 flex-col gap-1.5 overflow-y-auto">
+        <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border">
           {orphans?.map((orphan) => (
-            <li
-              key={orphan.pgid}
-              className="flex items-center gap-2 rounded-md border px-2.5 py-1.5"
-            >
+            <li key={orphan.pgid} className="flex items-center gap-2 px-3 py-2">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[0.8125rem] font-medium">{orphan.name}</p>
                 <p className="truncate font-mono text-xs text-muted-foreground">{orphan.command}</p>

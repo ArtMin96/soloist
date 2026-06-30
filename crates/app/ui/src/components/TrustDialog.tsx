@@ -44,7 +44,7 @@ export function TrustDialog({ review, onTrustCommand, onTrustAll, onDismiss }: T
 
         {review && <DiffSummary diff={review.diff} />}
 
-        <ul className="flex max-h-72 flex-col gap-2 overflow-y-auto">
+        <ul className="max-h-72 divide-y divide-border overflow-x-hidden overflow-y-auto rounded-lg border border-border">
           {review?.commands.map((command) => (
             <CommandReview
               key={command.name}
@@ -70,7 +70,7 @@ export function TrustDialog({ review, onTrustCommand, onTrustAll, onDismiss }: T
 function CommandReview({ command, onTrust }: { command: TrustReviewCommand; onTrust: () => void }) {
   const env = Object.entries(command.env);
   return (
-    <li className="flex flex-col gap-1 rounded-md border px-2.5 py-2">
+    <li className="flex flex-col gap-1 px-3 py-2.5">
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium">{command.name}</span>
         <Button variant="outline" size="xs" aria-label={`Trust ${command.name}`} onClick={onTrust}>
