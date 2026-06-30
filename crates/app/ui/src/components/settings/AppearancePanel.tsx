@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { NullableSelect } from "@/components/settings/controls/NullableSelect";
-import { SegmentedControl } from "@/components/settings/controls/SegmentedControl";
+import { SegmentedControl } from "@/components/SegmentedControl";
 import { SettingRow } from "@/components/settings/controls/SettingRow";
 import { SettingSelect } from "@/components/settings/controls/SettingSelect";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";

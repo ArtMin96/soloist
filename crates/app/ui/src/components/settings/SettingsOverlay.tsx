@@ -77,7 +77,7 @@ export function SettingsOverlay({
             <div
               role="tabpanel"
               aria-labelledby={settingsTabButtonId(active)}
-              className="min-w-0 flex-1 overflow-y-auto"
+              className="min-w-0 flex-1 overflow-y-auto bg-sidebar"
             >
               <div className="mx-auto max-w-2xl px-6 py-6">{panelFor(active)}</div>
             </div>

@@ -3,11 +3,19 @@ import { OrchestrationTree } from "@/components/orchestration/OrchestrationTree"
 import { ScratchpadPanel } from "@/components/orchestration/ScratchpadPanel";
 import { TimersPanel } from "@/components/orchestration/TimersPanel";
 import { TodoBoard } from "@/components/orchestration/TodoBoard";
+import { SegmentedControl } from "@/components/SegmentedControl";
 import { useOrchestration } from "@/store/useOrchestration";
-import { cn } from "@/lib/utils";
+import type { Option } from "@/lib/appearance";
 import type { ProjectView } from "@/domain";
 
 type View = "agents" | "todos" | "scratchpads" | "timers";
+
+const VIEW_OPTIONS: Option<View>[] = [
+  { value: "agents", label: "Agents" },
+  { value: "todos", label: "To-dos" },
+  { value: "scratchpads", label: "Scratchpads" },
+  { value: "timers", label: "Timers" },
+];
 
 // The orchestration surface for one project: a live view of the lead→worker agent tree and the
 // shared coordination documents (todos, scratchpads, timers). Owns the read-model hook — the only
@@ -19,28 +27,19 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
 
   return (
     <section className="flex h-full min-w-0 flex-col bg-background">
-      <header className="flex h-9 shrink-0 items-center gap-3 border-b bg-sidebar px-3">
-        <span className="shrink-0 truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">
+      <header className="flex h-11 shrink-0 items-center gap-3 border-b bg-sidebar px-3">
+        <span className="min-w-0 shrink truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">
           {project.name}
         </span>
-        <nav className="flex items-center gap-2" aria-label="Orchestration views">
-          <Tab active={view === "agents"} onClick={() => setView("agents")}>
-            Agents
-          </Tab>
-          <Tab active={view === "todos"} onClick={() => setView("todos")}>
-            To-dos
-          </Tab>
-          <Tab active={view === "scratchpads"} onClick={() => setView("scratchpads")}>
-            Scratchpads
-          </Tab>
-          <Tab
-            active={view === "timers"}
-            onClick={() => setView("timers")}
-            count={timers.length > 0 ? timers.length : undefined}
-          >
-            Timers
-          </Tab>
-        </nav>
+        <div className="ml-auto shrink-0">
+          <SegmentedControl<View>
+            value={view}
+            options={VIEW_OPTIONS}
+            onChange={setView}
+            ariaLabel="Orchestration views"
+            counts={{ timers: timers.length }}
+          />
+        </div>
       </header>
       {error && <p className="px-3 pt-2 text-xs text-destructive">{error}</p>}
       <div className="min-h-0 flex-1 overflow-hidden">
@@ -56,43 +55,5 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
         {view === "timers" && <TimersPanel timers={timers} agents={agents} project={project.id} />}
       </div>
     </section>
-  );
-}
-
-function Tab({
-  active,
-  onClick,
-  count,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  count?: number;
-  children: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "relative flex h-9 items-center gap-1.5 px-1 text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-        active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {children}
-      {count != null && (
-        <span
-          className={cn(
-            "text-[0.6875rem] tabular-nums",
-            active ? "text-muted-foreground" : "text-muted-foreground/60",
-          )}
-          aria-label={`${count} ${children}`}
-        >
-          {count}
-        </span>
-      )}
-      {active && <span aria-hidden className="absolute inset-x-0 -bottom-px h-0.5 bg-primary" />}
-    </button>
   );
 }

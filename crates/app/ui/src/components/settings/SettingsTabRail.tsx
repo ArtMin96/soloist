@@ -2,8 +2,9 @@ import type { KeyboardEvent } from "react";
 import { SETTINGS_TABS, settingsTabButtonId, type SettingsTabId } from "@/components/settings/tabs";
 import { cn } from "@/lib/utils";
 
-// The left rail of settings sections. The active tab carries a full-height azure selection
-// marker (the same affordance as a selected sidebar row, not a decorative stripe).
+// The left rail of settings sections. The active tab carries the macOS source-list selection —
+// an azure-tinted rounded fill — matching the process tree, so selection reads identically across
+// the app.
 export function SettingsTabRail({
   active,
   onSelect,
@@ -62,19 +63,13 @@ export function SettingsTabRail({
             tabIndex={isActive ? 0 : -1}
             onClick={() => onSelect(tab.id)}
             className={cn(
-              "relative rounded-sm px-2.5 py-1.5 text-left text-[0.8125rem] transition-colors",
+              "rounded-md px-2.5 py-1.5 text-left text-[0.8125rem] transition-colors",
               "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
               isActive
-                ? "bg-sidebar-accent text-foreground"
+                ? "bg-primary/15 font-medium text-foreground"
                 : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
             )}
           >
-            {isActive && (
-              <span
-                aria-hidden
-                className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-primary"
-              />
-            )}
             {tab.label}
           </button>
         );

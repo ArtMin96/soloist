@@ -72,13 +72,13 @@ components:
   sidebar-row:
     backgroundColor: "transparent"
     textColor: "{colors.slate-ink}"
-    rounded: "{rounded.sm}"
+    rounded: "{rounded.md}"
     padding: "4px 8px"
     typography: "{typography.body}"
   sidebar-row-selected:
-    backgroundColor: "{colors.cool-surface-raised}"
+    backgroundColor: "{colors.azure-accent} @ 15% (macOS source-list tinted selection)"
     textColor: "{colors.slate-ink}"
-    rounded: "{rounded.sm}"
+    rounded: "{rounded.md}"
     padding: "4px 8px"
     typography: "{typography.body}"
 ---
@@ -109,6 +109,14 @@ default"** (no warm paper background, no tiny tracked-uppercase eyebrows, no `01
 section scaffolding), the **web-app-in-a-window** (no browser chrome, no Electron bloat),
 and the **toy/skeuomorphic** (no oversized radii, no heavy drop shadows). It must read as a
 first-class native Linux desktop tool.
+
+**Native-macOS chrome (on Linux).** The instrument panel wears a **macOS-faithful AppKit
+shell**: a unified toolbar carrying the app identity (logo + wordmark), a **source-list
+sidebar** with inset rounded selection, segmented controls, system-settings-style grouped
+panels, and thin overlay scrollbars — the calm, dense, keyboard-first *feel* of a native mac
+app. Two pragmatic departures keep it honest on Ubuntu: **no liquid-glass / vibrancy** (the
+window isn't translucent over the desktop), and the **window controls stay top-right**
+(restyled), where a Linux/GNOME user expects them — not faked traffic lights on the left.
 
 **Key Characteristics:**
 - Near-monochrome cool-slate surface; saturated color reserved for process status.
@@ -250,15 +258,27 @@ with the full label in a tooltip and on the selected-process header — but the 
 dropped**. A `Transition` state may use a slow 1.5s opacity pulse on the glyph (reduced-motion:
 static). Never encode status by color alone, anywhere.
 
-### Sidebar / Process Tree (signature component)
+A macOS **source list**: an inset, rounded-selection tree the user scans at a glance. Reads
+unmistakably mac-native while keeping the status vocabulary and density rules above.
+
+- **Project header:** disclosure + project icon + **name + running count**. The name is the
+  header's job and **always stays fully visible** — every project action (Start all / Restart
+  running / Stop all / Orchestration / Project settings) lives in a single hover-revealed `•••`
+  menu **and** the row's right-click context menu, both driven by one source so they can't
+  drift. Never a row of inline buttons competing with the name for width.
 - **Groups:** Three collapsible sections — Agents / Terminals / Commands — each a sentence-case
   Label header with a muted count and a disclosure chevron. Collapse state persists per project.
-- **Rows:** `4px 8px`, body type, `rounded.sm`. Left: status indicator. Center: process name
-  (mono-tinted only for the value, not the whole row). Right: per-row ghost controls, revealed
-  on hover/focus, always present for the selected row.
-- **Selected:** Cool Surface Raised fill + a 2px Azure left marker (a *full-height selection
-  marker*, not a decorative side-stripe on an unselected card). Hover: a lighter raised fill.
+- **Rows:** body type, `rounded.md`, inset from the sidebar edge. Left: status indicator. Center:
+  process name. Right: per-row ghost controls, revealed on hover/focus, always present for the
+  selected row.
+- **Selected:** the macOS source-list selection — an **azure-tinted rounded fill** (`primary` at
+  ~15% over the sidebar), inset, not a side-stripe or a full-saturation bar. Status hues keep
+  their **full saturation** on the selection (the heartbeat must not lose contrast to it), so the
+  fill stays a *tint*, never a solid accent bar with inverted text. Hover is a quiet neutral
+  raised fill; selected goes blue — the macOS hover-vs-selected distinction.
 - **Density:** ~28px row height. Tight but tappable; no card chrome around rows.
+- **Scrollbars:** thin, overlay-style (a transparency of the ink, inset to a hairline rail) — a
+  native-desktop signal, never heavy browser chrome.
 
 ### Terminal Pane (signature component)
 - The interactive PTY (xterm.js) on Cool Surface chrome, Geist Mono, generous internal padding,
@@ -299,8 +319,8 @@ static). Never encode status by color alone, anywhere.
   that reads as "obviously a website" (PRODUCT.md).
 - **Don't** go **toy / skeuomorphic** — no oversized radii (cap ~8px), no heavy drop shadows, no
   playful mascot energy (PRODUCT.md).
-- **Don't** use `border-left`/`border-right` > 1px as a colored accent stripe on rows or cards. The
-  selected-row marker is a full-height selection affordance, not a decorative stripe.
+- **Don't** use `border-left`/`border-right` > 1px as a colored accent stripe on rows or cards.
+  Selection is the macOS azure-tinted inset fill, never a side-stripe marker.
 - **Don't** use `background-clip: text` gradient text, decorative glassmorphism, or a shadow on any
   resting surface.
 - **Don't** encode status by hue alone, ever — drop the glyph and the design has failed its a11y bar.

@@ -165,8 +165,9 @@ describe("App dashboard", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText(/No project loaded/)).toBeTruthy();
+      expect(screen.getByText("No project open")).toBeTruthy();
     });
+    expect(screen.getByText(/Open a folder with a solo\.yml/)).toBeTruthy();
     expect(screen.queryAllByRole("option")).toHaveLength(0);
   });
 
