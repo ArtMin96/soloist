@@ -8,6 +8,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
+import { Kbd } from "@/components/ui/kbd";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { canRestart, canStart, canStop } from "@/lib/status";
 import { groupByProject } from "@/store/projects";
@@ -53,6 +54,7 @@ export function QuickActionsPalette({
 
   const hasProject = activeTree != null;
   const activeProcesses = activeTree ? activeTree.kinds.flatMap((k) => k.processes) : [];
+  const activeProjectName = activeTree?.project.name ?? null;
 
   return (
     <CommandDialog
@@ -117,6 +119,19 @@ export function QuickActionsPalette({
               );
             })}
         </CommandList>
+        <div className="flex items-center gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <Kbd>↵</Kbd>
+            run
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Kbd>esc</Kbd>
+            close
+          </span>
+          {activeProjectName && (
+            <span className="ml-auto min-w-0 truncate">▸ {activeProjectName}</span>
+          )}
+        </div>
       </Command>
     </CommandDialog>
   );

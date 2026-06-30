@@ -8,6 +8,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
+import { Kbd } from "@/components/ui/kbd";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { groupByProject, monogram } from "@/store/projects";
 import type { ProcessView, ProjectView } from "@/domain";
@@ -111,6 +112,16 @@ export function QuickJumpPalette({
             <CommandEmpty>No destinations found.</CommandEmpty>
           )}
         </CommandList>
+        <div className="flex items-center gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <Kbd>↵</Kbd>
+            jump
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Kbd>esc</Kbd>
+            close
+          </span>
+        </div>
       </Command>
     </CommandDialog>
   );
