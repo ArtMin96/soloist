@@ -118,12 +118,21 @@ app. Two pragmatic departures keep it honest on Ubuntu: **no liquid-glass / vibr
 window isn't translucent over the desktop), and the **window controls stay top-right**
 (restyled), where a Linux/GNOME user expects them — not faked traffic lights on the left.
 
+**Motion answers interaction the AppKit way — spring, not fade.** Every state change is carried
+by native-feeling spring physics: a selection settles, a segmented thumb glides to its tab, a
+disclosure unfolds by height, a sheet pops in. It is crisp (~180–240 ms) and effectively
+overshoot-free — felt, never waited on, never decorative — and always degrades to instant under
+`prefers-reduced-motion`. A cross-fade is reserved for the rare appear/disappear of incidental
+chrome; it is never the default transition.
+
 **Key Characteristics:**
 - Near-monochrome cool-slate surface; saturated color reserved for process status.
 - One azure accent, ≤10% of any screen, for focus / selection / the primary action only.
 - Compact fixed type scale (13px body), single family + a mono companion for terminal/data.
 - Flat by default; depth from tonal layering and hairline borders, not shadows.
 - Status is encoded redundantly — **shape + color + label** — never hue alone.
+- Motion is native spring physics — purposeful and state-conveying, crisp and reduced-motion-safe;
+  never a default cross-fade.
 
 ## 2. Colors
 
@@ -238,10 +247,21 @@ Earned familiarity is the bar: every control behaves like its equivalent in Line
 with the full state set (default, hover, focus-visible, active, disabled, selected). shadcn/ui
 + Radix primitives supply the mechanics; this section sets their dress.
 
+Motion is one shared system, not per-screen flourish: a small set of spring easings and a
+duration scale (defined once in `index.css` — the spring curves are the sampled step-response of
+a critically-damped spring, so deceleration reads native) flow through these primitives, so every
+surface inherits the same feel. Only `transform`, `opacity`, and a container's own `height` move;
+a layout property that would shove a neighbour never does.
+
+**The Spring-Not-Fade Rule.** Interaction is answered by movement with native spring physics — a
+thing slides, settles, scales, or unfolds — never by a generic cross-fade. Fade is allowed only
+for the genuine appear/disappear of incidental chrome. Bounce/elastic is forbidden on utilitarian UI.
+
 ### Buttons
 - **Shape:** Crisp, lightly softened corners (6px / `rounded.md`). Never pill, never sharp.
 - **Primary:** Azure Accent background, near-white text, `6px 12px`. One per context (the bulk
-  "Start all"). Hover deepens the azure ~6% lightness; `:active` presses 1px down.
+  "Start all"). Hover deepens the azure ~6% lightness; `:active` springs a subtle scale-down
+  (~0.97 — a fast press-in, a smooth release), a press you feel rather than a 1px translate or a fade.
 - **Ghost (default control):** Transparent, slate-ink text/icon, `6px 10px`. Hover fills with
   Cool Surface Raised. This is the workhorse — per-row ▶ / ⟳ / ■ and toolbar actions are ghost
   icon buttons, ~28px square, with a tooltip and an `aria-label`.
@@ -257,12 +277,16 @@ actions as calm bezeled/ghost toolbar buttons, a short divider, then the **windo
 deliberately kept **top-right** (restyled), where a Linux/GNOME user expects them, not faked
 traffic lights on the left. The whole strip is a drag region except the controls; double-click
 toggles maximize. The terminal and orchestration content panes wear the same `h-11` toolbar tone.
+A content surface that scrolls reveals a 1px hairline under its toolbar only once content slides
+beneath it (the macOS **scroll-edge** effect); the toolbar is borderless at rest.
 
 ### Segmented Control
 The app's one **view-switch** vocabulary (the orchestration views, the Appearance theme switch): a
 recessed muted track with the active segment **lifted to the content surface** (tonal layering, no
-shadow). One shared component — never a second underline-tab style competing with it. An optional
-count rides a segment as a quiet **monochrome** badge (saturated hue stays on status).
+shadow). The active segment is a single lifted thumb that **slides** to the chosen tab — one
+element translated over a fixed track (~220 ms spring-settle), so the labels never reflow. One
+shared component — never a second underline-tab style competing with it. An optional count rides a
+segment as a quiet **monochrome** badge (saturated hue stays on status).
 
 ### Status Indicator (signature component)
 The heartbeat of the app. A small inline cluster: **glyph + dot color + text label**, reading
@@ -283,14 +307,18 @@ unmistakably mac-native while keeping the status vocabulary and density rules ab
   drift. Never a row of inline buttons competing with the name for width.
 - **Groups:** Three collapsible sections — Agents / Terminals / Commands — each a sentence-case
   Label header with a muted count and a disclosure chevron. Collapse state persists per project.
+  The chevron rotates and the group **springs open by height** (~220 ms), rather than snapping.
 - **Rows:** body type, `rounded.md`, inset from the sidebar edge. Left: status indicator. Center:
-  process name. Right: per-row ghost controls, revealed on hover/focus, always present for the
-  selected row.
+  process name. Right: per-row ghost controls that **slide in** on hover/focus (never a bare fade),
+  always present for the selected row, over reserved space so the name never reflows.
 - **Selected:** the macOS source-list selection — an **azure-tinted rounded fill** (`primary` at
   ~15% over the sidebar), inset, not a side-stripe or a full-saturation bar. Status hues keep
   their **full saturation** on the selection (the heartbeat must not lose contrast to it), so the
   fill stays a *tint*, never a solid accent bar with inverted text. Hover is a quiet neutral
-  raised fill; selected goes blue — the macOS hover-vs-selected distinction.
+  raised fill; selected goes blue — the macOS hover-vs-selected distinction. The tint **transitions
+  in place** (~180 ms) — it does not slide between rows; macOS selects in place. When the window is
+  not the key window, the tint **desaturates to neutral** (AppKit's unemphasized selection), the
+  azure returning when the window regains focus.
 - **Density:** ~28px row height. Tight but tappable; no card chrome around rows.
 - **Scrollbars:** thin, overlay-style (a transparency of the ink, inset to a hairline rail) — a
   native-desktop signal, never heavy browser chrome.
@@ -304,7 +332,7 @@ unmistakably mac-native while keeping the status vocabulary and density rules ab
 
 ### Inputs / Fields
 - **Style:** 1px Hairline border, Cool White fill, `rounded.md`, `6px 10px`, body type.
-- **Focus:** Border shifts to Azure Accent + a 2px ring; no glow.
+- **Focus:** Border shifts to Azure Accent + a 2px ring that eases in (~120 ms); no glow.
 - **Disabled:** Cool Surface fill, muted text.
 
 ### Settings & grouped lists
@@ -316,10 +344,11 @@ the **same grouped well** — one rounded, hairline-divided container, not a sta
 bordered cards.
 
 ### Dialogs (trust review, orphan resolution)
-- Centered modal on a dim cool backdrop, Dialog shadow, `rounded.lg`. Headline + body type; the
-  diff/command detail in Data (mono); reviewable items in a grouped well (above). Actions
-  right-aligned: one Primary + Ghost alternatives. Modals are reserved for genuine decisions
-  (trust, orphan) — not for flow.
+- Centered modal on a dim cool backdrop, Dialog shadow, `rounded.lg`. They **present** with a
+  spring pop (scale + fade, ~300 ms) and dismiss faster; a centered modal never slides (a translate
+  would fight its centering). Headline + body type; the diff/command detail in Data (mono);
+  reviewable items in a grouped well (above). Actions right-aligned: one Primary + Ghost
+  alternatives. Modals are reserved for genuine decisions (trust, orphan) — not for flow.
 
 ## 6. Do's and Don'ts
 
@@ -333,6 +362,11 @@ bordered cards.
 - **Do** use Geist Mono *only* for terminal output and aligned data (PIDs, ports, metrics).
 - **Do** disable (40% opacity) controls during a Transition status; never let a row reflow.
 - **Do** give every control a visible 2px Azure focus ring and full keyboard operability.
+- **Do** answer interaction with native spring motion on the shared tokens — selection settles,
+  segments glide, disclosures unfold, sheets pop — kept crisp (~180–240 ms) and overshoot-free
+  (The Spring-Not-Fade Rule).
+- **Do** give every animation a `prefers-reduced-motion: reduce` fallback (instant), and animate
+  only `transform` / `opacity` / a container's own `height` so an interaction never reflows a neighbour.
 
 ### Don't:
 - **Don't** build the **generic SaaS dashboard** — no gradient hero-metric cards, no identical
@@ -350,3 +384,7 @@ bordered cards.
 - **Don't** encode status by hue alone, ever — drop the glyph and the design has failed its a11y bar.
 - **Don't** reach for a modal when an inline/progressive affordance works; modals are for genuine
   decisions (trust, orphan) only.
+- **Don't** use a cross-fade as the default transition, or `transition-opacity` where a thing
+  should move — a fade-everywhere reads as web, not AppKit.
+- **Don't** add bounce/elastic to utilitarian motion, or a selection "pill" that travels between
+  source-list rows — macOS selects **in place** (the tint transitions, the row doesn't slide).

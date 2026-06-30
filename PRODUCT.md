@@ -53,7 +53,8 @@ dashboard makes the live state of *many* processes instantly legible without the
   — exactly when it matters, then gets out of the way.
 - **Feel:** a first-class native desktop tool wearing a **macOS-faithful AppKit feel on Linux** —
   source-list sidebar, unified toolbar, segmented controls, grouped settings; fast, quiet,
-  dense-but-legible — that you'd trust to babysit a dozen processes for a week. Two pragmatic
+  dense-but-legible, its movement native spring physics that *confirms* an action rather than
+  decorating — that you'd trust to babysit a dozen processes for a week. Two pragmatic
   departures keep it honest on Ubuntu: **no liquid-glass / vibrancy**, and **window controls stay
   top-right** (restyled), where a Linux/GNOME user expects them — not faked traffic lights.
 
@@ -80,7 +81,9 @@ What Soloist must **not** look like (all four confirmed):
 2. **Native and invisible.** Feel like a first-class desktop app — a **macOS-faithful AppKit shell on
    Linux** (no liquid-glass) — that disappears into the workflow. Speed and calm beat flourish; the
    familiar mac controls earn trust precisely by being unremarkable. A tool kept open for days should
-   feel unremarkable in the best way.
+   feel unremarkable in the best way. Motion obeys the same rule: native spring physics that
+   *confirms* a state change — a selection settling, a sheet popping, a group unfolding — never a
+   decorative cross-fade, and always reduced-motion-safe.
 3. **Keyboard-first, expert-respecting.** Every primary action is reachable by keyboard (command
    palette, jump palette, shortcuts). Don't hand-hold; don't gate power behind menus.
 4. **Density with rhythm.** Show a lot — process tree, terminals, status, metrics — without clutter.
