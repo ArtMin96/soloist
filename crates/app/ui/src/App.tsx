@@ -189,7 +189,6 @@ export default function App() {
                   onOpenChange={setPickerOpen}
                   tools={agents.tools}
                   projects={projects.projects}
-                  activeProjectId={selected?.project ?? null}
                   onLaunch={onLaunchAgent}
                 />
                 <SettingsOverlay open={settingsOpen} onOpenChange={setSettingsOpen} />
