@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { AgentPicker } from "@/components/AgentPicker";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -89,15 +89,23 @@ export default function App() {
     setPickerOpen(true);
   }, [reloadAgents]);
 
+  // Stable ref so the hotkey closure always sees the latest selection without re-creating
+  // the handlers object (and re-binding the global listener) on every process click.
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+
   // The keyboard-first paths run through the remappable keymap (the Hotkeys settings tab): a
-  // pressed General chord dispatches its action's handler here. Wiring a new action — a command
-  // palette, terminal search — is one more entry; an action with no handler yet is simply inert.
+  // pressed General chord dispatches its action's handler here. Wiring a new action is one
+  // more entry; an action with no handler yet is simply inert.
   const hotkeyHandlers = useMemo<Partial<Record<HotkeyAction, () => void>>>(
     () => ({
       new_agent_or_terminal: openPicker,
       open_settings: () => setSettingsOpen(true),
+      close_agent_or_terminal: () => {
+        if (selectedIdRef.current !== null) store.stop(selectedIdRef.current);
+      },
     }),
-    [openPicker],
+    [openPicker, store.stop],
   );
 
   // Launch an agent and focus its new terminal, so the user lands on the running agent.
@@ -148,6 +156,8 @@ export default function App() {
                       <TerminalPane
                         key={selected.id}
                         process={selected}
+                        processes={store.processes}
+                        onSelectProcess={selectProcess}
                         onStart={() => store.start(selected.id)}
                         onStop={() => store.stop(selected.id)}
                         onRestart={() => store.restart(selected.id)}

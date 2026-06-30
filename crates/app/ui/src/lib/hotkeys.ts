@@ -103,3 +103,11 @@ export function bindingsEqual(a: Binding, b: Binding): boolean {
     a.key === b.key
   );
 }
+
+// True when the event originates in a text-editing surface (input, textarea, or
+// contenteditable). A bare-key shortcut must yield to typing there; command-modifier
+// shortcuts (Ctrl/Alt/Super) still fire everywhere, as in a native app.
+export function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+}

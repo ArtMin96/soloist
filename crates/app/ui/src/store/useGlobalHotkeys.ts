@@ -1,15 +1,12 @@
 import { useEffect } from "react";
-import { bindingFromEvent, bindingsEqual, hasCommandModifier } from "@/lib/hotkeys";
+import {
+  bindingFromEvent,
+  bindingsEqual,
+  hasCommandModifier,
+  isEditableTarget,
+} from "@/lib/hotkeys";
 import { useHotkeys } from "@/store/hotkeysContext";
 import type { HotkeyAction } from "@/domain";
-
-// True when the event originates in a text-editing surface (an input, textarea, or
-// contenteditable — the terminal's helper textarea included), where a bare-key shortcut must
-// yield to typing.
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
-}
 
 // The live keyboard handler, driven by the remappable keymap (closes I6): a keydown is matched
 // against the enabled General-scope bindings, and the matching action's handler runs if one is

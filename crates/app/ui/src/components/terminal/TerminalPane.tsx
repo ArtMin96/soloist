@@ -1,14 +1,20 @@
+import { useRef } from "react";
 import { Bell } from "lucide-react";
 import { ProcessControls } from "@/components/ProcessControls";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessMeta } from "@/components/sidebar/ProcessMeta";
 import { useTerminal } from "@/components/terminal/useTerminal";
 import { useTerminalChrome } from "@/components/terminal/useTerminalChrome";
+import { useTerminalHotkeys } from "@/components/terminal/useTerminalHotkeys";
 import { useSignal } from "@/store/signalsContext";
 import type { ProcessView } from "@/domain";
 
 interface TerminalPaneProps {
   process: ProcessView;
+  /** Ordered process list for Ctrl+↑/↓ navigation. */
+  processes?: ProcessView[];
+  /** Called when a terminal-scope nav shortcut selects a different process. */
+  onSelectProcess?: (id: number) => void;
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
@@ -21,18 +27,22 @@ interface TerminalPaneProps {
 // this stays presentational.
 export function TerminalPane({
   process,
+  processes = [],
+  onSelectProcess,
   onStart,
   onStop,
   onRestart,
   onResume,
   onTrust,
 }: TerminalPaneProps) {
+  const sectionRef = useRef<HTMLElement>(null);
   const { hostRef, state } = useTerminal(process);
   const { title, ringing } = useTerminalChrome(process.id);
   const { metrics, attempt, activity } = useSignal(process.id);
+  useTerminalHotkeys(sectionRef, processes, process.id, onSelectProcess);
 
   return (
-    <section className="flex h-full min-w-0 flex-col bg-background">
+    <section ref={sectionRef} className="flex h-full min-w-0 flex-col bg-background">
       <header className="flex h-11 shrink-0 items-center gap-2.5 border-b bg-sidebar px-3">
         <span className="truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">
           {title ?? process.label}
@@ -73,14 +83,14 @@ export function TerminalPane({
             <p className="max-w-sm text-sm text-pretty text-muted-foreground">
               {process.resumable ? (
                 <>
-                  This agent isn’t running. Press{" "}
+                  This agent isn't running. Press{" "}
                   <span className="font-medium text-foreground">Resume last session</span> to
                   continue where it left off, or{" "}
                   <span className="font-medium text-foreground">Start</span> to begin fresh.
                 </>
               ) : (
                 <>
-                  This process hasn’t started yet. Press{" "}
+                  This process hasn't started yet. Press{" "}
                   <span className="font-medium text-foreground">Start</span> to run it.
                 </>
               )}
