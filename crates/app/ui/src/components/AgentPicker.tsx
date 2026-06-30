@@ -22,35 +22,31 @@ interface AgentPickerProps {
   tools: DetectedTool[];
   /** Every open project — the launch target, and the fallback chooser when it's ambiguous. */
   projects: ProjectView[];
-  /** The project to launch into by default (the selected process's project), or null. */
-  activeProjectId: number | null;
   /** Launch `tool` in `project` with `extraArgs` ([] for a plain launch). */
   onLaunch: (project: number, tool: string, extraArgs: string[]) => void;
 }
 
 // The agent launch picker (E4): a Cmd/Ctrl+T command palette over the configured tools.
 // Enter launches the highlighted tool instantly; Alt+Enter opens a one-shot flags field for
-// it ("agent with flags"). It launches into the active project; when several projects are
-// open and none is active, it first asks which — the footer always names the target so the
-// launch is never ambiguous. Presentational: tools/projects come in as props and the launch
-// routes out through `onLaunch`; no IPC lives here.
+// it ("agent with flags"). When several projects are open it always asks which first — the
+// footer always names the target so the launch is never ambiguous. Presentational:
+// tools/projects come in as props and the launch routes out through `onLaunch`; no IPC lives here.
 export function AgentPicker({
   open,
   onOpenChange,
   tools,
   projects,
-  activeProjectId,
   onLaunch,
 }: AgentPickerProps) {
-  // An explicit project choice (the fallback chooser) overrides the active project; the tool
-  // whose flags are being edited (null = the list) drives which step shows.
+  // The user's explicit project choice drives the step; the tool whose flags are being
+  // edited (null = the list) drives which of the remaining two steps shows.
   const [chosenProjectId, setChosenProjectId] = useState<number | null>(null);
   const [flagsTool, setFlagsTool] = useState<string | null>(null);
   const [flags, setFlags] = useState("");
   const [active, setActive] = useState("");
 
   const targetProject =
-    chosenProjectId ?? activeProjectId ?? (projects.length === 1 ? projects[0].id : null);
+    chosenProjectId ?? (projects.length === 1 ? projects[0].id : null);
   const targetName = projects.find((project) => project.id === targetProject)?.name;
   const step = flagsTool ? "flags" : targetProject === null ? "project" : "tool";
 
