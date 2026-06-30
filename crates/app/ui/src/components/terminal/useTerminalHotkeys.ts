@@ -13,6 +13,7 @@ export function useTerminalHotkeys(
   processes: ProcessView[],
   processId: number,
   onSelectProcess: ((id: number) => void) | undefined,
+  onOpenSearch: (() => void) | undefined,
 ): void {
   const { bindings } = useHotkeys();
   const { appearance, setAppearance } = useAppearance();
@@ -20,8 +21,15 @@ export function useTerminalHotkeys(
   const bindingsRef = useRef(bindings);
   bindingsRef.current = bindings;
 
-  const ctx = useRef({ appearance, setAppearance, processes, processId, onSelectProcess });
-  ctx.current = { appearance, setAppearance, processes, processId, onSelectProcess };
+  const ctx = useRef({
+    appearance,
+    setAppearance,
+    processes,
+    processId,
+    onSelectProcess,
+    onOpenSearch,
+  });
+  ctx.current = { appearance, setAppearance, processes, processId, onSelectProcess, onOpenSearch };
 
   useEffect(() => {
     const el = containerRef.current;
@@ -41,6 +49,7 @@ export function useTerminalHotkeys(
           processes: ps,
           processId: pid,
           onSelectProcess: onSel,
+          onOpenSearch: onSearch,
         } = ctx.current;
 
         switch (row.action) {
@@ -54,6 +63,10 @@ export function useTerminalHotkeys(
             const idx = FONT_SCALE_ORDER.indexOf(ap.terminal.font_scale);
             if (idx > 0)
               setAp({ ...ap, terminal: { ...ap.terminal, font_scale: FONT_SCALE_ORDER[idx - 1] } });
+            break;
+          }
+          case "open_terminal_search": {
+            onSearch?.();
             break;
           }
           case "next_process": {

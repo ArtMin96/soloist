@@ -1,8 +1,9 @@
-import { useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Bell } from "lucide-react";
 import { ProcessControls } from "@/components/ProcessControls";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessMeta } from "@/components/sidebar/ProcessMeta";
+import { FindBar } from "@/components/terminal/FindBar";
 import { useTerminal } from "@/components/terminal/useTerminal";
 import { useTerminalChrome } from "@/components/terminal/useTerminalChrome";
 import { useTerminalHotkeys } from "@/components/terminal/useTerminalHotkeys";
@@ -36,10 +37,31 @@ export function TerminalPane({
   onTrust,
 }: TerminalPaneProps) {
   const sectionRef = useRef<HTMLElement>(null);
-  const { hostRef, state } = useTerminal(process);
+  const { hostRef, state, search } = useTerminal(process);
   const { title, ringing } = useTerminalChrome(process.id);
   const { metrics, attempt, activity } = useSignal(process.id);
-  useTerminalHotkeys(sectionRef, processes, process.id, onSelectProcess);
+
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+
+  const openFind = useCallback(() => setFindOpen(true), []);
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindQuery("");
+    search.clear();
+  }, [search]);
+
+  const handleFindChange = useCallback(
+    (query: string) => {
+      setFindQuery(query);
+      if (query) search.findNext(query);
+      else search.clear();
+    },
+    [search],
+  );
+
+  useTerminalHotkeys(sectionRef, processes, process.id, onSelectProcess, openFind);
 
   return (
     <section ref={sectionRef} className="flex h-full min-w-0 flex-col bg-background">
@@ -77,6 +99,15 @@ export function TerminalPane({
         </div>
       </header>
       <div className="relative min-h-0 flex-1">
+        {findOpen && (
+          <FindBar
+            query={findQuery}
+            onChange={handleFindChange}
+            onFindNext={() => findQuery && search.findNext(findQuery)}
+            onFindPrevious={() => findQuery && search.findPrevious(findQuery)}
+            onClose={closeFind}
+          />
+        )}
         <div ref={hostRef} className="absolute inset-2" data-testid="terminal-host" />
         {state === "not-started" && (
           <div className="pointer-events-none absolute inset-0 flex animate-in items-center justify-center px-6 text-center fade-in-0 duration-[var(--dur-sheet)]">

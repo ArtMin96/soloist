@@ -5,6 +5,8 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { OrchestrationPane } from "@/components/orchestration/OrchestrationPane";
 import { OrphanDialog } from "@/components/OrphanDialog";
 import { ProjectSettingsPane } from "@/components/project-settings/ProjectSettingsPane";
+import { QuickActionsPalette } from "@/components/QuickActionsPalette";
+import { QuickJumpPalette } from "@/components/QuickJumpPalette";
 import { SettingsOverlay } from "@/components/settings/SettingsOverlay";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { TerminalPane } from "@/components/terminal/TerminalPane";
@@ -48,11 +50,17 @@ export default function App() {
   const [orchestrationProjectId, setOrchestrationProjectId] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [quickJumpOpen, setQuickJumpOpen] = useState(false);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
 
   const selected = store.processes.find((process) => process.id === selectedId) ?? null;
   const selectedProject = projects.projects.find((p) => p.id === selectedProjectId) ?? null;
   const orchestrationProject =
     projects.projects.find((p) => p.id === orchestrationProjectId) ?? null;
+
+  // The project whose processes the Quick Actions palette shows: whichever project currently
+  // has a terminal open, or the settings / orchestration pane open.
+  const activeProjectId = selected?.project ?? selectedProjectId ?? orchestrationProjectId ?? null;
 
   // The main pane shows one of: a process terminal, a project's settings, its orchestration tree,
   // or the empty state. The three selections are mutually exclusive, so opening one clears the
@@ -104,6 +112,8 @@ export default function App() {
       close_agent_or_terminal: () => {
         if (selectedIdRef.current !== null) store.stop(selectedIdRef.current);
       },
+      quick_jump: () => setQuickJumpOpen(true),
+      quick_actions: () => setQuickActionsOpen(true),
     }),
     [openPicker, store.stop],
   );
@@ -202,6 +212,26 @@ export default function App() {
                   onLaunch={onLaunchAgent}
                 />
                 <SettingsOverlay open={settingsOpen} onOpenChange={setSettingsOpen} />
+                <QuickJumpPalette
+                  open={quickJumpOpen}
+                  onOpenChange={setQuickJumpOpen}
+                  processes={store.processes}
+                  projects={projects.projects}
+                  onSelectProcess={selectProcess}
+                  onSelectProject={openProjectSettings}
+                />
+                <QuickActionsPalette
+                  open={quickActionsOpen}
+                  onOpenChange={setQuickActionsOpen}
+                  processes={store.processes}
+                  projects={projects.projects}
+                  activeProjectId={activeProjectId}
+                  onStart={store.start}
+                  onStop={store.stop}
+                  onRestart={store.restart}
+                  onResume={store.resume}
+                  onTrust={trust.trust}
+                />
               </div>
             </TooltipProvider>
           </SignalsProvider>

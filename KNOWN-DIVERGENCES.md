@@ -369,3 +369,18 @@ it needs no `apt` install of WebKit on 22.04+ desktops (the J2 promise, scoped t
 on a clean 22.04 container. **J2** passes as *"the `.AppImage` runs on a clean 22.04+ desktop without a
 manual WebKit install"* — its literal *"20.04"* wording is not achievable and is revised to 22.04+ here.
 Recorded in `README.md` (Platform support), `plan/02` J2, `plan/03` D2, and `plan/05` §12.
+
+---
+
+## D-12 — Quick Jump palette (I3): processes + projects only, not todos/scratchpads
+
+**What Solo does:** `Cmd+E` jumps to any destination — processes, projects, todos, scratchpads.
+
+**What we do:** the palette searches processes and projects only. Todos and scratchpads require a
+per-project `orchestration_snapshot` call that is not pre-loaded at the App shell level; fetching
+them on each palette open would add noticeable async latency. The I3 "later" marker reflected
+missing infrastructure; now that the data exists it can be lifted by promoting the orchestration
+snapshot to the App-level store and extending the palette's search targets.
+
+**Effect on parity:** I3 is partial parity — navigation to process/project destinations works; the
+todo/scratchpad jump targets are a tracked follow-up.
