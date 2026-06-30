@@ -40,7 +40,6 @@ function renderPicker(props: Partial<Parameters<typeof AgentPicker>[0]> = {}) {
       onOpenChange={() => {}}
       tools={TOOLS}
       projects={[STOREFRONT]}
-      activeProjectId={1}
       onLaunch={onLaunch}
       {...props}
     />,
@@ -81,7 +80,6 @@ describe("AgentPicker", () => {
   it("asks which project first when several are open and none is active", () => {
     const { onLaunch } = renderPicker({
       projects: [STOREFRONT, API],
-      activeProjectId: null,
     });
     // The tool list is gated behind picking a project.
     expect(screen.queryByText("Claude")).toBeNull();

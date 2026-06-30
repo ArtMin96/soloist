@@ -28,7 +28,8 @@ export function FindBar({ query, onChange, onFindNext, onFindPrevious, onClose }
       onClose();
     } else if (event.key === "Enter") {
       event.preventDefault();
-      event.shiftKey ? onFindPrevious() : onFindNext();
+      if (event.shiftKey) onFindPrevious();
+      else onFindNext();
     }
   }
 

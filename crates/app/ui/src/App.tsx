@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { AgentPicker } from "@/components/AgentPicker";
+import { CommandPalette } from "@/components/CommandPalette";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { OrchestrationPane } from "@/components/orchestration/OrchestrationPane";
@@ -52,6 +53,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [quickJumpOpen, setQuickJumpOpen] = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
   const selected = store.processes.find((process) => process.id === selectedId) ?? null;
   const selectedProject = projects.projects.find((p) => p.id === selectedProjectId) ?? null;
@@ -105,17 +107,19 @@ export default function App() {
   // The keyboard-first paths run through the remappable keymap (the Hotkeys settings tab): a
   // pressed General chord dispatches its action's handler here. Wiring a new action is one
   // more entry; an action with no handler yet is simply inert.
+  const { stop } = store;
   const hotkeyHandlers = useMemo<Partial<Record<HotkeyAction, () => void>>>(
     () => ({
+      open_command_palette: () => setCommandPaletteOpen(true),
       new_agent_or_terminal: openPicker,
       open_settings: () => setSettingsOpen(true),
       close_agent_or_terminal: () => {
-        if (selectedIdRef.current !== null) store.stop(selectedIdRef.current);
+        if (selectedIdRef.current !== null) stop(selectedIdRef.current);
       },
       quick_jump: () => setQuickJumpOpen(true),
       quick_actions: () => setQuickActionsOpen(true),
     }),
-    [openPicker, store.stop],
+    [openPicker, stop],
   );
 
   // Launch an agent and focus its new terminal, so the user lands on the running agent.
@@ -231,6 +235,28 @@ export default function App() {
                   onRestart={store.restart}
                   onResume={store.resume}
                   onTrust={trust.trust}
+                />
+                <CommandPalette
+                  open={commandPaletteOpen}
+                  onOpenChange={setCommandPaletteOpen}
+                  processes={store.processes}
+                  projects={projects.projects}
+                  newAgentOrTerminal={openPicker}
+                  openProject={projects.open}
+                  openSettings={() => setSettingsOpen(true)}
+                  selectProcess={selectProcess}
+                  openProjectSettings={openProjectSettings}
+                  openOrchestration={openOrchestration}
+                  startAll={store.startAll}
+                  stopAll={store.stopAll}
+                  restartRunning={store.restartRunning}
+                  process={{
+                    onTrust: trust.trust,
+                    onResume: store.resume,
+                    onStart: store.start,
+                    onStop: store.stop,
+                    onRestart: store.restart,
+                  }}
                 />
               </div>
             </TooltipProvider>

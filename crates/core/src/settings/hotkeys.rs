@@ -36,7 +36,6 @@ pub enum HotkeyAction {
     QuickJump,
     NewAgentOrTerminal,
     OpenSettings,
-    OpenTerminalSearch,
     CloseAgentOrTerminal,
     // Sidebar — navigation.
     NextProjectGroup,
@@ -51,6 +50,7 @@ pub enum HotkeyAction {
     ExpandProject,
     RestartSelection,
     // Terminal — active while the terminal is focused.
+    OpenTerminalSearch,
     PreviousProcess,
     NextProcess,
     IncreaseTerminalFontSize,
@@ -112,7 +112,6 @@ impl HotkeyAction {
         HotkeyAction::QuickJump,
         HotkeyAction::NewAgentOrTerminal,
         HotkeyAction::OpenSettings,
-        HotkeyAction::OpenTerminalSearch,
         HotkeyAction::CloseAgentOrTerminal,
         HotkeyAction::NextProjectGroup,
         HotkeyAction::PrevProjectGroup,
@@ -125,6 +124,7 @@ impl HotkeyAction {
         HotkeyAction::JumpToParentProject,
         HotkeyAction::ExpandProject,
         HotkeyAction::RestartSelection,
+        HotkeyAction::OpenTerminalSearch,
         HotkeyAction::PreviousProcess,
         HotkeyAction::NextProcess,
         HotkeyAction::IncreaseTerminalFontSize,
@@ -136,13 +136,15 @@ impl HotkeyAction {
         use HotkeyAction::*;
         match self {
             OpenCommandPalette | QuickActions | QuickJump | NewAgentOrTerminal | OpenSettings
-            | OpenTerminalSearch | CloseAgentOrTerminal => HotkeyScope::General,
+            | CloseAgentOrTerminal => HotkeyScope::General,
             NextProjectGroup | PrevProjectGroup | NextSection | PrevSection | JumpToAgents
             | JumpToCommands | JumpToTerminals | CollapseOrSection | JumpToParentProject
             | ExpandProject | RestartSelection => HotkeyScope::Sidebar,
-            PreviousProcess | NextProcess | IncreaseTerminalFontSize | DecreaseTerminalFontSize => {
-                HotkeyScope::Terminal
-            }
+            OpenTerminalSearch
+            | PreviousProcess
+            | NextProcess
+            | IncreaseTerminalFontSize
+            | DecreaseTerminalFontSize => HotkeyScope::Terminal,
         }
     }
 

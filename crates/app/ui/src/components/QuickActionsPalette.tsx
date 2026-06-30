@@ -1,16 +1,9 @@
-import {
-  Command,
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@/components/ui/command";
-import { Kbd } from "@/components/ui/kbd";
+import { CommandEmpty, CommandGroup, CommandItem, CommandSeparator } from "@/components/ui/command";
+import { CommandPaletteShell } from "@/components/palette/CommandPaletteShell";
+import type { PaletteHintData } from "@/components/palette/PaletteFooter";
+import { useCommandAction } from "@/components/palette/useCommandAction";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
-import { canRestart, canStart, canStop } from "@/lib/status";
+import { runnableProcessActions, type ProcessActionHandlers } from "@/lib/processActions";
 import { groupByProject } from "@/store/projects";
 import type { ProcessView, ProjectView } from "@/domain";
 
@@ -28,10 +21,16 @@ interface QuickActionsPaletteProps {
   onTrust: (project: number, name: string) => void;
 }
 
-// Quick actions palette (Ctrl+P): shows all processes in the active project with their
-// status-aware actions. Gap decision: "quick actions" = process control for the current
-// project — distinct from the command palette (Ctrl+K) which covers app-wide actions.
-// Recorded in plan/05 §12.
+const HINTS: PaletteHintData[] = [
+  { keys: "↵", label: "run" },
+  { keys: "esc", label: "close" },
+];
+
+// Quick actions palette (Ctrl+P): every process in the active project with its status-aware
+// actions. Gap decision (plan/05 §12): "quick actions" = process control for the current project —
+// distinct from the command palette (Ctrl+K) which covers app-wide actions. The available actions
+// per process come from the single `runnableProcessActions` source, so the gating never diverges
+// from the per-process control cluster.
 export function QuickActionsPalette({
   open,
   onOpenChange,
@@ -44,95 +43,54 @@ export function QuickActionsPalette({
   onResume,
   onTrust,
 }: QuickActionsPaletteProps) {
-  function run(fn: () => void) {
-    fn();
-    onOpenChange(false);
-  }
+  const run = useCommandAction(onOpenChange);
+  const handlers: ProcessActionHandlers = { onTrust, onResume, onStart, onStop, onRestart };
 
   const trees = groupByProject(processes, projects, false);
-  const activeTree = activeProjectId ? trees.find((t) => t.project.id === activeProjectId) : null;
-
-  const hasProject = activeTree != null;
-  const activeProcesses = activeTree ? activeTree.kinds.flatMap((k) => k.processes) : [];
-  const activeProjectName = activeTree?.project.name ?? null;
+  const activeTree = activeProjectId
+    ? trees.find((tree) => tree.project.id === activeProjectId)
+    : null;
+  const actionable = (activeTree ? activeTree.kinds.flatMap((kind) => kind.processes) : [])
+    .map((process) => ({ process, actions: runnableProcessActions(process, handlers) }))
+    .filter((entry) => entry.actions.length > 0);
 
   return (
-    <CommandDialog
+    <CommandPaletteShell
       open={open}
       onOpenChange={onOpenChange}
       title="Quick Actions"
       description="Run an action on any process in the active project"
+      placeholder="Search actions…"
+      hints={HINTS}
+      target={activeTree?.project.name}
     >
-      <Command>
-        <CommandInput placeholder="Search actions…" autoFocus />
-        <CommandList>
-          {!hasProject && <CommandEmpty>Open a project to see actions.</CommandEmpty>}
-          {hasProject && activeProcesses.length === 0 && (
-            <CommandEmpty>No processes in this project.</CommandEmpty>
-          )}
-          {hasProject &&
-            activeProcesses.map((process, idx) => {
-              const actions: { label: string; fn: () => void }[] = [];
-              if (process.requires_trust) {
-                actions.push({
-                  label: "Trust",
-                  fn: () => onTrust(process.project, process.label),
-                });
-              }
-              if (canStart(process.status) && !process.requires_trust) {
-                if (process.resumable) {
-                  actions.push({ label: "Resume", fn: () => onResume(process.id) });
-                }
-                actions.push({ label: "Start", fn: () => onStart(process.id) });
-              }
-              if (canStop(process.status)) {
-                actions.push({ label: "Stop", fn: () => onStop(process.id) });
-              }
-              if (canRestart(process.status)) {
-                actions.push({ label: "Restart", fn: () => onRestart(process.id) });
-              }
-
-              if (actions.length === 0) return null;
-
-              return (
-                <div key={process.id}>
-                  {idx > 0 && <CommandSeparator />}
-                  <CommandGroup
-                    heading={
-                      <span className="flex items-center gap-1.5">
-                        <ProcessIndicator status={process.status} showLabel={false} />
-                        {process.label}
-                      </span>
-                    }
-                  >
-                    {actions.map((action) => (
-                      <CommandItem
-                        key={action.label}
-                        value={`${process.id}:${process.label}:${action.label}`}
-                        onSelect={() => run(action.fn)}
-                      >
-                        {action.label}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </div>
-              );
-            })}
-        </CommandList>
-        <div className="flex items-center gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <Kbd>↵</Kbd>
-            run
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Kbd>esc</Kbd>
-            close
-          </span>
-          {activeProjectName && (
-            <span className="ml-auto min-w-0 truncate">▸ {activeProjectName}</span>
-          )}
+      {!activeTree && <CommandEmpty>Open a project to see actions.</CommandEmpty>}
+      {activeTree && actionable.length === 0 && (
+        <CommandEmpty>No actions available in this project.</CommandEmpty>
+      )}
+      {actionable.map(({ process, actions }, idx) => (
+        <div key={process.id}>
+          {idx > 0 && <CommandSeparator />}
+          <CommandGroup
+            heading={
+              <span className="flex items-center gap-1.5">
+                <ProcessIndicator status={process.status} showLabel={false} />
+                {process.label}
+              </span>
+            }
+          >
+            {actions.map((action) => (
+              <CommandItem
+                key={action.kind}
+                value={`${process.label} ${action.label} ${process.id}`}
+                onSelect={run(action.run)}
+              >
+                {action.label}
+              </CommandItem>
+            ))}
+          </CommandGroup>
         </div>
-      </Command>
-    </CommandDialog>
+      ))}
+    </CommandPaletteShell>
   );
 }

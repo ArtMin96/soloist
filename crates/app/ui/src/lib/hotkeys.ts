@@ -4,7 +4,7 @@
 // `KeyboardEvent.key` tokens) so a captured chord round-trips and the live handler matches a real
 // key event.
 
-import type { Binding, HotkeyAction, HotkeyScope } from "@/domain";
+import type { Binding, HotkeyAction, HotkeyBindingView, HotkeyScope } from "@/domain";
 
 export const HOTKEY_SCOPE_ORDER: HotkeyScope[] = ["general", "sidebar", "terminal"];
 
@@ -102,6 +102,31 @@ export function bindingsEqual(a: Binding, b: Binding): boolean {
     a.super === b.super &&
     a.key === b.key
   );
+}
+
+// The action a pressed chord triggers within a scope, or null when none matches. This is the one
+// place the live keymap is searched, shared by every scoped key handler (general / sidebar /
+// terminal) so the match rule — same scope, an enabled binding, an equal chord — lives once. The
+// optional `accept` predicate lets a caller require a *handled* action (e.g. one with a wired
+// handler), so a user-created chord conflict resolves to the action that actually does something
+// rather than to whichever appears first in the keymap.
+export function matchHotkey(
+  bindings: HotkeyBindingView[],
+  scope: HotkeyScope,
+  pressed: Binding,
+  accept: (action: HotkeyAction) => boolean = () => true,
+): HotkeyAction | null {
+  for (const row of bindings) {
+    if (
+      row.scope === scope &&
+      row.binding &&
+      bindingsEqual(row.binding, pressed) &&
+      accept(row.action)
+    ) {
+      return row.action;
+    }
+  }
+  return null;
 }
 
 // True when the event originates in a text-editing surface (input, textarea, or

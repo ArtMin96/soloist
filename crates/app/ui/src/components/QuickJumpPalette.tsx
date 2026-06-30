@@ -1,15 +1,9 @@
-import {
-  Command,
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@/components/ui/command";
-import { Kbd } from "@/components/ui/kbd";
-import { ProcessIndicator } from "@/components/ProcessIndicator";
+import { CommandEmpty, CommandGroup, CommandItem, CommandSeparator } from "@/components/ui/command";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { CommandPaletteShell } from "@/components/palette/CommandPaletteShell";
+import { ProcessCommandItem } from "@/components/palette/ProcessCommandItem";
+import { useCommandAction } from "@/components/palette/useCommandAction";
+import type { PaletteHintData } from "@/components/palette/PaletteFooter";
 import { groupByProject, monogram } from "@/store/projects";
 import type { ProcessView, ProjectView } from "@/domain";
 
@@ -22,17 +16,15 @@ interface QuickJumpPaletteProps {
   onSelectProject: (id: number) => void;
 }
 
-// Kind labels kept short for the dense palette item.
-const KIND_LABEL: Record<string, string> = {
-  Agent: "Agent",
-  Terminal: "Terminal",
-  Command: "Command",
-};
+const HINTS: PaletteHintData[] = [
+  { keys: "↵", label: "jump" },
+  { keys: "esc", label: "close" },
+];
 
-// Quick-jump palette (Ctrl+E): fuzzy search across all processes and open projects.
-// Processes are grouped under their project; the project line itself is also selectable —
-// it opens that project's settings. Todos and scratchpads are out of scope here
-// (they require a per-project async fetch not pre-loaded at the App level).
+// Quick-jump palette (Ctrl+E): fuzzy search across all processes and open projects. Processes are
+// grouped under their project; the project line itself is also selectable — it opens that project's
+// settings. Todos and scratchpads are out of scope here (they need a per-project async fetch not
+// pre-loaded at the App level; recorded in plan/05 §12 + KNOWN-DIVERGENCES).
 export function QuickJumpPalette({
   open,
   onOpenChange,
@@ -41,88 +33,51 @@ export function QuickJumpPalette({
   onSelectProcess,
   onSelectProject,
 }: QuickJumpPaletteProps) {
-  function jump(fn: () => void) {
-    fn();
-    onOpenChange(false);
-  }
-
+  const run = useCommandAction(onOpenChange);
   const trees = groupByProject(processes, projects, false);
-  const hasContent = projects.length > 0;
 
   return (
-    <CommandDialog
+    <CommandPaletteShell
       open={open}
       onOpenChange={onOpenChange}
       title="Quick Jump"
       description="Jump to any process or project"
+      placeholder="Jump to…"
+      hints={HINTS}
     >
-      <Command>
-        <CommandInput placeholder="Jump to…" autoFocus />
-        <CommandList>
-          {!hasContent && <CommandEmpty>No destinations found.</CommandEmpty>}
-          {trees.map((tree, idx) => {
-            const allProcesses = tree.kinds.flatMap((k) => k.processes);
-            return (
-              <div key={tree.project.id}>
-                {idx > 0 && <CommandSeparator />}
-                <CommandGroup heading={tree.project.name}>
-                  {/* Project row — opens project settings */}
-                  <CommandItem
-                    value={`project:${tree.project.id}:${tree.project.name}`}
-                    onSelect={() => jump(() => onSelectProject(tree.project.id))}
-                    className="gap-2"
-                  >
-                    <span
-                      className="flex size-4 shrink-0 items-center justify-center rounded text-[0.625rem] font-semibold bg-muted text-muted-foreground"
-                      aria-hidden
-                    >
-                      {tree.project.icon ? (
-                        <img
-                          src={tree.project.icon}
-                          alt=""
-                          className="size-4 rounded object-cover"
-                        />
-                      ) : (
-                        monogram(tree.project.name)
-                      )}
-                    </span>
-                    <span className="flex-1 truncate">{tree.project.name}</span>
-                    <span className="text-[0.6875rem] text-muted-foreground">Project settings</span>
-                  </CommandItem>
-                  {/* Process rows */}
-                  {allProcesses.map((process) => (
-                    <CommandItem
-                      key={process.id}
-                      value={`process:${process.id}:${process.label}:${tree.project.name}`}
-                      onSelect={() => jump(() => onSelectProcess(process.id))}
-                      className="gap-2"
-                    >
-                      <ProcessIndicator status={process.status} showLabel={false} />
-                      <span className="flex-1 truncate">{process.label}</span>
-                      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
-                        {KIND_LABEL[process.kind]}
-                      </span>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </div>
-            );
-          })}
-          {hasContent && processes.length === 0 && (
-            <CommandEmpty>No destinations found.</CommandEmpty>
-          )}
-        </CommandList>
-        <div className="flex items-center gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <Kbd>↵</Kbd>
-            jump
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Kbd>esc</Kbd>
-            close
-          </span>
+      {projects.length === 0 && <CommandEmpty>No destinations found.</CommandEmpty>}
+      {trees.map((tree, idx) => (
+        <div key={tree.project.id}>
+          {idx > 0 && <CommandSeparator />}
+          <CommandGroup heading={tree.project.name}>
+            <CommandItem
+              value={`${tree.project.name} project settings ${tree.project.id}`}
+              onSelect={run(() => onSelectProject(tree.project.id))}
+              className="gap-2"
+            >
+              <Avatar>
+                {tree.project.icon && <AvatarImage src={tree.project.icon} alt="" />}
+                <AvatarFallback>{monogram(tree.project.name)}</AvatarFallback>
+              </Avatar>
+              <span className="flex-1 truncate">{tree.project.name}</span>
+              <span className="text-[0.6875rem] text-muted-foreground">Project settings</span>
+            </CommandItem>
+            {tree.kinds
+              .flatMap((kind) => kind.processes)
+              .map((process) => (
+                <ProcessCommandItem
+                  key={process.id}
+                  process={process}
+                  projectName={tree.project.name}
+                  onSelect={run(() => onSelectProcess(process.id))}
+                />
+              ))}
+          </CommandGroup>
         </div>
-      </Command>
-    </CommandDialog>
+      ))}
+      {projects.length > 0 && processes.length === 0 && (
+        <CommandEmpty>No destinations found.</CommandEmpty>
+      )}
+    </CommandPaletteShell>
   );
 }

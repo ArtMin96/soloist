@@ -26,6 +26,20 @@ fn every_action_has_a_default_and_cmd_remaps_to_ctrl() {
 }
 
 #[test]
+fn terminal_search_is_a_terminal_scope_action() {
+    // Ctrl+F is dispatched by the terminal-focused key handler, so it must be Terminal-scoped —
+    // not General — or that handler (which filters to its own scope) never receives the chord.
+    assert_eq!(
+        HotkeyAction::OpenTerminalSearch.scope(),
+        HotkeyScope::Terminal
+    );
+    assert_eq!(
+        HotkeyAction::OpenTerminalSearch.default_binding(),
+        Binding::ctrl("F")
+    );
+}
+
+#[test]
 fn a_fresh_keymap_is_all_defaults() {
     let hotkeys = Hotkeys::default();
     let view = hotkeys.view();
