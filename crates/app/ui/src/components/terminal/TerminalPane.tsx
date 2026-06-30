@@ -33,7 +33,7 @@ export function TerminalPane({
 
   return (
     <section className="flex h-full min-w-0 flex-col bg-background">
-      <header className="flex h-9 shrink-0 items-center gap-2.5 border-b bg-sidebar px-3">
+      <header className="flex h-11 shrink-0 items-center gap-2.5 border-b bg-sidebar px-3">
         <span className="truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">
           {title ?? process.label}
         </span>
