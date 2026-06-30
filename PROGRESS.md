@@ -27,6 +27,35 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Native-macOS UI redesign (branch `feat/macos-redesign`) — continuation pass CODE-COMPLETE &
+  gate-green (2026-06-30); only the user-only real-window motion walk remains.** Builds on the prior
+  session's motion + token foundation (`73fc8ea`, `a51f811`, `b813f75`, `a8982ec`). This pass brought the
+  remaining surfaces up to the same bar and made the whole app one coherent macOS shell — UI-only, no
+  Rust touched, zero new runtime deps (CSS-native motion). Driven through `/impeccable`; DESIGN.md/PRODUCT.md
+  are the source of truth. What landed (19 files):
+  - **Single-source foundation:** added `--shadow-overlay`/`--shadow-dialog` tokens (DESIGN.md §4) so every
+    floating surface (dropdown, context menu, select, command palette, dialog) shares one overlay/dialog
+    shadow + hairline + animation token — replacing a mix of `shadow-md`+ring / `shadow-lg` / inline shadows.
+    **Menus unified** across `dropdown`/`context`/`select`/`command`: one item metric (`gap-2 px-2 py-1`, 13px),
+    one neutral `bg-accent` highlight (Command was `bg-muted`), 11px labels, matched sub-content surfaces.
+  - **Selection single-sourced:** the rail active tab and `ScratchpadList` now use the shared
+    `--sidebar-sel-fill` token (rail was a hardcoded `bg-primary/15`; ScratchpadList had a **banned 2px azure
+    side-stripe** + neutral fill). Sidebar row, settings rail, and scratchpad list now render an identical
+    in-place azure tint (proven side-by-side in the harness `?view=audit`).
+  - **Project settings:** replaced the **underline tab rail** with the shared `SegmentedControl` in a toolbar
+    header mirroring the orchestration pane (DESIGN.md §5 bans a competing underline-tab style); `CommandList`
+    is now one grouped hairline-divided well. Removed dead `projectTabButtonId`. `ProjectSettingsPane.test.tsx`
+    updated `getByRole("tab")`→`("radio")` (the control is now a radiogroup; same behavior asserted).
+  - **Sizing:** app sidebar `240→256px`, settings rail `192→208px`. **Badges:** one capsule vocabulary
+    (`rounded-full`, 11px). **AgentPicker:** uses the `Kbd` primitive (was a hand-rolled `<kbd>`). Orchestration
+    header gained the project avatar (matches project-settings).
+  - **Harness extended** (`crates/app/ui/src/harness.tsx`, dev-only, not in prod bundle): `?view=` gallery /
+    menus / settings / audit, each ×`&dark`, for static screenshot verification.
+  - **Gate (evidence, 2026-06-30):** `tsc --noEmit` exit 0, `eslint .` exit 0, `prettier --check` clean,
+    `vitest run` 175 passed (39 files), `vite build` OK. No Rust files changed (Rust gates unaffected).
+  - **Remaining (user-only):** the real-window `just dev` walk for live **motion timing/feel** (segmented-thumb
+    glide on the new project-settings header, menu zoom-in, selection settle) — no display in this environment.
+
 - **Orchestrator track IN PROGRESS — orch-00 DONE, orch-01 DONE, orch-02 CODE-COMPLETE & gate-green
   (2026-06-29); orch-03 CODE-COMPLETE & gate-green (2026-06-29). User-only real-window e2e walks
   remain for orch-02 (O5/O6) and orch-03 (O7/O8).**

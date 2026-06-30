@@ -56,12 +56,12 @@ export function TodoItem({
           {todo.doc.title}
         </span>
         {todo.blocked && (
-          <Badge variant="outline" className="shrink-0 text-[0.6875rem]">
+          <Badge variant="outline" className="shrink-0">
             Blocked
           </Badge>
         )}
         {todo.locked_by != null && (
-          <Badge variant="secondary" className="shrink-0 gap-1 text-[0.6875rem]">
+          <Badge variant="muted" className="shrink-0 gap-1">
             <Lock aria-hidden className="size-3" />
             {lockOwnerLabel ?? `#${todo.locked_by}`}
           </Badge>

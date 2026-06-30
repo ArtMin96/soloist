@@ -76,7 +76,7 @@ describe("Per-project settings page", () => {
     expect(screen.getByText(/2 running/)).toBeTruthy();
     expect(screen.getByText(/3 total/)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Commands" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Commands" }));
     expect(await screen.findByText("Web")).toBeTruthy();
   });
 
@@ -87,7 +87,7 @@ describe("Per-project settings page", () => {
     render(<ProjectSettingsPane project={project} />);
     await waitFor(() => expect(calls).toContain("project_settings_page"));
 
-    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Settings" }));
     fireEvent.click(await screen.findByLabelText("Suppress auto-start"));
 
     await waitFor(() => expect(calls).toContain("set_project_auto_start_gate"));
@@ -100,7 +100,7 @@ describe("Per-project settings page", () => {
     render(<ProjectSettingsPane project={project} />);
     await waitFor(() => expect(calls).toContain("project_settings_page"));
 
-    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Settings" }));
     fireEvent.click(await screen.findByLabelText("Automatically trust command changes"));
 
     await waitFor(() => expect(calls).toContain("set_project_auto_trust_command_changes"));
@@ -113,7 +113,7 @@ describe("Per-project settings page", () => {
     render(<ProjectSettingsPane project={project} />);
     await waitFor(() => expect(calls).toContain("project_settings_page"));
 
-    fireEvent.click(screen.getByRole("tab", { name: "Commands" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Commands" }));
     fireEvent.click(await screen.findByText("Web"));
     fireEvent.click(await screen.findByRole("button", { name: "Make local" }));
 

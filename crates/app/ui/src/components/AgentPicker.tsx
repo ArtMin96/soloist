@@ -10,6 +10,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
 import type { DetectedTool, ProjectView } from "@/domain";
 import { tokenizeArgs } from "@/lib/tokenizeArgs";
 import { cn } from "@/lib/utils";
@@ -280,8 +281,8 @@ function PickerFooter({ targetName, children }: { targetName?: string; children:
 
 function Hint({ keys, label }: { keys: string; label: string }) {
   return (
-    <span className="flex items-center gap-1">
-      <kbd className="rounded border bg-muted px-1 font-mono text-[0.6875rem]">{keys}</kbd>
+    <span className="flex items-center gap-1.5">
+      <Kbd>{keys}</Kbd>
       {label}
     </span>
   );

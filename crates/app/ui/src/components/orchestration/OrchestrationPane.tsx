@@ -4,6 +4,8 @@ import { ScratchpadPanel } from "@/components/orchestration/ScratchpadPanel";
 import { TimersPanel } from "@/components/orchestration/TimersPanel";
 import { TodoBoard } from "@/components/orchestration/TodoBoard";
 import { SegmentedControl } from "@/components/SegmentedControl";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { monogram } from "@/store/projects";
 import { useOrchestration } from "@/store/useOrchestration";
 import type { Option } from "@/lib/appearance";
 import type { ProjectView } from "@/domain";
@@ -27,7 +29,11 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
 
   return (
     <section className="flex h-full min-w-0 flex-col bg-background">
-      <header className="flex h-11 shrink-0 items-center gap-3 border-b bg-sidebar px-3">
+      <header className="flex h-11 shrink-0 items-center gap-2.5 border-b bg-sidebar px-3">
+        <Avatar className="size-5">
+          {project.icon && <AvatarImage src={project.icon} alt="" />}
+          <AvatarFallback>{monogram(project.name)}</AvatarFallback>
+        </Avatar>
         <span className="min-w-0 shrink truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">
           {project.name}
         </span>

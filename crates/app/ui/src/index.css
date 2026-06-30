@@ -118,6 +118,16 @@
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) * 1.33);
   --radius-xl: calc(var(--radius) * 1.66);
+
+  /*
+   * Elevation (DESIGN.md §4): the only shadows in the app. A resting surface is flat; a
+   * surface that floats *temporarily* gets exactly one of these. Cool-tinted and theme-
+   * independent (the same ink reads on either surface), defined once so every popover,
+   * dropdown, menu, select, and the command palette share one overlay, and every modal one
+   * dialog shadow — `shadow-overlay` / `shadow-dialog`.
+   */
+  --shadow-overlay: 0 8px 24px -8px oklch(0.2 0.02 255 / 0.18);
+  --shadow-dialog: 0 16px 48px -12px oklch(0.2 0.02 255 / 0.28);
 }
 
 /*

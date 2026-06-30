@@ -35,15 +35,15 @@ export function CommandList({
       </div>
 
       {commands.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+        <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
           No commands yet. Add one to run it under Soloist.
         </p>
       ) : (
-        <ul className="flex flex-col gap-1.5">
+        <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
           {commands.map((command) => {
             const isOpen = expanded === command.name;
             return (
-              <li key={command.name} className="overflow-hidden rounded-md border border-border">
+              <li key={command.name}>
                 <button
                   type="button"
                   aria-expanded={isOpen}

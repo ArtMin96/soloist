@@ -100,13 +100,7 @@ function TimerRow({ timer, labelOf }: RowProps) {
       {/* Main row */}
       <div className="flex items-center gap-2">
         {/* Fire-condition badge */}
-        <Badge
-          variant="outline"
-          className={cn(
-            "shrink-0 text-[0.625rem] font-[450] tabular-nums",
-            isPaused && "opacity-50",
-          )}
-        >
+        <Badge variant="outline" className={cn("shrink-0 tabular-nums", isPaused && "opacity-50")}>
           {isPaused ? "Paused" : fireBadge(timer.fire)}
         </Badge>
 
@@ -243,7 +237,7 @@ function WaitingOnChips({
       {shown.map((id) => (
         <span
           key={id}
-          className="rounded bg-sidebar px-1 py-0.5 text-[0.625rem] text-muted-foreground"
+          className="rounded-full bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground"
         >
           {labelOf(id)}
         </span>
