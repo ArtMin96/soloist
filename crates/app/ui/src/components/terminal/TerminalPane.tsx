@@ -33,7 +33,7 @@ export function TerminalPane({
 
   return (
     <section className="flex h-full min-w-0 flex-col bg-background">
-      <header className="flex h-9 shrink-0 items-center gap-2.5 border-b bg-sidebar px-3">
+      <header className="flex h-11 shrink-0 items-center gap-2.5 border-b bg-sidebar px-3">
         <span className="truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">
           {title ?? process.label}
         </span>
@@ -69,7 +69,7 @@ export function TerminalPane({
       <div className="relative min-h-0 flex-1">
         <div ref={hostRef} className="absolute inset-2" data-testid="terminal-host" />
         {state === "not-started" && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center">
+          <div className="pointer-events-none absolute inset-0 flex animate-in items-center justify-center px-6 text-center fade-in-0 duration-[var(--dur-sheet)]">
             <p className="max-w-sm text-sm text-pretty text-muted-foreground">
               {process.resumable ? (
                 <>

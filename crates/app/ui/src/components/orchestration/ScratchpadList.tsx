@@ -8,9 +8,9 @@ interface ScratchpadListProps {
 }
 
 // The scratchpad roster: one row per shared document, its name over a one-line objective gist with
-// its revision in mono. Presentational — selection state and the choice arrive as props. Mirrors the
-// sidebar ProcessRow idiom (h-auto rows, raised fill + a full-height azure selection marker, never a
-// decorative side-stripe).
+// its revision in mono. Presentational — selection state and the choice arrive as props. Selection
+// is the shared macOS source-list language (the azure-tinted `--sidebar-sel-fill` over a neutral
+// hover), identical to the sidebar ProcessRow — a tint in place, never a side-stripe marker.
 export function ScratchpadList({ scratchpads, selected, onSelect }: ScratchpadListProps) {
   if (scratchpads.length === 0) {
     return (
@@ -33,17 +33,13 @@ export function ScratchpadList({ scratchpads, selected, onSelect }: ScratchpadLi
               aria-selected={isSelected}
               onClick={() => onSelect(pad.name)}
               className={cn(
-                "relative flex w-full flex-col gap-0.5 rounded-sm py-1.5 pr-2.5 pl-2.5 text-left outline-none",
-                "hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                isSelected && "bg-sidebar-accent",
+                "flex w-full flex-col gap-0.5 rounded-md py-1.5 pr-2.5 pl-2.5 text-left outline-none transition-colors duration-[var(--dur-select)] ease-out-quint",
+                "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                isSelected
+                  ? "bg-[var(--sidebar-sel-fill)] hover:bg-[var(--sidebar-sel-fill-hover)]"
+                  : "hover:bg-sidebar-accent focus-visible:bg-sidebar-accent",
               )}
             >
-              {isSelected && (
-                <span
-                  aria-hidden
-                  className="absolute top-1.5 bottom-1.5 left-0 w-0.5 rounded-full bg-sidebar-primary"
-                />
-              )}
               <span className="flex items-baseline gap-2">
                 <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-foreground">
                   {pad.name}

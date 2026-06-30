@@ -49,7 +49,7 @@ export function Sidebar({
   const [collapsed, setCollapsed] = useCollapseState();
 
   return (
-    <div className="flex w-60 shrink-0 flex-col border-r bg-sidebar">
+    <div className="flex w-64 shrink-0 flex-col border-r bg-sidebar">
       <nav aria-label="Projects" className="min-h-0 flex-1 overflow-y-auto p-2">
         {trees.map((tree, index) => (
           <div key={tree.project.id} className={index > 0 ? "mt-1 border-t pt-1" : undefined}>

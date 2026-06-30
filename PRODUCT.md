@@ -51,8 +51,12 @@ dashboard makes the live state of *many* processes instantly legible without the
 - **Emotional goal:** the user feels **in control and oriented**, never overwhelmed. The app fades into
   the background and surfaces *signal* — a crash, an agent waiting for permission, a process going idle
   — exactly when it matters, then gets out of the way.
-- **Feel:** a first-class native Linux desktop tool — fast, quiet, dense-but-legible — that you'd trust
-  to babysit a dozen processes for a week.
+- **Feel:** a first-class native desktop tool wearing a **macOS-faithful AppKit feel on Linux** —
+  source-list sidebar, unified toolbar, segmented controls, grouped settings; fast, quiet,
+  dense-but-legible, its movement native spring physics that *confirms* an action rather than
+  decorating — that you'd trust to babysit a dozen processes for a week. Two pragmatic
+  departures keep it honest on Ubuntu: **no liquid-glass / vibrancy**, and **window controls stay
+  top-right** (restyled), where a Linux/GNOME user expects them — not faked traffic lights.
 
 ## Anti-references
 
@@ -64,7 +68,8 @@ What Soloist must **not** look like (all four confirmed):
   uppercase eyebrows, no `01 / 02 / 03` numbered section scaffolding. These are the saturated
   AI-generation tells.
 - **A web-app-in-a-window** — no heavy browser chrome, no Electron-y bloat, nothing that reads as
-  "obviously a website." It must feel like a **native Linux app**.
+  "obviously a website." It must feel like a **native desktop app** — a macOS-faithful AppKit feel on
+  Linux (source-list sidebar, unified toolbar, segmented controls, grouped settings), never a webpage.
 - **Toy / skeuomorphic** — no oversized radii, no heavy drop shadows, no playful mascot/clip-art energy.
   This is a serious tool for serious work.
 
@@ -73,9 +78,12 @@ What Soloist must **not** look like (all four confirmed):
 1. **Signal over chrome.** The UI's whole job is to make the live state of many processes instantly
    legible. Surface what *changed* (a crash, an agent needing permission, an idle transition); keep
    everything else quiet. Decoration that doesn't carry information is debt.
-2. **Native and invisible.** Feel like a first-class Linux desktop app that disappears into the
-   workflow. Speed and calm beat flourish. A tool kept open for days earns trust by being
-   unremarkable in the best way.
+2. **Native and invisible.** Feel like a first-class desktop app — a **macOS-faithful AppKit shell on
+   Linux** (no liquid-glass) — that disappears into the workflow. Speed and calm beat flourish; the
+   familiar mac controls earn trust precisely by being unremarkable. A tool kept open for days should
+   feel unremarkable in the best way. Motion obeys the same rule: native spring physics that
+   *confirms* a state change — a selection settling, a sheet popping, a group unfolding — never a
+   decorative cross-fade, and always reduced-motion-safe.
 3. **Keyboard-first, expert-respecting.** Every primary action is reachable by keyboard (command
    palette, jump palette, shortcuts). Don't hand-hold; don't gate power behind menus.
 4. **Density with rhythm.** Show a lot — process tree, terminals, status, metrics — without clutter.

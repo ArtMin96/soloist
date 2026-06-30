@@ -14,8 +14,3 @@ export const PROJECT_TABS: ProjectTab[] = [
   { id: "notifications", label: "Notifications" },
   { id: "commands", label: "Commands" },
 ];
-
-// The DOM id of a tab's button — shared so the tabpanel can label itself by the active tab.
-export function projectTabButtonId(id: ProjectTabId): string {
-  return `project-settings-tab-${id}`;
-}

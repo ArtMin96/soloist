@@ -18,8 +18,9 @@ interface ProcessRowProps {
 
 // One process in the tree: status dot + name, with per-row controls revealed on hover or
 // focus (always shown for the selected row, and for an untrusted command so its trust
-// affordance stays visible). The selected row carries a full-height azure marker — a
-// selection affordance, not a decorative side-stripe.
+// affordance stays visible). The selected row is an azure-tinted rounded fill — the macOS
+// source-list selection — while hover stays a quiet neutral; status hues keep their full
+// saturation on either, so the heartbeat never loses contrast to the selection.
 export function ProcessRow({
   process,
   selected,
@@ -49,17 +50,14 @@ export function ProcessRow({
         }
       }}
       className={cn(
-        "group/row relative flex h-7 cursor-default items-center gap-2 rounded-sm pr-1 pl-2.5 text-[0.8125rem] outline-none",
-        "hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-        selected && "bg-sidebar-accent",
+        "group/row relative flex h-7 cursor-default items-center gap-2 rounded-md pr-1 pl-2.5 text-[0.8125rem] outline-none",
+        "transition-colors duration-[var(--dur-select)] ease-out-quint",
+        "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+        selected
+          ? "bg-[var(--sidebar-sel-fill)] font-medium hover:bg-[var(--sidebar-sel-fill-hover)]"
+          : "hover:bg-sidebar-accent focus-visible:bg-sidebar-accent",
       )}
     >
-      {selected && (
-        <span
-          aria-hidden
-          className="absolute top-1 bottom-1 left-0 w-0.5 rounded-full bg-sidebar-primary"
-        />
-      )}
       <ProcessIndicator status={process.status} activity={activity} showLabel={false} />
       <span className="min-w-0 flex-1 truncate">{process.label}</span>
       {/* The right zone stacks at-rest telemetry under the controls in one grid cell, so the
@@ -71,7 +69,7 @@ export function ProcessRow({
         <div
           style={{ gridArea: "stack" }}
           className={cn(
-            "pointer-events-none transition-opacity",
+            "pointer-events-none transition-opacity duration-[var(--dur-fast)]",
             "group-hover/row:opacity-0 group-focus-within/row:opacity-0",
             showControls && "opacity-0",
           )}
@@ -87,10 +85,10 @@ export function ProcessRow({
         <div
           style={{ gridArea: "stack" }}
           className={cn(
-            "pointer-events-none opacity-0 transition-opacity",
-            "group-hover/row:pointer-events-auto group-hover/row:opacity-100",
-            "group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100",
-            showControls && "pointer-events-auto opacity-100",
+            "pointer-events-none translate-x-1 opacity-0 transition-[opacity,transform] duration-[var(--dur-fast)] ease-out-quint",
+            "group-hover/row:pointer-events-auto group-hover/row:translate-x-0 group-hover/row:opacity-100",
+            "group-focus-within/row:pointer-events-auto group-focus-within/row:translate-x-0 group-focus-within/row:opacity-100",
+            showControls && "pointer-events-auto translate-x-0 opacity-100",
           )}
         >
           <ProcessControls

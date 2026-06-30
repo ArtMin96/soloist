@@ -3,6 +3,7 @@ import type { MouseEvent } from "react";
 import { useWindowControls } from "@/components/titlebar/useWindowControls";
 import { WindowControls } from "@/components/titlebar/WindowControls";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 
 interface TitlebarProps {
   appName: string;
@@ -16,9 +17,10 @@ interface TitlebarProps {
 // clickable.
 const DRAG = { "data-tauri-drag-region": "" };
 
-// The single window-chrome surface: a draggable titlebar carrying the app identity, the
-// global Launch-agent / Open-project actions, and the OS window controls. It stands in
-// for the native decorations, which are turned off in tauri.conf.json.
+// The single window-chrome surface: a unified toolbar carrying the app identity (logo +
+// wordmark), the global Launch-agent / Open-project actions, and the OS window controls. It
+// stands in for the native decorations, which are turned off in tauri.conf.json. The whole
+// strip is a drag handle except the interactive controls.
 export function Titlebar({ appName, appVersion, onOpenProject, onLaunchAgent }: TitlebarProps) {
   const { isMaximized, minimize, toggleMaximize, close } = useWindowControls();
 
@@ -32,17 +34,27 @@ export function Titlebar({ appName, appVersion, onOpenProject, onLaunchAgent }: 
     <header
       {...DRAG}
       onDoubleClick={onDoubleClick}
-      className="flex h-11 shrink-0 items-center gap-2 border-b bg-sidebar px-3"
+      className="flex h-11 shrink-0 items-center gap-2.5 border-b bg-sidebar pr-2 pl-3"
     >
-      <span {...DRAG} className="text-[0.9375rem] font-[550] tracking-[-0.005em]">
+      <img
+        src="/logo.png"
+        alt=""
+        width={18}
+        height={18}
+        draggable={false}
+        {...DRAG}
+        className="size-[18px] shrink-0 rounded-[5px]"
+      />
+      <span {...DRAG} className="text-[0.9375rem] font-[550] tracking-[-0.005em] text-foreground">
         {appName}
       </span>
       {appVersion && (
-        <span {...DRAG} className="font-mono text-xs text-muted-foreground">
+        <span {...DRAG} className="font-mono text-[0.6875rem] text-muted-foreground">
           v{appVersion}
         </span>
       )}
-      <Button variant="ghost" size="sm" className="ml-2" onClick={onLaunchAgent}>
+      <div {...DRAG} className="h-full flex-1" />
+      <Button variant="secondary" size="sm" onClick={onLaunchAgent}>
         <Bot />
         Launch agent
       </Button>
@@ -50,7 +62,10 @@ export function Titlebar({ appName, appVersion, onOpenProject, onLaunchAgent }: 
         <FolderOpen />
         Open project
       </Button>
-      <div {...DRAG} className="h-full flex-1" />
+      <Separator
+        orientation="vertical"
+        className="mx-1 data-vertical:h-5 data-vertical:self-center"
+      />
       <WindowControls
         isMaximized={isMaximized}
         onMinimize={minimize}

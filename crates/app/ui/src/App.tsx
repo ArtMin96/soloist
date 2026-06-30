@@ -22,6 +22,7 @@ import { useProcesses } from "@/store/useProcesses";
 import { useProjects } from "@/store/projects";
 import { SignalsProvider } from "@/store/SignalsProvider";
 import { useTrust } from "@/store/useTrust";
+import { useWindowActive } from "@/store/useWindowActive";
 import type { HotkeyAction } from "@/domain";
 
 // Binds the live keymap to the app's actions; rendered inside HotkeysProvider so it reads the
@@ -35,6 +36,7 @@ function GlobalHotkeys({ handlers }: { handlers: Partial<Record<HotkeyAction, ()
 // process's terminal. All state is a projection of the core read model; this composes the
 // pieces and tracks only which process is selected.
 export default function App() {
+  useWindowActive();
   const info = useAppInfo();
   const store = useProcesses();
   const projects = useProjects(store.reportError);

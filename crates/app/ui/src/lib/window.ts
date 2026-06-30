@@ -26,3 +26,14 @@ export function isWindowMaximized(): Promise<boolean> {
 export function onWindowResized(handler: () => void): Promise<UnlistenFn> {
   return getCurrentWindow().onResized(() => handler());
 }
+
+// Whether Soloist's window is the key (focused) window — used to render AppKit's
+// "unemphasized" selection on a background window.
+export function isWindowFocused(): Promise<boolean> {
+  return getCurrentWindow().isFocused();
+}
+
+// Re-fires whenever the window gains or loses focus. Returns the unlisten handle for cleanup.
+export function onWindowFocusChanged(handler: (focused: boolean) => void): Promise<UnlistenFn> {
+  return getCurrentWindow().onFocusChanged(({ payload }) => handler(payload));
+}

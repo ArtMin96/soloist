@@ -35,7 +35,7 @@ export function ProcessGroup({
       <Collapsible.Trigger className="group/trigger flex w-full items-center gap-1.5 rounded-sm px-1 py-1 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
         <ChevronRight
           aria-hidden
-          className="size-3 text-muted-foreground transition-transform group-data-[state=open]/trigger:rotate-90"
+          className="size-3 text-muted-foreground transition-transform duration-[var(--dur-control)] ease-spring-settle group-data-[state=open]/trigger:rotate-90"
         />
         <span className="text-[0.6875rem] font-[550] tracking-[0.01em] text-muted-foreground">
           {group.label}
@@ -44,7 +44,7 @@ export function ProcessGroup({
           {group.processes.length}
         </span>
       </Collapsible.Trigger>
-      <Collapsible.Content>
+      <Collapsible.Content className="overflow-hidden data-[state=open]:animate-disclose-down data-[state=closed]:animate-disclose-up">
         <div className="mt-0.5 flex flex-col gap-px pl-1">
           {group.processes.map((process) => (
             <ProcessRow
