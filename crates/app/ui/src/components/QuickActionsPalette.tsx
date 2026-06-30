@@ -1,12 +1,13 @@
 import {
+  Command,
   CommandDialog,
   CommandEmpty,
   CommandGroup,
+  CommandInput,
   CommandItem,
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
-import { CommandInput } from "@/components/ui/command";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { canRestart, canStart, canStop } from "@/lib/status";
 import { groupByProject } from "@/store/projects";
@@ -60,61 +61,63 @@ export function QuickActionsPalette({
       title="Quick Actions"
       description="Run an action on any process in the active project"
     >
-      <CommandInput placeholder="Search actions…" autoFocus />
-      <CommandList>
-        {!hasProject && <CommandEmpty>Open a project to see actions.</CommandEmpty>}
-        {hasProject && activeProcesses.length === 0 && (
-          <CommandEmpty>No processes in this project.</CommandEmpty>
-        )}
-        {hasProject &&
-          activeProcesses.map((process, idx) => {
-            const actions: { label: string; fn: () => void }[] = [];
-            if (process.requires_trust) {
-              actions.push({
-                label: "Trust",
-                fn: () => onTrust(process.project, process.label),
-              });
-            }
-            if (canStart(process.status) && !process.requires_trust) {
-              if (process.resumable) {
-                actions.push({ label: "Resume", fn: () => onResume(process.id) });
+      <Command>
+        <CommandInput placeholder="Search actions…" autoFocus />
+        <CommandList>
+          {!hasProject && <CommandEmpty>Open a project to see actions.</CommandEmpty>}
+          {hasProject && activeProcesses.length === 0 && (
+            <CommandEmpty>No processes in this project.</CommandEmpty>
+          )}
+          {hasProject &&
+            activeProcesses.map((process, idx) => {
+              const actions: { label: string; fn: () => void }[] = [];
+              if (process.requires_trust) {
+                actions.push({
+                  label: "Trust",
+                  fn: () => onTrust(process.project, process.label),
+                });
               }
-              actions.push({ label: "Start", fn: () => onStart(process.id) });
-            }
-            if (canStop(process.status)) {
-              actions.push({ label: "Stop", fn: () => onStop(process.id) });
-            }
-            if (canRestart(process.status)) {
-              actions.push({ label: "Restart", fn: () => onRestart(process.id) });
-            }
+              if (canStart(process.status) && !process.requires_trust) {
+                if (process.resumable) {
+                  actions.push({ label: "Resume", fn: () => onResume(process.id) });
+                }
+                actions.push({ label: "Start", fn: () => onStart(process.id) });
+              }
+              if (canStop(process.status)) {
+                actions.push({ label: "Stop", fn: () => onStop(process.id) });
+              }
+              if (canRestart(process.status)) {
+                actions.push({ label: "Restart", fn: () => onRestart(process.id) });
+              }
 
-            if (actions.length === 0) return null;
+              if (actions.length === 0) return null;
 
-            return (
-              <div key={process.id}>
-                {idx > 0 && <CommandSeparator />}
-                <CommandGroup
-                  heading={
-                    <span className="flex items-center gap-1.5">
-                      <ProcessIndicator status={process.status} showLabel={false} />
-                      {process.label}
-                    </span>
-                  }
-                >
-                  {actions.map((action) => (
-                    <CommandItem
-                      key={action.label}
-                      value={`${process.id}:${process.label}:${action.label}`}
-                      onSelect={() => run(action.fn)}
-                    >
-                      {action.label}
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </div>
-            );
-          })}
-      </CommandList>
+              return (
+                <div key={process.id}>
+                  {idx > 0 && <CommandSeparator />}
+                  <CommandGroup
+                    heading={
+                      <span className="flex items-center gap-1.5">
+                        <ProcessIndicator status={process.status} showLabel={false} />
+                        {process.label}
+                      </span>
+                    }
+                  >
+                    {actions.map((action) => (
+                      <CommandItem
+                        key={action.label}
+                        value={`${process.id}:${process.label}:${action.label}`}
+                        onSelect={() => run(action.fn)}
+                      >
+                        {action.label}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </div>
+              );
+            })}
+        </CommandList>
+      </Command>
     </CommandDialog>
   );
 }

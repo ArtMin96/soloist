@@ -1,4 +1,5 @@
 import {
+  Command,
   CommandDialog,
   CommandEmpty,
   CommandGroup,
@@ -54,57 +55,63 @@ export function QuickJumpPalette({
       title="Quick Jump"
       description="Jump to any process or project"
     >
-      <CommandInput placeholder="Jump to…" autoFocus />
-      <CommandList>
-        {!hasContent && <CommandEmpty>No destinations found.</CommandEmpty>}
-        {trees.map((tree, idx) => {
-          const allProcesses = tree.kinds.flatMap((k) => k.processes);
-          return (
-            <div key={tree.project.id}>
-              {idx > 0 && <CommandSeparator />}
-              <CommandGroup heading={tree.project.name}>
-                {/* Project row — opens project settings */}
-                <CommandItem
-                  value={`project:${tree.project.id}:${tree.project.name}`}
-                  onSelect={() => jump(() => onSelectProject(tree.project.id))}
-                  className="gap-2"
-                >
-                  <span
-                    className="flex size-4 shrink-0 items-center justify-center rounded text-[0.625rem] font-semibold bg-muted text-muted-foreground"
-                    aria-hidden
-                  >
-                    {tree.project.icon ? (
-                      <img src={tree.project.icon} alt="" className="size-4 rounded object-cover" />
-                    ) : (
-                      monogram(tree.project.name)
-                    )}
-                  </span>
-                  <span className="flex-1 truncate">{tree.project.name}</span>
-                  <span className="text-[0.6875rem] text-muted-foreground">Project settings</span>
-                </CommandItem>
-                {/* Process rows */}
-                {allProcesses.map((process) => (
+      <Command>
+        <CommandInput placeholder="Jump to…" autoFocus />
+        <CommandList>
+          {!hasContent && <CommandEmpty>No destinations found.</CommandEmpty>}
+          {trees.map((tree, idx) => {
+            const allProcesses = tree.kinds.flatMap((k) => k.processes);
+            return (
+              <div key={tree.project.id}>
+                {idx > 0 && <CommandSeparator />}
+                <CommandGroup heading={tree.project.name}>
+                  {/* Project row — opens project settings */}
                   <CommandItem
-                    key={process.id}
-                    value={`process:${process.id}:${process.label}:${tree.project.name}`}
-                    onSelect={() => jump(() => onSelectProcess(process.id))}
+                    value={`project:${tree.project.id}:${tree.project.name}`}
+                    onSelect={() => jump(() => onSelectProject(tree.project.id))}
                     className="gap-2"
                   >
-                    <ProcessIndicator status={process.status} showLabel={false} />
-                    <span className="flex-1 truncate">{process.label}</span>
-                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
-                      {KIND_LABEL[process.kind]}
+                    <span
+                      className="flex size-4 shrink-0 items-center justify-center rounded text-[0.625rem] font-semibold bg-muted text-muted-foreground"
+                      aria-hidden
+                    >
+                      {tree.project.icon ? (
+                        <img
+                          src={tree.project.icon}
+                          alt=""
+                          className="size-4 rounded object-cover"
+                        />
+                      ) : (
+                        monogram(tree.project.name)
+                      )}
                     </span>
+                    <span className="flex-1 truncate">{tree.project.name}</span>
+                    <span className="text-[0.6875rem] text-muted-foreground">Project settings</span>
                   </CommandItem>
-                ))}
-              </CommandGroup>
-            </div>
-          );
-        })}
-        {hasContent && processes.length === 0 && (
-          <CommandEmpty>No destinations found.</CommandEmpty>
-        )}
-      </CommandList>
+                  {/* Process rows */}
+                  {allProcesses.map((process) => (
+                    <CommandItem
+                      key={process.id}
+                      value={`process:${process.id}:${process.label}:${tree.project.name}`}
+                      onSelect={() => jump(() => onSelectProcess(process.id))}
+                      className="gap-2"
+                    >
+                      <ProcessIndicator status={process.status} showLabel={false} />
+                      <span className="flex-1 truncate">{process.label}</span>
+                      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
+                        {KIND_LABEL[process.kind]}
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </div>
+            );
+          })}
+          {hasContent && processes.length === 0 && (
+            <CommandEmpty>No destinations found.</CommandEmpty>
+          )}
+        </CommandList>
+      </Command>
     </CommandDialog>
   );
 }
