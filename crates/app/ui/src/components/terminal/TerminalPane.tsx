@@ -69,7 +69,7 @@ export function TerminalPane({
       <div className="relative min-h-0 flex-1">
         <div ref={hostRef} className="absolute inset-2" data-testid="terminal-host" />
         {state === "not-started" && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center">
+          <div className="pointer-events-none absolute inset-0 flex animate-in items-center justify-center px-6 text-center fade-in-0 duration-[var(--dur-sheet)]">
             <p className="max-w-sm text-sm text-pretty text-muted-foreground">
               {process.resumable ? (
                 <>

@@ -51,9 +51,10 @@ export function ProcessRow({
       }}
       className={cn(
         "group/row relative flex h-7 cursor-default items-center gap-2 rounded-md pr-1 pl-2.5 text-[0.8125rem] outline-none",
+        "transition-colors duration-[var(--dur-select)] ease-out-quint",
         "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
         selected
-          ? "bg-primary/15 font-medium hover:bg-primary/20"
+          ? "bg-[var(--sidebar-sel-fill)] font-medium hover:bg-[var(--sidebar-sel-fill-hover)]"
           : "hover:bg-sidebar-accent focus-visible:bg-sidebar-accent",
       )}
     >
@@ -68,7 +69,7 @@ export function ProcessRow({
         <div
           style={{ gridArea: "stack" }}
           className={cn(
-            "pointer-events-none transition-opacity",
+            "pointer-events-none transition-opacity duration-[var(--dur-fast)]",
             "group-hover/row:opacity-0 group-focus-within/row:opacity-0",
             showControls && "opacity-0",
           )}
@@ -84,10 +85,10 @@ export function ProcessRow({
         <div
           style={{ gridArea: "stack" }}
           className={cn(
-            "pointer-events-none opacity-0 transition-opacity",
-            "group-hover/row:pointer-events-auto group-hover/row:opacity-100",
-            "group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100",
-            showControls && "pointer-events-auto opacity-100",
+            "pointer-events-none translate-x-1 opacity-0 transition-[opacity,transform] duration-[var(--dur-fast)] ease-out-quint",
+            "group-hover/row:pointer-events-auto group-hover/row:translate-x-0 group-hover/row:opacity-100",
+            "group-focus-within/row:pointer-events-auto group-focus-within/row:translate-x-0 group-focus-within/row:opacity-100",
+            showControls && "pointer-events-auto translate-x-0 opacity-100",
           )}
         >
           <ProcessControls

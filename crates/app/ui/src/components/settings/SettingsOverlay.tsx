@@ -16,6 +16,8 @@ import {
   UNDEFINED_TABS,
 } from "@/components/settings/tabs";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { useScrollEdge } from "@/store/useScrollEdge";
 
 // The built panel for each tab — the single place a tab maps to its component. Tabs absent here
 // fall through to a placeholder (undefined-in-source vs. still-to-come, decided below), so the
@@ -51,17 +53,21 @@ export function SettingsOverlay({
   onOpenChange: (open: boolean) => void;
 }) {
   const [active, setActive] = useState<SettingsTabId>("appearance");
+  const { ref: panelRef, scrolled } = useScrollEdge<HTMLDivElement>();
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Content
           aria-describedby={undefined}
-          className="fixed inset-0 z-50 flex flex-col bg-background text-foreground outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 motion-reduce:animate-none"
+          className="fixed inset-0 z-50 flex flex-col bg-background text-foreground outline-none duration-[var(--dur-sheet)] ease-out-quint data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-bottom-2 data-[state=closed]:duration-[var(--dur-sheet-out)] motion-reduce:animate-none"
         >
           <header
             data-tauri-drag-region
-            className="flex h-11 shrink-0 items-center justify-between border-b border-border px-4"
+            className={cn(
+              "flex h-11 shrink-0 items-center justify-between border-b px-4 transition-colors duration-[var(--dur-fast)]",
+              scrolled ? "border-border" : "border-transparent",
+            )}
           >
             <DialogPrimitive.Title className="text-[0.9375rem] font-medium tracking-[-0.005em]">
               Settings
@@ -75,6 +81,7 @@ export function SettingsOverlay({
           <div className="flex min-h-0 flex-1">
             <SettingsTabRail active={active} onSelect={setActive} />
             <div
+              ref={panelRef}
               role="tabpanel"
               aria-labelledby={settingsTabButtonId(active)}
               className="min-w-0 flex-1 overflow-y-auto bg-sidebar"

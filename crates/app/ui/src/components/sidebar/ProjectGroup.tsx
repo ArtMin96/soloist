@@ -82,7 +82,7 @@ export function ProjectGroup({
             <Collapsible.Trigger className="group/trigger flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
               <ChevronRight
                 aria-hidden
-                className="size-3 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/trigger:rotate-90"
+                className="size-3 shrink-0 text-muted-foreground transition-transform duration-[var(--dur-control)] ease-spring-settle group-data-[state=open]/trigger:rotate-90"
               />
               <Avatar>
                 {project.icon && <AvatarImage src={project.icon} alt="" />}
@@ -143,7 +143,7 @@ export function ProjectGroup({
           ))}
         </ContextMenuContent>
       </ContextMenu>
-      <Collapsible.Content>
+      <Collapsible.Content className="overflow-hidden data-[state=open]:animate-disclose-down data-[state=closed]:animate-disclose-up">
         <div className="mt-0.5 flex flex-col gap-0.5 pb-0.5 pl-3">
           {count.total === 0 ? (
             <p className="px-1 py-1 text-[0.6875rem] text-muted-foreground/70">No commands yet</p>
