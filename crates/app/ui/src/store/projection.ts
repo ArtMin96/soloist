@@ -3,8 +3,8 @@ import type { DomainEvent, ProcessView } from "@/domain";
 // Pure read-model projection: fold one core event into the process list. Holds no
 // business logic — the core stays authoritative; this only mirrors its deltas, which
 // keeps it trivially unit-testable. Events that don't change the process list (config
-// sync, terminal title/bell, orphans, restart notices, metrics ticks, agent activity, and
-// the coordination deltas — todo/timer/lease/scratchpad/kv changed) leave it untouched;
+// sync, terminal title/bell, orphans, restart notices, metrics ticks, agent activity and
+// summary, and the coordination deltas — todo/timer/lease/scratchpad/kv changed) leave it untouched;
 // their consumers subscribe elsewhere (the coordination deltas drive an orchestration_snapshot
 // re-query once the orchestration view exists). A restart's status move arrives as ProcessStatusChanged;
 // RestartScheduled/RestartExhausted are the discrete signals notifications subscribe to;
@@ -59,6 +59,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "TerminalTitleChanged":
     case "TerminalBell":
     case "AgentActivityChanged":
+    case "AgentSummary":
     case "OrphansFound":
     case "TodoChanged":
     case "TimerArmed":
