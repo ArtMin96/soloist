@@ -283,6 +283,26 @@ impl TodoRepo for FakeTodoRepo {
         }
         Ok(cleared)
     }
+
+    fn transfer(
+        &self,
+        from: ProjectId,
+        to: ProjectId,
+        id: TodoId,
+    ) -> Result<Option<StoredTodo>, StoreError> {
+        let mut rows = lock(&self.rows);
+        match rows.get_mut(&id.get()).filter(|todo| todo.project == from) {
+            Some(todo) => {
+                // Re-key the project; blockers reference source-project ids and the lock is
+                // per-run/process-owned, so both are cleared. Doc, tags, comments, revision, id stay.
+                todo.project = to;
+                todo.blockers.clear();
+                todo.locked_by = None;
+                Ok(Some(todo.clone()))
+            }
+            None => Ok(None),
+        }
+    }
 }
 
 impl FakeTodoRepo {

@@ -193,6 +193,17 @@ pub trait TodoRepo: Send + Sync {
     /// recycled, so no lock left by a previous run can be matched to a live process; the todos
     /// themselves are kept. Returns how many locks were cleared.
     fn clear_locks(&self) -> Result<usize, StoreError>;
+
+    /// Moves todo `id` from project `from` to project `to`, **clearing its blockers and lock**
+    /// (both reference the source project, so they cannot survive the move) while keeping its
+    /// document, tags, comments, revision, and durable id. Returns the moved row read back under
+    /// `to`, or `None` if `from` has no such todo. One atomic step, like the other mutations.
+    fn transfer(
+        &self,
+        from: ProjectId,
+        to: ProjectId,
+        id: TodoId,
+    ) -> Result<Option<StoredTodo>, StoreError>;
 }
 
 /// A [`TodoRepo`] that stores nothing — the default until the durable adapter is wired, so the core
@@ -329,5 +340,13 @@ impl TodoRepo for NoopTodoRepo {
     }
     fn clear_locks(&self) -> Result<usize, StoreError> {
         Ok(0)
+    }
+    fn transfer(
+        &self,
+        _from: ProjectId,
+        _to: ProjectId,
+        _id: TodoId,
+    ) -> Result<Option<StoredTodo>, StoreError> {
+        Ok(None)
     }
 }

@@ -173,6 +173,8 @@ the UI button and the MCP tool drive.
 | `POST` | `/projects/{id}/restart-all` | Bring the trusted command set up fresh. |
 | `POST` | `/projects/{id}/reload` | Re-read `solo.yml` and reconcile the command set. |
 | `POST` | `/projects/{id}/spawn-agent` | Launch a known agent tool as a worker (JSON body; returns the new id). |
+| `POST` | `/projects/{id}/transfer-todo` | Move a todo from this project to another (JSON body). |
+| `POST` | `/projects/{id}/transfer-scratchpad` | Move a scratchpad from this project to another (JSON body). |
 | `POST` | `/focus` | Raise the desktop window to the front. |
 
 The two bulk-start scopes are distinct on purpose. `start-auto` starts only the commands marked
@@ -199,6 +201,17 @@ ungated worker in the project, replying `{ "id": <process id> }`. This is the lo
 on the loopback socket, the same `launch_agent` the desktop launch picker drives; the spawned agent
 is a root process. An unknown tool or project is a `404`. (The session-scoped MCP `spawn_agent`,
 which nests a worker under a bound lead, stays MCP-only.)
+
+`/projects/{id}/transfer-todo` and `/projects/{id}/transfer-scratchpad` move a coordination
+aggregate from the path (source) project to another. Post `{ "todo": <id>, "to_project": <id> }` or
+`{ "name": "<name>", "to_project": <id> }`. The move keeps the aggregate's document, tags, and
+durable id (a todo also keeps its comments and completion but clears its blockers and lock, which
+reference the source project). This is the local user's authority on the loopback socket — the same
+`*_transfer_in` core path a desktop board drives — so it addresses **both** projects by explicit id;
+the target project must be loaded (an unknown todo, scratchpad, or target project is a `404`, and a
+scratchpad name already used in the target is a `409`). The session-scoped MCP `todo_transfer` /
+`scratchpad_transfer` cannot reach across projects (a session is scoped to one project), so
+cross-project transfers go through here or the desktop, never over MCP.
 
 ### Bulk endpoint to core mapping
 

@@ -108,12 +108,26 @@ impl<'a> ProjectService<'a> {
         let Some(diff) = self.config.sync(project)? else {
             return Ok(None);
         };
-        let config = self.config.current(project).unwrap_or_default();
+        // `sync` just refreshed and stored the parsed config, so `current` is `Some` here; the
+        // guard keeps the reconcile all-or-nothing rather than defaulting to an empty config.
+        let Some(config) = self.config.current(project) else {
+            return Ok(Some(diff));
+        };
 
         for name in &diff.added {
             if let Some(spec) = config.processes.get(name) {
-                self.supervisor
-                    .register(Registration::command(project, &root, name, spec));
+                let registration = Registration::command(project, &root, name, spec);
+                // A command re-added after being removed while running is still registered (a
+                // running command is kept on removal), so reconcile it in place rather than
+                // minting a second registration under the same name.
+                match self.supervisor.command_id_by_name(project, name) {
+                    Some(id) => {
+                        self.supervisor.update_command(id, registration);
+                    }
+                    None => {
+                        self.supervisor.register(registration);
+                    }
+                }
             }
         }
         for name in &diff.updated {
@@ -677,5 +691,43 @@ mod tests {
             parts.service().reload(ProjectId::from_raw(9999)),
             Err(ReloadError::UnknownProject)
         ));
+    }
+
+    #[tokio::test]
+    async fn reload_reuses_the_registration_when_a_removed_running_command_is_readded() {
+        let parts = parts(FakeSpawner::exits_on_terminate());
+        let mut rx = parts.bus.subscribe();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (project, web) = opened_running_web(&parts, &mut rx, dir.path()).await;
+
+        // Remove Web while it runs — a running command is kept, not dropped (so its registration
+        // lingers under the same name).
+        write_yml(dir.path(), "processes:\n  Api:\n    command: cargo run\n");
+        parts
+            .service()
+            .reload(project)
+            .expect("reload removes Web from config");
+
+        // Re-add Web: the reconcile must apply it onto the still-running registration, not mint a
+        // second one under the same name.
+        write_yml(
+            dir.path(),
+            "processes:\n  Api:\n    command: cargo run\n  Web:\n    command: npm run dev\n",
+        );
+        parts.service().reload(project).expect("reload re-adds Web");
+
+        let webs: Vec<_> = parts
+            .supervisor
+            .snapshot()
+            .into_iter()
+            .filter(|p| p.label == "Web")
+            .collect();
+        assert_eq!(
+            webs.len(),
+            1,
+            "a re-added running command is not duplicated"
+        );
+        assert_eq!(webs[0].id, web, "it keeps the original registration's id");
+        assert_eq!(webs[0].status, ProcStatus::Running, "and stays running");
     }
 }

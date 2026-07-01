@@ -11,12 +11,12 @@
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
-use soloist_core::{is_link, ScratchpadDoc};
+use soloist_core::{is_link, ProjectId, ScratchpadDoc};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
     ScratchpadArchiveArg, ScratchpadNameArg, ScratchpadRenameArg, ScratchpadTagsArg,
-    ScratchpadWriteArg,
+    ScratchpadTransferArg, ScratchpadWriteArg,
 };
 use crate::server::SoloistMcp;
 use crate::tools::reply::{app_error, structured, unexpected};
@@ -192,6 +192,27 @@ impl SoloistMcp {
             Ok(IpcResponse::ScratchpadDeleted(deleted)) => {
                 structured(&serde_json::json!({ "deleted": deleted }))
             }
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Move a scratchpad to another project, keeping its document, revision, tags, and durable identity. You must be authenticated to the destination — a process you run in belongs to it; a name already used there is refused. Note: an MCP session is scoped to a single project, so a genuine cross-project move over MCP is refused; the desktop app performs cross-project transfers."
+    )]
+    pub(crate) async fn scratchpad_transfer(
+        &self,
+        Parameters(ScratchpadTransferArg { name, to_project }): Parameters<ScratchpadTransferArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self
+            .client
+            .request(IpcRequest::ScratchpadTransfer {
+                name,
+                to_project: ProjectId::from_raw(to_project),
+            })
+            .await
+        {
+            Ok(IpcResponse::Scratchpad(view)) => structured(&view),
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }

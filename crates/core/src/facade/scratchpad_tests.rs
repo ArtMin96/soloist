@@ -3,7 +3,10 @@ use std::sync::Arc;
 
 use super::*;
 use crate::ports::{CorePorts, ProjectRepo, TokioClock};
-use crate::testing::{FakeProjectRepo, FakeScratchpadRepo, FakeSpawner, FakeTrustRepo};
+use crate::testing::{
+    authentic_session, terminal_registration, FakeProjectRepo, FakeScratchpadRepo, FakeSpawner,
+    FakeTrustRepo, TEST_PEER_PGID,
+};
 
 /// A well-formed disciplined document.
 fn doc() -> ScratchpadDoc {
@@ -177,4 +180,108 @@ fn tags_and_archive_round_trip_through_the_facade() {
         facade.scratchpad_add_tags(session, "a", &["x".into()]),
         Err(CoordinationError::UnknownScratchpad)
     ));
+}
+
+/// A façade with two projects loaded and the scratchpad store wired, returning the façade and both
+/// project ids — the setup the transfer tests share.
+fn two_projects() -> (Facade, ProjectId, ProjectId) {
+    let projects = Arc::new(FakeProjectRepo::new());
+    let a = projects
+        .upsert(Path::new("/tmp/soloist-sp-a"), Some("a"), None)
+        .expect("A")
+        .id;
+    let b = projects
+        .upsert(Path::new("/tmp/soloist-sp-b"), Some("b"), None)
+        .expect("B")
+        .id;
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            projects,
+        )
+        .scratchpad_repo(Arc::new(FakeScratchpadRepo::new()))
+        .build(),
+    );
+    (facade, a, b)
+}
+
+#[test]
+fn scratchpad_transfer_in_moves_the_document_keeping_its_identity_and_revision() {
+    let (facade, a, b) = two_projects();
+    let created = facade
+        .scratchpad_write_in(a, "plan", doc(), None)
+        .expect("create in A");
+
+    let moved = facade
+        .scratchpad_transfer_in(a, "plan", b)
+        .expect("transfer");
+    assert_eq!(moved.id, created.id, "the durable id is stable");
+    assert_eq!(moved.name, "plan", "the name handle is kept");
+    assert_eq!(
+        moved.revision, created.revision,
+        "the revision is preserved"
+    );
+    assert_eq!(moved.doc, created.doc, "the document is preserved");
+
+    // It now reads from B and is gone from A.
+    assert!(facade.scratchpad_read_in(b, "plan").is_ok());
+    assert!(matches!(
+        facade.scratchpad_read_in(a, "plan"),
+        Err(CoordinationError::UnknownScratchpad)
+    ));
+}
+
+#[test]
+fn scratchpad_transfer_in_refuses_a_name_already_used_in_the_target() {
+    let (facade, a, b) = two_projects();
+    facade
+        .scratchpad_write_in(a, "plan", doc(), None)
+        .expect("create in A");
+    facade
+        .scratchpad_write_in(b, "plan", doc(), None)
+        .expect("a scratchpad already named plan in B");
+
+    assert!(matches!(
+        facade.scratchpad_transfer_in(a, "plan", b),
+        Err(CoordinationError::ScratchpadNameTaken)
+    ));
+}
+
+#[test]
+fn scratchpad_transfer_refuses_a_target_outside_the_callers_authenticated_scope() {
+    let (facade, a, b) = two_projects();
+    // The session authenticates to A (a process it runs in), never B.
+    let owner = facade
+        .supervisor()
+        .register(terminal_registration(a, "w", "sleep 1"));
+    let session = authentic_session(&facade, owner, TEST_PEER_PGID);
+    facade
+        .bind_session_process(session, owner)
+        .expect("bind the session to its process in A");
+    facade
+        .scratchpad_write_in(a, "plan", doc(), None)
+        .expect("create in A");
+
+    assert!(matches!(
+        facade.scratchpad_transfer(session, "plan", b),
+        Err(CoordinationError::ForeignProject)
+    ));
+}
+
+#[test]
+fn scratchpad_transfer_in_refuses_an_unknown_target_project() {
+    let (facade, a, _b) = two_projects();
+    facade
+        .scratchpad_write_in(a, "plan", doc(), None)
+        .expect("create in A");
+
+    // A target project that is not loaded is refused before any move, so a bad id never orphans
+    // the scratchpad — it stays readable in A.
+    assert!(matches!(
+        facade.scratchpad_transfer_in(a, "plan", ProjectId::from_raw(9999)),
+        Err(CoordinationError::UnknownProject)
+    ));
+    assert!(facade.scratchpad_read_in(a, "plan").is_ok(), "still in A");
 }

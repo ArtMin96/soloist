@@ -50,6 +50,6 @@ describe("Settings — Integrations", () => {
     // The MCP transport is stdio (no port); the HTTP API is loopback with a derived endpoint count.
     expect(screen.getByText(/"command": "soloist-mcp"/)).toBeTruthy();
     expect(screen.getByText("http://127.0.0.1:24678")).toBeTruthy();
-    expect(screen.getByText("17 endpoints")).toBeTruthy();
+    expect(screen.getByText("19 endpoints")).toBeTruthy();
   });
 });
