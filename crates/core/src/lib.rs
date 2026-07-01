@@ -92,7 +92,7 @@ pub use portscan::{wait_for_port, NoopPortProbe, PortProbe, PortScanner, WaitFor
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView, Readiness};
 pub use projects::{
     ConfigStatus, LoadProjectError, ProjectCommandView, ProjectError, ProjectLoad, ProjectService,
-    ProjectSettingsPage, ProjectView, Projects, Visibility,
+    ProjectSettingsPage, ProjectView, Projects, ReloadError, Visibility,
 };
 pub use settings::{
     AgentSettings, Appearance, Binding, FontScale, FontWeight, HotkeyAction, HotkeyBindingView,

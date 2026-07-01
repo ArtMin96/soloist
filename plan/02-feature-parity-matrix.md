@@ -124,7 +124,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 |----|---------|-----|------:|--------|--------|
 | H1 | Loopback API `127.0.0.1:24678`; mutation auth header; localhost CORS | ✅ | 10 | v1 | Mutation needs header |
 | H2 | Read endpoints (`/health`,`/status`,`/processes`,`/processes/:id/ports`,`/projects`) | ✅ | 10 | v1 | Each returns JSON |
-| H3 | Mutation endpoints (process start/stop/restart; project bulk; `/focus`) | ✅ | 10 | v1 | `POST .../restart` works |
+| H3 | Mutation endpoints (process start/stop/restart; project bulk incl. `reload`; `spawn-agent`; `/focus`) | ✅ | 10 | v1 | `POST .../restart` works |
 | H4 | `soloist` CLI over the API (status/start/stop/restart/logs/focus/open/spawn) | ✅ | 10 | v1 | `soloist status` prints table |
 
 ## I. UX & shell (Phase 11)

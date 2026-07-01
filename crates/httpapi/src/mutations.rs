@@ -15,7 +15,7 @@ use axum::middleware;
 use axum::routing::post;
 use axum::{Json, Router};
 
-use soloist_core::{LaunchAgentError, ProcessId, ProjectId, SupervisorError};
+use soloist_core::{LaunchAgentError, ProcessId, ProjectId, ReloadError, SupervisorError};
 use soloist_ipc::http::{SpawnRequest, SpawnResponse};
 
 use crate::auth::require_local_auth;
@@ -34,6 +34,7 @@ pub fn router() -> Router<ApiState> {
         .route("/projects/{id}/stop-all", post(stop_all))
         .route("/projects/{id}/restart-running", post(restart_running))
         .route("/projects/{id}/restart-all", post(restart_all))
+        .route("/projects/{id}/reload", post(reload))
         .route("/projects/{id}/spawn-agent", post(spawn_agent))
         .route("/focus", post(focus))
         .route_layer(middleware::from_fn(require_local_auth))
@@ -127,6 +128,27 @@ async fn restart_all(State(state): State<ApiState>, Path(id): Path<u64>) -> Stat
             .supervisor()
             .restart_all_commands(ProjectId::from_raw(id)),
     )
+}
+
+/// `POST /projects/:id/reload` — re-reads the project's `solo.yml` and reconciles the registered
+/// command set to it (adds new resting, drops removed-and-resting, updates changed specs in place,
+/// applies renames), never killing running work. Routes to the one core reconcile the UI and MCP
+/// can share. A byte-identical file is a no-op success; an unknown project is a `404`. The read is
+/// small and bounded (the `solo.yml` cap), like the trust-store reads the other mutations make.
+async fn reload(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
+    match state.facade().reload_project(ProjectId::from_raw(id)) {
+        Ok(_) => StatusCode::OK,
+        Err(err) => reload_status(&err),
+    }
+}
+
+/// Maps a reload failure to the status the adapter returns: an unknown project is `404`, and a
+/// config re-read or durable-store failure is `500`.
+fn reload_status(err: &ReloadError) -> StatusCode {
+    match err {
+        ReloadError::UnknownProject => StatusCode::NOT_FOUND,
+        ReloadError::Sync(_) | ReloadError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
 /// `POST /focus` — raises the desktop window so a launcher can bring Soloist to the front.

@@ -11,10 +11,10 @@
 
 use std::path::Path;
 
-use crate::config::{ConfigEngine, ConfigError, SoloYml, WriteError};
+use crate::config::{ConfigEngine, ConfigError, ConfigSync, SoloYml, SyncError, WriteError};
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProjectId;
-use crate::ports::ProjectRecord;
+use crate::ports::{ProjectRecord, StoreError};
 use crate::projects::{ProjectError, Projects};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 
@@ -85,6 +85,63 @@ impl<'a> ProjectService<'a> {
         self.supervisor.reconcile_orphans();
     }
 
+    /// Reloads a project's `solo.yml` and reconciles the supervisor's command registrations to
+    /// it — the counterpart to [`Self::open`] for a project already open. Re-reads the file via
+    /// the config engine (which also announces [`DomainEvent::ConfigChanged`]), then applies the
+    /// change set to the registry: an **added** command is registered resting (untrusted until
+    /// the user trusts its variant, like [`Self::restore`] — reload never starts anything); an
+    /// **updated** command's spec is replaced in place, keeping its id (so a reload never
+    /// duplicates a command) and never killing a running process (the new spec takes effect on
+    /// its next restart, which the trust gate re-checks); a **renamed** command's label is
+    /// updated in place, preserving trust (keyed on the variant) and the id; a **removed**
+    /// command is dropped only if it is resting — a running one is left untouched. Returns the
+    /// applied change set, or `None` when the file is byte-identical (a reload is then a no-op).
+    /// Must run within a `tokio` runtime (registering announces on the bus).
+    pub fn reload(&self, project: ProjectId) -> Result<Option<ConfigSync>, ReloadError> {
+        // Resolve the root first so an unknown project is a clear error, not a silent no-op:
+        // `config.sync` returns `None` for both an unchanged file and a project it never opened.
+        let root = self
+            .projects
+            .get(project)?
+            .ok_or(ReloadError::UnknownProject)?
+            .root;
+        let Some(diff) = self.config.sync(project)? else {
+            return Ok(None);
+        };
+        let config = self.config.current(project).unwrap_or_default();
+
+        for name in &diff.added {
+            if let Some(spec) = config.processes.get(name) {
+                self.supervisor
+                    .register(Registration::command(project, &root, name, spec));
+            }
+        }
+        for name in &diff.updated {
+            if let (Some(id), Some(spec)) = (
+                self.supervisor.command_id_by_name(project, name),
+                config.processes.get(name),
+            ) {
+                self.supervisor
+                    .update_command(id, Registration::command(project, &root, name, spec));
+            }
+        }
+        for rename in &diff.renamed {
+            if let (Some(id), Some(spec)) = (
+                self.supervisor.command_id_by_name(project, &rename.from),
+                config.processes.get(&rename.to),
+            ) {
+                self.supervisor
+                    .update_command(id, Registration::command(project, &root, &rename.to, spec));
+            }
+        }
+        for name in &diff.removed {
+            if let Some(id) = self.supervisor.command_id_by_name(project, name) {
+                self.supervisor.deregister_if_resting(id);
+            }
+        }
+        Ok(Some(diff))
+    }
+
     /// Adds the project (auto-creating its `solo.yml` when absent), loads the config,
     /// persists the resolved display metadata, announces the open, and registers each
     /// command as a trust-gated process — the shared path under [`Self::open`] (which then
@@ -142,9 +199,22 @@ pub enum LoadProjectError {
     Supervisor(#[from] SupervisorError),
 }
 
+/// Why reloading a project's `solo.yml` failed: the project is not open, or re-reading the
+/// file / a durable read while resolving its root failed.
+#[derive(Debug, thiserror::Error)]
+pub enum ReloadError {
+    #[error("no such project is open")]
+    UnknownProject,
+    #[error(transparent)]
+    Sync(#[from] SyncError),
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::ProcessId;
     use crate::ports::{CorePorts, TokioClock, TrustRepo};
     use crate::process::ProcStatus;
     use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTrustRepo};
@@ -383,5 +453,229 @@ mod tests {
         assert_eq!(snapshot.len(), 1);
         assert_eq!(snapshot[0].label, "Web");
         assert_eq!(snapshot[0].status, ProcStatus::Stopped);
+    }
+
+    /// Opens a project with one trusted, auto-starting `Web` command already running, returning
+    /// the parts, an event receiver, the project id, and `Web`'s process id — the setup the
+    /// running-command reload tests share.
+    async fn opened_running_web(
+        parts: &Parts,
+        rx: &mut broadcast::Receiver<DomainEvent>,
+        dir: &Path,
+    ) -> (ProjectId, ProcessId) {
+        let yml = "processes:\n  Web:\n    command: npm run dev\n";
+        write_yml(dir, yml);
+        let record = parts.projects.add(dir, None, None).expect("add");
+        let spec = crate::config::parse(yml)
+            .expect("parse")
+            .processes
+            .get("Web")
+            .cloned()
+            .expect("Web");
+        parts
+            .trust
+            .set_trusted(record.id, &spec.variant_hash())
+            .expect("trust");
+        let load = parts.service().open(dir).expect("open");
+        wait_for(rx, ProcStatus::Running).await;
+        (load.id, parts.supervisor.snapshot()[0].id)
+    }
+
+    #[tokio::test]
+    async fn reload_registers_an_added_command_resting() {
+        let parts = parts(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        write_yml(dir.path(), "processes:\n  Web:\n    command: npm run dev\n");
+        let load = parts.service().open(dir.path()).expect("open");
+
+        // A command added to solo.yml appears after a reload, registered resting (never started).
+        write_yml(
+            dir.path(),
+            "processes:\n  Web:\n    command: npm run dev\n  Api:\n    command: cargo run\n",
+        );
+        let diff = parts
+            .service()
+            .reload(load.id)
+            .expect("reload")
+            .expect("a change");
+        assert_eq!(diff.added, vec!["Api"]);
+        let mut labels: Vec<_> = parts
+            .supervisor
+            .snapshot()
+            .iter()
+            .map(|p| p.label.clone())
+            .collect();
+        labels.sort();
+        assert_eq!(labels, vec!["Api".to_string(), "Web".to_string()]);
+        assert!(parts
+            .supervisor
+            .snapshot()
+            .iter()
+            .all(|p| p.status == ProcStatus::Stopped));
+    }
+
+    #[tokio::test]
+    async fn reload_updates_a_changed_spec_in_place_and_recomputes_trust() {
+        let parts = parts(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        // `auto_start: false` so trusting the variant does not start it — this exercises the
+        // resting-update path, and the variant covers command/dir/env (not auto_start).
+        let yml = "processes:\n  Web:\n    command: npm run dev\n    auto_start: false\n";
+        write_yml(dir.path(), yml);
+        let record = parts.projects.add(dir.path(), None, None).expect("add");
+        let spec = crate::config::parse(yml)
+            .expect("parse")
+            .processes
+            .get("Web")
+            .cloned()
+            .expect("Web");
+        parts
+            .trust
+            .set_trusted(record.id, &spec.variant_hash())
+            .expect("trust");
+        let load = parts.service().open(dir.path()).expect("open");
+        let web = parts.supervisor.snapshot()[0].id;
+        assert!(!parts.supervisor.view(web).expect("view").requires_trust);
+
+        // Changing the command updates the one registration in place — id stable, never
+        // duplicated — and the new, untrusted variant flips `requires_trust`.
+        write_yml(
+            dir.path(),
+            "processes:\n  Web:\n    command: npm run start\n    auto_start: false\n",
+        );
+        let diff = parts
+            .service()
+            .reload(load.id)
+            .expect("reload")
+            .expect("a change");
+        assert_eq!(diff.updated, vec!["Web"]);
+        let snapshot = parts.supervisor.snapshot();
+        assert_eq!(
+            snapshot.len(),
+            1,
+            "an updated command is replaced in place, never duplicated"
+        );
+        assert_eq!(snapshot[0].id, web, "the id is stable across a spec change");
+        assert!(
+            parts.supervisor.view(web).expect("view").requires_trust,
+            "the new, untrusted variant re-flags trust"
+        );
+    }
+
+    #[tokio::test]
+    async fn reload_leaves_a_running_command_untouched_when_its_spec_changes() {
+        let parts = parts(FakeSpawner::exits_on_terminate());
+        let mut rx = parts.bus.subscribe();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (project, web) = opened_running_web(&parts, &mut rx, dir.path()).await;
+
+        // A spec change never kills running work: Web keeps running on its current launch until
+        // its next restart, with the new spec stored beneath it.
+        write_yml(
+            dir.path(),
+            "processes:\n  Web:\n    command: npm run start\n",
+        );
+        parts.service().reload(project).expect("reload");
+        assert_eq!(
+            parts.supervisor.view(web).expect("still registered").status,
+            ProcStatus::Running,
+            "reload never kills a running command"
+        );
+        assert_eq!(parts.supervisor.snapshot().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn reload_drops_a_removed_resting_command() {
+        let parts = parts(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        write_yml(
+            dir.path(),
+            "processes:\n  Web:\n    command: npm run dev\n  Api:\n    command: cargo run\n",
+        );
+        let load = parts.service().open(dir.path()).expect("open");
+
+        // Removing a resting command from solo.yml drops it on reload.
+        write_yml(dir.path(), "processes:\n  Web:\n    command: npm run dev\n");
+        let diff = parts
+            .service()
+            .reload(load.id)
+            .expect("reload")
+            .expect("a change");
+        assert_eq!(diff.removed, vec!["Api"]);
+        let labels: Vec<_> = parts
+            .supervisor
+            .snapshot()
+            .iter()
+            .map(|p| p.label.clone())
+            .collect();
+        assert_eq!(labels, vec!["Web".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn reload_keeps_a_removed_running_command() {
+        let parts = parts(FakeSpawner::exits_on_terminate());
+        let mut rx = parts.bus.subscribe();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (project, web) = opened_running_web(&parts, &mut rx, dir.path()).await;
+
+        // Removing a *running* command never kills it: it is left registered and running for the
+        // user to stop explicitly. (A different command replaces it so the file is not empty.)
+        write_yml(dir.path(), "processes:\n  Api:\n    command: cargo run\n");
+        parts.service().reload(project).expect("reload");
+        assert_eq!(
+            parts
+                .supervisor
+                .view(web)
+                .expect("running command kept")
+                .status,
+            ProcStatus::Running
+        );
+    }
+
+    #[tokio::test]
+    async fn reload_applies_a_rename_in_place() {
+        let parts = parts(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        write_yml(dir.path(), "processes:\n  Web:\n    command: npm run dev\n");
+        let load = parts.service().open(dir.path()).expect("open");
+        let web = parts.supervisor.snapshot()[0].id;
+
+        // Renaming the process (same command) relabels the one registration in place — same id,
+        // no duplicate.
+        write_yml(
+            dir.path(),
+            "processes:\n  Frontend:\n    command: npm run dev\n",
+        );
+        let diff = parts
+            .service()
+            .reload(load.id)
+            .expect("reload")
+            .expect("a change");
+        assert_eq!(diff.renamed.len(), 1);
+        let snapshot = parts.supervisor.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].id, web, "a rename keeps the id");
+        assert_eq!(snapshot[0].label, "Frontend");
+    }
+
+    #[tokio::test]
+    async fn reload_of_an_unchanged_file_is_a_noop() {
+        let parts = parts(FakeSpawner::exits_on_terminate());
+        let dir = tempfile::tempdir().expect("temp dir");
+        write_yml(dir.path(), "processes:\n  Web:\n    command: npm run dev\n");
+        let load = parts.service().open(dir.path()).expect("open");
+
+        // A byte-identical file yields no diff — the reconcile does nothing.
+        assert!(parts.service().reload(load.id).expect("reload").is_none());
+        assert_eq!(parts.supervisor.snapshot().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn reload_of_an_unknown_project_is_an_error() {
+        let parts = parts(FakeSpawner::exits_on_terminate());
+        assert!(matches!(
+            parts.service().reload(ProjectId::from_raw(9999)),
+            Err(ReloadError::UnknownProject)
+        ));
     }
 }

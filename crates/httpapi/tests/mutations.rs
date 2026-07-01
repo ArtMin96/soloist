@@ -279,6 +279,53 @@ async fn spawn_agent_without_auth_is_rejected() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
+#[tokio::test]
+async fn reload_reconciles_a_changed_solo_yml() {
+    let facade = Arc::new(Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .build(),
+    ));
+    let dir = tempfile::tempdir().expect("temp dir");
+    let config = dir.path().join("solo.yml");
+    std::fs::write(&config, "processes:\n  Web:\n    command: npm run dev\n").expect("write");
+    let project = facade.load_project(dir.path()).expect("load");
+    assert_eq!(facade.snapshot().len(), 1);
+
+    // Add a command on disk, then reload over HTTP: the reconcile registers it without
+    // duplicating the existing command.
+    std::fs::write(
+        &config,
+        "processes:\n  Web:\n    command: npm run dev\n  Api:\n    command: cargo run\n",
+    )
+    .expect("write");
+    let app = router(ApiState::new(Arc::clone(&facade)));
+    let response = app
+        .oneshot(post(
+            &format!("/projects/{}/reload", project.id.get()),
+            &[AUTH],
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(facade.snapshot().len(), 2);
+}
+
+#[tokio::test]
+async fn reload_of_an_unknown_project_is_404() {
+    let (facade, _id) = facade_with_terminal();
+    let app = router(ApiState::new(facade));
+    let response = app
+        .oneshot(post("/projects/999999/reload", &[AUTH]))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
 #[test]
 fn the_shared_status_contract_matches_the_codes_the_server_returns() {
     // The CLI interprets these `ipc::http` constants; the server returns these axum codes.

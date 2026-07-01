@@ -171,6 +171,7 @@ the UI button and the MCP tool drive.
 | `POST` | `/projects/{id}/stop-all` | Stop every live process in the project. |
 | `POST` | `/projects/{id}/restart-running` | Restart only the running processes. |
 | `POST` | `/projects/{id}/restart-all` | Bring the trusted command set up fresh. |
+| `POST` | `/projects/{id}/reload` | Re-read `solo.yml` and reconcile the command set. |
 | `POST` | `/projects/{id}/spawn-agent` | Launch a known agent tool as a worker (JSON body; returns the new id). |
 | `POST` | `/focus` | Raise the desktop window to the front. |
 
@@ -182,6 +183,14 @@ regardless of `auto_start`. `restart-running` cycles only what is already runnin
 `/focus` is the one action that does not go through the core, because the core has no window. The
 composition root supplies the window-raising callback, so the API crate stays free of any UI
 dependency.
+
+`/projects/{id}/reload` re-reads the project's `solo.yml` and reconciles the registered command
+set to it, **without ever killing running work**: a command added to the file is registered resting
+(untrusted until you trust its variant — reload never starts anything); a changed command's spec is
+updated in place, keeping its process id (so a reload never duplicates a command) — if it is running
+it keeps running until its next restart, which the trust gate re-checks; a renamed command is
+relabelled in place, preserving trust; a removed command is dropped only if it is resting, and left
+running otherwise. A byte-identical file is a no-op success; an unknown project is a `404`.
 
 `/projects/{id}/spawn-agent` is the one mutation that carries a request body and returns one. Post
 `{ "tool": "<name>", "args": [] }` — `tool` is an entry in the app's agent-tool registry (e.g.
