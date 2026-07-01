@@ -15,8 +15,12 @@ use axum::middleware;
 use axum::routing::post;
 use axum::{Json, Router};
 
-use soloist_core::{LaunchAgentError, ProcessId, ProjectId, ReloadError, SupervisorError};
-use soloist_ipc::http::{SpawnRequest, SpawnResponse};
+use soloist_core::{
+    CoordinationError, LaunchAgentError, ProcessId, ProjectId, ReloadError, SupervisorError, TodoId,
+};
+use soloist_ipc::http::{
+    SpawnRequest, SpawnResponse, TransferScratchpadRequest, TransferTodoRequest,
+};
 
 use crate::auth::require_local_auth;
 use crate::state::ApiState;
@@ -36,6 +40,11 @@ pub fn router() -> Router<ApiState> {
         .route("/projects/{id}/restart-all", post(restart_all))
         .route("/projects/{id}/reload", post(reload))
         .route("/projects/{id}/spawn-agent", post(spawn_agent))
+        .route("/projects/{id}/transfer-todo", post(transfer_todo))
+        .route(
+            "/projects/{id}/transfer-scratchpad",
+            post(transfer_scratchpad),
+        )
         .route("/focus", post(focus))
         .route_layer(middleware::from_fn(require_local_auth))
 }
@@ -184,5 +193,56 @@ fn launch_status(err: &LaunchAgentError) -> StatusCode {
         LaunchAgentError::Store(_) | LaunchAgentError::Supervisor(_) => {
             StatusCode::INTERNAL_SERVER_ERROR
         }
+    }
+}
+
+/// `POST /projects/:id/transfer-todo` — moves a todo from the path (source) project to another,
+/// via the same [`Facade::todo_transfer_in`] a local surface drives (the local user's authority on
+/// the loopback socket, which addresses both projects by explicit id). Keeps the todo's document,
+/// comments, tags, and id; clears its blockers and lock (they reference the source project). An
+/// unknown todo or target project is a `404`.
+async fn transfer_todo(
+    State(state): State<ApiState>,
+    Path(id): Path<u64>,
+    Json(body): Json<TransferTodoRequest>,
+) -> StatusCode {
+    transfer_status(state.facade().todo_transfer_in(
+        ProjectId::from_raw(id),
+        ProjectId::from_raw(body.to_project),
+        TodoId::from_raw(body.todo),
+    ))
+}
+
+/// `POST /projects/:id/transfer-scratchpad` — moves a scratchpad by name from the path (source)
+/// project to another, via [`Facade::scratchpad_transfer_in`]. Keeps its document, revision, tags,
+/// and id. An unknown scratchpad or target project is a `404`; a name already used in the target is
+/// a `409`.
+async fn transfer_scratchpad(
+    State(state): State<ApiState>,
+    Path(id): Path<u64>,
+    Json(body): Json<TransferScratchpadRequest>,
+) -> StatusCode {
+    transfer_status(state.facade().scratchpad_transfer_in(
+        ProjectId::from_raw(id),
+        &body.name,
+        ProjectId::from_raw(body.to_project),
+    ))
+}
+
+/// Collapses a transfer outcome to a status: `200` on success; an unknown todo, scratchpad, or
+/// target project is `404`; a name already used in the target is `409`; a durable failure is `500`.
+/// Only the outcomes the two local `*_transfer_in` paths can produce are named; the scope/binding
+/// variants of [`CoordinationError`] cannot arise on this path (it takes explicit project ids, not
+/// a session), so they fall through to `500`.
+fn transfer_status(result: Result<impl Sized, CoordinationError>) -> StatusCode {
+    match result {
+        Ok(_) => StatusCode::OK,
+        Err(
+            CoordinationError::UnknownTodo
+            | CoordinationError::UnknownScratchpad
+            | CoordinationError::UnknownProject,
+        ) => StatusCode::NOT_FOUND,
+        Err(CoordinationError::ScratchpadNameTaken) => StatusCode::CONFLICT,
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

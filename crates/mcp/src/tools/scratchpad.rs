@@ -198,7 +198,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Move a scratchpad from your effective project to another project, keeping its document, revision, tags, and durable identity. You must be authenticated to the destination project — a process you run in belongs to it — or the transfer is refused; a name already used there is refused too."
+        description = "Move a scratchpad to another project, keeping its document, revision, tags, and durable identity. You must be authenticated to the destination — a process you run in belongs to it; a name already used there is refused. Note: an MCP session is scoped to a single project, so a genuine cross-project move over MCP is refused; the desktop app performs cross-project transfers."
     )]
     pub(crate) async fn scratchpad_transfer(
         &self,

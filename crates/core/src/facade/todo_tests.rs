@@ -308,9 +308,31 @@ fn todo_transfer_refuses_a_target_outside_the_callers_authenticated_scope() {
         .todo_create(session, doc("ship", TodoStatus::Open))
         .expect("create in A");
 
-    // Transferring to B — which the caller does not run in — is refused (the O10 cross-scope guard).
+    // Transferring to B — which the caller does not run in — is refused (the cross-scope guard).
     assert!(matches!(
         facade.todo_transfer(session, b, todo.id),
         Err(CoordinationError::ForeignProject)
     ));
+}
+
+#[test]
+fn todo_transfer_in_refuses_an_unknown_target_project() {
+    let projects = Arc::new(FakeProjectRepo::new());
+    let a = projects
+        .upsert(Path::new("/tmp/soloist-a"), Some("a"), None)
+        .expect("A")
+        .id;
+    let facade = facade_with(projects);
+    let session = facade.open_session(None);
+    let todo = facade
+        .todo_create(session, doc("ship", TodoStatus::Open))
+        .expect("create in A");
+
+    // A target project that is not loaded is refused before any move, so a bad id never orphans
+    // the todo — it stays readable in A.
+    assert!(matches!(
+        facade.todo_transfer_in(a, ProjectId::from_raw(9999), todo.id),
+        Err(CoordinationError::UnknownProject)
+    ));
+    assert!(facade.todo_get(session, todo.id).is_ok(), "still in A");
 }

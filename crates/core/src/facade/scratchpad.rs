@@ -112,7 +112,7 @@ impl Facade {
         )
     }
 
-    /// Moves the scratchpad `name` into project `to` for a scoped session (context C8 → C6, O10).
+    /// Moves the scratchpad `name` into project `to` for a scoped session (context C8 → C6).
     /// Authorized only when the caller is authenticated to **both** its own effective project (the
     /// source) and `to` (the target, via [`authentic_scope`](Facade::authentic_scope)); else
     /// [`CoordinationError::ForeignProject`]. Because an MCP session authenticates to a single
@@ -135,13 +135,18 @@ impl Facade {
     /// path — never takes a project from an untrusted surface). Moves the scratchpad `name` from
     /// `from` to `to`, keeping its document, revision, tags, archived flag, and id. Emits
     /// `ScratchpadChanged` for **both** boards — the source drops it, the target shows it — or
-    /// [`CoordinationError::UnknownScratchpad`] / [`CoordinationError::ScratchpadNameTaken`].
+    /// [`CoordinationError::UnknownProject`] if `to` is not loaded (refused before the move, so a
+    /// bad target never orphans the scratchpad) / [`CoordinationError::UnknownScratchpad`] /
+    /// [`CoordinationError::ScratchpadNameTaken`].
     pub fn scratchpad_transfer_in(
         &self,
         from: ProjectId,
         name: &str,
         to: ProjectId,
     ) -> Result<ScratchpadView, CoordinationError> {
+        if self.projects.get(to)?.is_none() {
+            return Err(CoordinationError::UnknownProject);
+        }
         let result = self
             .scratchpads
             .transfer(from, name, to)

@@ -243,7 +243,9 @@ replacement. The host file-io tools (`_save_to_file`/`_load_from_file`) are **fo
 MCP tool reads or writes an arbitrary host path until a dedicated project-root FS-sandbox security
 pass, which is not planned. Cross-project `_transfer` is delivered by the **O10** transfer slice
 (authenticated to both project scopes; see
-[D-6](#d-6--mcp-cross-project-scope-isolation-is-authenticated-f13--resolved)). Todos carry the same
+[D-6](#d-6--mcp-cross-project-scope-isolation-is-authenticated-f13--resolved)); its reachable success
+path is the local-user loopback endpoint `POST /projects/:id/transfer-scratchpad`, since an MCP
+session scoped to one project cannot authorize a genuine cross-project move. Todos carry the same
 discipline ([D-8](#d-8--todos-carry-an-enforced-disciplined-structure-and-a-blocker-gate-)). The
 clean-room per-tool semantics are recorded in `plan/05` §12.
 
@@ -292,8 +294,10 @@ supply and pass the structured fields), and completion is gated on blockers. Cro
 its comments and completion and clearing its blockers and lock (both reference the source project),
 authorized only when the caller is authenticated to **both** projects — a single MCP session
 authenticates to one project (D-6), so a genuine cross-project transfer over MCP is refused by
-design and the reachable path is the local/trusted surface. The clean-room per-tool semantics and
-the cross-scope authorization are recorded in `plan/05` §12.
+design and the reachable success path is the local-user loopback endpoint
+`POST /projects/:id/transfer-todo` (the target must be loaded, else `UnknownProject`, so a bad id
+never orphans the todo). The clean-room per-tool semantics and the cross-scope authorization are
+recorded in `plan/05` §12.
 
 ## D-9 — A stopped resumable agent offers both Start and Resume 🟢
 

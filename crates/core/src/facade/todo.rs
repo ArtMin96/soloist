@@ -246,7 +246,7 @@ impl Facade {
         )
     }
 
-    /// Moves todo `id` into project `to` for a scoped session (context C8 → C6, O10). Authorized
+    /// Moves todo `id` into project `to` for a scoped session (context C8 → C6). Authorized
     /// only when the caller is authenticated to **both** its own effective project (the source) and
     /// `to` (the target, via [`authentic_scope`](Facade::authentic_scope)); otherwise
     /// [`CoordinationError::ForeignProject`]. Because an MCP session authenticates to a single
@@ -270,13 +270,17 @@ impl Facade {
     /// takes a project from an untrusted surface). Moves todo `id` from `from` to `to`, keeping its
     /// comments and completion and clearing its blockers (which referenced source-project ids) and
     /// lock. Emits `TodoChanged` for **both** boards — the source drops it, the target shows it — or
-    /// [`CoordinationError::UnknownTodo`] if `from` has no such todo.
+    /// [`CoordinationError::UnknownProject`] if `to` is not loaded (refused before the move, so a
+    /// bad target never orphans the todo) / [`CoordinationError::UnknownTodo`] if `from` has none.
     pub fn todo_transfer_in(
         &self,
         from: ProjectId,
         to: ProjectId,
         id: TodoId,
     ) -> Result<TodoView, CoordinationError> {
+        if self.projects.get(to)?.is_none() {
+            return Err(CoordinationError::UnknownProject);
+        }
         let view = self
             .todos
             .transfer(from, to, id)?

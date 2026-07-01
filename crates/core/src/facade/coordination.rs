@@ -92,6 +92,12 @@ pub enum CoordinationError {
     /// reachable path is the local/trusted surface.
     #[error("that project is outside your authenticated scope")]
     ForeignProject,
+    /// A transfer named a target project that is not loaded, so it is refused rather than re-keying
+    /// the aggregate to a project that does not exist (which would orphan it). The session-scoped
+    /// surface never hits this — [`authentic_scope`](Facade::authentic_scope) already proved the
+    /// target loaded — so it can only arise on the local/trusted `*_transfer_in` path.
+    #[error("no such project is loaded")]
+    UnknownProject,
     /// A durable read or write failed.
     #[error(transparent)]
     Store(#[from] StoreError),

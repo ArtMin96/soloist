@@ -141,7 +141,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Move a todo from your effective project to another project, keeping its comments and completion status and clearing its blockers and lock (those reference the source project). You must be authenticated to the destination project — a process you run in belongs to it — or the transfer is refused."
+        description = "Move a todo to another project, keeping its comments and completion status and clearing its blockers and lock (those reference the source project). You must be authenticated to the destination — a process you run in belongs to it. Note: an MCP session is scoped to a single project, so a genuine cross-project move over MCP is refused; the desktop app performs cross-project transfers."
     )]
     pub(crate) async fn todo_transfer(
         &self,

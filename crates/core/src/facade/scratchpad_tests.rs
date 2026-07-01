@@ -269,3 +269,19 @@ fn scratchpad_transfer_refuses_a_target_outside_the_callers_authenticated_scope(
         Err(CoordinationError::ForeignProject)
     ));
 }
+
+#[test]
+fn scratchpad_transfer_in_refuses_an_unknown_target_project() {
+    let (facade, a, _b) = two_projects();
+    facade
+        .scratchpad_write_in(a, "plan", doc(), None)
+        .expect("create in A");
+
+    // A target project that is not loaded is refused before any move, so a bad id never orphans
+    // the scratchpad — it stays readable in A.
+    assert!(matches!(
+        facade.scratchpad_transfer_in(a, "plan", ProjectId::from_raw(9999)),
+        Err(CoordinationError::UnknownProject)
+    ));
+    assert!(facade.scratchpad_read_in(a, "plan").is_ok(), "still in A");
+}
