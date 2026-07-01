@@ -3,7 +3,7 @@ use std::sync::{Arc, Barrier};
 
 use soloist_core::{
     ProjectId, ProjectRepo, RenameResult, ScratchpadDoc, ScratchpadRepo, StoredScratchpad,
-    WriteResult,
+    TransferResult, WriteResult,
 };
 use tempfile::tempdir;
 
@@ -312,4 +312,38 @@ fn concurrent_writes_at_one_revision_apply_exactly_one() {
     );
     // The scratchpad advanced exactly one revision — no lost update, no double-apply.
     assert_eq!(store.read(project, "plan").unwrap().unwrap().revision, 2);
+}
+
+#[test]
+fn transfer_moves_the_scratchpad_keeping_identity_and_refuses_a_taken_name() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let a = project(&store, "/p/a");
+    let b = project(&store, "/p/b");
+    let created = match store.write(a, "plan", &doc("draft"), None).expect("create") {
+        WriteResult::Written(stored) => *stored,
+        other => panic!("expected a write, got {other:?}"),
+    };
+
+    // A name already used in the target is refused.
+    store
+        .write(b, "plan", &doc("draft"), None)
+        .expect("create in B");
+    assert!(matches!(
+        store.transfer(a, "plan", b).expect("transfer"),
+        TransferResult::NameTaken
+    ));
+
+    // Clear the collision, then the move keeps the durable id and revision.
+    store.delete(b, "plan").expect("delete B copy");
+    let moved = match store.transfer(a, "plan", b).expect("transfer") {
+        TransferResult::Transferred(stored) => *stored,
+        other => panic!("expected a transfer, got {other:?}"),
+    };
+    assert_eq!(moved.id, created.id, "durable id kept");
+    assert_eq!(moved.project, b, "now under the target project");
+    assert_eq!(moved.revision, created.revision, "revision kept");
+    assert!(
+        store.read(a, "plan").expect("read a").is_none(),
+        "gone from A"
+    );
 }

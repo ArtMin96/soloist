@@ -246,6 +246,52 @@ impl Facade {
         )
     }
 
+    /// Moves todo `id` into project `to` for a scoped session (context C8 → C6). Authorized
+    /// only when the caller is authenticated to **both** its own effective project (the source) and
+    /// `to` (the target, via [`authentic_scope`](Facade::authentic_scope)); otherwise
+    /// [`CoordinationError::ForeignProject`]. Because an MCP session authenticates to a single
+    /// project, a genuine cross-project transfer is refused here — the reachable path is the local
+    /// [`todo_transfer_in`](Self::todo_transfer_in). Preserves comments/completion, clears
+    /// blockers/lock.
+    pub fn todo_transfer(
+        &self,
+        session: SessionId,
+        to: ProjectId,
+        id: TodoId,
+    ) -> Result<TodoView, CoordinationError> {
+        let from = self.coordination_scope(session)?;
+        if !self.authentic_scope(session, to) {
+            return Err(CoordinationError::ForeignProject);
+        }
+        self.todo_transfer_in(from, to, id)
+    }
+
+    /// [`todo_transfer`](Self::todo_transfer) scoped to `from`/`to` directly (local-UI path — never
+    /// takes a project from an untrusted surface). Moves todo `id` from `from` to `to`, keeping its
+    /// comments and completion and clearing its blockers (which referenced source-project ids) and
+    /// lock. Emits `TodoChanged` for **both** boards — the source drops it, the target shows it — or
+    /// [`CoordinationError::UnknownProject`] if `to` is not loaded (refused before the move, so a
+    /// bad target never orphans the todo) / [`CoordinationError::UnknownTodo`] if `from` has none.
+    pub fn todo_transfer_in(
+        &self,
+        from: ProjectId,
+        to: ProjectId,
+        id: TodoId,
+    ) -> Result<TodoView, CoordinationError> {
+        if self.projects.get(to)?.is_none() {
+            return Err(CoordinationError::UnknownProject);
+        }
+        let view = self
+            .todos
+            .transfer(from, to, id)?
+            .ok_or(CoordinationError::UnknownTodo)?;
+        self.bus
+            .publish(DomainEvent::TodoChanged { project: from, id });
+        self.bus
+            .publish(DomainEvent::TodoChanged { project: to, id });
+        Ok(view)
+    }
+
     /// Locks todo `id` in the session's effective project for the caller's bound process —
     /// "signals, not ownership": the returned todo's `locked_by` reports the holder, so the caller
     /// checks whether it won. Needs a bound process (the owner the lock auto-releases for on close).

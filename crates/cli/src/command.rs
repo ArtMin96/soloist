@@ -5,6 +5,7 @@
 
 use std::fmt::Write as _;
 
+use soloist_ipc::http::{SpawnRequest, SpawnResponse};
 use soloist_ipc::{ProcStatus, ProcessKind, ProcessView, ProjectView};
 
 use crate::cli::{StatusFilter, Target};
@@ -108,6 +109,29 @@ pub fn logs(client: &Client, name: &str, lines: Option<usize>) -> Result<String,
 pub fn raise(client: &Client) -> Result<String, CliError> {
     client.post("/focus")?;
     Ok("Raised the Soloist window.".to_string())
+}
+
+/// Runs `spawn`: launch a configured agent tool as a worker in a project and start it. Resolves
+/// the target project the same way a bulk `all` target does (the sole open project, or
+/// `--project <name>`), then posts to the one core launch path — the same `launch_agent` the
+/// desktop launch picker drives — and reports the new process.
+pub fn spawn(
+    client: &Client,
+    tool: &str,
+    args: &[String],
+    project: Option<&str>,
+) -> Result<String, CliError> {
+    let project = resolve_project(client, project)?;
+    let request = SpawnRequest {
+        tool: tool.to_string(),
+        args: args.to_vec(),
+    };
+    let spawned: SpawnResponse =
+        client.post_json(&format!("/projects/{}/spawn-agent", project.id), &request)?;
+    Ok(format!(
+        "Spawned {tool:?} in project {:?} (process {}).",
+        project.name, spawned.id
+    ))
 }
 
 /// Resolves a process name to its row against the live stack, or a clear error when no process

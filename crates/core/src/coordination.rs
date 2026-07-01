@@ -42,7 +42,7 @@ pub use scratchpad::{
     RenameError, ScratchpadDoc, ScratchpadSummary, ScratchpadView, Scratchpads, WriteError,
 };
 pub use scratchpad_repo::{
-    NoopScratchpadRepo, RenameResult, ScratchpadRepo, StoredScratchpad, WriteResult,
+    NoopScratchpadRepo, RenameResult, ScratchpadRepo, StoredScratchpad, TransferResult, WriteResult,
 };
 pub(crate) use timer::watched_is_idle;
 pub use timer::{FireCond, IdleMode, SetWhenIdleOutcome, TimerStatus, TimerView, Timers};

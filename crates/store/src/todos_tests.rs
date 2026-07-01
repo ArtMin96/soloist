@@ -254,3 +254,46 @@ fn durable_todos_survive_a_reopen() {
         .expect("the todo persisted across the reopen");
     assert_eq!(found.doc.title, "persist");
 }
+
+#[test]
+fn transfer_moves_the_todo_clearing_blockers_and_lock_but_keeping_comments_and_doc() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let a = project(&store, "/p/a");
+    let b = project(&store, "/p/b");
+    let todo = store
+        .create(a, &doc("ship", TodoStatus::InProgress))
+        .expect("create");
+    let blocker = store
+        .create(a, &doc("dep", TodoStatus::Open))
+        .expect("blocker");
+    store.add_blocker(a, todo.id, blocker.id).expect("block");
+    store
+        .comment_create(
+            a,
+            todo.id,
+            "note",
+            Some(CommentAuthor::External { label: "x".into() }),
+        )
+        .expect("comment");
+    // Fully-qualified: `SqliteStore::lock` (the connection guard) shadows the `TodoRepo::lock` verb.
+    TodoRepo::lock(&store, a, todo.id, ProcessId::from_raw(7)).expect("lock");
+
+    let moved = store
+        .transfer(a, b, todo.id)
+        .expect("transfer")
+        .expect("moved");
+    assert_eq!(moved.id, todo.id, "durable id kept");
+    assert_eq!(moved.project, b, "now under the target project");
+    assert_eq!(moved.doc.status, TodoStatus::InProgress, "document kept");
+    assert_eq!(moved.comments.len(), 1, "comments kept");
+    assert!(moved.blockers.is_empty(), "blockers cleared");
+    assert_eq!(moved.locked_by, None, "lock cleared");
+    assert!(
+        store.read(a, todo.id).expect("read a").is_none(),
+        "gone from A"
+    );
+    assert!(
+        store.read(b, todo.id).expect("read b").is_some(),
+        "present in B"
+    );
+}
