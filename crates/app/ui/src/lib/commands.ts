@@ -43,7 +43,7 @@ const THEME_LABELS: Record<Theme, string> = {
 
 const THEMES: Theme[] = ["light", "dark", "system"];
 
-// Builds the command-palette registry (I2) from the live app state and its wired callbacks. Grouped
+// Builds the command-palette registry from the live app state and its wired callbacks. Grouped
 // the way the user reaches for them: app-wide actions, appearance, then each open project (its bulk
 // stack controls and navigation) and finally every process (focus + its status-aware actions, from
 // the shared `runnableProcessActions` source). A new capability becomes one entry here and appears

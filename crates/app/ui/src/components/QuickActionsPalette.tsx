@@ -27,9 +27,9 @@ const HINTS: PaletteHintData[] = [
 ];
 
 // Quick actions palette (Ctrl+P): every process in the active project with its status-aware
-// actions. Gap decision (plan/05 §12): "quick actions" = process control for the current project —
-// distinct from the command palette (Ctrl+K) which covers app-wide actions. The available actions
-// per process come from the single `runnableProcessActions` source, so the gating never diverges
+// actions. By design, "quick actions" is process control for the current project — distinct from
+// the command palette (Ctrl+K), which covers app-wide actions. The available actions per process
+// come from the single `runnableProcessActions` source, so the gating never diverges
 // from the per-process control cluster.
 export function QuickActionsPalette({
   open,

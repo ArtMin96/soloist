@@ -184,11 +184,9 @@ export function useTerminal(process: ProcessView) {
   }, []);
 
   const findPrevious = useCallback((query: string) => {
-    searchRef.current?.findPrevious(query, {
-      incremental: true,
-      caseSensitive: false,
-      regex: false,
-    });
+    // No `incremental` here: the addon expands the current selection only for `findNext`; on
+    // `findPrevious` it must step to the prior match, so the flag is deliberately omitted.
+    searchRef.current?.findPrevious(query, { caseSensitive: false, regex: false });
   }, []);
 
   const clearSearch = useCallback(() => {

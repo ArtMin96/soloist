@@ -23,8 +23,8 @@ const HINTS: PaletteHintData[] = [
 
 // Quick-jump palette (Ctrl+E): fuzzy search across all processes and open projects. Processes are
 // grouped under their project; the project line itself is also selectable — it opens that project's
-// settings. Todos and scratchpads are out of scope here (they need a per-project async fetch not
-// pre-loaded at the App level; recorded in plan/05 §12 + KNOWN-DIVERGENCES).
+// settings. Todos and scratchpads are out of scope here: they need a per-project async fetch that is
+// not pre-loaded at the App level.
 export function QuickJumpPalette({
   open,
   onOpenChange,
@@ -45,7 +45,7 @@ export function QuickJumpPalette({
       placeholder="Jump to…"
       hints={HINTS}
     >
-      {projects.length === 0 && <CommandEmpty>No destinations found.</CommandEmpty>}
+      <CommandEmpty>No destinations found.</CommandEmpty>
       {trees.map((tree, idx) => (
         <div key={tree.project.id}>
           {idx > 0 && <CommandSeparator />}
@@ -75,9 +75,6 @@ export function QuickJumpPalette({
           </CommandGroup>
         </div>
       ))}
-      {projects.length > 0 && processes.length === 0 && (
-        <CommandEmpty>No destinations found.</CommandEmpty>
-      )}
     </CommandPaletteShell>
   );
 }

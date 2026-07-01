@@ -15,7 +15,7 @@ const HINTS: PaletteHintData[] = [
   { keys: "esc", label: "close" },
 ];
 
-// The command palette (I2, Ctrl+K): a fuzzy-filtered registry of every app-wide action — new
+// The command palette (Ctrl+K): a fuzzy-filtered registry of every app-wide action — new
 // agent/terminal, open settings/project, theme, per-project bulk + navigation, and per-process
 // focus + actions. The registry is the pure `buildCommands`, so the palette stays presentational
 // and a new command appears here automatically. Theme is read from the appearance context (the
