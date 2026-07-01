@@ -99,13 +99,12 @@ impl AgentTool {
         prefix: &[&str],
         extra_args: &[String],
     ) -> String {
-        std::iter::once(self.command.as_str())
-            .chain(prefix.iter().copied())
-            .chain(self.default_args.iter().map(String::as_str))
-            .chain(extra_args.iter().map(String::as_str))
-            .map(shell_quote)
-            .collect::<Vec<_>>()
-            .join(" ")
+        shell_command_line(
+            std::iter::once(self.command.as_str())
+                .chain(prefix.iter().copied())
+                .chain(self.default_args.iter().map(String::as_str))
+                .chain(extra_args.iter().map(String::as_str)),
+        )
     }
 
     /// The built-in agent providers Soloist seeds into the registry on first run. Each
@@ -133,6 +132,15 @@ impl AgentTool {
         })
         .collect()
     }
+}
+
+/// Composes a POSIX shell command line from `tokens`: each is [`shell_quote`]d so it survives
+/// `$SHELL -lc <line>` as exactly one argument, then joined by spaces. The single source for
+/// turning a token list into a runnable command line — the launch path
+/// ([`AgentTool::command_line_with_prefix`]) and the headless summarizer invocation
+/// ([`crate::agents::summarize`]) both build their lines through it.
+pub(crate) fn shell_command_line<'a>(tokens: impl Iterator<Item = &'a str>) -> String {
+    tokens.map(shell_quote).collect::<Vec<_>>().join(" ")
 }
 
 /// Quotes one token for a POSIX shell so it is passed through `$SHELL -lc` as exactly one

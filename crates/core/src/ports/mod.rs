@@ -361,10 +361,3 @@ impl OrphanControl for NoopOrphanControl {
         Ok(())
     }
 }
-
-// ───────────── Ports realized in later phases (contracts only) ──────────────
-
-/// Produces an idle summary for an agent from a rendered-text snapshot. Optional by
-/// design: when absent, idle detection degrades to the heuristic-only signal.
-/// Methods are added when the agent-summary feature lands.
-pub trait Summarizer: Send + Sync {}

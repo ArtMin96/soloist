@@ -11,12 +11,17 @@ pub mod idle;
 mod lineage;
 mod repo;
 mod resume;
+pub mod summarize;
 mod tool;
 
 pub use detect::{DetectedTool, NoopVersionProbe, VersionProbe};
 pub use idle::{AgentActivity, IdleSampler, IdleTracker};
 pub use lineage::AgentLineage;
 pub use repo::{AgentToolRepo, NoopAgentToolRepo};
+pub use summarize::{
+    NoopSummaryRunner, OutputSnapshot, SummaryError, SummaryInvocation, SummaryReactor,
+    SummaryRunner,
+};
 pub use tool::{AgentKind, AgentTool, PromptMode};
 
 use std::sync::Arc;
@@ -71,6 +76,13 @@ impl Agents {
             .list()?
             .into_iter()
             .find(|tool| tool.name == name))
+    }
+
+    /// A shared handle to the durable tool registry, for a background loop (the summary reactor)
+    /// that resolves the configured summarizer tool as it runs. The same registry the context
+    /// itself reads — a shared `Arc`, not a second copy.
+    pub(crate) fn tool_repo(&self) -> Arc<dyn AgentToolRepo> {
+        self.tools.clone()
     }
 
     /// Each configured tool paired with whether its CLI appears installed, by probing

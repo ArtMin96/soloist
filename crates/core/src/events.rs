@@ -110,6 +110,11 @@ pub enum DomainEvent {
     /// transition (edge-triggered), so adapters update the agent's row without polling.
     /// `Permission` and `Error` are attention states and raise a notification.
     AgentActivityChanged { id: ProcessId, state: AgentActivity },
+    /// An agent's idle summary — a one-line description of what it was last doing, produced by the
+    /// optional auto-summarizer when the agent went idle. Off by default and best-effort: emitted
+    /// only when the user has opted in (a summarizer tool is configured) and the headless
+    /// summarizer succeeded. Adapters show it on the agent's row.
+    AgentSummary { id: ProcessId, text: String },
     /// Reconciliation found leftover process groups from a previous run that match no
     /// known command, awaiting a user Kill / Kill All / Leave decision surfaced by the
     /// UI. The core only reports them; it neither kills nor keeps them on its own.

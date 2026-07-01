@@ -16,11 +16,9 @@ use std::io::Read;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use nix::unistd::{Uid, User};
 use soloist_core::{ShellEnvError, ShellEnvProbe};
 
-/// Fallback shell when neither `$SHELL` nor the passwd entry yields one.
-const FALLBACK_SHELL: &str = "/bin/sh";
+use crate::shell::login_shell;
 
 /// How long to wait for the shell to dump its environment before giving up. An interactive
 /// login shell with heavy rc files can take a moment; the ceiling only guards a hang.
@@ -69,25 +67,6 @@ impl ShellEnvProbe for CommandShellEnvProbe {
     fn capture(&self) -> Result<BTreeMap<String, String>, ShellEnvError> {
         capture_env(&login_shell(), self.timeout)
     }
-}
-
-/// Resolves the user's login shell: `$SHELL`, then the passwd-entry shell, then `/bin/sh`.
-/// The same resolution the PTY spawner uses, so the captured environment is the one the
-/// command shell would have.
-fn login_shell() -> String {
-    if let Ok(shell) = std::env::var("SHELL") {
-        if !shell.is_empty() {
-            return shell;
-        }
-    }
-    if let Ok(Some(user)) = User::from_uid(Uid::current()) {
-        if let Some(shell) = user.shell.to_str() {
-            if !shell.is_empty() {
-                return shell.to_owned();
-            }
-        }
-    }
-    FALLBACK_SHELL.to_string()
 }
 
 /// Runs `<shell> -ilc 'env -0'`, drains its output on a thread, and parses it. A spawn

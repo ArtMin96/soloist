@@ -26,7 +26,6 @@ pub mod facade;
 pub mod filewatch;
 pub mod hash;
 pub mod identity;
-pub mod idle;
 pub mod ids;
 pub mod metrics;
 pub mod notify;
@@ -50,8 +49,9 @@ mod sync;
 pub mod testing;
 
 pub use agents::{
-    AgentKind, AgentTool, AgentToolRepo, Agents, DetectedTool, NoopAgentToolRepo, NoopVersionProbe,
-    PromptMode, VersionProbe,
+    AgentKind, AgentTool, AgentToolRepo, Agents, DetectedTool, NoopAgentToolRepo,
+    NoopSummaryRunner, NoopVersionProbe, OutputSnapshot, PromptMode, SummaryError,
+    SummaryInvocation, SummaryReactor, SummaryRunner, VersionProbe,
 };
 pub use config::{
     ConfigEngine, ConfigError, ConfigSync, ConfigWriteError, ProcessSpec, Rename, SoloYml,

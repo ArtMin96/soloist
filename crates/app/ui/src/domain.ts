@@ -198,6 +198,9 @@ export type DomainEvent =
   // An agent's activity changed (the five-state idle FSM). Edge-triggered (only on a
   // transition), so the agent's row updates without polling; Permission/Error raise attention.
   | { type: "AgentActivityChanged"; id: number; state: AgentActivity }
+  // An agent's idle summary — a one-line description of what it was last doing, from the opt-in
+  // auto-summarizer. Off by default and best-effort; shown as a caption under the agent's row.
+  | { type: "AgentSummary"; id: number; text: string }
   | { type: "OrphansFound"; orphans: OrphanInfo[] }
   // Coordination change-notifications (C6) for the orchestration read-model. Each carries ids
   // only — the UI re-reads orchestration_snapshot (coalesced) rather than trusting a payload.

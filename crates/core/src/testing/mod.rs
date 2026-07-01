@@ -6,7 +6,8 @@
 //! [`FakeAgentToolRepo`]/[`FakeVersionProbe`] for the agent registry and auto-detection, a
 //! [`FakeMetricsProbe`]/[`FakePortProbe`] reporting fixed CPU-memory/port readings, a
 //! [`FakeFileWatcher`] feeding synthetic filesystem changes, a [`RecordingNotifier`] capturing
-//! the toasts the notification reactor composes, the [`terminal_registration`]
+//! the toasts the notification reactor composes, a [`CannedSummaryRunner`]/[`FailingSummaryRunner`]
+//! plus a [`FakeOutputSnapshot`] for driving the summary reactor, the [`terminal_registration`]
 //! fixture for driving the supervisor thread, and (in the core's own tests) the
 //! `wait_all`/`next_matching` event waiters that let a test await an asynchronous effect
 //! deterministically. Together they let
@@ -36,6 +37,7 @@ mod runtime_state;
 mod settings;
 mod shellenv;
 mod spawner;
+mod summarize;
 
 pub use agents::{FakeAgentToolRepo, FakeVersionProbe};
 pub use clock::MockClock;
@@ -56,3 +58,4 @@ pub use runtime_state::{FakeOrphanControl, FakeRuntimeState};
 pub use settings::FakeSettingsRepo;
 pub use shellenv::FakeShellEnvProbe;
 pub use spawner::FakeSpawner;
+pub use summarize::{CannedSummaryRunner, FailingSummaryRunner, FakeOutputSnapshot};

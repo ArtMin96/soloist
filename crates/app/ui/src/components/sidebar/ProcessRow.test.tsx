@@ -51,6 +51,7 @@ describe("ProcessRow telemetry", () => {
         metrics: new Map([[1, { cpu_pct: 4, rss: 86 * 1024 * 1024 }]]),
         attempts: new Map(),
         activity: new Map(),
+        summary: new Map(),
       },
     );
     const meta = screen.getByText(/:5173/);
@@ -66,7 +67,7 @@ describe("ProcessRow telemetry", () => {
   it("shows the auto-restart attempt against the limit while restarting", () => {
     renderRow(
       { ...running, status: "Starting" },
-      { metrics: new Map(), attempts: new Map([[1, 3]]), activity: new Map() },
+      { metrics: new Map(), attempts: new Map([[1, 3]]), activity: new Map(), summary: new Map() },
     );
     expect(screen.getByText("restarting 3/10")).toBeTruthy();
   });
@@ -74,5 +75,22 @@ describe("ProcessRow telemetry", () => {
   it("shows no telemetry for a stopped process", () => {
     renderRow({ ...running, status: "Stopped" });
     expect(screen.queryByText(/:|restarting|not ready/)).toBeNull();
+  });
+});
+
+const agent: ProcessView = { ...running, kind: "Agent", label: "claude" };
+const SUMMARY = "Refactoring the auth module";
+
+describe("ProcessRow agent summary", () => {
+  it("shows the latest idle summary as a caption with the full text on hover", () => {
+    renderRow(agent, { ...EMPTY_SIGNALS, summary: new Map([[1, SUMMARY]]) });
+    const caption = screen.getByText(SUMMARY);
+    expect(caption.tagName).toBe("P");
+    expect(caption.getAttribute("title")).toBe(SUMMARY);
+  });
+
+  it("renders no caption when the agent has no summary", () => {
+    renderRow(agent);
+    expect(screen.queryByText(SUMMARY)).toBeNull();
   });
 });
