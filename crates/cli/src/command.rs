@@ -102,8 +102,10 @@ pub fn logs(client: &Client, name: &str, lines: Option<usize>) -> Result<String,
     Ok(output.join("\n"))
 }
 
-/// Runs `focus`: raise the desktop window.
-pub fn focus(client: &Client) -> Result<String, CliError> {
+/// Raises the desktop window — the shared handler behind both `focus` and `open` (Solo's
+/// `open` raise-app case is the same action, so it routes to the one `POST /focus` endpoint
+/// rather than a second core path).
+pub fn raise(client: &Client) -> Result<String, CliError> {
     client.post("/focus")?;
     Ok("Raised the Soloist window.".to_string())
 }

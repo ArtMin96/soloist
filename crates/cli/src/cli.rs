@@ -41,6 +41,8 @@ pub enum Command {
     },
     /// Raise the Soloist window to the front.
     Focus,
+    /// Open Soloist — raise its window to the front (an alias of `focus`).
+    Open,
 }
 
 /// What `start`/`stop`/`restart` act on: a named process, or `all` for a whole project. Shared

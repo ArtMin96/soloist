@@ -260,6 +260,7 @@ form `all` acts on a whole project: the sole open project when one is open, or t
 | `restart <name>` / `restart all` | `POST /processes/{id}/restart` / `POST /projects/{id}/restart-all` | |
 | `logs <name>` | `GET /processes/{id}/output` | `-n <count>` becomes `?lines=<count>`. |
 | `focus` | `POST /focus` | |
+| `open` | `POST /focus` | Solo's raise-app alias of `focus`; shares its handler. |
 
 The CLI's `start all` and `restart all` use the `start-all` and `restart-all` scopes. The
 `start-auto` and `restart-running` scopes are reachable directly over HTTP when a script needs them.

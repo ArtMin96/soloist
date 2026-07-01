@@ -54,6 +54,24 @@ fn logs_parses_an_optional_line_count() {
 }
 
 #[test]
+fn focus_and_open_both_parse_to_a_raise_command() {
+    // `open` is Solo's raise-app alias of `focus`; both are argument-free and route to the
+    // same `raise` handler (`POST /focus`).
+    assert!(matches!(
+        Cli::try_parse_from(["soloist", "focus"])
+            .expect("parse")
+            .command,
+        Command::Focus
+    ));
+    assert!(matches!(
+        Cli::try_parse_from(["soloist", "open"])
+            .expect("parse")
+            .command,
+        Command::Open
+    ));
+}
+
+#[test]
 fn a_missing_subcommand_is_an_error() {
     assert!(Cli::try_parse_from(["soloist"]).is_err());
 }
