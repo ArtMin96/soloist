@@ -398,3 +398,23 @@ snapshot to the App-level store and extending the palette's search targets.
 
 **Effect on parity:** I3 is partial parity — navigation to process/project destinations works; the
 todo/scratchpad jump targets are a tracked follow-up.
+
+## D-13 — Auto-summarization covers the providers with a documented headless one-shot; the rest degrade 🟡
+
+**What Solo does:** documents native-headless auto-summarization for Claude/Codex/Gemini (default
+models `sonnet`/`gpt-5-codex`/`flash-lite`, 15s/30s/1min cadence).
+
+**What we do:** the per-provider headless invocation is a clean-room Strategy grounded per arm in each
+provider's own published CLI reference — Claude `-p`, Codex `exec`, Gemini `-p`, OpenCode `run` (model
+via `--model`/`-m`), and a user-configured Generic tool via its `PromptMode` (appended arg or piped
+stdin). Amp, Copilot, and Kimi document no id-less headless one-shot we could ground, so they produce
+**no summary** rather than a fabricated flag — the same honesty as the resume Strategy's `NoResume`.
+Summarization is OFF by default (opt-in tool+model in settings), per-agent rate-limited (30 s cooldown,
+within Solo's cadence band), and fully degradable: no runner wired, an unsupported provider, a missing
+CLI, or any failure yields no summary and never blocks the core (K5). The summary shows as a muted
+one-line caption under the agent's sidebar row, kept as the agent's last-known activity until replaced
+or the agent leaves Running.
+
+**Effect on parity:** E6 is implemented (built ahead of its `later` marker at the owner's request).
+"Disabled OK" is structural (default off, `NoopSummaryRunner`); "summary when enabled" is code-complete
+and tested with fakes + a real shell, pending an owner runtime walk with a live summarizer CLI.
