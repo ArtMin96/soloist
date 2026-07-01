@@ -158,4 +158,18 @@ impl Facade {
             .and_then(|id| self.process_view(id))
             .map(|view| view.project)
     }
+
+    /// Whether `session` is authentically scoped to `project` — its connecting peer runs in it,
+    /// the same check [`select_project`](Self::select_project) enforces. The cross-project
+    /// transfer surface requires this of the **target** project (the source is the caller's own
+    /// effective scope), so content only ever moves between two projects the caller actually runs
+    /// in. Because a single connection authenticates to one project, a genuine cross-project
+    /// transfer over MCP is refused; the reachable path is the local/trusted surface.
+    pub(in crate::facade) fn authentic_scope(
+        &self,
+        session: SessionId,
+        project: ProjectId,
+    ) -> bool {
+        self.home_project(session) == Some(project)
+    }
 }

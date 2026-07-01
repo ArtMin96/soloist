@@ -112,6 +112,57 @@ impl Facade {
         )
     }
 
+    /// Moves the scratchpad `name` into project `to` for a scoped session (context C8 → C6, O10).
+    /// Authorized only when the caller is authenticated to **both** its own effective project (the
+    /// source) and `to` (the target, via [`authentic_scope`](Facade::authentic_scope)); else
+    /// [`CoordinationError::ForeignProject`]. Because an MCP session authenticates to a single
+    /// project, a genuine cross-project transfer is refused here — the reachable path is the local
+    /// [`scratchpad_transfer_in`](Self::scratchpad_transfer_in). Keeps the document/revision/tags/id.
+    pub fn scratchpad_transfer(
+        &self,
+        session: SessionId,
+        name: &str,
+        to: ProjectId,
+    ) -> Result<ScratchpadView, CoordinationError> {
+        let from = self.coordination_scope(session)?;
+        if !self.authentic_scope(session, to) {
+            return Err(CoordinationError::ForeignProject);
+        }
+        self.scratchpad_transfer_in(from, name, to)
+    }
+
+    /// [`scratchpad_transfer`](Self::scratchpad_transfer) scoped to `from`/`to` directly (local-UI
+    /// path — never takes a project from an untrusted surface). Moves the scratchpad `name` from
+    /// `from` to `to`, keeping its document, revision, tags, archived flag, and id. Emits
+    /// `ScratchpadChanged` for **both** boards — the source drops it, the target shows it — or
+    /// [`CoordinationError::UnknownScratchpad`] / [`CoordinationError::ScratchpadNameTaken`].
+    pub fn scratchpad_transfer_in(
+        &self,
+        from: ProjectId,
+        name: &str,
+        to: ProjectId,
+    ) -> Result<ScratchpadView, CoordinationError> {
+        let result = self
+            .scratchpads
+            .transfer(from, name, to)
+            .map_err(|err| match err {
+                RenameError::NotFound => CoordinationError::UnknownScratchpad,
+                RenameError::NameTaken => CoordinationError::ScratchpadNameTaken,
+                RenameError::Store(err) => CoordinationError::Store(err),
+            });
+        if let Ok(view) = &result {
+            self.bus.publish(DomainEvent::ScratchpadChanged {
+                project: from,
+                name: view.name.clone(),
+            });
+            self.bus.publish(DomainEvent::ScratchpadChanged {
+                project: to,
+                name: view.name.clone(),
+            });
+        }
+        result
+    }
+
     /// Adds `tags` to the scratchpad `name` in the session's effective project, returning the
     /// updated scratchpad, or [`CoordinationError::UnknownScratchpad`] if there is none.
     pub fn scratchpad_add_tags(

@@ -12,12 +12,13 @@
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
-use soloist_core::{LinkContent, TodoDoc, TodoId};
+use soloist_core::{LinkContent, ProjectId, TodoDoc, TodoId};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
     TodoArg, TodoBlockerArg, TodoBlockersArg, TodoCommentCreateArg, TodoCommentEditArg,
-    TodoCommentRefArg, TodoCreateArg, TodoGetArg, TodoRef, TodoTagArg, TodoUpdateArg,
+    TodoCommentRefArg, TodoCreateArg, TodoGetArg, TodoRef, TodoTagArg, TodoTransferArg,
+    TodoUpdateArg,
 };
 use crate::server::SoloistMcp;
 use crate::tools::reply::{app_error, structured, unexpected};
@@ -134,6 +135,27 @@ impl SoloistMcp {
             Ok(IpcResponse::TodoDeleted(deleted)) => {
                 structured(&serde_json::json!({ "deleted": deleted }))
             }
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Move a todo from your effective project to another project, keeping its comments and completion status and clearing its blockers and lock (those reference the source project). You must be authenticated to the destination project — a process you run in belongs to it — or the transfer is refused."
+    )]
+    pub(crate) async fn todo_transfer(
+        &self,
+        Parameters(TodoTransferArg { todo, to_project }): Parameters<TodoTransferArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self
+            .client
+            .request(IpcRequest::TodoTransfer {
+                todo: TodoId::from_raw(todo),
+                to_project: ProjectId::from_raw(to_project),
+            })
+            .await
+        {
+            Ok(IpcResponse::Todo(view)) => structured(&view),
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }

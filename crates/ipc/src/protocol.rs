@@ -160,6 +160,9 @@ pub enum IpcRequest {
     ScratchpadArchive { name: String, archived: bool },
     /// Delete the scratchpad `name` in the session's effective project.
     ScratchpadDelete { name: String },
+    /// Move the scratchpad `name` from the session's effective project to `to_project` — authorized
+    /// only when the caller is authenticated to both (O10).
+    ScratchpadTransfer { name: String, to_project: ProjectId },
     /// Create a todo from the disciplined `doc` in the session's effective project.
     TodoCreate { doc: TodoDoc },
     /// Every todo in the session's effective project, as one-line summaries.
@@ -177,6 +180,9 @@ pub enum IpcRequest {
     TodoComplete { todo: TodoId },
     /// Delete `todo` in the session's effective project.
     TodoDelete { todo: TodoId },
+    /// Move `todo` from the session's effective project to `to_project` — authorized only when the
+    /// caller is authenticated to both (O10).
+    TodoTransfer { todo: TodoId, to_project: ProjectId },
     /// The distinct tags used across the session's effective project's todos.
     TodoTagsList,
     /// Add `tag` to `todo` in the session's effective project.

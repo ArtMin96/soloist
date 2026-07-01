@@ -230,3 +230,87 @@ fn a_bound_process_stamps_its_actor_on_a_comment() {
         })
     );
 }
+
+#[test]
+fn todo_transfer_in_preserves_the_document_comments_and_clears_blockers_and_lock() {
+    let projects = Arc::new(FakeProjectRepo::new());
+    let a = projects
+        .upsert(Path::new("/tmp/soloist-a"), Some("a"), None)
+        .expect("A")
+        .id;
+    let b = projects
+        .upsert(Path::new("/tmp/soloist-b"), Some("b"), None)
+        .expect("B")
+        .id;
+    let facade = facade_with(projects);
+
+    // A todo in A with a comment, a blocker, and a lock (set via a session bound to a process in A).
+    let owner = facade
+        .supervisor()
+        .register(terminal_registration(a, "w", "sleep 1"));
+    let session = authentic_session(&facade, owner, TEST_PEER_PGID);
+    facade
+        .bind_session_process(session, owner)
+        .expect("bind the session to its process in A");
+    let todo = facade
+        .todo_create(session, doc("ship", TodoStatus::InProgress))
+        .expect("create");
+    let blocker = facade
+        .todo_create(session, doc("dep", TodoStatus::Open))
+        .expect("blocker");
+    facade
+        .todo_add_blocker(session, todo.id, blocker.id)
+        .expect("block");
+    facade
+        .todo_comment_create(session, todo.id, "note")
+        .expect("comment");
+    let locked = facade.todo_lock(session, todo.id).expect("lock");
+    assert_eq!(locked.locked_by, Some(owner));
+
+    // Move it to B via the local/trusted path.
+    let moved = facade.todo_transfer_in(a, b, todo.id).expect("transfer");
+    assert_eq!(moved.id, todo.id, "the durable id is stable");
+    assert_eq!(moved.revision, todo.revision, "the revision is preserved");
+    assert_eq!(
+        moved.doc.status,
+        TodoStatus::InProgress,
+        "the document (including status) is preserved"
+    );
+    assert_eq!(moved.comments.len(), 1, "comments are preserved");
+    assert!(
+        moved.blockers.is_empty(),
+        "blockers reference the source project and are cleared"
+    );
+    assert_eq!(moved.locked_by, None, "the process-owned lock is cleared");
+}
+
+#[test]
+fn todo_transfer_refuses_a_target_outside_the_callers_authenticated_scope() {
+    let projects = Arc::new(FakeProjectRepo::new());
+    let a = projects
+        .upsert(Path::new("/tmp/soloist-a"), Some("a"), None)
+        .expect("A")
+        .id;
+    let b = projects
+        .upsert(Path::new("/tmp/soloist-b"), Some("b"), None)
+        .expect("B")
+        .id;
+    let facade = facade_with(projects);
+    // The session authenticates to A (a process it runs in), never B.
+    let owner = facade
+        .supervisor()
+        .register(terminal_registration(a, "w", "sleep 1"));
+    let session = authentic_session(&facade, owner, TEST_PEER_PGID);
+    facade
+        .bind_session_process(session, owner)
+        .expect("bind the session to its process in A");
+    let todo = facade
+        .todo_create(session, doc("ship", TodoStatus::Open))
+        .expect("create in A");
+
+    // Transferring to B — which the caller does not run in — is refused (the O10 cross-scope guard).
+    assert!(matches!(
+        facade.todo_transfer(session, b, todo.id),
+        Err(CoordinationError::ForeignProject)
+    ));
+}

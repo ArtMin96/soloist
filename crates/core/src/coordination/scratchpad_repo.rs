@@ -51,6 +51,16 @@ pub enum RenameResult {
     NameTaken,
 }
 
+/// The outcome of a cross-project [`transfer`](ScratchpadRepo::transfer): the moved row (now under
+/// the target project), no scratchpad under the source name, or the target project already using
+/// that name. The stored row is boxed so the small miss variants stay small.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TransferResult {
+    Transferred(Box<StoredScratchpad>),
+    NotFound,
+    NameTaken,
+}
+
 /// Durable repository of coordination scratchpads. One row per `(project, name)`, keyed for
 /// addressing by `name` but identified durably by a store-assigned [`ScratchpadId`] a rename does
 /// not change. Every state-dependent method is atomic with respect to the others.
@@ -78,6 +88,17 @@ pub trait ScratchpadRepo: Send + Sync {
     /// Renames `(project, from)` to `to` (the durable id is unchanged), checking target uniqueness
     /// as part of the update so two renames cannot both take one name.
     fn rename(&self, project: ProjectId, from: &str, to: &str) -> Result<RenameResult, StoreError>;
+
+    /// Moves the scratchpad `(from, name)` to project `to`, keeping its `name`, document, tags,
+    /// archived flag, revision, and durable id. Checks the target `(to, name)` is free as part of
+    /// the update — a clearer [`TransferResult::NameTaken`] than a UNIQUE violation — so a move
+    /// cannot collide with an existing scratchpad. One atomic step.
+    fn transfer(
+        &self,
+        from: ProjectId,
+        name: &str,
+        to: ProjectId,
+    ) -> Result<TransferResult, StoreError>;
 
     /// Adds `tags` to `(project, name)` — read-modify-write of the tag set under one guard, so a
     /// concurrent tag change is not lost. Idempotent. Returns the updated row, or `None` if absent.
@@ -153,6 +174,14 @@ impl ScratchpadRepo for NoopScratchpadRepo {
         _to: &str,
     ) -> Result<RenameResult, StoreError> {
         Ok(RenameResult::NotFound)
+    }
+    fn transfer(
+        &self,
+        _from: ProjectId,
+        _name: &str,
+        _to: ProjectId,
+    ) -> Result<TransferResult, StoreError> {
+        Ok(TransferResult::NotFound)
     }
     fn add_tags(
         &self,

@@ -288,9 +288,12 @@ a property of the schema rather than a convention. The blocker gate gives G4 a r
 blocker gates a todo), and G5 (process-owned lock, auto-releases on close) are **delivered**. The
 observable difference from Solo is that a todo cannot hold an arbitrary free-form body (a write must
 supply and pass the structured fields), and completion is gated on blockers. Cross-project
-`todo_transfer` is a **tracked deferral** — it raises the same cross-scope question as the scratchpad
-`_transfer` (D-7) and is held for the same focused follow-up; G4's Verify (the blocker gate) does not
-depend on it. The clean-room per-tool semantics are recorded in `plan/05` §12.
+`todo_transfer` is **delivered (2026-07-01, O10)**: it moves the todo to the target project keeping
+its comments and completion and clearing its blockers and lock (both reference the source project),
+authorized only when the caller is authenticated to **both** projects — a single MCP session
+authenticates to one project (D-6), so a genuine cross-project transfer over MCP is refused by
+design and the reachable path is the local/trusted surface. The clean-room per-tool semantics and
+the cross-scope authorization are recorded in `plan/05` §12.
 
 ## D-9 — A stopped resumable agent offers both Start and Resume 🟢
 

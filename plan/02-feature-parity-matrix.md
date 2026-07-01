@@ -106,7 +106,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 
 | ID | Feature | Src | Phase | Target | Verify |
 |----|---------|-----|------:|--------|--------|
-| G1 | Scratchpads CRUD + tags/archive (disciplined doc — free-form/file-io diverged, D-7; transfer→O10) | ✅ | 9 | v1 | Read/write a scratchpad |
+| G1 | Scratchpads CRUD + tags/archive/transfer (disciplined doc — free-form/file-io diverged, D-7) | ✅ | 9 | v1 | Read/write a scratchpad |
 | G2 | Scratchpad **revision-guarded** writes | ✅ | 9 | v1 | Stale write → conflict |
 | G3 | Todos: create/list/get/update/complete/delete | ✅ | 9 | v1 | CRUD a todo |
 | G4 | Todo tags, **blockers**, comments, transfer | ✅ | 9 | v1 | Blocker gates a todo |
@@ -197,7 +197,7 @@ charter, dependencies, and per-phase definition of done: [`orchestrator/README.m
 | O7 | Timers & fire-when-idle panel — armed timers, `waiting_on`, max-wait countdown, injected-turn `body` preview | 🟡 | orch-03 | v1 | A `fire_when_idle` arm shows `waiting_on` + countdown |
 | O8 | Wake-cycle visibility — timer fires → `body` delivered as a fresh turn (named with *why* it woke), surfaced on the lead | 🟡 | orch-03 | v1 | Fired timer's body appears on the lead; timer leaves the panel |
 | O9 | `spawn_process` (arbitrary terminal over MCP) with its trust treatment | ✅ name / ❓ trust | orch-04 | v1 | Trusted spawn works; untrusted / cross-project refused |
-| O10 | Cross-project `scratchpad_transfer` / `todo_transfer` with cross-scope authorization | ✅ name / ❓ scope | orch-04 | v1 | In-scope transfer works; cross-scope refused |
+| O10 | Cross-project `scratchpad_transfer` / `todo_transfer` with cross-scope authorization | ✅ | orch-04 | v1 | In-scope transfer works; cross-scope refused (delivered 2026-07-01) |
 | O11 | Orchestrator capability — documented recipe + setup guidance + first-class status | ❓ | orch-05 | v1 | Recipe doc + `setup_agent_integration` guidance; E2E walk passes |
 | O12 | Todo **comment authorship** — a comment records its creating bound actor (`author_actor_id` + display author), populated by the core on create; surfaced on the to-do board | 🟡 | orch-02 | v1 | A comment created by a bound process records its actor; the board shows who wrote each comment; reverses the `05` "no author attribution" decision |
 | O13 | **Spawn orchestration-context preamble** — `spawn_agent`/`spawn_process` deliver a first-turn `[SOLO ORCHESTRATION CONTEXT]` preamble (the worker's identity + the coordination tools), mirroring the demo's `include_agent_instructions` | 🟡 | orch-04 | v1 | A spawned worker receives the preamble as its first turn and can use the primitives with no skills loaded; applies to the built `spawn_agent` (not gated on the O9 arbitrary-spawn trust work) |

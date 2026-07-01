@@ -17,7 +17,9 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::scratchpad_repo::{RenameResult, ScratchpadRepo, StoredScratchpad, WriteResult};
+use super::scratchpad_repo::{
+    RenameResult, ScratchpadRepo, StoredScratchpad, TransferResult, WriteResult,
+};
 use crate::ids::{ProjectId, ScratchpadId};
 use crate::ports::StoreError;
 
@@ -275,6 +277,23 @@ impl Scratchpads {
             RenameResult::Renamed(stored) => Ok(ScratchpadView::of(*stored)),
             RenameResult::NotFound => Err(RenameError::NotFound),
             RenameResult::NameTaken => Err(RenameError::NameTaken),
+        }
+    }
+
+    /// Moves the scratchpad `name` from `from` to `to`, keeping its name, document, tags, archived
+    /// flag, revision, and durable id. [`RenameError::NotFound`] if `from` has no such scratchpad,
+    /// [`RenameError::NameTaken`] if `to` already has one under that name (reusing the rename error
+    /// taxonomy — a transfer is a cross-project relocation with the same two failure modes).
+    pub fn transfer(
+        &self,
+        from: ProjectId,
+        name: &str,
+        to: ProjectId,
+    ) -> Result<ScratchpadView, RenameError> {
+        match self.repo.transfer(from, name, to)? {
+            TransferResult::Transferred(stored) => Ok(ScratchpadView::of(*stored)),
+            TransferResult::NotFound => Err(RenameError::NotFound),
+            TransferResult::NameTaken => Err(RenameError::NameTaken),
         }
     }
 

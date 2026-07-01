@@ -196,6 +196,7 @@ impl From<CoordinationError> for IpcError {
             CoordinationError::UnknownComment => IpcError::UnknownComment,
             CoordinationError::MalformedLink => IpcError::MalformedLink,
             CoordinationError::ForeignScopeLink => IpcError::ForeignScopeLink,
+            CoordinationError::ForeignProject => IpcError::ForeignProject,
             CoordinationError::Store(err) => IpcError::Internal(err.to_string()),
         }
     }

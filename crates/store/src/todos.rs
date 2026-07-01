@@ -285,6 +285,30 @@ impl TodoRepo for SqliteStore {
             )
             .map_err(sql_err)
     }
+
+    fn transfer(
+        &self,
+        from: ProjectId,
+        to: ProjectId,
+        id: TodoId,
+    ) -> Result<Option<StoredTodo>, StoreError> {
+        let conn = self.lock();
+        // Nothing to move if the todo is not in the source project — read and re-key under one
+        // guard so the check and the move cannot interleave.
+        if read_one(&conn, from, id)?.is_none() {
+            return Ok(None);
+        }
+        // The id is globally unique (AUTOINCREMENT), so re-keying `project_id` cannot collide.
+        // Blockers reference source-project ids and the lock is per-run/process-owned, so both are
+        // cleared; the document, tags, comments, and revision ride along unchanged.
+        conn.execute(
+            "UPDATE todos SET project_id = ?3, blockers = '[]', locked_by = NULL
+             WHERE project_id = ?1 AND id = ?2",
+            (from.get() as i64, id.get() as i64, to.get() as i64),
+        )
+        .map_err(sql_err)?;
+        read_one(&conn, to, id)
+    }
 }
 
 impl SqliteStore {

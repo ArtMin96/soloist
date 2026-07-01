@@ -65,7 +65,7 @@ pub use coordination::{
     ScratchpadView, Scratchpads, SetWhenIdleOutcome, StoredLease, StoredScratchpad, StoredTimer,
     StoredTodo, TimerRepo, TimerScheduler, TimerStatus, TimerView, Timers, TodoDoc, TodoError,
     TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView, TodoWriteResult, Todos,
-    WriteError, WriteResult,
+    TransferResult, WriteError, WriteResult,
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
