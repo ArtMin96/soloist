@@ -30,7 +30,8 @@ use soloist_core::{
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use soloist_store::{FileRuntimeState, SqliteStore};
 use soloist_sys::{
-    CommandShellEnvProbe, CommandVersionProbe, NotifyFileWatcher, ProcMetricsProbe, ProcPortProbe,
+    CommandShellEnvProbe, CommandSummaryRunner, CommandVersionProbe, NotifyFileWatcher,
+    ProcMetricsProbe, ProcPortProbe,
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_window_state::StateFlags;
@@ -87,7 +88,8 @@ fn build_facade(app: AppHandle) -> Facade {
     // scratchpad, and todo stores persist them; the runtime-state and orphan-control adapters are
     // wired for adoption, the metrics probe reads CPU/memory from /proc, the port probe reads /proc,
     // the file watcher reports filesystem changes via notify, the notifier shows desktop toasts via
-    // the Tauri notification plugin, the version probe auto-detects installed agent CLIs, and the
+    // the Tauri notification plugin, the version probe auto-detects installed agent CLIs, the
+    // summary runner runs the opt-in headless auto-summarizer through the login shell, and the
     // shell-env probe captures the login shell's environment (over this process's own env as the
     // base) so launched processes see version-manager PATHs.
     let lock_releaser = CompositeLockReleaser::new(vec![
@@ -109,6 +111,7 @@ fn build_facade(app: AppHandle) -> Facade {
         .notifier(Arc::new(TauriNotifier::new(app)))
         .agent_tools(store.clone())
         .version_probe(Arc::new(CommandVersionProbe::new()))
+        .summary_runner(Arc::new(CommandSummaryRunner::new()))
         .shell_env_probe(Arc::new(CommandShellEnvProbe::new()))
         .app_env(std::env::vars().collect())
         .lock_repo(store.clone())
@@ -246,6 +249,10 @@ pub fn run() {
             // Start the idle sampler: it reclassifies each launched agent's activity from its
             // terminal output and publishes transitions (also weakly held, also self-supervised).
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().idle_sampler_loop());
+            // Start the agent summary reactor: when an agent goes idle it produces a one-line
+            // summary of its recent output through the user's configured summarizer CLI, run
+            // headless (opt-in and OFF by default; also weakly held, also degradable).
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().summary_reactor_loop());
             // Start the coordination timer scheduler: it fires due timers and delivers each body to
             // its owning process as a fresh turn, tracking idle state from the event stream (also
             // weakly held, also self-supervised).
