@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use tokio::sync::{broadcast, Notify};
 
-use crate::agents::{AgentLineage, Agents, IdleTracker};
+use crate::agents::{AgentLineage, Agents, IdleTracker, SummaryRunner};
 use crate::config::{ConfigEngine, ConfigSync};
 use crate::coordination::{Kv, Leases, Scratchpads, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
@@ -71,6 +71,7 @@ pub struct Facade {
     trust: TrustStore,
     config: ConfigEngine,
     agents: Agents,
+    summary_runner: Arc<dyn SummaryRunner>,
     idle: Arc<IdleTracker>,
     lineage: Arc<AgentLineage>,
     identity: Identity,
@@ -100,6 +101,7 @@ impl Facade {
             projects,
             agent_tools,
             version_probe,
+            summary_runner,
             kv_repo,
             lock_repo,
             timer_repo,
@@ -117,6 +119,7 @@ impl Facade {
             // or resuming a timer re-evaluates the schedule at once.
             timers: Timers::new(timer_repo, clock.clone(), Arc::new(Notify::new())),
             agents: Agents::new(agent_tools, version_probe, clock.clone()),
+            summary_runner,
             scratchpads: Scratchpads::new(scratchpad_repo),
             todos: Todos::new(todo_repo),
             settings: SettingsStore::new(settings_repo),

@@ -7,14 +7,16 @@
 //! command/query surface.
 
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use super::Facade;
-use crate::agents::IdleSampler;
+use crate::agents::{IdleSampler, OutputSnapshot, SummaryReactor};
 use crate::filewatch::WatchReactor;
+use crate::ids::ProcessId;
 use crate::metrics::MetricsSampler;
 use crate::notify::NotificationReactor;
 use crate::portscan::PortScanner;
+use crate::supervisor::Supervisor;
 
 impl Facade {
     /// The self-healing reactor loop (crash auto-restart, C2), returned for the
@@ -53,6 +55,27 @@ impl Facade {
             self.lineage.clone(),
             self.bus.clone(),
             Arc::downgrade(&self.supervisor),
+        )
+        .run()
+    }
+
+    /// The agent auto-summarization reactor loop (agents C4), returned for the composition root to
+    /// spawn once on its runtime. It reacts to an agent going idle by producing a one-line summary
+    /// of its recent terminal output through the user's configured summarizer CLI, run headless,
+    /// and publishing a [`crate::events::DomainEvent::AgentSummary`]. Optional and OFF by default:
+    /// with no summarizer tool configured, an unsupported provider, or the default
+    /// [`crate::agents::NoopSummaryRunner`] (no adapter wired), it produces nothing and never
+    /// blocks the core — the real headless executor is chosen in the composition root. It reads
+    /// recent output from the supervisor weakly so it never keeps the app alive.
+    pub fn summary_reactor_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        let snapshots = Arc::new(SupervisorSnapshot(Arc::downgrade(&self.supervisor)));
+        SummaryReactor::new(
+            self.clock.clone(),
+            self.summary_runner.clone(),
+            self.settings.repo(),
+            self.agents.tool_repo(),
+            snapshots,
+            self.bus.clone(),
         )
         .run()
     }
@@ -116,5 +139,20 @@ impl Facade {
             Arc::downgrade(&self.supervisor),
         )
         .run()
+    }
+}
+
+/// Reads a process's recent rendered output from the supervisor (C2) for the summary reactor (C4),
+/// holding it weakly so the reactor never keeps the app alive. The one place the summarization
+/// subsystem is bound to the concrete supervisor; the reactor itself depends only on the narrow
+/// [`OutputSnapshot`] read.
+struct SupervisorSnapshot(Weak<Supervisor>);
+
+impl OutputSnapshot for SupervisorSnapshot {
+    fn recent_lines(&self, id: ProcessId, max_lines: usize) -> Vec<String> {
+        self.0
+            .upgrade()
+            .and_then(|supervisor| supervisor.rendered_tail(id, max_lines))
+            .unwrap_or_default()
     }
 }

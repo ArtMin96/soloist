@@ -181,6 +181,13 @@ impl<K, D: Default> SettingsStore<K, D> {
         Ok(self.repo.load(key)?.unwrap_or_default())
     }
 
+    /// A shared handle to the underlying repository, for a background loop (the summary reactor)
+    /// that reads the live document as it runs. The same store this aggregate reads and writes —
+    /// a shared `Arc`, not a second copy.
+    pub(crate) fn repo(&self) -> Arc<dyn SettingsRepo<K, D>> {
+        self.repo.clone()
+    }
+
     /// The single write primitive: read the current document, apply one `mutator`, persist the whole
     /// record, and return the updated document. Every façade setter routes through this, so there is
     /// one place a settings write happens. The read-modify-write is serialized by `write_lock`, so
