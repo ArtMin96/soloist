@@ -133,7 +133,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 |----|---------|-----|------:|--------|--------|
 | I1 | Sidebar process tree grouped by project → Agents/Terminals/Commands (collapse persists per project, reorder) | 🟡 | 5,11 | v1 | Grouped tree renders. Each opened project is a collapsible node (icon + name + running count + per-project bulk controls) over its non-empty kind subgroups; collapse persists per project and per subgroup. Reorder (drag) → Phase 11. |
 | I2 | Command palette (`Ctrl+K`) | ✅ | 11 | v1 | Run any action |
-| I3 | Jump palette (`Ctrl+E`) + attention jump (`Ctrl+Shift+E`) | ✅ | 11 | later | Jump to a destination |
+| I3 | Jump palette (`Ctrl+E`) + attention jump (`Ctrl+Shift+E`) | ✅ | 11 | later | Jump to a destination. **Delivered ahead of schedule (user request 2026-06-30) — partial:** `Ctrl+E` Quick Jump fuzzy-searches **processes + open projects** (a process row focuses its terminal; a project row opens its settings), built on the shared palette shell + `ProcessCommandItem` and wired to the remappable `quick_jump` keymap action. **Still deferred:** attention-jump (`Ctrl+Shift+E`, unread-only), todo/scratchpad jump targets (need a per-project snapshot not pre-loaded at the App shell — D-12), and the `soloist://` copy-link (folded into I4). Headless evidence: `QuickJumpPalette.test.tsx` (4). Real-window walk is the user-only step. |
 | I4 | `soloist://` deep links | ✅ | 11 | later | Link opens target |
 | I5 | Light/dark/system themes (app + terminal) | ✅ | 11 | v1 | Toggle restyles incl. xterm |
 | I6 | Keyboard-first nav (remapped to Ctrl/Super) | ✅ | 11 | v1 | Dashboard usable no-mouse |
