@@ -17,7 +17,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, Notify};
 
 use crate::agents::{AgentLineage, Agents, IdleTracker};
-use crate::config::ConfigEngine;
+use crate::config::{ConfigEngine, ConfigSync};
 use crate::coordination::{Kv, Leases, Scratchpads, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::FileWatcher;
@@ -28,7 +28,9 @@ use crate::notify::Notifier;
 use crate::ports::{Clock, CorePorts, PtySize, SpawnSpec, StoreError};
 use crate::portscan::{self, PortProbe, WaitForPortError};
 use crate::process::{ProcessKind, ProcessView};
-use crate::projects::{LoadProjectError, ProjectLoad, ProjectService, ProjectView, Projects};
+use crate::projects::{
+    LoadProjectError, ProjectLoad, ProjectService, ProjectView, Projects, ReloadError,
+};
 use crate::settings::{ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::trust::TrustStore;
@@ -216,6 +218,14 @@ impl Facade {
     /// sequence lives in the projects domain rather than being re-implemented here.
     pub fn load_project(&self, root: &Path) -> Result<ProjectLoad, LoadProjectError> {
         self.project_service().open(root)
+    }
+
+    /// Reloads an already-open project's `solo.yml` and reconciles the supervisor's command
+    /// registrations to it — see [`ProjectService::reload`]. Returns the applied change set, or
+    /// `None` when the file is byte-identical. Delegates to the projects domain, so the reconcile
+    /// lives there and every adapter (HTTP today, the UI/MCP later) routes to the one command.
+    pub fn reload_project(&self, project: ProjectId) -> Result<Option<ConfigSync>, ReloadError> {
+        self.project_service().reload(project)
     }
 
     /// Re-registers every known project without starting anything (session restore on

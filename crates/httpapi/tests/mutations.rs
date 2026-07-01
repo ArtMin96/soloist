@@ -13,11 +13,18 @@ use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 use tower::ServiceExt;
 
-use soloist_core::testing::{terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
-use soloist_core::{CorePorts, DomainEvent, Facade, ProcStatus, ProcessId, ProjectId, TokioClock};
+use soloist_core::testing::{
+    terminal_registration, FakeAgentToolRepo, FakeProjectRepo, FakeScratchpadRepo, FakeSpawner,
+    FakeTrustRepo,
+};
+use soloist_core::{
+    AgentTool, CorePorts, DomainEvent, Facade, ProcStatus, ProcessId, ProcessKind, ProjectId,
+    ScratchpadDoc, TokioClock,
+};
 use soloist_httpapi::{router, ApiState, FocusFn};
 use soloist_ipc::http::{
-    LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE, STATUS_FORBIDDEN, STATUS_NOT_FOUND, STATUS_UNAUTHORIZED,
+    SpawnResponse, LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE, STATUS_FORBIDDEN, STATUS_NOT_FOUND,
+    STATUS_UNAUTHORIZED,
 };
 
 /// The header pair an authorized mutation carries.
@@ -43,6 +50,26 @@ fn facade_with_terminal() -> (Arc<Facade>, ProcessId) {
     (facade, id)
 }
 
+/// A façade seeded with the built-in agent tools and one loaded (empty) project, returning the
+/// façade, the project id, and the temp dir to keep alive — the setup `spawn-agent` needs.
+fn facade_with_agent_tool() -> (Arc<Facade>, ProjectId, tempfile::TempDir) {
+    let facade = Arc::new(Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .agent_tools(Arc::new(FakeAgentToolRepo::new(
+            AgentTool::builtin_defaults(),
+        )))
+        .build(),
+    ));
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load project");
+    (facade, project.id, dir)
+}
+
 /// A `POST` request to `uri` carrying each given header.
 fn post(uri: &str, headers: &[(&str, &str)]) -> Request<Body> {
     let mut builder = Request::builder().method("POST").uri(uri);
@@ -50,6 +77,18 @@ fn post(uri: &str, headers: &[(&str, &str)]) -> Request<Body> {
         builder = builder.header(*name, *value);
     }
     builder.body(Body::empty()).expect("request")
+}
+
+/// A `POST` request to `uri` with a JSON `body` and each given header.
+fn post_json(uri: &str, headers: &[(&str, &str)], body: &str) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/json");
+    for (name, value) in headers {
+        builder = builder.header(*name, *value);
+    }
+    builder.body(Body::from(body.to_string())).expect("request")
 }
 
 /// Waits (bounded) for `id` to reach `target` on the event bus, so a state-changing mutation
@@ -182,6 +221,237 @@ async fn focus_without_auth_is_rejected_before_the_handler_runs() {
         !raised.load(Ordering::SeqCst),
         "the gate rejects before the focus callback can fire"
     );
+}
+
+#[tokio::test]
+async fn spawn_agent_launches_a_known_tool_and_returns_its_id() {
+    let (facade, project, _dir) = facade_with_agent_tool();
+    let app = router(ApiState::new(Arc::clone(&facade)));
+    let response = app
+        .oneshot(post_json(
+            &format!("/projects/{}/spawn-agent", project.get()),
+            &[AUTH],
+            r#"{"tool":"Claude","args":[]}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let spawned: SpawnResponse = serde_json::from_slice(&body).expect("spawn response");
+    // The returned id names a real, newly-registered Agent process in the stack.
+    assert!(
+        facade
+            .snapshot()
+            .iter()
+            .any(|p| p.id.get() == spawned.id && p.kind == ProcessKind::Agent),
+        "the spawned id is a registered Agent process"
+    );
+}
+
+#[tokio::test]
+async fn spawn_agent_with_an_unknown_tool_is_404() {
+    let (facade, project, _dir) = facade_with_agent_tool();
+    let app = router(ApiState::new(facade));
+    let response = app
+        .oneshot(post_json(
+            &format!("/projects/{}/spawn-agent", project.get()),
+            &[AUTH],
+            r#"{"tool":"Nonexistent"}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn spawn_agent_without_auth_is_rejected() {
+    let (facade, project, _dir) = facade_with_agent_tool();
+    let app = router(ApiState::new(facade));
+    let response = app
+        .oneshot(post_json(
+            &format!("/projects/{}/spawn-agent", project.get()),
+            &[],
+            r#"{"tool":"Claude"}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn reload_reconciles_a_changed_solo_yml() {
+    let facade = Arc::new(Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .build(),
+    ));
+    let dir = tempfile::tempdir().expect("temp dir");
+    let config = dir.path().join("solo.yml");
+    std::fs::write(&config, "processes:\n  Web:\n    command: npm run dev\n").expect("write");
+    let project = facade.load_project(dir.path()).expect("load");
+    assert_eq!(facade.snapshot().len(), 1);
+
+    // Add a command on disk, then reload over HTTP: the reconcile registers it without
+    // duplicating the existing command.
+    std::fs::write(
+        &config,
+        "processes:\n  Web:\n    command: npm run dev\n  Api:\n    command: cargo run\n",
+    )
+    .expect("write");
+    let app = router(ApiState::new(Arc::clone(&facade)));
+    let response = app
+        .oneshot(post(
+            &format!("/projects/{}/reload", project.id.get()),
+            &[AUTH],
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(facade.snapshot().len(), 2);
+}
+
+#[tokio::test]
+async fn reload_of_an_unknown_project_is_404() {
+    let (facade, _id) = facade_with_terminal();
+    let app = router(ApiState::new(facade));
+    let response = app
+        .oneshot(post("/projects/999999/reload", &[AUTH]))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// A façade with the scratchpad store wired and two empty projects loaded, returning the façade,
+/// both project ids, and the temp dirs to keep alive — the setup the transfer tests share.
+fn facade_with_two_projects() -> (
+    Arc<Facade>,
+    ProjectId,
+    ProjectId,
+    tempfile::TempDir,
+    tempfile::TempDir,
+) {
+    let facade = Arc::new(Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .scratchpad_repo(Arc::new(FakeScratchpadRepo::new()))
+        .build(),
+    ));
+    let a_dir = tempfile::tempdir().expect("temp dir a");
+    let b_dir = tempfile::tempdir().expect("temp dir b");
+    let a = facade.load_project(a_dir.path()).expect("load a").id;
+    let b = facade.load_project(b_dir.path()).expect("load b").id;
+    (facade, a, b, a_dir, b_dir)
+}
+
+/// A well-formed disciplined scratchpad document to seed a transfer test with.
+fn scratchpad_doc() -> ScratchpadDoc {
+    ScratchpadDoc {
+        objective: "Ship v1".into(),
+        context: "RC cut".into(),
+        plan: vec!["Cut RC".into()],
+        acceptance_criteria: vec!["soak green".into()],
+        risks: vec!["none identified".into()],
+        status: "in progress".into(),
+        notes: None,
+    }
+}
+
+#[tokio::test]
+async fn transfer_scratchpad_moves_it_to_the_target_project() {
+    let (facade, a, b, _a_dir, _b_dir) = facade_with_two_projects();
+    facade
+        .scratchpad_write_in(a, "plan", scratchpad_doc(), None)
+        .expect("seed in A");
+    let app = router(ApiState::new(Arc::clone(&facade)));
+    let response = app
+        .oneshot(post_json(
+            &format!("/projects/{}/transfer-scratchpad", a.get()),
+            &[AUTH],
+            &format!(r#"{{"name":"plan","to_project":{}}}"#, b.get()),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(facade.scratchpad_read_in(b, "plan").is_ok(), "now in B");
+    assert!(facade.scratchpad_read_in(a, "plan").is_err(), "gone from A");
+}
+
+#[tokio::test]
+async fn transfer_scratchpad_to_an_unknown_target_is_404_and_does_not_orphan() {
+    let (facade, a, _b, _a_dir, _b_dir) = facade_with_two_projects();
+    facade
+        .scratchpad_write_in(a, "plan", scratchpad_doc(), None)
+        .expect("seed in A");
+    let app = router(ApiState::new(Arc::clone(&facade)));
+    let response = app
+        .oneshot(post_json(
+            &format!("/projects/{}/transfer-scratchpad", a.get()),
+            &[AUTH],
+            r#"{"name":"plan","to_project":999999}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(
+        facade.scratchpad_read_in(a, "plan").is_ok(),
+        "still in A — a bad target never orphans it"
+    );
+}
+
+#[tokio::test]
+async fn transfer_scratchpad_without_auth_is_rejected() {
+    let (facade, a, b, _a_dir, _b_dir) = facade_with_two_projects();
+    let app = router(ApiState::new(facade));
+    let response = app
+        .oneshot(post_json(
+            &format!("/projects/{}/transfer-scratchpad", a.get()),
+            &[],
+            &format!(r#"{{"name":"plan","to_project":{}}}"#, b.get()),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn transfer_todo_with_an_unknown_todo_is_404() {
+    let (facade, a, b, _a_dir, _b_dir) = facade_with_two_projects();
+    let app = router(ApiState::new(facade));
+    // The target project exists, but there is no such todo in the source → UnknownTodo → 404.
+    let response = app
+        .oneshot(post_json(
+            &format!("/projects/{}/transfer-todo", a.get()),
+            &[AUTH],
+            &format!(r#"{{"todo":9999,"to_project":{}}}"#, b.get()),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn transfer_todo_without_auth_is_rejected() {
+    let (facade, a, b, _a_dir, _b_dir) = facade_with_two_projects();
+    let app = router(ApiState::new(facade));
+    let response = app
+        .oneshot(post_json(
+            &format!("/projects/{}/transfer-todo", a.get()),
+            &[],
+            &format!(r#"{{"todo":1,"to_project":{}}}"#, b.get()),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[test]

@@ -289,6 +289,18 @@ impl Todos {
         self.repo.delete(project, id)
     }
 
+    /// Moves todo `id` from `from` to `to`, clearing its blockers and lock (both reference the
+    /// source project) and keeping its document, tags, comments, revision, and id. Returns the
+    /// moved todo's view, or `None` if `from` has no such todo.
+    pub fn transfer(
+        &self,
+        from: ProjectId,
+        to: ProjectId,
+        id: TodoId,
+    ) -> Result<Option<TodoView>, StoreError> {
+        self.view_opt(self.repo.transfer(from, to, id)?)
+    }
+
     /// The distinct tags used across `project`'s todos, sorted.
     pub fn tags(&self, project: ProjectId) -> Result<Vec<String>, StoreError> {
         self.repo.tags(project)

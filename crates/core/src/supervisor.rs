@@ -304,6 +304,64 @@ impl Supervisor {
         Ok(())
     }
 
+    /// Resolves a `solo.yml` process name to its registered command's id in `project`, if one
+    /// exists — the config-reload path's lookup for the registration to update or drop.
+    pub(crate) fn command_id_by_name(&self, project: ProjectId, name: &str) -> Option<ProcessId> {
+        self.registry.command_id_by_name(project, name)
+    }
+
+    /// Applies a changed `solo.yml` spec to an already-registered command **in place**, keeping
+    /// its id (config-reload never duplicates a command) and its live actor if it is running —
+    /// the new spec takes effect on the next restart, which the trust gate re-checks. Recomputes
+    /// whether the new variant needs trust; announces [`DomainEvent::ProcessRenamed`] only when
+    /// the label actually changed (a `solo.yml` rename). Returns whether it was still registered.
+    pub(crate) fn update_command(&self, id: ProcessId, registration: Registration) -> bool {
+        let Registration {
+            project,
+            label,
+            launch,
+            trust_variant,
+            auto_start,
+            auto_restart,
+            restart_when_changed,
+            // `kind`, `project_root`, and `resume_command` are invariant for a reloaded command.
+            ..
+        } = registration;
+        let requires_trust = self.requires_trust(project, trust_variant.as_ref());
+        let renamed = self
+            .registry
+            .label_of(id)
+            .is_some_and(|previous| previous != label);
+        let updated = self.registry.update_command_spec(
+            id,
+            label.clone(),
+            launch,
+            trust_variant,
+            auto_start,
+            auto_restart,
+            restart_when_changed,
+            requires_trust,
+        );
+        if updated && renamed {
+            self.bus.publish(DomainEvent::ProcessRenamed { id, label });
+        }
+        updated
+    }
+
+    /// Drops a registration **only if it is not active** — the config-reload path removing a
+    /// command deleted from `solo.yml` without killing running work. Returns `true` when the
+    /// resting entry was removed (announcing [`DomainEvent::ProcessRemoved`]), `false` when the
+    /// process was live and so left running for the caller to surface. A resting entry holds no
+    /// actor, so removal needs no reap and stays synchronous.
+    pub(crate) fn deregister_if_resting(&self, id: ProcessId) -> bool {
+        if self.registry.remove_if_resting(id) {
+            self.bus.publish(DomainEvent::ProcessRemoved { id });
+            true
+        } else {
+            false
+        }
+    }
+
     /// Stops a process and removes it from the registry entirely — the one path that forgets
     /// a managed process, unlike [`stop`](Self::stop), which leaves it resting. The entry is
     /// removed up front, atomically taking any live actor handle; its group is then reaped

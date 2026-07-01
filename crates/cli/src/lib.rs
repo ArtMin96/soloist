@@ -29,7 +29,12 @@ pub fn run() -> ExitCode {
         Command::Stop(target) => command::control(&client, Verb::Stop, &target),
         Command::Restart(target) => command::control(&client, Verb::Restart, &target),
         Command::Logs { name, lines } => command::logs(&client, &name, lines),
-        Command::Focus => command::focus(&client),
+        Command::Focus | Command::Open => command::raise(&client),
+        Command::Spawn {
+            tool,
+            project,
+            args,
+        } => command::spawn(&client, &tool, &args, project.as_deref()),
     };
     match result {
         Ok(message) => {

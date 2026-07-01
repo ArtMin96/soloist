@@ -41,6 +41,19 @@ pub enum Command {
     },
     /// Raise the Soloist window to the front.
     Focus,
+    /// Open Soloist — raise its window to the front (an alias of `focus`).
+    Open,
+    /// Spawn a configured agent tool as a worker in a project and start it.
+    Spawn {
+        /// The agent tool to launch (a name from the app's tool registry, e.g. `Claude`).
+        tool: String,
+        /// The project to spawn into, when more than one is open.
+        #[arg(long)]
+        project: Option<String>,
+        /// Extra arguments forwarded to the agent's command line, after a `--` separator.
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
 }
 
 /// What `start`/`stop`/`restart` act on: a named process, or `all` for a whole project. Shared

@@ -185,6 +185,55 @@ impl Registry {
         }
     }
 
+    /// Replaces a registered command's launch spec, trust variant, label, and schedule fields
+    /// **in place**, keeping its id — the config-reload path applying a changed `solo.yml` spec
+    /// without minting a fresh id (which would duplicate the command). The caller holds the
+    /// trust store, so it computes and passes `requires_trust`. The live actor handle, pgid, and
+    /// status are untouched: a running process keeps running on its current launch until its
+    /// next (re)start picks up the new spec. Returns whether the process was still registered.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn update_command_spec(
+        &self,
+        id: ProcessId,
+        label: String,
+        launch: SpawnSpec,
+        trust_variant: Option<Hash>,
+        auto_start: bool,
+        auto_restart: bool,
+        restart_when_changed: Vec<String>,
+        requires_trust: bool,
+    ) -> bool {
+        let mut guard = lock(&self.inner);
+        match guard.get_mut(&id) {
+            Some(entry) => {
+                entry.view.label = label;
+                entry.view.requires_trust = requires_trust;
+                entry.launch = launch;
+                entry.trust_variant = trust_variant;
+                entry.auto_start = auto_start;
+                entry.auto_restart = auto_restart;
+                entry.restart_when_changed = restart_when_changed;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Removes a process **only if it is not active**, returning whether it was removed — the
+    /// config-reload path dropping a command deleted from `solo.yml` without ever killing
+    /// running work. A resting entry holds no live actor, so it is dropped outright; an active
+    /// one is left untouched. Checking the status and removing under one lock keeps it atomic.
+    pub(crate) fn remove_if_resting(&self, id: ProcessId) -> bool {
+        let mut guard = lock(&self.inner);
+        match guard.get(&id) {
+            Some(entry) if !entry.view.status.is_active() => {
+                guard.remove(&id);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Updates a process's readiness gate to ready/not-ready, but only while it is still on
     /// the `pgid` the wait is probing. Returns whether it changed (so the caller announces
     /// only real transitions). Guarding on the group closes the race where a process stops
@@ -469,6 +518,74 @@ mod tests {
         assert_eq!(registry.status(id), Some(ProcStatus::RestartExhausted));
         // Idempotent: once held, a second call is a no-op (no spurious re-exhaust).
         assert!(!registry.exhaust_if_crashed(id));
+    }
+
+    #[test]
+    fn command_id_by_name_finds_the_command_in_its_project_only() {
+        // `registry_holding` registers a Command labelled "x" in project 1.
+        let (registry, id) = registry_holding(ProcStatus::Stopped);
+        let project = ProjectId::from_raw(1);
+        assert_eq!(registry.command_id_by_name(project, "x"), Some(id));
+        assert_eq!(registry.command_id_by_name(project, "other"), None);
+        assert_eq!(
+            registry.command_id_by_name(ProjectId::from_raw(2), "x"),
+            None
+        );
+    }
+
+    #[test]
+    fn update_command_spec_replaces_fields_but_leaves_status_untouched() {
+        let (registry, id) = registry_holding(ProcStatus::Running);
+        let launch = SpawnSpec {
+            command: "npm run start".into(),
+            working_dir: PathBuf::from("/"),
+            env: BTreeMap::new(),
+            size: PtySize::default(),
+        };
+        assert!(registry.update_command_spec(
+            id,
+            "Web".into(),
+            launch.clone(),
+            None,
+            false,
+            false,
+            Vec::new(),
+            true,
+        ));
+        let view = registry.view(id).expect("view");
+        assert_eq!(view.label, "Web");
+        assert!(view.requires_trust);
+        assert_eq!(
+            view.status,
+            ProcStatus::Running,
+            "a spec update never touches a running process's status"
+        );
+        // A missing process reports no update.
+        assert!(!registry.update_command_spec(
+            ProcessId::from_raw(999),
+            "x".into(),
+            launch,
+            None,
+            false,
+            false,
+            Vec::new(),
+            false,
+        ));
+    }
+
+    #[test]
+    fn remove_if_resting_drops_a_resting_process_but_keeps_an_active_one() {
+        let (resting, id) = registry_holding(ProcStatus::Stopped);
+        assert!(resting.remove_if_resting(id));
+        assert_eq!(resting.status(id), None, "a resting process is dropped");
+
+        let (running, id) = registry_holding(ProcStatus::Running);
+        assert!(!running.remove_if_resting(id));
+        assert_eq!(
+            running.status(id),
+            Some(ProcStatus::Running),
+            "a running process is left untouched"
+        );
     }
 
     #[test]

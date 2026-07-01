@@ -5066,6 +5066,7 @@ dependencies = [
  "serde_json",
  "soloist-core",
  "soloist-ipc",
+ "tempfile",
  "tokio",
  "tower 0.5.3",
  "tower-http 0.6.11",

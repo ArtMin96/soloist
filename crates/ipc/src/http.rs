@@ -45,6 +45,48 @@ pub struct HttpRuntime {
     pub port: u16,
 }
 
+/// The body of `POST /projects/:id/spawn-agent`: which configured agent tool to launch as a
+/// worker in the project, and any extra arguments appended to its command line for this run.
+/// One definition the CLI serialises and the in-app server deserialises, so the wire shape
+/// stays single-source (like [`HttpRuntime`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpawnRequest {
+    /// The agent tool to launch — an entry in the app's agent-tool registry (e.g. `"Claude"`).
+    pub tool: String,
+    /// Extra arguments appended to the tool's command line for this launch.
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+/// The response to a successful `POST /projects/:id/spawn-agent`: the id of the newly spawned,
+/// started agent process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpawnResponse {
+    /// The new agent process's id.
+    pub id: u64,
+}
+
+/// The body of `POST /projects/:id/transfer-todo`: which todo in the path (source) project to move,
+/// and the project to move it to. One definition the in-app server deserialises (a future CLI would
+/// serialise it), so the wire shape stays single-source (like [`SpawnRequest`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransferTodoRequest {
+    /// The id of the todo to move, as it exists in the path (source) project.
+    pub todo: u64,
+    /// The id of the project to move it to.
+    pub to_project: u64,
+}
+
+/// The body of `POST /projects/:id/transfer-scratchpad`: which scratchpad in the path (source)
+/// project to move, by its name handle, and the project to move it to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransferScratchpadRequest {
+    /// The name handle of the scratchpad to move in the path (source) project.
+    pub name: String,
+    /// The id of the project to move it to.
+    pub to_project: u64,
+}
+
 /// The runtime file's path inside the data directory (the directory is not created here).
 pub fn runtime_file_path() -> Result<PathBuf, DataDirError> {
     Ok(data_dir()?.join(RUNTIME_FILE))
