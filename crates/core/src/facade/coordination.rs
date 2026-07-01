@@ -85,6 +85,19 @@ pub enum CoordinationError {
     /// rather than resolved to another project's content (the never-leak scope discipline).
     #[error("that link points outside your effective project")]
     ForeignScopeLink,
+    /// A cross-project transfer named a target project the caller is not authenticated to — its
+    /// connecting peer does not run there — so it is refused rather than moving content into a
+    /// project the caller cannot reach (the never-widen-scope discipline). Over MCP a session
+    /// authenticates to a single project, so a genuine cross-project transfer is refused here; the
+    /// reachable path is the local/trusted surface.
+    #[error("that project is outside your authenticated scope")]
+    ForeignProject,
+    /// A transfer named a target project that is not loaded, so it is refused rather than re-keying
+    /// the aggregate to a project that does not exist (which would orphan it). The session-scoped
+    /// surface never hits this — [`authentic_scope`](Facade::authentic_scope) already proved the
+    /// target loaded — so it can only arise on the local/trusted `*_transfer_in` path.
+    #[error("no such project is loaded")]
+    UnknownProject,
     /// A durable read or write failed.
     #[error(transparent)]
     Store(#[from] StoreError),

@@ -341,6 +341,10 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .scratchpad_delete(session, &name)
             .map(IpcResponse::ScratchpadDeleted)
             .map_err(IpcError::from),
+        IpcRequest::ScratchpadTransfer { name, to_project } => facade
+            .scratchpad_transfer(session, &name, to_project)
+            .map(IpcResponse::Scratchpad)
+            .map_err(IpcError::from),
         IpcRequest::TodoCreate { doc } => facade
             .todo_create(session, doc)
             .map(IpcResponse::Todo)
@@ -368,6 +372,10 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
         IpcRequest::TodoDelete { todo } => facade
             .todo_delete(session, todo)
             .map(IpcResponse::TodoDeleted)
+            .map_err(IpcError::from),
+        IpcRequest::TodoTransfer { todo, to_project } => facade
+            .todo_transfer(session, to_project, todo)
+            .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoTagsList => facade
             .todo_tags_list(session)
