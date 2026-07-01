@@ -171,6 +171,7 @@ the UI button and the MCP tool drive.
 | `POST` | `/projects/{id}/stop-all` | Stop every live process in the project. |
 | `POST` | `/projects/{id}/restart-running` | Restart only the running processes. |
 | `POST` | `/projects/{id}/restart-all` | Bring the trusted command set up fresh. |
+| `POST` | `/projects/{id}/spawn-agent` | Launch a known agent tool as a worker (JSON body; returns the new id). |
 | `POST` | `/focus` | Raise the desktop window to the front. |
 
 The two bulk-start scopes are distinct on purpose. `start-auto` starts only the commands marked
@@ -181,6 +182,14 @@ regardless of `auto_start`. `restart-running` cycles only what is already runnin
 `/focus` is the one action that does not go through the core, because the core has no window. The
 composition root supplies the window-raising callback, so the API crate stays free of any UI
 dependency.
+
+`/projects/{id}/spawn-agent` is the one mutation that carries a request body and returns one. Post
+`{ "tool": "<name>", "args": [] }` — `tool` is an entry in the app's agent-tool registry (e.g.
+`Claude`), `args` are optional extra command-line arguments — and it launches that agent as an
+ungated worker in the project, replying `{ "id": <process id> }`. This is the local user's authority
+on the loopback socket, the same `launch_agent` the desktop launch picker drives; the spawned agent
+is a root process. An unknown tool or project is a `404`. (The session-scoped MCP `spawn_agent`,
+which nests a worker under a bound lead, stays MCP-only.)
 
 ### Bulk endpoint to core mapping
 
@@ -259,6 +268,7 @@ form `all` acts on a whole project: the sole open project when one is open, or t
 | `stop <name>` / `stop all` | `POST /processes/{id}/stop` / `POST /projects/{id}/stop-all` | |
 | `restart <name>` / `restart all` | `POST /processes/{id}/restart` / `POST /projects/{id}/restart-all` | |
 | `logs <name>` | `GET /processes/{id}/output` | `-n <count>` becomes `?lines=<count>`. |
+| `spawn <tool> [-- args]` | `GET /projects`, then `POST /projects/{id}/spawn-agent` | Resolves the project (sole, or `--project`), then launches the agent. |
 | `focus` | `POST /focus` | |
 | `open` | `POST /focus` | Solo's raise-app alias of `focus`; shares its handler. |
 

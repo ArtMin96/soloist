@@ -5,6 +5,7 @@
 use std::fmt;
 
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 use soloist_ipc::http::{
     read_runtime, DEFAULT_PORT, LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE, STATUS_FORBIDDEN,
@@ -83,6 +84,29 @@ impl Client {
             .map_err(mutation_error)
     }
 
+    /// `POST path` carrying the local-auth header and a JSON `body`, decoding the JSON response
+    /// as `T` — a mutation that takes a request body and returns data (e.g. `spawn`). Status and
+    /// transport failures map exactly as [`post`](Self::post) does.
+    pub fn post_json<B: Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T, CliError> {
+        let url = self.url(path);
+        let payload = serde_json::to_vec(body)
+            .map_err(|err| CliError::Protocol(format!("could not encode the request: {err}")))?;
+        let text = ureq::post(&url)
+            .header(LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE)
+            .header("content-type", "application/json")
+            .send(payload.as_slice())
+            .map_err(mutation_error)?
+            .body_mut()
+            .read_to_string()
+            .map_err(|err| CliError::Protocol(format!("could not read the response: {err}")))?;
+        serde_json::from_str(&text)
+            .map_err(|err| CliError::Protocol(format!("unexpected response from the API: {err}")))
+    }
+
     fn url(&self, path: &str) -> String {
         format!("{}{path}", self.base)
     }
@@ -106,7 +130,7 @@ fn mutation_error(err: ureq::Error) -> CliError {
             CliError::Request("that command is not trusted — trust it in Soloist first".to_string())
         }
         ureq::Error::StatusCode(STATUS_NOT_FOUND) => {
-            CliError::Request("no such process or project".to_string())
+            CliError::Request("no such process, project, or agent tool".to_string())
         }
         ureq::Error::StatusCode(STATUS_UNAUTHORIZED) => {
             CliError::Request("the local-auth header was rejected".to_string())

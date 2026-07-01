@@ -45,6 +45,27 @@ pub struct HttpRuntime {
     pub port: u16,
 }
 
+/// The body of `POST /projects/:id/spawn-agent`: which configured agent tool to launch as a
+/// worker in the project, and any extra arguments appended to its command line for this run.
+/// One definition the CLI serialises and the in-app server deserialises, so the wire shape
+/// stays single-source (like [`HttpRuntime`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpawnRequest {
+    /// The agent tool to launch — an entry in the app's agent-tool registry (e.g. `"Claude"`).
+    pub tool: String,
+    /// Extra arguments appended to the tool's command line for this launch.
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+/// The response to a successful `POST /projects/:id/spawn-agent`: the id of the newly spawned,
+/// started agent process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpawnResponse {
+    /// The new agent process's id.
+    pub id: u64,
+}
+
 /// The runtime file's path inside the data directory (the directory is not created here).
 pub fn runtime_file_path() -> Result<PathBuf, DataDirError> {
     Ok(data_dir()?.join(RUNTIME_FILE))

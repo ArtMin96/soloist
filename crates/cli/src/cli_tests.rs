@@ -72,6 +72,45 @@ fn focus_and_open_both_parse_to_a_raise_command() {
 }
 
 #[test]
+fn spawn_parses_a_tool_optional_project_and_trailing_args() {
+    let cli = Cli::try_parse_from([
+        "soloist",
+        "spawn",
+        "Claude",
+        "--project",
+        "storefront",
+        "--",
+        "--resume",
+    ])
+    .expect("parse");
+    let Command::Spawn {
+        tool,
+        project,
+        args,
+    } = cli.command
+    else {
+        panic!("expected spawn");
+    };
+    assert_eq!(tool, "Claude");
+    assert_eq!(project.as_deref(), Some("storefront"));
+    assert_eq!(args, vec!["--resume".to_string()]);
+
+    // The common case is just a tool: no project, no extra args.
+    let cli = Cli::try_parse_from(["soloist", "spawn", "Claude"]).expect("parse");
+    let Command::Spawn {
+        tool,
+        project,
+        args,
+    } = cli.command
+    else {
+        panic!("expected spawn");
+    };
+    assert_eq!(tool, "Claude");
+    assert_eq!(project, None);
+    assert!(args.is_empty());
+}
+
+#[test]
 fn a_missing_subcommand_is_an_error() {
     assert!(Cli::try_parse_from(["soloist"]).is_err());
 }

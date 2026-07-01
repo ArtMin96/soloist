@@ -13,9 +13,10 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::routing::post;
-use axum::Router;
+use axum::{Json, Router};
 
-use soloist_core::{ProcessId, ProjectId, SupervisorError};
+use soloist_core::{LaunchAgentError, ProcessId, ProjectId, SupervisorError};
+use soloist_ipc::http::{SpawnRequest, SpawnResponse};
 
 use crate::auth::require_local_auth;
 use crate::state::ApiState;
@@ -33,6 +34,7 @@ pub fn router() -> Router<ApiState> {
         .route("/projects/{id}/stop-all", post(stop_all))
         .route("/projects/{id}/restart-running", post(restart_running))
         .route("/projects/{id}/restart-all", post(restart_all))
+        .route("/projects/{id}/spawn-agent", post(spawn_agent))
         .route("/focus", post(focus))
         .route_layer(middleware::from_fn(require_local_auth))
 }
@@ -131,4 +133,34 @@ async fn restart_all(State(state): State<ApiState>, Path(id): Path<u64>) -> Stat
 async fn focus(State(state): State<ApiState>) -> StatusCode {
     state.focus();
     StatusCode::OK
+}
+
+/// `POST /projects/:id/spawn-agent` — launches a **known** configured agent tool as a worker in
+/// the project and starts it, returning the new process's id. Routes to the same
+/// [`Facade::launch_agent`] the desktop launch picker drives — the local user's authority on the
+/// loopback socket (an ungated `Agent`-kind process), not the session-scoped MCP `spawn_agent`,
+/// which stays MCP-only. An unknown tool or project is a `404`.
+async fn spawn_agent(
+    State(state): State<ApiState>,
+    Path(id): Path<u64>,
+    Json(body): Json<SpawnRequest>,
+) -> Result<Json<SpawnResponse>, StatusCode> {
+    match state
+        .facade()
+        .launch_agent(ProjectId::from_raw(id), &body.tool, body.args)
+    {
+        Ok(process) => Ok(Json(SpawnResponse { id: process.get() })),
+        Err(err) => Err(launch_status(&err)),
+    }
+}
+
+/// Maps an agent-launch failure to the status the adapter returns: an unknown tool or project is
+/// `404`, and a durable-store or supervisor failure is `500`.
+fn launch_status(err: &LaunchAgentError) -> StatusCode {
+    match err {
+        LaunchAgentError::UnknownTool | LaunchAgentError::UnknownProject => StatusCode::NOT_FOUND,
+        LaunchAgentError::Store(_) | LaunchAgentError::Supervisor(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }

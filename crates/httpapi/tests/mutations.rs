@@ -13,11 +13,17 @@ use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 use tower::ServiceExt;
 
-use soloist_core::testing::{terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
-use soloist_core::{CorePorts, DomainEvent, Facade, ProcStatus, ProcessId, ProjectId, TokioClock};
+use soloist_core::testing::{
+    terminal_registration, FakeAgentToolRepo, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
+};
+use soloist_core::{
+    AgentTool, CorePorts, DomainEvent, Facade, ProcStatus, ProcessId, ProcessKind, ProjectId,
+    TokioClock,
+};
 use soloist_httpapi::{router, ApiState, FocusFn};
 use soloist_ipc::http::{
-    LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE, STATUS_FORBIDDEN, STATUS_NOT_FOUND, STATUS_UNAUTHORIZED,
+    SpawnResponse, LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE, STATUS_FORBIDDEN, STATUS_NOT_FOUND,
+    STATUS_UNAUTHORIZED,
 };
 
 /// The header pair an authorized mutation carries.
@@ -43,6 +49,26 @@ fn facade_with_terminal() -> (Arc<Facade>, ProcessId) {
     (facade, id)
 }
 
+/// A façade seeded with the built-in agent tools and one loaded (empty) project, returning the
+/// façade, the project id, and the temp dir to keep alive — the setup `spawn-agent` needs.
+fn facade_with_agent_tool() -> (Arc<Facade>, ProjectId, tempfile::TempDir) {
+    let facade = Arc::new(Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .agent_tools(Arc::new(FakeAgentToolRepo::new(
+            AgentTool::builtin_defaults(),
+        )))
+        .build(),
+    ));
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load project");
+    (facade, project.id, dir)
+}
+
 /// A `POST` request to `uri` carrying each given header.
 fn post(uri: &str, headers: &[(&str, &str)]) -> Request<Body> {
     let mut builder = Request::builder().method("POST").uri(uri);
@@ -50,6 +76,18 @@ fn post(uri: &str, headers: &[(&str, &str)]) -> Request<Body> {
         builder = builder.header(*name, *value);
     }
     builder.body(Body::empty()).expect("request")
+}
+
+/// A `POST` request to `uri` with a JSON `body` and each given header.
+fn post_json(uri: &str, headers: &[(&str, &str)], body: &str) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/json");
+    for (name, value) in headers {
+        builder = builder.header(*name, *value);
+    }
+    builder.body(Body::from(body.to_string())).expect("request")
 }
 
 /// Waits (bounded) for `id` to reach `target` on the event bus, so a state-changing mutation
@@ -182,6 +220,63 @@ async fn focus_without_auth_is_rejected_before_the_handler_runs() {
         !raised.load(Ordering::SeqCst),
         "the gate rejects before the focus callback can fire"
     );
+}
+
+#[tokio::test]
+async fn spawn_agent_launches_a_known_tool_and_returns_its_id() {
+    let (facade, project, _dir) = facade_with_agent_tool();
+    let app = router(ApiState::new(Arc::clone(&facade)));
+    let response = app
+        .oneshot(post_json(
+            &format!("/projects/{}/spawn-agent", project.get()),
+            &[AUTH],
+            r#"{"tool":"Claude","args":[]}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let spawned: SpawnResponse = serde_json::from_slice(&body).expect("spawn response");
+    // The returned id names a real, newly-registered Agent process in the stack.
+    assert!(
+        facade
+            .snapshot()
+            .iter()
+            .any(|p| p.id.get() == spawned.id && p.kind == ProcessKind::Agent),
+        "the spawned id is a registered Agent process"
+    );
+}
+
+#[tokio::test]
+async fn spawn_agent_with_an_unknown_tool_is_404() {
+    let (facade, project, _dir) = facade_with_agent_tool();
+    let app = router(ApiState::new(facade));
+    let response = app
+        .oneshot(post_json(
+            &format!("/projects/{}/spawn-agent", project.get()),
+            &[AUTH],
+            r#"{"tool":"Nonexistent"}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn spawn_agent_without_auth_is_rejected() {
+    let (facade, project, _dir) = facade_with_agent_tool();
+    let app = router(ApiState::new(facade));
+    let response = app
+        .oneshot(post_json(
+            &format!("/projects/{}/spawn-agent", project.get()),
+            &[],
+            r#"{"tool":"Claude"}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[test]
