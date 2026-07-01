@@ -19,6 +19,8 @@ parity walk (Phase 13).
    auto-appear; fuzzy filter; Enter runs.
 2. **Jump palettes (I3):** `Ctrl+E` quick-jump to any destination (process/project/todo/scratchpad);
    `Ctrl+Shift+E` attention-jump (unread only); copy link (`Ctrl+C`) yields a `soloist://` URL.
+   *Delivered (2026-06-30, partial): `Ctrl+E` quick-jump across processes + open projects; attention-jump,
+   todo/scratchpad targets, and the copy-link remain deferred (D-12).*
 3. **Deep links (I4):** register the `soloist://` scheme; opening a link navigates to the target
    (project/process/todo/scratchpad).
 4. **Theming (I5):** finalize the CSS-variable tokens (Phase 0) → light/dark/**system**
