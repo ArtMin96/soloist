@@ -12,12 +12,18 @@ export interface ProcessSignal {
   metrics?: ProcessMetrics;
   attempt?: number;
   activity?: AgentActivity;
+  summary?: string;
 }
 
 /** The telemetry for one process: its latest CPU/memory reading, current auto-restart
- *  attempt, and (for a running agent) its current activity — each `undefined` until one
- *  arrives. */
+ *  attempt, and (for a running agent) its current activity and latest idle summary — each
+ *  `undefined` until one arrives. */
 export function useSignal(id: number): ProcessSignal {
-  const { metrics, attempts, activity } = useContext(SignalsContext);
-  return { metrics: metrics.get(id), attempt: attempts.get(id), activity: activity.get(id) };
+  const { metrics, attempts, activity, summary } = useContext(SignalsContext);
+  return {
+    metrics: metrics.get(id),
+    attempt: attempts.get(id),
+    activity: activity.get(id),
+    summary: summary.get(id),
+  };
 }

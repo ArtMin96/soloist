@@ -82,6 +82,9 @@
    * content-height var, paired with the chevron rotation, so a group unfolds rather than snaps. */
   --animate-disclose-down: disclose-down var(--dur-control) var(--ease-spring-settle);
   --animate-disclose-up: disclose-up var(--dur-control) var(--ease-spring-settle);
+  /* Agent idle summary caption: a quiet appear of incidental signal (a settle + fade on the
+   * incidental-fade curve), never the default cross-fade — reduced-motion drops it (motion-safe). */
+  --animate-summary-in: summary-in var(--dur-select) var(--ease-out-quint);
   --color-status-running: var(--status-running);
   --color-status-transition: var(--status-transition);
   --color-status-stopped: var(--status-stopped);
@@ -309,5 +312,16 @@
   }
   to {
     height: 0;
+  }
+}
+
+@keyframes summary-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

@@ -79,7 +79,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | E3 | Per-tool: name, command, default args, prompt mode | ✅ | 7 | v1 | Defaults applied on launch |
 | E4 | Launch picker (`Cmd/Ctrl+T`) + "agent with flags" modal | ✅ | 7 | v1 | Launch with edited flags |
 | E5 | 5-state idle detection (IDLE/PERMISSION/THINKING/WORKING/ERROR) | ✅ | 7 | v1 | State tracks a real agent |
-| E6 | Optional auto-summarization (headless, degradable) | ✅❓ | 7 | later | Summary when enabled; disabled OK |
+| E6 | Optional auto-summarization (headless, degradable) | ✅❓ | 7 | later | Summary when enabled; disabled OK. **Implemented 2026-07-01** (built ahead of `later` at owner request): per-provider headless Strategy + `SummaryRunner` port (Noop default) + bus-driven `SummaryReactor` + `AgentSummary` event + sidebar caption. Providers without a documented headless one-shot degrade to no-summary (KNOWN-DIVERGENCES D-13). `Done — pending verify` (owner runtime walk with a live summarizer CLI). |
 | E7 | Agents spawning agents (cross-vendor) | ✅ | 7,9 | v1 | Lead spawns a worker via MCP |
 | E8 | Agents authenticate via their **own** native flow (OAuth/API key) in the interactive PTY; Soloist manages no agent credentials | 🟡 | 7 | v1 | Fresh `claude` (no stored creds) completes its native login in its terminal; Soloist stores/injects no key/token; `$DISPLAY`/`BROWSER`/`ANTHROPIC_*` pass through |
 
