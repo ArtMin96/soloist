@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use crate::coordination::{
     LockRepo, NewTimer, RenameResult, ScratchpadDoc, ScratchpadRepo, StoredLease, StoredScratchpad,
-    StoredTimer, TimerRepo, TimerStatus, WriteResult,
+    StoredTimer, TimerRepo, TimerStatus, TransferResult, WriteResult,
 };
 use crate::ids::{ProcessId, ProjectId, ScratchpadId, TimerId};
 use crate::ports::StoreError;
@@ -194,6 +194,28 @@ impl ScratchpadRepo for FakeScratchpadRepo {
                 Ok(RenameResult::Renamed(Box::new(stored)))
             }
             None => Ok(RenameResult::NotFound),
+        }
+    }
+
+    fn transfer(
+        &self,
+        from: ProjectId,
+        name: &str,
+        to: ProjectId,
+    ) -> Result<TransferResult, StoreError> {
+        let mut rows = lock(&self.rows);
+        let to_slot = (to.get(), name.to_owned());
+        if rows.contains_key(&to_slot) {
+            return Ok(TransferResult::NameTaken);
+        }
+        match rows.remove(&(from.get(), name.to_owned())) {
+            Some(mut stored) => {
+                // Re-key the project only; the durable id, name, doc, tags, archived, revision stay.
+                stored.project = to;
+                rows.insert(to_slot, stored.clone());
+                Ok(TransferResult::Transferred(Box::new(stored)))
+            }
+            None => Ok(TransferResult::NotFound),
         }
     }
 

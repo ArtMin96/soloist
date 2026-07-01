@@ -234,9 +234,18 @@ so the discipline does not block legitimate ad-hoc content.
 revision-guarded writes. The observable difference from Solo is that a scratchpad cannot hold an
 arbitrary free-form body: a write must supply the structured fields (and pass validation), and a read
 returns both the structured doc and its canonical rendering rather than an author-formatted blob. The
-free-form-oriented tools (`_append`/`_edit`/`_append_section`/`_tail`/`_find`/`_clear`),
-cross-project `_transfer`, and the host file-io tools (`_save_to_file`/`_load_from_file`) are tracked
-deferrals (the latter behind a focused security pass), not part of this slice. Todos carry the same
+Solo tools that presuppose a free-form buffer are resolved (decided 2026-07-01), not left open: the
+free-form-oriented verbs (`_append`/`_edit`/`_append_section`/`_tail`/`_find`/`_clear`) are an
+**intentional divergence — not implemented**, because they have no clean mapping onto the disciplined
+document and some would violate its invariants (`_clear` against the non-blank rule; `_append_section`
+against the fixed sections); the revision-guarded whole-document `scratchpad_write` is the deliberate
+replacement. The host file-io tools (`_save_to_file`/`_load_from_file`) are **formally declined** — no
+MCP tool reads or writes an arbitrary host path until a dedicated project-root FS-sandbox security
+pass, which is not planned. Cross-project `_transfer` is delivered by the **O10** transfer slice
+(authenticated to both project scopes; see
+[D-6](#d-6--mcp-cross-project-scope-isolation-is-authenticated-f13--resolved)); its reachable success
+path is the local-user loopback endpoint `POST /projects/:id/transfer-scratchpad`, since an MCP
+session scoped to one project cannot authorize a genuine cross-project move. Todos carry the same
 discipline ([D-8](#d-8--todos-carry-an-enforced-disciplined-structure-and-a-blocker-gate-)). The
 clean-room per-tool semantics are recorded in `plan/05` §12.
 
@@ -281,9 +290,14 @@ a property of the schema rather than a convention. The blocker gate gives G4 a r
 blocker gates a todo), and G5 (process-owned lock, auto-releases on close) are **delivered**. The
 observable difference from Solo is that a todo cannot hold an arbitrary free-form body (a write must
 supply and pass the structured fields), and completion is gated on blockers. Cross-project
-`todo_transfer` is a **tracked deferral** — it raises the same cross-scope question as the scratchpad
-`_transfer` (D-7) and is held for the same focused follow-up; G4's Verify (the blocker gate) does not
-depend on it. The clean-room per-tool semantics are recorded in `plan/05` §12.
+`todo_transfer` is **delivered (2026-07-01, O10)**: it moves the todo to the target project keeping
+its comments and completion and clearing its blockers and lock (both reference the source project),
+authorized only when the caller is authenticated to **both** projects — a single MCP session
+authenticates to one project (D-6), so a genuine cross-project transfer over MCP is refused by
+design and the reachable success path is the local-user loopback endpoint
+`POST /projects/:id/transfer-todo` (the target must be loaded, else `UnknownProject`, so a bad id
+never orphans the todo). The clean-room per-tool semantics and the cross-scope authorization are
+recorded in `plan/05` §12.
 
 ## D-9 — A stopped resumable agent offers both Start and Resume 🟢
 

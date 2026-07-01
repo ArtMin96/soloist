@@ -157,6 +157,7 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "scratchpad_tags_list",
     "scratchpad_archive",
     "scratchpad_delete",
+    "scratchpad_transfer",
     // tools/todo.rs
     "todo_list",
     "todo_get",
@@ -164,6 +165,7 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "todo_update",
     "todo_complete",
     "todo_delete",
+    "todo_transfer",
     "todo_tags_list",
     "todo_add_tag",
     "todo_remove_tag",

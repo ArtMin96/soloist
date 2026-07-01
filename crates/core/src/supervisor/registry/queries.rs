@@ -53,6 +53,18 @@ impl Registry {
             .collect()
     }
 
+    /// The `Command` in `project` whose display label is `name`, if any — how config-reload
+    /// resolves a `solo.yml` process name to the registration to update, rename, or drop.
+    /// `solo.yml` names are unique per project, so at most one command matches; terminals and
+    /// agents are excluded (a launched process is never a config command).
+    pub(crate) fn command_id_by_name(&self, project: ProjectId, name: &str) -> Option<ProcessId> {
+        let guard = lock(&self.inner);
+        guard
+            .values()
+            .find(|entry| entry.view.is_command_in(project) && entry.view.label == name)
+            .map(|entry| entry.view.id)
+    }
+
     /// Stopped, `auto_start` commands within `project` — the candidates `start_all`
     /// trust-checks before launching.
     pub(crate) fn auto_start_candidates(&self, project: ProjectId) -> Vec<Candidate> {

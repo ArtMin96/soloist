@@ -207,6 +207,16 @@ pub(crate) struct ScratchpadArchiveArg {
     pub(crate) archived: bool,
 }
 
+/// Arguments for transferring a scratchpad to another project.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ScratchpadTransferArg {
+    /// The scratchpad's name handle in your effective project.
+    pub(crate) name: String,
+    /// The id of the destination project — you must be authenticated to it (a process you run in
+    /// belongs to it), or the transfer is refused.
+    pub(crate) to_project: u64,
+}
+
 /// The lifecycle status an agent declares on a todo — a closed set, mirroring the core
 /// `TodoStatus` on the wire; the handler converts it. Distinct from the *blocker gate*: a todo is
 /// prevented from completing by its unmet blockers, not by this label.
@@ -235,6 +245,16 @@ impl From<TodoStatusArg> for TodoStatus {
 pub(crate) struct TodoArg {
     /// The id of the todo, as returned by `todo_list` or `todo_create`.
     pub(crate) todo: u64,
+}
+
+/// Arguments for transferring a todo to another project.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoTransferArg {
+    /// The id of the todo in your effective project, as returned by `todo_list`.
+    pub(crate) todo: u64,
+    /// The id of the destination project — you must be authenticated to it (a process you run in
+    /// belongs to it), or the transfer is refused.
+    pub(crate) to_project: u64,
 }
 
 /// A reference to a todo for `todo_get`: either its numeric id or a `solo://` link someone handed

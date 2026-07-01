@@ -123,7 +123,7 @@ impl Facade {
 - **Re-implementing validation/gating in the UI** → forbidden; the UI renders the core's typed result
   and errors, never re-decides blocked-ness or revision validity ([`04` §13](../04-engineering-architecture-and-patterns.md)).
 - **Free-form drift vs the disciplined schema** → the editor is field-structured per `D-7`/`D-8`; the
-  deferred free-form tools (`_append`/`_edit`/…) are **not** pulled in here ([`05` §12](../05-solo-reference-and-sources.md)).
+  diverged free-form tools (`_append`/`_edit`/…, D-7 — not implemented) are **not** pulled in here ([`05` §12](../05-solo-reference-and-sources.md)).
 - **mermaid/markdown bundle weight** → lazy-load any heavy renderer only when a doc needs it (CLAUDE.md §6).
 
 ## Effort

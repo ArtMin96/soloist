@@ -14,7 +14,7 @@
 use rusqlite::{Connection, OptionalExtension, Row};
 use soloist_core::{
     ProjectId, RenameResult, ScratchpadDoc, ScratchpadId, ScratchpadRepo, StoreError,
-    StoredScratchpad, WriteResult,
+    StoredScratchpad, TransferResult, WriteResult,
 };
 
 use crate::{sql_err, SqliteStore};
@@ -177,6 +177,34 @@ impl ScratchpadRepo for SqliteStore {
             )
             .map(|rows| rows > 0)
             .map_err(sql_err)
+    }
+
+    fn transfer(
+        &self,
+        from: ProjectId,
+        name: &str,
+        to: ProjectId,
+    ) -> Result<TransferResult, StoreError> {
+        let conn = self.lock();
+        // Reject a name already used in the target before the update (clearer than the UNIQUE
+        // violation), and do both under one guard so a move and a create cannot both take the name.
+        if current_revision(&conn, to, name)?.is_some() {
+            return Ok(TransferResult::NameTaken);
+        }
+        // Re-key the project only; the durable id, name, document, tags, archived flag, and revision
+        // all ride along unchanged.
+        let updated = conn
+            .execute(
+                "UPDATE scratchpads SET project_id = ?3 WHERE project_id = ?1 AND name = ?2",
+                (from.get() as i64, name, to.get() as i64),
+            )
+            .map_err(sql_err)?;
+        if updated == 0 {
+            return Ok(TransferResult::NotFound);
+        }
+        read_one(&conn, to, name)?
+            .map(|stored| TransferResult::Transferred(Box::new(stored)))
+            .ok_or_else(|| StoreError::Backend("scratchpad vanished after transfer".into()))
     }
 }
 
