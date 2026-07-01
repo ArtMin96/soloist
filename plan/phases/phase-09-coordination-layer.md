@@ -25,6 +25,11 @@ separate from ephemeral process state.
    (+ `_edit/_append_section/_tail/_find`). **Revision-guarded writes:** `_write` takes
    `expected_revision`; mismatch → `RevisionConflict` (`04` §7). Leading H1 = title; read modes
    full/headings/section.
+   > **Resolved 2026-07-01 (D-7 / `05` §12):** the free-form verbs
+   > (`_append`/`_edit`/`_append_section`/`_tail`/`_find`/`_clear`) and file-io
+   > (`_save_to_file`/`_load_from_file`) were **not** built — intentional divergence / formally
+   > declined; the disciplined-document subset shipped (revision-guarded `_write`), and `_transfer`
+   > lands via O10.
 2. **Todos (G3/G4/G5, ref §7):** `TodoRepo`; `todo_create/list/get/update/complete/delete`, tags,
    **blockers** (`_set_blockers/_add_blocker/_remove_blocker` — a todo is gated until blockers complete),
    comments (`_comment_create/update/delete/list`), `todo_transfer` (preserves comments/completion,

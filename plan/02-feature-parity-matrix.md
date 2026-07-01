@@ -106,7 +106,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 
 | ID | Feature | Src | Phase | Target | Verify |
 |----|---------|-----|------:|--------|--------|
-| G1 | Scratchpads CRUD + tags/append/archive/transfer/file-io | ✅ | 9 | v1 | Read/write a scratchpad |
+| G1 | Scratchpads CRUD + tags/archive (disciplined doc — free-form/file-io diverged, D-7; transfer→O10) | ✅ | 9 | v1 | Read/write a scratchpad |
 | G2 | Scratchpad **revision-guarded** writes | ✅ | 9 | v1 | Stale write → conflict |
 | G3 | Todos: create/list/get/update/complete/delete | ✅ | 9 | v1 | CRUD a todo |
 | G4 | Todo tags, **blockers**, comments, transfer | ✅ | 9 | v1 | Blocker gates a todo |
