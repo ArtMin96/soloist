@@ -1,15 +1,7 @@
 import { useEffect } from "react";
-import { bindingFromEvent, bindingsEqual, hasCommandModifier } from "@/lib/hotkeys";
+import { bindingFromEvent, hasCommandModifier, isEditableTarget, matchHotkey } from "@/lib/hotkeys";
 import { useHotkeys } from "@/store/hotkeysContext";
 import type { HotkeyAction } from "@/domain";
-
-// True when the event originates in a text-editing surface (an input, textarea, or
-// contenteditable — the terminal's helper textarea included), where a bare-key shortcut must
-// yield to typing.
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
-}
 
 // The live keyboard handler, driven by the remappable keymap (closes I6): a keydown is matched
 // against the enabled General-scope bindings, and the matching action's handler runs if one is
@@ -26,17 +18,12 @@ export function useGlobalHotkeys(handlers: Partial<Record<HotkeyAction, () => vo
       // A bare-key shortcut must not fire while the user is typing in a field; command-modifier
       // shortcuts (Ctrl/Alt/Super) still work everywhere, as in a native app.
       if (!hasCommandModifier(pressed) && isEditableTarget(event.target)) return;
-      for (const row of bindings) {
-        if (row.scope !== "general" || !row.binding) continue;
-        if (!bindingsEqual(row.binding, pressed)) continue;
-        const handler = handlers[row.action];
-        // Skip a matching but unwired action so it can't swallow a chord a later, handled action
-        // is bound to (a user-made conflict otherwise loses the working binding to array order).
-        if (!handler) continue;
-        event.preventDefault();
-        handler();
-        return;
-      }
+      // Require a wired action so a matching but unwired chord can't swallow a chord a later,
+      // handled action is bound to (a user-made conflict otherwise loses the working binding).
+      const action = matchHotkey(bindings, "general", pressed, (a) => handlers[a] != null);
+      if (!action) return;
+      event.preventDefault();
+      handlers[action]?.();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

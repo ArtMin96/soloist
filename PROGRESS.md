@@ -27,6 +27,51 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Phase 11 — I2 command palette (Ctrl+K) + hotkey/palette refactor (branch `feat/hotkey-palettes`,
+  PR #53 stacked on #52) — CODE-COMPLETE & gate-green (2026-06-30); only the user-only real-window
+  walk remains.** Reviewed PR #53 (the `quick_jump`/Ctrl+E, `quick_actions`/Ctrl+P,
+  `open_terminal_search`/Ctrl+F palettes) at the owner's request, fixed its
+  duplication/separation/reusability, and delivered the **missing I2 (`open_command_palette`,
+  Ctrl+K)**. Code is the source of truth — those three palettes are implemented and intended
+  (plan/05 §10 documents `Cmd+K`/`Cmd+P`/`Cmd+E`/`Cmd+F`; §12 records the `quick_actions`/`quick_jump`
+  gap decisions), so the stale phase-doc "out-of-scope" framing was ignored. UI-only except one core
+  enum scope move. What landed:
+  - **Baseline was red, now green:** `AgentPicker.test.tsx` passed a removed `activeProjectId` prop
+    (a `tsc` error) and `FindBar.tsx:31` had a `no-unused-expressions` eslint error — both
+    pre-existing on the branch, masked because vitest doesn't typecheck. Fixed; the two
+    `exhaustive-deps` warnings (App, useTerminalHotkeys) are also resolved.
+  - **Bug found & fixed — Ctrl+F was dead:** `open_terminal_search` was `General`-scoped in core but
+    only dispatched in the terminal-scope branch of `useTerminalHotkeys` (unreachable) and absent
+    from App's global handlers — so Ctrl+F never opened the FindBar and leaked to the shell. Moved
+    the action to **Terminal scope** in `core::settings::hotkeys` (enum + `ALL` + `scope()`), where
+    its handler lives; locked with `terminal_search_is_a_terminal_scope_action`.
+  - **I2 — command palette (Ctrl+K):** a pure registry `lib/commands.ts` (`buildCommands`) over real
+    wired capabilities — new agent/terminal, open project, open settings, theme Light/Dark/System,
+    per-project Start-all/Stop-all/Restart-running + open settings/orchestration, and per-process
+    focus + status-aware actions — rendered by `CommandPalette.tsx` on the shared shell and wired to
+    `open_command_palette` in App. A new command is one registry entry (auto-appears).
+  - **Refactor (the owner's dup/separation/reusability concern):** one `lib/processActions.ts`
+    single-sources action availability (consumed by `ProcessControls` + QuickActions + the registry;
+    fixed a latent resume-while-untrusted inconsistency); a new `components/palette/`
+    (`PaletteFooter`/`PaletteHint`, `CommandPaletteShell`, `ProcessCommandItem`, `useCommandAction`)
+    removes the 3× footer copies and the palettes' duplicated skeleton (AgentPicker, QuickJump,
+    QuickActions, CommandPalette all share them); QuickJump uses the shared `Avatar` (was a
+    hand-rolled monogram chip) + single-sourced `KIND_LABELS` (was a `Record<string,string>` magic
+    map); one `matchHotkey` in `lib/hotkeys.ts` replaces the triplicated chord-match loop across the
+    global/sidebar/terminal hooks (skip-unwired semantics preserved).
+  - **Tests (were zero for any palette):** +30 UI tests — `processActions`, `commands` registry,
+    `CommandPalette`, `QuickJump`, `QuickActions`, `FindBar` — exercising real behaviour.
+  - **Gate (evidence, 2026-06-30):** `just lint` green end-to-end — `cargo fmt --check`, `cargo
+    clippy --workspace --all-targets -D warnings`, `tsc --noEmit`, `eslint .`, `prettier --check`,
+    dep-direction, `config::schema` all pass (file-size advisory only — pre-existing). UI **vitest
+    212 passed (45 files)** (up from 182/39); Rust **core 468 passed**.
+  - **Remaining (user-only):** the real-window walk — Ctrl+K opens the command palette and an action
+    runs (I2 Verify "Run any action"); Ctrl+F opens/closes the FindBar in a focused terminal; Esc
+    closes each. No display in this environment. The owner slices commits/PRs (stacked-PR-per-change,
+    no self-merge). Review follow-up: the incidental harness `.agents/skills/shadcn/*` upgrade was
+    reverted to base and the harness `skills-lock.json` removed + gitignored, so the branch carries
+    only the hotkey/palette feature.
+
 - **Native-macOS UI redesign (branch `feat/macos-redesign`) — continuation pass CODE-COMPLETE &
   gate-green (2026-06-30); only the user-only real-window motion walk remains.** Builds on the prior
   session's motion + token foundation (`73fc8ea`, `a51f811`, `b813f75`, `a8982ec`). This pass brought the

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { History, Play, RotateCw, ShieldCheck, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { canRestart, canStart, canStop } from "@/lib/status";
+import { processActions } from "@/lib/processActions";
 import type { ProcStatus } from "@/domain";
 
 type ControlSize = "icon-xs" | "icon-sm";
@@ -38,35 +38,34 @@ export function ProcessControls({
   resumable = false,
   onResume,
 }: ProcessControlsProps) {
+  // The same single source the palettes read decides which actions are live; the cluster shows the
+  // full set of affordances and disables the ones that aren't currently runnable, so it never
+  // reflows as a process changes state.
+  const available = new Set(processActions({ status, requiresTrust, resumable }));
   return (
     <div className="flex items-center gap-0.5">
       {requiresTrust && onTrust && (
-        <Control label="Trust" size={size} disabled={false} onClick={onTrust}>
+        <Control label="Trust" size={size} disabled={!available.has("trust")} onClick={onTrust}>
           <ShieldCheck />
         </Control>
       )}
-      <Control
-        label="Start"
-        size={size}
-        disabled={!canStart(status) || requiresTrust}
-        onClick={onStart}
-      >
+      <Control label="Start" size={size} disabled={!available.has("start")} onClick={onStart}>
         <Play />
       </Control>
       {resumable && onResume && (
         <Control
           label="Resume last session"
           size={size}
-          disabled={!canStart(status)}
+          disabled={!available.has("resume")}
           onClick={onResume}
         >
           <History />
         </Control>
       )}
-      <Control label="Restart" size={size} disabled={!canRestart(status)} onClick={onRestart}>
+      <Control label="Restart" size={size} disabled={!available.has("restart")} onClick={onRestart}>
         <RotateCw />
       </Control>
-      <Control label="Stop" size={size} disabled={!canStop(status)} onClick={onStop}>
+      <Control label="Stop" size={size} disabled={!available.has("stop")} onClick={onStop}>
         <Square />
       </Control>
     </div>

@@ -10,6 +10,15 @@ export const GROUP_LABELS: Record<ProcessKind, string> = {
   Command: "Commands",
 };
 
+// The singular noun for one process's kind — used where a single process is labelled (e.g. a
+// palette row badge), as opposed to the plural section headings above. One source so no surface
+// emits a bare `ProcessKind` token.
+export const KIND_LABELS: Record<ProcessKind, string> = {
+  Agent: "Agent",
+  Terminal: "Terminal",
+  Command: "Command",
+};
+
 export interface ProcessGroup {
   kind: ProcessKind;
   label: string;

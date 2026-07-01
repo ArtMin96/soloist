@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { ptyAttach, ptyDetach, ptyResize, ptyWrite } from "@/api";
@@ -11,6 +12,13 @@ import type { ProcessView } from "@/domain";
 
 export type TerminalState = "attaching" | "live" | "not-started";
 
+/** Stable API for in-terminal text search — backed by SearchAddon once mounted. */
+export interface TerminalSearch {
+  findNext: (query: string) => void;
+  findPrevious: (query: string) => void;
+  clear: () => void;
+}
+
 // Owns one xterm.js instance bound to the selected process: it replays the raw scrollback
 // then streams live PTY bytes (coalesced per animation frame so a chatty process can't
 // thrash the main thread), routes keystrokes back via `pty_write`, and keeps the PTY
@@ -21,6 +29,7 @@ export function useTerminal(process: ProcessView) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const searchRef = useRef<SearchAddon | null>(null);
   const attachedRef = useRef(false);
   // The id of the pending coalescing frame, so unmount can cancel it before disposing the terminal
   // (otherwise a frame scheduled in the last ~16 ms would write to a disposed emulator).
@@ -90,10 +99,13 @@ export function useTerminal(process: ProcessView) {
       ...terminalOptions(seed.appearance, seed.dark),
     });
     const fit = new FitAddon();
+    const search = new SearchAddon();
     term.loadAddon(fit);
+    term.loadAddon(search);
     term.open(host);
     termRef.current = term;
     fitRef.current = fit;
+    searchRef.current = search;
     attachedRef.current = false;
 
     // Swap in the GPU (WebGL) renderer now that the terminal is in the DOM. The load is
@@ -128,6 +140,7 @@ export function useTerminal(process: ProcessView) {
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      searchRef.current = null;
       attachedRef.current = false;
     };
   }, [id, attach, syncSize]);
@@ -164,5 +177,21 @@ export function useTerminal(process: ProcessView) {
     if (isActive(process.status)) syncSize();
   }, [process.status, syncSize]);
 
-  return { hostRef, state };
+  // Stable search callbacks — backed by the SearchAddon ref so callers don't need to
+  // re-subscribe when the terminal remounts (stable reference, latest addon via ref).
+  const findNext = useCallback((query: string) => {
+    searchRef.current?.findNext(query, { incremental: true, caseSensitive: false, regex: false });
+  }, []);
+
+  const findPrevious = useCallback((query: string) => {
+    // No `incremental` here: the addon expands the current selection only for `findNext`; on
+    // `findPrevious` it must step to the prior match, so the flag is deliberately omitted.
+    searchRef.current?.findPrevious(query, { caseSensitive: false, regex: false });
+  }, []);
+
+  const clearSearch = useCallback(() => {
+    searchRef.current?.clearDecorations();
+  }, []);
+
+  return { hostRef, state, search: { findNext, findPrevious, clear: clearSearch } };
 }

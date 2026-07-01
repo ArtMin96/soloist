@@ -24,6 +24,8 @@ dist-ssr/
 .claude/evolution/
 .claude/spec.md
 .claude/features.json
+# harness-generated skill lockfile — regenerated per session, never committed
+skills-lock.json
 
 # ---- OS / editor cruft ----
 .DS_Store

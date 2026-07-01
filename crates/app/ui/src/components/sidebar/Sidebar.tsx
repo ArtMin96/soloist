@@ -1,5 +1,6 @@
 import { Settings } from "lucide-react";
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
+import { useSidebarHotkeys } from "@/components/sidebar/useSidebarHotkeys";
 import { Button } from "@/components/ui/button";
 import { groupByProject, kindCollapseKey, projectCollapseKey } from "@/store/projects";
 import { useCollapseState } from "@/store/useCollapseState";
@@ -47,10 +48,22 @@ export function Sidebar({
   const { sidebar } = useSidebarSettings();
   const trees = groupByProject(processes, projects, sidebar.hide_empty_sections);
   const [collapsed, setCollapsed] = useCollapseState();
+  const handleNavKeyDown = useSidebarHotkeys({
+    trees,
+    selectedId,
+    setCollapsed,
+    onSelect,
+    onRestart,
+  });
 
   return (
     <div className="flex w-64 shrink-0 flex-col border-r bg-sidebar">
-      <nav aria-label="Projects" className="min-h-0 flex-1 overflow-y-auto p-2">
+      <nav
+        aria-label="Projects"
+        className="min-h-0 flex-1 overflow-y-auto p-2"
+        tabIndex={0}
+        onKeyDown={handleNavKeyDown}
+      >
         {trees.map((tree, index) => (
           <div key={tree.project.id} className={index > 0 ? "mt-1 border-t pt-1" : undefined}>
             <ProjectGroup
