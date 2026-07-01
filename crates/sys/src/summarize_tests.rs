@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use soloist_core::{SummaryError, SummaryInvocation, SummaryRunner};
@@ -25,6 +26,20 @@ fn run(command_line: &str, stdin: Option<&str>) -> Result<String, SummaryError> 
 fn captures_the_commands_stdout() {
     let out = run("printf 'summary line'", None).expect("command runs");
     assert_eq!(out, "summary line");
+}
+
+#[test]
+fn runs_in_a_fresh_isolated_working_directory_and_cleans_it_up() {
+    // `pwd -P` reports the real cwd: the runner's isolated dir, not the process's own directory —
+    // so a summarizer CLI cannot read the app's project context (CLAUDE.md, memory, sessions).
+    let dir = run("pwd -P", None).expect("command runs");
+    let dir = dir.trim();
+    assert!(
+        dir.contains("soloist-summarizer-"),
+        "ran in the isolated dir, got {dir}"
+    );
+    // The isolated dir is removed once the run returns — no leak.
+    assert!(!Path::new(dir).exists(), "the isolated dir is cleaned up");
 }
 
 #[test]
