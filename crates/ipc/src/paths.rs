@@ -13,6 +13,12 @@ use std::path::PathBuf;
 /// The Unix-socket file the app listens on and the MCP server connects to.
 const SOCKET_FILE: &str = "soloist-ipc.sock";
 
+/// The environment variable that overrides the data directory — the single source of its
+/// name. A generated MCP client snippet must carry it when it is set (the helper is
+/// launched by the MCP host with a fresh environment, so without it the helper would
+/// resolve a different directory and miss the socket).
+pub const DATA_DIR_ENV: &str = "SOLOIST_APP_DATA_DIR";
+
 /// Owner-only permissions (`rwx------`) for the data directory. The IPC socket lives
 /// inside it, and connecting to a Unix socket requires search (`x`) on every path
 /// component — so denying other local users access to the directory is what keeps them
@@ -22,13 +28,13 @@ const DATA_DIR_MODE: u32 = 0o700;
 
 /// Why the data directory could not be resolved: no usable location is configured.
 #[derive(Debug, thiserror::Error)]
-#[error("cannot resolve the data directory: set SOLOIST_APP_DATA_DIR or HOME")]
+#[error("cannot resolve the data directory: set {DATA_DIR_ENV} or HOME")]
 pub struct DataDirError;
 
 /// Soloist's per-user data directory: `$SOLOIST_APP_DATA_DIR`, else
 /// `$XDG_DATA_HOME/soloist`, else `$HOME/.local/share/soloist`.
 pub fn data_dir() -> Result<PathBuf, DataDirError> {
-    if let Some(dir) = std::env::var_os("SOLOIST_APP_DATA_DIR") {
+    if let Some(dir) = std::env::var_os(DATA_DIR_ENV) {
         return Ok(PathBuf::from(dir));
     }
     if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
@@ -40,6 +46,12 @@ pub fn data_dir() -> Result<PathBuf, DataDirError> {
         return Ok(PathBuf::from(home).join(".local/share/soloist"));
     }
     Err(DataDirError)
+}
+
+/// Whether the data directory is overridden via [`DATA_DIR_ENV`] — the signal that a
+/// generated client snippet must carry the variable for the helper to find the socket.
+pub fn data_dir_overridden() -> bool {
+    std::env::var_os(DATA_DIR_ENV).is_some()
 }
 
 /// The IPC socket path inside the data directory.

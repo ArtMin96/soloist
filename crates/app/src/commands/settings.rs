@@ -161,3 +161,48 @@ pub async fn set_mcp_tool_group(
         .set_mcp_tool_group(group, enabled)
         .map_err(|err| err.to_string())
 }
+
+/// The soloist-mcp helper binary's file name — resolved as a sibling of the app binary
+/// when present, else assumed reachable on PATH.
+const MCP_HELPER_BIN: &str = "soloist-mcp";
+
+/// What a generated MCP client snippet needs: the helper command and the data-directory
+/// facts. Presentation data for the Integrations panel, resolved app-side because the
+/// binary's own location is an adapter concern, not domain state.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct McpSetupInfo {
+    /// The command a client should launch: the absolute path to the helper next to this
+    /// binary when it exists there, else the bare name (PATH lookup).
+    pub helper_path: String,
+    /// The resolved data directory, for display beside the snippet.
+    pub data_dir: String,
+    /// Whether the data directory is overridden via the environment — when true, every
+    /// snippet must carry the variable or the helper would miss the socket.
+    pub data_dir_overridden: bool,
+}
+
+/// The helper command for a snippet, given this binary's own path: the sibling
+/// `soloist-mcp` when it exists (a packaged or `cargo build` layout), else the bare name.
+fn helper_command(exe: Option<std::path::PathBuf>) -> String {
+    exe.as_deref()
+        .and_then(std::path::Path::parent)
+        .map(|dir| dir.join(MCP_HELPER_BIN))
+        .filter(|sibling| sibling.exists())
+        .map(|sibling| sibling.display().to_string())
+        .unwrap_or_else(|| MCP_HELPER_BIN.to_owned())
+}
+
+/// The facts the Integrations panel renders MCP client snippets from.
+#[tauri::command]
+pub async fn mcp_setup_info() -> Result<McpSetupInfo, String> {
+    let data_dir = soloist_ipc::data_dir().map_err(|err| err.to_string())?;
+    Ok(McpSetupInfo {
+        helper_path: helper_command(std::env::current_exe().ok()),
+        data_dir: data_dir.display().to_string(),
+        data_dir_overridden: soloist_ipc::data_dir_overridden(),
+    })
+}
+
+#[cfg(test)]
+#[path = "settings_tests.rs"]
+mod tests;

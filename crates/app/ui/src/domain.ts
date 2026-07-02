@@ -530,6 +530,15 @@ export interface McpToolGroups {
   key_value: boolean;
 }
 
+// What a generated MCP client snippet needs (mirrors the app's McpSetupInfo): the helper command
+// (absolute when installed beside the app binary, else the bare name) and the data-directory
+// facts — when overridden, every snippet must carry the env var or the helper misses the socket.
+export interface McpSetupInfo {
+  helper_path: string;
+  data_dir: string;
+  data_dir_overridden: boolean;
+}
+
 // ── Per-project settings (mirrors core::settings::project + core::projects::page) ────────────
 // The durable, app-local preference surface for one project plus the assembled settings-page read
 // model. Field names match the core's serde output; the command-spec fields on `ProcessSpec` are
