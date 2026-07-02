@@ -1,9 +1,10 @@
 use super::*;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, FeedbackEntry, FireCond, IntegrationFile,
-    IntegrationWrite, LeaseView, Origin, ProcStatus, ProcessId, ProcessKind, ProcessView,
-    ProjectId, ProjectView, PromptMode, Readiness, SessionId, SetWhenIdleOutcome, StartSummary,
-    TimerId, TimerStatus, TimerView, Whoami,
+    AcquireOutcome, AgentKind, AgentTool, ExportedPromptTemplate, FeedbackEntry, FireCond,
+    IntegrationFile, IntegrationWrite, LeaseView, Origin, ProcStatus, ProcessId, ProcessKind,
+    ProcessView, ProjectId, ProjectView, PromptMode, PromptScope, PromptTemplateId,
+    PromptTemplateSummary, PromptTemplateView, Readiness, SessionId, SetWhenIdleOutcome,
+    StartSummary, TimerId, TimerStatus, TimerView, Whoami,
 };
 use std::path::PathBuf;
 
@@ -154,6 +155,35 @@ fn requests_round_trip_through_json() {
         IpcRequest::SetupAgentIntegration {
             file: IntegrationFile::AgentsMd,
         },
+        IpcRequest::PromptTemplateList { scope: None },
+        IpcRequest::PromptTemplateList {
+            scope: Some(PromptScope::Global),
+        },
+        IpcRequest::PromptTemplateRead {
+            scope: PromptScope::Project,
+            name: "review".into(),
+        },
+        IpcRequest::PromptTemplateCreate {
+            scope: PromptScope::Global,
+            name: "review".into(),
+            description: Some("PR review".into()),
+            body: "Review {{diff}}".into(),
+        },
+        IpcRequest::PromptTemplateUpdate {
+            scope: PromptScope::Project,
+            name: "review".into(),
+            description: None,
+            body: "Review {{diff}} for {{focus}}".into(),
+            expected_revision: 2,
+        },
+        IpcRequest::PromptTemplateDelete {
+            scope: PromptScope::Project,
+            name: "review".into(),
+        },
+        IpcRequest::PromptTemplateExport {
+            scope: PromptScope::Global,
+            name: "review".into(),
+        },
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -286,6 +316,30 @@ fn every_response_variant_round_trips_through_json() {
         IpcResponse::IntegrationWritten(IntegrationWrite {
             path: PathBuf::from("/projects/storefront/CLAUDE.md"),
             created: true,
+        }),
+        IpcResponse::PromptTemplate(PromptTemplateView {
+            id: PromptTemplateId::from_raw(4),
+            name: "review".into(),
+            description: Some("PR review".into()),
+            body: "Review {{diff}}".into(),
+            placeholders: vec!["diff".into()],
+            scope: PromptScope::Project,
+            revision: 1,
+        }),
+        IpcResponse::PromptTemplates(vec![PromptTemplateSummary {
+            id: PromptTemplateId::from_raw(4),
+            name: "review".into(),
+            description: None,
+            placeholders: vec!["diff".into()],
+            scope: PromptScope::Global,
+            revision: 3,
+        }]),
+        IpcResponse::PromptTemplateDeleted(true),
+        IpcResponse::PromptTemplateExport(ExportedPromptTemplate {
+            format: "soloist.prompt-template/v1".into(),
+            name: "review".into(),
+            description: None,
+            body: "Review {{diff}}".into(),
         }),
     ];
     for response in responses {

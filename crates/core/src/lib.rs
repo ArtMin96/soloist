@@ -59,14 +59,16 @@ pub use config::{
     SyncError, TrustReviewCommand,
 };
 pub use coordination::{
-    is_link, AcquireOutcome, Comment, CommentAuthor, CommentEdit, CommentOutcome, FireCond,
-    IdleMode, Kv, KvEntry, KvRepo, LeaseReleaser, LeaseView, Leases, Link, LinkContent, LinkError,
-    LinkTarget, LockRepo, NewTimer, NoopKvRepo, NoopLockRepo, NoopScratchpadRepo, NoopTimerRepo,
-    NoopTodoRepo, RenameError, RenameResult, ScratchpadDoc, ScratchpadRepo, ScratchpadSummary,
-    ScratchpadView, Scratchpads, SetWhenIdleOutcome, StoredLease, StoredScratchpad, StoredTimer,
-    StoredTodo, TimerRepo, TimerScheduler, TimerStatus, TimerView, Timers, TodoDoc, TodoError,
-    TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView, TodoWriteResult, Todos,
-    TransferResult, WriteError, WriteResult,
+    is_link, placeholders, AcquireOutcome, Comment, CommentAuthor, CommentEdit, CommentOutcome,
+    ExportedPromptTemplate, FireCond, IdleMode, Kv, KvEntry, KvRepo, LeaseReleaser, LeaseView,
+    Leases, Link, LinkContent, LinkError, LinkTarget, LockRepo, NewTimer, NoopKvRepo, NoopLockRepo,
+    NoopPromptTemplateRepo, NoopScratchpadRepo, NoopTimerRepo, NoopTodoRepo, PromptScope,
+    PromptTemplateRepo, PromptTemplateSummary, PromptTemplateView, PromptTemplateWriteResult,
+    PromptTemplates, RenameError, RenameResult, ScratchpadDoc, ScratchpadRepo, ScratchpadSummary,
+    ScratchpadView, Scratchpads, SetWhenIdleOutcome, StoredLease, StoredPromptTemplate,
+    StoredScratchpad, StoredTimer, StoredTodo, TimerRepo, TimerScheduler, TimerStatus, TimerView,
+    Timers, TodoDoc, TodoError, TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView,
+    TodoWriteResult, Todos, TransferResult, WriteError, WriteResult,
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
@@ -77,7 +79,7 @@ pub use facade::{
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, Whoami, PROCESS_ID_ENV};
-pub use ids::{ProcessId, ProjectId, ScratchpadId, SessionId, TimerId, TodoId};
+pub use ids::{ProcessId, ProjectId, PromptTemplateId, ScratchpadId, SessionId, TimerId, TodoId};
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use notify::{NoopNotifier, Notification, NotificationReactor, Notifier};
 pub use orchestration::{AgentNode, LineageEdge, OrchestrationSnapshot};

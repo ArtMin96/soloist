@@ -414,3 +414,69 @@ pub(crate) struct SetupAgentIntegrationArg {
     /// Which file in the project root to write the guide into. Omit for AGENTS.md.
     pub(crate) file: Option<IntegrationFileArg>,
 }
+
+/// The scope a prompt-template tool addresses — a closed set, mirroring the core
+/// `PromptScope` on the wire; the handler converts it.
+#[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum PromptScopeArg {
+    Global,
+    Project,
+}
+
+impl From<PromptScopeArg> for soloist_core::PromptScope {
+    fn from(scope: PromptScopeArg) -> Self {
+        match scope {
+            PromptScopeArg::Global => soloist_core::PromptScope::Global,
+            PromptScopeArg::Project => soloist_core::PromptScope::Project,
+        }
+    }
+}
+
+/// Arguments for listing prompt templates.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct PromptTemplateListArg {
+    /// Filter to one scope: "project" (the effective project's templates) or "global".
+    /// Omit to list both the global templates and the current project's.
+    pub(crate) scope: Option<PromptScopeArg>,
+}
+
+/// Arguments for reading, deleting, or exporting a prompt template by name.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct PromptTemplateNameArg {
+    /// The template's name — the addressing handle, unique within its scope.
+    pub(crate) name: String,
+    /// The scope the name lives in. Omit for the current project's scope.
+    pub(crate) scope: Option<PromptScopeArg>,
+}
+
+/// Arguments for creating a prompt template.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct PromptTemplateCreateArg {
+    /// The template's name — the addressing handle, unique within its scope.
+    pub(crate) name: String,
+    /// An optional one-line description of what the prompt is for.
+    pub(crate) description: Option<String>,
+    /// The prompt text. Mark fill-ins with {{placeholder}} — they are reported back as the
+    /// template's placeholders, to be filled when the prompt is used.
+    pub(crate) body: String,
+    /// Where the template lives: "project" (the effective project) or "global" (shared
+    /// across projects). Omit for the current project's scope.
+    pub(crate) scope: Option<PromptScopeArg>,
+}
+
+/// Arguments for updating a prompt template.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct PromptTemplateUpdateArg {
+    /// The template's name — the addressing handle, unique within its scope.
+    pub(crate) name: String,
+    /// The new description, or omit to clear it.
+    pub(crate) description: Option<String>,
+    /// The new prompt text, replacing the old body entirely.
+    pub(crate) body: String,
+    /// The revision you read, guarding against a concurrent edit: a stale value is refused —
+    /// re-read and retry.
+    pub(crate) expected_revision: u64,
+    /// The scope the name lives in. Omit for the current project's scope.
+    pub(crate) scope: Option<PromptScopeArg>,
+}

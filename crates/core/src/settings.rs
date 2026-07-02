@@ -51,23 +51,25 @@ pub enum McpFeatureGroup {
     Todos,
     Timers,
     KeyValue,
+    PromptTemplates,
 }
 
 impl McpFeatureGroup {
     /// Every toggleable feature group, in display order — the single source the settings document
     /// and the MCP server iterate, so adding a group is one edit here plus the exhaustive matches
     /// in [`McpToolGroups`].
-    pub const ALL: [McpFeatureGroup; 4] = [
+    pub const ALL: [McpFeatureGroup; 5] = [
         McpFeatureGroup::Scratchpads,
         McpFeatureGroup::Todos,
         McpFeatureGroup::Timers,
         McpFeatureGroup::KeyValue,
+        McpFeatureGroup::PromptTemplates,
     ];
 }
 
 /// Which MCP feature-tool groups the server exposes. Scratchpads, Todos and Timers default on;
-/// Key-Value defaults off. `#[serde(default)]` fills any field an older record omits from
-/// [`Default`], so adding a group stays backward-compatible with stored records.
+/// Key-Value and Prompt Templates default off. `#[serde(default)]` fills any field an older
+/// record omits from [`Default`], so adding a group stays backward-compatible with stored records.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct McpToolGroups {
@@ -75,6 +77,7 @@ pub struct McpToolGroups {
     pub todos: bool,
     pub timers: bool,
     pub key_value: bool,
+    pub prompt_templates: bool,
 }
 
 impl Default for McpToolGroups {
@@ -84,6 +87,7 @@ impl Default for McpToolGroups {
             todos: true,
             timers: true,
             key_value: false,
+            prompt_templates: false,
         }
     }
 }
@@ -96,6 +100,7 @@ impl McpToolGroups {
             McpFeatureGroup::Todos => self.todos,
             McpFeatureGroup::Timers => self.timers,
             McpFeatureGroup::KeyValue => self.key_value,
+            McpFeatureGroup::PromptTemplates => self.prompt_templates,
         }
     }
 
@@ -106,6 +111,7 @@ impl McpToolGroups {
             McpFeatureGroup::Todos => self.todos = enabled,
             McpFeatureGroup::Timers => self.timers = enabled,
             McpFeatureGroup::KeyValue => self.key_value = enabled,
+            McpFeatureGroup::PromptTemplates => self.prompt_templates = enabled,
         }
     }
 }

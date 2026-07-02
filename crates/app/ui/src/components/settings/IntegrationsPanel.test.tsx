@@ -24,6 +24,7 @@ describe("Settings — Integrations", () => {
       todos: true,
       timers: true,
       key_value: false,
+      prompt_templates: false,
     };
     mockIPC((cmd, args) => {
       if (cmd === "mcp_tool_groups") return groups;
@@ -48,7 +49,13 @@ describe("Settings — Integrations", () => {
   it("generates the default client's snippet from the resolved setup info", async () => {
     mockIPC((cmd) => {
       if (cmd === "mcp_tool_groups")
-        return { scratchpads: true, todos: true, timers: true, key_value: false };
+        return {
+          scratchpads: true,
+          todos: true,
+          timers: true,
+          key_value: false,
+          prompt_templates: false,
+        };
       if (cmd === "mcp_setup_info") return setupInfo;
       return undefined;
     });
@@ -71,7 +78,13 @@ describe("Settings — Integrations", () => {
     Object.assign(navigator, { clipboard: { writeText } });
     mockIPC((cmd) => {
       if (cmd === "mcp_tool_groups")
-        return { scratchpads: true, todos: true, timers: true, key_value: false };
+        return {
+          scratchpads: true,
+          todos: true,
+          timers: true,
+          key_value: false,
+          prompt_templates: false,
+        };
       if (cmd === "mcp_setup_info") return setupInfo;
       return undefined;
     });

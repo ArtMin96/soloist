@@ -9,10 +9,11 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AcquireOutcome, AgentTool, Comment, FeedbackEntry, IntegrationFile, IntegrationWrite, KvEntry,
-    LeaseView, LinkContent, McpToolGroups, ProcessId, ProcessView, ProjectId, ProjectView,
-    ScratchpadDoc, ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome, StartSummary, TimerId,
-    TimerView, TodoDoc, TodoId, TodoSummary, TodoView, Whoami,
+    AcquireOutcome, AgentTool, Comment, ExportedPromptTemplate, FeedbackEntry, IntegrationFile,
+    IntegrationWrite, KvEntry, LeaseView, LinkContent, McpToolGroups, ProcessId, ProcessView,
+    ProjectId, ProjectView, PromptScope, PromptTemplateSummary, PromptTemplateView, ScratchpadDoc,
+    ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome, StartSummary, TimerId, TimerView,
+    TodoDoc, TodoId, TodoSummary, TodoView, Whoami,
 };
 
 use crate::error::IpcError;
@@ -230,6 +231,30 @@ pub enum IpcRequest {
     McpToolGroups,
     /// Store a feedback message locally (never transmitted anywhere).
     SubmitFeedback { message: String },
+    /// The templates the session can address: one scope's when given, else global merged
+    /// with the effective project's.
+    PromptTemplateList { scope: Option<PromptScope> },
+    /// The template `name` in the chosen scope (project = the session's effective one).
+    PromptTemplateRead { scope: PromptScope, name: String },
+    /// Create the template `name` in the chosen scope; a taken name is refused.
+    PromptTemplateCreate {
+        scope: PromptScope,
+        name: String,
+        description: Option<String>,
+        body: String,
+    },
+    /// Replace the template `name`'s description and body, revision-guarded.
+    PromptTemplateUpdate {
+        scope: PromptScope,
+        name: String,
+        description: Option<String>,
+        body: String,
+        expected_revision: u64,
+    },
+    /// Delete the template `name` from the chosen scope.
+    PromptTemplateDelete { scope: PromptScope, name: String },
+    /// The template `name` as a portable export envelope.
+    PromptTemplateExport { scope: PromptScope, name: String },
     /// Write the agent guide into the session's effective project root as a managed section.
     SetupAgentIntegration { file: IntegrationFile },
 }
@@ -333,6 +358,15 @@ pub enum IpcResponse {
     /// A stored feedback entry (answer to [`IpcRequest::SubmitFeedback`]). Reuses the core type so
     /// the wire shape cannot drift.
     Feedback(FeedbackEntry),
+    /// One prompt template (answer to a read, create, or update request). Reuses the core view so
+    /// the wire shape — including the derived placeholders — cannot drift.
+    PromptTemplate(PromptTemplateView),
+    /// The templates in scope, as summaries (answer to [`IpcRequest::PromptTemplateList`]).
+    PromptTemplates(Vec<PromptTemplateSummary>),
+    /// Whether a template was deleted (answer to [`IpcRequest::PromptTemplateDelete`]).
+    PromptTemplateDeleted(bool),
+    /// A template's portable export envelope (answer to [`IpcRequest::PromptTemplateExport`]).
+    PromptTemplateExport(ExportedPromptTemplate),
     /// What a guide write did (answer to [`IpcRequest::SetupAgentIntegration`]). Reuses the core
     /// type so the wire shape cannot drift.
     IntegrationWritten(IntegrationWrite),

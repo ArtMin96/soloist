@@ -1,11 +1,11 @@
 use super::*;
 use soloist_core::testing::{
-    terminal_registration, FakeLockRepo, FakeProjectRepo, FakeSettingsRepo, FakeSpawner,
-    FakeTrustRepo,
+    terminal_registration, FakeLockRepo, FakeProjectRepo, FakePromptTemplateRepo, FakeSettingsRepo,
+    FakeSpawner, FakeTrustRepo,
 };
 use soloist_core::{
     AcquireOutcome, CorePorts, DomainEvent, IntegrationFile, McpFeatureGroup, Origin, ProcStatus,
-    ProcessId, ProjectRepo, StartSummary, TokioClock,
+    ProcessId, ProjectRepo, PromptScope, StartSummary, TokioClock,
 };
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -748,6 +748,183 @@ async fn setup_agent_integration_writes_into_the_scoped_project_root() {
         }
         other => panic!("expected an IntegrationWritten reply, got {other:?}"),
     }
+}
+
+/// A façade with one project loaded and the template store wired — the sole loaded project
+/// gives an unbound session its default scope.
+fn facade_with_templates() -> Facade {
+    let projects = Arc::new(FakeProjectRepo::new());
+    projects
+        .upsert(
+            std::path::Path::new("/tmp/soloist-ipc-template-test"),
+            Some("p"),
+            None,
+        )
+        .expect("seed one project");
+    Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            projects,
+        )
+        .prompt_template_repo(Arc::new(FakePromptTemplateRepo::new()))
+        .build(),
+    )
+}
+
+#[tokio::test]
+async fn prompt_templates_route_create_read_update_delete_and_export() {
+    let facade = facade_with_templates();
+    let session = facade.open_session(None);
+
+    let created = match handle_request(
+        &facade,
+        session,
+        IpcRequest::PromptTemplateCreate {
+            scope: PromptScope::Project,
+            name: "review".into(),
+            description: None,
+            body: "Review {{diff}}".into(),
+        },
+    )
+    .await
+    {
+        Ok(IpcResponse::PromptTemplate(view)) => view,
+        other => panic!("expected the created template, got {other:?}"),
+    };
+    assert_eq!(created.placeholders, vec!["diff".to_owned()]);
+
+    match handle_request(
+        &facade,
+        session,
+        IpcRequest::PromptTemplateUpdate {
+            scope: PromptScope::Project,
+            name: "review".into(),
+            description: Some("PR review".into()),
+            body: "Review {{diff}} for {{focus}}".into(),
+            expected_revision: created.revision,
+        },
+    )
+    .await
+    {
+        Ok(IpcResponse::PromptTemplate(view)) => assert_eq!(view.revision, created.revision + 1),
+        other => panic!("expected the updated template, got {other:?}"),
+    }
+
+    match handle_request(
+        &facade,
+        session,
+        IpcRequest::PromptTemplateExport {
+            scope: PromptScope::Project,
+            name: "review".into(),
+        },
+    )
+    .await
+    {
+        Ok(IpcResponse::PromptTemplateExport(exported)) => {
+            assert_eq!(exported.body, "Review {{diff}} for {{focus}}");
+        }
+        other => panic!("expected the export envelope, got {other:?}"),
+    }
+
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::PromptTemplateDelete {
+                scope: PromptScope::Project,
+                name: "review".into(),
+            },
+        )
+        .await,
+        Ok(IpcResponse::PromptTemplateDeleted(true))
+    );
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::PromptTemplateRead {
+                scope: PromptScope::Project,
+                name: "review".into(),
+            },
+        )
+        .await,
+        Err(IpcError::UnknownPromptTemplate)
+    );
+}
+
+#[tokio::test]
+async fn an_unscoped_template_list_merges_global_and_project_rows() {
+    let facade = facade_with_templates();
+    let session = facade.open_session(None);
+    for (scope, name) in [
+        (PromptScope::Global, "shared"),
+        (PromptScope::Project, "mine"),
+    ] {
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::PromptTemplateCreate {
+                scope,
+                name: name.into(),
+                description: None,
+                body: "body".into(),
+            },
+        )
+        .await
+        .expect("create");
+    }
+
+    match handle_request(
+        &facade,
+        session,
+        IpcRequest::PromptTemplateList { scope: None },
+    )
+    .await
+    {
+        Ok(IpcResponse::PromptTemplates(rows)) => {
+            assert_eq!(rows.len(), 2, "global and project rows merge");
+        }
+        other => panic!("expected the merged list, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_stale_template_update_maps_to_the_wire_conflict() {
+    let facade = facade_with_templates();
+    let session = facade.open_session(None);
+    handle_request(
+        &facade,
+        session,
+        IpcRequest::PromptTemplateCreate {
+            scope: PromptScope::Project,
+            name: "review".into(),
+            description: None,
+            body: "one".into(),
+        },
+    )
+    .await
+    .expect("create");
+
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::PromptTemplateUpdate {
+                scope: PromptScope::Project,
+                name: "review".into(),
+                description: None,
+                body: "two".into(),
+                expected_revision: 9,
+            },
+        )
+        .await,
+        Err(IpcError::PromptTemplateRevisionConflict {
+            expected: Some(9),
+            actual: Some(1),
+        })
+    );
 }
 
 #[tokio::test]

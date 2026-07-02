@@ -8,7 +8,10 @@ use soloist_core::{
     StartSummary, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary,
     TodoView, Whoami,
 };
-use soloist_core::{FeedbackEntry, IntegrationFile, IntegrationWrite};
+use soloist_core::{
+    FeedbackEntry, IntegrationFile, IntegrationWrite, PromptScope, PromptTemplateId,
+    PromptTemplateView,
+};
 use soloist_ipc::{
     read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome,
 };
@@ -17,11 +20,12 @@ use std::path::PathBuf;
 use tokio::net::UnixListener;
 
 use crate::args::{
-    IntegrationFileArg, LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, RenameArg,
-    ScratchpadArchiveArg, ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg,
-    SelectProjectArg, SendInputArg, SetupAgentIntegrationArg, SpawnAgentArg, SubmitFeedbackArg,
-    TimerArg, TimerFireWhenIdleArg, TimerSetArg, TodoArg, TodoCommentCreateArg, TodoCreateArg,
-    TodoGetArg, TodoRef, TodoStatusArg, WaitForPortArg,
+    IntegrationFileArg, LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, PromptScopeArg,
+    PromptTemplateCreateArg, PromptTemplateUpdateArg, RenameArg, ScratchpadArchiveArg,
+    ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg, SelectProjectArg,
+    SendInputArg, SetupAgentIntegrationArg, SpawnAgentArg, SubmitFeedbackArg, TimerArg,
+    TimerFireWhenIdleArg, TimerSetArg, TodoArg, TodoCommentCreateArg, TodoCreateArg, TodoGetArg,
+    TodoRef, TodoStatusArg, WaitForPortArg,
 };
 
 /// Spawns a fake app on `socket` that answers each request via `respond` until the client
@@ -49,6 +53,7 @@ fn all_feature_groups() -> McpToolGroups {
         todos: true,
         timers: true,
         key_value: true,
+        prompt_templates: true,
     }
 }
 
@@ -189,6 +194,13 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "kv_get",
     "kv_delete",
     "kv_list",
+    // tools/prompt_template.rs
+    "prompt_template_list",
+    "prompt_template_read",
+    "prompt_template_create",
+    "prompt_template_update",
+    "prompt_template_delete",
+    "prompt_template_export",
 ];
 
 /// With every feature group enabled, the router [`SoloistMcp::new`] composes from the per-category
@@ -234,10 +246,16 @@ fn default_settings_gate_key_value_off_and_serve_the_rest() {
     assert!(served.contains("scratchpad_list"));
     assert!(served.contains("todo_list"));
     assert!(served.contains("timer_set"));
-    // Key-Value is gated off by default.
+    // Key-Value and Prompt Templates are gated off by default.
     assert!(
         !served.iter().any(|name| name.starts_with("kv_")),
         "no Key-Value tool is served by default"
+    );
+    assert!(
+        !served
+            .iter()
+            .any(|name| name.starts_with("prompt_template_")),
+        "no Prompt Template tool is served by default"
     );
 }
 
@@ -258,6 +276,30 @@ fn enabling_key_value_serves_its_tools() {
     }
 }
 
+/// Enabling Prompt Templates adds its tools to the served surface.
+#[test]
+fn enabling_prompt_templates_serves_its_tools() {
+    let groups = McpToolGroups {
+        prompt_templates: true,
+        ..McpToolGroups::default()
+    };
+    let served = served_tools(&handler_with_groups(groups));
+
+    for tool in [
+        "prompt_template_list",
+        "prompt_template_read",
+        "prompt_template_create",
+        "prompt_template_update",
+        "prompt_template_delete",
+        "prompt_template_export",
+    ] {
+        assert!(
+            served.contains(tool),
+            "{tool} should be served when Prompt Templates is enabled"
+        );
+    }
+}
+
 /// Disabling one feature group hides only its tools — the core groups and the other feature groups
 /// are unaffected.
 #[test]
@@ -267,6 +309,7 @@ fn disabling_a_feature_group_hides_only_its_tools() {
         todos: true,
         timers: true,
         key_value: false,
+        prompt_templates: false,
     };
     let served = served_tools(&handler_with_groups(groups));
 
@@ -1716,4 +1759,72 @@ async fn setup_agent_integration_threads_an_explicit_claude_md() {
         serde_json::from_value(structured_of(result)).expect("decode the write");
     assert!(!back.created);
     assert_eq!(back.path, PathBuf::from("/p/CLAUDE.md"));
+}
+
+#[tokio::test]
+async fn prompt_template_create_threads_the_scope_and_projects_the_view() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::PromptTemplateCreate {
+            scope: PromptScope::Global,
+            name,
+            description,
+            body,
+        } if name == "review" => Ok(IpcResponse::PromptTemplate(PromptTemplateView {
+            id: PromptTemplateId::from_raw(4),
+            name,
+            description,
+            placeholders: vec!["diff".into()],
+            body,
+            scope: PromptScope::Global,
+            revision: 1,
+        })),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .prompt_template_create(Parameters(PromptTemplateCreateArg {
+            name: "review".into(),
+            description: Some("PR review".into()),
+            body: "Review {{diff}}".into(),
+            scope: Some(PromptScopeArg::Global),
+        }))
+        .await
+        .expect("prompt_template_create succeeds");
+    let back: PromptTemplateView =
+        serde_json::from_value(structured_of(result)).expect("decode the view");
+    assert_eq!(back.placeholders, vec!["diff".to_owned()]);
+    assert_eq!(back.scope, PromptScope::Global);
+}
+
+/// An omitted scope addresses the effective project, and a stale update surfaces as a
+/// tool-execution error the model can read and retry on.
+#[tokio::test]
+async fn a_stale_prompt_template_update_becomes_a_tool_execution_error() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::PromptTemplateUpdate {
+            scope: PromptScope::Project,
+            expected_revision: 1,
+            ..
+        } => Err(IpcError::PromptTemplateRevisionConflict {
+            expected: Some(1),
+            actual: Some(2),
+        }),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .prompt_template_update(Parameters(PromptTemplateUpdateArg {
+            name: "review".into(),
+            description: None,
+            body: "new body".into(),
+            expected_revision: 1,
+            scope: None,
+        }))
+        .await
+        .expect("a request error is a tool result, not a protocol error");
+    assert_eq!(result.is_error, Some(true));
 }

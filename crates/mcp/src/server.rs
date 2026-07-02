@@ -3,9 +3,9 @@
 //! The tools themselves live in [`crate::tools`], one `#[tool_router(router = …)]` block per
 //! logical category; [`SoloistMcp::new`] composes their routers into the one served router via
 //! [`ToolRouter`]'s `Add`. The **core** groups are always served; the **feature** groups
-//! (Scratchpads, Todos, Timers, Key-Value) are gated by the user's settings — they are registered
-//! only when enabled, so a disabled group's tools are neither listed nor callable (Key-Value
-//! defaults off). Tool *names* mirror Solo for interop, but the parameter schemas are clean-room —
+//! (Scratchpads, Todos, Timers, Key-Value, Prompt Templates) are gated by the user's settings —
+//! they are registered only when enabled, so a disabled group's tools are neither listed nor
+//! callable (Key-Value and Prompt Templates default off). Tool *names* mirror Solo for interop, but the parameter schemas are clean-room —
 //! derived from the argument structs in [`crate::args`]. No domain logic lives in a tool: each
 //! forwards to the app, which resolves identity, scope, and the trust gate in the core, and the
 //! result is returned as structured content.
@@ -46,11 +46,15 @@ impl SoloistMcp {
             + Self::setup_router();
         // Feature groups: a registry of (group → its sub-router builder), each registered only when
         // the setting enables it. Adding a feature group is one row here plus its `McpFeatureGroup`.
-        let feature_groups: [(McpFeatureGroup, FeatureGroupRouter); 4] = [
+        let feature_groups: [(McpFeatureGroup, FeatureGroupRouter); 5] = [
             (McpFeatureGroup::Scratchpads, Self::scratchpad_router),
             (McpFeatureGroup::Todos, Self::todo_router),
             (McpFeatureGroup::Timers, Self::timer_router),
             (McpFeatureGroup::KeyValue, Self::kv_router),
+            (
+                McpFeatureGroup::PromptTemplates,
+                Self::prompt_template_router,
+            ),
         ];
         for (group, build_router) in feature_groups {
             if groups.enabled(group) {

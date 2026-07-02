@@ -7,12 +7,13 @@
 import type { McpFeatureGroup, McpSetupInfo, McpToolGroups } from "@/domain";
 
 // The pre-load fallback for the enablement: Scratchpads / Todos / Timers default on, Key-Value
-// off (the G10 contract). The facade's stored value supersedes this on load.
+// and Prompt Templates off. The facade's stored value supersedes this on load.
 export const DEFAULT_MCP_TOOL_GROUPS: McpToolGroups = {
   scratchpads: true,
   todos: true,
   timers: true,
   key_value: false,
+  prompt_templates: false,
 };
 
 export interface McpGroupInfo {
@@ -43,6 +44,11 @@ export const MCP_TOOL_GROUPS: McpGroupInfo[] = [
     group: "key_value",
     label: "Key-Value",
     description: "Small shared key-value state. Off by default.",
+  },
+  {
+    group: "prompt_templates",
+    label: "Prompt Templates",
+    description: "Reusable prompts with placeholder fill-ins. Off by default.",
   },
 ];
 

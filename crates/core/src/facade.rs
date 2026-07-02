@@ -18,7 +18,7 @@ use tokio::sync::{broadcast, Notify};
 
 use crate::agents::{AgentLineage, Agents, IdleTracker};
 use crate::config::{ConfigEngine, ConfigSync};
-use crate::coordination::{Kv, Leases, Scratchpads, Timers, Todos};
+use crate::coordination::{Kv, Leases, PromptTemplates, Scratchpads, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::FileWatcher;
 use crate::identity::Identity;
@@ -44,6 +44,7 @@ mod loops;
 mod orchestration;
 mod output;
 mod project_settings;
+mod prompt_template;
 mod scoped;
 mod scratchpad;
 mod session;
@@ -82,6 +83,7 @@ pub struct Facade {
     timers: Timers,
     scratchpads: Scratchpads,
     todos: Todos,
+    prompt_templates: PromptTemplates,
     settings: SettingsStore<(), Settings>,
     project_settings: SettingsStore<ProjectId, ProjectSettings>,
     feedback: Feedback,
@@ -109,6 +111,7 @@ impl Facade {
             timer_repo,
             scratchpad_repo,
             todo_repo,
+            prompt_template_repo,
             settings_repo,
             project_settings_repo,
             feedback_repo,
@@ -124,6 +127,7 @@ impl Facade {
             agents: Agents::new(agent_tools, version_probe, clock.clone()),
             scratchpads: Scratchpads::new(scratchpad_repo),
             todos: Todos::new(todo_repo),
+            prompt_templates: PromptTemplates::new(prompt_template_repo),
             settings: SettingsStore::new(settings_repo),
             project_settings: SettingsStore::new(project_settings_repo),
             feedback: Feedback::new(feedback_repo, clock.clone()),

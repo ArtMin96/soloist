@@ -12,6 +12,7 @@ pub(crate) mod lock;
 pub(crate) mod output;
 pub(crate) mod process;
 pub(crate) mod project;
+pub(crate) mod prompt_template;
 pub(crate) mod reply;
 pub(crate) mod scratchpad;
 pub(crate) mod services;

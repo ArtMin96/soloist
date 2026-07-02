@@ -15,6 +15,7 @@ mod meta;
 mod migrate;
 mod project_settings;
 mod projects;
+mod prompt_templates;
 mod runtime;
 mod scratchpads;
 mod settings;
