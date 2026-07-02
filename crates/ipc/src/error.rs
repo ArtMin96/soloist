@@ -89,6 +89,10 @@ pub enum IpcError {
     /// No agent tool is registered under the requested name.
     #[error("no agent tool is registered under that name")]
     UnknownTool,
+    /// A spawn was requested by a session bound to a process that was itself spawned as a
+    /// worker — delegation is one level deep.
+    #[error("a worker agent cannot spawn agents; report back to the lead that spawned it")]
+    WorkerMayNotSpawn,
     /// The app failed to serve the request (e.g. a durable read failed).
     #[error("the app could not serve the request: {0}")]
     Internal(String),
@@ -124,7 +128,8 @@ impl IpcError {
             | IpcError::ForeignScopeLink
             | IpcError::OutOfScope
             | IpcError::Untrusted
-            | IpcError::UnknownTool => true,
+            | IpcError::UnknownTool
+            | IpcError::WorkerMayNotSpawn => true,
             IpcError::Internal(_) => false,
         }
     }
@@ -169,6 +174,7 @@ impl From<SpawnAgentError> for IpcError {
     fn from(err: SpawnAgentError) -> Self {
         match err {
             SpawnAgentError::NoProjectScope => IpcError::NoProjectScope,
+            SpawnAgentError::WorkerMayNotSpawn => IpcError::WorkerMayNotSpawn,
             SpawnAgentError::Launch(err) => err.into(),
         }
     }

@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use soloist_core::{Facade, OrchestrationSnapshot, ProjectId};
+use soloist_core::{Facade, LineageEdge, OrchestrationSnapshot, ProjectId};
 use tauri::State;
 
 /// The orchestration read-model for `project`: its agent lineage tree plus the coordination
@@ -23,4 +23,11 @@ pub async fn orchestration_snapshot(
     facade
         .orchestration_snapshot(project)
         .map_err(|err| err.to_string())
+}
+
+/// Every live spawn-lineage edge across all projects — the sidebar joins these onto its process
+/// list to nest workers under their leads, re-reading on process lifecycle events.
+#[tauri::command]
+pub async fn lineage_edges(facade: State<'_, Arc<Facade>>) -> Result<Vec<LineageEdge>, String> {
+    Ok(facade.lineage_edges())
 }

@@ -45,7 +45,9 @@ pub use coordination_todo::FakeTodoRepo;
 #[cfg(test)]
 pub use events::{next_change, next_matching, next_to, wait_all};
 pub use filewatch::FakeFileWatcher;
-pub use fixtures::terminal_registration;
+#[cfg(test)]
+pub use fixtures::facade_with_agent_tool;
+pub use fixtures::{agent_registration, terminal_registration};
 pub use identity::{authentic_session, TEST_PEER_PGID};
 pub use lock_releaser::RecordingLockReleaser;
 pub use metrics::FakeMetricsProbe;

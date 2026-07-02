@@ -45,6 +45,18 @@ impl AgentLineage {
         lock(&self.parents).get(&child).copied()
     }
 
+    /// Every recorded `(child, parent)` pair, sorted by child id for a stable read. The caller
+    /// still filters both ends against the live registry — an edge whose parent has left the
+    /// registry is not a tree edge, exactly as with [`Self::parent_of`].
+    pub fn edges(&self) -> Vec<(ProcessId, ProcessId)> {
+        let mut edges: Vec<_> = lock(&self.parents)
+            .iter()
+            .map(|(child, parent)| (*child, *parent))
+            .collect();
+        edges.sort_by_key(|(child, _)| *child);
+        edges
+    }
+
     /// Drops lineage for any worker no longer in `live` (gone from the registry), so the map
     /// never outgrows the live process set.
     pub fn retain_live(&self, live: &HashSet<ProcessId>) {

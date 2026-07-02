@@ -79,7 +79,7 @@ pub use identity::{Identity, IdentityError, Origin, Whoami, PROCESS_ID_ENV};
 pub use ids::{ProcessId, ProjectId, ScratchpadId, SessionId, TimerId, TodoId};
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use notify::{NoopNotifier, Notification, NotificationReactor, Notifier};
-pub use orchestration::{AgentNode, OrchestrationSnapshot};
+pub use orchestration::{AgentNode, LineageEdge, OrchestrationSnapshot};
 pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{
     Clock, CompositeLockReleaser, CorePorts, CorePortsBuilder, ExitFuture, ExitStatus,

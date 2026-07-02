@@ -7,8 +7,8 @@ use crate::process::ProcStatus;
 use crate::supervisor::Registration;
 use crate::sync::lock;
 use crate::testing::{
-    authentic_session, terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
-    TEST_PEER_PGID,
+    agent_registration, authentic_session, facade_with_agent_tool, terminal_registration,
+    FakeProjectRepo, FakeSpawner, FakeTrustRepo, TEST_PEER_PGID,
 };
 use async_trait::async_trait;
 use std::path::Path;
@@ -215,6 +215,64 @@ fn spawn_agent_with_an_unknown_tool_is_refused() {
     assert!(matches!(
         facade.spawn_agent(session, "NoSuchTool", Vec::new()),
         Err(SpawnAgentError::Launch(LaunchAgentError::UnknownTool))
+    ));
+}
+
+#[tokio::test]
+async fn a_spawned_worker_cannot_spawn_its_own_worker() {
+    let (facade, project) = facade_with_agent_tool();
+    let lead = facade
+        .supervisor()
+        .register(agent_registration(project, "lead"));
+    let lead_session = scoped_to(&facade, lead);
+    let worker = facade
+        .spawn_agent(lead_session, "worker", Vec::new())
+        .expect("a lead spawns a worker");
+
+    // The worker's own MCP client binds to it, exactly as the lead's did — but its spawn is
+    // refused, and the refusal has no side effects: nothing new in the registry, no lineage.
+    let worker_session = authentic_session(&facade, worker, TEST_PEER_PGID + 1);
+    facade
+        .bind_session_process(worker_session, worker)
+        .expect("an authentic bind to the worker");
+    let registered_before = facade.snapshot().len();
+    assert!(matches!(
+        facade.spawn_agent(worker_session, "worker", Vec::new()),
+        Err(SpawnAgentError::WorkerMayNotSpawn)
+    ));
+    assert_eq!(
+        facade.snapshot().len(),
+        registered_before,
+        "a refused spawn registers nothing",
+    );
+}
+
+#[tokio::test]
+async fn the_worker_gate_outlives_a_closed_lead() {
+    let (facade, project) = facade_with_agent_tool();
+    let lead = facade
+        .supervisor()
+        .register(agent_registration(project, "lead"));
+    let lead_session = scoped_to(&facade, lead);
+    let worker = facade
+        .spawn_agent(lead_session, "worker", Vec::new())
+        .expect("a lead spawns a worker");
+    let worker_session = authentic_session(&facade, worker, TEST_PEER_PGID + 1);
+    facade
+        .bind_session_process(worker_session, worker)
+        .expect("an authentic bind to the worker");
+
+    facade
+        .supervisor()
+        .close(lead)
+        .await
+        .expect("close the lead");
+
+    // The tree re-roots the worker, but the gate does not: a closed lead never promotes its
+    // workers to spawners.
+    assert!(matches!(
+        facade.spawn_agent(worker_session, "worker", Vec::new()),
+        Err(SpawnAgentError::WorkerMayNotSpawn)
     ));
 }
 

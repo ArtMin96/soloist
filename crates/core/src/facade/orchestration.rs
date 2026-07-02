@@ -13,10 +13,26 @@ use std::collections::HashSet;
 use super::Facade;
 use crate::coordination::watched_is_idle;
 use crate::ids::{ProcessId, ProjectId};
-use crate::orchestration::{AgentNode, OrchestrationSnapshot};
+use crate::orchestration::{AgentNode, LineageEdge, OrchestrationSnapshot};
 use crate::ports::StoreError;
 
 impl Facade {
+    /// Every live spawn-lineage edge across all projects — the sidebar's cross-project nesting
+    /// read, cheap enough to re-query on process lifecycle events. An edge appears only while
+    /// both its worker and its lead are in the registry, the same re-root-on-read rule as
+    /// [`orchestration_snapshot`](Self::orchestration_snapshot); each edge is intra-project by
+    /// construction (a worker always lands in its caller's own project). A local read like
+    /// [`snapshot`](Self::snapshot): authorization is the caller's.
+    pub fn lineage_edges(&self) -> Vec<LineageEdge> {
+        let present: HashSet<ProcessId> = self.snapshot().into_iter().map(|view| view.id).collect();
+        self.lineage
+            .edges()
+            .into_iter()
+            .filter(|(child, parent)| present.contains(child) && present.contains(parent))
+            .map(|(child, parent)| LineageEdge { child, parent })
+            .collect()
+    }
+
     /// The orchestration read-model for `project`: its agent lineage tree (each managed process with
     /// its supervision status and, for agents, live idle activity) plus the coordination state agents
     /// share — todos, timers, leases, scratchpads, and key-value. Assembled purely from existing
