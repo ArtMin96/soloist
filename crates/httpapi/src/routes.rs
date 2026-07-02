@@ -8,7 +8,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
-use soloist_core::{ProcStatus, ProcessId, ProcessView, ProjectView};
+use soloist_core::{FeedbackEntry, ProcStatus, ProcessId, ProcessView, ProjectView};
 
 use crate::cors::localhost_cors;
 use crate::state::ApiState;
@@ -33,6 +33,7 @@ fn read_routes() -> Router<ApiState> {
         .route("/processes/{id}/ports", get(process_ports))
         .route("/processes/{id}/output", get(process_output))
         .route("/projects", get(projects))
+        .route("/feedback", get(feedback))
 }
 
 /// `GET /health` — liveness plus the running version, so a client can confirm it reached
@@ -122,6 +123,16 @@ async fn projects(State(state): State<ApiState>) -> Result<Json<Vec<ProjectView>
     state
         .facade()
         .projects_snapshot()
+        .map(Json)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// `GET /feedback` — every locally stored feedback entry, oldest first: the read-back for
+/// what agents leave via the `submit_solo_feedback` MCP tool (nothing is ever transmitted).
+async fn feedback(State(state): State<ApiState>) -> Result<Json<Vec<FeedbackEntry>>, StatusCode> {
+    state
+        .facade()
+        .feedback_list()
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }

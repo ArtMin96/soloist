@@ -8,7 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    CoordinationError, IdentityError, LaunchAgentError, ScopedActionError, SpawnAgentError, TodoId,
+    CoordinationError, FeedbackError, IdentityError, IntegrationWriteError, LaunchAgentError,
+    ScopedActionError, SetupIntegrationError, SpawnAgentError, TodoId,
 };
 
 /// Why a request failed: a typed error the client maps to a clear MCP tool error.
@@ -26,11 +27,16 @@ pub enum IpcError {
     #[error("that process is not yours to bind")]
     ForeignProcess,
     /// `select_project` named a project the caller does not run in — the scope would not be
-    /// authentic.
-    #[error("you are not running in that project")]
+    /// authentic. The message carries the remedies, since an agent launched outside Soloist
+    /// cannot fix this by retrying.
+    #[error(
+        "you are not running in that project; scope is proven by the process you run in — have Soloist launch the agent, keep exactly one project open, or use a global scope where the tool offers one"
+    )]
     ForeignProject,
     /// A scoped request was made with no project in scope.
-    #[error("no project is in scope; select one first")]
+    #[error(
+        "no project is in scope; select your own project first, or (launched outside Soloist) keep exactly one project open or use a global scope where the tool offers one"
+    )]
     NoProjectScope,
     /// A coordination action that needs an owning process was made by a session bound to none.
     #[error("not bound to a process; bind a session before owning a timer or lease")]
@@ -74,6 +80,21 @@ pub enum IpcError {
     /// A comment action named one that does not exist on the todo.
     #[error("no comment under that id on that todo")]
     UnknownComment,
+    /// A prompt-template write carried malformed content; the detail names every problem.
+    #[error("prompt template is not well-formed: {0}")]
+    InvalidPromptTemplate(String),
+    /// A prompt-template update expected a revision other than the one on record — re-read and retry.
+    #[error("prompt template revision conflict (expected {expected:?}, found {actual:?})")]
+    PromptTemplateRevisionConflict {
+        expected: Option<u64>,
+        actual: Option<u64>,
+    },
+    /// A prompt-template action named one that does not exist in the addressed scope.
+    #[error("no prompt template under that name")]
+    UnknownPromptTemplate,
+    /// A prompt-template create named a template that already exists in the addressed scope.
+    #[error("a prompt template with that name already exists")]
+    PromptTemplateNameTaken,
     /// A `solo://` link could not be parsed.
     #[error("not a valid solo:// link")]
     MalformedLink,
@@ -93,6 +114,15 @@ pub enum IpcError {
     /// worker — delegation is one level deep.
     #[error("a worker agent cannot spawn agents; report back to the lead that spawned it")]
     WorkerMayNotSpawn,
+    /// A feedback submission was refused (empty, oversized, or the store is full); the
+    /// detail says why.
+    #[error("feedback was not accepted: {0}")]
+    InvalidFeedback(String),
+    /// The chosen instructions file carries unmatched soloist section markers — replacing a
+    /// degenerate span could swallow the user's own content, so the write refused; the
+    /// detail names the file to fix by hand.
+    #[error("the instructions file was left untouched: {0}")]
+    UnmatchedIntegrationMarkers(String),
     /// The app failed to serve the request (e.g. a durable read failed).
     #[error("the app could not serve the request: {0}")]
     Internal(String),
@@ -124,12 +154,18 @@ impl IpcError {
             | IpcError::UnknownBlocker
             | IpcError::SelfBlocker
             | IpcError::UnknownComment
+            | IpcError::InvalidPromptTemplate(_)
+            | IpcError::PromptTemplateRevisionConflict { .. }
+            | IpcError::UnknownPromptTemplate
+            | IpcError::PromptTemplateNameTaken
             | IpcError::MalformedLink
             | IpcError::ForeignScopeLink
             | IpcError::OutOfScope
             | IpcError::Untrusted
             | IpcError::UnknownTool
-            | IpcError::WorkerMayNotSpawn => true,
+            | IpcError::WorkerMayNotSpawn
+            | IpcError::InvalidFeedback(_)
+            | IpcError::UnmatchedIntegrationMarkers(_) => true,
             IpcError::Internal(_) => false,
         }
     }
@@ -180,6 +216,31 @@ impl From<SpawnAgentError> for IpcError {
     }
 }
 
+impl From<FeedbackError> for IpcError {
+    fn from(err: FeedbackError) -> Self {
+        match err {
+            FeedbackError::Empty | FeedbackError::TooLong | FeedbackError::Full => {
+                IpcError::InvalidFeedback(err.to_string())
+            }
+            FeedbackError::Store(err) => IpcError::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<SetupIntegrationError> for IpcError {
+    fn from(err: SetupIntegrationError) -> Self {
+        match err {
+            SetupIntegrationError::Scope(err) => err.into(),
+            SetupIntegrationError::UnknownProject => IpcError::UnknownProject,
+            SetupIntegrationError::Store(err) => IpcError::Internal(err.to_string()),
+            SetupIntegrationError::Write(err @ IntegrationWriteError::UnmatchedMarkers { .. }) => {
+                IpcError::UnmatchedIntegrationMarkers(err.to_string())
+            }
+            SetupIntegrationError::Write(err) => IpcError::Internal(err.to_string()),
+        }
+    }
+}
+
 impl From<CoordinationError> for IpcError {
     fn from(err: CoordinationError) -> Self {
         match err {
@@ -200,6 +261,14 @@ impl From<CoordinationError> for IpcError {
             CoordinationError::UnknownBlocker => IpcError::UnknownBlocker,
             CoordinationError::SelfBlocker => IpcError::SelfBlocker,
             CoordinationError::UnknownComment => IpcError::UnknownComment,
+            CoordinationError::InvalidPromptTemplate(message) => {
+                IpcError::InvalidPromptTemplate(message)
+            }
+            CoordinationError::PromptTemplateRevisionConflict { expected, actual } => {
+                IpcError::PromptTemplateRevisionConflict { expected, actual }
+            }
+            CoordinationError::UnknownPromptTemplate => IpcError::UnknownPromptTemplate,
+            CoordinationError::PromptTemplateNameTaken => IpcError::PromptTemplateNameTaken,
             CoordinationError::MalformedLink => IpcError::MalformedLink,
             CoordinationError::ForeignScopeLink => IpcError::ForeignScopeLink,
             CoordinationError::ForeignProject => IpcError::ForeignProject,

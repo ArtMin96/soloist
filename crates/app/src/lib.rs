@@ -116,7 +116,9 @@ fn build_facade(app: AppHandle) -> Facade {
         .scratchpad_repo(store.clone())
         .todo_repo(store.clone())
         .kv_repo(store.clone())
+        .prompt_template_repo(store.clone())
         .settings_repo(store.clone())
+        .feedback_repo(store.clone())
         .project_settings_repo(store)
         .locks(Arc::new(lock_releaser))
         .build(),
@@ -330,6 +332,7 @@ pub fn run() {
             commands::set_integration_settings,
             commands::mcp_tool_groups,
             commands::set_mcp_tool_group,
+            commands::mcp_setup_info,
             commands::project_settings_page,
             commands::project_settings,
             commands::set_project_auto_start_gate,

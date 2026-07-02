@@ -15,7 +15,10 @@ mod protocol;
 
 pub use error::IpcError;
 pub use frame::{read_frame, write_frame, FrameError, MAX_FRAME};
-pub use paths::{data_dir, ensure_data_dir, ensure_socket_path, socket_path, DataDirError};
+pub use paths::{
+    data_dir, data_dir_overridden, ensure_data_dir, ensure_socket_path, socket_path, DataDirError,
+    DATA_DIR_ENV,
+};
 pub use protocol::{
     IpcRequest, IpcResponse, IpcResult, PortWaitOutcome, ProjectStatus, ProjectSummary,
 };

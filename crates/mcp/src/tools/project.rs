@@ -15,7 +15,11 @@ impl SoloistMcp {
     #[tool(description = "List every project Soloist has open.")]
     pub(crate) async fn list_projects(&self) -> Result<CallToolResult, ErrorData> {
         match self.client.request(IpcRequest::ListProjects).await {
-            Ok(IpcResponse::Projects(projects)) => structured(&projects),
+            // Wrapped in an object: the MCP spec requires `structuredContent` to be a JSON
+            // object, so a list reply must never be a bare array (clients refuse it).
+            Ok(IpcResponse::Projects(projects)) => {
+                structured(&serde_json::json!({ "projects": projects }))
+            }
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }

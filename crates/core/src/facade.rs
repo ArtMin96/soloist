@@ -18,7 +18,7 @@ use tokio::sync::{broadcast, Notify};
 
 use crate::agents::{AgentLineage, Agents, IdleTracker};
 use crate::config::{ConfigEngine, ConfigSync};
-use crate::coordination::{Kv, Leases, Scratchpads, Timers, Todos};
+use crate::coordination::{Kv, Leases, PromptTemplates, Scratchpads, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::FileWatcher;
 use crate::identity::Identity;
@@ -33,6 +33,7 @@ use crate::projects::{
 };
 use crate::settings::{ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
+use crate::support::Feedback;
 use crate::trust::TrustStore;
 
 mod commands;
@@ -43,15 +44,18 @@ mod loops;
 mod orchestration;
 mod output;
 mod project_settings;
+mod prompt_template;
 mod scoped;
 mod scratchpad;
 mod session;
 mod settings;
+mod support;
 mod todo;
 
 pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
 pub use scoped::{ScopedActionError, SpawnAgentError};
+pub use support::SetupIntegrationError;
 
 /// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot
 /// (see [`crate::events`]) rather than growing memory without limit.
@@ -79,8 +83,10 @@ pub struct Facade {
     timers: Timers,
     scratchpads: Scratchpads,
     todos: Todos,
+    prompt_templates: PromptTemplates,
     settings: SettingsStore<(), Settings>,
     project_settings: SettingsStore<ProjectId, ProjectSettings>,
+    feedback: Feedback,
 }
 
 impl Facade {
@@ -105,8 +111,10 @@ impl Facade {
             timer_repo,
             scratchpad_repo,
             todo_repo,
+            prompt_template_repo,
             settings_repo,
             project_settings_repo,
+            feedback_repo,
             ..
         } = ports;
         Self {
@@ -119,8 +127,10 @@ impl Facade {
             agents: Agents::new(agent_tools, version_probe, clock.clone()),
             scratchpads: Scratchpads::new(scratchpad_repo),
             todos: Todos::new(todo_repo),
+            prompt_templates: PromptTemplates::new(prompt_template_repo),
             settings: SettingsStore::new(settings_repo),
             project_settings: SettingsStore::new(project_settings_repo),
+            feedback: Feedback::new(feedback_repo, clock.clone()),
             clock,
             metrics,
             port_probe,

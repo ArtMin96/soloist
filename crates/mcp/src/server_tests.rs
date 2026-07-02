@@ -8,18 +8,25 @@ use soloist_core::{
     StartSummary, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary,
     TodoView, Whoami,
 };
+use soloist_core::{
+    FeedbackEntry, IntegrationFile, IntegrationWrite, PromptScope, PromptTemplateId,
+    PromptTemplateView,
+};
 use soloist_ipc::{
     read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome,
+    ProjectSummary,
 };
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use tokio::net::UnixListener;
 
 use crate::args::{
-    LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, RenameArg, ScratchpadArchiveArg,
+    IntegrationFileArg, LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, PromptScopeArg,
+    PromptTemplateCreateArg, PromptTemplateUpdateArg, RenameArg, ScratchpadArchiveArg,
     ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg, SelectProjectArg,
-    SendInputArg, SpawnAgentArg, TimerArg, TimerFireWhenIdleArg, TimerSetArg, TodoArg,
-    TodoCommentCreateArg, TodoCreateArg, TodoGetArg, TodoRef, TodoStatusArg, WaitForPortArg,
+    SendInputArg, SetupAgentIntegrationArg, SpawnAgentArg, SubmitFeedbackArg, TimerArg,
+    TimerFireWhenIdleArg, TimerSetArg, TodoArg, TodoCommentCreateArg, TodoCreateArg, TodoGetArg,
+    TodoRef, TodoStatusArg, WaitForPortArg,
 };
 
 /// Spawns a fake app on `socket` that answers each request via `respond` until the client
@@ -47,6 +54,7 @@ fn all_feature_groups() -> McpToolGroups {
         todos: true,
         timers: true,
         key_value: true,
+        prompt_templates: true,
     }
 }
 
@@ -75,9 +83,17 @@ fn served_tools(handler: &SoloistMcp) -> BTreeSet<String> {
         .collect()
 }
 
-/// The structured JSON content a tool returned, or a panic if there was none.
+/// The structured JSON content a tool returned, or a panic if there was none. Also asserts
+/// the spec's shape constraint here, in the one helper every projection test goes through:
+/// `structuredContent` must be a JSON **object**, never a bare array — clients refuse an
+/// array (found live: an agent's `list_projects` call was rejected by Claude Code).
 fn structured_of(result: CallToolResult) -> serde_json::Value {
-    result.structured_content.expect("a structured tool result")
+    let value = result.structured_content.expect("a structured tool result");
+    assert!(
+        value.is_object(),
+        "structuredContent must be a JSON object (MCP spec), got: {value}"
+    );
+    value
 }
 
 fn sample_view(id: u64) -> ProcessView {
@@ -139,6 +155,10 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "lock_acquire",
     "lock_status",
     "lock_release",
+    // tools/setup.rs
+    "help",
+    "submit_solo_feedback",
+    "setup_agent_integration",
     // tools/timer.rs
     "timer_set",
     "timer_fire_when_idle_any",
@@ -183,6 +203,13 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "kv_get",
     "kv_delete",
     "kv_list",
+    // tools/prompt_template.rs
+    "prompt_template_list",
+    "prompt_template_read",
+    "prompt_template_create",
+    "prompt_template_update",
+    "prompt_template_delete",
+    "prompt_template_export",
 ];
 
 /// With every feature group enabled, the router [`SoloistMcp::new`] composes from the per-category
@@ -221,13 +248,23 @@ fn default_settings_gate_key_value_off_and_serve_the_rest() {
         served.contains("lock_acquire"),
         "coordination leases are a core group"
     );
+    assert!(
+        served.contains("help"),
+        "setup/support is a core group, always served"
+    );
     assert!(served.contains("scratchpad_list"));
     assert!(served.contains("todo_list"));
     assert!(served.contains("timer_set"));
-    // Key-Value is gated off by default.
+    // Key-Value and Prompt Templates are gated off by default.
     assert!(
         !served.iter().any(|name| name.starts_with("kv_")),
         "no Key-Value tool is served by default"
+    );
+    assert!(
+        !served
+            .iter()
+            .any(|name| name.starts_with("prompt_template_")),
+        "no Prompt Template tool is served by default"
     );
 }
 
@@ -248,6 +285,30 @@ fn enabling_key_value_serves_its_tools() {
     }
 }
 
+/// Enabling Prompt Templates adds its tools to the served surface.
+#[test]
+fn enabling_prompt_templates_serves_its_tools() {
+    let groups = McpToolGroups {
+        prompt_templates: true,
+        ..McpToolGroups::default()
+    };
+    let served = served_tools(&handler_with_groups(groups));
+
+    for tool in [
+        "prompt_template_list",
+        "prompt_template_read",
+        "prompt_template_create",
+        "prompt_template_update",
+        "prompt_template_delete",
+        "prompt_template_export",
+    ] {
+        assert!(
+            served.contains(tool),
+            "{tool} should be served when Prompt Templates is enabled"
+        );
+    }
+}
+
 /// Disabling one feature group hides only its tools — the core groups and the other feature groups
 /// are unaffected.
 #[test]
@@ -257,6 +318,7 @@ fn disabling_a_feature_group_hides_only_its_tools() {
         todos: true,
         timers: true,
         key_value: false,
+        prompt_templates: false,
     };
     let served = served_tools(&handler_with_groups(groups));
 
@@ -310,9 +372,33 @@ async fn list_processes_projects_the_process_rows() {
         .list_processes()
         .await
         .expect("list succeeds");
-    let back: Vec<ProcessView> =
-        serde_json::from_value(structured_of(result)).expect("decode processes");
+    let back: Vec<ProcessView> = serde_json::from_value(structured_of(result)["processes"].clone())
+        .expect("decode processes");
     assert_eq!(back, vec![view]);
+}
+
+/// The reply is wrapped in an object (never a bare array — see [`structured_of`]).
+#[tokio::test]
+async fn list_projects_wraps_the_summaries_in_an_object() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let summary = ProjectSummary {
+        id: ProjectId::from_raw(2),
+        name: "soloist".into(),
+        root: PathBuf::from("/home/u/soloist"),
+    };
+    let canned = summary.clone();
+    spawn_fake_app(socket.clone(), move |_request| {
+        Ok(IpcResponse::Projects(vec![canned.clone()]))
+    });
+
+    let result = handler(socket)
+        .list_projects()
+        .await
+        .expect("list_projects succeeds");
+    let back: Vec<ProjectSummary> =
+        serde_json::from_value(structured_of(result)["projects"].clone()).expect("decode projects");
+    assert_eq!(back, vec![summary]);
 }
 
 #[tokio::test]
@@ -629,7 +715,8 @@ async fn list_agent_tools_projects_the_configured_tools() {
         .list_agent_tools()
         .await
         .expect("list_agent_tools succeeds");
-    let back: Vec<AgentTool> = serde_json::from_value(structured_of(result)).expect("decode tools");
+    let back: Vec<AgentTool> =
+        serde_json::from_value(structured_of(result)["tools"].clone()).expect("decode tools");
     assert_eq!(back, vec![tool]);
 }
 
@@ -1613,4 +1700,165 @@ async fn todo_comment_list_projects_the_comments() {
         serde_json::from_value(structured_of(result)["comments"].clone()).expect("decode comments");
     assert_eq!(back.len(), 1);
     assert_eq!(back[0].body, "looks good");
+}
+
+/// `help` answers from the core's embedded guide with no app round-trip — nothing listens on
+/// the socket here, and it still succeeds. That is deliberate: it must work when Soloist is
+/// down, which is when an agent most needs it.
+#[tokio::test]
+async fn help_returns_the_guide_without_the_app() {
+    let handler = handler(PathBuf::from("nothing-listens-here.sock"));
+
+    let result = handler.help().await.expect("help succeeds with no app");
+    let help = structured_of(result)["help"]
+        .as_str()
+        .expect("a help string")
+        .to_owned();
+    assert!(help.contains("bind_session_process"));
+    assert!(help.contains("lock_acquire"));
+}
+
+#[tokio::test]
+async fn submit_solo_feedback_threads_the_message_and_projects_the_entry() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SubmitFeedback { message } if message == "love the log search" => {
+            Ok(IpcResponse::Feedback(FeedbackEntry {
+                id: 3,
+                message,
+                submitted_unix_millis: 1_700_000_000_000,
+            }))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .submit_solo_feedback(Parameters(SubmitFeedbackArg {
+            message: "love the log search".into(),
+        }))
+        .await
+        .expect("submit_solo_feedback succeeds");
+    let back: FeedbackEntry =
+        serde_json::from_value(structured_of(result)).expect("decode the entry");
+    assert_eq!(back.id, 3);
+    assert_eq!(back.message, "love the log search");
+}
+
+#[tokio::test]
+async fn setup_agent_integration_defaults_to_agents_md() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SetupAgentIntegration {
+            file: IntegrationFile::AgentsMd,
+        } => Ok(IpcResponse::IntegrationWritten(IntegrationWrite {
+            path: PathBuf::from("/p/AGENTS.md"),
+            created: true,
+        })),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .setup_agent_integration(Parameters(SetupAgentIntegrationArg { file: None }))
+        .await
+        .expect("setup_agent_integration succeeds");
+    let back: IntegrationWrite =
+        serde_json::from_value(structured_of(result)).expect("decode the write");
+    assert!(back.created);
+    assert_eq!(back.path, PathBuf::from("/p/AGENTS.md"));
+}
+
+#[tokio::test]
+async fn setup_agent_integration_threads_an_explicit_claude_md() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SetupAgentIntegration {
+            file: IntegrationFile::ClaudeMd,
+        } => Ok(IpcResponse::IntegrationWritten(IntegrationWrite {
+            path: PathBuf::from("/p/CLAUDE.md"),
+            created: false,
+        })),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .setup_agent_integration(Parameters(SetupAgentIntegrationArg {
+            file: Some(IntegrationFileArg::ClaudeMd),
+        }))
+        .await
+        .expect("setup_agent_integration succeeds");
+    let back: IntegrationWrite =
+        serde_json::from_value(structured_of(result)).expect("decode the write");
+    assert!(!back.created);
+    assert_eq!(back.path, PathBuf::from("/p/CLAUDE.md"));
+}
+
+#[tokio::test]
+async fn prompt_template_create_threads_the_scope_and_projects_the_view() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::PromptTemplateCreate {
+            scope: PromptScope::Global,
+            name,
+            description,
+            body,
+        } if name == "review" => Ok(IpcResponse::PromptTemplate(PromptTemplateView {
+            id: PromptTemplateId::from_raw(4),
+            name,
+            description,
+            placeholders: vec!["diff".into()],
+            body,
+            scope: PromptScope::Global,
+            revision: 1,
+        })),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .prompt_template_create(Parameters(PromptTemplateCreateArg {
+            name: "review".into(),
+            description: Some("PR review".into()),
+            body: "Review {{diff}}".into(),
+            scope: Some(PromptScopeArg::Global),
+        }))
+        .await
+        .expect("prompt_template_create succeeds");
+    let back: PromptTemplateView =
+        serde_json::from_value(structured_of(result)).expect("decode the view");
+    assert_eq!(back.placeholders, vec!["diff".to_owned()]);
+    assert_eq!(back.scope, PromptScope::Global);
+}
+
+/// An omitted scope addresses the effective project, and a stale update surfaces as a
+/// tool-execution error the model can read and retry on.
+#[tokio::test]
+async fn a_stale_prompt_template_update_becomes_a_tool_execution_error() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::PromptTemplateUpdate {
+            scope: PromptScope::Project,
+            expected_revision: 1,
+            ..
+        } => Err(IpcError::PromptTemplateRevisionConflict {
+            expected: Some(1),
+            actual: Some(2),
+        }),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .prompt_template_update(Parameters(PromptTemplateUpdateArg {
+            name: "review".into(),
+            description: None,
+            body: "new body".into(),
+            expected_revision: 1,
+            scope: None,
+        }))
+        .await
+        .expect("a request error is a tool result, not a protocol error");
+    assert_eq!(result.is_error, Some(true));
 }

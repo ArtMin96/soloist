@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { IntegrationsPanel } from "@/components/settings/IntegrationsPanel";
-import type { McpFeatureGroup, McpToolGroups } from "@/domain";
+import { HTTP_API_ENDPOINTS } from "@/lib/integrations";
+import type { McpFeatureGroup, McpSetupInfo, McpToolGroups } from "@/domain";
+
+const setupInfo: McpSetupInfo = {
+  helper_path: "/usr/bin/soloist-mcp",
+  data_dir: "/home/u/.local/share/soloist",
+  data_dir_overridden: false,
+};
 
 afterEach(() => {
   cleanup();
@@ -18,9 +25,11 @@ describe("Settings — Integrations", () => {
       todos: true,
       timers: true,
       key_value: false,
+      prompt_templates: false,
     };
     mockIPC((cmd, args) => {
       if (cmd === "mcp_tool_groups") return groups;
+      if (cmd === "mcp_setup_info") return setupInfo;
       if (cmd === "set_mcp_tool_group") {
         const next = args as { group: McpFeatureGroup; enabled: boolean };
         lastSet = next;
@@ -38,18 +47,56 @@ describe("Settings — Integrations", () => {
     await waitFor(() => expect(lastSet).toEqual({ group: "key_value", enabled: true }));
   });
 
-  it("shows the stdio MCP setup and the read-only HTTP API surface", () => {
-    mockIPC((cmd) =>
-      cmd === "mcp_tool_groups"
-        ? { scratchpads: true, todos: true, timers: true, key_value: false }
-        : undefined,
-    );
+  it("generates the default client's snippet from the resolved setup info", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "mcp_tool_groups")
+        return {
+          scratchpads: true,
+          todos: true,
+          timers: true,
+          key_value: false,
+          prompt_templates: false,
+        };
+      if (cmd === "mcp_setup_info") return setupInfo;
+      return undefined;
+    });
 
     render(<IntegrationsPanel />);
 
-    // The MCP transport is stdio (no port); the HTTP API is loopback with a derived endpoint count.
-    expect(screen.getByText(/"command": "soloist-mcp"/)).toBeTruthy();
+    // The first client (Claude Code) renders once the resolved helper path arrives; the
+    // default data dir emits no env entry. The HTTP API stays read-only beside it.
+    await waitFor(() =>
+      expect(screen.getByText(/"command": "\/usr\/bin\/soloist-mcp"/)).toBeTruthy(),
+    );
+    expect(screen.queryByText(/SOLOIST_APP_DATA_DIR/)).toBeNull();
+    expect(screen.getByText(/\.mcp\.json \(project root\)/)).toBeTruthy();
     expect(screen.getByText("http://127.0.0.1:24678")).toBeTruthy();
-    expect(screen.getByText("19 endpoints")).toBeTruthy();
+    expect(screen.getByText(`${HTTP_API_ENDPOINTS.length} endpoints`)).toBeTruthy();
+  });
+
+  it("copies the generated snippet to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    mockIPC((cmd) => {
+      if (cmd === "mcp_tool_groups")
+        return {
+          scratchpads: true,
+          todos: true,
+          timers: true,
+          key_value: false,
+          prompt_templates: false,
+        };
+      if (cmd === "mcp_setup_info") return setupInfo;
+      return undefined;
+    });
+
+    render(<IntegrationsPanel />);
+    await waitFor(() =>
+      expect(screen.getByText(/"command": "\/usr\/bin\/soloist-mcp"/)).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+    expect(writeText.mock.calls[0][0]).toContain('"command": "/usr/bin/soloist-mcp"');
   });
 });

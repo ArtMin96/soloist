@@ -1,8 +1,12 @@
 use super::*;
+
+use crate::error::IpcError;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, FireCond, LeaseView, Origin, ProcStatus, ProcessId,
-    ProcessKind, ProcessView, ProjectId, ProjectView, PromptMode, Readiness, SessionId,
-    SetWhenIdleOutcome, StartSummary, TimerId, TimerStatus, TimerView, Whoami,
+    AcquireOutcome, AgentKind, AgentTool, ExportedPromptTemplate, FeedbackEntry, FireCond,
+    IntegrationFile, IntegrationWrite, LeaseView, Origin, ProcStatus, ProcessId, ProcessKind,
+    ProcessView, ProjectId, ProjectView, PromptMode, PromptScope, PromptTemplateId,
+    PromptTemplateSummary, PromptTemplateView, Readiness, SessionId, SetWhenIdleOutcome,
+    StartSummary, TimerId, TimerStatus, TimerView, Whoami,
 };
 use std::path::PathBuf;
 
@@ -144,6 +148,44 @@ fn requests_round_trip_through_json() {
             timer: TimerId::from_raw(1),
         },
         IpcRequest::TimerList,
+        IpcRequest::SubmitFeedback {
+            message: "the sidebar flickers".into(),
+        },
+        IpcRequest::SetupAgentIntegration {
+            file: IntegrationFile::ClaudeMd,
+        },
+        IpcRequest::SetupAgentIntegration {
+            file: IntegrationFile::AgentsMd,
+        },
+        IpcRequest::PromptTemplateList { scope: None },
+        IpcRequest::PromptTemplateList {
+            scope: Some(PromptScope::Global),
+        },
+        IpcRequest::PromptTemplateRead {
+            scope: PromptScope::Project,
+            name: "review".into(),
+        },
+        IpcRequest::PromptTemplateCreate {
+            scope: PromptScope::Global,
+            name: "review".into(),
+            description: Some("PR review".into()),
+            body: "Review {{diff}}".into(),
+        },
+        IpcRequest::PromptTemplateUpdate {
+            scope: PromptScope::Project,
+            name: "review".into(),
+            description: None,
+            body: "Review {{diff}} for {{focus}}".into(),
+            expected_revision: 2,
+        },
+        IpcRequest::PromptTemplateDelete {
+            scope: PromptScope::Project,
+            name: "review".into(),
+        },
+        IpcRequest::PromptTemplateExport {
+            scope: PromptScope::Global,
+            name: "review".into(),
+        },
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -268,6 +310,39 @@ fn every_response_variant_round_trips_through_json() {
             already_idle: false,
             paused_remaining_millis: Some(45_000),
         }]),
+        IpcResponse::Feedback(FeedbackEntry {
+            id: 7,
+            message: "the sidebar flickers".into(),
+            submitted_unix_millis: 1_700_000_000_000,
+        }),
+        IpcResponse::IntegrationWritten(IntegrationWrite {
+            path: PathBuf::from("/projects/storefront/CLAUDE.md"),
+            created: true,
+        }),
+        IpcResponse::PromptTemplate(PromptTemplateView {
+            id: PromptTemplateId::from_raw(4),
+            name: "review".into(),
+            description: Some("PR review".into()),
+            body: "Review {{diff}}".into(),
+            placeholders: vec!["diff".into()],
+            scope: PromptScope::Project,
+            revision: 1,
+        }),
+        IpcResponse::PromptTemplates(vec![PromptTemplateSummary {
+            id: PromptTemplateId::from_raw(4),
+            name: "review".into(),
+            description: None,
+            placeholders: vec!["diff".into()],
+            scope: PromptScope::Global,
+            revision: 3,
+        }]),
+        IpcResponse::PromptTemplateDeleted(true),
+        IpcResponse::PromptTemplateExport(ExportedPromptTemplate {
+            format: "soloist.prompt-template/v1".into(),
+            name: "review".into(),
+            description: None,
+            body: "Review {{diff}}".into(),
+        }),
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");
@@ -302,6 +377,8 @@ fn a_typed_error_round_trips() {
         IpcError::Untrusted,
         IpcError::UnknownTool,
         IpcError::WorkerMayNotSpawn,
+        IpcError::InvalidFeedback("feedback message is empty".into()),
+        IpcError::UnmatchedIntegrationMarkers("AGENTS.md has unmatched markers".into()),
         IpcError::Internal("disk full".into()),
     ] {
         let json = serde_json::to_string(&error).expect("serialize");
@@ -325,6 +402,8 @@ fn request_errors_are_distinguished_from_server_errors() {
         IpcError::Untrusted,
         IpcError::UnknownTool,
         IpcError::WorkerMayNotSpawn,
+        IpcError::InvalidFeedback("feedback message is empty".into()),
+        IpcError::UnmatchedIntegrationMarkers("AGENTS.md has unmatched markers".into()),
     ] {
         assert!(error.is_request_error(), "{error} is request-caused");
     }
@@ -332,6 +411,19 @@ fn request_errors_are_distinguished_from_server_errors() {
         !IpcError::Internal("disk full".into()).is_request_error(),
         "a server failure is not request-caused"
     );
+}
+
+#[test]
+fn a_refused_integration_write_maps_to_its_own_wire_error() {
+    use soloist_core::{IntegrationWriteError, SetupIntegrationError};
+
+    let err = IpcError::from(SetupIntegrationError::Write(
+        IntegrationWriteError::UnmatchedMarkers {
+            path: "/p/AGENTS.md".into(),
+        },
+    ));
+    assert!(matches!(err, IpcError::UnmatchedIntegrationMarkers(_)));
+    assert!(err.is_request_error(), "the caller can fix the file");
 }
 
 #[test]

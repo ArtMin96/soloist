@@ -18,6 +18,7 @@ import type {
   Integrations,
   LineageEdge,
   McpFeatureGroup,
+  McpSetupInfo,
   McpToolGroups,
   OrchestrationSnapshot,
   ProcessSpec,
@@ -323,6 +324,10 @@ export function mcpToolGroups(): Promise<McpToolGroups> {
 
 export function setMcpToolGroup(group: McpFeatureGroup, enabled: boolean): Promise<McpToolGroups> {
   return invoke<McpToolGroups>("set_mcp_tool_group", { group, enabled });
+}
+
+export function mcpSetupInfo(): Promise<McpSetupInfo> {
+  return invoke<McpSetupInfo>("mcp_setup_info");
 }
 
 // ── Per-project settings ──────────────────────────────────────────────────────

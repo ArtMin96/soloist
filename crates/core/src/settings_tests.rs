@@ -10,14 +10,15 @@ use super::*;
 use crate::testing::FakeSettingsRepo;
 
 #[test]
-fn the_mcp_tool_group_defaults_serve_every_feature_group_except_key_value() {
+fn the_mcp_tool_group_defaults_serve_every_feature_group_except_key_value_and_templates() {
     let groups = McpToolGroups::default();
 
     assert!(groups.enabled(McpFeatureGroup::Scratchpads));
     assert!(groups.enabled(McpFeatureGroup::Todos));
     assert!(groups.enabled(McpFeatureGroup::Timers));
-    // Key-Value is the one feature group that defaults off.
+    // Key-Value and Prompt Templates are the feature groups that default off.
     assert!(!groups.enabled(McpFeatureGroup::KeyValue));
+    assert!(!groups.enabled(McpFeatureGroup::PromptTemplates));
 }
 
 #[test]
@@ -121,6 +122,10 @@ fn a_record_missing_a_field_deserializes_to_the_default_for_that_field() {
         "an omitted field falls back to its default"
     );
     assert!(!partial.mcp_tool_groups.key_value);
+    assert!(
+        !partial.mcp_tool_groups.prompt_templates,
+        "a record written before the group existed reads it as off"
+    );
     // A record an older build wrote omits the whole `appearance` tab; it fills from the default.
     assert_eq!(
         partial.appearance,

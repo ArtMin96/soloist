@@ -453,6 +453,56 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .mcp_tool_groups()
             .map(IpcResponse::McpToolGroups)
             .map_err(|err| IpcError::Internal(err.to_string())),
+        IpcRequest::SubmitFeedback { message } => facade
+            .submit_feedback(&message)
+            .map(IpcResponse::Feedback)
+            .map_err(IpcError::from),
+        IpcRequest::SetupAgentIntegration { file } => facade
+            .setup_agent_integration(session, file)
+            .map(IpcResponse::IntegrationWritten)
+            .map_err(IpcError::from),
+        IpcRequest::PromptTemplateList { scope } => facade
+            .prompt_template_list(session, scope)
+            .map(IpcResponse::PromptTemplates)
+            .map_err(IpcError::from),
+        IpcRequest::PromptTemplateRead { scope, name } => facade
+            .prompt_template_read(session, scope, &name)
+            .map(IpcResponse::PromptTemplate)
+            .map_err(IpcError::from),
+        IpcRequest::PromptTemplateCreate {
+            scope,
+            name,
+            description,
+            body,
+        } => facade
+            .prompt_template_create(session, scope, &name, description.as_deref(), &body)
+            .map(IpcResponse::PromptTemplate)
+            .map_err(IpcError::from),
+        IpcRequest::PromptTemplateUpdate {
+            scope,
+            name,
+            description,
+            body,
+            expected_revision,
+        } => facade
+            .prompt_template_update(
+                session,
+                scope,
+                &name,
+                description.as_deref(),
+                &body,
+                expected_revision,
+            )
+            .map(IpcResponse::PromptTemplate)
+            .map_err(IpcError::from),
+        IpcRequest::PromptTemplateDelete { scope, name } => facade
+            .prompt_template_delete(session, scope, &name)
+            .map(IpcResponse::PromptTemplateDeleted)
+            .map_err(IpcError::from),
+        IpcRequest::PromptTemplateExport { scope, name } => facade
+            .prompt_template_export(session, scope, &name)
+            .map(IpcResponse::PromptTemplateExport)
+            .map_err(IpcError::from),
     }
 }
 

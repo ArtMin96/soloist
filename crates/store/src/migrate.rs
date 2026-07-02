@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 10;
+pub(crate) const SCHEMA_VERSION: i64 = 12;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -192,6 +192,44 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         .map_err(sql_err)?;
     }
 
+    if version < 11 {
+        // Feedback: append-only local notes about Soloist itself. Global (no project foreign
+        // key — feedback outlives any project) and never transmitted anywhere; the user reads
+        // it back at their own pace. The store-assigned `id` is durable and never reused
+        // (`AUTOINCREMENT`); the millis are a persistable wall clock.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS feedback (
+                 id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                 message               TEXT NOT NULL,
+                 submitted_unix_millis INTEGER NOT NULL
+             );",
+        )
+        .map_err(sql_err)?;
+    }
+
+    if version < 12 {
+        // Prompt templates: durable reusable prompts, global (NULL project_id) or
+        // project-scoped. `revision` guards optimistic-concurrency writes like scratchpads.
+        // Name uniqueness per scope is the expression index below, NOT a UNIQUE constraint:
+        // SQLite treats NULLs as distinct inside UNIQUE, so `UNIQUE(project_id, name)` would
+        // allow unlimited same-named global rows. COALESCE maps the global scope to 0, which
+        // no project row ever uses (rowids start at 1). The project foreign key cascades;
+        // global rows outlive every project.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS prompt_templates (
+                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                 project_id  INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+                 name        TEXT NOT NULL,
+                 description TEXT,
+                 body        TEXT NOT NULL,
+                 revision    INTEGER NOT NULL
+             );
+             CREATE UNIQUE INDEX IF NOT EXISTS prompt_templates_scope_name
+                 ON prompt_templates (COALESCE(project_id, 0), name);",
+        )
+        .map_err(sql_err)?;
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
@@ -246,6 +284,8 @@ mod tests {
             "kv",
             "settings",
             "project_settings",
+            "feedback",
+            "prompt_templates",
         ] {
             let exists = conn
                 .query_row(

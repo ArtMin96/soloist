@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::agents::{AgentToolRepo, NoopAgentToolRepo, NoopVersionProbe, VersionProbe};
 use crate::coordination::{
-    KvRepo, LockRepo, NoopKvRepo, NoopLockRepo, NoopScratchpadRepo, NoopTimerRepo, NoopTodoRepo,
-    ScratchpadRepo, TimerRepo, TodoRepo,
+    KvRepo, LockRepo, NoopKvRepo, NoopLockRepo, NoopPromptTemplateRepo, NoopScratchpadRepo,
+    NoopTimerRepo, NoopTodoRepo, PromptTemplateRepo, ScratchpadRepo, TimerRepo, TodoRepo,
 };
 use crate::filewatch::{FileWatcher, NoopFileWatcher};
 use crate::ids::ProjectId;
@@ -17,6 +17,7 @@ use crate::notify::{NoopNotifier, Notifier};
 use crate::portscan::{NoopPortProbe, PortProbe};
 use crate::settings::{NoopSettingsRepo, ProjectSettings, Settings, SettingsRepo};
 use crate::shellenv::{NoopShellEnvProbe, ShellEnvProbe};
+use crate::support::{FeedbackRepo, NoopFeedbackRepo};
 
 use super::{
     Clock, LockReleaser, NoopLockReleaser, NoopOrphanControl, NoopRuntimeState, OrphanControl,
@@ -28,9 +29,9 @@ use super::{
 /// rather than another argument threaded through every call site. The required adapters
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
 /// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `todo_repo`,
-/// `kv_repo`, `runtime`, `orphan_control`, `metrics`,
+/// `kv_repo`, `prompt_template_repo`, `runtime`, `orphan_control`, `metrics`,
 /// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`, `shell_env_probe`,
-/// `settings_repo`, `project_settings_repo`)
+/// `settings_repo`, `project_settings_repo`, `feedback_repo`)
 /// default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
 /// forces every existing composition root to change. `app_env` (the app's own environment,
 /// captured at the composition root for the shell-environment resolver) defaults to empty.
@@ -47,6 +48,7 @@ pub struct CorePorts {
     pub(crate) scratchpad_repo: Arc<dyn ScratchpadRepo>,
     pub(crate) todo_repo: Arc<dyn TodoRepo>,
     pub(crate) kv_repo: Arc<dyn KvRepo>,
+    pub(crate) prompt_template_repo: Arc<dyn PromptTemplateRepo>,
     pub(crate) runtime: Arc<dyn RuntimeState>,
     pub(crate) orphan_control: Arc<dyn OrphanControl>,
     pub(crate) metrics: Arc<dyn MetricsProbe>,
@@ -58,6 +60,7 @@ pub struct CorePorts {
     pub(crate) shell_env_probe: Arc<dyn ShellEnvProbe>,
     pub(crate) settings_repo: Arc<dyn SettingsRepo<(), Settings>>,
     pub(crate) project_settings_repo: Arc<dyn SettingsRepo<ProjectId, ProjectSettings>>,
+    pub(crate) feedback_repo: Arc<dyn FeedbackRepo>,
     pub(crate) app_env: BTreeMap<String, String>,
 }
 
@@ -82,6 +85,7 @@ impl CorePorts {
                 scratchpad_repo: Arc::new(NoopScratchpadRepo),
                 todo_repo: Arc::new(NoopTodoRepo),
                 kv_repo: Arc::new(NoopKvRepo),
+                prompt_template_repo: Arc::new(NoopPromptTemplateRepo),
                 runtime: Arc::new(NoopRuntimeState),
                 orphan_control: Arc::new(NoopOrphanControl),
                 metrics: Arc::new(NoopMetricsProbe),
@@ -93,6 +97,7 @@ impl CorePorts {
                 shell_env_probe: Arc::new(NoopShellEnvProbe),
                 settings_repo: Arc::new(NoopSettingsRepo),
                 project_settings_repo: Arc::new(NoopSettingsRepo),
+                feedback_repo: Arc::new(NoopFeedbackRepo),
                 app_env: BTreeMap::new(),
             },
         }
@@ -151,6 +156,18 @@ impl CorePortsBuilder {
     /// restart and have no process ownership.
     pub fn kv_repo(mut self, kv_repo: Arc<dyn KvRepo>) -> Self {
         self.ports.kv_repo = kv_repo;
+        self
+    }
+
+    /// Overrides the durable prompt-template store the coordination aggregate persists to (C6;
+    /// defaults to [`NoopPromptTemplateRepo`], which stores nothing). The real adapter is SQLite,
+    /// the same store backing every other durable repository; templates are durable shared
+    /// content — global or project-scoped — that survives a restart.
+    pub fn prompt_template_repo(
+        mut self,
+        prompt_template_repo: Arc<dyn PromptTemplateRepo>,
+    ) -> Self {
+        self.ports.prompt_template_repo = prompt_template_repo;
         self
     }
 
@@ -237,6 +254,15 @@ impl CorePortsBuilder {
         project_settings_repo: Arc<dyn SettingsRepo<ProjectId, ProjectSettings>>,
     ) -> Self {
         self.ports.project_settings_repo = project_settings_repo;
+        self
+    }
+
+    /// Overrides the durable feedback store submissions append to (defaults to
+    /// [`NoopFeedbackRepo`], which acknowledges without persisting). The real adapter is
+    /// SQLite, the same store backing every other durable repository; feedback is global,
+    /// never sent anywhere, and reviewed by the user locally.
+    pub fn feedback_repo(mut self, feedback_repo: Arc<dyn FeedbackRepo>) -> Self {
+        self.ports.feedback_repo = feedback_repo;
         self
     }
 

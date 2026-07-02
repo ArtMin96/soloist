@@ -30,7 +30,11 @@ impl SoloistMcp {
     #[tool(description = "List the configured agent tools that `spawn_agent` can launch.")]
     pub(crate) async fn list_agent_tools(&self) -> Result<CallToolResult, ErrorData> {
         match self.client.request(IpcRequest::ListAgentTools).await {
-            Ok(IpcResponse::AgentTools(tools)) => structured(&tools),
+            // Wrapped in an object: the MCP spec requires `structuredContent` to be a JSON
+            // object, so a list reply must never be a bare array (clients refuse it).
+            Ok(IpcResponse::AgentTools(tools)) => {
+                structured(&serde_json::json!({ "tools": tools }))
+            }
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }
