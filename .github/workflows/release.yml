@@ -1,7 +1,7 @@
 name: Release
 
 # Tag a commit `vX.Y.Z` (matching the version in crates/app/tauri.conf.json) to build the
-# signed .deb + .AppImage on x86_64, publish them to a draft GitHub Release with SHA-256
+# signed .deb + .AppImage on x86_64, publish them to a GitHub Release with SHA-256
 # checksums, and verify the AppImage runs on a clean Ubuntu 22.04 (bundled webkit, no
 # manual install). The updater artifacts are signed here with TAURI_SIGNING_PRIVATE_KEY;
 # the base build (CI, local) stays keyless because createUpdaterArtifacts lives only in
@@ -61,7 +61,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: 'Soloist v__VERSION__'
           releaseBody: 'Download the .deb (Ubuntu 22.04+) or the portable .AppImage. Verify your download against SHA256SUMS.'
-          releaseDraft: true
+          # Publish on build, not as a draft, so /releases/latest/download/latest.json resolves and
+          # installed apps pick the update up without a manual publish step.
+          releaseDraft: false
           prerelease: false
           args: --config bundle/release.conf.json
 
