@@ -27,6 +27,34 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Critical bugfix — terminal pane rendered empty after switching agents and navigating back
+  (2026-07-02, uncommitted on `main`).** Root cause, proven live via the `agent-bridge` MCP harness
+  (backend `eprintln` + frontend chunk tracing, then removed): `useTerminal`'s rAF-coalescing state
+  (`frameRef` + flush slot) was shared across attach generations of one hook instance. Under
+  StrictMode's mount→cleanup→mount, the superseded attachment's scrollback chunk always arrived
+  first (its `pty_attach` was processed first), claimed the shared frame slot, and its flush bailed
+  on the stale-term guard without rescheduling — so the live attachment's fully-delivered scrollback
+  replay sat in `pending` forever. Any live output rescued it within a second, which is why chatty
+  processes looked fine and the launch path ("first open") worked, but an **idle agent waiting for
+  input never rescues it → permanently empty pane**. Fix: (a) all coalescing state now lives in the
+  attach closure and dies with the attachment; superseded attachments discard bytes on arrival and
+  can never claim the live attachment's frame; the queue is bounded (`PENDING_CAP_BYTES` 512 KiB,
+  oldest-dropped — it previously grew unbounded while rAF was suspended, e.g. occluded window);
+  (b) `pty_attach` now returns a server-assigned token and `pty_detach(token)` is a no-op for a
+  stale token (`PtyBridge` keys the single forwarder slot by token) — official Tauri docs confirm
+  async commands execute out of invoke order, so an argument-less global detach could abort the
+  newer attachment's forwarder (prod-relevant race; frontend chains its detach off its own attach's
+  token). Regression tests: `pty_bridge_tests.rs` (4: token monotonicity, install-replaces-aborts,
+  stale-detach-no-op, current-detach-aborts) and `useTerminal.test.tsx` (3: replay renders after
+  StrictMode remount with a silent process — red before the fix, empty-string write observed;
+  superseded bytes never reach any emulator; unmount detaches by own token). Verified live:
+  Idle-process A→B→A navigation renders the full replay (screenshot evidence in-session). Gate:
+  `just lint` exit 0; `just test` green except **pre-existing, unrelated** `soloist-sys`
+  `shellenv::captures_a_real_login_shell_environment_with_path` (`Capture("timed out")` — fails
+  identically on clean HEAD in this environment; not touched). Side effect to note: a scratch
+  project `repro` (root under the session scratchpad) remains in the app's project list — there is
+  no project-remove command yet; harmless, remove when that lands.
+
 - **Phase 11 — I2 command palette (Ctrl+K) + hotkey/palette refactor (branch `feat/hotkey-palettes`,
   PR #53 stacked on #52) — CODE-COMPLETE & gate-green (2026-06-30); only the user-only real-window
   walk remains.** Reviewed PR #53 (the `quick_jump`/Ctrl+E, `quick_actions`/Ctrl+P,

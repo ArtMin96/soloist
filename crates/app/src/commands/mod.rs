@@ -207,14 +207,15 @@ pub async fn pty_resize(
 
 /// Attaches the terminal pane to a process: replays its raw scrollback as the first
 /// channel message, then streams live PTY bytes. Cancels any previous attachment so a
-/// single forwarder runs (the pane shows one process at a time).
+/// single forwarder runs (the pane shows one process at a time). Returns the token that
+/// identifies this attachment; [`pty_detach`] cancels it by that token.
 #[tauri::command]
 pub async fn pty_attach(
     id: u64,
     on_chunk: Channel<Vec<u8>>,
     facade: State<'_, Arc<Facade>>,
     bridge: State<'_, PtyBridge>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let (scrollback, mut live) = facade
         .supervisor()
         .attach_pty(ProcessId::from_raw(id))
@@ -235,14 +236,15 @@ pub async fn pty_attach(
             }
         }
     });
-    bridge.install(handle);
-    Ok(())
+    Ok(bridge.install(handle))
 }
 
-/// Detaches the terminal pane — the pane closed or the selection moved away.
+/// Detaches the attachment identified by `token` — the pane closed or the selection moved
+/// away. Async commands execute out of invoke order, so a stale token (a newer attachment
+/// has since installed its forwarder) is a no-op rather than killing the newer stream.
 #[tauri::command]
-pub async fn pty_detach(bridge: State<'_, PtyBridge>) -> Result<(), String> {
-    bridge.clear();
+pub async fn pty_detach(token: u64, bridge: State<'_, PtyBridge>) -> Result<(), String> {
+    bridge.clear(token);
     Ok(())
 }
 

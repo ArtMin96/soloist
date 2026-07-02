@@ -12,6 +12,12 @@ import type { ProcessView } from "@/domain";
 
 export type TerminalState = "attaching" | "live" | "not-started";
 
+// Upper bound on bytes coalesced between animation frames. Frames stop while the window is
+// hidden or occluded, so without a cap a chatty process would grow the queue without limit;
+// oldest chunks are dropped first, mirroring the core's raw-scrollback ring. Sized to hold a
+// full scrollback replay (the core caps raw scrollback at 256 KiB) plus a burst of live output.
+const PENDING_CAP_BYTES = 512 * 1024;
+
 /** Stable API for in-terminal text search — backed by SearchAddon once mounted. */
 export interface TerminalSearch {
   findNext: (query: string) => void;
@@ -31,9 +37,11 @@ export function useTerminal(process: ProcessView) {
   const fitRef = useRef<FitAddon | null>(null);
   const searchRef = useRef<SearchAddon | null>(null);
   const attachedRef = useRef(false);
-  // The id of the pending coalescing frame, so unmount can cancel it before disposing the terminal
-  // (otherwise a frame scheduled in the last ~16 ms would write to a disposed emulator).
-  const frameRef = useRef(0);
+  // Cancels the current attachment: drops its queued chunks and pending frame, discards its
+  // late-arriving bytes, and detaches its backend forwarder by token. Unmount calls it before
+  // disposing the emulator, so a superseded attachment can never write to the new terminal
+  // or claim its animation frame.
+  const cancelAttachRef = useRef<(() => void) | null>(null);
   const [state, setState] = useState<TerminalState>("attaching");
 
   const { appearance, dark } = useAppearance();
@@ -50,23 +58,52 @@ export function useTerminal(process: ProcessView) {
     attachedRef.current = true;
     setState("attaching");
 
+    // All coalescing state lives in this closure and dies with this attachment. Bytes from a
+    // cancelled attachment are discarded on arrival — never queued, never given a frame — so
+    // they cannot swallow the live attachment's flush or write to its emulator. This matters
+    // most for a silent process: its scrollback replay is the only content it will ever get.
+    let cancelled = false;
+    let frame = 0;
     let pending: Uint8Array[] = [];
+    let pendingBytes = 0;
+
     const flush = () => {
-      frameRef.current = 0;
-      // The effect's cleanup nulls termRef before this frame could run after a dispose; bail so a
-      // late frame never writes to a disposed emulator.
-      if (termRef.current !== term) return;
+      frame = 0;
       const batch = pending;
       pending = [];
+      pendingBytes = 0;
       for (const chunk of batch) term.write(chunk);
     };
 
-    void ptyAttach(id, (bytes) => {
+    const attachment = ptyAttach(id, (bytes) => {
+      if (cancelled) return;
       pending.push(bytes);
-      if (!frameRef.current) frameRef.current = requestAnimationFrame(flush);
-    })
-      .then(() => setState("live"))
+      pendingBytes += bytes.length;
+      while (pendingBytes > PENDING_CAP_BYTES && pending.length > 1) {
+        pendingBytes -= pending[0].length;
+        pending.shift();
+      }
+      if (!frame) frame = requestAnimationFrame(flush);
+    });
+
+    cancelAttachRef.current = () => {
+      cancelled = true;
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      pending = [];
+      pendingBytes = 0;
+      // Detach by this attachment's own token once it resolves: if a newer attachment has
+      // already installed its forwarder, the backend treats the stale token as a no-op — a
+      // late detach can never kill the stream the user is looking at.
+      void attachment.then((token) => ptyDetach(token)).catch(() => {});
+    };
+
+    attachment
+      .then(() => {
+        if (!cancelled) setState("live");
+      })
       .catch(() => {
+        if (cancelled) return;
         attachedRef.current = false;
         setState("not-started");
       });
@@ -131,11 +168,8 @@ export function useTerminal(process: ProcessView) {
       tornDown = true;
       observer.disconnect();
       onData.dispose();
-      if (frameRef.current) {
-        cancelAnimationFrame(frameRef.current);
-        frameRef.current = 0;
-      }
-      void ptyDetach().catch(() => {});
+      cancelAttachRef.current?.();
+      cancelAttachRef.current = null;
       renderer?.dispose();
       term.dispose();
       termRef.current = null;
