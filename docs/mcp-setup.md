@@ -14,9 +14,12 @@ these snippets with the resolved paths filled in — prefer copying from there.
 ## How it runs
 
 - **Transport: stdio only.** The client launches `soloist-mcp` per session; nothing listens on a
-  port. Until packaged installs land, the helper is a build artifact next to the `soloist`
-  binary — the Integrations panel resolves that sibling path and generates snippets with it; if
-  no sibling exists the snippet falls back to the bare name and `soloist-mcp` must be on `PATH`.
+  port. The packaged installs ship the helper beside the app binary (`/usr/bin/soloist-mcp` from
+  the `.deb`; inside the AppImage's `usr/bin`), and a dev build leaves it next to `soloist` in
+  `target/`. On startup the app also exports a copy to `<data dir>/bin/soloist-mcp` — the one
+  path that survives an AppImage's per-launch mount and package upgrades — so the Integrations
+  panel prefers it in generated snippets, then falls back to the executable sibling, then to the
+  bare name (`soloist-mcp` on `PATH`).
 - **The app must be running.** The helper serves its tool list on its own (and the `help` tool
   answers app-down), but every other tool call needs the desktop app's socket. A call while the
   app is closed returns a clear "Soloist is not running" error.

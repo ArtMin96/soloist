@@ -29,10 +29,19 @@ feed format + checker).
    future nice-to-have.)
 8. **CI release pipeline:** tag → build `.deb` + `.AppImage` (both 22.04+) on x86_64 →
    attach to a GitHub Release with checksums.
+9. **Companion binaries (added 2026-07-03 — omitted from the original plan and caught by a
+   user bug report):** both artifacts must ship `soloist-mcp` (F1 "bundled helper") and
+   `soloist-cli` (H4) at `usr/bin` beside the app binary — `bundle.linux.{deb,appimage}.files`
+   maps them from `target/release/`, and `beforeBuildCommand` release-builds both crates so
+   every `cargo tauri build` produces complete packages. The app exports the helper to
+   `<data dir>/bin` on startup so generated MCP snippets carry a path that survives an
+   AppImage's per-launch mount (see `docs/mcp-setup.md`).
 
 ## Acceptance criteria
 - `sudo apt install ./soloist_*.deb` on a clean **Ubuntu 22.04 (x86_64)** installs with a working menu
   entry + icon; launches; `apt remove` cleans up.
+- Both artifacts contain `usr/bin/soloist-mcp` and `usr/bin/soloist-cli`, and a generated
+  Claude Code snippet from a packaged install launches the helper successfully.
 - The `.AppImage` runs on a clean **Ubuntu 22.04+ (x86_64)** with **no** manual webkit install (20.04
   infeasible — `KNOWN-DIVERGENCES` D-11).
 - Published artifacts carry matching SHA-256 checksums produced by CI.

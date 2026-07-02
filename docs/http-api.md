@@ -273,6 +273,11 @@ find the port (falling back to the default `24678` when the file is absent), sen
 every mutation, and prints one line of result. A success goes to stdout with exit code `0`; an error
 goes to stderr as `soloist: <message>` with a non-zero exit code, so a script can branch on it.
 
+The packaged installs ship it as **`/usr/bin/soloist-cli`** — the desktop app owns the bare
+`soloist` name — so on an installed system the commands below read `soloist-cli status`,
+`soloist-cli logs web`, and so on (`KNOWN-DIVERGENCES.md` D-14; `alias soloist=soloist-cli`
+restores the short form). A dev checkout runs it as `cargo run -p soloist-cli --`.
+
 When the API cannot be reached (almost always because the app is not running), every command prints
 `soloist: Soloist is not running` and exits non-zero.
 

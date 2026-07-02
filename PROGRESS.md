@@ -9,7 +9,7 @@
 
 ## Current state
 
-> **PHASE 12 (Packaging — `.deb`/`.AppImage`, x86_64) — `Done — pending verify` (2026-06-30, branch `feat/phase-12-packaging`):** v1 rows J1/J2/J3 + the owner-requested J4/J5/tray are gate-green and container-smoked; only the user-only real-desktop GUI walk and the `git tag`→release publish remain. **D-11: the supported floor is Ubuntu 22.04+** (20.04 infeasible — Tauri v2 needs WebKitGTK 4.1). Details in the Phase 12 Decisions entry and "Next session should start with".
+> **PHASE 12 (Packaging — `.deb`/`.AppImage`, x86_64) — `Done — pending verify` (2026-06-30, branch `feat/phase-12-packaging`):** v1 rows J1/J2/J3 + the owner-requested J4/J5/tray are gate-green and container-smoked; only the user-only real-desktop GUI walk and the `git tag`→release publish remain. **2026-07-03: both artifacts now also bundle the companion binaries (`soloist-mcp`, `soloist-cli`) — a user-reported gap; fixed + verified, see the top entry. Re-tag/republish so installed apps get them.** **D-11: the supported floor is Ubuntu 22.04+** (20.04 infeasible — Tauri v2 needs WebKitGTK 4.1). Details in the Phase 12 Decisions entry and "Next session should start with".
 >
 > **ACTIVE PHASE: 11 (UX Polish & Execution Profiles) — STARTED. Slice 1 landed: I10 env capture (`$SHELL -ilc env`, ~10-min cache, precedence process > captured > app). Slice 2 landed (2026-06-25): `SettingsRepo` (migration v9) + the per-group MCP tool-enablement Registry (G10 Key-Value default-OFF) — **PR #28 MERGED to `main` (`1356f44`)**. Phase 10 (HTTP API & CLI) is `Verified` — the user-only runtime acceptance walk PASSED 2026-06-25 (status/restart/logs against a live app, CLI/UI restart route identically, app-down → "Soloist is not running"/exit 1, mutation auth 200-vs-401, foreign-Origin CORS refused). Phase 9 (Coordination, C6) is `Verified`.**
 > PR #26 (Phase 10 — H1–H4) is **merged to `main`** (merge commit `7db4004`, incl. the review-cleanup `a83ac19`);
@@ -26,6 +26,50 @@
 > Task 6) is Phase 11** work — it needs the per-group enablement toggle Phase 11 builds (plan/05 §7: Key-Value
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
+
+- **Packaged installs shipped no MCP helper or CLI — user bug report, root-caused, fixed,
+  verified (2026-07-03, on `main` after `fe00c54` v0.3.0; pushed to `main` per user).** The
+  installed `.deb`/`.AppImage` contained only `usr/bin/soloist`, so an installed app could not
+  offer the soloist MCP to any client — this repo only *appeared* to work because its
+  `.mcp.json` points at the dev artifact `target/debug/soloist-mcp`. The phase-12 plan had
+  omitted the companion binaries entirely while `plan/02` F1 promised a "bundled helper"
+  (docs/mcp-setup.md even said "until packaged installs land…"). Fixes, per user-confirmed
+  design choices (data-dir copy; ship the CLI; manual MCP setup like Solo):
+  - **Packaging:** `bundle.linux.{deb,appimage}.files` maps `/usr/bin/soloist-mcp` and
+    `/usr/bin/soloist-cli` from `target/release/`; `beforeBuildCommand` release-builds both
+    crates so every `cargo tauri build` (justfile and the CI tauri-action alike) produces
+    complete artifacts. `files` was chosen over `externalBin` deliberately: tauri-build
+    hard-fails any plain `cargo build -p soloist-app` when the triple-suffixed sidecar file
+    is missing (fresh-clone `just test` would break) and it stomps cargo's own
+    `target/release/soloist-mcp`; verified in the tauri-bundler/tauri-build sources
+    (`fs::copy` preserves the exec bit; the AppImage takes its own `files` map —
+    tauri-utils 2.9.2).
+  - **Stable snippet path:** new `crates/app/src/companion_bins.rs` exports both binaries to
+    `<data dir>/bin` on startup (byte-compare first; temp sibling + rename so a client
+    launching the helper mid-refresh never executes a torn file; non-fatal, off the runtime).
+    `helper_command` now resolves data-dir export → executable sibling → bare name, and
+    `mcp_setup_info` feeds it the data dir — one stable snippet on every install format,
+    closing the F2/F12/F14 review's AppImage `/tmp/.mount_*` open note (marked resolved
+    below).
+  - **Decisions recorded:** launched agents keep **manual** MCP client setup — confirmed
+    against Solo's own docs (soloterm.com/docs/integrations/mcp-server, 2026-07-03; Solo also
+    never auto-registers; its one-click "Run" configure is noted as a *later* candidate) —
+    new gap row in `plan/05` §12. The CLI ships as `/usr/bin/soloist-cli` because the GUI
+    owns `soloist` → `KNOWN-DIVERGENCES.md` **D-14**. Phase-12 file gained task 9 + an
+    artifact-contents acceptance line; `plan/02` F1/F2/H4 notes updated; `docs/mcp-setup.md`
+    and `docs/http-api.md` updated.
+  - **Evidence:** rebuilt both artifacts — `dpkg -c Soloist_0.3.0_amd64.deb` lists
+    `usr/bin/{soloist,soloist-mcp,soloist-cli}` (0755); the real `.AppImage` payload verified
+    via `--appimage-extract`; the deb-extracted helper answered MCP `initialize` +
+    `tools/list` (**80 tools**) over stdio; the deb-extracted `soloist-cli status` printed
+    the live app's table (exit 0). Sizes (measured): `.deb` 8.25 → **10.36 MB**, `.AppImage`
+    **89.7 MB** (bundled webkit). Gates: `just lint` exit 0; `just test` — Rust **849
+    passed / 0 failed / 3 ignored (30 suites**, incl. 4 net-new: `companion_bins` ×3 +
+    `helper_command` data-dir preference), UI **244 passed (50 files)**. `Cargo.lock` diff is
+    the workspace 0.2.1 → 0.3.0 sync the release cut had left ungenerated.
+  - **User-visible remedy:** reinstall from a rebuilt `.deb` (or the next tagged release),
+    launch the app once, and the Integrations snippet points at
+    `~/.local/share/soloist/bin/soloist-mcp`; existing dev-checkout configs keep working.
 
 - **Review + hardening pass over the F2/F12/F14 sweep (2026-07-03, branch
   `feat/later-f2-f12-f14`, uncommitted on top of `4648d93`; user-requested `/soloist-review` of
@@ -76,6 +120,8 @@
   - **Open note for Phase 12 packaging:** an AppImage's `/tmp/.mount_*` extraction dir changes
     every launch, so the sibling-path helper resolution must not be baked into generated
     snippets for the packaged build — revisit `helper_command` when the helper is bundled.
+    **Resolved 2026-07-03** (companion-binaries session entry above): the helper is bundled
+    and exported to `<data dir>/bin`, and `helper_command` prefers that stable path.
 
 - **Later sweep — F2 + F12 + F14 delivered ahead of schedule (2026-07-02, branch
   `feat/later-f2-f12-f14`, three commits `926e6f2` → `b86c190` → `dd7f52a`; user request).** The

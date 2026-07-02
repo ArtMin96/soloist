@@ -8,7 +8,7 @@
     "devUrl": "http://localhost:1420",
     "frontendDist": "ui/dist",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeBuildCommand": "pnpm build && cargo build --release --package soloist-mcp --package soloist-cli"
   },
   "app": {
     "windows": [
@@ -59,13 +59,19 @@
         "recommends": ["shared-mime-info", "desktop-file-utils"],
         "desktopTemplate": "bundle/soloist.desktop",
         "files": {
-          "/usr/share/mime/packages/soloist.xml": "bundle/soloist-mimetype.xml"
+          "/usr/share/mime/packages/soloist.xml": "bundle/soloist-mimetype.xml",
+          "/usr/bin/soloist-mcp": "../../target/release/soloist-mcp",
+          "/usr/bin/soloist-cli": "../../target/release/soloist-cli"
         },
         "postInstallScript": "bundle/deb-postinst.sh",
         "postRemoveScript": "bundle/deb-postrm.sh"
       },
       "appimage": {
-        "bundleMediaFramework": false
+        "bundleMediaFramework": false,
+        "files": {
+          "/usr/bin/soloist-mcp": "../../target/release/soloist-mcp",
+          "/usr/bin/soloist-cli": "../../target/release/soloist-cli"
+        }
       }
     }
   },

@@ -14,6 +14,8 @@ use soloist_core::{
 };
 use tauri::State;
 
+use crate::companion_bins::{self, is_executable_file, MCP_HELPER_BIN};
+
 /// The Appearance settings — theme and terminal typography.
 #[tauri::command]
 pub async fn appearance(facade: State<'_, Arc<Facade>>) -> Result<Appearance, String> {
@@ -162,17 +164,14 @@ pub async fn set_mcp_tool_group(
         .map_err(|err| err.to_string())
 }
 
-/// The soloist-mcp helper binary's file name — resolved as a sibling of the app binary
-/// when present, else assumed reachable on PATH.
-const MCP_HELPER_BIN: &str = "soloist-mcp";
-
 /// What a generated MCP client snippet needs: the helper command and the data-directory
 /// facts. Presentation data for the Integrations panel, resolved app-side because the
 /// binary's own location is an adapter concern, not domain state.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct McpSetupInfo {
-    /// The command a client should launch: the absolute path to the helper next to this
-    /// binary when it exists there, else the bare name (PATH lookup).
+    /// The command a client should launch: the stable copy exported into the data
+    /// directory when present, else the absolute path to the helper next to this binary,
+    /// else the bare name (PATH lookup).
     pub helper_path: String,
     /// The resolved data directory, for display beside the snippet.
     pub data_dir: String,
@@ -181,10 +180,15 @@ pub struct McpSetupInfo {
     pub data_dir_overridden: bool,
 }
 
-/// The helper command for a snippet, given this binary's own path: the sibling
-/// `soloist-mcp` when an executable file sits there (a packaged or `cargo build` layout),
-/// else the bare name.
-fn helper_command(exe: Option<std::path::PathBuf>) -> String {
+/// The helper command for a snippet: the copy exported into the data directory when an
+/// executable file sits there (the one path that survives an AppImage's per-launch mount
+/// and package upgrades), else the executable sibling of this binary (a packaged or
+/// `cargo build` layout), else the bare name.
+fn helper_command(exe: Option<std::path::PathBuf>, data_dir: &std::path::Path) -> String {
+    let exported = companion_bins::exported_path(data_dir, MCP_HELPER_BIN);
+    if is_executable_file(&exported) {
+        return exported.display().to_string();
+    }
     exe.as_deref()
         .and_then(std::path::Path::parent)
         .map(|dir| dir.join(MCP_HELPER_BIN))
@@ -193,21 +197,12 @@ fn helper_command(exe: Option<std::path::PathBuf>) -> String {
         .unwrap_or_else(|| MCP_HELPER_BIN.to_owned())
 }
 
-/// Whether `path` is a regular file the owner can execute — a mere name collision (a
-/// directory, a data file) must not be handed to an MCP client as a command.
-fn is_executable_file(path: &std::path::Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path)
-        .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
-
 /// The facts the Integrations panel renders MCP client snippets from.
 #[tauri::command]
 pub async fn mcp_setup_info() -> Result<McpSetupInfo, String> {
     let data_dir = soloist_ipc::data_dir().map_err(|err| err.to_string())?;
     Ok(McpSetupInfo {
-        helper_path: helper_command(std::env::current_exe().ok()),
+        helper_path: helper_command(std::env::current_exe().ok(), &data_dir),
         data_dir: data_dir.display().to_string(),
         data_dir_overridden: soloist_ipc::data_dir_overridden(),
     })

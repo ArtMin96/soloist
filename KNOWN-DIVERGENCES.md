@@ -422,3 +422,25 @@ HTTP API (`GET /feedback`, backed by `Facade::feedback_list`).
 **Effect on parity:** F12 verifies — the tool exists, accepts the documented shape, and acknowledges
 with the stored entry. Only the destination differs, and that difference is deliberate and
 user-favoring.
+
+## D-14 — The packaged CLI command is `soloist-cli`, not `soloist` 🟢
+
+**Introduced:** packaging fix, 2026-07-03.
+
+**Solo (ref `plan/05` §8):** the companion command-line client is invoked as `solo`
+(a thin HTTP client of the local API, v0.7.1+) — the CLI and the desktop app do not share
+a name.
+
+**Soloist:** the desktop app's binary already owns the `soloist` name (`/usr/bin/soloist`
+from the `.deb`), so the CLI ships beside it under its crate's own binary name:
+`/usr/bin/soloist-cli`. Every documented subcommand and behavior is unchanged — only the
+executable name differs from the `soloist status` shorthand the plan docs use.
+
+**Rationale:** one artifact cannot install two different programs at the same path, and
+renaming the desktop binary would break the `.desktop` entry, the single-instance handoff,
+and the updater's installed layout for a cosmetic win. A `soloist` shell alias remains the
+user's one-line opt-in.
+
+**Effect on parity:** H4 verifies unchanged (`soloist-cli status` prints the table); the
+matrix row carries the note. If a future release wants the short name, a dispatcher or a
+rename decision gets its own entry here.

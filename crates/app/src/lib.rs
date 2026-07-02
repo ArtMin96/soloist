@@ -6,6 +6,7 @@
 //! `DomainEvent` stream to the webview as Tauri events. The UI renders the read model.
 
 mod commands;
+mod companion_bins;
 #[cfg(feature = "mcp")]
 mod ipc_server;
 mod notifier;
@@ -234,6 +235,17 @@ pub fn run() {
             if let Err(err) = app.state::<Arc<Facade>>().reconcile_todo_locks() {
                 eprintln!("soloist: could not reconcile stale todo locks on launch ({err})");
             }
+            // Export the companion binaries (MCP helper, CLI) into the data directory so
+            // generated client snippets reference one stable path on every install format —
+            // an AppImage's mount point changes each launch. Non-fatal, off the async runtime.
+            tauri::async_runtime::spawn_blocking(|| match soloist_ipc::ensure_data_dir() {
+                Ok(data_dir) => {
+                    companion_bins::refresh(std::env::current_exe().ok(), &data_dir);
+                }
+                Err(err) => eprintln!(
+                    "soloist: could not resolve the data directory for companion binaries ({err})"
+                ),
+            });
             forward_events(app.handle().clone());
             // Start the self-healing reactor: it watches the core event stream and
             // relaunches crashed auto_restart commands within the documented rate limit
