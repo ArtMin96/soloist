@@ -200,7 +200,9 @@ running otherwise. A byte-identical file is a no-op success; an unknown project 
 ungated worker in the project, replying `{ "id": <process id> }`. This is the local user's authority
 on the loopback socket, the same `launch_agent` the desktop launch picker drives; the spawned agent
 is a root process. An unknown tool or project is a `404`. (The session-scoped MCP `spawn_agent`,
-which nests a worker under a bound lead, stays MCP-only.)
+which nests a worker under a bound lead, stays MCP-only — and additionally refuses a caller that
+is itself a spawned worker, since delegation is one level deep; this local route carries the
+user's own authority and no such gate.)
 
 `/projects/{id}/transfer-todo` and `/projects/{id}/transfer-scratchpad` move a coordination
 aggregate from the path (source) project to another. Post `{ "todo": <id>, "to_project": <id> }` or

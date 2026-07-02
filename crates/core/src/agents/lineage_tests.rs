@@ -19,6 +19,22 @@ fn an_unrecorded_process_has_no_parent() {
 }
 
 #[test]
+fn edges_returns_every_recorded_pair_sorted_by_child() {
+    let lineage = AgentLineage::new();
+    let lead = ProcessId::next();
+    let first_worker = ProcessId::next();
+    let second_worker = ProcessId::next();
+    // Recorded out of id order to prove the read sorts by child.
+    lineage.record(second_worker, lead);
+    lineage.record(first_worker, lead);
+
+    assert_eq!(
+        lineage.edges(),
+        vec![(first_worker, lead), (second_worker, lead)],
+    );
+}
+
+#[test]
 fn retain_live_drops_children_gone_from_the_registry() {
     let lineage = AgentLineage::new();
     let lead = ProcessId::next();

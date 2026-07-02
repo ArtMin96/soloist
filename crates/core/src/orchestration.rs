@@ -33,6 +33,16 @@ pub struct AgentNode {
     pub activity: Option<AgentActivity>,
 }
 
+/// One live spawn-lineage edge: a worker and the lead that spawned it, both still in the
+/// registry. The cross-project shape the sidebar joins onto its process list to nest workers
+/// under their leads; an edge disappears from this read once either end leaves the registry,
+/// so a closed lead re-roots its workers exactly as in [`OrchestrationSnapshot`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct LineageEdge {
+    pub child: ProcessId,
+    pub parent: ProcessId,
+}
+
 /// The orchestration read-model for one project: the agent tree and the coordination state agents
 /// share to orchestrate each other. Assembled purely from existing reads, in stable order so the UI
 /// diffs it cleanly. Every field is a projection — the durable source of truth stays in the C6

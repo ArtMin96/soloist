@@ -13,7 +13,7 @@ use crate::tools::reply::{app_error, structured, unexpected};
 #[tool_router(router = agent_router, vis = "pub(crate)")]
 impl SoloistMcp {
     #[tool(
-        description = "Spawn a configured agent tool as a worker in this session's project and start it. Use `list_agent_tools` for the available names. Returns the new process id."
+        description = "Spawn a configured agent tool as a worker in this session's project and start it. Use `list_agent_tools` for the available names. Returns the new process id. Delegation is one level deep: a worker spawned by a lead cannot itself spawn agents."
     )]
     pub(crate) async fn spawn_agent(
         &self,

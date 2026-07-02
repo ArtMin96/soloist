@@ -582,6 +582,34 @@ async fn spawn_agent_threads_its_arguments_through_and_returns_the_process_id() 
 }
 
 #[tokio::test]
+async fn a_workers_spawn_refusal_is_a_tool_error_the_model_can_read() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SpawnAgent { .. } => Err(IpcError::WorkerMayNotSpawn),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    // The one-level delegation refusal is caller-fixable feedback: a tool-execution error
+    // carrying the message, not a protocol error.
+    let result = handler(socket)
+        .spawn_agent(Parameters(SpawnAgentArg {
+            tool: "worker".into(),
+            extra_args: Vec::new(),
+        }))
+        .await
+        .expect("a request error is a tool result, not a protocol error");
+    assert_eq!(result.is_error, Some(true));
+    let rendered = serde_json::to_value(&result)
+        .expect("serialize the tool result")
+        .to_string();
+    assert!(
+        rendered.contains("a worker agent cannot spawn agents"),
+        "the refusal message reaches the model: {rendered}",
+    );
+}
+
+#[tokio::test]
 async fn list_agent_tools_projects_the_configured_tools() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");

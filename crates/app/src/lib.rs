@@ -350,6 +350,7 @@ pub fn run() {
             commands::save_command_to_yaml,
             commands::set_project_icon,
             commands::orchestration_snapshot,
+            commands::lineage_edges,
             commands::scratchpad_read,
             commands::scratchpad_write,
             commands::todo_create,

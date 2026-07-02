@@ -46,13 +46,18 @@ pub enum ScopedActionError {
     Store(#[from] StoreError),
 }
 
-/// Why spawning a worker agent over a scoped session failed: no project is in scope, or the
-/// underlying launch failed (unknown tool, unknown project, store, or supervisor).
+/// Why spawning a worker agent over a scoped session failed: no project is in scope, the
+/// caller is itself a spawned worker, or the underlying launch failed (unknown tool, unknown
+/// project, store, or supervisor).
 #[derive(Debug, thiserror::Error)]
 pub enum SpawnAgentError {
     /// The session has no project in scope to spawn the worker into.
     #[error("no project is in scope; select one first")]
     NoProjectScope,
+    /// The calling session is bound to a process that was itself spawned as a worker this
+    /// run — delegation is one level deep, so a worker may not spawn its own workers.
+    #[error("a worker agent cannot spawn agents; report back to the lead that spawned it")]
+    WorkerMayNotSpawn,
     /// The launch itself failed — see [`LaunchAgentError`].
     #[error(transparent)]
     Launch(#[from] LaunchAgentError),
@@ -167,8 +172,10 @@ impl Facade {
     /// another and needs no project argument. The new agent auto-binds via the injected
     /// `SOLOIST_PROCESS_ID`. When the calling session is bound to a lead process, the worker's
     /// lineage is recorded under that lead so the orchestration tree nests it; an unbound or
-    /// external caller's spawn is a root. Must run within a `tokio` runtime (starting spawns the
-    /// actor).
+    /// external caller's spawn is a root. Delegation is one level deep: a caller that was
+    /// itself spawned as a worker this run is refused with
+    /// [`SpawnAgentError::WorkerMayNotSpawn`]. Must run within a `tokio` runtime (starting
+    /// spawns the actor).
     pub fn spawn_agent(
         &self,
         session: SessionId,
@@ -178,6 +185,15 @@ impl Facade {
         let project = self
             .effective_project(session)
             .ok_or(SpawnAgentError::NoProjectScope)?;
+        // Delegation is one level deep: a caller recorded as a spawned worker is refused for
+        // its whole run — deliberately unfiltered by parent liveness, so a closed lead never
+        // promotes its workers to spawners. Refusal precedes the launch: nothing is spawned,
+        // registered, or recorded.
+        if let Some(caller) = self.identity.origin(session).process() {
+            if self.lineage.parent_of(caller).is_some() {
+                return Err(SpawnAgentError::WorkerMayNotSpawn);
+            }
+        }
         let worker = self.launch_agent(project, tool, extra_args)?;
         // A worker spawned by a bound lead nests under it in the orchestration tree; an
         // unbound or external caller's spawn records no parent and so reads back as a root.

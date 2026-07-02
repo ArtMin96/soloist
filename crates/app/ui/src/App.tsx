@@ -21,6 +21,7 @@ import { useAgents } from "@/store/useAgents";
 import { useAppInfo } from "@/store/useAppInfo";
 import { useGlobalHotkeys } from "@/store/useGlobalHotkeys";
 import { useOrphans } from "@/store/useOrphans";
+import { useLineage } from "@/store/useLineage";
 import { useProcesses } from "@/store/useProcesses";
 import { useProjects } from "@/store/projects";
 import { SignalsProvider } from "@/store/SignalsProvider";
@@ -42,6 +43,7 @@ export default function App() {
   useWindowActive();
   const info = useAppInfo();
   const store = useProcesses();
+  const lineage = useLineage();
   const projects = useProjects(store.reportError);
   const trust = useTrust(store.refresh, store.reportError);
   const orphans = useOrphans();
@@ -151,6 +153,7 @@ export default function App() {
                   <Sidebar
                     projects={projects.projects}
                     processes={store.processes}
+                    lineage={lineage}
                     selectedId={selectedId}
                     onSelect={selectProcess}
                     onStart={store.start}

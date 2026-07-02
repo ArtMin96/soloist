@@ -301,6 +301,7 @@ fn a_typed_error_round_trips() {
         IpcError::OutOfScope,
         IpcError::Untrusted,
         IpcError::UnknownTool,
+        IpcError::WorkerMayNotSpawn,
         IpcError::Internal("disk full".into()),
     ] {
         let json = serde_json::to_string(&error).expect("serialize");
@@ -323,6 +324,7 @@ fn request_errors_are_distinguished_from_server_errors() {
         IpcError::OutOfScope,
         IpcError::Untrusted,
         IpcError::UnknownTool,
+        IpcError::WorkerMayNotSpawn,
     ] {
         assert!(error.is_request_error(), "{error} is request-caused");
     }
@@ -360,6 +362,10 @@ fn core_spawn_errors_map_to_the_wire_error() {
     assert_eq!(
         IpcError::from(SpawnAgentError::NoProjectScope),
         IpcError::NoProjectScope
+    );
+    assert_eq!(
+        IpcError::from(SpawnAgentError::WorkerMayNotSpawn),
+        IpcError::WorkerMayNotSpawn
     );
     assert_eq!(
         IpcError::from(SpawnAgentError::Launch(LaunchAgentError::UnknownTool)),

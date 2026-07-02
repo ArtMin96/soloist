@@ -144,7 +144,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | I11 | First-launch guided demo project | 🟡 | 11 | later | Demo appears on first run |
 | I12 | Activity Monitor view (cross-project; flat/tree; project/type/status/ports filters; sortable CPU/mem/port columns; subprocess actions) | 🟡 | 11 | later | Monitor lists processes + descendants; filter/sort works |
 | I13 | Prompt templates UI (create/edit/search/duplicate; global+project scope; placeholder fill-in) | 🟡 | 11 | later | Template saved, filled, and applied to an agent |
-| I14 | Nested child-agent display (agent-spawned agents nested under their parent in the sidebar) | 🟡 | 5,11 | later | Spawned agent appears under its parent |
+| I14 | Nested child-agent display (agent-spawned agents nested under their parent in the sidebar) | 🟡 | 5,11 | v1 ✅ | A spawned worker renders nested (collapsible) under its lead's row in the sidebar Agents group; re-roots flat when the lead closes; flat again next run (lineage is per-run). Delivered 2026-07-02 alongside O3's orchestration-pane tree |
 
 ### I7 decomposed — Settings detail (Phase 11a per-project · 11b global)
 

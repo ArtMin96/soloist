@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { monogram, type ProjectTree } from "@/store/projects";
+import type { ToggleSet } from "@/store/useToggleSet";
 import type { ProcessKind } from "@/domain";
 
 interface ProjectGroupProps {
@@ -27,6 +28,7 @@ interface ProjectGroupProps {
   onOpenChange: (open: boolean) => void;
   kindOpen: (kind: ProcessKind) => boolean;
   onKindOpenChange: (kind: ProcessKind, open: boolean) => void;
+  collapsedLeads: ToggleSet;
   selectedId: number | null;
   onSelect: (id: number) => void;
   onStart: (id: number) => void;
@@ -52,6 +54,7 @@ export function ProjectGroup({
   onOpenChange,
   kindOpen,
   onKindOpenChange,
+  collapsedLeads,
   selectedId,
   onSelect,
   onStart,
@@ -154,6 +157,7 @@ export function ProjectGroup({
                 group={group}
                 open={kindOpen(group.kind)}
                 onOpenChange={(value) => onKindOpenChange(group.kind, value)}
+                collapsedLeads={collapsedLeads}
                 selectedId={selectedId}
                 onSelect={onSelect}
                 onStart={onStart}

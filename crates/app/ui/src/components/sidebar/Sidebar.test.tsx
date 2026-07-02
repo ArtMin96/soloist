@@ -93,6 +93,7 @@ function renderSidebar(
     onSelect?: (id: number) => void;
     onRestart?: (id: number) => void;
     bindings?: HotkeyBindingView[];
+    lineage?: ReadonlyMap<number, number>;
   } = {},
 ) {
   const {
@@ -101,6 +102,7 @@ function renderSidebar(
     onSelect = noop,
     onRestart = noop,
     bindings = DEFAULT_BINDINGS,
+    lineage = new Map(),
   } = overrides;
   render(
     <TooltipProvider>
@@ -109,6 +111,7 @@ function renderSidebar(
           <Sidebar
             projects={[PROJECT_A, PROJECT_B]}
             processes={PROCESSES}
+            lineage={lineage}
             selectedId={selectedId}
             onSelect={onSelect}
             onStart={noop}
@@ -141,6 +144,71 @@ describe("Sidebar footer", () => {
   it("hides the Settings footer button when the setting is off", () => {
     renderSidebar({ settings: { ...DEFAULT_SIDEBAR, show_settings_footer: false } });
     expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
+  });
+});
+
+describe("Sidebar lineage nesting", () => {
+  const WORKER = {
+    id: 12,
+    project: 1,
+    kind: "Agent" as const,
+    label: "codex-worker",
+    status: "Running" as const,
+    exit_code: null,
+    requires_trust: false,
+    resumable: false,
+    ports: [],
+    ready: "Ungated" as const,
+  };
+
+  it("nests a spawned worker under its lead in the Agents group", () => {
+    render(
+      <TooltipProvider>
+        <HotkeysContext
+          value={{
+            bindings: DEFAULT_BINDINGS,
+            remap: noop,
+            disable: noop,
+            reset: noop,
+            resetAll: noop,
+          }}
+        >
+          <SidebarSettingsContext value={{ sidebar: DEFAULT_SIDEBAR, setSidebar: noop }}>
+            <Sidebar
+              projects={[PROJECT_A]}
+              processes={[...PROCESSES.filter((p) => p.project === 1), WORKER]}
+              lineage={new Map([[12, 10]])}
+              selectedId={null}
+              onSelect={noop}
+              onStart={noop}
+              onStop={noop}
+              onRestart={noop}
+              onResume={noop}
+              onTrust={noop}
+              onStartAll={noop}
+              onRestartRunning={noop}
+              onStopAll={noop}
+              onOpenSettings={noop}
+              onOpenProjectSettings={noop}
+              onOpenOrchestration={noop}
+            />
+          </SidebarSettingsContext>
+        </HotkeysContext>
+      </TooltipProvider>,
+    );
+    const lead = screen.getByRole("treeitem", { name: /claude/ });
+    expect(lead.getAttribute("aria-expanded")).toBe("true");
+    const worker = screen.getByRole("treeitem", { name: /codex-worker/ });
+    expect(worker.getAttribute("aria-level")).toBe("2");
+    // The Commands group carries no lineage, so its row stays a flat level-1 row.
+    expect(screen.getByRole("treeitem", { name: /build/ }).getAttribute("aria-level")).toBe("1");
+  });
+
+  it("keeps every agent flat when no lineage exists", () => {
+    renderSidebar();
+    const agent = screen.getByRole("treeitem", { name: /claude/ });
+    expect(agent.getAttribute("aria-level")).toBe("1");
+    expect(agent.getAttribute("aria-expanded")).toBeNull();
   });
 });
 
