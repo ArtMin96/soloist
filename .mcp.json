@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "soloist": {
+      "command": "/home/arthur/Downloads/soloist/target/debug/soloist-mcp"
+    }
+  }
+}

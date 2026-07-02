@@ -26,6 +26,10 @@ project-scoped workspace over MCP (server: `soloist-mcp`, stdio).
 - Tools act on your effective project: the one selected with `select_project`, the one your
   bound process runs in, or the sole open project. Scope never widens — a tool cannot touch
   another project.
+- Scope is proven by the process you run in, so an agent launched *outside* Soloist while
+  several projects are open has no project scope and cannot select one. In that case use a
+  global scope where a tool offers one (prompt templates), keep exactly one project open, or
+  have Soloist launch the agent.
 
 ### Tools and the trust gate
 

@@ -14,6 +14,7 @@ use soloist_core::{
 };
 use soloist_ipc::{
     read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome,
+    ProjectSummary,
 };
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -82,9 +83,17 @@ fn served_tools(handler: &SoloistMcp) -> BTreeSet<String> {
         .collect()
 }
 
-/// The structured JSON content a tool returned, or a panic if there was none.
+/// The structured JSON content a tool returned, or a panic if there was none. Also asserts
+/// the spec's shape constraint here, in the one helper every projection test goes through:
+/// `structuredContent` must be a JSON **object**, never a bare array — clients refuse an
+/// array (found live: an agent's `list_projects` call was rejected by Claude Code).
 fn structured_of(result: CallToolResult) -> serde_json::Value {
-    result.structured_content.expect("a structured tool result")
+    let value = result.structured_content.expect("a structured tool result");
+    assert!(
+        value.is_object(),
+        "structuredContent must be a JSON object (MCP spec), got: {value}"
+    );
+    value
 }
 
 fn sample_view(id: u64) -> ProcessView {
@@ -363,9 +372,33 @@ async fn list_processes_projects_the_process_rows() {
         .list_processes()
         .await
         .expect("list succeeds");
-    let back: Vec<ProcessView> =
-        serde_json::from_value(structured_of(result)).expect("decode processes");
+    let back: Vec<ProcessView> = serde_json::from_value(structured_of(result)["processes"].clone())
+        .expect("decode processes");
     assert_eq!(back, vec![view]);
+}
+
+/// The reply is wrapped in an object (never a bare array — see [`structured_of`]).
+#[tokio::test]
+async fn list_projects_wraps_the_summaries_in_an_object() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let summary = ProjectSummary {
+        id: ProjectId::from_raw(2),
+        name: "soloist".into(),
+        root: PathBuf::from("/home/u/soloist"),
+    };
+    let canned = summary.clone();
+    spawn_fake_app(socket.clone(), move |_request| {
+        Ok(IpcResponse::Projects(vec![canned.clone()]))
+    });
+
+    let result = handler(socket)
+        .list_projects()
+        .await
+        .expect("list_projects succeeds");
+    let back: Vec<ProjectSummary> =
+        serde_json::from_value(structured_of(result)["projects"].clone()).expect("decode projects");
+    assert_eq!(back, vec![summary]);
 }
 
 #[tokio::test]
@@ -682,7 +715,8 @@ async fn list_agent_tools_projects_the_configured_tools() {
         .list_agent_tools()
         .await
         .expect("list_agent_tools succeeds");
-    let back: Vec<AgentTool> = serde_json::from_value(structured_of(result)).expect("decode tools");
+    let back: Vec<AgentTool> =
+        serde_json::from_value(structured_of(result)["tools"].clone()).expect("decode tools");
     assert_eq!(back, vec![tool]);
 }
 

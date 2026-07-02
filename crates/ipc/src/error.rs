@@ -27,11 +27,16 @@ pub enum IpcError {
     #[error("that process is not yours to bind")]
     ForeignProcess,
     /// `select_project` named a project the caller does not run in — the scope would not be
-    /// authentic.
-    #[error("you are not running in that project")]
+    /// authentic. The message carries the remedies, since an agent launched outside Soloist
+    /// cannot fix this by retrying.
+    #[error(
+        "you are not running in that project; scope is proven by the process you run in — have Soloist launch the agent, keep exactly one project open, or use a global scope where the tool offers one"
+    )]
     ForeignProject,
     /// A scoped request was made with no project in scope.
-    #[error("no project is in scope; select one first")]
+    #[error(
+        "no project is in scope; select your own project first, or (launched outside Soloist) keep exactly one project open or use a global scope where the tool offers one"
+    )]
     NoProjectScope,
     /// A coordination action that needs an owning process was made by a session bound to none.
     #[error("not bound to a process; bind a session before owning a timer or lease")]

@@ -66,6 +66,21 @@
     round-trip a template over a real session, run `setup_agent_integration` against a live
     project).
 
+- **Live-walk bugfix — three MCP list tools returned spec-invalid `structuredContent`
+  (2026-07-02, `feat/later-f2-f12-f14`).** Found by the owner's first real Claude Code session:
+  `list_projects` was rejected by the client as malformed. Verified against the current MCP spec
+  (2025-11-25, Tools → Structured Content): `structuredContent` must be a JSON **object**;
+  `list_projects`, `list_processes`, and `list_agent_tools` returned bare arrays (every other
+  list tool already wrapped — kv/timers/todos/scratchpads/templates/services/output). Fixed by
+  wrapping (`{"projects"|"processes"|"tools": [...]}`); `list_projects` had **no projection test
+  at all** (how it slipped) — one added, and the shared `structured_of` test helper now asserts
+  object-ness so every projection test guards the constraint. Also from the same walk: the
+  select_project/NoProjectScope refusals were confirmed **by design** (peer-group-authenticated
+  scope; external caller + ≥2 open projects ⇒ no project scope — the recorded F13 policy), but
+  the errors gave an agent no path forward — the two wire messages now carry the remedies and
+  the `help` guide documents the multi-project external case (use global scope / one project /
+  Soloist-launched). Gate green: Rust 30 suites 0 failed (mcp 72), UI 241.
+
 - **Critical bugfix — terminal pane rendered empty after switching agents and navigating back
   (2026-07-02, uncommitted on `main`).** Root cause, proven live via the `agent-bridge` MCP harness
   (backend `eprintln` + frontend chunk tracing, then removed): `useTerminal`'s rAF-coalescing state

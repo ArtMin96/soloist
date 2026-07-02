@@ -7,7 +7,9 @@ use serde::Serialize;
 
 use crate::client::ClientError;
 
-/// Serializes a reply into a structured tool result.
+/// Serializes a reply into a structured tool result. The value must serialize to a JSON
+/// **object** — the MCP spec constrains `structuredContent` to an object, and clients refuse
+/// a bare array — so a list reply is always wrapped in a keyed object first.
 pub(crate) fn structured<T: Serialize>(value: &T) -> Result<CallToolResult, ErrorData> {
     serde_json::to_value(value)
         .map(CallToolResult::structured)
