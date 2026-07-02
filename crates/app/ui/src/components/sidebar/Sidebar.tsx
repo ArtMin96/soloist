@@ -5,11 +5,14 @@ import { Button } from "@/components/ui/button";
 import { groupByProject, kindCollapseKey, projectCollapseKey } from "@/store/projects";
 import { useCollapseState } from "@/store/useCollapseState";
 import { useSidebarSettings } from "@/store/sidebarSettingsContext";
+import { useToggleSet } from "@/store/useToggleSet";
 import type { ProcessView, ProjectView } from "@/domain";
 
 interface SidebarProps {
   projects: ProjectView[];
   processes: ProcessView[];
+  /** The live spawn-lineage map (worker id → lead id); workers nest under their leads. */
+  lineage: ReadonlyMap<number, number>;
   selectedId: number | null;
   onSelect: (id: number) => void;
   onStart: (id: number) => void;
@@ -26,11 +29,14 @@ interface SidebarProps {
 }
 
 // The process tree, grouped by project: each opened project is a collapsible node over its
-// subtype subgroups. It renders the read model and raises intent; the store owns the data
-// and the core owns the behaviour. Collapse state persists per project and per subgroup.
+// subtype subgroups, with spawned workers nested under their lead inside a subgroup. It renders
+// the read model and raises intent; the store owns the data and the core owns the behaviour.
+// Collapse state persists per project and per subgroup; a lead's collapse is in-session only
+// (per-run ids must never persist).
 export function Sidebar({
   projects,
   processes,
+  lineage,
   selectedId,
   onSelect,
   onStart,
@@ -46,8 +52,9 @@ export function Sidebar({
   onOpenOrchestration,
 }: SidebarProps) {
   const { sidebar } = useSidebarSettings();
-  const trees = groupByProject(processes, projects, sidebar.hide_empty_sections);
+  const trees = groupByProject(processes, projects, sidebar.hide_empty_sections, lineage);
   const [collapsed, setCollapsed] = useCollapseState();
+  const collapsedLeads = useToggleSet();
   const handleNavKeyDown = useSidebarHotkeys({
     trees,
     selectedId,
@@ -74,6 +81,7 @@ export function Sidebar({
               onKindOpenChange={(kind, open) =>
                 setCollapsed(kindCollapseKey(tree.project.id, kind), !open)
               }
+              collapsedLeads={collapsedLeads}
               selectedId={selectedId}
               onSelect={onSelect}
               onStart={onStart}

@@ -20,6 +20,7 @@ function renderGroup() {
       onOpenChange={noop}
       kindOpen={() => true}
       onKindOpenChange={noop}
+      collapsedLeads={{ has: () => false, toggle: noop }}
       selectedId={null}
       onSelect={noop}
       onStart={noop}

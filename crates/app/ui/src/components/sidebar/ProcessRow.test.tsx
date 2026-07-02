@@ -76,3 +76,95 @@ describe("ProcessRow telemetry", () => {
     expect(screen.queryByText(/:|restarting|not ready/)).toBeNull();
   });
 });
+
+describe("ProcessRow as a tree row", () => {
+  it("stays a flat level-1 row without a tree column", () => {
+    renderRow(running);
+    const row = screen.getByRole("treeitem", { name: /web/ });
+    expect(row.getAttribute("aria-level")).toBe("1");
+    expect(row.getAttribute("aria-expanded")).toBeNull();
+    expect(screen.queryByRole("button", { name: /workers/ })).toBeNull();
+  });
+
+  it("exposes a lead's disclosure with its expanded state", () => {
+    render(
+      <TooltipProvider>
+        <SignalsContext value={EMPTY_SIGNALS}>
+          <ProcessRow
+            process={running}
+            selected={false}
+            onSelect={noop}
+            onStart={noop}
+            onStop={noop}
+            onRestart={noop}
+            onResume={noop}
+            onTrust={noop}
+            treeColumn
+            hasChildren
+            expanded={false}
+            onToggleExpand={noop}
+          />
+        </SignalsContext>
+      </TooltipProvider>,
+    );
+    const row = screen.getByRole("treeitem", { name: /web/ });
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("button", { name: "Expand web's workers" })).toBeTruthy();
+  });
+
+  it("toggles the disclosure without selecting the row", () => {
+    let selected = 0;
+    let toggled = 0;
+    render(
+      <TooltipProvider>
+        <SignalsContext value={EMPTY_SIGNALS}>
+          <ProcessRow
+            process={running}
+            selected={false}
+            onSelect={() => {
+              selected += 1;
+            }}
+            onStart={noop}
+            onStop={noop}
+            onRestart={noop}
+            onResume={noop}
+            onTrust={noop}
+            treeColumn
+            hasChildren
+            expanded
+            onToggleExpand={() => {
+              toggled += 1;
+            }}
+          />
+        </SignalsContext>
+      </TooltipProvider>,
+    );
+    screen.getByRole("button", { name: "Collapse web's workers" }).click();
+    expect(toggled).toBe(1);
+    expect(selected).toBe(0);
+  });
+
+  it("indents one step per lineage level", () => {
+    render(
+      <TooltipProvider>
+        <SignalsContext value={EMPTY_SIGNALS}>
+          <ProcessRow
+            process={running}
+            selected={false}
+            onSelect={noop}
+            onStart={noop}
+            onStop={noop}
+            onRestart={noop}
+            onResume={noop}
+            onTrust={noop}
+            depth={1}
+            treeColumn
+          />
+        </SignalsContext>
+      </TooltipProvider>,
+    );
+    const row = screen.getByRole("treeitem", { name: /web/ });
+    expect(row.style.paddingLeft).toBe("26px");
+    expect(row.getAttribute("aria-level")).toBe("2");
+  });
+});

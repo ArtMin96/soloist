@@ -355,6 +355,14 @@ export interface AgentNode {
   activity: AgentActivity | null;
 }
 
+// One live spawn-lineage edge: a worker and the lead that spawned it, both still in the registry.
+// The cross-project shape the sidebar joins onto its process list to nest workers under leads; an
+// edge disappears once either end leaves the registry, so a closed lead re-roots its workers.
+export interface LineageEdge {
+  child: number;
+  parent: number;
+}
+
 // The orchestration read-model for one project: its agent tree plus the coordination state agents
 // share. Produced by the `orchestration_snapshot` query (exposed to the UI by a Tauri command).
 export interface OrchestrationSnapshot {
