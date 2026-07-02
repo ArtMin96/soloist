@@ -133,6 +133,53 @@ fn updating_a_missing_template_conflicts_with_no_record() {
 }
 
 #[test]
+fn an_omitted_description_keeps_the_stored_one_and_a_blank_one_clears_it() {
+    let templates = templates();
+    templates
+        .create(None, "triage", Some("sort the queue"), "Triage {{issue}}")
+        .expect("create");
+
+    let kept = templates
+        .update(None, "triage", None, "Triage {{issue}} fast", 1)
+        .expect("update without a description");
+    assert_eq!(kept.description.as_deref(), Some("sort the queue"));
+
+    let cleared = templates
+        .update(None, "triage", Some("   "), "Triage {{issue}} faster", 2)
+        .expect("update with a blank description");
+    assert_eq!(cleared.description, None);
+}
+
+#[test]
+fn a_blank_description_on_create_is_stored_as_none() {
+    let templates = templates();
+
+    let view = templates
+        .create(Some(P), "review", Some("  "), "body")
+        .expect("create");
+
+    assert_eq!(view.description, None);
+}
+
+#[test]
+fn an_overlong_name_or_description_is_rejected_before_it_persists() {
+    let templates = templates();
+
+    let long_name = "n".repeat(MAX_PROMPT_TEMPLATE_NAME + 1);
+    let err = templates
+        .create(Some(P), &long_name, None, "body")
+        .expect_err("an overlong name is rejected");
+    assert!(err.to_string().contains("name exceeds"));
+
+    let long_description = "d".repeat(MAX_PROMPT_TEMPLATE_DESCRIPTION + 1);
+    let err = templates
+        .create(Some(P), "review", Some(&long_description), "body")
+        .expect_err("an overlong description is rejected");
+    assert!(err.to_string().contains("description exceeds"));
+    assert!(templates.list(Some(P)).expect("list").is_empty());
+}
+
+#[test]
 fn a_malformed_template_is_rejected_before_it_persists() {
     let templates = templates();
 

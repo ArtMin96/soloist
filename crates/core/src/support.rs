@@ -11,7 +11,8 @@ mod guide;
 mod integration_file;
 
 pub use feedback::{
-    Feedback, FeedbackEntry, FeedbackError, FeedbackRepo, NoopFeedbackRepo, MAX_FEEDBACK_LEN,
+    Feedback, FeedbackEntry, FeedbackError, FeedbackRepo, NoopFeedbackRepo, MAX_FEEDBACK_ENTRIES,
+    MAX_FEEDBACK_LEN,
 };
 pub use guide::agent_guide;
 pub use integration_file::{

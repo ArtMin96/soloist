@@ -56,3 +56,19 @@ fn an_oversized_message_is_refused_before_it_persists() {
     ));
     assert!(repo.list().expect("list").is_empty());
 }
+
+#[test]
+fn a_full_store_refuses_further_submissions() {
+    let (feedback, repo, _clock) = feedback();
+    for n in 0..MAX_FEEDBACK_ENTRIES {
+        feedback
+            .submit(&format!("note {n}"))
+            .expect("fill the store to its cap");
+    }
+
+    assert!(matches!(
+        feedback.submit("one more"),
+        Err(FeedbackError::Full)
+    ));
+    assert_eq!(repo.count().expect("count"), MAX_FEEDBACK_ENTRIES);
+}

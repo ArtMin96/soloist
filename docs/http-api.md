@@ -68,7 +68,7 @@ core outcome:
 | `500 Internal Server Error` | A durable-store read or write failed. |
 
 Reads do not use `403`/`404`: an unknown id reads as an empty result (see each endpoint). The only
-read codes are `200`, and `500` for `/status` and `/projects` if the project store cannot be read.
+read codes are `200`, and `500` for `/status`, `/projects`, and `/feedback` if the store cannot be read.
 
 ## Read endpoints
 
@@ -82,6 +82,7 @@ Open on loopback; no header required.
 | `GET` | `/processes/{id}/ports` | The TCP ports a process is listening on. |
 | `GET` | `/processes/{id}/output` | A process's recent output lines. |
 | `GET` | `/projects` | The open projects. |
+| `GET` | `/feedback` | Locally stored agent feedback, oldest first. |
 
 ### `GET /health`
 
@@ -152,6 +153,17 @@ Every open project's display identity, as a JSON array of [`ProjectView`](#proje
 ```json
 [
   { "id": 1, "name": "storefront", "root": "/home/you/projects/storefront", "icon": null }
+]
+```
+
+### `GET /feedback`
+
+Every feedback entry agents left via the `submit_solo_feedback` MCP tool, oldest first.
+Feedback is stored locally and never transmitted; this endpoint is how the owner reads it back.
+
+```json
+[
+  { "id": 1, "message": "the sidebar flickers", "submitted_unix_millis": 1783000000000 }
 ]
 ```
 

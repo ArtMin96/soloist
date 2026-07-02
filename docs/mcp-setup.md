@@ -40,9 +40,11 @@ these snippets with the resolved paths filled in — prefer copying from there.
 The core groups are always served: identity (`whoami`, `bind_session_process`,
 `register_agent`), projects, processes, bulk commands, output, services, lease locks, and
 setup/support (`help`, `submit_solo_feedback`, `setup_agent_integration`). The feature groups —
-Scratchpads, Todos, Timers, Key-Value — are toggled per group in Settings → Integrations
-(Key-Value is off by default). The server reads the enablement when it starts, so a toggle
-applies to the next client connection.
+Scratchpads, Todos, Timers, Key-Value, Prompt Templates — are toggled per group in Settings →
+Integrations (Key-Value and Prompt Templates are off by default). The server reads the
+enablement when it starts, so a toggle applies to the next client connection. Feedback left via
+`submit_solo_feedback` is stored locally and never transmitted; read it back with
+`GET /feedback` on the local HTTP API.
 
 Two setup tools are worth knowing before anything else:
 

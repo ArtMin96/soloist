@@ -1,0 +1,286 @@
+//! Parameter structs for the coordination tools: leases, timers, scratchpads, todos, and
+//! the key-value store.
+
+use rmcp::schemars;
+use serde::Deserialize;
+use soloist_core::TodoStatus;
+
+/// Arguments for acquiring a coordination lease.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct LockAcquireArg {
+    /// The lease key — a name the coordinating agents agree on (e.g. `deploy`). Project-scoped.
+    pub(crate) key: String,
+    /// How long to hold the lease before it auto-expires, in milliseconds. Omit for the server
+    /// default; re-acquire the same key to renew. The app caps it.
+    pub(crate) ttl_ms: Option<u64>,
+}
+
+/// Arguments for a lease lookup or release, by key.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct LockKeyArg {
+    /// The lease key, scoped to the session's project.
+    pub(crate) key: String,
+}
+
+/// Arguments for setting a plain timer.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TimerSetArg {
+    /// The text delivered to your bound process as a fresh, submitted turn when the timer fires.
+    pub(crate) body: String,
+    /// Fire this many milliseconds from now. Omit to fire as soon as possible; the app caps it.
+    pub(crate) after_ms: Option<u64>,
+}
+
+/// Arguments for a fire-when-idle timer.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TimerFireWhenIdleArg {
+    /// The text delivered to your bound process as a fresh turn when the watched agents go idle.
+    pub(crate) body: String,
+    /// The ids of the processes to watch for idle (from `list_processes`) — e.g. workers you spawned.
+    pub(crate) processes: Vec<u64>,
+    /// A max-wait backstop in milliseconds: fire even if they never go idle. Omit for the app's
+    /// default; the app caps it.
+    pub(crate) max_wait_ms: Option<u64>,
+}
+
+/// Arguments for a timer-management tool, by id.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TimerArg {
+    /// The id of the timer, as returned by `timer_set` / `timer_fire_when_idle_*` or `timer_list`.
+    pub(crate) timer: u64,
+}
+
+/// Arguments naming a single scratchpad by its handle.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ScratchpadNameArg {
+    /// The scratchpad's name handle (unique within the project), as returned by `scratchpad_list`.
+    pub(crate) name: String,
+}
+
+/// Arguments for writing a scratchpad's disciplined document. The fields ARE the required structure
+/// — every scratchpad records the same sections, so they stay consistent and informative.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ScratchpadWriteArg {
+    /// The scratchpad's name handle (unique within the project). Omit `expected_revision` to create
+    /// it; pass the current revision (from `scratchpad_read`) to update it.
+    pub(crate) name: String,
+    /// What this scratchpad is for — the goal it serves, in a sentence or two.
+    pub(crate) objective: String,
+    /// The background and current state a reader needs to act on it.
+    pub(crate) context: String,
+    /// The ordered path to the objective: each entry one step, in order. At least one.
+    pub(crate) plan: Vec<String>,
+    /// The testable criteria that define the objective as done. At least one.
+    pub(crate) acceptance_criteria: Vec<String>,
+    /// The risks, unknowns, or blockers to watch. State "none identified" rather than leaving empty.
+    pub(crate) risks: Vec<String>,
+    /// Where the work stands right now.
+    pub(crate) status: String,
+    /// Anything the structured sections do not cover — free Markdown. Optional.
+    pub(crate) notes: Option<String>,
+    /// The revision you are updating from, as returned by `scratchpad_read`. Omit to create a new
+    /// scratchpad; a mismatch means someone edited it first, so re-read and retry.
+    pub(crate) expected_revision: Option<u64>,
+}
+
+/// Arguments for renaming a scratchpad.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ScratchpadRenameArg {
+    /// The scratchpad's current name handle.
+    pub(crate) name: String,
+    /// The new name handle (must be unused in the project).
+    pub(crate) new_name: String,
+}
+
+/// Arguments for adding or removing a scratchpad's tags.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ScratchpadTagsArg {
+    /// The scratchpad's name handle.
+    pub(crate) name: String,
+    /// The tags to add or remove.
+    pub(crate) tags: Vec<String>,
+}
+
+/// Arguments for archiving or restoring a scratchpad.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ScratchpadArchiveArg {
+    /// The scratchpad's name handle.
+    pub(crate) name: String,
+    /// True to archive it (hide from the default listing), false to restore it.
+    pub(crate) archived: bool,
+}
+
+/// Arguments for transferring a scratchpad to another project.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ScratchpadTransferArg {
+    /// The scratchpad's name handle in your effective project.
+    pub(crate) name: String,
+    /// The id of the destination project — you must be authenticated to it (a process you run in
+    /// belongs to it), or the transfer is refused.
+    pub(crate) to_project: u64,
+}
+
+/// The lifecycle status an agent declares on a todo — a closed set, mirroring the core
+/// `TodoStatus` on the wire; the handler converts it. Distinct from the *blocker gate*: a todo is
+/// prevented from completing by its unmet blockers, not by this label.
+#[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum TodoStatusArg {
+    Open,
+    Blocked,
+    InProgress,
+    Done,
+}
+
+impl From<TodoStatusArg> for TodoStatus {
+    fn from(status: TodoStatusArg) -> Self {
+        match status {
+            TodoStatusArg::Open => TodoStatus::Open,
+            TodoStatusArg::Blocked => TodoStatus::Blocked,
+            TodoStatusArg::InProgress => TodoStatus::InProgress,
+            TodoStatusArg::Done => TodoStatus::Done,
+        }
+    }
+}
+
+/// Arguments naming a single todo by id.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoArg {
+    /// The id of the todo, as returned by `todo_list` or `todo_create`.
+    pub(crate) todo: u64,
+}
+
+/// Arguments for transferring a todo to another project.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoTransferArg {
+    /// The id of the todo in your effective project, as returned by `todo_list`.
+    pub(crate) todo: u64,
+    /// The id of the destination project — you must be authenticated to it (a process you run in
+    /// belongs to it), or the transfer is refused.
+    pub(crate) to_project: u64,
+}
+
+/// A reference to a todo for `todo_get`: either its numeric id or a `solo://` link someone handed
+/// you. A number is read as the id; a string is read as a link.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub(crate) enum TodoRef {
+    Id(u64),
+    Link(String),
+}
+
+/// Arguments for reading one todo, by its id or a `solo://` link to it.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoGetArg {
+    /// The todo to read: its numeric id (from `todo_list`/`todo_create`) or a `solo://` link to it.
+    pub(crate) todo: TodoRef,
+}
+
+/// Arguments for creating a todo's disciplined document. The fields ARE the required structure —
+/// every todo records the same sections, so they stay consistent and informative.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoCreateArg {
+    /// A short imperative title — what this todo is.
+    pub(crate) title: String,
+    /// What needs doing and any detail a worker needs to act on it.
+    pub(crate) description: String,
+    /// The testable criteria that define the todo as done. At least one.
+    pub(crate) acceptance_criteria: Vec<String>,
+    /// The risks, unknowns, or blockers to watch. State "none identified" rather than leaving empty.
+    pub(crate) risks: Vec<String>,
+    /// The lifecycle status to start in (usually open).
+    pub(crate) status: TodoStatusArg,
+}
+
+/// Arguments for updating a todo's document, revision-guarded.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoUpdateArg {
+    /// The id of the todo to update.
+    pub(crate) todo: u64,
+    /// A short imperative title — what this todo is.
+    pub(crate) title: String,
+    /// What needs doing and any detail a worker needs to act on it.
+    pub(crate) description: String,
+    /// The testable criteria that define the todo as done. At least one.
+    pub(crate) acceptance_criteria: Vec<String>,
+    /// The risks, unknowns, or blockers to watch. State "none identified" rather than leaving empty.
+    pub(crate) risks: Vec<String>,
+    /// The lifecycle status. Set it to done only when the todo's blockers are all complete.
+    pub(crate) status: TodoStatusArg,
+    /// The revision you are updating from, as returned by `todo_get`. A mismatch means someone
+    /// edited it first, so re-read and retry.
+    pub(crate) expected_revision: u64,
+}
+
+/// Arguments for adding or removing a single tag on a todo.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoTagArg {
+    /// The id of the todo.
+    pub(crate) todo: u64,
+    /// The tag to add or remove.
+    pub(crate) tag: String,
+}
+
+/// Arguments for replacing a todo's blockers.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoBlockersArg {
+    /// The id of the todo.
+    pub(crate) todo: u64,
+    /// The ids of the todos that must complete before this one (from `todo_list`).
+    pub(crate) blockers: Vec<u64>,
+}
+
+/// Arguments for adding or removing a single blocker on a todo.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoBlockerArg {
+    /// The id of the todo to gate.
+    pub(crate) todo: u64,
+    /// The id of the todo that must complete first.
+    pub(crate) blocker: u64,
+}
+
+/// Arguments for creating a comment on a todo.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoCommentCreateArg {
+    /// The id of the todo to comment on.
+    pub(crate) todo: u64,
+    /// The comment text.
+    pub(crate) body: String,
+}
+
+/// Arguments for updating a comment on a todo.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoCommentEditArg {
+    /// The id of the todo.
+    pub(crate) todo: u64,
+    /// The id of the comment, as returned by `todo_comment_create` or seen on the todo.
+    pub(crate) comment: u64,
+    /// The new comment text.
+    pub(crate) body: String,
+}
+
+/// Arguments for referencing a comment on a todo (delete).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TodoCommentRefArg {
+    /// The id of the todo.
+    pub(crate) todo: u64,
+    /// The id of the comment to delete.
+    pub(crate) comment: u64,
+}
+
+/// Arguments for storing a kv entry.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct KvSetArg {
+    /// The key to store the value at. Case-sensitive; unique within the project.
+    pub(crate) key: String,
+    /// The JSON value to store. Can be any valid JSON — an object, array, string, number, or
+    /// boolean. Replaces the previous value if the key already exists.
+    pub(crate) value: serde_json::Value,
+}
+
+/// Arguments for reading or deleting a kv entry by key.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct KvKeyArg {
+    /// The key to read or delete.
+    pub(crate) key: String,
+}

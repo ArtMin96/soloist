@@ -43,6 +43,15 @@ impl FeedbackRepo for SqliteStore {
             .map_err(sql_err)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sql_err)
     }
+
+    fn count(&self) -> Result<u64, StoreError> {
+        let conn = self.lock();
+        conn.query_row("SELECT COUNT(*) FROM feedback", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map(|count| count as u64)
+        .map_err(sql_err)
+    }
 }
 
 #[cfg(test)]

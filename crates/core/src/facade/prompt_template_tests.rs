@@ -145,6 +145,16 @@ fn a_stale_update_and_a_taken_name_surface_their_own_errors() {
 }
 
 #[test]
+fn updating_a_missing_template_reports_it_unknown() {
+    let (facade, session) = scoped_facade();
+
+    assert!(matches!(
+        facade.prompt_template_update(session, PromptScope::Project, "ghost", None, "body", 1),
+        Err(CoordinationError::UnknownPromptTemplate)
+    ));
+}
+
+#[test]
 fn an_unscoped_list_merges_global_and_project_rows() {
     let (facade, session) = scoped_facade();
     facade

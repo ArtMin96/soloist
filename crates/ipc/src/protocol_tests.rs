@@ -1,4 +1,6 @@
 use super::*;
+
+use crate::error::IpcError;
 use soloist_core::{
     AcquireOutcome, AgentKind, AgentTool, ExportedPromptTemplate, FeedbackEntry, FireCond,
     IntegrationFile, IntegrationWrite, LeaseView, Origin, ProcStatus, ProcessId, ProcessKind,
@@ -376,6 +378,7 @@ fn a_typed_error_round_trips() {
         IpcError::UnknownTool,
         IpcError::WorkerMayNotSpawn,
         IpcError::InvalidFeedback("feedback message is empty".into()),
+        IpcError::UnmatchedIntegrationMarkers("AGENTS.md has unmatched markers".into()),
         IpcError::Internal("disk full".into()),
     ] {
         let json = serde_json::to_string(&error).expect("serialize");
@@ -400,6 +403,7 @@ fn request_errors_are_distinguished_from_server_errors() {
         IpcError::UnknownTool,
         IpcError::WorkerMayNotSpawn,
         IpcError::InvalidFeedback("feedback message is empty".into()),
+        IpcError::UnmatchedIntegrationMarkers("AGENTS.md has unmatched markers".into()),
     ] {
         assert!(error.is_request_error(), "{error} is request-caused");
     }
@@ -407,6 +411,19 @@ fn request_errors_are_distinguished_from_server_errors() {
         !IpcError::Internal("disk full".into()).is_request_error(),
         "a server failure is not request-caused"
     );
+}
+
+#[test]
+fn a_refused_integration_write_maps_to_its_own_wire_error() {
+    use soloist_core::{IntegrationWriteError, SetupIntegrationError};
+
+    let err = IpcError::from(SetupIntegrationError::Write(
+        IntegrationWriteError::UnmatchedMarkers {
+            path: "/p/AGENTS.md".into(),
+        },
+    ));
+    assert!(matches!(err, IpcError::UnmatchedIntegrationMarkers(_)));
+    assert!(err.is_request_error(), "the caller can fix the file");
 }
 
 #[test]

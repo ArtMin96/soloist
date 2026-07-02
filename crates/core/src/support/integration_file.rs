@@ -41,7 +41,9 @@ pub struct IntegrationWrite {
     pub created: bool,
 }
 
-/// Why writing the guide failed — always the file itself (read, write, or replace).
+/// Why writing the guide failed: the file itself (read, write, or replace), or a file whose
+/// section markers are not one well-formed pair — replacing a degenerate span could swallow
+/// the user's own content, so the write refuses instead of guessing.
 #[derive(Debug, thiserror::Error)]
 pub enum IntegrationWriteError {
     #[error("cannot write {path}: {source}", path = path.display())]
@@ -50,6 +52,11 @@ pub enum IntegrationWriteError {
         #[source]
         source: std::io::Error,
     },
+    #[error(
+        "{path} has unmatched soloist section markers; fix or remove the marker lines and re-run",
+        path = path.display()
+    )]
+    UnmatchedMarkers { path: PathBuf },
 }
 
 /// The complete managed section: markers around the heading and the guide.
@@ -61,10 +68,13 @@ fn managed_section() -> String {
 }
 
 /// Writes the guide into `root`'s chosen instructions file. A missing file is created with
-/// just the section; a file already carrying both markers has the span between them
-/// replaced in place; any other file gets the section appended after a blank line. The
-/// write goes to a temporary sibling and is renamed over the target, so a crash mid-write
-/// never leaves the user's file truncated.
+/// just the section; a file carrying exactly one well-formed marker pair has the span
+/// between them replaced in place; a file with no markers gets the section appended after a
+/// blank line. Any other marker state (a stray or duplicated marker, an end before a begin)
+/// is refused untouched — see [`IntegrationWriteError::UnmatchedMarkers`]. The write goes
+/// to a temporary sibling and is renamed over the target, so a crash mid-write never leaves
+/// the user's file truncated; the rename replaces the path itself, so a symlinked
+/// instructions file becomes a regular file (matching `solo.yml` writes).
 pub fn write_integration_guide(
     root: &Path,
     file: IntegrationFile,
@@ -83,33 +93,45 @@ pub fn write_integration_guide(
     let created = existing.is_none();
     let contents = match existing {
         None => format!("{}\n", managed_section()),
-        Some(contents) => updated(&contents),
+        Some(contents) => updated(&contents)
+            .ok_or_else(|| IntegrationWriteError::UnmatchedMarkers { path: path.clone() })?,
     };
 
     let tmp = path.with_file_name(format!(".{}.soloist-tmp", file.file_name()));
     std::fs::write(&tmp, contents).map_err(io_err)?;
-    std::fs::rename(&tmp, &path).map_err(io_err)?;
+    if let Err(source) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(io_err(source));
+    }
     Ok(IntegrationWrite { path, created })
 }
 
-/// An existing file with the fresh section in it: the marked span replaced when both
-/// markers are present in order, otherwise the section appended after a blank line.
-fn updated(contents: &str) -> String {
-    let begin = contents.find(SECTION_BEGIN);
-    let end = contents.find(SECTION_END).map(|at| at + SECTION_END.len());
-    match (begin, end) {
-        (Some(begin), Some(end)) if begin < end => {
-            let mut updated = String::with_capacity(contents.len());
-            updated.push_str(&contents[..begin]);
-            updated.push_str(&managed_section());
-            updated.push_str(&contents[end..]);
-            updated
-        }
-        _ => format!(
+/// An existing file with the fresh section in it: the marked span replaced when the file
+/// carries exactly one well-formed pair, the section appended when it carries no marker at
+/// all, and `None` for anything else — replacing around degenerate markers could swallow
+/// the user's own content, so the caller refuses rather than guesses.
+fn updated(contents: &str) -> Option<String> {
+    let begins = contents.matches(SECTION_BEGIN).count();
+    let ends = contents.matches(SECTION_END).count();
+    match (begins, ends) {
+        (0, 0) => Some(format!(
             "{}\n\n{}\n",
             contents.trim_end_matches('\n'),
             managed_section()
-        ),
+        )),
+        (1, 1) => {
+            let begin = contents.find(SECTION_BEGIN)?;
+            let end = contents.find(SECTION_END)?;
+            if end < begin {
+                return None;
+            }
+            let mut updated = String::with_capacity(contents.len());
+            updated.push_str(&contents[..begin]);
+            updated.push_str(&managed_section());
+            updated.push_str(&contents[end + SECTION_END.len()..]);
+            Some(updated)
+        }
+        _ => None,
     }
 }
 

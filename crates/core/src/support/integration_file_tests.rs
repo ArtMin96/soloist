@@ -57,6 +57,55 @@ fn rerunning_replaces_the_section_instead_of_duplicating_it() {
 }
 
 #[test]
+fn a_stray_begin_marker_is_refused_and_the_file_left_untouched() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let seeded = format!("Notes quoting {SECTION_BEGIN} without its end.\n\nHouse rules.\n");
+    std::fs::write(dir.path().join("AGENTS.md"), &seeded).expect("seed the file");
+
+    let err = write_integration_guide(dir.path(), IntegrationFile::AgentsMd)
+        .expect_err("an unpaired marker must refuse the write");
+
+    assert!(matches!(
+        err,
+        IntegrationWriteError::UnmatchedMarkers { .. }
+    ));
+    assert_eq!(read(&dir, IntegrationFile::AgentsMd), seeded);
+}
+
+#[test]
+fn an_end_marker_before_the_begin_is_refused_and_the_file_left_untouched() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let seeded = format!("{SECTION_END}\nOut of order.\n{SECTION_BEGIN}\n");
+    std::fs::write(dir.path().join("CLAUDE.md"), &seeded).expect("seed the file");
+
+    let err = write_integration_guide(dir.path(), IntegrationFile::ClaudeMd)
+        .expect_err("an out-of-order pair must refuse the write");
+
+    assert!(matches!(
+        err,
+        IntegrationWriteError::UnmatchedMarkers { .. }
+    ));
+    assert_eq!(read(&dir, IntegrationFile::ClaudeMd), seeded);
+}
+
+#[test]
+fn a_duplicated_section_is_refused_and_the_file_left_untouched() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let seeded =
+        format!("{SECTION_BEGIN}\none\n{SECTION_END}\n\n{SECTION_BEGIN}\ntwo\n{SECTION_END}\n");
+    std::fs::write(dir.path().join("AGENTS.md"), &seeded).expect("seed the file");
+
+    let err = write_integration_guide(dir.path(), IntegrationFile::AgentsMd)
+        .expect_err("two managed sections must refuse the write");
+
+    assert!(matches!(
+        err,
+        IntegrationWriteError::UnmatchedMarkers { .. }
+    ));
+    assert_eq!(read(&dir, IntegrationFile::AgentsMd), seeded);
+}
+
+#[test]
 fn an_unwritable_root_surfaces_the_io_error() {
     let missing = std::path::Path::new("/nonexistent-soloist-test-root");
 

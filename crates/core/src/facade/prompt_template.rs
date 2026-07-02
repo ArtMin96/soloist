@@ -44,8 +44,8 @@ impl Facade {
             .map_err(create_error)
     }
 
-    /// Replaces the template `name`'s description and body, guarded by the revision the
-    /// caller read.
+    /// Replaces the template `name`'s body, guarded by the revision the caller read. An
+    /// omitted description keeps the stored one; a blank description clears it.
     pub fn prompt_template_update(
         &self,
         session: SessionId,
@@ -138,6 +138,11 @@ fn update_error(err: PromptTemplateWriteError) -> CoordinationError {
     match err {
         PromptTemplateWriteError::Invalid(message) => {
             CoordinationError::InvalidPromptTemplate(message)
+        }
+        // No revision on record means no template — "re-read and retry" would mislead a
+        // caller whose target was deleted.
+        PromptTemplateWriteError::Conflict { actual: None, .. } => {
+            CoordinationError::UnknownPromptTemplate
         }
         PromptTemplateWriteError::Conflict { expected, actual } => {
             CoordinationError::PromptTemplateRevisionConflict { expected, actual }

@@ -3,11 +3,17 @@
 //! reads in-band and what lives in a project file can never disagree.
 
 use crate::identity::PROCESS_ID_ENV;
+use crate::settings::McpFeatureGroup;
 
 /// The guide text, as Markdown. Covers the mechanics an agent needs (identity and binding,
 /// project scope, the trust gate, waking up without polling) and the coordination etiquette
 /// that keeps concurrent agents from trampling each other's shared state.
 pub fn agent_guide() -> String {
+    let toggleable = McpFeatureGroup::ALL
+        .iter()
+        .map(|group| group.label().to_lowercase())
+        .collect::<Vec<_>>()
+        .join(", ");
     format!(
         "\
 This project runs under Soloist, a process supervisor that gives coding agents a shared,
@@ -35,7 +41,7 @@ project-scoped workspace over MCP (server: `soloist-mcp`, stdio).
 
 - Always available: project and process status/control, bulk commands, output reading and
   search, service ports, lease locks, and this setup group.
-- Toggleable in Soloist's settings: scratchpads, todos, timers, key-value.
+- Toggleable in Soloist's settings: {toggleable}.
 - Starting or restarting a command requires the user to have trusted it. An \"untrusted\"
   refusal means ask the user to trust the command in Soloist — never work around it.
 

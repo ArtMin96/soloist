@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::settings::McpFeatureGroup;
+
 #[test]
 fn the_guide_teaches_binding_via_the_injected_process_id() {
     let guide = agent_guide();
@@ -16,6 +18,18 @@ fn the_guide_covers_scope_trust_and_idle_timers() {
     assert!(guide.contains("untrusted"));
     assert!(guide.contains("timer_fire_when_idle_any"));
     assert!(guide.contains("wait_for_bound_port"));
+}
+
+#[test]
+fn the_guide_lists_every_toggleable_group() {
+    let guide = agent_guide();
+    for group in McpFeatureGroup::ALL {
+        assert!(
+            guide.contains(&group.label().to_lowercase()),
+            "the guide must name the {} group",
+            group.label()
+        );
+    }
 }
 
 #[test]

@@ -96,7 +96,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Replace a prompt template's description and body, revision-guarded: pass the revision you read; a stale revision is refused — re-read and retry rather than overwriting a concurrent edit."
+        description = "Replace a prompt template's body, revision-guarded: pass the revision you read; a stale revision is refused — re-read and retry rather than overwriting a concurrent edit. Omitting description keeps the stored one; an empty string clears it."
     )]
     pub(crate) async fn prompt_template_update(
         &self,

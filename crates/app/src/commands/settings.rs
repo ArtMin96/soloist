@@ -182,14 +182,24 @@ pub struct McpSetupInfo {
 }
 
 /// The helper command for a snippet, given this binary's own path: the sibling
-/// `soloist-mcp` when it exists (a packaged or `cargo build` layout), else the bare name.
+/// `soloist-mcp` when an executable file sits there (a packaged or `cargo build` layout),
+/// else the bare name.
 fn helper_command(exe: Option<std::path::PathBuf>) -> String {
     exe.as_deref()
         .and_then(std::path::Path::parent)
         .map(|dir| dir.join(MCP_HELPER_BIN))
-        .filter(|sibling| sibling.exists())
+        .filter(|sibling| is_executable_file(sibling))
         .map(|sibling| sibling.display().to_string())
         .unwrap_or_else(|| MCP_HELPER_BIN.to_owned())
+}
+
+/// Whether `path` is a regular file the owner can execute — a mere name collision (a
+/// directory, a data file) must not be handed to an MCP client as a command.
+fn is_executable_file(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 /// The facts the Integrations panel renders MCP client snippets from.

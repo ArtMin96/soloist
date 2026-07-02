@@ -5,8 +5,9 @@
 //! [`ToolRouter`]'s `Add`. The **core** groups are always served; the **feature** groups
 //! (Scratchpads, Todos, Timers, Key-Value, Prompt Templates) are gated by the user's settings —
 //! they are registered only when enabled, so a disabled group's tools are neither listed nor
-//! callable (Key-Value and Prompt Templates default off). Tool *names* mirror Solo for interop, but the parameter schemas are clean-room —
-//! derived from the argument structs in [`crate::args`]. No domain logic lives in a tool: each
+//! callable (Key-Value and Prompt Templates default off). Tool *names* mirror Solo for
+//! interop, but the parameter schemas are clean-room — derived from the argument structs in
+//! [`crate::args`]. No domain logic lives in a tool: each
 //! forwards to the app, which resolves identity, scope, and the trust gate in the core, and the
 //! result is returned as structured content.
 

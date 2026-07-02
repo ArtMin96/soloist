@@ -8,8 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    CoordinationError, FeedbackError, IdentityError, LaunchAgentError, ScopedActionError,
-    SetupIntegrationError, SpawnAgentError, TodoId,
+    CoordinationError, FeedbackError, IdentityError, IntegrationWriteError, LaunchAgentError,
+    ScopedActionError, SetupIntegrationError, SpawnAgentError, TodoId,
 };
 
 /// Why a request failed: a typed error the client maps to a clear MCP tool error.
@@ -114,9 +114,15 @@ pub enum IpcError {
     /// worker — delegation is one level deep.
     #[error("a worker agent cannot spawn agents; report back to the lead that spawned it")]
     WorkerMayNotSpawn,
-    /// A feedback submission was refused (empty or oversized); the detail says why.
+    /// A feedback submission was refused (empty, oversized, or the store is full); the
+    /// detail says why.
     #[error("feedback was not accepted: {0}")]
     InvalidFeedback(String),
+    /// The chosen instructions file carries unmatched soloist section markers — replacing a
+    /// degenerate span could swallow the user's own content, so the write refused; the
+    /// detail names the file to fix by hand.
+    #[error("the instructions file was left untouched: {0}")]
+    UnmatchedIntegrationMarkers(String),
     /// The app failed to serve the request (e.g. a durable read failed).
     #[error("the app could not serve the request: {0}")]
     Internal(String),
@@ -158,7 +164,8 @@ impl IpcError {
             | IpcError::Untrusted
             | IpcError::UnknownTool
             | IpcError::WorkerMayNotSpawn
-            | IpcError::InvalidFeedback(_) => true,
+            | IpcError::InvalidFeedback(_)
+            | IpcError::UnmatchedIntegrationMarkers(_) => true,
             IpcError::Internal(_) => false,
         }
     }
@@ -212,7 +219,7 @@ impl From<SpawnAgentError> for IpcError {
 impl From<FeedbackError> for IpcError {
     fn from(err: FeedbackError) -> Self {
         match err {
-            FeedbackError::Empty | FeedbackError::TooLong => {
+            FeedbackError::Empty | FeedbackError::TooLong | FeedbackError::Full => {
                 IpcError::InvalidFeedback(err.to_string())
             }
             FeedbackError::Store(err) => IpcError::Internal(err.to_string()),
@@ -226,6 +233,9 @@ impl From<SetupIntegrationError> for IpcError {
             SetupIntegrationError::Scope(err) => err.into(),
             SetupIntegrationError::UnknownProject => IpcError::UnknownProject,
             SetupIntegrationError::Store(err) => IpcError::Internal(err.to_string()),
+            SetupIntegrationError::Write(err @ IntegrationWriteError::UnmatchedMarkers { .. }) => {
+                IpcError::UnmatchedIntegrationMarkers(err.to_string())
+            }
             SetupIntegrationError::Write(err) => IpcError::Internal(err.to_string()),
         }
     }

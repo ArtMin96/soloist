@@ -12,7 +12,13 @@ use crate::client::ClientError;
 /// a bare array — so a list reply is always wrapped in a keyed object first.
 pub(crate) fn structured<T: Serialize>(value: &T) -> Result<CallToolResult, ErrorData> {
     serde_json::to_value(value)
-        .map(CallToolResult::structured)
+        .map(|value| {
+            debug_assert!(
+                value.is_object(),
+                "structuredContent must be a JSON object, got: {value}"
+            );
+            CallToolResult::structured(value)
+        })
         .map_err(|err| ErrorData::internal_error(err.to_string(), None))
 }
 

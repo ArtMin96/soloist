@@ -38,4 +38,8 @@ impl FeedbackRepo for FakeFeedbackRepo {
     fn list(&self) -> Result<Vec<FeedbackEntry>, StoreError> {
         Ok(lock(&self.rows).clone())
     }
+
+    fn count(&self) -> Result<u64, StoreError> {
+        Ok(lock(&self.rows).len() as u64)
+    }
 }

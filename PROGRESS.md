@@ -27,6 +27,56 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Review + hardening pass over the F2/F12/F14 sweep (2026-07-03, branch
+  `feat/later-f2-f12-f14`, uncommitted on top of `4648d93`; user-requested `/soloist-review` of
+  PR #66 followed by "fix all findings and nits").** The review ran the real gates, consulted
+  the MCP spec (2025-11-25, Tools → structured content) and the project `tauri-*` skills
+  (capabilities confirmed **not** needed for app-defined commands), and confirmed boundaries /
+  security / clean-room intact. It found one blocker and a batch of should-fixes — all fixed:
+  - **Blocker — `integration_file.rs` could silently eat user content on degenerate markers**
+    (a stray BEGIN, an END before a BEGIN, or a duplicated section made the replace span wrong).
+    `updated()` now replaces only when the file carries exactly one well-formed pair, appends
+    only when it carries none, and otherwise refuses via the new
+    `IntegrationWriteError::UnmatchedMarkers` → wire `IpcError::UnmatchedIntegrationMarkers`
+    (request-class, remedy in the message). The tmp sibling is removed on a failed rename;
+    symlink-replaced-by-rename is documented. Three new refusal tests assert the file is left
+    byte-identical.
+  - **`prompt_template_update` no longer erases the description.** Omitting `description` now
+    **keeps** the stored one; a blank string clears it (create normalizes blank → none). The
+    semantics live in the C6 aggregate (read-merge under the revision guard); the MCP tool
+    description and arg docs say so. An update naming a missing template now surfaces
+    `UnknownPromptTemplate` instead of the misleading `RevisionConflict { actual: None }`.
+  - **Bounded-everything holes closed:** the feedback store is capped at
+    `MAX_FEEDBACK_ENTRIES` = 500 (new `FeedbackRepo::count`, `FeedbackError::Full`; the old
+    `MAX_FEEDBACK_LEN` doc overclaimed); template names/descriptions are capped
+    (`MAX_PROMPT_TEMPLATE_NAME` 200, `MAX_PROMPT_TEMPLATE_DESCRIPTION` 1,000 chars); the
+    64 KiB error message derives from its const.
+  - **`Facade::feedback_list` is now reachable:** `GET /feedback` on the local HTTP API
+    (docs/http-api.md + Integrations endpoint list updated; D-13 had claimed a read-back
+    surface that did not exist — wording corrected).
+  - **Single-source repairs:** `agent_guide()`'s toggleable-group list is generated from
+    `McpFeatureGroup::ALL` via the new `label()` (the hand-written list had omitted Prompt
+    Templates the day it shipped; a guide test now asserts every group);
+    `docs/mcp-setup.md`'s group list fixed; `structured()` now `debug_assert!`s the MCP
+    object constraint at the one choke point every reply flows through; `.mcp.json`'s helper
+    path made repo-relative (was machine-absolute); `helper_command` requires an executable
+    regular file, not mere `exists()`.
+  - **UI:** the CodeBlock copy button gained an honest `failed` state (destructive X, label,
+    sr-only status; a missing or rejecting Clipboard API is no longer silent or a sync throw)
+    — new `CodeBlock.test.tsx` (3 tests); the endpoint-count assertion derives from
+    `HTTP_API_ENDPOINTS` instead of a literal.
+  - **File splits at the 400-line smell (both pushed over by this PR):** `mcp/args.rs` →
+    root + `args/{coordination,prompt_template,setup}.rs` (mirrors the `tools/` taxonomy);
+    `ipc/protocol.rs` → root + `protocol/{request,response}.rs`. Guard now lists 12
+    advisories, all pre-existing. `plan/05 §12`'s three new gap rows re-joined into the table
+    (blank lines had broken their Markdown rendering).
+  - **Evidence:** `just lint` exit 0; `just test` exit 0 — Rust **845 passed / 0 failed
+    (30 suites)**, UI **244 passed (50 files, incl. the 3 new CodeBlock tests)**;
+    `check-core-deps.sh` green ("soloist-core is framework-free").
+  - **Open note for Phase 12 packaging:** an AppImage's `/tmp/.mount_*` extraction dir changes
+    every launch, so the sibling-path helper resolution must not be baked into generated
+    snippets for the packaged build — revisit `helper_command` when the helper is bundled.
+
 - **Later sweep — F2 + F12 + F14 delivered ahead of schedule (2026-07-02, branch
   `feat/later-f2-f12-f14`, three commits `926e6f2` → `b86c190` → `dd7f52a`; user request).** The
   session first **verified against the code** (not the docs) that all three rows were genuinely

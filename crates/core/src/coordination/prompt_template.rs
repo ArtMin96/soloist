@@ -19,10 +19,20 @@ use crate::ids::{ProjectId, PromptTemplateId};
 use crate::ports::StoreError;
 
 /// The longest accepted template body, in bytes. A template is a prompt, not a document
-/// store; the cap keeps a runaway caller from growing the table without bound.
+/// store; together with the name and description caps this bounds the row, so a runaway
+/// caller cannot grow the table without bound.
 pub const MAX_PROMPT_TEMPLATE_BODY: usize = 64 * 1024;
 
+/// The longest accepted template name, in characters — an addressing handle, not content.
+pub const MAX_PROMPT_TEMPLATE_NAME: usize = 200;
+
+/// The longest accepted template description, in characters — a one-line summary; the body
+/// carries the content.
+pub const MAX_PROMPT_TEMPLATE_DESCRIPTION: usize = 1_000;
+
 /// The format discriminator of an exported template — bump on a breaking envelope change.
+/// Mirrored as a literal in the `prompt_template_export` MCP tool description (a `#[tool]`
+/// attribute cannot reference a const) — update both together.
 pub const PROMPT_TEMPLATE_EXPORT_FORMAT: &str = "soloist.prompt-template/v1";
 
 /// Which scope a template action addresses.
@@ -184,8 +194,9 @@ impl PromptTemplates {
         self.write(project, name, description, body, None)
     }
 
-    /// Replaces the template `name`'s description and body, guarded by the revision the
-    /// caller read.
+    /// Replaces the template `name`'s body, guarded by the revision the caller read. An
+    /// omitted description keeps the stored one; a blank description clears it. A concurrent
+    /// edit landing between the keep-read and the write is caught by the revision guard.
     pub fn update(
         &self,
         project: Option<ProjectId>,
@@ -194,6 +205,17 @@ impl PromptTemplates {
         body: &str,
         expected_revision: u64,
     ) -> Result<PromptTemplateView, PromptTemplateWriteError> {
+        let kept;
+        let description = match description {
+            Some(text) => Some(text),
+            None => {
+                kept = self
+                    .repo
+                    .read(project, name.trim())?
+                    .and_then(|stored| stored.description);
+                kept.as_deref()
+            }
+        };
         self.write(project, name, description, body, Some(expected_revision))
     }
 
@@ -205,7 +227,8 @@ impl PromptTemplates {
         body: &str,
         expected: Option<u64>,
     ) -> Result<PromptTemplateView, PromptTemplateWriteError> {
-        validate(name, body).map_err(PromptTemplateWriteError::Invalid)?;
+        let description = description.map(str::trim).filter(|text| !text.is_empty());
+        validate(name, description, body).map_err(PromptTemplateWriteError::Invalid)?;
         match self
             .repo
             .write(project, name.trim(), description, body, expected)?
@@ -262,16 +285,30 @@ impl PromptTemplates {
 
 /// Every problem with a template's content, named at once so the caller fixes it in one
 /// revision.
-fn validate(name: &str, body: &str) -> Result<(), String> {
+fn validate(name: &str, description: Option<&str>, body: &str) -> Result<(), String> {
     let mut problems = Vec::new();
     if name.trim().is_empty() {
-        problems.push("the name is empty");
+        problems.push("the name is empty".to_owned());
+    } else if name.trim().chars().count() > MAX_PROMPT_TEMPLATE_NAME {
+        problems.push(format!(
+            "the name exceeds {MAX_PROMPT_TEMPLATE_NAME} characters"
+        ));
+    }
+    if let Some(description) = description {
+        if description.chars().count() > MAX_PROMPT_TEMPLATE_DESCRIPTION {
+            problems.push(format!(
+                "the description exceeds {MAX_PROMPT_TEMPLATE_DESCRIPTION} characters"
+            ));
+        }
     }
     if body.trim().is_empty() {
-        problems.push("the body is empty");
+        problems.push("the body is empty".to_owned());
     }
     if body.len() > MAX_PROMPT_TEMPLATE_BODY {
-        problems.push("the body exceeds the 64 KiB cap");
+        problems.push(format!(
+            "the body exceeds the {} KiB cap",
+            MAX_PROMPT_TEMPLATE_BODY / 1024
+        ));
     }
     if problems.is_empty() {
         Ok(())

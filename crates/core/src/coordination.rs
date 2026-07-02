@@ -40,7 +40,7 @@ pub use link::{is_link, Link, LinkContent, LinkError, LinkTarget};
 pub use prompt_template::{
     placeholders, ExportedPromptTemplate, PromptScope, PromptTemplateSummary, PromptTemplateView,
     PromptTemplateWriteError, PromptTemplates, MAX_PROMPT_TEMPLATE_BODY,
-    PROMPT_TEMPLATE_EXPORT_FORMAT,
+    MAX_PROMPT_TEMPLATE_DESCRIPTION, MAX_PROMPT_TEMPLATE_NAME, PROMPT_TEMPLATE_EXPORT_FORMAT,
 };
 pub use prompt_template_repo::{
     NoopPromptTemplateRepo, PromptTemplateRepo, PromptTemplateWriteResult, StoredPromptTemplate,

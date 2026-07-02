@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { IntegrationsPanel } from "@/components/settings/IntegrationsPanel";
+import { HTTP_API_ENDPOINTS } from "@/lib/integrations";
 import type { McpFeatureGroup, McpSetupInfo, McpToolGroups } from "@/domain";
 
 const setupInfo: McpSetupInfo = {
@@ -70,7 +71,7 @@ describe("Settings — Integrations", () => {
     expect(screen.queryByText(/SOLOIST_APP_DATA_DIR/)).toBeNull();
     expect(screen.getByText(/\.mcp\.json \(project root\)/)).toBeTruthy();
     expect(screen.getByText("http://127.0.0.1:24678")).toBeTruthy();
-    expect(screen.getByText("19 endpoints")).toBeTruthy();
+    expect(screen.getByText(`${HTTP_API_ENDPOINTS.length} endpoints`)).toBeTruthy();
   });
 
   it("copies the generated snippet to the clipboard", async () => {

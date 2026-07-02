@@ -65,6 +65,18 @@ impl McpFeatureGroup {
         McpFeatureGroup::KeyValue,
         McpFeatureGroup::PromptTemplates,
     ];
+
+    /// The group's human-readable name — what the settings UI shows and the agent guide
+    /// renders, so the toggleable-group list can never drift from the enum.
+    pub fn label(self) -> &'static str {
+        match self {
+            McpFeatureGroup::Scratchpads => "Scratchpads",
+            McpFeatureGroup::Todos => "Todos",
+            McpFeatureGroup::Timers => "Timers",
+            McpFeatureGroup::KeyValue => "Key-Value",
+            McpFeatureGroup::PromptTemplates => "Prompt Templates",
+        }
+    }
 }
 
 /// Which MCP feature-tool groups the server exposes. Scratchpads, Todos and Timers default on;
