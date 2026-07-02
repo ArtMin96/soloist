@@ -79,7 +79,12 @@
   scope; external caller + ≥2 open projects ⇒ no project scope — the recorded F13 policy), but
   the errors gave an agent no path forward — the two wire messages now carry the remedies and
   the `help` guide documents the multi-project external case (use global scope / one project /
-  Soloist-launched). Gate green: Rust 30 suites 0 failed (mcp 72), UI 241.
+  Soloist-launched). Gate green: Rust 30 suites 0 failed (mcp 72), UI 241. **Open thread
+  (owner: decide later):** cwd-based scope inference — the helper could report its working
+  directory at connect and the core match it to an open project root, granting terminal-launched
+  agents project scope automatically with ≥2 projects open. Would relax the F13
+  peer-group-only policy (cwd is self-reported; socket is already owner-only) and likely matches
+  Solo's "inferred from the MCP session" (`plan/05` §7). Proposed 2026-07-02, not scheduled.
 
 - **Critical bugfix — terminal pane rendered empty after switching agents and navigating back
   (2026-07-02, uncommitted on `main`).** Root cause, proven live via the `agent-bridge` MCP harness
