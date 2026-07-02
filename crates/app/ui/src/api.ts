@@ -232,20 +232,18 @@ export function ptyResize(id: number, cols: number, rows: number): Promise<void>
 }
 
 // Attaches the terminal pane to a process. The first channel message is the raw
-// scrollback replay; subsequent messages are live PTY bytes. Returns the Channel so the
-// caller can stop receiving (drop it) when the pane switches away or unmounts; pair with
-// `ptyDetach` to cancel the backend forwarder.
-export function ptyAttach(
-  id: number,
-  onChunk: (bytes: Uint8Array) => void,
-): Promise<Channel<Uint8Array>> {
+// scrollback replay; subsequent messages are live PTY bytes. Resolves to the token that
+// identifies this attachment: pass it to `ptyDetach` to cancel the backend forwarder.
+export function ptyAttach(id: number, onChunk: (bytes: Uint8Array) => void): Promise<number> {
   const channel = new Channel<Uint8Array>();
   channel.onmessage = onChunk;
-  return invoke<void>("pty_attach", { id, onChunk: channel }).then(() => channel);
+  return invoke<number>("pty_attach", { id, onChunk: channel });
 }
 
-export function ptyDetach(): Promise<void> {
-  return invoke<void>("pty_detach");
+// Detaches the attachment identified by `token`. Commands execute out of invoke order, so
+// the backend ignores a stale token — a late detach never cancels a newer attachment.
+export function ptyDetach(token: number): Promise<void> {
+  return invoke<void>("pty_detach", { token });
 }
 
 // Resolves surfaced orphans: the pgids to SIGKILL and forget. An empty list ("Leave
