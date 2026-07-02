@@ -111,7 +111,7 @@ describe("App dashboard", () => {
     mockBackend(STACK);
     render(<App />);
 
-    const rows = await screen.findAllByRole("option");
+    const rows = await screen.findAllByRole("treeitem");
     expect(rows).toHaveLength(4);
 
     // The project node titles the tree; its subtype subgroups nest beneath it.
@@ -131,7 +131,7 @@ describe("App dashboard", () => {
   it("derives control enabled-state from the status FSM", async () => {
     mockBackend(STACK);
     render(<App />);
-    await screen.findAllByRole("option");
+    await screen.findAllByRole("treeitem");
 
     // A stopped process can start, not stop; a running one is the inverse.
     const stopped = within(row(1));
@@ -146,7 +146,7 @@ describe("App dashboard", () => {
   it("selects a process and opens its terminal pane", async () => {
     mockBackend(STACK);
     render(<App />);
-    await screen.findAllByRole("option");
+    await screen.findAllByRole("treeitem");
 
     // With a populated stack but nothing selected, the pane guides the next action.
     expect(screen.getByText(/Select a process in the sidebar/)).toBeTruthy();
@@ -168,7 +168,7 @@ describe("App dashboard", () => {
       expect(screen.getByText("No project open")).toBeTruthy();
     });
     expect(screen.getByText(/Open a folder with a solo\.yml/)).toBeTruthy();
-    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    expect(screen.queryAllByRole("treeitem")).toHaveLength(0);
   });
 
   it("blocks an untrusted command's start and trusts it from the row", async () => {
@@ -187,7 +187,7 @@ describe("App dashboard", () => {
       return undefined;
     });
     render(<App />);
-    await screen.findAllByRole("option");
+    await screen.findAllByRole("treeitem");
 
     // The untrusted command (row 3) cannot start; it offers a trust affordance instead.
     const untrusted = within(row(3));
@@ -211,7 +211,7 @@ describe("App dashboard", () => {
       { shouldMockEvents: true },
     );
     render(<App />);
-    await screen.findAllByRole("option");
+    await screen.findAllByRole("treeitem");
     // Let the trust listener register before emitting — events have no replay.
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));

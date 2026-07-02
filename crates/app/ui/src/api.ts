@@ -16,6 +16,7 @@ import type {
   HotkeyAction,
   HotkeyBindingView,
   Integrations,
+  LineageEdge,
   McpFeatureGroup,
   McpToolGroups,
   OrchestrationSnapshot,
@@ -50,6 +51,12 @@ export function procList(): Promise<ProcessView[]> {
 // event prompts a re-read (snapshot-then-deltas).
 export function orchestrationSnapshot(project: number): Promise<OrchestrationSnapshot> {
   return invoke<OrchestrationSnapshot>("orchestration_snapshot", { project });
+}
+
+// Every live spawn-lineage edge across all projects — the sidebar joins these onto its process
+// list to nest workers under their leads, re-reading on process lifecycle events.
+export function lineageEdges(): Promise<LineageEdge[]> {
+  return invoke<LineageEdge[]>("lineage_edges");
 }
 
 // --- Coordination panels: the scratchpad panel and the to-do board read/write through these.

@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
 import { OrchestrationNode } from "@/components/orchestration/OrchestrationNode";
+import { useToggleSet } from "@/store/useToggleSet";
 import type { OrchestrationTreeNode } from "@/store/orchestrationTree";
 
 interface OrchestrationTreeProps {
@@ -12,16 +12,7 @@ interface OrchestrationTreeProps {
 // (lineage is per-run, so it is not persisted across launches). A project with no agents shows a
 // quiet empty state rather than a blank panel.
 export function OrchestrationTree({ tree }: OrchestrationTreeProps) {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<number>>(() => new Set());
-  const toggle = useCallback((id: number) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-  const isCollapsed = useCallback((id: number) => collapsed.has(id), [collapsed]);
+  const collapsed = useToggleSet();
 
   if (tree.length === 0) {
     return (
@@ -38,8 +29,8 @@ export function OrchestrationTree({ tree }: OrchestrationTreeProps) {
           key={node.id}
           node={node}
           depth={0}
-          isCollapsed={isCollapsed}
-          onToggle={toggle}
+          isCollapsed={collapsed.has}
+          onToggle={collapsed.toggle}
         />
       ))}
     </div>
