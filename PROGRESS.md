@@ -27,6 +27,45 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Later sweep — F2 + F12 + F14 delivered ahead of schedule (2026-07-02, branch
+  `feat/later-f2-f12-f14`, three commits `926e6f2` → `b86c190` → `dd7f52a`; user request).** The
+  session first **verified against the code** (not the docs) that all three rows were genuinely
+  unimplemented, then built them:
+  - **F12 (`926e6f2`)** — the always-on **Setup/Support** MCP group (`help`,
+    `submit_solo_feedback`, `setup_agent_integration`; tool surface 71 → 74). The agent guide is
+    single-sourced in `core::support::agent_guide()` (mechanics + coordination etiquette — owner
+    choice); `help` serves it from the core with **no app round-trip**; feedback is stored locally
+    (`feedback` table, **schema v11**, capped/trimmed/stamped — **KNOWN-DIVERGENCES D-13**);
+    `setup_agent_integration` writes a marker-managed section into `AGENTS.md` (default) or
+    `CLAUDE.md` at the effective project root (create/append/replace-in-place, temp+rename,
+    idempotent). Semantics recorded in `plan/05 §12`.
+  - **F2 (`b86c190`)** — per-client MCP setup snippets in Settings → Integrations: a data-driven
+    client table (Claude Code, Codex, Amp, OpenCode, Cursor, Windsurf, Cline), **every shape
+    verified against the client's official docs** (sources in the new `docs/mcp-setup.md`);
+    **Claude Desktop deliberately omitted** (macOS/Windows-only — no working config against a
+    Linux-only Soloist; `plan/05 §12`). New `mcp_setup_info` command resolves the helper (sibling
+    `soloist-mcp` → PATH fallback) and the data-dir facts; the `SOLOIST_APP_DATA_DIR` env entry is
+    emitted only when overridden (`DATA_DIR_ENV` now a named const in `soloist-ipc`, which became
+    an **unconditional** app dependency — the `mcp` feature now gates only the IPC server).
+    `CodeBlock` gained an opt-in copy button.
+  - **F14 (`dd7f52a`)** — six `prompt_template_*` tools behind the new default-**off**
+    `McpFeatureGroup::PromptTemplates` (surface 74 → 80 enabled). Durable C6 aggregate: name
+    unique per scope (**project default / global** — the first cross-project C6 state), derived
+    `{{placeholder}}`s (trimmed, strict — owner-picked edge rules), revision-guarded updates,
+    portable `soloist.prompt-template/v1` export. Storage **schema v12** with a
+    `COALESCE(project_id, 0)` unique expression index (SQLite treats NULLs as distinct inside
+    UNIQUE — regression test proves the index rejects a raw duplicate global insert).
+  - **Evidence:** gate green after each commit and at branch end — `just lint` exit 0, `just test`
+    **30 Rust suites 0 failed** (core 523 incl. 34 new; store 90; ipc 14; app 48; mcp 71) + **UI
+    241** (49 files); `cargo check -p soloist-app --no-default-features` builds. **Real stdio
+    walk** against the built `soloist-mcp` with the app down: 70 tools served (exactly the default
+    gating), setup tools present, kv/prompt-template absent, `help` returns the guide, a mutation
+    reports "Soloist is not running (could not reach its IPC socket)", clean exit. Matrix rows
+    annotated (Target stays `later`; F14 Src stays 🟡). **Remaining user-only:** the live-app walk
+    (paste a generated snippet into a client against `just dev`, toggle Prompt Templates on and
+    round-trip a template over a real session, run `setup_agent_integration` against a live
+    project).
+
 - **Critical bugfix — terminal pane rendered empty after switching agents and navigating back
   (2026-07-02, uncommitted on `main`).** Root cause, proven live via the `agent-bridge` MCP harness
   (backend `eprintln` + frontend chunk tracing, then removed): `useTerminal`'s rAF-coalescing state
