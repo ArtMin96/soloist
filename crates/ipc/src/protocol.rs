@@ -9,10 +9,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AcquireOutcome, AgentTool, Comment, KvEntry, LeaseView, LinkContent, McpToolGroups, ProcessId,
-    ProcessView, ProjectId, ProjectView, ScratchpadDoc, ScratchpadSummary, ScratchpadView,
-    SetWhenIdleOutcome, StartSummary, TimerId, TimerView, TodoDoc, TodoId, TodoSummary, TodoView,
-    Whoami,
+    AcquireOutcome, AgentTool, Comment, FeedbackEntry, IntegrationFile, IntegrationWrite, KvEntry,
+    LeaseView, LinkContent, McpToolGroups, ProcessId, ProcessView, ProjectId, ProjectView,
+    ScratchpadDoc, ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome, StartSummary, TimerId,
+    TimerView, TodoDoc, TodoId, TodoSummary, TodoView, Whoami,
 };
 
 use crate::error::IpcError;
@@ -228,6 +228,10 @@ pub enum IpcRequest {
     /// The MCP feature-group tool enablement — a global settings read (not project-scoped) the MCP
     /// server consults at startup to decide which feature-tool groups to serve.
     McpToolGroups,
+    /// Store a feedback message locally (never transmitted anywhere).
+    SubmitFeedback { message: String },
+    /// Write the agent guide into the session's effective project root as a managed section.
+    SetupAgentIntegration { file: IntegrationFile },
 }
 
 /// A successful reply. The server always returns the variant matching the request.
@@ -326,6 +330,12 @@ pub enum IpcResponse {
     /// The MCP feature-group tool enablement (answer to [`IpcRequest::McpToolGroups`]). Reuses the
     /// core type so the wire shape cannot drift.
     McpToolGroups(McpToolGroups),
+    /// A stored feedback entry (answer to [`IpcRequest::SubmitFeedback`]). Reuses the core type so
+    /// the wire shape cannot drift.
+    Feedback(FeedbackEntry),
+    /// What a guide write did (answer to [`IpcRequest::SetupAgentIntegration`]). Reuses the core
+    /// type so the wire shape cannot drift.
+    IntegrationWritten(IntegrationWrite),
 }
 
 /// How a [`IpcRequest::WaitForBoundPort`] resolved — a structured answer, not an error: a

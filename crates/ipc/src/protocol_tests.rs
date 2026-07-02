@@ -1,8 +1,9 @@
 use super::*;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, FireCond, LeaseView, Origin, ProcStatus, ProcessId,
-    ProcessKind, ProcessView, ProjectId, ProjectView, PromptMode, Readiness, SessionId,
-    SetWhenIdleOutcome, StartSummary, TimerId, TimerStatus, TimerView, Whoami,
+    AcquireOutcome, AgentKind, AgentTool, FeedbackEntry, FireCond, IntegrationFile,
+    IntegrationWrite, LeaseView, Origin, ProcStatus, ProcessId, ProcessKind, ProcessView,
+    ProjectId, ProjectView, PromptMode, Readiness, SessionId, SetWhenIdleOutcome, StartSummary,
+    TimerId, TimerStatus, TimerView, Whoami,
 };
 use std::path::PathBuf;
 
@@ -144,6 +145,15 @@ fn requests_round_trip_through_json() {
             timer: TimerId::from_raw(1),
         },
         IpcRequest::TimerList,
+        IpcRequest::SubmitFeedback {
+            message: "the sidebar flickers".into(),
+        },
+        IpcRequest::SetupAgentIntegration {
+            file: IntegrationFile::ClaudeMd,
+        },
+        IpcRequest::SetupAgentIntegration {
+            file: IntegrationFile::AgentsMd,
+        },
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -268,6 +278,15 @@ fn every_response_variant_round_trips_through_json() {
             already_idle: false,
             paused_remaining_millis: Some(45_000),
         }]),
+        IpcResponse::Feedback(FeedbackEntry {
+            id: 7,
+            message: "the sidebar flickers".into(),
+            submitted_unix_millis: 1_700_000_000_000,
+        }),
+        IpcResponse::IntegrationWritten(IntegrationWrite {
+            path: PathBuf::from("/projects/storefront/CLAUDE.md"),
+            created: true,
+        }),
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");
@@ -302,6 +321,7 @@ fn a_typed_error_round_trips() {
         IpcError::Untrusted,
         IpcError::UnknownTool,
         IpcError::WorkerMayNotSpawn,
+        IpcError::InvalidFeedback("feedback message is empty".into()),
         IpcError::Internal("disk full".into()),
     ] {
         let json = serde_json::to_string(&error).expect("serialize");
@@ -325,6 +345,7 @@ fn request_errors_are_distinguished_from_server_errors() {
         IpcError::Untrusted,
         IpcError::UnknownTool,
         IpcError::WorkerMayNotSpawn,
+        IpcError::InvalidFeedback("feedback message is empty".into()),
     ] {
         assert!(error.is_request_error(), "{error} is request-caused");
     }

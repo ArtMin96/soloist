@@ -17,6 +17,7 @@ use crate::notify::{NoopNotifier, Notifier};
 use crate::portscan::{NoopPortProbe, PortProbe};
 use crate::settings::{NoopSettingsRepo, ProjectSettings, Settings, SettingsRepo};
 use crate::shellenv::{NoopShellEnvProbe, ShellEnvProbe};
+use crate::support::{FeedbackRepo, NoopFeedbackRepo};
 
 use super::{
     Clock, LockReleaser, NoopLockReleaser, NoopOrphanControl, NoopRuntimeState, OrphanControl,
@@ -30,7 +31,7 @@ use super::{
 /// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `todo_repo`,
 /// `kv_repo`, `runtime`, `orphan_control`, `metrics`,
 /// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`, `shell_env_probe`,
-/// `settings_repo`, `project_settings_repo`)
+/// `settings_repo`, `project_settings_repo`, `feedback_repo`)
 /// default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
 /// forces every existing composition root to change. `app_env` (the app's own environment,
 /// captured at the composition root for the shell-environment resolver) defaults to empty.
@@ -58,6 +59,7 @@ pub struct CorePorts {
     pub(crate) shell_env_probe: Arc<dyn ShellEnvProbe>,
     pub(crate) settings_repo: Arc<dyn SettingsRepo<(), Settings>>,
     pub(crate) project_settings_repo: Arc<dyn SettingsRepo<ProjectId, ProjectSettings>>,
+    pub(crate) feedback_repo: Arc<dyn FeedbackRepo>,
     pub(crate) app_env: BTreeMap<String, String>,
 }
 
@@ -93,6 +95,7 @@ impl CorePorts {
                 shell_env_probe: Arc::new(NoopShellEnvProbe),
                 settings_repo: Arc::new(NoopSettingsRepo),
                 project_settings_repo: Arc::new(NoopSettingsRepo),
+                feedback_repo: Arc::new(NoopFeedbackRepo),
                 app_env: BTreeMap::new(),
             },
         }
@@ -237,6 +240,15 @@ impl CorePortsBuilder {
         project_settings_repo: Arc<dyn SettingsRepo<ProjectId, ProjectSettings>>,
     ) -> Self {
         self.ports.project_settings_repo = project_settings_repo;
+        self
+    }
+
+    /// Overrides the durable feedback store submissions append to (defaults to
+    /// [`NoopFeedbackRepo`], which acknowledges without persisting). The real adapter is
+    /// SQLite, the same store backing every other durable repository; feedback is global,
+    /// never sent anywhere, and reviewed by the user locally.
+    pub fn feedback_repo(mut self, feedback_repo: Arc<dyn FeedbackRepo>) -> Self {
+        self.ports.feedback_repo = feedback_repo;
         self
     }
 

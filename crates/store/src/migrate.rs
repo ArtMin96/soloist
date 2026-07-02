@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 10;
+pub(crate) const SCHEMA_VERSION: i64 = 11;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -192,6 +192,21 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         .map_err(sql_err)?;
     }
 
+    if version < 11 {
+        // Feedback: append-only local notes about Soloist itself. Global (no project foreign
+        // key — feedback outlives any project) and never transmitted anywhere; the user reads
+        // it back at their own pace. The store-assigned `id` is durable and never reused
+        // (`AUTOINCREMENT`); the millis are a persistable wall clock.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS feedback (
+                 id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                 message               TEXT NOT NULL,
+                 submitted_unix_millis INTEGER NOT NULL
+             );",
+        )
+        .map_err(sql_err)?;
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
@@ -246,6 +261,7 @@ mod tests {
             "kv",
             "settings",
             "project_settings",
+            "feedback",
         ] {
             let exists = conn
                 .query_row(

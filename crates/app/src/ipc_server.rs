@@ -453,6 +453,14 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .mcp_tool_groups()
             .map(IpcResponse::McpToolGroups)
             .map_err(|err| IpcError::Internal(err.to_string())),
+        IpcRequest::SubmitFeedback { message } => facade
+            .submit_feedback(&message)
+            .map(IpcResponse::Feedback)
+            .map_err(IpcError::from),
+        IpcRequest::SetupAgentIntegration { file } => facade
+            .setup_agent_integration(session, file)
+            .map(IpcResponse::IntegrationWritten)
+            .map_err(IpcError::from),
     }
 }
 

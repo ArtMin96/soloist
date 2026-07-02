@@ -15,5 +15,6 @@ pub(crate) mod project;
 pub(crate) mod reply;
 pub(crate) mod scratchpad;
 pub(crate) mod services;
+pub(crate) mod setup;
 pub(crate) mod timer;
 pub(crate) mod todo;

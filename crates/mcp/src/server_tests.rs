@@ -8,6 +8,7 @@ use soloist_core::{
     StartSummary, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary,
     TodoView, Whoami,
 };
+use soloist_core::{FeedbackEntry, IntegrationFile, IntegrationWrite};
 use soloist_ipc::{
     read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome,
 };
@@ -16,10 +17,11 @@ use std::path::PathBuf;
 use tokio::net::UnixListener;
 
 use crate::args::{
-    LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, RenameArg, ScratchpadArchiveArg,
-    ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg, SelectProjectArg,
-    SendInputArg, SpawnAgentArg, TimerArg, TimerFireWhenIdleArg, TimerSetArg, TodoArg,
-    TodoCommentCreateArg, TodoCreateArg, TodoGetArg, TodoRef, TodoStatusArg, WaitForPortArg,
+    IntegrationFileArg, LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, RenameArg,
+    ScratchpadArchiveArg, ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg,
+    SelectProjectArg, SendInputArg, SetupAgentIntegrationArg, SpawnAgentArg, SubmitFeedbackArg,
+    TimerArg, TimerFireWhenIdleArg, TimerSetArg, TodoArg, TodoCommentCreateArg, TodoCreateArg,
+    TodoGetArg, TodoRef, TodoStatusArg, WaitForPortArg,
 };
 
 /// Spawns a fake app on `socket` that answers each request via `respond` until the client
@@ -139,6 +141,10 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "lock_acquire",
     "lock_status",
     "lock_release",
+    // tools/setup.rs
+    "help",
+    "submit_solo_feedback",
+    "setup_agent_integration",
     // tools/timer.rs
     "timer_set",
     "timer_fire_when_idle_any",
@@ -220,6 +226,10 @@ fn default_settings_gate_key_value_off_and_serve_the_rest() {
     assert!(
         served.contains("lock_acquire"),
         "coordination leases are a core group"
+    );
+    assert!(
+        served.contains("help"),
+        "setup/support is a core group, always served"
     );
     assert!(served.contains("scratchpad_list"));
     assert!(served.contains("todo_list"));
@@ -1613,4 +1623,97 @@ async fn todo_comment_list_projects_the_comments() {
         serde_json::from_value(structured_of(result)["comments"].clone()).expect("decode comments");
     assert_eq!(back.len(), 1);
     assert_eq!(back[0].body, "looks good");
+}
+
+/// `help` answers from the core's embedded guide with no app round-trip — nothing listens on
+/// the socket here, and it still succeeds. That is deliberate: it must work when Soloist is
+/// down, which is when an agent most needs it.
+#[tokio::test]
+async fn help_returns_the_guide_without_the_app() {
+    let handler = handler(PathBuf::from("nothing-listens-here.sock"));
+
+    let result = handler.help().await.expect("help succeeds with no app");
+    let help = structured_of(result)["help"]
+        .as_str()
+        .expect("a help string")
+        .to_owned();
+    assert!(help.contains("bind_session_process"));
+    assert!(help.contains("lock_acquire"));
+}
+
+#[tokio::test]
+async fn submit_solo_feedback_threads_the_message_and_projects_the_entry() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SubmitFeedback { message } if message == "love the log search" => {
+            Ok(IpcResponse::Feedback(FeedbackEntry {
+                id: 3,
+                message,
+                submitted_unix_millis: 1_700_000_000_000,
+            }))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .submit_solo_feedback(Parameters(SubmitFeedbackArg {
+            message: "love the log search".into(),
+        }))
+        .await
+        .expect("submit_solo_feedback succeeds");
+    let back: FeedbackEntry =
+        serde_json::from_value(structured_of(result)).expect("decode the entry");
+    assert_eq!(back.id, 3);
+    assert_eq!(back.message, "love the log search");
+}
+
+#[tokio::test]
+async fn setup_agent_integration_defaults_to_agents_md() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SetupAgentIntegration {
+            file: IntegrationFile::AgentsMd,
+        } => Ok(IpcResponse::IntegrationWritten(IntegrationWrite {
+            path: PathBuf::from("/p/AGENTS.md"),
+            created: true,
+        })),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .setup_agent_integration(Parameters(SetupAgentIntegrationArg { file: None }))
+        .await
+        .expect("setup_agent_integration succeeds");
+    let back: IntegrationWrite =
+        serde_json::from_value(structured_of(result)).expect("decode the write");
+    assert!(back.created);
+    assert_eq!(back.path, PathBuf::from("/p/AGENTS.md"));
+}
+
+#[tokio::test]
+async fn setup_agent_integration_threads_an_explicit_claude_md() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SetupAgentIntegration {
+            file: IntegrationFile::ClaudeMd,
+        } => Ok(IpcResponse::IntegrationWritten(IntegrationWrite {
+            path: PathBuf::from("/p/CLAUDE.md"),
+            created: false,
+        })),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .setup_agent_integration(Parameters(SetupAgentIntegrationArg {
+            file: Some(IntegrationFileArg::ClaudeMd),
+        }))
+        .await
+        .expect("setup_agent_integration succeeds");
+    let back: IntegrationWrite =
+        serde_json::from_value(structured_of(result)).expect("decode the write");
+    assert!(!back.created);
+    assert_eq!(back.path, PathBuf::from("/p/CLAUDE.md"));
 }

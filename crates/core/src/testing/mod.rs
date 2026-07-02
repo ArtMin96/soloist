@@ -36,6 +36,7 @@ mod runtime_state;
 mod settings;
 mod shellenv;
 mod spawner;
+mod support;
 
 pub use agents::{FakeAgentToolRepo, FakeVersionProbe};
 pub use clock::MockClock;
@@ -58,3 +59,4 @@ pub use runtime_state::{FakeOrphanControl, FakeRuntimeState};
 pub use settings::FakeSettingsRepo;
 pub use shellenv::FakeShellEnvProbe;
 pub use spawner::FakeSpawner;
+pub use support::FakeFeedbackRepo;

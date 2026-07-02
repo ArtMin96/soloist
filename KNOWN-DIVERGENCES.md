@@ -398,3 +398,27 @@ snapshot to the App-level store and extending the palette's search targets.
 
 **Effect on parity:** I3 is partial parity — navigation to process/project destinations works; the
 todo/scratchpad jump targets are a tracked follow-up.
+
+---
+
+## D-13 — `submit_solo_feedback` stores feedback locally, never transmits it 🟢
+
+**Introduced:** later sweep (F12), 2026-07-02.
+
+**Solo (ref `plan/05` §7):** the Setup/Support MCP tool `submit_solo_feedback` submits feedback to
+the Solo team — a vendor service receives the message.
+
+**Soloist:** the tool keeps Solo's name (interop — agents following Solo-era docs still find it) and
+the same submit-a-message shape, but the message is **appended to a local `feedback` table** in the
+app's own SQLite store (trimmed, non-empty, capped at 4,000 characters, wall-clock stamped) and is
+never transmitted anywhere. The tool's description says exactly that, so an agent never believes it
+reached a vendor.
+
+**Rationale:** Soloist is an open, local-only rebuild with no vendor backend — the licensing and
+account services were dropped wholesale (D3), and no telemetry endpoint exists by design. Storing
+locally keeps the tool honest and useful: the owner can read the collected notes back at their own
+pace (`Facade::feedback_list`).
+
+**Effect on parity:** F12 verifies — the tool exists, accepts the documented shape, and acknowledges
+with the stored entry. Only the destination differs, and that difference is deliberate and
+user-favoring.

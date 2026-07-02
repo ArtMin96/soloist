@@ -8,7 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    CoordinationError, IdentityError, LaunchAgentError, ScopedActionError, SpawnAgentError, TodoId,
+    CoordinationError, FeedbackError, IdentityError, LaunchAgentError, ScopedActionError,
+    SetupIntegrationError, SpawnAgentError, TodoId,
 };
 
 /// Why a request failed: a typed error the client maps to a clear MCP tool error.
@@ -93,6 +94,9 @@ pub enum IpcError {
     /// worker — delegation is one level deep.
     #[error("a worker agent cannot spawn agents; report back to the lead that spawned it")]
     WorkerMayNotSpawn,
+    /// A feedback submission was refused (empty or oversized); the detail says why.
+    #[error("feedback was not accepted: {0}")]
+    InvalidFeedback(String),
     /// The app failed to serve the request (e.g. a durable read failed).
     #[error("the app could not serve the request: {0}")]
     Internal(String),
@@ -129,7 +133,8 @@ impl IpcError {
             | IpcError::OutOfScope
             | IpcError::Untrusted
             | IpcError::UnknownTool
-            | IpcError::WorkerMayNotSpawn => true,
+            | IpcError::WorkerMayNotSpawn
+            | IpcError::InvalidFeedback(_) => true,
             IpcError::Internal(_) => false,
         }
     }
@@ -176,6 +181,28 @@ impl From<SpawnAgentError> for IpcError {
             SpawnAgentError::NoProjectScope => IpcError::NoProjectScope,
             SpawnAgentError::WorkerMayNotSpawn => IpcError::WorkerMayNotSpawn,
             SpawnAgentError::Launch(err) => err.into(),
+        }
+    }
+}
+
+impl From<FeedbackError> for IpcError {
+    fn from(err: FeedbackError) -> Self {
+        match err {
+            FeedbackError::Empty | FeedbackError::TooLong => {
+                IpcError::InvalidFeedback(err.to_string())
+            }
+            FeedbackError::Store(err) => IpcError::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<SetupIntegrationError> for IpcError {
+    fn from(err: SetupIntegrationError) -> Self {
+        match err {
+            SetupIntegrationError::Scope(err) => err.into(),
+            SetupIntegrationError::UnknownProject => IpcError::UnknownProject,
+            SetupIntegrationError::Store(err) => IpcError::Internal(err.to_string()),
+            SetupIntegrationError::Write(err) => IpcError::Internal(err.to_string()),
         }
     }
 }

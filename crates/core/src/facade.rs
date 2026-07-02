@@ -33,6 +33,7 @@ use crate::projects::{
 };
 use crate::settings::{ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
+use crate::support::Feedback;
 use crate::trust::TrustStore;
 
 mod commands;
@@ -47,11 +48,13 @@ mod scoped;
 mod scratchpad;
 mod session;
 mod settings;
+mod support;
 mod todo;
 
 pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
 pub use scoped::{ScopedActionError, SpawnAgentError};
+pub use support::SetupIntegrationError;
 
 /// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot
 /// (see [`crate::events`]) rather than growing memory without limit.
@@ -81,6 +84,7 @@ pub struct Facade {
     todos: Todos,
     settings: SettingsStore<(), Settings>,
     project_settings: SettingsStore<ProjectId, ProjectSettings>,
+    feedback: Feedback,
 }
 
 impl Facade {
@@ -107,6 +111,7 @@ impl Facade {
             todo_repo,
             settings_repo,
             project_settings_repo,
+            feedback_repo,
             ..
         } = ports;
         Self {
@@ -121,6 +126,7 @@ impl Facade {
             todos: Todos::new(todo_repo),
             settings: SettingsStore::new(settings_repo),
             project_settings: SettingsStore::new(project_settings_repo),
+            feedback: Feedback::new(feedback_repo, clock.clone()),
             clock,
             metrics,
             port_probe,

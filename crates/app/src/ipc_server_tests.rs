@@ -4,8 +4,8 @@ use soloist_core::testing::{
     FakeTrustRepo,
 };
 use soloist_core::{
-    AcquireOutcome, CorePorts, DomainEvent, McpFeatureGroup, Origin, ProcStatus, ProcessId,
-    StartSummary, TokioClock,
+    AcquireOutcome, CorePorts, DomainEvent, IntegrationFile, McpFeatureGroup, Origin, ProcStatus,
+    ProcessId, ProjectRepo, StartSummary, TokioClock,
 };
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -674,4 +674,95 @@ async fn mcp_tool_groups_reflects_a_persisted_change() {
         Ok(IpcResponse::McpToolGroups(groups)) => assert!(groups.key_value),
         other => panic!("expected an McpToolGroups reply, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn submit_feedback_routes_and_echoes_the_stored_entry() {
+    // A global write — no scope needed, so an unbound session resolves it.
+    let facade = facade();
+    let session = facade.open_session(None);
+    match handle_request(
+        &facade,
+        session,
+        IpcRequest::SubmitFeedback {
+            message: "  more keyboard shortcuts please  ".into(),
+        },
+    )
+    .await
+    {
+        Ok(IpcResponse::Feedback(entry)) => {
+            assert_eq!(entry.message, "more keyboard shortcuts please");
+        }
+        other => panic!("expected a Feedback reply, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn blank_feedback_is_refused_as_a_request_error() {
+    let facade = facade();
+    let session = facade.open_session(None);
+    match handle_request(
+        &facade,
+        session,
+        IpcRequest::SubmitFeedback {
+            message: "  ".into(),
+        },
+    )
+    .await
+    {
+        Err(err @ IpcError::InvalidFeedback(_)) => assert!(err.is_request_error()),
+        other => panic!("expected an InvalidFeedback refusal, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn setup_agent_integration_writes_into_the_scoped_project_root() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let projects = Arc::new(FakeProjectRepo::new());
+    projects
+        .upsert(dir.path(), Some("p"), None)
+        .expect("seed one project");
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            projects,
+        )
+        .build(),
+    );
+    // The sole loaded project gives the unbound session its default scope.
+    let session = facade.open_session(None);
+    match handle_request(
+        &facade,
+        session,
+        IpcRequest::SetupAgentIntegration {
+            file: IntegrationFile::ClaudeMd,
+        },
+    )
+    .await
+    {
+        Ok(IpcResponse::IntegrationWritten(write)) => {
+            assert!(write.created);
+            assert_eq!(write.path, dir.path().join("CLAUDE.md"));
+        }
+        other => panic!("expected an IntegrationWritten reply, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn setup_agent_integration_with_no_scope_is_refused() {
+    let facade = facade();
+    let session = facade.open_session(None);
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::SetupAgentIntegration {
+                file: IntegrationFile::AgentsMd,
+            },
+        )
+        .await,
+        Err(IpcError::NoProjectScope)
+    );
 }

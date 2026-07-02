@@ -42,7 +42,8 @@ impl SoloistMcp {
             + Self::bulk_router()
             + Self::output_router()
             + Self::services_router()
-            + Self::lock_router();
+            + Self::lock_router()
+            + Self::setup_router();
         // Feature groups: a registry of (group → its sub-router builder), each registered only when
         // the setting enables it. Adding a feature group is one row here plus its `McpFeatureGroup`.
         let feature_groups: [(McpFeatureGroup, FeatureGroupRouter); 4] = [

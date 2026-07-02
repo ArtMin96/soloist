@@ -39,6 +39,7 @@ pub mod projects;
 pub mod settings;
 pub mod shellenv;
 pub mod supervisor;
+pub mod support;
 pub mod terminal;
 pub mod trust;
 
@@ -71,7 +72,7 @@ pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
     CoordinationError, Facade, LaunchAgentError, LocalCommandError, MoveCommandError,
-    ScopedActionError, SpawnAgentError, TrustCommandError,
+    ScopedActionError, SetupIntegrationError, SpawnAgentError, TrustCommandError,
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
@@ -103,5 +104,9 @@ pub use settings::{
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};
+pub use support::{
+    agent_guide, Feedback, FeedbackEntry, FeedbackError, FeedbackRepo, IntegrationFile,
+    IntegrationWrite, IntegrationWriteError, NoopFeedbackRepo,
+};
 pub use terminal::{LogLine, PtyChunk, RenderedScreen};
 pub use trust::{Trust, TrustStore};
