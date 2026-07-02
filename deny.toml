@@ -13,7 +13,16 @@ targets = ["x86_64-unknown-linux-gnu"]
 unmaintained = "workspace"
 # Add an entry here, each with a written reason, only when a vulnerability has no fix and the
 # risk is knowingly accepted.
-ignore = []
+ignore = [
+    # Two DoS advisories against quick-xml 0.39.4: a quadratic-time duplicate-attribute check on
+    # a crafted start tag (0194) and unbounded namespace-declaration allocation in NsReader (0195).
+    # Both are reached only transitively via plist -> tauri-utils (Tauri's bundler/plist parsing);
+    # Soloist parses no untrusted XML through that path. plist 1.9.0 pins quick-xml to 0.39.x with
+    # no in-range patched release, so the only fix is a full Tauri-stack upgrade — tracked
+    # separately, out of scope for a release cut. Revisit when tauri-utils ships a patched plist.
+    { id = "RUSTSEC-2026-0194", reason = "transitive quick-xml via plist/tauri-utils; no untrusted-XML path in Soloist; no in-range fix" },
+    { id = "RUSTSEC-2026-0195", reason = "transitive quick-xml via plist/tauri-utils; no untrusted-XML path in Soloist; no in-range fix" },
+]
 
 [licenses]
 # The dependency tree must stay permissively licensed, matching Soloist's own MIT/Apache-2.0.
