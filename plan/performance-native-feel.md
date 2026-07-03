@@ -230,18 +230,19 @@ React DevTools Profiler for re-renders · `WEBKIT_DISABLE_COMPOSITING_MODE=1` as
 
 ## I. Progress Log (append newest first — the cross-session state)
 
-- **P2 (terminal keep-alive) implemented — Done, pending final verify + GUI confirm.** Chose
-  sub-decision **(a)**. Changes: `pty_bridge` is now a token→forwarder **map** (multi-forwarder, no
-  abort-on-install) — **Verified** (clippy clean, 4 bridge tests green); new `store/useTerminalPool.ts`
-  (bounded LRU `nextPool`, `TERMINAL_POOL_CAP=6` under the 16 WebGL cap) + test; `App.tsx` drops
-  `key={id}` and renders a persistent pool (one `TerminalPane` per pooled process, only the selected
-  visible, current selection folded in so no first-select flash); `TerminalPane` gains a `visible`
-  prop (`display:none` when hidden) passed to `useTerminal`, which gains a refit-and-focus-on-show
-  effect — its attach/cancel/replay lifecycle otherwise **untouched**. So a switch back to a pooled
-  terminal is instant (no xterm/WebGL rebuild, no replay; stream stayed live). Frontend gates green
-  (tsc/eslint/prettier; pool+terminal+app+sidebar tests 52). **Owed:** the running full `just test` +
-  `just soak` leak-gate (in flight), then a GUI runtime confirm (switch feels instant; FD/task count
-  flat across many switches). Not yet committed.
+- **P2 (terminal keep-alive) — implemented, all automated gates green, committed. Owed: GUI
+  feel-confirm.** Chose sub-decision **(a)**. `pty_bridge` is now a token→forwarder **map**
+  (multi-forwarder, no abort-on-install); new `store/useTerminalPool.ts` (bounded LRU `nextPool`,
+  `TERMINAL_POOL_CAP=6` under the 16 WebGL cap) + test; `App.tsx` drops `key={id}` and renders a
+  persistent pool (one `TerminalPane` per pooled process, only the selected visible, current
+  selection folded in so no first-select flash); `TerminalPane` gains a `visible` prop
+  (`display:none` when hidden) → `useTerminal` refit-and-focus-on-show; its attach/cancel/replay
+  lifecycle otherwise **untouched**. So switching back to a pooled terminal is instant (no
+  xterm/WebGL rebuild, no replay; the stream stayed live). **Gates GREEN:** `just test` (UI **55
+  files / 271 tests**, Rust core **537** + app + pty) + `just soak` leak-gate (3/3; `fds 4→4,
+  threads 5→5, tasks 1→1` — flat) + clippy + fmt. **Committed** (3e07102 backend, 4d311c5 UI,
+  590aede docs). **Owed only:** a GUI runtime confirm that switching *feels* instant and shows/refits
+  cleanly (the display:none→show path) — the one property tests can't observe.
 - **✅ TIER 1 COMPLETE (2026-07-04) — full workspace gate green.** `just lint` passes end-to-end (fmt,
   clippy `-D warnings`, tsc, eslint, prettier, dependency-direction, schema); Rust core **537** tests,
   UI **264** tests. Symptoms ① (theme lag) and ③ (general jank) are addressed and verified. Only the
