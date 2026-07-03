@@ -203,4 +203,17 @@ describe("useTerminal attach lifecycle", () => {
     // can never target a newer attachment.
     expect([...detached].sort((a, b) => a - b)).toEqual(attaches.map((a) => a.token));
   });
+
+  it("detaches even when unmounted before the attachment resolves", async () => {
+    // A pooled pane can be evicted before its pty_attach promise resolves; the token must still be
+    // detached once it arrives, or the forwarder leaks with no token left to clear it.
+    const view = render(<Probe process={PROCESS} />);
+    // Unmount immediately — the invoke has registered the attachment (so a token exists) but its
+    // promise has not resolved yet.
+    view.unmount();
+    await settle();
+
+    expect(attaches).toHaveLength(1);
+    expect(detached).toEqual([attaches[0].token]);
+  });
 });
