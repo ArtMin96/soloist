@@ -1,9 +1,9 @@
 ---
 name: soloist-diagnose
 description: Detect, fix, and re-verify performance, quality, supply-chain, and runtime issues across the whole Soloist app — the Rust core + Tauri adapters and the React/TS frontend — using the project's own detection tools. Use when the user wants to optimize, speed up, audit, health-check, or "find and fix anything broken or slow" in Soloist. Runs the real gates (cargo-deny, clippy, the soak leak-gate, bundle/bloat measurement) and delegates React component issues to the react-doctor skill, then applies fixes and re-runs each gate to confirm green. It changes code, but stays inside the architecture and the locked non-changes — it measures before optimizing, never weakens a test to pass, accepts an unfixable advisory only with a written reason, and never touches PROGRESS.md unless asked.
-version: 1.0.0
-user-invocable: true
+version: 1.0.1
 argument-hint: "[scope — 'deps', 'lints', 'perf', 'leaks', 'frontend', or blank for a full sweep]"
+allowed-tools: Bash(just *) Bash(cargo *)
 ---
 
 # Soloist diagnose
@@ -36,7 +36,7 @@ non-negotiable.
 
 ## The layers and their gates
 
-Run only the layers in scope (the argument; blank = all). For each: **detect → fix → re-verify**.
+Scope: `$ARGUMENTS` (blank = full sweep). Run only the layers in scope. For each: **detect → fix → re-verify**.
 
 ### 1. Supply chain — `just audit` (cargo-deny)
 
@@ -74,17 +74,21 @@ PID/FD/task count" (§8). Re-verify: `just soak` is green.
 
 ### 5. React frontend — delegate to `/doctor`
 
-Do **not** hand-roll React analysis. Invoke the **react-doctor** skill (`/doctor`) for component-level lint,
-accessibility, bundle, and architecture findings, and let its `--fix` loop apply fixes. For deeper runtime
-render issues, point the user to `react-scan` / the webview DevTools. Re-verify: `/doctor` re-scans clean.
+Do **not** hand-roll React analysis. Invoke the **react-doctor** skill for component-level lint,
+accessibility, bundle, and architecture findings, and let its `--fix` loop apply fixes. If no react-doctor
+skill is listed, it is not installed — tell the user and offer to run
+`npx -y skills add millionco/react-doctor` first. Never substitute the built-in `/doctor` command, which
+diagnoses the Claude Code installation, not React code. For deeper runtime render issues, point the user
+to `react-scan` / the webview DevTools. Re-verify: react-doctor re-scans clean.
 
 ## Tools you do NOT drive (tell the user)
 
 `CrabNebula DevTools` (`just devtools`) and `tokio-console` (`just tokio-console`) are **live visual** tools
 for a human's eyes — you cannot read a GUI or TUI. If a finding needs them (a specific slow IPC command, a
 runtime stall), say so, tell the user exactly what to run and what to look for, and act on what they report.
-If the `@hypothesi/tauri-mcp-server` MCP is connected and the app is running with `just agent-bridge`, you
-*can* inspect IPC calls and drive the webview through that MCP's tools instead — prefer it when available.
+If the `tauri-bridge` MCP (the `@hypothesi/tauri-mcp-server` package) is connected and the app is running
+with `just agent-bridge`, you *can* inspect IPC calls and drive the webview through its `tauri-bridge:*`
+tools instead — prefer it when available.
 
 ## Report
 

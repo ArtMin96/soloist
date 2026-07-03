@@ -122,9 +122,10 @@ export function buildCommands(ctx: CommandContext): CommandGroup[] {
     });
   }
 
+  const projectNameById = new Map(ctx.projects.map((p) => [p.id, p.name] as const));
   const processCommands: Command[] = [];
   for (const proc of ctx.processes) {
-    const projectName = ctx.projects.find((p) => p.id === proc.project)?.name ?? "";
+    const projectName = projectNameById.get(proc.project) ?? "";
     processCommands.push({
       id: `process:${proc.id}:focus`,
       label: `Focus ${proc.label}`,

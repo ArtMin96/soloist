@@ -1,12 +1,12 @@
 import { Plus, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { appendRow, removeItem, setItem } from "@/store/scratchpadForm";
+import { appendRow, removeItem, setItem, type Row } from "@/store/scratchpadForm";
 
 interface FieldListProps {
   label: string;
-  items: string[];
+  items: Row[];
   placeholder: string;
-  onChange: (items: string[]) => void;
+  onChange: (items: Row[]) => void;
 }
 
 // A labelled list of single-line entries (the disciplined document's plan / acceptance-criteria /
@@ -18,10 +18,11 @@ export function FieldList({ label, items, placeholder, onChange }: FieldListProp
       <legend className="text-[0.6875rem] font-[550] text-muted-foreground">{label}</legend>
       <div className="flex flex-col gap-1">
         {items.map((item, index) => (
-          // The lists are short and never reordered, so the row index is a stable enough key.
-          <div key={index} className="flex items-center gap-1">
+          // Keyed by the row's stable id, not its index, so removing a middle row keeps each input
+          // bound to its own DOM node (focus/caret don't jump to the wrong row).
+          <div key={item.id} className="flex items-center gap-1">
             <Input
-              value={item}
+              value={item.value}
               placeholder={placeholder}
               aria-label={`${label} ${index + 1}`}
               onChange={(event) => onChange(setItem(items, index, event.target.value))}

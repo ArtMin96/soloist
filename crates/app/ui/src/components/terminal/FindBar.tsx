@@ -34,14 +34,13 @@ export function FindBar({ query, onChange, onFindNext, onFindPrevious, onClose }
   }
 
   return (
-    <div
+    <search
       className={cn(
         "absolute top-0 right-3 z-10",
         "flex items-center gap-0.5 rounded-b-md border border-t-0 border-border/60",
         "bg-sidebar px-2 py-1 shadow-[var(--shadow-overlay)]",
         "animate-in slide-in-from-top-2 duration-[var(--dur-select)] ease-out-quint",
       )}
-      role="search"
       aria-label="Find in terminal"
     >
       <input
@@ -86,6 +85,6 @@ export function FindBar({ query, onChange, onFindNext, onFindPrevious, onClose }
       >
         <X className="size-3.5" />
       </Button>
-    </div>
+    </search>
   );
 }

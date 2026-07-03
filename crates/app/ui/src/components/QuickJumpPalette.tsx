@@ -62,16 +62,16 @@ export function QuickJumpPalette({
               <span className="flex-1 truncate">{tree.project.name}</span>
               <span className="text-[0.6875rem] text-muted-foreground">Project settings</span>
             </CommandItem>
-            {tree.kinds
-              .flatMap((kind) => kind.processes)
-              .map((process) => (
+            {tree.kinds.flatMap((kind) =>
+              kind.processes.map((process) => (
                 <ProcessCommandItem
                   key={process.id}
                   process={process}
                   projectName={tree.project.name}
                   onSelect={run(() => onSelectProcess(process.id))}
                 />
-              ))}
+              )),
+            )}
           </CommandGroup>
         </div>
       ))}

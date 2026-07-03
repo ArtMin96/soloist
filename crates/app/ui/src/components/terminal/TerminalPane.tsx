@@ -10,6 +10,10 @@ import { useTerminalHotkeys } from "@/components/terminal/useTerminalHotkeys";
 import { useSignal } from "@/store/signalsContext";
 import type { ProcessView } from "@/domain";
 
+// A stable empty default so an unspecified `processes` keeps the same identity across renders —
+// a fresh `[]` each render would defeat memoized consumers and re-run the hotkey subscription.
+const NO_PROCESSES: ProcessView[] = [];
+
 interface TerminalPaneProps {
   process: ProcessView;
   /** Ordered process list for Ctrl+↑/↓ navigation. */
@@ -28,7 +32,7 @@ interface TerminalPaneProps {
 // this stays presentational.
 export function TerminalPane({
   process,
-  processes = [],
+  processes = NO_PROCESSES,
   onSelectProcess,
   onStart,
   onStop,

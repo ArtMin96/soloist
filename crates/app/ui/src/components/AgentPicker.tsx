@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { PaletteFooter, PaletteHint } from "@/components/palette/PaletteFooter";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,7 +37,9 @@ export function AgentPicker({ open, onOpenChange, tools, projects, onLaunch }: A
   const [chosenProjectId, setChosenProjectId] = useState<number | null>(null);
   const [flagsTool, setFlagsTool] = useState<string | null>(null);
   const [flags, setFlags] = useState("");
-  const [active, setActive] = useState("");
+  // The cmdk-highlighted tool is only read when the user opens the flags step (Alt+Enter); it is
+  // never rendered, so a ref keeps it current without re-rendering the picker on every highlight.
+  const activeRef = useRef("");
 
   const targetProject = chosenProjectId ?? (projects.length === 1 ? projects[0].id : null);
   const targetName = projects.find((project) => project.id === targetProject)?.name;
@@ -49,7 +51,7 @@ export function AgentPicker({ open, onOpenChange, tools, projects, onLaunch }: A
       setChosenProjectId(null);
       setFlagsTool(null);
       setFlags("");
-      setActive("");
+      activeRef.current = "";
     }
     onOpenChange(next);
   }
@@ -81,10 +83,10 @@ export function AgentPicker({ open, onOpenChange, tools, projects, onLaunch }: A
         <ToolStep
           tools={tools}
           targetName={targetName}
-          onValueChange={setActive}
+          onValueChange={(value) => (activeRef.current = value)}
           onLaunch={(tool) => launchWith(tool, [])}
           onEditFlags={() => {
-            const tool = active || tools[0]?.tool.name;
+            const tool = activeRef.current || tools[0]?.tool.name;
             if (tool) setFlagsTool(tool);
           }}
         />

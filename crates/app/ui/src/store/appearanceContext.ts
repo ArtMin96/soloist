@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, use } from "react";
 import type { Appearance } from "@/domain";
 import { DEFAULT_APPEARANCE, resolveDark, systemPrefersDark } from "@/lib/appearance";
 
@@ -22,5 +22,5 @@ export const AppearanceContext = createContext<AppearanceState>(DEFAULT_STATE);
 
 /** The current appearance, the resolved dark/light, and the auto-saving setter. */
 export function useAppearance(): AppearanceState {
-  return useContext(AppearanceContext);
+  return use(AppearanceContext);
 }

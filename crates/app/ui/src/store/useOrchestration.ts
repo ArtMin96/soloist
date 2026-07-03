@@ -35,7 +35,10 @@ export interface OrchestrationStore {
   refresh: () => void;
 }
 
-const EMPTY: Omit<OrchestrationStore, "error" | "refresh"> = {
+type Snapshot = Omit<OrchestrationStore, "error" | "refresh"> & { forProject: number | null };
+
+const EMPTY: Snapshot = {
+  forProject: null,
   tree: [],
   agents: [],
   todos: [],
@@ -56,13 +59,11 @@ export function useOrchestration(project: number | null): OrchestrationStore {
   const fail = useCallback((reason: unknown) => setError(String(reason)), []);
 
   const refresh = useCallback(() => {
-    if (project == null) {
-      setSnapshot(EMPTY);
-      return;
-    }
+    if (project == null) return;
     orchestrationSnapshot(project)
       .then((snap) =>
         setSnapshot({
+          forProject: project,
           tree: buildOrchestrationTree(snap.agents),
           agents: snap.agents,
           todos: snap.todos,
@@ -74,10 +75,7 @@ export function useOrchestration(project: number | null): OrchestrationStore {
   }, [project, fail]);
 
   useEffect(() => {
-    if (project == null) {
-      setSnapshot(EMPTY);
-      return;
-    }
+    if (project == null) return;
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     let frame: number | null = null;
@@ -114,5 +112,17 @@ export function useOrchestration(project: number | null): OrchestrationStore {
     };
   }, [project, refresh, fail]);
 
-  return { ...snapshot, error, refresh };
+  // A snapshot captured for another project (or before the first load) is stale: surface EMPTY
+  // until this project's own data arrives, so switching projects never flashes the previous tree
+  // and a null project shows nothing — deriving staleness here means no effect resets state.
+  const view = snapshot.forProject === project ? snapshot : EMPTY;
+  return {
+    tree: view.tree,
+    agents: view.agents,
+    todos: view.todos,
+    scratchpads: view.scratchpads,
+    timers: view.timers,
+    error,
+    refresh,
+  };
 }

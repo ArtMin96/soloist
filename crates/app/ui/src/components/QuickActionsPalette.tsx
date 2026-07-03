@@ -50,9 +50,12 @@ export function QuickActionsPalette({
   const activeTree = activeProjectId
     ? trees.find((tree) => tree.project.id === activeProjectId)
     : null;
-  const actionable = (activeTree ? activeTree.kinds.flatMap((kind) => kind.processes) : [])
-    .map((process) => ({ process, actions: runnableProcessActions(process, handlers) }))
-    .filter((entry) => entry.actions.length > 0);
+  const actionable = (activeTree ? activeTree.kinds.flatMap((kind) => kind.processes) : []).flatMap(
+    (process) => {
+      const actions = runnableProcessActions(process, handlers);
+      return actions.length > 0 ? [{ process, actions }] : [];
+    },
+  );
 
   return (
     <CommandPaletteShell
