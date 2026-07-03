@@ -16,7 +16,7 @@ import { useGlobalHotkeys } from "@/store/useGlobalHotkeys";
 import { useOrphans } from "@/store/useOrphans";
 import { useLineage } from "@/store/useLineage";
 import { useProcesses } from "@/store/useProcesses";
-import { useTerminalPool } from "@/store/useTerminalPool";
+import { TERMINAL_POOL_CAP, useTerminalPool } from "@/store/useTerminalPool";
 import { useProjects } from "@/store/projects";
 import { SignalsProvider } from "@/store/SignalsProvider";
 import { useTrust } from "@/store/useTrust";
@@ -164,12 +164,15 @@ export default function App() {
   // Keep-alive terminal pool: the recently-viewed processes whose terminals stay mounted so
   // switching back is instant. The pool tracks selection over renders; the current selection is
   // folded in immediately (the effect that formalizes it lands next tick) so a first-time selection
-  // never flashes blank. Only the selected process renders visible — the rest sit hidden.
+  // never flashes blank, and the result is capped so a fold-in never mounts one past the pool cap.
+  // Only the selected process renders visible — the rest sit hidden.
   const pool = useTerminalPool(
     selectedId,
     store.processes.map((process) => process.id),
   );
-  const poolIds = selectedId !== null && !pool.includes(selectedId) ? [selectedId, ...pool] : pool;
+  const poolIds = (
+    selectedId !== null && !pool.includes(selectedId) ? [selectedId, ...pool] : pool
+  ).slice(0, TERMINAL_POOL_CAP);
   const poolProcesses = poolIds
     .map((id) => store.processes.find((process) => process.id === id))
     .filter((process): process is ProcessView => process !== undefined);
