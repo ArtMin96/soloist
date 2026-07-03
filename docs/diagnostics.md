@@ -133,29 +133,32 @@ invariant during a start/stop loop.
 The detectors above split into two groups for an agent:
 
 - **Agent-drivable** (text/CLI → Claude reads output and fixes): cargo-deny, clippy, the soak
-  gate, bundle/bloat, and React Doctor. Claude runs these, interprets them, and applies fixes.
+  gate, bundle/bloat, and react-doctor. Claude runs these, interprets them, and applies fixes.
 - **Human-visual** (live GUI/TUI → Claude can't read): CrabNebula DevTools and tokio-console.
   Claude can set them up and act on what *you* report, but it can't watch them. The exception is
   the Tauri MCP bridge below, which exposes IPC inspection to the agent in a readable form.
 
-### `/doctor` — React frontend (react-doctor skill)
+### react-doctor — React frontend skill
 
-Installed via `npx -y skills add millionco/react-doctor`. Type `/doctor` (or "scan the React
-code") and Claude scans the frontend for lint, accessibility, bundle, and architecture issues and
-applies fixes, then re-scans. This is the only tool that reads your React **component** code — the
-Rust-side tools never touch it.
+**Not installed by default.** Install it with `npx -y skills add millionco/react-doctor` (it
+lands in `.agents/skills/`, symlinked into `.claude/skills/`; commit it if the whole team should
+have it, as was done for `shadcn`). Once installed, invoke the react-doctor skill (or ask "scan
+the React code") and Claude scans the frontend for lint, accessibility, bundle, and architecture
+issues, applies fixes, then re-scans. This is the only tool that reads your React **component**
+code — the Rust-side tools never touch it.
 
-> The installer also added react-doctor's rule-authoring skills (`rule-writing`, `rde-eval`,
-> `product-thinking`, …) and a few general ones (`ship`, `deslop`, `shadcn`). They're harmless
-> (skills only trigger on relevant prompts); prune any you don't want from `.agents/skills/`.
+> Don't confuse it with Claude Code's **built-in `/doctor` command**, which diagnoses the Claude
+> Code installation itself, not React code. The installer may also add react-doctor's
+> rule-authoring skills and a few general ones; they're harmless (skills only trigger on relevant
+> prompts) — prune any you don't want from `.agents/skills/`.
 
 ### `/soloist-diagnose` — the whole-app detect → fix → re-verify loop
 
 A project skill (`.claude/skills/soloist-diagnose/`). Ask Claude to "optimize / health-check /
 find and fix issues," or run `/soloist-diagnose [deps|lints|perf|leaks|frontend]`. It runs the
 agent-drivable gates (`just audit`, clippy, `just soak`, `just bloat`), applies fixes or accepts
-advisories with written reasons, delegates React to `/doctor`, and **re-runs each gate to prove
-the fix**. It stays inside the architecture and the §6 locked non-changes, never weakens a test,
+advisories with written reasons, delegates React to react-doctor (offering to install it if
+absent), and **re-runs each gate to prove the fix**. It stays inside the architecture and the §6 locked non-changes, never weakens a test,
 and never edits `PROGRESS.md` unless asked.
 
 ### Tauri MCP bridge — agent-readable IPC inspection (`just agent-bridge`)
@@ -188,7 +191,7 @@ CrabNebula DevTools GUI. Two parts, both already wired:
 
 | I want Claude to… | Use |
 |---|---|
-| Fix React component issues | `/doctor` |
+| Fix React component issues | the react-doctor skill (install first, see above) |
 | Audit + fix deps, lints, leaks, size across the app | `/soloist-diagnose` |
 | Inspect IPC calls / drive the running app | `just agent-bridge` + the `tauri-bridge` MCP |
 | Deep-dive a slow command or runtime stall myself | `just devtools` / `just tokio-console` |
