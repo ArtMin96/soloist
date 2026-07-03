@@ -16,11 +16,12 @@ import { useGlobalHotkeys } from "@/store/useGlobalHotkeys";
 import { useOrphans } from "@/store/useOrphans";
 import { useLineage } from "@/store/useLineage";
 import { useProcesses } from "@/store/useProcesses";
+import { useTerminalPool } from "@/store/useTerminalPool";
 import { useProjects } from "@/store/projects";
 import { SignalsProvider } from "@/store/SignalsProvider";
 import { useTrust } from "@/store/useTrust";
 import { useWindowActive } from "@/store/useWindowActive";
-import type { HotkeyAction } from "@/domain";
+import type { HotkeyAction, ProcessView } from "@/domain";
 
 // The main-area panes and the overlays are code-split: each loads its own chunk the first time it
 // is shown, keeping the heaviest dependencies (the xterm.js emulator behind the terminal, cmdk and
@@ -160,6 +161,19 @@ export default function App() {
     [launchAgent, selectProcess],
   );
 
+  // Keep-alive terminal pool: the recently-viewed processes whose terminals stay mounted so
+  // switching back is instant. The pool tracks selection over renders; the current selection is
+  // folded in immediately (the effect that formalizes it lands next tick) so a first-time selection
+  // never flashes blank. Only the selected process renders visible — the rest sit hidden.
+  const pool = useTerminalPool(
+    selectedId,
+    store.processes.map((process) => process.id),
+  );
+  const poolIds = selectedId !== null && !pool.includes(selectedId) ? [selectedId, ...pool] : pool;
+  const poolProcesses = poolIds
+    .map((id) => store.processes.find((process) => process.id === id))
+    .filter((process): process is ProcessView => process !== undefined);
+
   return (
     <AppearanceProvider>
       <SidebarSettingsProvider>
@@ -197,32 +211,38 @@ export default function App() {
                   />
                   <main className="min-w-0 flex-1">
                     <Suspense fallback={<div className="h-full w-full bg-background" />}>
-                      {selected ? (
+                      {/* Keep-alive pool: every recently-viewed process keeps its terminal mounted
+                          (xterm + live stream) so switching back is instant; only the selected one
+                          is visible, the rest sit hidden with their renderer paused. */}
+                      {poolProcesses.map((process) => (
                         <TerminalPane
-                          key={selected.id}
-                          process={selected}
+                          key={process.id}
+                          process={process}
+                          visible={process.id === selectedId}
                           processes={store.processes}
                           onSelectProcess={selectProcess}
-                          onStart={() => store.start(selected.id)}
-                          onStop={() => store.stop(selected.id)}
-                          onRestart={() => store.restart(selected.id)}
-                          onResume={() => store.resume(selected.id)}
-                          onTrust={() => trustById(selected.id)}
+                          onStart={() => store.start(process.id)}
+                          onStop={() => store.stop(process.id)}
+                          onRestart={() => store.restart(process.id)}
+                          onResume={() => store.resume(process.id)}
+                          onTrust={() => trustById(process.id)}
                         />
-                      ) : selectedProject ? (
-                        <ProjectSettingsPane key={selectedProject.id} project={selectedProject} />
-                      ) : orchestrationProject ? (
-                        <OrchestrationPane
-                          key={orchestrationProject.id}
-                          project={orchestrationProject}
-                        />
-                      ) : (
-                        <EmptyState
-                          hasProcesses={store.processes.length > 0}
-                          onOpenProject={projects.open}
-                          notice={projects.notice}
-                        />
-                      )}
+                      ))}
+                      {!selected &&
+                        (selectedProject ? (
+                          <ProjectSettingsPane key={selectedProject.id} project={selectedProject} />
+                        ) : orchestrationProject ? (
+                          <OrchestrationPane
+                            key={orchestrationProject.id}
+                            project={orchestrationProject}
+                          />
+                        ) : (
+                          <EmptyState
+                            hasProcesses={store.processes.length > 0}
+                            onOpenProject={projects.open}
+                            notice={projects.notice}
+                          />
+                        ))}
                     </Suspense>
                   </main>
                 </div>

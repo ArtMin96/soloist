@@ -31,7 +31,7 @@ export interface TerminalSearch {
 // winsize in step with the pane via `pty_resize`. Theme and terminal typography follow the
 // Appearance settings — applied to the live emulator on change, never recreating it.
 // Detaches deterministically on unmount.
-export function useTerminal(process: ProcessView) {
+export function useTerminal(process: ProcessView, visible = true) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -210,6 +210,16 @@ export function useTerminal(process: ProcessView) {
   useEffect(() => {
     if (isActive(process.status)) syncSize();
   }, [process.status, syncSize]);
+
+  // Refit and focus when this pane becomes visible again. In the keep-alive pool a hidden terminal
+  // stays mounted (display:none) with its stream live but its host unmeasurable; on show, reconcile
+  // any size change that happened off-screen and take keyboard focus so the user can type
+  // immediately after switching to it.
+  useEffect(() => {
+    if (!visible) return;
+    syncSize();
+    termRef.current?.focus();
+  }, [visible, syncSize]);
 
   // Stable search callbacks — backed by the SearchAddon ref so callers don't need to
   // re-subscribe when the terminal remounts (stable reference, latest addon via ref).

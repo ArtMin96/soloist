@@ -8,6 +8,7 @@ import { useTerminal } from "@/components/terminal/useTerminal";
 import { useTerminalChrome } from "@/components/terminal/useTerminalChrome";
 import { useTerminalHotkeys } from "@/components/terminal/useTerminalHotkeys";
 import { useSignal } from "@/store/signalsContext";
+import { cn } from "@/lib/utils";
 import type { ProcessView } from "@/domain";
 
 // A stable empty default so an unspecified `processes` keeps the same identity across renders —
@@ -16,6 +17,8 @@ const NO_PROCESSES: ProcessView[] = [];
 
 interface TerminalPaneProps {
   process: ProcessView;
+  /** Whether this pane is the currently-visible one; hidden pool panes stay mounted (display:none). */
+  visible?: boolean;
   /** Ordered process list for Ctrl+↑/↓ navigation. */
   processes?: ProcessView[];
   /** Called when a terminal-scope nav shortcut selects a different process. */
@@ -32,6 +35,7 @@ interface TerminalPaneProps {
 // this stays presentational.
 export function TerminalPane({
   process,
+  visible = true,
   processes = NO_PROCESSES,
   onSelectProcess,
   onStart,
@@ -41,7 +45,7 @@ export function TerminalPane({
   onTrust,
 }: TerminalPaneProps) {
   const sectionRef = useRef<HTMLElement>(null);
-  const { hostRef, state, search } = useTerminal(process);
+  const { hostRef, state, search } = useTerminal(process, visible);
   const { title, ringing } = useTerminalChrome(process.id);
   const { metrics, attempt, activity } = useSignal(process.id);
 
@@ -68,7 +72,10 @@ export function TerminalPane({
   useTerminalHotkeys(sectionRef, processes, process.id, onSelectProcess, openFind);
 
   return (
-    <section ref={sectionRef} className="flex h-full min-w-0 flex-col bg-background">
+    <section
+      ref={sectionRef}
+      className={cn("flex h-full min-w-0 flex-col bg-background", !visible && "hidden")}
+    >
       <header className="flex h-11 shrink-0 items-center gap-2.5 border-b bg-sidebar px-3">
         <span className="truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">
           {title ?? process.label}
