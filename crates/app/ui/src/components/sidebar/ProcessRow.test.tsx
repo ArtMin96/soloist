@@ -4,6 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { ProcessRow } from "@/components/sidebar/ProcessRow";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EMPTY_SIGNALS, type SignalState } from "@/store/signals";
+import { EMPTY_STORE, fixedSignalStore } from "@/store/signalStore";
 import { SignalsContext } from "@/store/signalsContext";
 import type { ProcessView } from "@/domain";
 
@@ -25,7 +26,7 @@ const running: ProcessView = {
 function renderRow(process: ProcessView, signals: SignalState = EMPTY_SIGNALS) {
   return render(
     <TooltipProvider>
-      <SignalsContext value={signals}>
+      <SignalsContext value={fixedSignalStore(signals)}>
         <ProcessRow
           process={process}
           selected={false}
@@ -89,7 +90,7 @@ describe("ProcessRow as a tree row", () => {
   it("exposes a lead's disclosure with its expanded state", () => {
     render(
       <TooltipProvider>
-        <SignalsContext value={EMPTY_SIGNALS}>
+        <SignalsContext value={EMPTY_STORE}>
           <ProcessRow
             process={running}
             selected={false}
@@ -117,7 +118,7 @@ describe("ProcessRow as a tree row", () => {
     let toggled = 0;
     render(
       <TooltipProvider>
-        <SignalsContext value={EMPTY_SIGNALS}>
+        <SignalsContext value={EMPTY_STORE}>
           <ProcessRow
             process={running}
             selected={false}
@@ -147,7 +148,7 @@ describe("ProcessRow as a tree row", () => {
   it("indents one step per lineage level", () => {
     render(
       <TooltipProvider>
-        <SignalsContext value={EMPTY_SIGNALS}>
+        <SignalsContext value={EMPTY_STORE}>
           <ProcessRow
             process={running}
             selected={false}

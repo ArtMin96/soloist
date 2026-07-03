@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ProcessNode } from "@/components/sidebar/ProcessNode";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { EMPTY_SIGNALS } from "@/store/signals";
+import { EMPTY_STORE } from "@/store/signalStore";
 import { SignalsContext } from "@/store/signalsContext";
 import type { ProcessNode as Node } from "@/store/grouping";
 import type { ToggleSet } from "@/store/useToggleSet";
@@ -36,7 +36,7 @@ const expandedLeads: ToggleSet = { has: () => false, toggle: noop };
 function renderNode(node: Node, collapsedLeads: ToggleSet = expandedLeads) {
   return render(
     <TooltipProvider>
-      <SignalsContext value={EMPTY_SIGNALS}>
+      <SignalsContext value={EMPTY_STORE}>
         <ProcessNode
           node={node}
           depth={0}
