@@ -57,12 +57,13 @@ pub enum DomainEvent {
     /// A periodic CPU/memory reading for a running process, sampled across its whole
     /// process group. `cpu_pct` is normalised to the whole machine (100 = every core busy,
     /// never above); `rss` is the group's memory in bytes, shared pages counted once.
-    /// Emitted on the sampler's interval, and only when the reading changed since the last tick
-    /// for that process — a steady process (an idle server) falls silent rather than re-sending an
-    /// identical reading every interval, so adapters see one event per *change*, not per process
-    /// per second. A single late reading may arrive just after a process stops (sampled before it
-    /// exited); it carries no view state, so consumers simply ignore one for a process no longer
-    /// running.
+    /// Emitted on the sampler's interval when the reading changed since the last tick for that
+    /// process, plus an occasional heartbeat so a steady process (an idle server) is re-published
+    /// now and then rather than falling silent forever — a subscriber that mounts or reloads after
+    /// the reading last moved has no snapshot to seed from, and the heartbeat repopulates it. So
+    /// adapters see roughly one event per *change*, not per process per second. A single late
+    /// reading may arrive just after a process stops (sampled before it exited); it carries no view
+    /// state, so consumers simply ignore one for a process no longer running.
     MetricsTick {
         id: ProcessId,
         cpu_pct: f32,

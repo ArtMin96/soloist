@@ -17,7 +17,7 @@ use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, Supervisor};
 use crate::testing::{FakeMetricsProbe, FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock};
 
-use super::{MetricsSampler, SAMPLE_INTERVAL};
+use super::{MetricsSampler, HEARTBEAT_SAMPLES, SAMPLE_INTERVAL};
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);
 
@@ -168,9 +168,10 @@ async fn the_sampler_restarts_itself_after_a_panic() {
 }
 
 #[tokio::test]
-async fn an_unchanged_reading_is_not_re_emitted() {
-    // A steady process holds a constant reading; it publishes once, then further identical samples
-    // are suppressed — the sampler keeps polling but does not churn the UI with unchanged ticks.
+async fn an_unchanged_reading_is_suppressed_between_heartbeats() {
+    // A steady process holds a constant reading; after it publishes once, the next few identical
+    // samples (fewer than a heartbeat window) are suppressed — the sampler keeps polling but does
+    // not churn the UI with unchanged ticks.
     let mut s = setup();
     let id = terminal(&s.sup);
     s.sup.start(id).expect("start");
@@ -190,23 +191,83 @@ async fn an_unchanged_reading_is_not_re_emitted() {
     // The first reading is published.
     assert_eq!(next_metrics_tick(&mut s.rx, &s.clock, id).await, (3.0, 512));
 
-    // Several more intervals pass with the same reading; no further tick is published for it,
-    // though the probe keeps sampling.
+    // Drive several more samples (fewer than a heartbeat window) with the same reading and confirm
+    // none is re-emitted. Progress is measured by the probe's sample count, not wall-clock rounds,
+    // so scheduler contention under a parallel test run only slows the test — it can never make it
+    // observe a false "suppressed" from a sample that never ran.
+    let target = probe.calls() + (HEARTBEAT_SAMPLES as usize) / 2;
     let mut rx = s.bus.subscribe();
-    for _ in 0..5 {
-        s.clock.advance(SAMPLE_INTERVAL);
-        for _ in 0..8 {
+    let mut re_emitted = false;
+    for _ in 0..500 {
+        if probe.calls() >= target {
+            break;
+        }
+        s.clock.advance(ADVANCE_STEP);
+        for _ in 0..16 {
             tokio::task::yield_now().await;
         }
-    }
-    let mut re_emitted = false;
-    while let Ok(event) = rx.try_recv() {
-        if matches!(event, DomainEvent::MetricsTick { id: got, .. } if got == id) {
-            re_emitted = true;
+        while let Ok(event) = rx.try_recv() {
+            if matches!(event, DomainEvent::MetricsTick { id: got, .. } if got == id) {
+                re_emitted = true;
+            }
         }
     }
-    assert!(!re_emitted, "an unchanged reading is not re-emitted");
-    assert!(probe.calls() >= 2, "but the probe kept sampling");
+    assert!(probe.calls() >= target, "the probe kept sampling");
+    assert!(
+        !re_emitted,
+        "an unchanged reading is suppressed within a heartbeat window"
+    );
+}
+
+#[tokio::test]
+async fn a_steady_reading_is_re_emitted_as_a_heartbeat() {
+    // A steady process must not fall silent forever: the UI has no snapshot to seed from, so a
+    // subscriber that mounts (or reloads) after the reading last moved would show a blank reading.
+    // After the heartbeat window the unchanged reading is re-published so any such subscriber
+    // repopulates.
+    let mut s = setup();
+    let id = terminal(&s.sup);
+    s.sup.start(id).expect("start");
+    wait_for_running(&mut s.rx, id).await;
+
+    let probe = FakeMetricsProbe::returning(3.0, 512);
+    tokio::spawn(
+        MetricsSampler::new(
+            Arc::new(s.clock.clone()),
+            Arc::new(probe.clone()),
+            s.bus.clone(),
+            Arc::downgrade(&s.sup),
+        )
+        .run(),
+    );
+
+    assert_eq!(next_metrics_tick(&mut s.rx, &s.clock, id).await, (3.0, 512));
+
+    // Drive past a full heartbeat window with the same reading and confirm it is re-published. A
+    // fresh subscriber (which missed the first publish) must still receive the reading — the
+    // property the heartbeat guarantees. Progress is measured by the probe's sample count (so a
+    // parallel run's scheduler contention only slows the test), with a generous round budget.
+    let target = probe.calls() + HEARTBEAT_SAMPLES as usize + 2;
+    let mut rx = s.bus.subscribe();
+    let mut re_emitted = false;
+    for _ in 0..1000 {
+        if re_emitted || probe.calls() >= target {
+            break;
+        }
+        s.clock.advance(ADVANCE_STEP);
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
+        while let Ok(event) = rx.try_recv() {
+            if matches!(event, DomainEvent::MetricsTick { id: got, .. } if got == id) {
+                re_emitted = true;
+            }
+        }
+    }
+    assert!(
+        re_emitted,
+        "a steady reading is re-published as a heartbeat"
+    );
 }
 
 #[tokio::test]

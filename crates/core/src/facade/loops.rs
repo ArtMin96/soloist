@@ -25,11 +25,13 @@ impl Facade {
     }
 
     /// The metrics sampler loop (monitoring C5), returned for the composition root to spawn
-    /// once on its runtime. It samples each running process group on an interval and
-    /// publishes a [`crate::events::DomainEvent::MetricsTick`] per group, watching the supervisor
-    /// weakly so it ends when the facade is dropped. Self-supervised: a panicking sample is isolated
-    /// and the loop restarts. With the default [`crate::metrics::NoopMetricsProbe`] it emits
-    /// nothing — the real CPU/memory adapter is chosen in the composition root.
+    /// once on its runtime. It samples each running process group on an interval and publishes a
+    /// [`crate::events::DomainEvent::MetricsTick`] when a group's reading changes — with an
+    /// occasional heartbeat so a subscriber that mounts after the reading last moved still
+    /// repopulates — watching the supervisor weakly so it ends when the facade is dropped.
+    /// Self-supervised: a panicking sample is isolated and the loop restarts. With the default
+    /// [`crate::metrics::NoopMetricsProbe`] it emits nothing — the real CPU/memory adapter is
+    /// chosen in the composition root.
     pub fn metrics_sampler_loop(&self) -> impl Future<Output = ()> + Send + 'static {
         MetricsSampler::new(
             self.clock.clone(),
