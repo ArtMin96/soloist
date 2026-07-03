@@ -121,17 +121,21 @@ Design: bounded warm keep-alive pool.
    IntersectionObserver auto-resumes the shown renderer.
 4. Keep WebGL warm; bound with an **LRU ≤ 8**; on eviction fully dispose (`renderer.dispose()` →
    `term.dispose()` → `ptyDetach`).
-5. **Sub-decision (pick one):**
-   - **(a) PTY stays attached for pooled terminals** → truly instant, no replay — needs
-     `pty_bridge.rs` to hold **multiple concurrent forwarders** (small backend change). *Recommended.*
-   - **(b) PTY re-attaches on show** → no backend change, replays scrollback on show.
+5. **Sub-decision — CHOSEN: (a) PTY stays attached for pooled terminals.** Truly instant, no replay.
+   Rationale over (b): it keeps `useTerminal`'s delicate attach/cancel/replay lifecycle **untouched**
+   (lowest frontend risk), the existing `ResizeObserver` already refits on the `display:none`→show
+   transition, and xterm auto-pauses/resumes its renderer off-screen. The only new logic is a small,
+   unit-testable `pty_bridge` multi-forwarder map (install adds; clear-by-token aborts one; no
+   abort-on-install). Each pooled pane detaches its token on unmount/eviction, so forwarders stay
+   bounded by the pool cap — verified by `just soak`. (b) was rejected: rewriting the streaming
+   lifecycle for visibility-driven attach/detach is higher risk to the safety-critical terminal UX.
 
 | # | Task | Files | Status |
 |---|------|-------|--------|
-| P2.1 | Terminal registry/manager owning one instance per id; drop `key`. | `App.tsx`, new `store/terminals/*`, `useTerminal.ts` | Not started |
-| P2.2 | Visibility switch + refit-on-show. | `TerminalPane.tsx`, `useTerminal.ts` | Not started |
-| P2.3 | LRU pool cap (≤8) + deterministic dispose. | registry | Not started |
-| P2.4 | Backend multi-forwarder (if sub-decision = a). | `pty_bridge.rs` (+ `pty_bridge_tests.rs`) | Not started |
+| P2.1 | Drop `key={id}`; render a keep-alive pool (one mounted `TerminalPane` per pooled process, React owns each xterm via a stable id key). | `App.tsx`, `store/useTerminalPool.ts` (new) | **Done — pending verify** |
+| P2.2 | Visibility switch (`display:none` for hidden panes) + refit-and-focus on show. | `TerminalPane.tsx`, `useTerminal.ts` (`visible` param) | **Done — pending verify** |
+| P2.3 | Bounded LRU pool (`TERMINAL_POOL_CAP=6`, under the 16 WebGL cap) + deterministic dispose (evicted pane unmounts → existing cleanup disposes xterm + detaches PTY). | `store/useTerminalPool.ts` (+ test) | **Done — pending verify** |
+| P2.4 | Backend multi-forwarder: `pty_bridge` holds a token→forwarder map (install adds, clear-by-token aborts one, no abort-on-install). | `pty_bridge.rs`, `pty_bridge_tests.rs`, `commands/mod.rs` doc | **Verified** (clippy clean, 4 bridge tests green) |
 
 Acceptance for P2: switching between visited terminals is instant (measured vs P0.3); WebGL contexts
 never exceed the cap; `just soak` leak-gate green (FD/task/RSS flat across N start/stop/switch);
@@ -226,6 +230,18 @@ React DevTools Profiler for re-renders · `WEBKIT_DISABLE_COMPOSITING_MODE=1` as
 
 ## I. Progress Log (append newest first — the cross-session state)
 
+- **P2 (terminal keep-alive) implemented — Done, pending final verify + GUI confirm.** Chose
+  sub-decision **(a)**. Changes: `pty_bridge` is now a token→forwarder **map** (multi-forwarder, no
+  abort-on-install) — **Verified** (clippy clean, 4 bridge tests green); new `store/useTerminalPool.ts`
+  (bounded LRU `nextPool`, `TERMINAL_POOL_CAP=6` under the 16 WebGL cap) + test; `App.tsx` drops
+  `key={id}` and renders a persistent pool (one `TerminalPane` per pooled process, only the selected
+  visible, current selection folded in so no first-select flash); `TerminalPane` gains a `visible`
+  prop (`display:none` when hidden) passed to `useTerminal`, which gains a refit-and-focus-on-show
+  effect — its attach/cancel/replay lifecycle otherwise **untouched**. So a switch back to a pooled
+  terminal is instant (no xterm/WebGL rebuild, no replay; stream stayed live). Frontend gates green
+  (tsc/eslint/prettier; pool+terminal+app+sidebar tests 52). **Owed:** the running full `just test` +
+  `just soak` leak-gate (in flight), then a GUI runtime confirm (switch feels instant; FD/task count
+  flat across many switches). Not yet committed.
 - **✅ TIER 1 COMPLETE (2026-07-04) — full workspace gate green.** `just lint` passes end-to-end (fmt,
   clippy `-D warnings`, tsc, eslint, prettier, dependency-direction, schema); Rust core **537** tests,
   UI **264** tests. Symptoms ① (theme lag) and ③ (general jank) are addressed and verified. Only the
