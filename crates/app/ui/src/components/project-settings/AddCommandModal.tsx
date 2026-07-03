@@ -59,10 +59,10 @@ export function AddCommandModal({
       working_dir: workingDir.trim() || null,
       auto_start: autoStart,
       auto_restart: autoRestart,
-      restart_when_changed: globs
-        .split(",")
-        .map((g) => g.trim())
-        .filter(Boolean),
+      restart_when_changed: globs.split(",").flatMap((g) => {
+        const trimmed = g.trim();
+        return trimmed ? [trimmed] : [];
+      }),
     });
     onAdd(name.trim(), spec, visibility)
       .then(() => change(false))

@@ -95,7 +95,7 @@ export function terminalFontPx(scale: FontScale): number {
   return TERMINAL_FONT_PX[scale];
 }
 
-export function interfaceRootFontPx(scale: FontScale): number {
+function interfaceRootFontPx(scale: FontScale): number {
   return ROOT_FONT_PX * INTERFACE_SCALE[scale];
 }
 

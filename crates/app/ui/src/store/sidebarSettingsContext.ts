@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, use } from "react";
 import { DEFAULT_SIDEBAR } from "@/lib/sidebar";
 import type { Sidebar } from "@/domain";
 
@@ -20,5 +20,5 @@ export const SidebarSettingsContext = createContext<SidebarSettingsState>(DEFAUL
 
 /** The current Sidebar settings and the auto-saving setter. */
 export function useSidebarSettings(): SidebarSettingsState {
-  return useContext(SidebarSettingsContext);
+  return use(SidebarSettingsContext);
 }

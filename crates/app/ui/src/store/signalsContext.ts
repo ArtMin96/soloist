@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, use } from "react";
 import type { AgentActivity } from "@/domain";
 import { EMPTY_SIGNALS, type ProcessMetrics, type SignalState } from "@/store/signals";
 
@@ -18,6 +18,6 @@ export interface ProcessSignal {
  *  attempt, and (for a running agent) its current activity — each `undefined` until one
  *  arrives. */
 export function useSignal(id: number): ProcessSignal {
-  const { metrics, attempts, activity } = useContext(SignalsContext);
+  const { metrics, attempts, activity } = use(SignalsContext);
   return { metrics: metrics.get(id), attempt: attempts.get(id), activity: activity.get(id) };
 }

@@ -24,7 +24,7 @@ export function PaletteFooter({ hints, target }: { hints: PaletteHintData[]; tar
   return (
     <div className="flex items-center gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
       {hints.map((hint) => (
-        <PaletteHint key={hint.label} {...hint} />
+        <PaletteHint {...hint} key={hint.label} />
       ))}
       {target && <span className="ml-auto min-w-0 truncate">▸ {target}</span>}
     </div>

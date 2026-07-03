@@ -24,7 +24,10 @@ export function SegmentedControl<T extends string>({
   counts?: Partial<Record<T, number>>;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const itemRefs = useRef(new Map<T, HTMLButtonElement>());
+  // Created on first use, not rebuilt-and-discarded on every render (useRef ignores a fresh
+  // argument after the first render anyway).
+  const itemRefsRef = useRef<Map<T, HTMLButtonElement> | null>(null);
+  const itemRefs = () => (itemRefsRef.current ??= new Map<T, HTMLButtonElement>());
   const [thumb, setThumb] = useState<{ x: number; w: number } | null>(null);
   // Suppress the slide on the very first measured paint (and after a reduced-motion reset);
   // it turns on one frame later so the initial thumb appears in place, not gliding from zero.
@@ -32,10 +35,10 @@ export function SegmentedControl<T extends string>({
 
   useLayoutEffect(() => {
     const root = rootRef.current;
-    const active = itemRefs.current.get(value);
+    const active = itemRefs().get(value);
     if (!root || !active) return;
     const measure = () => {
-      const node = itemRefs.current.get(value);
+      const node = itemRefs().get(value);
       if (node) setThumb({ x: node.offsetLeft, w: node.offsetWidth });
     };
     measure();
@@ -43,7 +46,7 @@ export function SegmentedControl<T extends string>({
     // thumb tracks the active segment without a layout listener per call site.
     const observer = new ResizeObserver(measure);
     observer.observe(root);
-    itemRefs.current.forEach((node) => observer.observe(node));
+    itemRefs().forEach((node) => observer.observe(node));
     return () => observer.disconnect();
   }, [value, options]);
 
@@ -79,8 +82,8 @@ export function SegmentedControl<T extends string>({
             key={option.value}
             value={option.value}
             ref={(node) => {
-              if (node) itemRefs.current.set(option.value, node);
-              else itemRefs.current.delete(option.value);
+              if (node) itemRefs().set(option.value, node);
+              else itemRefs().delete(option.value);
             }}
             className={cn(
               "relative z-10 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[0.8125rem] text-muted-foreground",

@@ -13,7 +13,7 @@ export interface ProcessActionState {
 }
 
 /** The human label for each action — one source for every surface that names an action. */
-export const PROCESS_ACTION_LABELS: Record<ProcessActionKind, string> = {
+const PROCESS_ACTION_LABELS: Record<ProcessActionKind, string> = {
   trust: "Trust",
   resume: "Resume",
   start: "Start",

@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Link2 } from "lucide-react";
 import { FieldList } from "@/components/orchestration/FieldList";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ export function ScratchpadEditor({
   onReload,
   onCopyLink,
 }: ScratchpadEditorProps) {
+  const fieldId = useId();
   const set = <K extends keyof ScratchpadForm>(key: K, value: ScratchpadForm[K]) =>
     onChange({ ...form, [key]: value });
 
@@ -71,9 +73,10 @@ export function ScratchpadEditor({
       )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3">
-        <label className="flex flex-col gap-1.5">
+        <label htmlFor={`${fieldId}-objective`} className="flex flex-col gap-1.5">
           <span className="text-[0.6875rem] font-[550] text-muted-foreground">Objective</span>
           <Input
+            id={`${fieldId}-objective`}
             value={form.objective}
             placeholder="What this scratchpad is for"
             onChange={(event) => set("objective", event.target.value)}
@@ -81,9 +84,10 @@ export function ScratchpadEditor({
           />
         </label>
 
-        <label className="flex flex-col gap-1.5">
+        <label htmlFor={`${fieldId}-context`} className="flex flex-col gap-1.5">
           <span className="text-[0.6875rem] font-[550] text-muted-foreground">Context</span>
           <Textarea
+            id={`${fieldId}-context`}
             value={form.context}
             placeholder="The background a reader needs"
             onChange={(event) => set("context", event.target.value)}
@@ -110,9 +114,10 @@ export function ScratchpadEditor({
           onChange={(items) => set("risks", items)}
         />
 
-        <label className="flex flex-col gap-1.5">
+        <label htmlFor={`${fieldId}-status`} className="flex flex-col gap-1.5">
           <span className="text-[0.6875rem] font-[550] text-muted-foreground">Status</span>
           <Input
+            id={`${fieldId}-status`}
             value={form.status}
             placeholder="e.g. in progress"
             onChange={(event) => set("status", event.target.value)}
@@ -120,11 +125,12 @@ export function ScratchpadEditor({
           />
         </label>
 
-        <label className="flex flex-col gap-1.5">
+        <label htmlFor={`${fieldId}-notes`} className="flex flex-col gap-1.5">
           <span className="text-[0.6875rem] font-[550] text-muted-foreground">
             Notes (optional)
           </span>
           <Textarea
+            id={`${fieldId}-notes`}
             value={form.notes}
             placeholder="Anything else, in Markdown"
             onChange={(event) => set("notes", event.target.value)}

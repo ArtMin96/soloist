@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, use } from "react";
 import type { Binding, HotkeyAction, HotkeyBindingView } from "@/domain";
 
 // The live keymap read model plus its mutators. Read by the Hotkeys settings panel (to render and
@@ -25,5 +25,5 @@ export const HotkeysContext = createContext<HotkeysState>(DEFAULT_STATE);
 
 /** The current keymap and its mutators. */
 export function useHotkeys(): HotkeysState {
-  return useContext(HotkeysContext);
+  return use(HotkeysContext);
 }

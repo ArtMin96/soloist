@@ -1,0 +1,11 @@
+# Supply-chain hardening for the UI's dependency installs (pnpm >= 10.16; this repo builds on
+# pnpm 11). minimumReleaseAge holds back newly published versions (in minutes) so a compromised
+# release has time to be caught and unpublished before it can be installed; 10080 = 7 days. It
+# only gates *future* resolutions, so the current locked install is unaffected.
+minimumReleaseAge: 10080
+#
+# `trustPolicy: no-downgrade` is intentionally NOT enabled yet: the current pnpm-lock.yaml has a
+# flagged entry (semver@6.3.1, a provenance/trust downgrade on a transitive dep) that makes every
+# `pnpm install` hard-fail under it. Turning it on needs a deliberate lockfile remediation first —
+# rebuild the lockfile (`pnpm clean --lockfile && pnpm install`) or add a justified
+# `trustPolicyExclude` for the vetted entry — then set `trustPolicy: no-downgrade` here.

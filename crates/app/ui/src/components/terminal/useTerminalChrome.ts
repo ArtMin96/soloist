@@ -21,8 +21,6 @@ export function useTerminalChrome(id: number): TerminalChrome {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
-    setTitle(null);
-    setRinging(false);
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     onDomainEvent((event) => {

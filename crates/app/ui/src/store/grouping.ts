@@ -2,9 +2,9 @@ import type { ProcessKind, ProcessView } from "@/domain";
 
 // The sidebar's fixed group order: Agents first (most attention-worthy), then Terminals,
 // then Commands — matching Solo's process tree.
-export const GROUP_ORDER: ProcessKind[] = ["Agent", "Terminal", "Command"];
+const GROUP_ORDER: ProcessKind[] = ["Agent", "Terminal", "Command"];
 
-export const GROUP_LABELS: Record<ProcessKind, string> = {
+const GROUP_LABELS: Record<ProcessKind, string> = {
   Agent: "Agents",
   Terminal: "Terminals",
   Command: "Commands",

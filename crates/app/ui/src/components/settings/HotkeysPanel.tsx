@@ -47,13 +47,13 @@ export function HotkeysPanel() {
   }, [capturing, remap]);
 
   const q = query.trim().toLowerCase();
-  const groups = HOTKEY_SCOPE_ORDER.map((scope) => ({
-    scope,
-    rows: bindings.filter(
+  const groups = HOTKEY_SCOPE_ORDER.flatMap((scope) => {
+    const rows = bindings.filter(
       (row) =>
         row.scope === scope && (!q || HOTKEY_ACTION_LABELS[row.action].toLowerCase().includes(q)),
-    ),
-  })).filter((group) => group.rows.length > 0);
+    );
+    return rows.length > 0 ? [{ scope, rows }] : [];
+  });
 
   return (
     <div className="flex flex-col">
