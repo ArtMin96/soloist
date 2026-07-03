@@ -252,9 +252,9 @@ pub async fn pty_attach(
     Ok(bridge.install(handle))
 }
 
-/// Detaches the attachment identified by `token` — the pane closed or the selection moved
-/// away. Async commands execute out of invoke order, so a stale token (a newer attachment
-/// has since installed its forwarder) is a no-op rather than killing the newer stream.
+/// Detaches the attachment identified by `token` — the pane closed, switched away, or was
+/// evicted from the keep-alive pool. Async commands execute out of invoke order, so a token that
+/// has already been cleared is a no-op rather than touching a live forwarder.
 #[tauri::command]
 pub async fn pty_detach(token: u64, bridge: State<'_, PtyBridge>) -> Result<(), String> {
     bridge.clear(token);

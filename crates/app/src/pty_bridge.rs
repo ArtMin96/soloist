@@ -11,12 +11,23 @@
 //! attachment that has already been cleared is a no-op (its token is gone) rather than touching a
 //! live one. It is transport state the webview owns, not domain state.
 //!
+//! A detach is the webview's responsibility, so a lost token — a full page reload (dev HMR) or a
+//! web-process crash, where the JS holding the tokens is gone — would otherwise strand its
+//! forwarder forever. A ceiling ([`MAX_FORWARDERS`]) backstops that: installing past it reclaims
+//! the oldest forwarder, so the map is bounded regardless of the webview's behavior.
+//!
 //! [`Channel`]: tauri::ipc::Channel
 
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 
 use tauri::async_runtime::JoinHandle;
+
+/// The most forwarders held at once. Each pooled terminal installs one and clears it on unmount,
+/// so a healthy session holds at most a pool's worth (the frontend keeps ~6). This ceiling sits
+/// well above that: it exists only to reclaim forwarders orphaned when the webview loses its
+/// detach tokens, so the map can never grow without bound.
+const MAX_FORWARDERS: usize = 16;
 
 /// Holds the live PTY-forwarding tasks, one per attached terminal, keyed by install token.
 #[derive(Default)]
@@ -39,6 +50,17 @@ impl PtyBridge {
         slots.next_token += 1;
         let token = slots.next_token;
         slots.forwarders.insert(token, handle);
+        // Reclaim forwarders orphaned by a webview reload or crash (their detach tokens were lost
+        // in JS). Live pooled forwarders always hold the newest tokens, so the lowest token is
+        // necessarily a leak — never a terminal the pane is still showing.
+        while slots.forwarders.len() > MAX_FORWARDERS {
+            let Some(&oldest) = slots.forwarders.keys().min() else {
+                break;
+            };
+            if let Some(forwarder) = slots.forwarders.remove(&oldest) {
+                forwarder.abort();
+            }
+        }
         token
     }
 
