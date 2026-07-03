@@ -193,6 +193,7 @@ export default function App() {
                     onOpenSettings={() => setSettingsOpen(true)}
                     onOpenProjectSettings={openProjectSettings}
                     onOpenOrchestration={openOrchestration}
+                    onRemoveProject={projects.remove}
                   />
                   <main className="min-w-0 flex-1">
                     <Suspense fallback={<div className="h-full w-full bg-background" />}>

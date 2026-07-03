@@ -19,6 +19,17 @@ impl Registry {
             .collect()
     }
 
+    /// Every process within `project`, whatever its kind or status — the targets of
+    /// `close_all`, which forgets the whole project.
+    pub(crate) fn ids_in(&self, project: ProjectId) -> Vec<ProcessId> {
+        let guard = lock(&self.inner);
+        guard
+            .values()
+            .filter(|entry| entry.view.project == project)
+            .map(|entry| entry.view.id)
+            .collect()
+    }
+
     /// Running processes within `project` — the targets of `restart_running`.
     pub(crate) fn running_in(&self, project: ProjectId) -> Vec<ProcessId> {
         let guard = lock(&self.inner);

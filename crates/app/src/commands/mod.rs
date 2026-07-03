@@ -64,6 +64,19 @@ pub async fn project_load(
         .map_err(|err| err.to_string())
 }
 
+/// Removes a project from Soloist: closes its processes (live groups stopped and reaped
+/// before anything is forgotten), deletes its durable record — the store cascades to its
+/// project-scoped state (trust, todos, scratchpads, settings, …) — and announces
+/// `ProjectRemoved`, which prompts the UI to re-read the project snapshot. Files on disk
+/// are never touched. Routes to the one core removal the HTTP API and CLI also drive.
+#[tauri::command]
+pub async fn project_remove(project: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
+    facade
+        .remove_project(ProjectId::from_raw(project))
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Trusts a project's command by name so it can start (A6). Routes to the one core
 /// trust gate; the read model clears the command's blocked state, which the UI re-reads.
 #[tauri::command]

@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { ChevronRight, MoreHorizontal } from "lucide-react";
 import { Collapsible } from "radix-ui";
 import { ProcessGroup } from "@/components/sidebar/ProcessGroup";
 import { projectActions, type ProjectAction } from "@/components/sidebar/projectActions";
+import { RemoveProjectDialog } from "@/components/sidebar/RemoveProjectDialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +43,7 @@ interface ProjectGroupProps {
   onStopAll: () => void;
   onOpenProjectSettings: () => void;
   onOpenOrchestration: () => void;
+  onRemoveProject: () => void;
 }
 
 // One project in the sidebar source list: a collapsible header (disclosure + icon + name +
@@ -67,14 +70,19 @@ export function ProjectGroup({
   onStopAll,
   onOpenProjectSettings,
   onOpenOrchestration,
+  onRemoveProject,
 }: ProjectGroupProps) {
   const { project, kinds, count } = tree;
+  // The menus only *open* the confirm; the removal itself runs solely from the dialog's
+  // destructive action, so a destructive menu click can never remove anything by itself.
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const actions = projectActions({
     onStartAll,
     onRestartRunning,
     onStopAll,
     onOpenOrchestration,
     onOpenProjectSettings,
+    onRemoveProject: () => setConfirmRemove(true),
   });
 
   return (
@@ -126,6 +134,13 @@ export function ProjectGroup({
                     {action.label}
                   </DropdownMenuItem>
                 ))}
+                <DropdownMenuSeparator />
+                {actions.danger.map((action) => (
+                  <DropdownMenuItem key={action.id} variant="destructive" onSelect={action.run}>
+                    <ActionIcon action={action} />
+                    {action.label}
+                  </DropdownMenuItem>
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -144,8 +159,22 @@ export function ProjectGroup({
               {action.label}
             </ContextMenuItem>
           ))}
+          <ContextMenuSeparator />
+          {actions.danger.map((action) => (
+            <ContextMenuItem key={action.id} variant="destructive" onSelect={action.run}>
+              <ActionIcon action={action} />
+              {action.label}
+            </ContextMenuItem>
+          ))}
         </ContextMenuContent>
       </ContextMenu>
+      <RemoveProjectDialog
+        open={confirmRemove}
+        onOpenChange={setConfirmRemove}
+        projectName={project.name}
+        runningCount={count.running}
+        onConfirm={onRemoveProject}
+      />
       <Collapsible.Content className="overflow-hidden data-[state=open]:animate-disclose-down data-[state=closed]:animate-disclose-up">
         <div className="mt-0.5 flex flex-col gap-0.5 pb-0.5 pl-3">
           {count.total === 0 ? (

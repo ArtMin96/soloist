@@ -79,6 +79,25 @@ impl Supervisor {
             .count()
     }
 
+    /// Closes every process in a project — stopping and reaping each live group, then
+    /// forgetting the entry (each announcing [`DomainEvent::ProcessRemoved`]) — so after it
+    /// returns the project holds no registrations and no children. The project-removal
+    /// teardown. Reuses the per-process [`close`](Supervisor::close), so bulk teardown can
+    /// never diverge from the single-process path.
+    ///
+    /// [`DomainEvent::ProcessRemoved`]: crate::events::DomainEvent::ProcessRemoved
+    pub async fn close_all(&self, project: ProjectId) {
+        // Message every live process to stop up front so their termination grace windows
+        // overlap; the per-process closes then await exits already under way. Bulk teardown
+        // stays O(grace), not O(n × grace).
+        self.stop_all(project);
+        for id in self.registry.ids_in(project) {
+            // `close` fails only on `NotFound` — a process closed concurrently — which a
+            // bulk teardown tolerates by design.
+            let _ = self.close(id).await;
+        }
+    }
+
     /// Restarts every currently-running process in a project (trusted only; an
     /// untrusted one is skipped).
     pub fn restart_running(&self, project: ProjectId) -> Result<(), SupervisorError> {

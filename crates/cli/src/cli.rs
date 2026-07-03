@@ -54,6 +54,13 @@ pub enum Command {
         #[arg(last = true)]
         args: Vec<String>,
     },
+    /// Remove a project from Soloist: stop and close its processes and forget its Soloist
+    /// state (trust, todos, scratchpads, settings). Files on disk are untouched.
+    RemoveProject {
+        /// The name of the project to remove. Always required — a destructive action never
+        /// guesses a default target, even when only one project is open.
+        project: String,
+    },
 }
 
 /// What `start`/`stop`/`restart` act on: a named process, or `all` for a whole project. Shared

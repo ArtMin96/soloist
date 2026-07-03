@@ -33,6 +33,7 @@ function renderGroup() {
       onStopAll={noop}
       onOpenProjectSettings={noop}
       onOpenOrchestration={noop}
+      onRemoveProject={noop}
     />,
   );
 }

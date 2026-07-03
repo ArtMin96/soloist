@@ -19,5 +19,5 @@ mod view;
 
 pub use page::{ConfigStatus, ProjectCommandView, ProjectSettingsPage, Visibility};
 pub use registry::{ProjectError, Projects};
-pub use service::{LoadProjectError, ProjectLoad, ProjectService, ReloadError};
+pub use service::{LoadProjectError, ProjectLoad, ProjectService, ReloadError, RemoveProjectError};
 pub use view::ProjectView;

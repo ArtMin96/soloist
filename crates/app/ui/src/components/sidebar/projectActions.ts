@@ -1,4 +1,4 @@
-import { Network, Play, RotateCw, Settings, Square } from "lucide-react";
+import { Network, Play, RotateCw, Settings, Square, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 // The handlers a project header needs, each already scoped to its project by the Sidebar.
@@ -8,6 +8,7 @@ export interface ProjectActionHandlers {
   onStopAll: () => void;
   onOpenOrchestration: () => void;
   onOpenProjectSettings: () => void;
+  onRemoveProject: () => void;
 }
 
 export interface ProjectAction {
@@ -17,13 +18,16 @@ export interface ProjectAction {
   run: () => void;
 }
 
-// The project-level actions, in two groups: the bulk supervisor commands (scoped to this
-// project) and the project's views. One source of truth, rendered into both the header's
-// ••• menu and the row's right-click menu so the two can never drift — and so the header
-// row carries the project name, not five competing buttons.
+// The project-level actions, in three groups: the bulk supervisor commands (scoped to this
+// project), the project's views, and the destructive removal — rendered last, behind its own
+// separator, so it can never be a slip of the pointer from a routine action. One source of
+// truth, rendered into both the header's ••• menu and the row's right-click menu so the two
+// can never drift — and so the header row carries the project name, not a row of buttons.
+// `onRemoveProject` opens the confirm dialog; the removal itself only runs from there.
 export function projectActions(handlers: ProjectActionHandlers): {
   bulk: ProjectAction[];
   views: ProjectAction[];
+  danger: ProjectAction[];
 } {
   return {
     bulk: [
@@ -48,6 +52,14 @@ export function projectActions(handlers: ProjectActionHandlers): {
         label: "Project settings",
         Icon: Settings,
         run: handlers.onOpenProjectSettings,
+      },
+    ],
+    danger: [
+      {
+        id: "remove-project",
+        label: "Remove project",
+        Icon: Trash2,
+        run: handlers.onRemoveProject,
       },
     ],
   };

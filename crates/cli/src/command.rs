@@ -134,6 +134,19 @@ pub fn spawn(
     ))
 }
 
+/// Runs `remove-project`: resolve the named project, then remove it via the one core removal
+/// the desktop confirm dialog drives (its processes are closed, its Soloist state forgotten;
+/// files on disk are untouched). The name is required — a destructive action never guesses a
+/// default target, even when only one project is open.
+pub fn remove_project(client: &Client, name: &str) -> Result<String, CliError> {
+    let project = resolve_project(client, Some(name))?;
+    client.delete(&format!("/projects/{}", project.id))?;
+    Ok(format!(
+        "Removed project {:?} from Soloist (files on disk are untouched).",
+        project.name
+    ))
+}
+
 /// Resolves a process name to its row against the live stack, or a clear error when no process
 /// — or more than one — bears that name. The API is keyed by id; a name is a CLI convenience
 /// and a `label` is not guaranteed unique across projects, so an ambiguous name is refused

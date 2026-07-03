@@ -117,6 +117,12 @@ describe("applyEvent", () => {
     expect(next).toEqual([]);
   });
 
+  it("drops only the removed project's processes on ProjectRemoved", () => {
+    const otherProject: ProcessView = { ...starting, id: 2, project: 9 };
+    const next = applyEvent([starting, otherProject], { type: "ProjectRemoved", id: 1 });
+    expect(next).toEqual([otherProject]);
+  });
+
   it("renames only the matching process", () => {
     const other: ProcessView = { ...starting, id: 2 };
     const next = applyEvent([starting, other], {

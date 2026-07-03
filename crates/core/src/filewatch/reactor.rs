@@ -7,10 +7,11 @@
 //! [`crate::debounce::Debouncer`], and routes the restart through the supervisor's existing
 //! [`Supervisor::file_restart`] — so file-watch reuses one restart behaviour (the trust gate
 //! and the crash-tracking reset) rather than reimplementing it. It establishes watches at
-//! startup and re-syncs them on each [`DomainEvent::ProjectOpened`], so a project opened after
-//! launch is watched too. It holds a [`Weak`] reference to the supervisor and ends when the
-//! event bus closes (app shutdown), like the crash reactor; command-only, trusted-only, and
-//! running-only all follow from the watch targets and the restart gate.
+//! startup and re-syncs them on each [`DomainEvent::ProjectOpened`] and
+//! [`DomainEvent::ProjectRemoved`], so a project opened after launch is watched too and a
+//! removed project's OS watch is released. It holds a [`Weak`] reference to the supervisor and
+//! ends when the event bus closes (app shutdown), like the crash reactor; command-only,
+//! trusted-only, and running-only all follow from the watch targets and the restart gate.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -74,20 +75,14 @@ impl WatchReactor {
             return;
         };
         let (changes_tx, mut changes_rx) = mpsc::channel(CHANGE_BUFFER);
-        // The watch state, held for the reactor's lifetime. `handles` keeps each OS watch
-        // alive: dropping a handle stops its watch (the bounded-resource contract), so they
-        // live exactly as long as the watches do. `resync` (re)builds all three from the
-        // current watch targets — once now, then again on each project open.
+        // The watch state, held for the reactor's lifetime. `watches` keeps each root's OS
+        // watch alive: dropping a handle stops its watch (the bounded-resource contract), so
+        // a handle lives exactly as long as its root has watch-eligible commands. `resync`
+        // rebuilds both from the current watch targets — once now, then again on each
+        // project open or removal.
         let mut rules: Vec<WatchRule> = Vec::new();
-        let mut roots: HashSet<PathBuf> = HashSet::new();
-        let mut handles: Vec<Box<dyn WatchHandle>> = Vec::new();
-        self.resync(
-            &supervisor,
-            &changes_tx,
-            &mut rules,
-            &mut roots,
-            &mut handles,
-        );
+        let mut watches: HashMap<PathBuf, Box<dyn WatchHandle>> = HashMap::new();
+        self.resync(&supervisor, &changes_tx, &mut rules, &mut watches);
         drop(supervisor);
 
         let mut debouncers: HashMap<ProcessId, Debouncer> = HashMap::new();
@@ -95,23 +90,18 @@ impl WatchReactor {
             let next_due = debouncers.values().filter_map(Debouncer::due_at).min();
             tokio::select! {
                 // The event bus drives two things: a closed bus means the facade dropped, so
-                // stop; a project opening (or a lag that may have hidden one) means new
-                // watch-eligible commands may exist, so re-sync the watches. Changes
-                // themselves arrive on `changes_rx`, not here.
+                // stop; a project opening or being removed (or a lag that may have hidden
+                // either) means the watch-eligible command set changed, so re-sync the
+                // watches. Changes themselves arrive on `changes_rx`, not here.
                 result = self.events.recv() => {
                     match result {
                         Err(RecvError::Closed) => break,
-                        Ok(DomainEvent::ProjectOpened { .. }) | Err(RecvError::Lagged(_)) => {
+                        Ok(DomainEvent::ProjectOpened { .. } | DomainEvent::ProjectRemoved { .. })
+                        | Err(RecvError::Lagged(_)) => {
                             let Some(supervisor) = self.supervisor.upgrade() else {
                                 break;
                             };
-                            self.resync(
-                                &supervisor,
-                                &changes_tx,
-                                &mut rules,
-                                &mut roots,
-                                &mut handles,
-                            );
+                            self.resync(&supervisor, &changes_tx, &mut rules, &mut watches);
                         }
                         Ok(_) => {}
                     }
@@ -148,36 +138,41 @@ impl WatchReactor {
                 }
             }
         }
-        // Dropping `handles` here stops every watch — the reactor leaves no OS watch behind.
-        drop(handles);
+        // Dropping `watches` here stops every watch — the reactor leaves no OS watch behind.
+        drop(watches);
     }
 
-    /// Rebuilds the match rules from the current watch-eligible commands and establishes a
-    /// watch for every project root not already watched. Idempotent: a root already in
-    /// `roots` keeps its existing watch (no duplicate, no churn), so re-syncing on a project
-    /// open only adds the newly-seen roots; the rules are rebuilt wholesale so a command that
-    /// is gone simply drops out of matching.
+    /// Rebuilds the match rules from the current watch-eligible commands and reconciles the
+    /// per-root OS watches to them: a root already watched keeps its existing watch (no
+    /// duplicate, no churn), a newly-seen root gains one, and a root with no remaining
+    /// watch-eligible command — its project removed or its commands gone — has its watch
+    /// dropped, which releases the OS resources. The rules are rebuilt wholesale so a
+    /// command that is gone simply drops out of matching.
     fn resync(
         &self,
         supervisor: &Supervisor,
         changes_tx: &mpsc::Sender<PathBuf>,
         rules: &mut Vec<WatchRule>,
-        roots: &mut HashSet<PathBuf>,
-        handles: &mut Vec<Box<dyn WatchHandle>>,
+        watches: &mut HashMap<PathBuf, Box<dyn WatchHandle>>,
     ) {
         rules.clear();
+        let mut desired: HashSet<PathBuf> = HashSet::new();
         for target in supervisor.watch_targets() {
             let Some(set) = compile(&target.globs) else {
                 continue;
             };
-            if roots.insert(target.project_root.clone()) {
-                handles.push(
+            if desired.insert(target.project_root.clone())
+                && !watches.contains_key(&target.project_root)
+            {
+                watches.insert(
+                    target.project_root.clone(),
                     self.watcher
                         .watch(target.project_root.clone(), changes_tx.clone()),
                 );
             }
             rules.push(WatchRule::new(target.id, target.project_root, set));
         }
+        watches.retain(|root, _| desired.contains(root));
     }
 }
 
