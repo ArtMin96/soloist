@@ -218,10 +218,10 @@ pub async fn pty_resize(
         .map_err(|err| err.to_string())
 }
 
-/// Attaches the terminal pane to a process: replays its raw scrollback as the first
-/// channel message, then streams live PTY bytes. Cancels any previous attachment so a
-/// single forwarder runs (the pane shows one process at a time). Returns the token that
-/// identifies this attachment; [`pty_detach`] cancels it by that token.
+/// Attaches a terminal pane to a process: replays its raw scrollback as the first channel
+/// message, then streams live PTY bytes. The keep-alive terminal pool runs several attachments
+/// at once, each an independent forwarder. Returns the token that identifies this attachment;
+/// [`pty_detach`] cancels it by that token.
 #[tauri::command]
 pub async fn pty_attach(
     id: u64,

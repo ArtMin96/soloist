@@ -1,55 +1,53 @@
 //! Adapter-side PTY streaming lifecycle.
 //!
-//! The dashboard shows one terminal at a time, so at most one live forwarder runs: a
-//! task draining a process's core output broadcast into a Tauri [`Channel`]. This holds
-//! that single forwarder's handle, so attaching a new process — or closing the pane —
-//! deterministically cancels the previous one and no streaming task leaks.
+//! The dashboard keeps a bounded pool of terminals alive (one per recently-viewed process) so
+//! switching between them is instant, so several forwarders run at once: each is a task draining
+//! one process's core output broadcast into a Tauri [`Channel`]. This holds those forwarders keyed
+//! by an install token, so detaching one pane (or evicting it from the pool) cancels exactly its
+//! forwarder and no streaming task leaks.
 //!
 //! Each install is identified by a monotonically increasing token, and a detach names the
-//! attachment it targets. Async commands execute out of invoke order, so a detach issued
-//! for an old attachment can arrive after a newer attach; matching by token makes that
-//! stale detach a no-op instead of killing the stream the pane is showing. It is
-//! transport state the webview owns, not domain state.
+//! attachment it targets. Async commands execute out of invoke order, so a detach issued for an
+//! attachment that has already been cleared is a no-op (its token is gone) rather than touching a
+//! live one. It is transport state the webview owns, not domain state.
 //!
 //! [`Channel`]: tauri::ipc::Channel
 
+use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 
 use tauri::async_runtime::JoinHandle;
 
-/// Holds the single active PTY-forwarding task, cancelling the previous one on swap.
+/// Holds the live PTY-forwarding tasks, one per attached terminal, keyed by install token.
 #[derive(Default)]
 pub struct PtyBridge {
-    slot: Mutex<Slot>,
+    slots: Mutex<Slots>,
 }
 
 #[derive(Default)]
-struct Slot {
-    token: u64,
-    forwarder: Option<JoinHandle<()>>,
+struct Slots {
+    next_token: u64,
+    forwarders: HashMap<u64, JoinHandle<()>>,
 }
 
 impl PtyBridge {
-    /// Installs a new forwarder, aborting any previous one, and returns the token that
-    /// identifies this attachment for a later [`clear`](Self::clear).
+    /// Installs a new forwarder and returns the token that identifies this attachment for a later
+    /// [`clear`](Self::clear). Other forwarders keep running — the terminal pool streams several
+    /// processes at once.
     pub fn install(&self, handle: JoinHandle<()>) -> u64 {
-        let mut slot = self.slot.lock().unwrap_or_else(PoisonError::into_inner);
-        slot.token += 1;
-        if let Some(previous) = slot.forwarder.replace(handle) {
-            previous.abort();
-        }
-        slot.token
+        let mut slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
+        slots.next_token += 1;
+        let token = slots.next_token;
+        slots.forwarders.insert(token, handle);
+        token
     }
 
-    /// Cancels the forwarder installed under `token` — the pane closed or switched away.
-    /// A stale token (a newer attachment has since installed) is a no-op.
+    /// Cancels the forwarder installed under `token` — the pane closed, switched away, or was
+    /// evicted from the pool. A stale token (already cleared) is a no-op.
     pub fn clear(&self, token: u64) {
-        let mut slot = self.slot.lock().unwrap_or_else(PoisonError::into_inner);
-        if token != slot.token {
-            return;
-        }
-        if let Some(previous) = slot.forwarder.take() {
-            previous.abort();
+        let mut slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(forwarder) = slots.forwarders.remove(&token) {
+            forwarder.abort();
         }
     }
 }

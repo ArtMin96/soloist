@@ -37,25 +37,28 @@ async fn install_returns_increasing_tokens() {
 }
 
 #[tokio::test]
-async fn installing_aborts_the_previous_forwarder() {
+async fn installing_another_forwarder_keeps_the_previous_running() {
+    // The terminal pool streams several processes at once, so a second install does not disturb
+    // the first — both forwarders run until each is cleared by its own token.
     let bridge = PtyBridge::default();
     let (first, mut rx1) = parked_forwarder();
     let (second, mut rx2) = parked_forwarder();
     bridge.install(first);
     bridge.install(second);
-    assert!(aborted(&mut rx1).await);
+    assert!(!aborted(&mut rx1).await);
     assert!(!aborted(&mut rx2).await);
 }
 
 #[tokio::test]
-async fn a_stale_detach_keeps_the_newer_forwarder_running() {
+async fn clearing_one_forwarder_leaves_the_others_running() {
     let bridge = PtyBridge::default();
-    let (first, _rx1) = parked_forwarder();
+    let (first, mut rx1) = parked_forwarder();
     let (second, mut rx2) = parked_forwarder();
-    let stale = bridge.install(first);
+    let first_token = bridge.install(first);
     bridge.install(second);
-    bridge.clear(stale);
-    assert!(!aborted(&mut rx2).await);
+    bridge.clear(first_token);
+    assert!(aborted(&mut rx1).await, "the cleared forwarder stops");
+    assert!(!aborted(&mut rx2).await, "the other keeps running");
 }
 
 #[tokio::test]
