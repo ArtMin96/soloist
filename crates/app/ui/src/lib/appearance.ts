@@ -152,9 +152,21 @@ export function writeThemeHint(theme: Theme): void {
 }
 
 // The single place the `.dark` class is written on the document root — shared by the pre-paint
-// hint (main entry) and the live provider, so there is one theme-application path.
+// hint (main entry) and the live provider, so there is one theme-application path. The swap is made
+// atomic: every transition is suppressed for the duration of the class flip and a synchronous style
+// read forces the new palette to resolve in one pass, so the whole surface recolors together instead
+// of hundreds of per-element color crossfades firing at once (which read as a staggered recolor).
 export function applyDarkClass(dark: boolean): void {
-  document.documentElement.classList.toggle("dark", dark);
+  const root = document.documentElement;
+  const freeze = document.createElement("style");
+  freeze.textContent = "*,*::before,*::after{transition:none!important}";
+  document.head.appendChild(freeze);
+  root.classList.toggle("dark", dark);
+  // Reading a computed style forces the browser to apply the frozen (transition-less) palette
+  // synchronously before transitions are re-enabled — without this flush the three DOM mutations
+  // batch and the suppression is skipped. The read's return value is intentionally discarded.
+  void window.getComputedStyle(root).backgroundColor;
+  document.head.removeChild(freeze);
 }
 
 // Resolve the effective dark/light from the theme choice and the OS preference (the latter
