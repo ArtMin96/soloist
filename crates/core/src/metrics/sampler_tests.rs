@@ -168,6 +168,48 @@ async fn the_sampler_restarts_itself_after_a_panic() {
 }
 
 #[tokio::test]
+async fn an_unchanged_reading_is_not_re_emitted() {
+    // A steady process holds a constant reading; it publishes once, then further identical samples
+    // are suppressed — the sampler keeps polling but does not churn the UI with unchanged ticks.
+    let mut s = setup();
+    let id = terminal(&s.sup);
+    s.sup.start(id).expect("start");
+    wait_for_running(&mut s.rx, id).await;
+
+    let probe = FakeMetricsProbe::returning(3.0, 512);
+    tokio::spawn(
+        MetricsSampler::new(
+            Arc::new(s.clock.clone()),
+            Arc::new(probe.clone()),
+            s.bus.clone(),
+            Arc::downgrade(&s.sup),
+        )
+        .run(),
+    );
+
+    // The first reading is published.
+    assert_eq!(next_metrics_tick(&mut s.rx, &s.clock, id).await, (3.0, 512));
+
+    // Several more intervals pass with the same reading; no further tick is published for it,
+    // though the probe keeps sampling.
+    let mut rx = s.bus.subscribe();
+    for _ in 0..5 {
+        s.clock.advance(SAMPLE_INTERVAL);
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+    }
+    let mut re_emitted = false;
+    while let Ok(event) = rx.try_recv() {
+        if matches!(event, DomainEvent::MetricsTick { id: got, .. } if got == id) {
+            re_emitted = true;
+        }
+    }
+    assert!(!re_emitted, "an unchanged reading is not re-emitted");
+    assert!(probe.calls() >= 2, "but the probe kept sampling");
+}
+
+#[tokio::test]
 async fn a_process_with_no_live_group_is_not_sampled() {
     // A registered-but-never-started process has no recorded group, so the sampler targets
     // nothing and emits no tick (and never calls the probe with it).

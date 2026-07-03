@@ -10,10 +10,12 @@
 //! dies, the sampler backs off and restarts it, so a transient probe fault never silently
 //! stops monitoring while the rest of the app runs on.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use crate::events::{DomainEvent, EventBus};
+use crate::ids::ProcessId;
 use crate::ports::Clock;
 use crate::supervision::{run_blocking, supervise};
 use crate::supervisor::Supervisor;
@@ -61,9 +63,15 @@ impl MetricsSampler {
         supervise(clock, move || self.clone().sample_loop()).await;
     }
 
-    /// The sampling loop itself: tick, read the live groups' metrics, publish a tick each.
-    /// Ends when the supervisor has been dropped.
+    /// The sampling loop itself: tick, read the live groups' metrics, publish a tick for each
+    /// group whose reading changed. Ends when the supervisor has been dropped.
     async fn sample_loop(self) {
+        // The last reading published per process (CPU bits + RSS bytes), so a steady process — an
+        // idle server holding a constant reading — is not re-emitted every interval; only a moved
+        // reading is forwarded, since the UI shows the last value until it changes. Bounded by the
+        // live set (entries for processes no longer live are dropped each tick). CPU is compared by
+        // bit pattern to keep it an exact identity check with no float equality.
+        let mut last: HashMap<ProcessId, (u32, u64)> = HashMap::new();
         loop {
             self.clock.sleep(SAMPLE_INTERVAL).await;
             let Some(supervisor) = self.supervisor.upgrade() else {
@@ -73,6 +81,8 @@ impl MetricsSampler {
             // Drop the strong reference before the OS read, so the loop never keeps the
             // supervisor (and the app) alive across a sample.
             drop(supervisor);
+            // Forget processes that are no longer live so the cache tracks only the live set.
+            last.retain(|id, _| targets.iter().any(|(live, _)| live == id));
             if targets.is_empty() {
                 continue;
             }
@@ -82,6 +92,12 @@ impl MetricsSampler {
             let readings = run_blocking(move || probe.sample(&pgids)).await;
             for (id, pgid) in targets {
                 if let Some(metrics) = readings.get(&pgid) {
+                    let reading = (metrics.cpu_pct.to_bits(), metrics.rss);
+                    // An unchanged reading carries nothing new for the UI — skip it.
+                    if last.get(&id) == Some(&reading) {
+                        continue;
+                    }
+                    last.insert(id, reading);
                     self.bus.publish(DomainEvent::MetricsTick {
                         id,
                         cpu_pct: metrics.cpu_pct,
