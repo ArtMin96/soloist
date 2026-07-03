@@ -1,5 +1,5 @@
 import { ToggleGroup } from "radix-ui";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Option } from "@/lib/appearance";
 import { cn } from "@/lib/utils";
 
@@ -25,9 +25,10 @@ export function SegmentedControl<T extends string>({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   // Created on first use, not rebuilt-and-discarded on every render (useRef ignores a fresh
-  // argument after the first render anyway).
+  // argument after the first render anyway). Stable identity via useCallback so the layout effect
+  // can list it as a dependency without re-subscribing the ResizeObserver every render.
   const itemRefsRef = useRef<Map<T, HTMLButtonElement> | null>(null);
-  const itemRefs = () => (itemRefsRef.current ??= new Map<T, HTMLButtonElement>());
+  const itemRefs = useCallback(() => (itemRefsRef.current ??= new Map<T, HTMLButtonElement>()), []);
   const [thumb, setThumb] = useState<{ x: number; w: number } | null>(null);
   // Suppress the slide on the very first measured paint (and after a reduced-motion reset);
   // it turns on one frame later so the initial thumb appears in place, not gliding from zero.
@@ -48,7 +49,7 @@ export function SegmentedControl<T extends string>({
     observer.observe(root);
     itemRefs().forEach((node) => observer.observe(node));
     return () => observer.disconnect();
-  }, [value, options]);
+  }, [value, options, itemRefs]);
 
   useEffect(() => {
     if (thumb) setAnimated(true);

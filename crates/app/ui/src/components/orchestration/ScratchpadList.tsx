@@ -18,12 +18,9 @@ interface ScratchpadListProps {
 // sidebar ProcessRow.
 export function ScratchpadList({ scratchpads, selected, onSelect }: ScratchpadListProps) {
   const baseId = useId();
-  const [active, setActive] = useState(() =>
-    Math.max(
-      0,
-      scratchpads.findIndex((pad) => pad.name === selected),
-    ),
-  );
+  // Track the roving cursor by the pad's name, not its index, so a scratchpad added or removed live
+  // keeps the cursor on the same document instead of sliding onto a neighbour.
+  const [activeName, setActiveName] = useState<string | null>(selected);
 
   if (scratchpads.length === 0) {
     return (
@@ -34,13 +31,16 @@ export function ScratchpadList({ scratchpads, selected, onSelect }: ScratchpadLi
     );
   }
 
-  // Clamp against a roster that shrank since the cursor last moved (a scratchpad removed live).
-  const activeIndex = Math.min(active, scratchpads.length - 1);
+  // Resolve the cursor to a live row; a name whose pad was removed falls back to the first row.
+  const activeIndex = Math.max(
+    0,
+    scratchpads.findIndex((pad) => pad.name === activeName),
+  );
   const optionId = (index: number) => `${baseId}-option-${index}`;
 
   function moveTo(index: number) {
     const clamped = Math.max(0, Math.min(index, scratchpads.length - 1));
-    setActive(clamped);
+    setActiveName(scratchpads[clamped].name);
     document.getElementById(optionId(clamped))?.focus();
   }
 
@@ -84,7 +84,7 @@ export function ScratchpadList({ scratchpads, selected, onSelect }: ScratchpadLi
             // Roving tabindex: only the cursor's option is in the tab order; the arrows move it.
             tabIndex={index === activeIndex ? 0 : -1}
             onClick={() => {
-              setActive(index);
+              setActiveName(pad.name);
               onSelect(pad.name);
             }}
             className={cn(

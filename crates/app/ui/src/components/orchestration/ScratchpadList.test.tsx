@@ -42,6 +42,18 @@ describe("ScratchpadList", () => {
     expect(document.activeElement).toBe(options[0]);
   });
 
+  it("keeps the roving cursor on the same document when the roster changes live", () => {
+    const { rerender } = render(
+      <ScratchpadList scratchpads={pads} selected={null} onSelect={vi.fn()} />,
+    );
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "End" }); // cursor on "risks" (index 2)
+    expect(screen.getByRole("option", { name: /risks/ }).tabIndex).toBe(0);
+    // The first pad is removed live: "risks" is now index 1, but the cursor stays on it.
+    rerender(<ScratchpadList scratchpads={pads.slice(1)} selected={null} onSelect={vi.fn()} />);
+    expect(screen.getByRole("option", { name: /risks/ }).tabIndex).toBe(0);
+    expect(screen.getAllByRole("option").map((o) => o.tabIndex)).toEqual([-1, 0]);
+  });
+
   it("opens the clicked option", () => {
     const onSelect = vi.fn();
     render(<ScratchpadList scratchpads={pads} selected={null} onSelect={onSelect} />);
