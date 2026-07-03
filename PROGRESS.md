@@ -27,6 +27,20 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Performance & native-feel pass (2026-07-04, branch `perf/native-feel`, PR #69; owner-requested,
+  no new features).** Fixes the three reported feel complaints: ① theme/titlebar recolor lag
+  (`Titlebar.tsx` compositing promotion + `applyDarkClass` atomic swap + memoized appearance value),
+  ② slow terminal switching (a bounded keep-alive pool — `store/useTerminalPool.ts`, cap 6 under the
+  16 WebGL-context limit — that keeps each xterm + its live PTY stream mounted, so a revisit does no
+  rebuild/replay; backend `pty_bridge` became a bounded token→forwarder map), ③ metrics re-render
+  storm (external signal store read by a per-id `useSyncExternalStore` selector; core sampler emits
+  on-change with a periodic heartbeat). Full design record + primary sources:
+  `plan/performance-native-feel.md`; durable WebKitGTK gotchas distilled into
+  `.claude/skills/soloist-diagnose/references/webkitgtk-perf.md`. Evidence is user feel-confirmation
+  on the real desktop (① and ②) + tests (③) + green gates; the pre-change ms/profiler baselines
+  (P0.2–P0.4) were skipped rather than fabricated (noted in the plan). Post-review hardening applied
+  this session (see below). **Owner opens/merges the PR.**
+
 - **Project removal — delivered end to end across every front (2026-07-03, branch
   `feat/project-removal`; owner-requested C1 addition).** Solo documents no project-removal
   behavior anywhere, so the semantics are a recorded clean-room gap (`plan/05 §12`;

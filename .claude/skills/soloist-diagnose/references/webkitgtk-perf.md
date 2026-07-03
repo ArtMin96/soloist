@@ -19,8 +19,10 @@ visible stall here. Verify against the sources in `plan/performance-native-feel.
   Rust side or use a `Channel`; keep low-rate structural `DomainEvent`s on `emit`.
 - **React Context has no selector** — a whole-object context value re-renders every consumer on every
   change, and `React.memo` does NOT stop it. Use `useSyncExternalStore` + a per-id selector.
-- **`display:none` breaks `FitAddon.fit()`** (throws) — refit on show. A hidden xterm auto-pauses its
-  renderer, so it is cheap to keep mounted/alive.
+- **`display:none` makes `FitAddon.fit()` unreliable** — on a hidden host it either no-ops (size is
+  unmeasurable) or, if the host has an explicit size, clamps to the wrong (2×1) dimensions; either way
+  refit on show. (Older xterm threw here — #3118/#3029, since fixed to a NaN-guarded no-op.) A hidden
+  xterm auto-pauses its renderer, so it is cheap to keep mounted/alive.
 - **Font weight renders ~100 heavier** than a browser (tauri#14286) — tune typography on WebKitGTK, not
   in a browser. `-webkit-font-smoothing` is a macOS-only no-op on Linux (crispness = Fontconfig/FreeType).
 

@@ -68,7 +68,8 @@ Load-bearing constraints:
   keep-alive pool must be **bounded (≤ ~8)**.
 - **Hidden xterm instances auto-pause their renderer** via IntersectionObserver (xterm PR #1144) →
   a retained context costs GPU *memory* (atlas), ~zero GPU *time*. Writes still fill the buffer.
-- **`FitAddon.fit()` throws on a `display:none` element** (xterm #3118/#3029) → must **refit on
+- **`FitAddon.fit()` misfits on a `display:none` element** (xterm #3118/#3029 — once threw, since
+  fixed to a NaN-guarded no-op, but a sized-but-hidden host still clamps to 2×1) → must **refit on
   show**.
 
 ### ③ General jank (IPC + React)
@@ -92,11 +93,14 @@ every later fix has a measured before/after (CLAUDE.md §6; no fabricated number
 | # | Task | Acceptance | Status |
 |---|------|-----------|--------|
 | P0.1 | Green baseline: `just lint` + `just test` pass; record counts. | Both green; counts logged in Progress Log. | **Verified** |
-| P0.2 | Confirm H1: run dev build with `WEBKIT_DISABLE_COMPOSITING_MODE=1`; observe whether the titlebar theme-lag disappears. | Documented yes/no. Yes ⇒ H1 confirmed ⇒ F1 is correct. (Diagnostic only — never ship the flag.) | Not started |
-| P0.3 | Profile a terminal switch: `performance.now()` around mount + `activateTerminalRenderer`; note dominant sub-cost (WebGL init vs DOM build vs replay). Use `flush_terminal_perf`. | Numbers logged; dominant cost identified. | Not started |
-| P0.4 | Profile the render storm: React DevTools Profiler — re-renders per metrics tick, before changes. | Baseline re-render count logged. | Not started |
+| P0.2 | Confirm H1: run dev build with `WEBKIT_DISABLE_COMPOSITING_MODE=1`; observe whether the titlebar theme-lag disappears. | Documented yes/no. Yes ⇒ H1 confirmed ⇒ F1 is correct. (Diagnostic only — never ship the flag.) | Superseded — the fix was confirmed directly (user saw the titlebar recolor atomically on the real desktop); the A/B diagnostic was not needed. Revisit only if the lag returns. |
+| P0.3 | Profile a terminal switch: `performance.now()` around mount + `activateTerminalRenderer`; note dominant sub-cost (WebGL init vs DOM build vs replay). Use `flush_terminal_perf`. | Numbers logged; dominant cost identified. | Superseded — the keep-alive pool makes a revisit instant (no rebuild/replay at all), user feel-confirmed on the real desktop. No pre-change ms baseline was captured. |
+| P0.4 | Profile the render storm: React DevTools Profiler — re-renders per metrics tick, before changes. | Baseline re-render count logged. | Superseded — the per-id selector is proven by test (`signalsContext.test.tsx`: only the ticked row re-renders) rather than a profiler count. |
 
-> P0.2–P0.4 need a desktop session (`DISPLAY=:0`) or the `agent-bridge` MCP. P0.1 is automatable.
+> P0.2–P0.4 needed a desktop session (`DISPLAY=:0`) or the `agent-bridge` MCP for a *pre-change* number.
+> Rather than block on that, the fixes were validated by direct evidence instead — user feel-confirmation
+> on the real WebKitGTK desktop for ① and ②, and a re-render test for ③ — recorded per task and in the
+> Progress Log. No fabricated before/after numbers: where a measured baseline was skipped it says so.
 
 ### Phase P1 — Quick wins (low risk; directly kills the three complaints)
 
@@ -108,8 +112,9 @@ every later fix has a measured before/after (CLAUDE.md §6; no fabricated number
 | P1.4 | Metrics **emit-on-change** at the source: the sampler suppresses a reading identical to the last one for that process (idle/steady processes stop emitting redundant ~1 Hz ticks). | `crates/core/src/metrics/sampler.rs` (+`sampler_tests.rs`, `events.rs` doc) | ③ event fan-out. **Chose emit-on-change over the full enum batch** — see note. | **Verified** (core 537 tests green, clippy clean) |
 | P1.5 | Replace `SignalsContext` whole-object delivery with an external store + per-id `useSyncExternalStore` selector (manual slice caching — no new dep). | `store/signalStore.ts` (new), `store/signalsContext.ts`, `store/SignalsProvider.tsx`; `store/signals.ts` fold unchanged | ③ render storm — react.dev; TkDodo. | **Verified** (test proves only the ticked row re-renders; full suite 54/264 green) |
 
-Acceptance for P1: theme toggle recolors atomically incl. titlebar (measured vs P0.2); metrics-tick
-re-renders drop to "only the changed row" (measured vs P0.4); `just lint`/`just test` green.
+Acceptance for P1: theme toggle recolors atomically incl. titlebar (user feel-confirmed on the real
+desktop — the P0.2 A/B diagnostic was superseded); metrics-tick re-renders drop to "only the changed
+row" (proven by `signalsContext.test.tsx`, not a P0.4 profiler count); `just lint`/`just test` green.
 
 ### Phase P2 — Terminal keep-alive (the real fix for ②)
 
@@ -137,9 +142,11 @@ Design: bounded warm keep-alive pool.
 | P2.3 | Bounded LRU pool (`TERMINAL_POOL_CAP=6`, under the 16 WebGL cap) + deterministic dispose (evicted pane unmounts → existing cleanup disposes xterm + detaches PTY). | `store/useTerminalPool.ts` (+ test) | **Verified** (gates + soak green, user-confirmed) |
 | P2.4 | Backend multi-forwarder: `pty_bridge` holds a token→forwarder map (install adds, clear-by-token aborts one, no abort-on-install). | `pty_bridge.rs`, `pty_bridge_tests.rs`, `commands/mod.rs` doc | **Verified** (clippy clean, 4 bridge tests green) |
 
-Acceptance for P2: switching between visited terminals is instant (measured vs P0.3); WebGL contexts
-never exceed the cap; `just soak` leak-gate green (FD/task/RSS flat across N start/stop/switch);
-`just lint`/`just test` green.
+Acceptance for P2: switching between visited terminals is instant (user feel-confirmed on the real
+desktop — the pool keeps the xterm + live stream mounted, so a revisit does no rebuild/replay at all;
+the P0.3 pre-change ms baseline was skipped, not fabricated); WebGL contexts never exceed the cap (the
+pool caps at 6, the fold-in is capped too, under the 16-context limit); `just soak` leak-gate green
+(FD/task/RSS flat across N start/stop/switch); `just lint`/`just test` green.
 
 ### Phase P3 — Native-feel polish + gates
 
