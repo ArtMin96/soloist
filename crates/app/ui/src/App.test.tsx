@@ -155,8 +155,9 @@ describe("App dashboard", () => {
     fireEvent.click(row(1));
 
     expect(row(1).getAttribute("aria-selected")).toBe("true");
-    // The terminal pane mounts: the label now appears in both the row and the pane header.
-    expect(screen.getAllByText("assistant").length).toBe(2);
+    // The terminal pane mounts lazily: once its code-split chunk loads, the label appears in
+    // both the row and the pane header.
+    await waitFor(() => expect(screen.getAllByText("assistant")).toHaveLength(2));
     expect(screen.queryByText(/Select a process in the sidebar/)).toBeNull();
   });
 
