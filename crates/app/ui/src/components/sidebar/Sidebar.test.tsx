@@ -125,6 +125,7 @@ function renderSidebar(
             onOpenSettings={noop}
             onOpenProjectSettings={noop}
             onOpenOrchestration={noop}
+            onRemoveProject={noop}
           />
         </SidebarSettingsContext>
       </HotkeysContext>
@@ -191,6 +192,7 @@ describe("Sidebar lineage nesting", () => {
               onOpenSettings={noop}
               onOpenProjectSettings={noop}
               onOpenOrchestration={noop}
+              onRemoveProject={noop}
             />
           </SidebarSettingsContext>
         </HotkeysContext>

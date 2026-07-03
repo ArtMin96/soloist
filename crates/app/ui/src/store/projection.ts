@@ -46,6 +46,11 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
       );
     case "ProcessRemoved":
       return processes.filter((process) => process.id !== event.id);
+    // A removed project's processes each announce ProcessRemoved first; this sweep only
+    // covers a consumer that missed those deltas (bus lag), so the list never strands rows
+    // keyed to a project that no longer exists.
+    case "ProjectRemoved":
+      return processes.filter((process) => process.project !== event.id);
     case "ProcessRenamed":
       return processes.map((process) =>
         process.id === event.id ? { ...process, label: event.label } : process,

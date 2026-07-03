@@ -170,6 +170,13 @@ export function projectLoad(path: string): Promise<ProjectLoad> {
   return invoke<ProjectLoad>("project_load", { path });
 }
 
+// Removes a project from Soloist: the core closes its processes, deletes its durable
+// state (trust, todos, scratchpads, settings, …), and emits `ProjectRemoved`, which
+// prompts the project snapshot re-read. Files on disk are untouched.
+export function projectRemove(project: number): Promise<void> {
+  return invoke<void>("project_remove", { project });
+}
+
 // Trusts a project's command by name (the core trust gate) so it can start. The read
 // model clears the command's blocked state; callers re-read the snapshot to reflect it.
 export function configTrust(project: number, name: string): Promise<void> {

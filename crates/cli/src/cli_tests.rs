@@ -111,6 +111,18 @@ fn spawn_parses_a_tool_optional_project_and_trailing_args() {
 }
 
 #[test]
+fn remove_project_requires_the_project_name() {
+    let cli = Cli::try_parse_from(["soloist", "remove-project", "storefront"]).expect("parse");
+    let Command::RemoveProject { project } = cli.command else {
+        panic!("expected remove-project");
+    };
+    assert_eq!(project, "storefront");
+
+    // The name is mandatory: a destructive action never defaults to "the sole project".
+    assert!(Cli::try_parse_from(["soloist", "remove-project"]).is_err());
+}
+
+#[test]
 fn a_missing_subcommand_is_an_error() {
     assert!(Cli::try_parse_from(["soloist"]).is_err());
 }

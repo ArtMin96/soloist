@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { onDomainEvent, openProjectDirectory, projectList, projectLoad } from "@/api";
+import {
+  onDomainEvent,
+  openProjectDirectory,
+  projectList,
+  projectLoad,
+  projectRemove,
+} from "@/api";
 import { CacheKey } from "@/store/cache/persistentCache";
 import { usePersistentSnapshot } from "@/store/cache/usePersistentSnapshot";
 import type { ProjectLoad, ProjectView } from "@/domain";
@@ -9,6 +15,11 @@ export interface ProjectStore {
   projects: ProjectView[];
   /** Pick a project folder and load its stack; a cancelled picker is a no-op. */
   open: () => void;
+  /**
+   * Remove a project from Soloist (the core closes its processes and forgets its state;
+   * files on disk are untouched). The caller confirms first — this action just routes.
+   */
+  remove: (project: number) => void;
   /** A plain-language note about the last open (auto-created config, or no commands). */
   notice: string | null;
 }
@@ -54,9 +65,9 @@ export function useProjects(reportError: (reason: unknown) => void): ProjectStor
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    // A `ProjectOpened` just signals "projects changed"; re-read the rendered snapshot.
+    // `ProjectOpened`/`ProjectRemoved` just signal "projects changed"; re-read the snapshot.
     onDomainEvent((event) => {
-      if (event.type === "ProjectOpened") revalidate();
+      if (event.type === "ProjectOpened" || event.type === "ProjectRemoved") revalidate();
     })
       .then((stopListening) => {
         if (cancelled) {
@@ -84,5 +95,14 @@ export function useProjects(reportError: (reason: unknown) => void): ProjectStor
       .catch(reportError);
   }, [reportError]);
 
-  return { projects, open, notice };
+  // The row disappearing (via the `ProjectRemoved` re-read) is the confirmation; only a
+  // failure needs surfacing.
+  const remove = useCallback(
+    (project: number) => {
+      projectRemove(project).catch(reportError);
+    },
+    [reportError],
+  );
+
+  return { projects, open, remove, notice };
 }

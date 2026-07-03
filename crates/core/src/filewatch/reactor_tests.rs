@@ -252,6 +252,27 @@ async fn a_project_opened_after_startup_is_watched() {
 }
 
 #[tokio::test]
+async fn a_removed_projects_root_watch_is_released() {
+    let mut s = setup();
+    let web = register_command(&s, "Web", &["src/**/*.rs"], true);
+    start_running(&mut s, web).await;
+    start_reactor(&s).await;
+    assert_eq!(s.watcher.live(), vec![PathBuf::from(ROOT)]);
+
+    // Project removal's teardown: its processes close, then the removal is announced. The
+    // reactor re-syncs on the announcement; with no watch-eligible command left at ROOT,
+    // the root's OS watch is dropped (releasing its resources), not merely unmatched.
+    s.sup.close_all(PROJECT).await;
+    s.bus.publish(DomainEvent::ProjectRemoved { id: PROJECT });
+
+    s.watcher.released().await;
+    assert!(
+        s.watcher.live().is_empty(),
+        "the removed project's watch is dropped",
+    );
+}
+
+#[tokio::test]
 async fn a_terminal_or_a_glob_less_command_is_not_watched() {
     let s = setup();
     // A terminal (never file-watched) and a command with no globs — neither is eligible.

@@ -187,6 +187,7 @@ the UI button and the MCP tool drive.
 | `POST` | `/projects/{id}/spawn-agent` | Launch a known agent tool as a worker (JSON body; returns the new id). |
 | `POST` | `/projects/{id}/transfer-todo` | Move a todo from this project to another (JSON body). |
 | `POST` | `/projects/{id}/transfer-scratchpad` | Move a scratchpad from this project to another (JSON body). |
+| `DELETE` | `/projects/{id}` | Remove the project from Soloist (files on disk untouched). |
 | `POST` | `/focus` | Raise the desktop window to the front. |
 
 The two bulk-start scopes are distinct on purpose. `start-auto` starts only the commands marked
@@ -226,6 +227,14 @@ the target project must be loaded (an unknown todo, scratchpad, or target projec
 scratchpad name already used in the target is a `409`). The session-scoped MCP `todo_transfer` /
 `scratchpad_transfer` cannot reach across projects (a session is scoped to one project), so
 cross-project transfers go through here or the desktop, never over MCP.
+
+`DELETE /projects/{id}` removes the project from Soloist: every one of its processes is closed
+(each live group stopped and reaped — SIGTERM, grace, SIGKILL — before anything is forgotten),
+and its durable Soloist state is deleted with it (trust decisions, leases, timers, scratchpads,
+todos, key-value entries, per-project settings, and project-scoped prompt templates; global
+state is untouched). **No file on disk is touched** — the project folder and its `solo.yml`
+remain, and opening the folder again later registers it fresh, with commands untrusted. This is
+the same core removal the desktop confirm dialog drives; an unknown project is a `404`.
 
 ### Bulk endpoint to core mapping
 
@@ -310,6 +319,7 @@ form `all` acts on a whole project: the sole open project when one is open, or t
 | `restart <name>` / `restart all` | `POST /processes/{id}/restart` / `POST /projects/{id}/restart-all` | |
 | `logs <name>` | `GET /processes/{id}/output` | `-n <count>` becomes `?lines=<count>`. |
 | `spawn <tool> [-- args]` | `GET /projects`, then `POST /projects/{id}/spawn-agent` | Resolves the project (sole, or `--project`), then launches the agent. |
+| `remove-project <name>` | `GET /projects`, then `DELETE /projects/{id}` | The name is always required — a destructive action never defaults to the sole project. |
 | `focus` | `POST /focus` | |
 | `open` | `POST /focus` | Solo's raise-app alias of `focus`; shares its handler. |
 

@@ -27,6 +27,56 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Project removal — delivered end to end across every front (2026-07-03, branch
+  `feat/project-removal`; owner-requested C1 addition).** Solo documents no project-removal
+  behavior anywhere, so the semantics are a recorded clean-room gap (`plan/05 §12`;
+  owner-confirmed decisions: **stop-then-remove**, a confirm dialog, surfaces = UI + HTTP + CLI
+  with **deliberately no MCP tool**). The persistence layer already existed
+  (`ProjectRepo::remove` + `ON DELETE CASCADE` on all 8 project-scoped tables, all tested);
+  this session built everything above it:
+  - **Core:** `Supervisor::close_all(project)` (stop messaged to every live process first so
+    the SIGTERM grace windows overlap, then the one per-process `close` reaps and forgets each,
+    announcing `ProcessRemoved` per process **before** the project's own event — no child
+    abandoned, teardown O(grace) not O(n × grace)); `ConfigEngine::forget` evicts sync state;
+    `ProjectService::remove` = resolve (`UnknownProject` otherwise) → `close_all` → `forget` →
+    `Projects::remove` (store cascade) → new `DomainEvent::ProjectRemoved { id }`;
+    `Facade::remove_project` is the one seam every adapter routes to. The file-watch reactor
+    re-syncs on `ProjectRemoved` and now **drops a root's OS watch** when its last
+    watch-eligible command is gone (watch state became a root→handle map; the former add-only
+    root set leaked the watch). Disk is never touched.
+  - **Adapters:** `DELETE /projects/:id` (auth-gated, 404 unknown; `docs/http-api.md` updated);
+    `soloist-cli remove-project <name>` — the name is **required**, a destructive action never
+    defaults to the sole open project (new `Client::delete`, verified against the vendored
+    ureq 3 source); thin Tauri `project_remove` registered (app commands need no ACL entry,
+    confirmed previously).
+  - **UI (driven through `/impeccable` + the shadcn skill, DESIGN.md dialog vocabulary):** a
+    `danger` group in the single-source `projectActions` — both the ••• menu and the context
+    menu render it last behind its own separator (destructive variant, matching the harness
+    mockup that had sat unwired); `RemoveProjectDialog` composes the **one** `dialog.tsx`
+    primitive (no second alert-dialog primitive, no close X, first focusable is Cancel) with a
+    grouped-well consequence list — a conditional "Stops its N running processes", "Forgets
+    trust decisions, todos, scratchpads, and project settings", "Keeps the project folder and
+    solo.yml on disk, untouched"; `useProjects.remove` + snapshot revalidation on
+    `ProjectRemoved`; `projection.ts` sweeps the removed project's rows (bus-lag
+    belt-and-braces); selection self-heals (derived `.find()` falls back to the empty state);
+    `HTTP_API_ENDPOINTS` gained the DELETE row.
+  - **Tests:** `projects/service.rs`'s inline test module migrated to `service_tests.rs` (the
+    separate-files rule, taken opportunistically) plus three removal tests (reap-before-announce
+    ordering, resting-registration eviction + disk-untouched, unknown-project touches nothing);
+    a reactor released-watch test (the `FakeFileWatcher` gained drop-tracked `live()` +
+    `released()`); three httpapi delete tests (401 removes nothing, 200 empties registry +
+    read model with the file intact, 404); a CLI parse test (name mandatory); UI tests for
+    projectActions, RemoveProjectDialog (4), useProjects removal (2), and the projection sweep.
+  - **Evidence:** `just lint` exit 0; `just test` — Rust **857 passed / 0 failed / 3 ignored**,
+    UI **257 passed (52 files)**. **Real-window walk performed in this env** (`just
+    agent-bridge` + the tauri-mcp-server bridge on DISPLAY :0): both menus show the destructive
+    item; the confirm dialog screenshot-matches the DESIGN.md dialog spec; Cancel leaves state
+    untouched; then a true end-to-end removal of two scratch projects — one through the confirm
+    dialog, one via the packaged CLI path (`soloist-cli remove-project`) against the live app —
+    with `GET /projects` emptied of both, **both `solo.yml` files intact on disk**, the sidebar
+    dropping the rows live, and an unknown name refused with exit 1. Real projects untouched.
+  - **Follow-up:** the owner opens the PR for `feat/project-removal` (no self-merge).
+
 - **Packaged installs shipped no MCP helper or CLI — user bug report, root-caused, fixed,
   verified (2026-07-03, on `main` after `fe00c54` v0.3.0; pushed to `main` per user).** The
   installed `.deb`/`.AppImage` contained only `usr/bin/soloist`, so an installed app could not
@@ -4171,6 +4221,8 @@ review's one should-fix + the mechanical nits:
 ---
 
 ## Next session should start with
+
+**⊳ NEW (2026-07-03): `feat/project-removal` is complete, gate-green, and real-window-verified (see the Current-state entry) — the owner opens its PR (no self-merge). No follow-up work is owed on it.**
 
 **▣ PHASE 12 — PACKAGING: code-complete, gate-green, container-smoked (2026-06-30) on branch
 `feat/phase-12-packaging`. Three follow-ups, in order:**

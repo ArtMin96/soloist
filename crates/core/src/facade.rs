@@ -30,6 +30,7 @@ use crate::portscan::{self, PortProbe, WaitForPortError};
 use crate::process::{ProcessKind, ProcessView};
 use crate::projects::{
     LoadProjectError, ProjectLoad, ProjectService, ProjectView, Projects, ReloadError,
+    RemoveProjectError,
 };
 use crate::settings::{ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
@@ -242,6 +243,15 @@ impl Facade {
     /// launch) — see [`ProjectService::restore`]. Delegates to the projects domain.
     pub fn restore_projects(&self) {
         self.project_service().restore();
+    }
+
+    /// Removes a project end to end — see [`ProjectService::remove`]: closes its processes
+    /// (reaping live groups before anything is forgotten), deletes its durable record (the
+    /// store cascades to its project-scoped state), and announces the removal. One method,
+    /// so the UI, HTTP API, and CLI remove a project identically. Never touches the
+    /// project's files on disk.
+    pub async fn remove_project(&self, project: ProjectId) -> Result<(), RemoveProjectError> {
+        self.project_service().remove(project).await
     }
 
     /// Assembles the project lifecycle service over the contexts the Facade owns.

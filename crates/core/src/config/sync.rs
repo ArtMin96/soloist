@@ -99,6 +99,14 @@ impl ConfigEngine {
         Ok(config)
     }
 
+    /// Drops a project's sync state — the project-removal path evicting its last-seen
+    /// `solo.yml`. A later [`Self::sync`] for the id reports no change and a
+    /// [`Self::write`] refuses it as unknown; re-opening the project seeds fresh state
+    /// via [`Self::open`]. The file on disk is untouched.
+    pub fn forget(&self, project: ProjectId) {
+        lock(&self.states).remove(&project);
+    }
+
     /// Re-reads the project's `solo.yml`. When its content changed, diffs it against
     /// the last-seen config, determines whether any added/updated command needs
     /// re-trust, publishes a [`DomainEvent::ConfigChanged`] (unless the diff is

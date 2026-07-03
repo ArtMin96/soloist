@@ -327,6 +327,84 @@ async fn reload_of_an_unknown_project_is_404() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+/// A `DELETE` request to `uri` carrying each given header.
+fn delete(uri: &str, headers: &[(&str, &str)]) -> Request<Body> {
+    let mut builder = Request::builder().method("DELETE").uri(uri);
+    for (name, value) in headers {
+        builder = builder.header(*name, *value);
+    }
+    builder.body(Body::empty()).expect("request")
+}
+
+#[tokio::test]
+async fn removing_a_project_closes_its_processes_and_deletes_it() {
+    let facade = Arc::new(Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .build(),
+    ));
+    let dir = tempfile::tempdir().expect("temp dir");
+    let config = dir.path().join("solo.yml");
+    std::fs::write(&config, "processes:\n  Web:\n    command: npm run dev\n").expect("write");
+    let project = facade.load_project(dir.path()).expect("load");
+    assert_eq!(facade.snapshot().len(), 1);
+
+    let app = router(ApiState::new(Arc::clone(&facade)));
+    let response = app
+        .oneshot(delete(&format!("/projects/{}", project.id.get()), &[AUTH]))
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    // The registration set and the project read model are both empty; the user's file remains.
+    assert!(facade.snapshot().is_empty());
+    assert!(facade.projects_snapshot().expect("snapshot").is_empty());
+    assert!(config.exists(), "removal never touches disk");
+}
+
+#[tokio::test]
+async fn removing_a_project_without_auth_is_rejected() {
+    let facade = Arc::new(Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .build(),
+    ));
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load");
+
+    let app = router(ApiState::new(Arc::clone(&facade)));
+    let response = app
+        .oneshot(delete(&format!("/projects/{}", project.id.get()), &[]))
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        facade.projects_snapshot().expect("snapshot").len(),
+        1,
+        "an unauthorized delete removes nothing"
+    );
+}
+
+#[tokio::test]
+async fn removing_an_unknown_project_is_404() {
+    let (facade, _id) = facade_with_terminal();
+    let app = router(ApiState::new(facade));
+    let response = app
+        .oneshot(delete("/projects/999999", &[AUTH]))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
 /// A façade with the scratchpad store wired and two empty projects loaded, returning the façade,
 /// both project ids, and the temp dirs to keep alive — the setup the transfer tests share.
 fn facade_with_two_projects() -> (

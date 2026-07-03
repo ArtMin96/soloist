@@ -311,6 +311,7 @@ pub fn run() {
             commands::proc_list,
             commands::project_list,
             commands::project_load,
+            commands::project_remove,
             commands::config_trust,
             commands::agent_list,
             commands::agent_detect,

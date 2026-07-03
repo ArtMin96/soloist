@@ -198,7 +198,7 @@ export const MCP_CLIENTS: McpClientInfo[] = [
 // require the X-Soloist-Local-Auth header.
 export const HTTP_API_BASE_URL = "http://127.0.0.1:24678";
 
-// The documented HTTP surface (docs/http-api.md): seven reads + thirteen actions. Listed so the
+// The documented HTTP surface (docs/http-api.md): seven reads + fourteen actions. Listed so the
 // user can see exactly what a local script can reach; the count is derived, never a magic number.
 export const HTTP_API_ENDPOINTS: string[] = [
   "GET  /health",
@@ -220,5 +220,6 @@ export const HTTP_API_ENDPOINTS: string[] = [
   "POST /projects/:id/spawn-agent",
   "POST /projects/:id/transfer-todo",
   "POST /projects/:id/transfer-scratchpad",
+  "DELETE /projects/:id",
   "POST /focus",
 ];

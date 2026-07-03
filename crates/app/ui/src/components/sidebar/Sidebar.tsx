@@ -26,6 +26,7 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenProjectSettings: (projectId: number) => void;
   onOpenOrchestration: (projectId: number) => void;
+  onRemoveProject: (projectId: number) => void;
 }
 
 // The process tree, grouped by project: each opened project is a collapsible node over its
@@ -50,6 +51,7 @@ export function Sidebar({
   onOpenSettings,
   onOpenProjectSettings,
   onOpenOrchestration,
+  onRemoveProject,
 }: SidebarProps) {
   const { sidebar } = useSidebarSettings();
   const trees = groupByProject(processes, projects, sidebar.hide_empty_sections, lineage);
@@ -94,6 +96,7 @@ export function Sidebar({
               onStopAll={() => onStopAll(tree.project.id)}
               onOpenProjectSettings={() => onOpenProjectSettings(tree.project.id)}
               onOpenOrchestration={() => onOpenOrchestration(tree.project.id)}
+              onRemoveProject={() => onRemoveProject(tree.project.id)}
             />
           </div>
         ))}

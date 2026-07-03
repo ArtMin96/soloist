@@ -8,6 +8,7 @@ vi.mock("@/api", () => ({
   openProjectDirectory: vi.fn(),
   projectLoad: vi.fn(),
   projectList: vi.fn(() => Promise.resolve([])),
+  projectRemove: vi.fn(() => Promise.resolve()),
   onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
 }));
 
@@ -19,13 +20,20 @@ vi.mock("@/store/cache/persistentCache", () => ({
   writeSnapshot: vi.fn(() => Promise.resolve()),
 }));
 
-import { onDomainEvent, openProjectDirectory, projectList, projectLoad } from "@/api";
+import {
+  onDomainEvent,
+  openProjectDirectory,
+  projectList,
+  projectLoad,
+  projectRemove,
+} from "@/api";
 import { useProjects } from "@/store/projects/useProjects";
 import type { DomainEvent } from "@/domain";
 
 const pickDirectory = vi.mocked(openProjectDirectory);
 const load = vi.mocked(projectLoad);
 const list = vi.mocked(projectList);
+const remove = vi.mocked(projectRemove);
 const subscribe = vi.mocked(onDomainEvent);
 
 // A stable error sink, like the one the app passes (`store.reportError` is a useCallback):
@@ -111,5 +119,28 @@ describe("useProjects", () => {
     const handler = subscribe.mock.calls[0][0];
     act(() => handler({ type: "ProjectOpened", id: 1 } as DomainEvent));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+  });
+
+  it("re-reads the rendered project snapshot when a project is removed", async () => {
+    renderHook(() => useProjects(noop));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+
+    // The removal delta signals "projects changed" exactly like an open does; the sidebar
+    // drops the row by re-reading the snapshot, not by trusting an event payload.
+    const handler = subscribe.mock.calls[0][0];
+    act(() => handler({ type: "ProjectRemoved", id: 1 } as DomainEvent));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+  });
+
+  it("routes remove to the one core removal and surfaces a failure", async () => {
+    const { result } = renderHook(() => useProjects(noop));
+    result.current.remove(7);
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(7));
+
+    remove.mockRejectedValueOnce("no such project is open");
+    const reportError = vi.fn();
+    const failing = renderHook(() => useProjects(reportError));
+    failing.result.current.remove(9);
+    await waitFor(() => expect(reportError).toHaveBeenCalledWith("no such project is open"));
   });
 });

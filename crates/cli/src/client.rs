@@ -84,6 +84,17 @@ impl Client {
             .map_err(mutation_error)
     }
 
+    /// `DELETE path` carrying the local-auth header — a resource-removing mutation. Status
+    /// and transport failures map exactly as [`post`](Self::post) does.
+    pub fn delete(&self, path: &str) -> Result<(), CliError> {
+        let url = self.url(path);
+        ureq::delete(&url)
+            .header(LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE)
+            .call()
+            .map(|_| ())
+            .map_err(mutation_error)
+    }
+
     /// `POST path` carrying the local-auth header and a JSON `body`, decoding the JSON response
     /// as `T` — a mutation that takes a request body and returns data (e.g. `spawn`). Status and
     /// transport failures map exactly as [`post`](Self::post) does.

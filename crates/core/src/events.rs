@@ -91,6 +91,11 @@ pub enum DomainEvent {
     /// adapter re-reads the project read model ([`crate::projects::ProjectView`], which
     /// resolves name and icon together) rather than carrying that display state on the event.
     ProjectOpened { id: ProjectId },
+    /// A project was removed from the registry: its processes were closed (each announcing
+    /// [`Self::ProcessRemoved`]) and its durable project-scoped state deleted. Adapters
+    /// re-read the project read model and drop any state keyed to the id. Files on disk
+    /// are untouched.
+    ProjectRemoved { id: ProjectId },
     /// A project's `solo.yml` changed on disk. Carries the add/update/remove/rename
     /// diff, whether any added/updated command now needs (re-)trust, and the detail of
     /// each command awaiting trust (so the review dialog can show what will run). Sync

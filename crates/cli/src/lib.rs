@@ -35,6 +35,7 @@ pub fn run() -> ExitCode {
             project,
             args,
         } => command::spawn(&client, &tool, &args, project.as_deref()),
+        Command::RemoveProject { project } => command::remove_project(&client, &project),
     };
     match result {
         Ok(message) => {

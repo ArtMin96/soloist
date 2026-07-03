@@ -186,6 +186,10 @@ export type DomainEvent =
   // A project was opened/changed. The UI re-reads the rendered project snapshot on this
   // (which carries each project's loaded icon); it doesn't consume the event's domain fields.
   | { type: "ProjectOpened"; id: number }
+  // A project was removed: its processes were closed (each also announcing ProcessRemoved)
+  // and its Soloist state deleted. The UI re-reads the project snapshot and drops any
+  // state keyed to the id; files on disk are untouched.
+  | { type: "ProjectRemoved"; id: number }
   | {
       type: "ConfigChanged";
       project: number;

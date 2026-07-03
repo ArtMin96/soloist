@@ -12,11 +12,12 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::middleware;
-use axum::routing::post;
+use axum::routing::{delete, post};
 use axum::{Json, Router};
 
 use soloist_core::{
-    CoordinationError, LaunchAgentError, ProcessId, ProjectId, ReloadError, SupervisorError, TodoId,
+    CoordinationError, LaunchAgentError, ProcessId, ProjectId, ReloadError, RemoveProjectError,
+    SupervisorError, TodoId,
 };
 use soloist_ipc::http::{
     SpawnRequest, SpawnResponse, TransferScratchpadRequest, TransferTodoRequest,
@@ -39,6 +40,7 @@ pub fn router() -> Router<ApiState> {
         .route("/projects/{id}/restart-running", post(restart_running))
         .route("/projects/{id}/restart-all", post(restart_all))
         .route("/projects/{id}/reload", post(reload))
+        .route("/projects/{id}", delete(remove_project))
         .route("/projects/{id}/spawn-agent", post(spawn_agent))
         .route("/projects/{id}/transfer-todo", post(transfer_todo))
         .route(
@@ -157,6 +159,19 @@ fn reload_status(err: &ReloadError) -> StatusCode {
     match err {
         ReloadError::UnknownProject => StatusCode::NOT_FOUND,
         ReloadError::Sync(_) | ReloadError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// `DELETE /projects/:id` — removes the project from Soloist: closes its processes (each live
+/// group stopped and reaped before anything is forgotten), deletes its durable record (the
+/// store cascades to its project-scoped state), and announces the removal. Routes to the one
+/// core removal the desktop confirm dialog drives; files on disk are never touched. An
+/// unknown project is a `404`.
+async fn remove_project(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
+    match state.facade().remove_project(ProjectId::from_raw(id)).await {
+        Ok(()) => StatusCode::OK,
+        Err(RemoveProjectError::UnknownProject) => StatusCode::NOT_FOUND,
+        Err(RemoveProjectError::Store(_)) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
