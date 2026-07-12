@@ -193,6 +193,15 @@ impl Terminals {
         lock(&self.inner).get(&id).map(|c| c.input.clone())
     }
 
+    /// Drops the terminal channel of a process removed entirely (not merely stopped), freeing
+    /// its buffers and live broadcast. Called by [`crate::supervisor::Supervisor::close`] after
+    /// the actor is reaped, so no in-flight recorder still writes to it. A resting-but-registered
+    /// process keeps its channel — its scrollback stays readable — so only a full removal calls
+    /// this; without it a long session that opens and closes many processes leaks their buffers.
+    pub(crate) fn remove(&self, id: ProcessId) {
+        lock(&self.inner).remove(&id);
+    }
+
     /// Attaches a viewer to `id`: atomically captures the raw scrollback and a live
     /// subscription so the replay has no gap or duplicate against the live stream. The
     /// caller replays the scrollback, then streams the receiver. `None` if the process

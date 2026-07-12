@@ -380,6 +380,10 @@ impl Supervisor {
         if let Some(handle) = handle {
             let _ = signal_stop(handle).await;
         }
+        // The process is gone for good — free its terminal channel (buffers + live broadcast).
+        // The actor is reaped above, so its recorder is dropped and nothing still writes here;
+        // without this a long session that opens and closes many processes leaks their scrollback.
+        self.terminals.remove(id);
         self.bus.publish(DomainEvent::ProcessRemoved { id });
         Ok(())
     }
@@ -459,6 +463,7 @@ impl Supervisor {
             clock: self.clock.clone(),
             locks: self.locks.clone(),
             runtime: self.runtime.clone(),
+            orphan_control: self.orphan_control.clone(),
             bus: self.bus.clone(),
             registry: self.registry.clone(),
             terminals: self.terminals.clone(),
@@ -721,6 +726,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_spawn_failure_surfaces_the_reason_in_the_terminal_and_crashes() {
+        // A command that cannot be spawned (missing binary, bad working dir) crashes — but the
+        // reason must reach its terminal, not vanish, so the user sees why instead of an empty
+        // pane that flaps to RestartExhausted with no explanation.
+        let mut h = harness(FakeSpawner::fails_to_spawn("no such file or directory"));
+        let id = terminal(&h.sup, "definitely-not-a-binary");
+        h.sup.start(id).expect("start");
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Starting);
+        assert_eq!(next_change(&mut h.rx).await, (ProcStatus::Crashed, None));
+
+        let rendered = h.sup.rendered(id).expect("the crashed process kept its terminal");
+        let text = rendered.lines.join("\n");
+        assert!(
+            text.contains("failed to start") && text.contains("no such file or directory"),
+            "the spawn error is written to the terminal: {text:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn a_user_stop_is_stopped_not_crashed_even_when_sigkilled() {
         let mut h = harness(FakeSpawner::exits_on_kill());
         let id = terminal(&h.sup, "sleep 60");
@@ -773,6 +797,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn closing_a_process_frees_its_terminal_channel() {
+        // A removed process must not leak its terminal buffers. While running it has a channel to
+        // attach to; after close (a full removal, unlike a stop, which keeps the scrollback
+        // readable) the channel is gone, so a long session of opens and closes does not grow RSS.
+        let mut h = harness(FakeSpawner::exits_on_terminate());
+        let id = terminal(&h.sup, "sleep 60");
+        h.sup.start(id).expect("start");
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
+        assert!(
+            h.sup.attach_pty(id).is_some(),
+            "a running process has a terminal channel"
+        );
+
+        h.sup.close(id).await.expect("close");
+        assert!(
+            h.sup.attach_pty(id).is_none(),
+            "closing frees the terminal channel"
+        );
+    }
+
+    #[tokio::test]
     async fn a_panicking_process_is_isolated_and_the_supervisor_survives() {
         let mut h = harness(FakeSpawner::panics_after_running());
         let id = terminal(&h.sup, "boom");
@@ -783,6 +828,16 @@ mod tests {
         assert_eq!(next_to(&mut h.rx).await, ProcStatus::Crashed);
         tokio::task::yield_now().await;
         assert!(h.locks.released().contains(&id));
+        // The child the panicked task left behind is reaped (SIGKILL to its group) and its
+        // orphan record forgotten, so a crash auto-restart cannot spawn a second beside it.
+        assert!(
+            h.orphans.signalled().contains(&(9191, true)),
+            "the leftover child's group is SIGKILLed on the panic path"
+        );
+        assert!(
+            h.runtime.records().is_empty(),
+            "the leftover child's orphan record is forgotten"
+        );
 
         // The supervisor is still alive: another process runs to completion.
         let mut h2 = harness(FakeSpawner::exits_on_kill());

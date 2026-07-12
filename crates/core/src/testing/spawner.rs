@@ -79,6 +79,9 @@ enum Behavior {
     /// the owning actor. The [`Notify`] fires as the write begins to block, so the test can
     /// wait for that deterministically before it checks the actor is still responsive.
     BlocksOnInput(Arc<Notify>),
+    /// Fails to spawn with a fixed message — a missing binary or bad working dir — so a test
+    /// can prove the actor surfaces the reason in the terminal and crashes.
+    FailsToSpawn(String),
 }
 
 /// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is chosen
@@ -217,6 +220,14 @@ impl FakeSpawner {
             entered,
         )
     }
+
+    /// A spawner whose spawn always fails with `message` — a missing binary or bad working
+    /// dir — so a test can prove the actor writes the reason into the terminal and crashes.
+    pub fn fails_to_spawn(message: &str) -> Self {
+        Self {
+            behavior: Behavior::FailsToSpawn(message.to_string()),
+        }
+    }
 }
 
 /// A closed PTY output channel: the receiver yields nothing and reports EOF at once.
@@ -251,7 +262,9 @@ impl ProcessSpawner for FakeSpawner {
                 #[allow(clippy::panic)]
                 let exit: ExitFuture = Box::pin(async { panic!("fake child panicked") });
                 Ok(Spawned {
-                    pid: Some(0),
+                    // A realistic live pgid, so a test can prove the panic path reaps the child
+                    // the panicked inner task left behind.
+                    pid: Some(9191),
                     output: no_output(),
                     exit,
                     control: Box::new(NoopControl),
@@ -362,6 +375,7 @@ impl ProcessSpawner for FakeSpawner {
                     io: Box::new(NoopPtyIo),
                 })
             }
+            Behavior::FailsToSpawn(message) => Err(SpawnError::Spawn(message.clone())),
             Behavior::BlocksOnInput(entered) => {
                 let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
                 let control = Box::new(OneshotControl {
