@@ -40,14 +40,17 @@ impl ProjectView {
     }
 }
 
-/// A project's identity as a lean reference — its id and resolved display name, without the
-/// root or the (fs-loaded) icon. This is what `whoami` reports for the caller's effective
-/// project, so an agent sees a readable project name and not just an id; the name is resolved
-/// by the same [`display_name`] rule the full [`ProjectView`] uses, so the two never disagree.
+/// A project's identity as a lean reference — its id and (best-effort) display name, without the
+/// root or the (fs-loaded) icon. This is what `whoami` reports for the caller's effective project,
+/// so an agent sees a readable project name and not just an id. The `id` is authoritative; the
+/// `name` is a durable-store read resolved by the same [`display_name`] rule the full
+/// [`ProjectView`] uses (so the two never disagree), and is `None` when the store cannot be read or
+/// the record is gone — an unresolvable name never costs the caller the id of a scope it still
+/// holds.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectRef {
     pub id: ProjectId,
-    pub name: String,
+    pub name: Option<String>,
 }
 
 impl ProjectRef {
@@ -55,7 +58,7 @@ impl ProjectRef {
     pub fn from_record(record: &ProjectRecord) -> Self {
         Self {
             id: record.id,
-            name: display_name(record),
+            name: Some(display_name(record)),
         }
     }
 }

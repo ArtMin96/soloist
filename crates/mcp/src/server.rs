@@ -26,9 +26,22 @@ use soloist_core::{onboarding_hint, McpFeatureGroup, McpToolGroups};
 use crate::client::AppClient;
 use crate::suggestions::Suggestions;
 
-/// Builds one feature group's sub-router. A feature group is registered only when its setting
-/// enables it, so this is invoked lazily during composition.
-type FeatureGroupRouter = fn() -> ToolRouter<SoloistMcp>;
+/// One tool group's identity: the display label the summary groups it under, the constructor for
+/// its sub-router, and whether it is always served (a core group) or gated behind a feature
+/// setting. Both [`SoloistMcp::new`] (which composes the served router) and
+/// [`SoloistMcp::tools_summary`] (which labels the categories) read this one list, so the served
+/// surface and its categorization are single-sourced and cannot drift apart.
+struct ToolGroup {
+    label: &'static str,
+    router: fn() -> ToolRouter<SoloistMcp>,
+    gate: GroupGate,
+}
+
+/// Whether a [`ToolGroup`] is always served or enabled by one of the user's feature settings.
+enum GroupGate {
+    Core,
+    Feature(McpFeatureGroup),
+}
 
 /// The tools surfaced first in `tools/list`, in this order: identity and help, then a small
 /// starter pack of the tools an agent reaches for most. rmcp lists tools alphabetically, which
@@ -62,31 +75,17 @@ impl SoloistMcp {
     /// composed; each feature group is added only when `groups` enables it, so a disabled group is
     /// absent from `list_tools` and uncallable.
     pub fn new(client: Arc<AppClient>, groups: McpToolGroups) -> Self {
-        // Core groups: always served when the MCP server runs (plan/05 §7).
-        let mut tool_router = Self::identity_router()
-            + Self::project_router()
-            + Self::process_router()
-            + Self::agent_router()
-            + Self::bulk_router()
-            + Self::output_router()
-            + Self::services_router()
-            + Self::lock_router()
-            + Self::setup_router();
-        // Feature groups: a registry of (group → its sub-router builder), each registered only when
-        // the setting enables it. Adding a feature group is one row here plus its `McpFeatureGroup`.
-        let feature_groups: [(McpFeatureGroup, FeatureGroupRouter); 5] = [
-            (McpFeatureGroup::Scratchpads, Self::scratchpad_router),
-            (McpFeatureGroup::Todos, Self::todo_router),
-            (McpFeatureGroup::Timers, Self::timer_router),
-            (McpFeatureGroup::KeyValue, Self::kv_router),
-            (
-                McpFeatureGroup::PromptTemplates,
-                Self::prompt_template_router,
-            ),
-        ];
-        for (group, build_router) in feature_groups {
-            if groups.enabled(group) {
-                tool_router += build_router();
+        // Compose the served router from the single group list: core groups always, each feature
+        // group only when the user's settings enable it, so a disabled group is absent from
+        // `list_tools` and uncallable.
+        let mut tool_router = ToolRouter::new();
+        for group in Self::tool_groups() {
+            let served = match group.gate {
+                GroupGate::Core => true,
+                GroupGate::Feature(feature) => groups.enabled(feature),
+            };
+            if served {
+                tool_router += (group.router)();
             }
         }
         Self {
@@ -105,11 +104,11 @@ impl SoloistMcp {
     }
 
     /// A compact, categorized map of the currently-enabled tools — each tool as its name and a
-    /// one-line summary, grouped by category, with no input schemas. The categories are built from
-    /// the same per-category sub-routers [`new`] composes and then filtered to the tools actually
-    /// served, so a disabled feature group's tools drop out and the summary can never name a tool
-    /// the server does not define. This is what an agent reads to see the whole surface without the
-    /// weight of `tools/list`.
+    /// one-line summary, grouped by category, with no input schemas. The categories come from the
+    /// same [`tool_groups`](Self::tool_groups) list [`new`](Self::new) composes the served router
+    /// from, filtered to the tools actually served, so a disabled feature group's tools drop out and
+    /// the summary can never name a tool the server does not define. This is what an agent reads to
+    /// see the whole surface without the weight of `tools/list`.
     pub(crate) fn tools_summary(&self) -> serde_json::Value {
         let served: BTreeSet<String> = self
             .tool_router
@@ -118,10 +117,10 @@ impl SoloistMcp {
             .map(|tool| tool.name.into_owned())
             .collect();
 
-        let categories: Vec<serde_json::Value> = Self::tool_categories()
+        let categories: Vec<serde_json::Value> = Self::tool_groups()
             .into_iter()
-            .filter_map(|(label, router)| {
-                let tools: Vec<serde_json::Value> = router
+            .filter_map(|group| {
+                let tools: Vec<serde_json::Value> = (group.router)()
                     .list_all()
                     .into_iter()
                     .filter(|tool| served.contains(tool.name.as_ref()))
@@ -133,7 +132,7 @@ impl SoloistMcp {
                     })
                     .collect();
                 (!tools.is_empty())
-                    .then(|| serde_json::json!({ "category": label, "tools": tools }))
+                    .then(|| serde_json::json!({ "category": group.label, "tools": tools }))
             })
             .collect();
 
@@ -169,35 +168,103 @@ impl SoloistMcp {
         featured
     }
 
-    /// The tool categories in display order, each paired with the sub-router that defines it. Built
-    /// from the same router constructors [`new`] composes, so the category grouping is single-sourced
-    /// with the served surface rather than a hand-kept parallel list that could drift.
-    fn tool_categories() -> [(&'static str, ToolRouter<Self>); 14] {
+    /// Every tool group in display order — the single list [`new`](Self::new) composes the served
+    /// router from and [`tools_summary`](Self::tools_summary) labels its categories with. A group
+    /// added here is automatically both served (per its gate) and categorized in the summary, so the
+    /// served surface and its categorization can never fall out of sync.
+    fn tool_groups() -> [ToolGroup; 14] {
+        use GroupGate::{Core, Feature};
         [
-            ("Identity & session", Self::identity_router()),
-            ("Projects", Self::project_router()),
-            ("Processes", Self::process_router()),
-            ("Agents", Self::agent_router()),
-            ("Bulk commands", Self::bulk_router()),
-            ("Output", Self::output_router()),
-            ("Services", Self::services_router()),
-            ("Locks (leases)", Self::lock_router()),
-            ("Setup & support", Self::setup_router()),
-            ("Scratchpads", Self::scratchpad_router()),
-            ("Todos", Self::todo_router()),
-            ("Timers", Self::timer_router()),
-            ("Key-value", Self::kv_router()),
-            ("Prompt templates", Self::prompt_template_router()),
+            ToolGroup {
+                label: "Identity & session",
+                router: Self::identity_router,
+                gate: Core,
+            },
+            ToolGroup {
+                label: "Projects",
+                router: Self::project_router,
+                gate: Core,
+            },
+            ToolGroup {
+                label: "Processes",
+                router: Self::process_router,
+                gate: Core,
+            },
+            ToolGroup {
+                label: "Agents",
+                router: Self::agent_router,
+                gate: Core,
+            },
+            ToolGroup {
+                label: "Bulk commands",
+                router: Self::bulk_router,
+                gate: Core,
+            },
+            ToolGroup {
+                label: "Output",
+                router: Self::output_router,
+                gate: Core,
+            },
+            ToolGroup {
+                label: "Services",
+                router: Self::services_router,
+                gate: Core,
+            },
+            ToolGroup {
+                label: "Locks (leases)",
+                router: Self::lock_router,
+                gate: Core,
+            },
+            ToolGroup {
+                label: "Setup & support",
+                router: Self::setup_router,
+                gate: Core,
+            },
+            ToolGroup {
+                label: "Scratchpads",
+                router: Self::scratchpad_router,
+                gate: Feature(McpFeatureGroup::Scratchpads),
+            },
+            ToolGroup {
+                label: "Todos",
+                router: Self::todo_router,
+                gate: Feature(McpFeatureGroup::Todos),
+            },
+            ToolGroup {
+                label: "Timers",
+                router: Self::timer_router,
+                gate: Feature(McpFeatureGroup::Timers),
+            },
+            ToolGroup {
+                label: "Key-value",
+                router: Self::kv_router,
+                gate: Feature(McpFeatureGroup::KeyValue),
+            },
+            ToolGroup {
+                label: "Prompt templates",
+                router: Self::prompt_template_router,
+                gate: Feature(McpFeatureGroup::PromptTemplates),
+            },
         ]
     }
 }
 
-/// The first sentence of a tool description (up to the first `". "`), else the whole trimmed text —
-/// the compact form the tools summary shows in place of the full description and input schema.
+/// The first sentence of a tool description — the compact one-liner the tools summary shows in place
+/// of the full description and input schema. A sentence ends at the first `". "` that begins a new
+/// sentence, detected by the next character being uppercase; a period inside an abbreviation
+/// (`e.g. `, `vs. `) or a dotted literal (`127.0.0.1. `, `v0.8.2. `) is followed by a lowercase
+/// letter or a digit, so it is not mistaken for a boundary. Falls back to the whole trimmed text
+/// when there is no such boundary (a single-sentence description).
 fn first_sentence(description: Option<&str>) -> String {
     let text = description.unwrap_or("").trim();
-    match text.split_once(". ") {
-        Some((first, _)) => format!("{first}."),
+    let boundary = text.match_indices(". ").find(|(index, sep)| {
+        text[index + sep.len()..]
+            .chars()
+            .next()
+            .is_some_and(char::is_uppercase)
+    });
+    match boundary {
+        Some((index, _)) => text[..=index].to_string(),
         None => text.to_string(),
     }
 }

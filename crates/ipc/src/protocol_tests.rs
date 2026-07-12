@@ -224,7 +224,7 @@ fn every_response_variant_round_trips_through_json() {
             selected_process: None,
             effective_project: Some(ProjectRef {
                 id: ProjectId::from_raw(1),
-                name: "storefront".into(),
+                name: Some("storefront".into()),
             }),
         }),
         IpcResponse::Acked,

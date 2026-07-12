@@ -304,7 +304,7 @@ async fn binding_scopes_a_session_to_its_process_project() {
     // reported with its resolved display name.
     let scope = who.effective_project.expect("a resolved scope");
     assert_eq!(scope.id, project.id);
-    assert!(!scope.name.is_empty());
+    assert!(scope.name.as_deref().is_some_and(|name| !name.is_empty()));
 }
 
 #[tokio::test]

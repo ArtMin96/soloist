@@ -426,7 +426,7 @@ async fn whoami_projects_the_resolved_identity_and_the_enabled_tool_count() {
         selected_process: None,
         effective_project: Some(ProjectRef {
             id: ProjectId::from_raw(1),
-            name: "storefront".into(),
+            name: Some("storefront".into()),
         }),
     };
     let canned = who.clone();
@@ -1907,6 +1907,59 @@ async fn mcp_tools_summary_omits_a_disabled_feature_group() {
         names.iter().any(|name| name == "scratchpad_list"),
         "an enabled group's tools remain"
     );
+}
+
+/// The summary categorizes every served tool exactly once and names no tool the server does not
+/// serve — both sides derive from the one `tool_groups` list, so the served surface and its
+/// categorization cannot drift apart (the failure mode of a hand-kept parallel category list).
+#[tokio::test]
+async fn the_summary_categorizes_exactly_the_served_surface() {
+    let handler = handler(PathBuf::from("unused.sock"));
+    let value = structured_of(handler.mcp_tools_summary().await.expect("summary succeeds"));
+
+    let mut categorized: Vec<String> = value["categories"]
+        .as_array()
+        .expect("categories")
+        .iter()
+        .flat_map(|entry| entry["tools"].as_array().expect("tools"))
+        .map(|tool| tool["name"].as_str().expect("a name").to_string())
+        .collect();
+    let listed = categorized.len();
+    categorized.sort();
+    categorized.dedup();
+    assert_eq!(categorized.len(), listed, "no tool is categorized twice");
+    assert_eq!(
+        categorized.into_iter().collect::<BTreeSet<String>>(),
+        served_tools(&handler),
+        "every served tool is categorized, and the summary names none the server does not serve",
+    );
+}
+
+/// `first_sentence` cuts at a real sentence end and is not fooled by a period inside an
+/// abbreviation or a dotted literal — the fragility that would truncate a summary mid-token the
+/// moment a tool description were worded that way.
+#[test]
+fn first_sentence_splits_on_a_real_boundary_only() {
+    // A genuine boundary: the next sentence starts with an uppercase letter.
+    assert_eq!(
+        first_sentence(Some("Starts the process. It then streams output.")),
+        "Starts the process."
+    );
+    // An abbreviation ("e.g. ") is followed by lowercase, so it is not a boundary; the real end is.
+    assert_eq!(
+        first_sentence(Some(
+            "Filters output, e.g. errors only. The rest is dropped."
+        )),
+        "Filters output, e.g. errors only."
+    );
+    // A dotted literal ("127.0.0.1. ") followed by lowercase is not a boundary either.
+    assert_eq!(
+        first_sentence(Some("Listens on 127.0.0.1. and forwards traffic")),
+        "Listens on 127.0.0.1. and forwards traffic"
+    );
+    // A single sentence with no boundary returns whole, trimmed; empty input is empty.
+    assert_eq!(first_sentence(Some("  Does one thing  ")), "Does one thing");
+    assert_eq!(first_sentence(None), "");
 }
 
 /// The initialization handshake advertises the tool capability, identifies this binary (not the

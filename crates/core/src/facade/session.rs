@@ -118,19 +118,20 @@ impl Facade {
                 .and_then(|process| self.process_view(process)),
             effective_project: self
                 .effective_project(session)
-                .and_then(|id| self.project_ref(id)),
+                .map(|id| self.project_ref(id)),
             origin,
         }
     }
 
-    /// The lean id-and-name reference for a project, or `None` when the store cannot be read or
-    /// the project is gone — the naming half of the enriched `whoami`.
-    fn project_ref(&self, id: ProjectId) -> Option<ProjectRef> {
-        self.projects
-            .get(id)
-            .ok()
-            .flatten()
-            .map(|record| ProjectRef::from_record(&record))
+    /// The lean id-and-name reference for a resolved effective project. The id is authoritative —
+    /// it comes from in-memory identity — while the name is a best-effort durable-store read that
+    /// resolves to `None` when the store cannot be read or the record is gone. So a transient store
+    /// error dims the name without ever dropping the scope the caller still holds.
+    fn project_ref(&self, id: ProjectId) -> ProjectRef {
+        match self.projects.get(id).ok().flatten() {
+            Some(record) => ProjectRef::from_record(&record),
+            None => ProjectRef { id, name: None },
+        }
     }
 
     /// The project a session's scoped tools act on: its explicit selection, else the
@@ -188,3 +189,7 @@ impl Facade {
         self.home_project(session) == Some(project)
     }
 }
+
+#[cfg(test)]
+#[path = "session_tests.rs"]
+mod tests;

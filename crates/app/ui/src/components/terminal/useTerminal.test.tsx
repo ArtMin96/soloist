@@ -26,6 +26,11 @@ const { FakeTerminal } = vi.hoisted(() => {
     dispose() {
       this.disposed = true;
     }
+    reset() {
+      // A real xterm reset clears the screen and scrollback; mirror that by dropping recorded
+      // writes so a test sees only what is replayed after the reset.
+      this.writes = [];
+    }
     write(data: string | Uint8Array) {
       this.writes.push(data);
     }
@@ -249,6 +254,46 @@ describe("useTerminal hidden-pane pause", () => {
     await settle();
     // Shown: the accumulated backlog drains into the emulator, so no output is lost.
     expect(writtenText(term)).toContain("HIDDEN-OUTPUT");
+  });
+
+  // When a chatty background process overflows the bounded backlog while hidden, the oldest queued
+  // bytes are dropped, so draining on show would splice a gap into the scrollback. Instead the pane
+  // re-attaches and replays the core's coherent scrollback — the same gap-free view a fresh mount
+  // shows — rather than draining a discontinuity.
+  it("re-attaches and replays scrollback when the backlog overflows while hidden", async () => {
+    const view = render(<VisibilityProbe process={PROCESS} visible={false} />);
+    await settle();
+    expect(attaches).toHaveLength(1);
+
+    // Two chunks that together exceed the 512 KiB backlog cap, so the oldest is evicted while hidden.
+    const chunk = "A".repeat(300 * 1024);
+    await act(async () => {
+      deliver(attaches[0], chunk);
+      deliver(attaches[0], chunk);
+    });
+    await settle();
+
+    await act(async () => {
+      view.rerender(<VisibilityProbe process={PROCESS} visible={true} />);
+    });
+    await settle();
+
+    // Shown after an overflow: the pane re-attached (a second pty_attach) and detached the first,
+    // rather than draining the gappy backlog.
+    expect(attaches).toHaveLength(2);
+    expect(detached).toContain(attaches[0].token);
+
+    // The stale bytes never reached the emulator; the fresh attachment's scrollback replay does.
+    const term = FakeTerminal.instances.find((t) => !t.disposed) as InstanceType<
+      typeof FakeTerminal
+    >;
+    await act(async () => {
+      deliver(attaches[1], "COHERENT-REPLAY\r\n");
+    });
+    await settle();
+    const text = writtenText(term);
+    expect(text).toContain("COHERENT-REPLAY");
+    expect(text).not.toContain("A".repeat(1024));
   });
 
   it("parses bytes on the frame loop while visible", async () => {
