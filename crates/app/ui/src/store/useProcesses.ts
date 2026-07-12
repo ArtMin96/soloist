@@ -11,6 +11,7 @@ import {
   stackStop,
 } from "@/api";
 import { applyEvent } from "@/store/projection";
+import { useReconcile } from "@/store/useReconcile";
 import type { DomainEvent, ProcessView } from "@/domain";
 
 export interface ProcessStore {
@@ -108,6 +109,10 @@ export function useProcesses(): ProcessStore {
       unlisten?.();
     };
   }, [refresh, fail]);
+
+  // Re-sync on a backend resync signal or window focus, so a dropped delta never leaves the
+  // list permanently stale.
+  useReconcile(refresh);
 
   return {
     processes,

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use tokio::sync::broadcast;
 
-use crate::config::ProcessSpec;
+use crate::config::{ConfigSync, ProcessSpec};
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{CorePorts, PtySize, SpawnSpec, TrustRepo};
@@ -246,6 +246,39 @@ async fn a_project_opened_after_startup_is_watched() {
     );
 
     // A matching change to it now restarts it, proving the re-watch is live.
+    s.watcher.change(changed("src/app/main.rs"));
+    yield_many().await;
+    assert_eq!(next_file_restart(&mut s).await, web);
+}
+
+#[tokio::test]
+async fn a_config_reload_that_adds_a_watched_command_is_watched() {
+    let mut s = setup();
+    // Nothing watch-eligible at startup.
+    spawn_reactor(&s);
+    yield_many().await;
+    assert!(s.watcher.watched().is_empty(), "nothing to watch at startup");
+
+    // A solo.yml reload adds a watch-eligible command: the command is registered (as the
+    // config engine's reload does) and the reload is announced with ConfigChanged. The reactor
+    // must re-sync on that — not only on a project open — or the new command's globs go unwatched
+    // until the project is re-opened.
+    let web = register_command(&s, "Web", &["src/**/*.rs"], true);
+    start_running(&mut s, web).await;
+    s.bus.publish(DomainEvent::ConfigChanged {
+        project: PROJECT,
+        diff: ConfigSync::default(),
+        requires_trust: false,
+        commands: Vec::new(),
+    });
+
+    s.watcher.established().await;
+    assert!(
+        !s.watcher.watched().is_empty(),
+        "the reloaded command is now watched",
+    );
+
+    // A matching change now restarts it, proving the re-watch is live.
     s.watcher.change(changed("src/app/main.rs"));
     yield_many().await;
     assert_eq!(next_file_restart(&mut s).await, web);

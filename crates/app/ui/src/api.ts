@@ -480,3 +480,11 @@ export function setProjectIcon(project: ProjectId, icon: string | null): Promise
 export function onDomainEvent(handler: (event: DomainEvent) => void): Promise<UnlistenFn> {
   return listen<DomainEvent>(DOMAIN_EVENT, (event) => handler(event.payload));
 }
+
+// The backend's delta stream fell behind and dropped events; stores must re-read their
+// snapshots to recover, since a lost delta is otherwise permanent. Carries no payload.
+const DOMAIN_RESYNC = "domain-resync";
+
+export function onResync(handler: () => void): Promise<UnlistenFn> {
+  return listen(DOMAIN_RESYNC, () => handler());
+}

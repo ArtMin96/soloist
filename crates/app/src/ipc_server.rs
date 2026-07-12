@@ -19,6 +19,9 @@ use soloist_ipc::{
 use tauri::{AppHandle, Manager};
 use tokio::net::{UnixListener, UnixStream};
 
+/// Backoff after a failed `accept`, so a persistent condition (e.g. FD exhaustion) cannot
+/// hot-loop the accept task while it keeps serving.
+const ACCEPT_RETRY_BACKOFF: Duration = Duration::from_millis(100);
 /// The port-readiness wait when the caller names no timeout.
 const DEFAULT_PORT_WAIT: Duration = Duration::from_secs(10);
 /// The longest a `wait_for_bound_port` blocks, regardless of the requested timeout. Kept
@@ -58,8 +61,13 @@ pub async fn serve(app: AppHandle) {
                 tauri::async_runtime::spawn(handle_connection(app.clone(), stream));
             }
             Err(err) => {
-                eprintln!("soloist: MCP IPC stopped accepting connections: {err}");
-                return;
+                // A transient accept error — FD pressure (EMFILE/ENFILE) in a PTY-heavy
+                // supervisor, or a peer that aborted before we accepted it — must not tear
+                // down the whole MCP front, or every agent sees "Soloist is not running"
+                // until the app restarts. Log, back off briefly so a persistent condition
+                // cannot hot-loop, and keep serving.
+                eprintln!("soloist: MCP IPC accept error (retrying): {err}");
+                tokio::time::sleep(ACCEPT_RETRY_BACKOFF).await;
             }
         }
     }

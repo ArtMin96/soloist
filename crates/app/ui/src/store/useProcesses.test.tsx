@@ -7,6 +7,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 vi.mock("@/api", () => ({
   procList: vi.fn(),
   onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
+  onResync: vi.fn(() => Promise.resolve(() => {})),
   procStart: vi.fn(),
   procStop: vi.fn(),
   procRestart: vi.fn(),

@@ -7,9 +7,10 @@
 //! [`crate::debounce::Debouncer`], and routes the restart through the supervisor's existing
 //! [`Supervisor::file_restart`] — so file-watch reuses one restart behaviour (the trust gate
 //! and the crash-tracking reset) rather than reimplementing it. It establishes watches at
-//! startup and re-syncs them on each [`DomainEvent::ProjectOpened`] and
-//! [`DomainEvent::ProjectRemoved`], so a project opened after launch is watched too and a
-//! removed project's OS watch is released. It holds a [`Weak`] reference to the supervisor and
+//! startup and re-syncs them on each [`DomainEvent::ProjectOpened`],
+//! [`DomainEvent::ProjectRemoved`], and [`DomainEvent::ConfigChanged`], so a project opened
+//! after launch is watched too, a removed project's OS watch is released, and a `solo.yml`
+//! reload that re-globs or adds a command takes effect without a re-open. It holds a [`Weak`] reference to the supervisor and
 //! ends when the event bus closes (app shutdown), like the crash reactor; command-only,
 //! trusted-only, and running-only all follow from the watch targets and the restart gate.
 
@@ -90,13 +91,16 @@ impl WatchReactor {
             let next_due = debouncers.values().filter_map(Debouncer::due_at).min();
             tokio::select! {
                 // The event bus drives two things: a closed bus means the facade dropped, so
-                // stop; a project opening or being removed (or a lag that may have hidden
-                // either) means the watch-eligible command set changed, so re-sync the
-                // watches. Changes themselves arrive on `changes_rx`, not here.
+                // stop; a project opening or being removed, a `solo.yml` reload (which can add,
+                // remove, or re-glob a watch-eligible command), or a lag that may have hidden
+                // any of them means the watch-eligible command set or its globs changed, so
+                // re-sync the watches. Changes themselves arrive on `changes_rx`, not here.
                 result = self.events.recv() => {
                     match result {
                         Err(RecvError::Closed) => break,
-                        Ok(DomainEvent::ProjectOpened { .. } | DomainEvent::ProjectRemoved { .. })
+                        Ok(DomainEvent::ProjectOpened { .. }
+                            | DomainEvent::ProjectRemoved { .. }
+                            | DomainEvent::ConfigChanged { .. })
                         | Err(RecvError::Lagged(_)) => {
                             let Some(supervisor) = self.supervisor.upgrade() else {
                                 break;
