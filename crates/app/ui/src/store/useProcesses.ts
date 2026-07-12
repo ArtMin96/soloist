@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   agentResume,
   onDomainEvent,
@@ -11,7 +11,7 @@ import {
   stackStop,
 } from "@/api";
 import { applyEvent } from "@/store/projection";
-import type { ProcessView } from "@/domain";
+import type { DomainEvent, ProcessView } from "@/domain";
 
 export interface ProcessStore {
   processes: ProcessView[];
@@ -39,10 +39,35 @@ export function useProcesses(): ProcessStore {
   const [processes, setProcesses] = useState<ProcessView[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // Applying a snapshot replaces the whole list, so an event folded in while the snapshot was
+  // in flight would be clobbered — and an unknown-id delta (a ProcessSpawned for a row the
+  // snapshot predates) is a silent no-op in the projection, making the loss permanent. So while
+  // a fetch is in flight events are buffered here and replayed on top of the snapshot (the folds
+  // are idempotent), and a generation guard drops a superseded fetch so overlapping refreshes
+  // (e.g. the post-trust refresh racing a spawn burst) resolve in order.
+  const fetchingRef = useRef(false);
+  const bufferRef = useRef<DomainEvent[]>([]);
+  const genRef = useRef(0);
+
   const fail = useCallback((reason: unknown) => setError(String(reason)), []);
   const clearError = useCallback(() => setError(null), []);
   const refresh = useCallback(() => {
-    procList().then(setProcesses).catch(fail);
+    const gen = ++genRef.current;
+    fetchingRef.current = true;
+    bufferRef.current = [];
+    procList()
+      .then((snapshot) => {
+        if (gen !== genRef.current) return; // a newer refresh superseded this one
+        const hydrated = bufferRef.current.reduce(applyEvent, snapshot);
+        bufferRef.current = [];
+        fetchingRef.current = false;
+        setProcesses(hydrated);
+      })
+      .catch((reason) => {
+        if (gen !== genRef.current) return;
+        fetchingRef.current = false;
+        fail(reason);
+      });
   }, [fail]);
 
   const start = useCallback((id: number) => void procStart(id).catch(fail), [fail]);
@@ -60,9 +85,15 @@ export function useProcesses(): ProcessStore {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    // Attach the listener before reading the snapshot, so an event emitted between the
-    // snapshot and the subscription cannot be lost (snapshot-then-deltas).
-    onDomainEvent((event) => setProcesses((prev) => applyEvent(prev, event)))
+    // Attach the listener before reading the snapshot, so an event emitted between the snapshot
+    // and the subscription cannot be lost (snapshot-then-deltas). While a fetch is in flight the
+    // event is buffered (replayed on top of the snapshot when it lands) rather than folded into a
+    // list the snapshot is about to replace.
+    const onEvent = (event: DomainEvent) => {
+      if (fetchingRef.current) bufferRef.current.push(event);
+      else setProcesses((prev) => applyEvent(prev, event));
+    };
+    onDomainEvent(onEvent)
       .then((stopListening) => {
         if (cancelled) {
           stopListening();
