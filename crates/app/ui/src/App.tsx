@@ -216,7 +216,8 @@ export default function App() {
                     <Suspense fallback={<div className="h-full w-full bg-background" />}>
                       {/* Keep-alive pool: every recently-viewed process keeps its terminal mounted
                           (xterm + live stream) so switching back is instant; only the selected one
-                          is visible, the rest sit hidden with their renderer paused. */}
+                          is visible, the rest sit hidden with both their renderer and their byte
+                          parsing paused, so a hidden pane costs no per-frame main-thread work. */}
                       {poolProcesses.map((process) => (
                         <TerminalPane
                           key={process.id}

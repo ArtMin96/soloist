@@ -12,10 +12,11 @@ import type { ProcessView } from "@/domain";
 
 export type TerminalState = "attaching" | "live" | "not-started";
 
-// Upper bound on bytes coalesced between animation frames. Frames stop while the window is
-// hidden or occluded, so without a cap a chatty process would grow the queue without limit;
-// oldest chunks are dropped first, mirroring the core's raw-scrollback ring. Sized to hold a
-// full scrollback replay (the core caps raw scrollback at 256 KiB) plus a burst of live output.
+// Upper bound on bytes coalesced between animation frames. Flushing stops while the pane is hidden
+// — a background pool pane, or the whole window occluded — so without a cap a chatty process would
+// grow the queue without limit; oldest chunks are dropped first, mirroring the core's raw-scrollback
+// ring. Sized to hold a full scrollback replay (the core caps raw scrollback at 256 KiB) plus a
+// burst of live output.
 const PENDING_CAP_BYTES = 512 * 1024;
 
 /** Stable API for in-terminal text search — backed by SearchAddon once mounted. */
@@ -28,9 +29,11 @@ export interface TerminalSearch {
 // Owns one xterm.js instance bound to the selected process: it replays the raw scrollback
 // then streams live PTY bytes (coalesced per animation frame so a chatty process can't
 // thrash the main thread), routes keystrokes back via `pty_write`, and keeps the PTY
-// winsize in step with the pane via `pty_resize`. Theme and terminal typography follow the
-// Appearance settings — applied to the live emulator on change, never recreating it.
-// Detaches deterministically on unmount.
+// winsize in step with the pane via `pty_resize`. While its pane is hidden in the keep-alive
+// pool the emulator stays mounted but pauses flushing, so a background process does no
+// per-frame parsing on the main thread; the backlog drains when the pane is shown. Theme and
+// terminal typography follow the Appearance settings — applied to the live emulator on change,
+// never recreating it. Detaches deterministically on unmount.
 export function useTerminal(process: ProcessView, visible = true) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -42,7 +45,16 @@ export function useTerminal(process: ProcessView, visible = true) {
   // disposing the emulator, so a superseded attachment can never write to the new terminal
   // or claim its animation frame.
   const cancelAttachRef = useRef<(() => void) | null>(null);
+  // Drains the current attachment's flush when its pane becomes visible again, writing the bytes
+  // that accumulated (bounded) while it was hidden. Null between attachments.
+  const resumeRef = useRef<(() => void) | null>(null);
   const [state, setState] = useState<TerminalState>("attaching");
+
+  // The latest visibility, read inside the attachment's byte handler so a hidden pool pane stops
+  // scheduling per-frame flushes — and the VT parsing they drive — without re-creating the
+  // attachment. Bytes still accumulate (bounded) and drain when the pane is shown again.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   const { appearance, dark } = useAppearance();
   // The latest appearance, read by the creation effect to seed the emulator without depending
@@ -75,6 +87,12 @@ export function useTerminal(process: ProcessView, visible = true) {
       for (const chunk of batch) term.write(chunk);
     };
 
+    // Called when this attachment's pane is shown: parse the backlog it accrued while hidden.
+    resumeRef.current = () => {
+      if (cancelled || frame || pending.length === 0) return;
+      frame = requestAnimationFrame(flush);
+    };
+
     const attachment = ptyAttach(id, (bytes) => {
       if (cancelled) return;
       pending.push(bytes);
@@ -83,7 +101,9 @@ export function useTerminal(process: ProcessView, visible = true) {
         pendingBytes -= pending[0].length;
         pending.shift();
       }
-      if (!frame) frame = requestAnimationFrame(flush);
+      // A hidden pool pane keeps accruing bytes (bounded above) but does not schedule a flush, so it
+      // runs no VT parsing on the main thread until it is shown again.
+      if (visibleRef.current && !frame) frame = requestAnimationFrame(flush);
     });
 
     cancelAttachRef.current = () => {
@@ -211,12 +231,13 @@ export function useTerminal(process: ProcessView, visible = true) {
     if (isActive(process.status)) syncSize();
   }, [process.status, syncSize]);
 
-  // Refit and focus when this pane becomes visible again. In the keep-alive pool a hidden terminal
-  // stays mounted (display:none) with its stream live but its host unmeasurable; on show, reconcile
-  // any size change that happened off-screen and take keyboard focus so the user can type
-  // immediately after switching to it.
+  // Refit, drain, and focus when this pane becomes visible again. In the keep-alive pool a hidden
+  // terminal stays mounted (display:none) with its stream live but its parsing paused and its host
+  // unmeasurable; on show, parse the bytes it accrued while hidden, reconcile any size change that
+  // happened off-screen, and take keyboard focus so the user can type immediately after switching.
   useEffect(() => {
     if (!visible) return;
+    resumeRef.current?.();
     syncSize();
     termRef.current?.focus();
   }, [visible, syncSize]);
