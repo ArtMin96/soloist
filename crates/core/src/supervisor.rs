@@ -606,6 +606,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_blocking_stdin_write_does_not_wedge_the_actor() {
+        // A child that has stopped reading its stdin blocks every PTY write forever. Input
+        // is applied off the select loop, so the stuck write stalls only the input pump —
+        // the actor stays responsive and a stop still tears the process down. Bounded by a
+        // timeout so a regression (input awaited inline again) fails here, not hangs.
+        let (spawner, write_blocking) = FakeSpawner::blocks_on_input();
+        let mut h = harness(spawner);
+        let id = terminal(&h.sup, "sleep 60");
+
+        h.sup.start(id).expect("start");
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Starting);
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Running);
+
+        // Send input and wait until the write is actually blocking, so the assertion below
+        // is a real test of responsiveness while a write is stuck, not a race.
+        h.sup
+            .write_stdin(id, b"typing into a deaf child".to_vec())
+            .await
+            .expect("write accepted into the bounded input channel");
+        write_blocking.notified().await;
+
+        // The fake exits on SIGTERM, so a working stop reaches Stopped with no grace elapse;
+        // a wedged actor would never process the stop and the timeout would fire.
+        assert!(h.sup.stop(id), "an active process is messaged");
+        let stopped = tokio::time::timeout(Duration::from_secs(5), async {
+            while next_to(&mut h.rx).await != ProcStatus::Stopped {}
+        })
+        .await;
+        assert!(
+            stopped.is_ok(),
+            "a stuck stdin write must not wedge the actor's stop path"
+        );
+        assert_eq!(status_of(&h.sup, id), ProcStatus::Stopped);
+    }
+
+    #[tokio::test]
     async fn an_untrusted_command_cannot_run_by_any_path() {
         let mut h = harness(FakeSpawner::exits_on_kill());
         let spec = command_spec("npm run dev", true);

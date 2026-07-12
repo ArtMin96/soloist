@@ -9,7 +9,7 @@
 //! across so its output history survives the restart.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::mpsc;
@@ -24,6 +24,7 @@ use crate::ports::{
 };
 use crate::process::ProcStatus;
 use crate::shellenv::ShellEnv;
+use crate::sync::lock;
 use crate::terminal::{ActorTerminal, PtyInput, Recorder, TerminalSignal, Terminals};
 
 use super::apply_transition;
@@ -157,10 +158,13 @@ async fn run(
         terminals,
         shell_env,
     } = ports;
-    let ActorTerminal {
-        mut input,
-        recorder,
-    } = terminals.open(id);
+    let ActorTerminal { input, recorder } = terminals.open(id);
+    // Input is applied off the select loop by a dedicated pump: a blocking write to a
+    // child that has stopped reading its stdin then stalls only the pump (typed input
+    // backpressures on the bounded channel), never this actor — so stop, restart, exit,
+    // and output draining stay responsive. The pump is torn down with the actor.
+    let current_io: CurrentIo = Arc::new(Mutex::new(None));
+    let _pump = PumpGuard(spawn_input_pump(input, current_io.clone()));
     // The supervisor has already moved this process into `Starting`.
     let mut status = ProcStatus::Starting;
 
@@ -209,6 +213,8 @@ async fn run(
         record_orphan(&runtime, &identity, &launch, pgid).await;
         registry.set_pgid(id, pgid);
         advance(&registry, &bus, id, &mut status, ProcStatus::Running, None);
+        // Hand the live child's I/O to the input pump; cleared below when it stops.
+        *lock(&current_io) = Some(Arc::from(io));
 
         // Once the child closes its output the branch is disabled (its `recv` would
         // otherwise return `None` forever and busy-spin the select).
@@ -225,16 +231,13 @@ async fn run(
                     Some(chunk) => publish_output(&recorder, id, &bus, chunk),
                     None => output_open = false,
                 },
-                message = input.recv() => {
-                    if let Some(message) = message {
-                        apply_input(io.as_ref(), message).await;
-                    }
-                }
             }
         };
         // The current child is exiting or about to be stopped — drop it as a sampling
-        // target. A restart re-records the fresh group's pgid on the next iteration.
+        // target and stop routing input to it. A restart re-records the fresh group's
+        // pgid and I/O on the next iteration.
         registry.set_pgid(id, None);
+        *lock(&current_io) = None;
 
         match outcome {
             Outcome::Exited(exit_status) => {
@@ -348,6 +351,36 @@ async fn apply_input(io: &dyn PtyIo, message: PtyInput) {
         PtyInput::Write(data) => io.write(&data).await,
         PtyInput::Resize(size) => io.resize(size).await,
     };
+}
+
+/// The shared slot holding the currently-live child's I/O handle. The actor swaps in the
+/// new handle on each (re)spawn and clears it when the child stops; the input pump reads
+/// it per message. A plain mutex the pump never holds across an `.await`.
+type CurrentIo = Arc<Mutex<Option<Arc<dyn PtyIo>>>>;
+
+/// Aborts the input pump when the actor's `run` ends, so a pump blocked on a stuck write
+/// to a child that stopped reading its stdin is torn down with the actor, not leaked.
+struct PumpGuard(JoinHandle<()>);
+
+impl Drop for PumpGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Spawns the per-actor input pump: it owns the process's input receiver and applies each
+/// message to whichever child is currently live, off the actor's select loop. A blocking
+/// PTY write therefore stalls only the pump — never stop, restart, exit, or output
+/// draining. Input that arrives with no live child has nowhere to go and is dropped.
+fn spawn_input_pump(mut input: mpsc::Receiver<PtyInput>, current_io: CurrentIo) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Some(message) = input.recv().await {
+            let io = lock(&current_io).clone();
+            if let Some(io) = io {
+                apply_input(io.as_ref(), message).await;
+            }
+        }
+    })
 }
 
 /// Applies one FSM transition, threading the actor's local status mirror (the source

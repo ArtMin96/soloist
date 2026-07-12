@@ -195,6 +195,20 @@ impl Supervisor {
         self.restart_policy.forget(id);
     }
 
+    /// Re-drives the crash auto-restart policy from the current registry snapshot: every
+    /// process still in [`ProcStatus::Crashed`] is offered to the policy again. Idempotent —
+    /// a process already handled has left `Crashed` and is skipped, so only one whose
+    /// `Crashed` delta the reactor missed is recovered. The reactor calls this when its event
+    /// stream lags, because a crashed process emits no further event: without a rescan a
+    /// dropped `Crashed` delta would strand an `auto_restart` command crashed forever.
+    fn rescan_crashed(&self) {
+        for view in self.registry.snapshot() {
+            if view.status == ProcStatus::Crashed {
+                self.auto_restart_after_crash(view.id);
+            }
+        }
+    }
+
     /// The self-healing reactor loop: watch the process event stream and drive the crash
     /// auto-restart policy. Returned as a future for the composition root to spawn on its
     /// runtime. It holds only a [`std::sync::Weak`] reference, so it ends when the
@@ -206,8 +220,16 @@ impl Supervisor {
             loop {
                 let event = match events.recv().await {
                     Ok(event) => event,
-                    // A lagging reactor missed events; the next crash re-drives it.
-                    Err(RecvError::Lagged(_)) => continue,
+                    // A lagging reactor missed events. A crashed process emits nothing more,
+                    // so re-drive the policy from the registry snapshot: any process left
+                    // stuck Crashed by a dropped delta is recovered.
+                    Err(RecvError::Lagged(_)) => {
+                        match weak.upgrade() {
+                            Some(sup) => sup.rescan_crashed(),
+                            None => break,
+                        }
+                        continue;
+                    }
                     Err(RecvError::Closed) => break,
                 };
                 let Some(sup) = weak.upgrade() else { break };
@@ -382,6 +404,43 @@ mod tests {
             banners >= 1,
             "a restart banner separates the runs: {rendered:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_lagged_reactor_recovers_a_stuck_crashed_process_via_rescan() {
+        // Simulates the reactor missing a Crashed delta (broadcast lag): the self-healing
+        // loop is never started, so nothing auto-restarts the crash. Driving the rescan the
+        // Lagged arm runs must still relaunch a still-Crashed auto_restart command.
+        let mut h = harness(FakeSpawner::exits_with_code(1));
+        let id = register_trusted_auto_restart(&h);
+        h.sup.start(id).expect("start");
+
+        // Consume the lifecycle on our own receiver until the process is Crashed.
+        loop {
+            match h.rx.recv().await {
+                Ok(DomainEvent::ProcessStatusChanged {
+                    id: got,
+                    to: ProcStatus::Crashed,
+                    ..
+                }) if got == id => break,
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => panic!("event bus closed"),
+            }
+        }
+        assert_eq!(status_of(&h.sup, id), ProcStatus::Crashed);
+
+        // The recovery path a lagged reactor takes: rescan relaunches the stranded process.
+        h.sup.rescan_crashed();
+        loop {
+            match h.rx.recv().await {
+                Ok(DomainEvent::RestartScheduled { id: got, .. }) if got == id => break,
+                Ok(DomainEvent::RestartExhausted { id: got }) if got == id => {
+                    panic!("a first crash must be restarted, not exhausted")
+                }
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => panic!("event bus closed"),
+            }
+        }
     }
 
     #[tokio::test]
