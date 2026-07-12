@@ -257,7 +257,10 @@ async fn a_config_reload_that_adds_a_watched_command_is_watched() {
     // Nothing watch-eligible at startup.
     spawn_reactor(&s);
     yield_many().await;
-    assert!(s.watcher.watched().is_empty(), "nothing to watch at startup");
+    assert!(
+        s.watcher.watched().is_empty(),
+        "nothing to watch at startup"
+    );
 
     // A solo.yml reload adds a watch-eligible command: the command is registered (as the
     // config engine's reload does) and the reload is announced with ConfigChanged. The reactor

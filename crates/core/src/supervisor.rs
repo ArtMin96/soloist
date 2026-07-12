@@ -736,7 +736,10 @@ mod tests {
         assert_eq!(next_to(&mut h.rx).await, ProcStatus::Starting);
         assert_eq!(next_change(&mut h.rx).await, (ProcStatus::Crashed, None));
 
-        let rendered = h.sup.rendered(id).expect("the crashed process kept its terminal");
+        let rendered = h
+            .sup
+            .rendered(id)
+            .expect("the crashed process kept its terminal");
         let text = rendered.lines.join("\n");
         assert!(
             text.contains("failed to start") && text.contains("no such file or directory"),

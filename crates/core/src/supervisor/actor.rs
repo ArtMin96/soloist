@@ -211,7 +211,8 @@ async fn run(
                         // Surface *why* the spawn failed (missing binary, bad working dir, …) in
                         // the process's own terminal, so the crash is diagnosable instead of an
                         // empty pane. Then crash, as before.
-                        recorder.record(format!("soloist: failed to start: {err}\r\n").into_bytes());
+                        recorder
+                            .record(format!("soloist: failed to start: {err}\r\n").into_bytes());
                         advance(&registry, &bus, id, &mut status, ProcStatus::Crashed, None);
                         locks.release_all(id);
                         return;
