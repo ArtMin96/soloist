@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { appearance as readAppearance, setAppearance as writeAppearance } from "@/api";
 import {
   applyDarkClass,
@@ -69,9 +69,13 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     [adopt],
   );
 
-  return (
-    <AppearanceContext value={{ appearance, dark, setAppearance: save }}>
-      {children}
-    </AppearanceContext>
+  // Memoized so a provider re-render (theme, interface scale, or OS light/dark change) only
+  // propagates to consumers when the value they read actually changes — otherwise the fresh
+  // object identity would re-render every consumer, including each live terminal, on every toggle.
+  const value = useMemo(
+    () => ({ appearance, dark, setAppearance: save }),
+    [appearance, dark, save],
   );
+
+  return <AppearanceContext value={value}>{children}</AppearanceContext>;
 }

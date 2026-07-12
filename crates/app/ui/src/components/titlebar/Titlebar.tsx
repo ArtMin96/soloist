@@ -31,10 +31,14 @@ export function Titlebar({ appName, appVersion, onOpenProject, onLaunchAgent }: 
   };
 
   return (
+    // `translateZ(0)` promotes the strip to its own compositing layer so a theme switch repaints it
+    // on the compositor thread alongside the terminal and sidebar (both already composited), instead
+    // of the deferred main-thread root-layer flush that made it recolor seconds after the body on
+    // WebKitGTK. A no-op transform: it doesn't move the strip or affect drag-region hit-testing.
     <header
       {...DRAG}
       onDoubleClick={onDoubleClick}
-      className="flex h-11 shrink-0 items-center gap-2.5 border-b bg-sidebar pr-2 pl-3"
+      className="flex h-11 shrink-0 items-center gap-2.5 border-b bg-sidebar pr-2 pl-3 [transform:translateZ(0)]"
     >
       <img
         src="/logo.png"

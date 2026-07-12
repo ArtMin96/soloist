@@ -78,6 +78,11 @@ function Probe({ process }: { process: ProcessView }) {
   return <div ref={hostRef} />;
 }
 
+function VisibilityProbe({ process, visible }: { process: ProcessView; visible: boolean }) {
+  const { hostRef } = useTerminal(process, visible);
+  return <div ref={hostRef} />;
+}
+
 type ChunkChannel = Channel<Uint8Array>;
 
 interface AttachCall {
@@ -202,5 +207,62 @@ describe("useTerminal attach lifecycle", () => {
     // Every issued attachment is eventually detached with its own token, so a late detach
     // can never target a newer attachment.
     expect([...detached].sort((a, b) => a - b)).toEqual(attaches.map((a) => a.token));
+  });
+
+  it("detaches even when unmounted before the attachment resolves", async () => {
+    // A pooled pane can be evicted before its pty_attach promise resolves; the token must still be
+    // detached once it arrives, or the forwarder leaks with no token left to clear it.
+    const view = render(<Probe process={PROCESS} />);
+    // Unmount immediately — the invoke has registered the attachment (so a token exists) but its
+    // promise has not resolved yet.
+    view.unmount();
+    await settle();
+
+    expect(attaches).toHaveLength(1);
+    expect(detached).toEqual([attaches[0].token]);
+  });
+});
+
+describe("useTerminal hidden-pane pause", () => {
+  // A hidden pool pane keeps its stream live but must not run the emulator's VT parser on the main
+  // thread: bytes accumulate off the frame loop and are parsed only once the pane is shown. This is
+  // what keeps a pool of chatty background processes from thrashing the foreground terminal.
+  it("does not parse bytes while hidden, then drains the backlog on show", async () => {
+    const view = render(<VisibilityProbe process={PROCESS} visible={false} />);
+    await settle();
+    expect(attaches).toHaveLength(1);
+
+    await act(async () => {
+      deliver(attaches[0], "HIDDEN-OUTPUT\r\n");
+    });
+    await settle();
+
+    const term = FakeTerminal.instances.find((t) => !t.disposed) as InstanceType<
+      typeof FakeTerminal
+    >;
+    // Hidden: the bytes were queued but never written to the emulator (no per-frame parsing).
+    expect(writtenText(term)).not.toContain("HIDDEN-OUTPUT");
+
+    await act(async () => {
+      view.rerender(<VisibilityProbe process={PROCESS} visible={true} />);
+    });
+    await settle();
+    // Shown: the accumulated backlog drains into the emulator, so no output is lost.
+    expect(writtenText(term)).toContain("HIDDEN-OUTPUT");
+  });
+
+  it("parses bytes on the frame loop while visible", async () => {
+    render(<VisibilityProbe process={PROCESS} visible={true} />);
+    await settle();
+
+    await act(async () => {
+      deliver(attaches[0], "VISIBLE-OUTPUT\r\n");
+    });
+    await settle();
+
+    const term = FakeTerminal.instances.find((t) => !t.disposed) as InstanceType<
+      typeof FakeTerminal
+    >;
+    expect(writtenText(term)).toContain("VISIBLE-OUTPUT");
   });
 });

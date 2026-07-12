@@ -1,7 +1,7 @@
 ---
 name: soloist-diagnose
 description: Detect, fix, and re-verify performance, quality, supply-chain, and runtime issues across the whole Soloist app — the Rust core + Tauri adapters and the React/TS frontend — using the project's own detection tools. Use when the user wants to optimize, speed up, audit, health-check, or "find and fix anything broken or slow" in Soloist. Runs the real gates (cargo-deny, clippy, the soak leak-gate, bundle/bloat measurement) and delegates React component issues to the react-doctor skill, then applies fixes and re-runs each gate to confirm green. It changes code, but stays inside the architecture and the locked non-changes — it measures before optimizing, never weakens a test to pass, accepts an unfixable advisory only with a written reason, and never touches PROGRESS.md unless asked.
-version: 1.0.1
+version: 1.1.0
 argument-hint: "[scope — 'deps', 'lints', 'perf', 'leaks', 'frontend', or blank for a full sweep]"
 allowed-tools: Bash(just *) Bash(cargo *)
 ---
@@ -33,6 +33,11 @@ non-negotiable.
   a fix that uses it (§4). Invoke the matching `tauri-*` skill for Tauri surfaces.
 - **Leave the ledger alone.** Do not edit `PROGRESS.md` (or any `plan/` doc) unless the user explicitly
   asks. Report your changes in chat instead.
+- **Consult the references first for perf/rendering work.** `references/webkitgtk-perf.md` records the
+  WebKitGTK gotchas this project already hit and the perf issues already fixed (theme lag, terminal
+  switching, metrics re-render storm). Read it before diagnosing any slow / janky / laggy / rendering
+  issue so you apply the known fix and never re-derive or re-fix — it points to the full report,
+  `plan/performance-native-feel.md`.
 
 ## The layers and their gates
 
@@ -56,6 +61,9 @@ Detect: `cargo clippy --workspace --all-targets -- -D warnings` (includes the `c
 Fix: address each warning at the cause — needless clones in hot paths (the PTY read loop, event fan-out),
 inefficient patterns, dead code. Keep changes minimal and idiomatic to the surrounding code.
 Re-verify: clippy exits 0; `cargo fmt --check` is clean; the relevant `cargo test` passes.
+Note: UI/rendering perf (WebKitGTK jank, React re-renders, theme/terminal lag) is **not** clippy — see
+`references/webkitgtk-perf.md` for the known traps and already-applied fixes, and delegate React
+component specifics to §5.
 
 ### 3. Size — `just bloat` / `just bundle-size`
 

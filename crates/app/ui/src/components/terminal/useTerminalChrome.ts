@@ -11,10 +11,10 @@ export interface TerminalChrome {
   ringing: boolean;
 }
 
-// Tracks the selected process's terminal chrome from the low-rate domain events the PTY
-// emits: the OSC title it sets and the bell it rings. Scoped to one process id (the pane
-// remounts on selection), so it resets cleanly when the selection changes. Kept separate
-// from `useTerminal`, which owns the high-throughput byte stream and the emulator.
+// Tracks a process's terminal chrome from the low-rate domain events the PTY emits: the OSC
+// title it sets and the bell it rings. Scoped to one process id and re-subscribed when the id
+// changes, so each pooled pane tracks only its own process. Kept separate from `useTerminal`,
+// which owns the high-throughput byte stream and the emulator.
 export function useTerminalChrome(id: number): TerminalChrome {
   const [title, setTitle] = useState<string | null>(null);
   const [ringing, setRinging] = useState(false);
