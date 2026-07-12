@@ -444,3 +444,36 @@ user's one-line opt-in.
 **Effect on parity:** H4 verifies unchanged (`soloist-cli status` prints the table); the
 matrix row carries the note. If a future release wants the short name, a dispatcher or a
 rename decision gets its own entry here.
+
+---
+
+## D-15 — `whoami` omits the OS pid, and there is no manual bind tool 🟢
+
+**Introduced:** MCP progressive-disclosure pass, 2026-07-12 (source: Aaron Francis,
+`x.com/aarondfrancis/status/2075571055041675691`, 2026-07-10; post-v0.8.2 primary evidence).
+
+**Solo (ref `plan/05` §7 + the tweet's screenshot):** Solo's `whoami` reports the process's
+**OS `pid`** (e.g. `9486`) alongside its internal process id, and §7's tool catalog lists
+`bind_session_process` as an MCP **tool** an agent calls to bind its session.
+
+**Soloist:**
+- `whoami` reports the internal `ProcessId`, the process name/kind/status, the actor (`origin`),
+  and the effective project by name — but **not the OS pid**. `ProcessView` (the canonical
+  process projection) does not carry the OS pid, and the agent already knows its own; surfacing
+  it would mean plumbing a raw pid through the read model for no operational gain.
+- There is **no manual bind tool**. A Soloist-launched process's `soloist-mcp` client sends the
+  bind **automatically on connect** (authenticated by `SO_PEERCRED`, D-6); an external caller uses
+  `register_agent`. The agent guide (and the `AGENTS.md` section it writes) teaches this — the
+  earlier guide text told agents to *call* `bind_session_process`, a tool the surface never
+  exposed, so an agent following it literally would have errored. That text is fixed.
+
+**Rationale:** keep the read model lean and the agent-facing guide truthful. Auto-bind is the
+correct ergonomics (the agent should not have to bind itself) and the authenticity check
+(D-6) requires the binding to come from the connecting peer, not a self-asserted tool call. The
+OS pid is a detail the agent owns about itself, not a coordination fact other agents need.
+
+**Effect on parity:** F12/identity Verify is unaffected — `whoami` still reports which process and
+project a session acts on, now with names. The enriched payload, the auto-bind clarification, and
+the related progressive-disclosure additions (topic `help`, init instructions, `mcp_tools_summary`,
+featured `tools/list` order, decaying next-tool suggestions, and the group-level-only tool disable)
+are recorded as decisions in `plan/05 §12`.

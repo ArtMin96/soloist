@@ -40,10 +40,30 @@ impl ProjectView {
     }
 }
 
+/// A project's identity as a lean reference — its id and resolved display name, without the
+/// root or the (fs-loaded) icon. This is what `whoami` reports for the caller's effective
+/// project, so an agent sees a readable project name and not just an id; the name is resolved
+/// by the same [`display_name`] rule the full [`ProjectView`] uses, so the two never disagree.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectRef {
+    pub id: ProjectId,
+    pub name: String,
+}
+
+impl ProjectRef {
+    /// The lean reference for a durable record.
+    pub fn from_record(record: &ProjectRecord) -> Self {
+        Self {
+            id: record.id,
+            name: display_name(record),
+        }
+    }
+}
+
 /// A project's display name: its `solo.yml` `name:` if set and non-blank, else the final
 /// component of its (canonical, absolute) root path — falling back to the whole path only
 /// for a root with no final component.
-fn display_name(record: &ProjectRecord) -> String {
+pub(crate) fn display_name(record: &ProjectRecord) -> String {
     record
         .name
         .as_deref()

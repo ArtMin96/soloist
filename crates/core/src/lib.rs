@@ -94,8 +94,9 @@ pub use ports::{
 pub use portscan::{wait_for_port, NoopPortProbe, PortProbe, PortScanner, WaitForPortError};
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView, Readiness};
 pub use projects::{
-    ConfigStatus, LoadProjectError, ProjectCommandView, ProjectError, ProjectLoad, ProjectService,
-    ProjectSettingsPage, ProjectView, Projects, ReloadError, RemoveProjectError, Visibility,
+    ConfigStatus, LoadProjectError, ProjectCommandView, ProjectError, ProjectLoad, ProjectRef,
+    ProjectService, ProjectSettingsPage, ProjectView, Projects, ReloadError, RemoveProjectError,
+    Visibility,
 };
 pub use settings::{
     AgentSettings, Appearance, Binding, FontScale, FontWeight, HotkeyAction, HotkeyBindingView,
@@ -107,8 +108,9 @@ pub use settings::{
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};
 pub use support::{
-    agent_guide, Feedback, FeedbackEntry, FeedbackError, FeedbackRepo, IntegrationFile,
-    IntegrationWrite, IntegrationWriteError, NoopFeedbackRepo,
+    agent_guide, help_overview, help_topic, onboarding_hint, Feedback, FeedbackEntry,
+    FeedbackError, FeedbackRepo, IntegrationFile, IntegrationWrite, IntegrationWriteError,
+    NoopFeedbackRepo,
 };
 pub use terminal::{LogLine, PtyChunk, RenderedScreen};
 pub use trust::{Trust, TrustStore};

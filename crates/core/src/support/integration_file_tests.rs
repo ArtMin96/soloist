@@ -16,7 +16,7 @@ fn a_missing_file_is_created_with_just_the_section() {
     let contents = read(&dir, IntegrationFile::AgentsMd);
     assert!(contents.starts_with(SECTION_BEGIN));
     assert!(contents.trim_end().ends_with(SECTION_END));
-    assert!(contents.contains("bind_session_process"));
+    assert!(contents.contains("Identity & binding"));
 }
 
 #[test]

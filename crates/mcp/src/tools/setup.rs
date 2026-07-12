@@ -8,20 +8,44 @@
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
-use soloist_core::{agent_guide, IntegrationFile};
+use soloist_core::{help_overview, help_topic, IntegrationFile};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
-use crate::args::{SetupAgentIntegrationArg, SubmitFeedbackArg};
+use crate::args::{HelpArg, SetupAgentIntegrationArg, SubmitFeedbackArg};
 use crate::server::SoloistMcp;
 use crate::tools::reply::{app_error, structured, unexpected};
 
 #[tool_router(router = setup_router, vis = "pub(crate)")]
 impl SoloistMcp {
     #[tool(
-        description = "Explain how to work inside Soloist: identity and binding (SOLOIST_PROCESS_ID, bind_session_process, register_agent, whoami), project scope, the trust gate, waking up via fire-when-idle timers instead of polling, and coordination etiquette. Call this first if you are unsure how Soloist works."
+        description = "Learn how to work inside Soloist. Call with no topic for a compact capability overview and the list of topics; call with a topic (e.g. timers, scope, trust) or an alias (ports, services, status, \"how do I\", yaml) for detail on one area. Answered from the server itself, so it works even while Soloist is not running. Call this first if you are unsure how Soloist works."
     )]
-    pub(crate) async fn help(&self) -> Result<CallToolResult, ErrorData> {
-        structured(&serde_json::json!({ "help": agent_guide() }))
+    pub(crate) async fn help(
+        &self,
+        Parameters(HelpArg { topic }): Parameters<HelpArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match topic.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+            // No topic: the capability overview and the topic menu.
+            None => structured(&serde_json::json!({ "help": help_overview() })),
+            // A known topic: just that section. An unknown one falls back to the overview, with the
+            // query echoed so the agent sees why, rather than erroring on a guess.
+            Some(topic) => match help_topic(topic) {
+                Some(section) => {
+                    structured(&serde_json::json!({ "topic": topic, "help": section }))
+                }
+                None => structured(&serde_json::json!({
+                    "unknown_topic": topic,
+                    "help": help_overview(),
+                })),
+            },
+        }
+    }
+
+    #[tool(
+        description = "List the currently enabled Soloist MCP tools, grouped by category, as names with one-line summaries and no input schemas — a compact map of the whole surface. Use it to see everything available without the weight of a full tool listing."
+    )]
+    pub(crate) async fn mcp_tools_summary(&self) -> Result<CallToolResult, ErrorData> {
+        structured(&self.tools_summary())
     }
 
     #[tool(

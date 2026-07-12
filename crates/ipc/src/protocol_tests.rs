@@ -4,7 +4,7 @@ use crate::error::IpcError;
 use soloist_core::{
     AcquireOutcome, AgentKind, AgentTool, ExportedPromptTemplate, FeedbackEntry, FireCond,
     IntegrationFile, IntegrationWrite, LeaseView, Origin, ProcStatus, ProcessId, ProcessKind,
-    ProcessView, ProjectId, ProjectView, PromptMode, PromptScope, PromptTemplateId,
+    ProcessView, ProjectId, ProjectRef, ProjectView, PromptMode, PromptScope, PromptTemplateId,
     PromptTemplateSummary, PromptTemplateView, Readiness, SessionId, SetWhenIdleOutcome,
     StartSummary, TimerId, TimerStatus, TimerView, Whoami,
 };
@@ -218,10 +218,14 @@ fn every_response_variant_round_trips_through_json() {
     let responses = [
         IpcResponse::Whoami(Whoami {
             session: SessionId::from_raw(1),
-            origin: Origin::Unbound,
-            bound_process: None,
+            origin: Origin::Process(ProcessId::from_raw(7)),
+            // Populated so the enriched process and project projections round-trip in the envelope.
+            bound_process: Some(view.clone()),
             selected_process: None,
-            effective_project: None,
+            effective_project: Some(ProjectRef {
+                id: ProjectId::from_raw(1),
+                name: "storefront".into(),
+            }),
         }),
         IpcResponse::Acked,
         IpcResponse::Projects(vec![summary.clone()]),

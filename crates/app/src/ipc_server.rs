@@ -521,8 +521,7 @@ fn project_status(facade: &Facade, session: SessionId, project: Option<ProjectId
     let target = match project {
         Some(project) => project,
         None => facade
-            .whoami(session)
-            .effective_project
+            .effective_project(session)
             .ok_or(IpcError::NoProjectScope)?,
     };
     let view = facade

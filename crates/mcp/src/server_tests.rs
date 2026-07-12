@@ -1,12 +1,13 @@
 use super::*;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
+use rmcp::ServerHandler;
 use soloist_core::{
     AcquireOutcome, AgentKind, AgentTool, Comment, FireCond, LeaseView, LinkContent, McpToolGroups,
-    Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, PromptMode, Readiness,
-    ScratchpadDoc, ScratchpadId, ScratchpadSummary, ScratchpadView, SessionId, SetWhenIdleOutcome,
-    StartSummary, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary,
-    TodoView, Whoami,
+    Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, PromptMode,
+    Readiness, ScratchpadDoc, ScratchpadId, ScratchpadSummary, ScratchpadView, SessionId,
+    SetWhenIdleOutcome, StartSummary, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus,
+    TodoSummary, TodoView, Whoami,
 };
 use soloist_core::{
     FeedbackEntry, IntegrationFile, IntegrationWrite, PromptScope, PromptTemplateId,
@@ -21,7 +22,7 @@ use std::path::PathBuf;
 use tokio::net::UnixListener;
 
 use crate::args::{
-    IntegrationFileArg, LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, PromptScopeArg,
+    HelpArg, IntegrationFileArg, LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, PromptScopeArg,
     PromptTemplateCreateArg, PromptTemplateUpdateArg, RenameArg, ScratchpadArchiveArg,
     ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg, SelectProjectArg,
     SendInputArg, SetupAgentIntegrationArg, SpawnAgentArg, SubmitFeedbackArg, TimerArg,
@@ -157,6 +158,7 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "lock_release",
     // tools/setup.rs
     "help",
+    "mcp_tools_summary",
     "submit_solo_feedback",
     "setup_agent_integration",
     // tools/timer.rs
@@ -234,6 +236,82 @@ fn served_router_exposes_exactly_the_expected_tool_surface() {
         served, expected,
         "the served MCP tool surface drifted from the intended set"
     );
+}
+
+/// `tools/list` leads with the featured starter pack, in order, rather than rmcp's alphabetical
+/// default — and reordering neither drops nor duplicates a tool.
+#[test]
+fn tools_list_features_identity_and_help_first() {
+    let handler = handler(PathBuf::from("unused.sock"));
+    let ordered: Vec<String> = handler
+        .featured_tool_list()
+        .into_iter()
+        .map(|tool| tool.name.into_owned())
+        .collect();
+
+    assert_eq!(&ordered[..3], &["whoami", "help", "mcp_tools_summary"]);
+    assert_eq!(ordered.len(), handler.served_tool_count());
+    assert_eq!(
+        ordered.iter().collect::<BTreeSet<_>>().len(),
+        ordered.len(),
+        "no tool is duplicated by the reorder"
+    );
+}
+
+/// Every featured name is a real served tool, so a rename or typo in FEATURED_TOOLS cannot leave a
+/// dangling entry that silently never surfaces.
+#[test]
+fn every_featured_tool_is_actually_served() {
+    let served = served_tools(&handler(PathBuf::from("unused.sock")));
+    for name in FEATURED_TOOLS {
+        assert!(
+            served.contains(*name),
+            "featured tool {name} must be served"
+        );
+    }
+}
+
+/// A successful tool result gains a contextual next-tool suggestion, appended as a text block that
+/// leaves the structured data intact — and the suggestion decays after its budget so a repeated
+/// call stops re-spending tokens on it.
+#[test]
+fn a_successful_result_gains_a_decaying_next_tool_suggestion() {
+    let handler = handler(PathBuf::from("unused.sock"));
+    let ok = || CallToolResult::structured(serde_json::json!({ "ok": true }));
+    let suggestion_of = |result: &CallToolResult| {
+        result
+            .content
+            .iter()
+            .filter_map(|content| content.as_text())
+            .find_map(|text| text.text.strip_prefix("Next: ").map(str::to_owned))
+    };
+
+    // First spawn_agent result carries the timer nudge, and the structured data is untouched.
+    let first = handler.with_suggestion("spawn_agent", ok());
+    assert_eq!(
+        first.structured_content,
+        Some(serde_json::json!({ "ok": true }))
+    );
+    assert!(suggestion_of(&first)
+        .expect("a suggestion")
+        .contains("timer_fire_when_idle_any"));
+
+    // It decays: the second still shows (budget 2), the third is silent.
+    let _second = handler.with_suggestion("spawn_agent", ok());
+    let third = handler.with_suggestion("spawn_agent", ok());
+    assert!(suggestion_of(&third).is_none());
+}
+
+/// A failed result never gains a suggestion — a nudge only makes sense after the action succeeded.
+#[test]
+fn an_error_result_is_left_without_a_suggestion() {
+    let handler = handler(PathBuf::from("unused.sock"));
+    let error = handler.with_suggestion("spawn_agent", CallToolResult::error(vec![]));
+    assert!(error
+        .content
+        .iter()
+        .filter_map(|content| content.as_text())
+        .all(|text| !text.text.starts_with("Next: ")));
 }
 
 /// The default surface serves every core and on-by-default feature group, but gates Key-Value off
@@ -338,15 +416,18 @@ fn disabling_a_feature_group_hides_only_its_tools() {
 }
 
 #[tokio::test]
-async fn whoami_projects_the_resolved_identity() {
+async fn whoami_projects_the_resolved_identity_and_the_enabled_tool_count() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
     let who = Whoami {
         session: SessionId::from_raw(1),
-        origin: Origin::Unbound,
-        bound_process: None,
+        origin: Origin::Process(ProcessId::from_raw(7)),
+        bound_process: Some(sample_view(7)),
         selected_process: None,
-        effective_project: None,
+        effective_project: Some(ProjectRef {
+            id: ProjectId::from_raw(1),
+            name: "storefront".into(),
+        }),
     };
     let canned = who.clone();
     spawn_fake_app(socket.clone(), move |_request| {
@@ -354,8 +435,22 @@ async fn whoami_projects_the_resolved_identity() {
     });
 
     let result = handler(socket).whoami().await.expect("whoami succeeds");
-    let back: Whoami = serde_json::from_value(structured_of(result)).expect("decode whoami");
+    let value = structured_of(result);
+
+    // The core's identity survives the round-trip (serde ignores the extra mcp_tools field).
+    let back: Whoami = serde_json::from_value(value.clone()).expect("decode whoami");
     assert_eq!(back, who);
+
+    // The server attaches its own enabled-tool visibility, computed from its composed router.
+    let mcp_tools = &value["mcp_tools"];
+    assert_eq!(mcp_tools["enabled"], true);
+    assert!(
+        mcp_tools["server_enabled_tool_count"]
+            .as_u64()
+            .expect("a tool count")
+            > 0
+    );
+    assert!(mcp_tools["visibility_note"].is_string());
 }
 
 #[tokio::test]
@@ -1704,18 +1799,128 @@ async fn todo_comment_list_projects_the_comments() {
 
 /// `help` answers from the core's embedded guide with no app round-trip — nothing listens on
 /// the socket here, and it still succeeds. That is deliberate: it must work when Soloist is
-/// down, which is when an agent most needs it.
+/// down, which is when an agent most needs it. With no topic it returns the compact overview.
 #[tokio::test]
-async fn help_returns_the_guide_without_the_app() {
+async fn help_returns_the_overview_without_the_app() {
     let handler = handler(PathBuf::from("nothing-listens-here.sock"));
 
-    let result = handler.help().await.expect("help succeeds with no app");
+    let result = handler
+        .help(Parameters(HelpArg::default()))
+        .await
+        .expect("help succeeds with no app");
     let help = structured_of(result)["help"]
         .as_str()
         .expect("a help string")
         .to_owned();
-    assert!(help.contains("bind_session_process"));
-    assert!(help.contains("lock_acquire"));
+    // The overview advertises the first-run tool and the topic menu.
+    assert!(help.contains("whoami"));
+    assert!(help.contains("`timers`"));
+}
+
+/// `help(topic=…)` returns just that section, and resolves an alias to the same one. An unknown
+/// topic falls back to the overview with the query echoed, rather than erroring on a guess.
+#[tokio::test]
+async fn help_resolves_a_topic_and_its_alias_and_falls_back() {
+    let handler = handler(PathBuf::from("nothing-listens-here.sock"));
+    let help_for = |topic: &str| {
+        let handler = handler.clone();
+        let topic = topic.to_owned();
+        async move {
+            let result = handler
+                .help(Parameters(HelpArg { topic: Some(topic) }))
+                .await
+                .expect("help succeeds");
+            structured_of(result)
+        }
+    };
+
+    // The canonical key and an alias both resolve to the locks section.
+    let by_key = help_for("locks").await;
+    assert_eq!(by_key["topic"], "locks");
+    assert!(by_key["help"]
+        .as_str()
+        .expect("body")
+        .contains("lock_acquire"));
+    let by_alias = help_for("lease").await;
+    assert_eq!(by_alias["help"], by_key["help"]);
+
+    // An unknown topic echoes the query and falls back to the overview.
+    let unknown = help_for("nonsense").await;
+    assert_eq!(unknown["unknown_topic"], "nonsense");
+    assert!(unknown["help"]
+        .as_str()
+        .expect("overview")
+        .contains("`timers`"));
+}
+
+/// `mcp_tools_summary` returns the served tools grouped by category, each as a name and a one-line
+/// summary with no input schema, and its count matches the served surface.
+#[tokio::test]
+async fn mcp_tools_summary_categorizes_the_served_tools_without_schemas() {
+    let handler = handler(PathBuf::from("unused.sock"));
+    let value = structured_of(handler.mcp_tools_summary().await.expect("summary succeeds"));
+
+    assert_eq!(
+        value["tool_count"].as_u64().expect("a count") as usize,
+        handler.served_tool_count()
+    );
+    let categories = value["categories"].as_array().expect("categories");
+    let has = |category: &str, tool: &str| {
+        categories.iter().any(|entry| {
+            entry["category"] == category
+                && entry["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|t| t["name"] == tool)
+        })
+    };
+    // whoami is categorized under identity; the summary tool lists itself under setup.
+    assert!(has("Identity & session", "whoami"));
+    assert!(has("Setup & support", "mcp_tools_summary"));
+
+    // A tool entry carries a name and a one-line summary, and no input schema.
+    let sample = &categories[0]["tools"][0];
+    assert!(sample["name"].is_string());
+    assert!(sample["summary"].is_string());
+    assert!(sample.get("inputSchema").is_none() && sample.get("input_schema").is_none());
+}
+
+/// A disabled feature group's tools are absent from the summary — the same gating `tools/list` sees.
+#[tokio::test]
+async fn mcp_tools_summary_omits_a_disabled_feature_group() {
+    // Key-Value is off by default.
+    let handler = handler_with_groups(McpToolGroups::default());
+    let value = structured_of(handler.mcp_tools_summary().await.expect("summary succeeds"));
+    let names: Vec<String> = value["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|entry| entry["tools"].as_array().unwrap())
+        .map(|tool| tool["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        !names.iter().any(|name| name.starts_with("kv_")),
+        "disabled Key-Value tools are excluded"
+    );
+    assert!(
+        names.iter().any(|name| name == "scratchpad_list"),
+        "an enabled group's tools remain"
+    );
+}
+
+/// The initialization handshake advertises the tool capability, identifies this binary (not the
+/// rmcp crate the default reports), and carries the first-run onboarding path so a client sees it
+/// before any tool call.
+#[test]
+fn get_info_advertises_tools_identity_and_the_onboarding_path() {
+    let info = handler(PathBuf::from("unused.sock")).get_info();
+
+    assert!(info.capabilities.tools.is_some(), "tools are advertised");
+    assert_eq!(info.server_info.name, "soloist-mcp");
+    let instructions = info.instructions.expect("onboarding instructions");
+    assert!(instructions.contains("whoami"));
+    assert!(instructions.contains("help"));
 }
 
 #[tokio::test]

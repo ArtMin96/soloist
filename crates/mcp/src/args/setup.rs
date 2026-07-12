@@ -1,7 +1,17 @@
-//! Parameter structs for the setup/support tools: feedback and the integration-guide write.
+//! Parameter structs for the setup/support tools: the guide lookup, feedback, and the
+//! integration-guide write.
 
 use rmcp::schemars;
 use serde::Deserialize;
+
+/// Arguments for the `help` tool. A topic is optional: omit it for the compact capability
+/// overview, or name a topic (or one of its aliases) for detail on one area.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub(crate) struct HelpArg {
+    /// The topic to explain — a key like `timers` or an alias like `ports`, `status`, or
+    /// `how do I`. Omit for the capability overview and the list of topics.
+    pub(crate) topic: Option<String>,
+}
 
 /// Arguments for submitting feedback.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

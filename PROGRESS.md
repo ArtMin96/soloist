@@ -27,6 +27,50 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **MCP progressive-disclosure pass (2026-07-12; owner-requested, sourced from Aaron Francis's
+  Solo write-up `x.com/aarondfrancis/status/2075571055041675691`, 2026-07-10 — post-v0.8.2 primary
+  evidence).** Brought the Soloist MCP surface up to the tweet's progressive-disclosure design and
+  fixed a real guide bug found while verifying it. **Six features + one bug fix, all with tests, all
+  gates green:**
+  1. **Topic-structured `help`** — `core::support::guide` is now a topic set: `help_overview()`
+     (compact menu + first-run path), `help_topic(query)` (one topic by key or alias, normalized so
+     `how do I`/`how-do-i` match), `agent_guide()` (full doc, still the single source the
+     `setup_agent_integration` file section renders). The `help` tool takes an optional `topic`;
+     unknown → overview with the query echoed. **Bug fix:** the identity topic now teaches
+     **automatic** binding — the old guide told agents to *call* `bind_session_process`, which is
+     **not** an MCP tool (auto-bind on connect), so a literal follower would have errored.
+  2. **Initialization instructions + server identity** — `SoloistMcp::get_info` advertises the
+     whoami→help→help(topic) path (single-sourced `onboarding_hint()`), enables the tools
+     capability, and identifies the binary as `soloist-mcp` (rmcp default reported `rmcp`).
+  3. **Rich `whoami`** — core `Whoami` enriched: `bound_process`/`selected_process` are the canonical
+     `ProcessView`; `effective_project` is a new lean `ProjectRef { id, name }` (reuses the UI
+     display-name rule). The `soloist-mcp` `whoami` tool attaches the `mcp_tools` block
+     (`enabled`, `server_enabled_tool_count` = composed-router size, `visibility_note`). **OS pid
+     omitted** (D-15).
+  4. **`mcp_tools_summary`** (new Setup tool) — categorized enabled tools with one-line summaries and
+     no input schemas; categories built from the **same sub-routers `new` composes**, filtered to the
+     served set (disabled groups drop out; zero hand-kept name list). Added to `EXPECTED_TOOL_SURFACE`.
+  5. **Featured `tools/list`** — `list_tools` surfaces a starter pack (whoami, help,
+     mcp_tools_summary, then the common read/act tools) ahead of the default alphabetical order;
+     `FEATURED_TOOLS` const with a served-membership drift guard.
+  6. **Decaying next-tool suggestions** — `call_tool` appends a contextual hint to a *successful*
+     result from a single `hint_for(tool)` catalog; a per-session ledger (`suggestions.rs`) caps each
+     at 2 shows then falls silent.
+  - **Finding 6 (per-individual-tool disable): declined (owner-confirmed 2026-07-12)** — group-level
+    gating (G10) already delivers "disabled → removed from discovery"; per-tool is tracked *later*.
+    **Finding 8 (scratchpad free-form verbs): unchanged** — already declined as D-7.
+  - **Decisions recorded:** 7 new rows in `plan/05 §12` (each citing the tweet) + the F12 `help` row
+    reconciled; new `KNOWN-DIVERGENCES.md` **D-15** (whoami omits OS pid; no manual bind tool).
+  - **Touched:** `core` (`support/guide.rs` rewrite + `guide_tests.rs`, `identity.rs` Whoami,
+    `projects/view.rs` ProjectRef, `facade/session.rs`), `ipc` (protocol_tests), `mcp`
+    (`server.rs`, `tools/{setup,identity}.rs`, `args/setup.rs`, new `suggestions.rs`), `app`
+    (`ipc_server.rs` uses the promoted `Facade::effective_project`). No frontend/`domain.ts` change
+    (whoami is MCP-only). No new deps.
+  - **Gate: green.** `cargo test --workspace` all pass (**core 543, mcp 84**, ipc/app/pty/httpapi/cli
+    unchanged-or-updated, 0 failed); `cargo clippy --workspace --all-targets -D warnings` clean;
+    `cargo fmt --check` clean; `scripts/check-core-deps.sh` OK (core still framework-free). UI
+    untouched, so tsc/eslint/vitest unaffected. **No commit made yet — owner reviews/commits.**
+
 - **Performance & native-feel pass (2026-07-04, branch `perf/native-feel`, PR #69; owner-requested,
   no new features).** Fixes the three reported feel complaints: ① theme/titlebar recolor lag
   (`Titlebar.tsx` compositing promotion + `applyDarkClass` atomic swap + memoized appearance value),

@@ -2,7 +2,7 @@ use super::*;
 use crate::identity::{IdentityError, Origin};
 use crate::ids::ProjectId;
 use crate::ports::{TokioClock, TrustRepo};
-use crate::process::ProcStatus;
+use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, SupervisorError};
 use crate::testing::{
     authentic_session, terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
@@ -273,18 +273,20 @@ async fn whoami_of_a_fresh_session_is_unbound_and_unscoped() {
     let who = facade.whoami(session);
     assert_eq!(who.session, session);
     assert_eq!(who.origin, Origin::Unbound);
-    assert_eq!(who.bound_process, None);
+    assert!(who.bound_process.is_none());
     // No project loaded and nothing bound: the scope cannot be resolved.
-    assert_eq!(who.effective_project, None);
+    assert!(who.effective_project.is_none());
 }
 
 #[tokio::test]
 async fn binding_scopes_a_session_to_its_process_project() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
-    let project = ProjectId::from_raw(1);
+    // A real loaded project, so its record — and thus its display name — resolves for whoami.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load");
     let id = facade
         .supervisor()
-        .register(terminal_registration(project, "term", "sleep 60"));
+        .register(terminal_registration(project.id, "term", "sleep 60"));
     // The session's peer runs in this process's group, so binding to it is authentic.
     let session = authentic_session(&facade, id, TEST_PEER_PGID);
     facade
@@ -293,9 +295,16 @@ async fn binding_scopes_a_session_to_its_process_project() {
 
     let who = facade.whoami(session);
     assert_eq!(who.origin, Origin::Process(id));
-    assert_eq!(who.bound_process, Some(id));
-    // The effective project is inferred from the bound process (nothing was selected).
-    assert_eq!(who.effective_project, Some(project));
+    // The bound process is reported with its live details, not just its id.
+    let bound = who.bound_process.expect("a bound process view");
+    assert_eq!(bound.id, id);
+    assert_eq!(bound.label, "term");
+    assert_eq!(bound.kind, ProcessKind::Terminal);
+    // The effective project is inferred from the bound process (nothing was selected), and
+    // reported with its resolved display name.
+    let scope = who.effective_project.expect("a resolved scope");
+    assert_eq!(scope.id, project.id);
+    assert!(!scope.name.is_empty());
 }
 
 #[tokio::test]
@@ -345,7 +354,10 @@ async fn selecting_an_in_scope_process_records_it_for_whoami() {
     facade
         .select_process(session, id)
         .expect("select an in-scope process");
-    assert_eq!(facade.whoami(session).selected_process, Some(id));
+    assert_eq!(
+        facade.whoami(session).selected_process.map(|p| p.id),
+        Some(id)
+    );
 }
 
 #[tokio::test]
@@ -372,7 +384,7 @@ async fn selecting_an_out_of_scope_process_is_refused() {
         facade.select_process(session, elsewhere),
         Err(IdentityError::UnknownProcess)
     ));
-    assert_eq!(facade.whoami(session).selected_process, None);
+    assert!(facade.whoami(session).selected_process.is_none());
 }
 
 #[tokio::test]
@@ -394,7 +406,10 @@ async fn a_lone_loaded_project_is_the_default_scope() {
     // With exactly one project and no explicit selection, it is the effective scope — the
     // unambiguous single-project default, granted even to an unauthenticated peer.
     let session = facade.open_session(None);
-    assert_eq!(facade.whoami(session).effective_project, Some(project.id));
+    assert_eq!(
+        facade.whoami(session).effective_project.map(|p| p.id),
+        Some(project.id)
+    );
 }
 
 #[tokio::test]
@@ -414,12 +429,15 @@ async fn scope_is_ambiguous_with_several_projects_until_one_is_selected() {
     let session = authentic_session(&facade, in_b, TEST_PEER_PGID);
 
     // Two projects, nothing bound or selected: the scope cannot be inferred.
-    assert_eq!(facade.whoami(session).effective_project, None);
+    assert!(facade.whoami(session).effective_project.is_none());
 
     // It can select its own project; an unknown project is rejected, and a sibling it does not
     // run in is refused as foreign — the authenticity check on the select path.
     facade.select_project(session, b.id).expect("select b");
-    assert_eq!(facade.whoami(session).effective_project, Some(b.id));
+    assert_eq!(
+        facade.whoami(session).effective_project.map(|p| p.id),
+        Some(b.id)
+    );
     assert!(matches!(
         facade.select_project(session, ProjectId::from_raw(9999)),
         Err(IdentityError::UnknownProject)
