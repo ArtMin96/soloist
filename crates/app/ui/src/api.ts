@@ -239,10 +239,11 @@ export function ptyResize(id: number, cols: number, rows: number): Promise<void>
   return invoke<void>("pty_resize", { id, cols, rows });
 }
 
-// Byte 0 of every PTY frame tags the payload: a resync (a scrollback snapshot the emulator
-// must reset to — sent first and again whenever the forwarder falls behind) versus a live
-// chunk to append (tag 0). Mirrors the backend `PTY_FRAME_RESYNC` in `commands/mod.rs`.
-const PTY_FRAME_RESYNC = 1;
+// Byte 0 of every PTY frame tags the payload: a live chunk to append (`PTY_FRAME_CHUNK`) versus a
+// resync (a scrollback snapshot the emulator must reset to — sent first and again whenever the
+// forwarder falls behind). Mirrors the backend tags in `commands/mod.rs`.
+export const PTY_FRAME_CHUNK = 0;
+export const PTY_FRAME_RESYNC = 1;
 
 // Attaches the terminal pane to a process. The first channel message is a resync carrying the
 // raw scrollback replay; subsequent messages are live PTY bytes, with an occasional resync if

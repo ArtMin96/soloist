@@ -61,4 +61,6 @@ pub use runtime_state::{FakeOrphanControl, FakeRuntimeState};
 pub use settings::FakeSettingsRepo;
 pub use shellenv::FakeShellEnvProbe;
 pub use spawner::FakeSpawner;
+#[cfg(test)]
+pub(crate) use spawner::PANIC_FAKE_PGID;
 pub use support::FakeFeedbackRepo;

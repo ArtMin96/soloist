@@ -76,6 +76,23 @@ impl Supervisor {
         self.send_input(id, PtyInput::Write(data)).await
     }
 
+    /// Like [`Supervisor::write_stdin`] but never blocks: if the input channel is full (the child
+    /// has stopped draining its stdin) the write is dropped rather than awaited. Autonomous timer
+    /// delivery uses this so one deaf child cannot stall the shared scheduler for every other
+    /// agent; interactive input keeps [`Supervisor::write_stdin`]'s backpressure so no keystroke
+    /// is lost. Returns [`SupervisorError::NotFound`] only when the process has no terminal at all.
+    pub fn try_write_stdin(&self, id: ProcessId, data: Vec<u8>) -> Result<(), SupervisorError> {
+        match self.terminals.input(id) {
+            // A full channel (a child not draining its stdin) or a closed one (the process has
+            // since stopped) both drop harmlessly — this delivery path is best-effort.
+            Some(sender) => {
+                let _ = sender.try_send(PtyInput::Write(data));
+                Ok(())
+            }
+            None => Err(SupervisorError::NotFound(id)),
+        }
+    }
+
     /// Resizes a running process's PTY so the child sees the new dimensions (and a
     /// `SIGWINCH`). Best-effort, as for [`Supervisor::write_stdin`].
     pub async fn resize(&self, id: ProcessId, cols: u16, rows: u16) -> Result<(), SupervisorError> {

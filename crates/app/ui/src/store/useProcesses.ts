@@ -14,6 +14,11 @@ import { applyEvent } from "@/store/projection";
 import { useReconcile } from "@/store/useReconcile";
 import type { DomainEvent, ProcessView } from "@/domain";
 
+// Ceiling on events buffered during an in-flight snapshot fetch. A fetch this far behind is
+// pathological; drop the oldest rather than grow without bound. A delta lost this way still
+// self-heals — `useReconcile` re-fetches on the resync signal and on window focus.
+const MAX_BUFFERED_EVENTS = 1024;
+
 export interface ProcessStore {
   processes: ProcessView[];
   error: string | null;
@@ -91,8 +96,11 @@ export function useProcesses(): ProcessStore {
     // event is buffered (replayed on top of the snapshot when it lands) rather than folded into a
     // list the snapshot is about to replace.
     const onEvent = (event: DomainEvent) => {
-      if (fetchingRef.current) bufferRef.current.push(event);
-      else setProcesses((prev) => applyEvent(prev, event));
+      if (fetchingRef.current) {
+        const buffer = bufferRef.current;
+        buffer.push(event);
+        if (buffer.length > MAX_BUFFERED_EVENTS) buffer.shift();
+      } else setProcesses((prev) => applyEvent(prev, event));
     };
     onDomainEvent(onEvent)
       .then((stopListening) => {

@@ -5,6 +5,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import type { Channel } from "@tauri-apps/api/core";
 import type { ProcessView } from "@/domain";
+import { PTY_FRAME_CHUNK, PTY_FRAME_RESYNC } from "@/api";
 
 // jsdom has no emulator surface, so the terminal is a write-recording fake; the hook's real
 // attach / coalesce / flush logic is what runs. Instances accumulate so a test can tell the
@@ -104,13 +105,13 @@ async function settle(ms = 50) {
   });
 }
 
-// Sends a framed PTY message the way the backend does: byte 0 tags a live chunk (0) or a
-// scrollback-snapshot resync (1); the rest is the payload. `api.ts` strips the tag before the
-// hook sees it, so tests must include it.
+// Sends a framed PTY message the way the backend does: byte 0 tags a live chunk or a
+// scrollback-snapshot resync; the rest is the payload. `api.ts` strips the tag before the hook
+// sees it, so tests must include it — using the same tag constants the backend mirror defines.
 function deliver(call: AttachCall, text: string, kind: "chunk" | "resync" = "chunk") {
   const bytes = new TextEncoder().encode(text);
   const frame = new Uint8Array(bytes.length + 1);
-  frame[0] = kind === "resync" ? 1 : 0;
+  frame[0] = kind === "resync" ? PTY_FRAME_RESYNC : PTY_FRAME_CHUNK;
   frame.set(bytes, 1);
   call.channel.onmessage(frame);
 }

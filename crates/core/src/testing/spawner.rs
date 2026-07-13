@@ -28,6 +28,11 @@ type CommandLog = Arc<Mutex<Vec<String>>>;
 const SIGKILL: i32 = 9;
 const SIGTERM: i32 = 15;
 
+/// The pid — and therefore process group — of [`FakeSpawner::panics_after_running`]'s child.
+/// The panic-isolation test asserts this exact group is SIGKILLed when the actor reaps the child
+/// the panicked task left behind, so the two sites share one binding.
+pub(crate) const PANIC_FAKE_PGID: i32 = 9191;
+
 /// The exit status of a fake child terminated by `signal`.
 fn killed_by(signal: i32) -> ExitStatus {
     ExitStatus {
@@ -264,7 +269,7 @@ impl ProcessSpawner for FakeSpawner {
                 Ok(Spawned {
                     // A realistic live pgid, so a test can prove the panic path reaps the child
                     // the panicked inner task left behind.
-                    pid: Some(9191),
+                    pid: Some(PANIC_FAKE_PGID as u32),
                     output: no_output(),
                     exit,
                     control: Box::new(NoopControl),
@@ -468,8 +473,9 @@ struct BlockingPtyIo {
 impl PtyIo for BlockingPtyIo {
     async fn write(&self, _data: &[u8]) -> Result<(), SpawnError> {
         self.entered.notify_one();
-        std::future::pending::<()>().await;
-        unreachable!("a blocking write never resolves")
+        // Never resolves: a child that has stopped draining its stdin stalls the master write
+        // in the kernel forever. The owning actor's input pump must absorb this without wedging.
+        std::future::pending().await
     }
 
     async fn resize(&self, _size: PtySize) -> Result<(), SpawnError> {

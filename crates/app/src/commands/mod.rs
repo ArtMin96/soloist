@@ -218,28 +218,20 @@ pub async fn pty_resize(
         .map_err(|err| err.to_string())
 }
 
-/// The first byte of every PTY channel frame tags what follows: a live chunk the UI
-/// appends, or a raw-scrollback snapshot the UI must reset its emulator to. Framing keeps
-/// the efficient raw-bytes channel while letting the forwarder signal a re-sync — the UI
-/// mirror of these values lives in `api.ts` (`PTY_FRAME_RESYNC`).
+/// The first byte of every PTY channel frame tags what follows: a live chunk the UI appends
+/// ([`PTY_FRAME_CHUNK`]), or a raw-scrollback snapshot the UI must reset its emulator to
+/// ([`PTY_FRAME_RESYNC`], sent first and again after the forwarder falls behind). Framing keeps
+/// the efficient raw-bytes channel while letting the forwarder signal a re-sync — the UI mirror
+/// of these values lives in `api.ts`.
 const PTY_FRAME_CHUNK: u8 = 0;
 const PTY_FRAME_RESYNC: u8 = 1;
 
-/// Frames a live output chunk (tag + bytes).
-fn chunk_frame(bytes: &[u8]) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(bytes.len() + 1);
-    frame.push(PTY_FRAME_CHUNK);
-    frame.extend_from_slice(bytes);
-    frame
-}
-
-/// Frames a scrollback snapshot the UI must reset to (tag + bytes) — sent first and again
-/// after the forwarder falls behind.
-fn resync_frame(bytes: Vec<u8>) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(bytes.len() + 1);
-    frame.push(PTY_FRAME_RESYNC);
-    frame.extend_from_slice(&bytes);
-    frame
+/// Prefixes a payload with its frame tag.
+fn frame(tag: u8, bytes: &[u8]) -> Vec<u8> {
+    let mut framed = Vec::with_capacity(bytes.len() + 1);
+    framed.push(tag);
+    framed.extend_from_slice(bytes);
+    framed
 }
 
 /// Attaches a terminal pane to a process: replays its raw scrollback as the first channel
@@ -262,14 +254,14 @@ pub async fn pty_attach(
     // first message preserves the core's no-gap/no-duplicate guarantee across IPC. It is a
     // resync frame: the emulator resets to it, the same way it recovers from a re-sync below.
     on_chunk
-        .send(resync_frame(scrollback))
+        .send(frame(PTY_FRAME_RESYNC, &scrollback))
         .map_err(|err| err.to_string())?;
     let facade = Arc::clone(&facade);
     let handle = tauri::async_runtime::spawn(async move {
         loop {
             match live.recv().await {
                 Ok(chunk) => {
-                    if on_chunk.send(chunk_frame(&chunk)).is_err() {
+                    if on_chunk.send(frame(PTY_FRAME_CHUNK, &chunk)).is_err() {
                         break;
                     }
                 }
@@ -281,7 +273,7 @@ pub async fn pty_attach(
                     match facade.supervisor().attach_pty(pid) {
                         Some((scrollback, fresh)) => {
                             live = fresh;
-                            if on_chunk.send(resync_frame(scrollback)).is_err() {
+                            if on_chunk.send(frame(PTY_FRAME_RESYNC, &scrollback)).is_err() {
                                 break;
                             }
                         }

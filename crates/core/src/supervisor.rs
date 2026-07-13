@@ -527,7 +527,7 @@ mod tests {
         command_spec, harness, harness_with_shell_env, next_change, next_to, spawn_spec, status_of,
         terminal, wait_all, PROJECT,
     };
-    use crate::testing::{FakeShellEnvProbe, FakeSpawner};
+    use crate::testing::{FakeShellEnvProbe, FakeSpawner, PANIC_FAKE_PGID};
     use std::collections::BTreeMap;
     use std::path::Path;
     use std::time::Duration;
@@ -644,6 +644,48 @@ mod tests {
             "a stuck stdin write must not wedge the actor's stop path"
         );
         assert_eq!(status_of(&h.sup, id), ProcStatus::Stopped);
+    }
+
+    #[tokio::test]
+    async fn best_effort_delivery_to_a_deaf_child_drops_instead_of_blocking() {
+        // Autonomous timer delivery uses the non-blocking `try_write_stdin`: a child that has
+        // stopped draining its stdin fills its bounded input channel, but delivery must drop
+        // rather than await, so one deaf agent cannot stall the scheduler for every other agent.
+        // Bounded by a timeout so a regression (delivery awaiting a full channel) fails here.
+        let (spawner, write_blocking) = FakeSpawner::blocks_on_input();
+        let mut h = harness(spawner);
+        let id = terminal(&h.sup, "sleep 60");
+
+        h.sup.start(id).expect("start");
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Starting);
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Running);
+
+        // Wedge the input pump on a blocking write, then flood far past the channel's capacity.
+        h.sup
+            .write_stdin(id, b"first".to_vec())
+            .await
+            .expect("write accepted into the bounded input channel");
+        write_blocking.notified().await;
+
+        let flooded = tokio::time::timeout(Duration::from_secs(5), async {
+            for _ in 0..1024 {
+                h.sup
+                    .try_write_stdin(id, b"timer body".to_vec())
+                    .expect("a live process accepts (and may drop) best-effort input");
+            }
+        })
+        .await;
+        assert!(
+            flooded.is_ok(),
+            "best-effort delivery to a deaf child must drop, never block the caller"
+        );
+
+        // A process with no terminal is still a not-found, as for the blocking path.
+        assert!(matches!(
+            h.sup
+                .try_write_stdin(ProcessId::from_raw(999), b"x".to_vec()),
+            Err(SupervisorError::NotFound(_))
+        ));
     }
 
     #[tokio::test]
@@ -834,7 +876,7 @@ mod tests {
         // The child the panicked task left behind is reaped (SIGKILL to its group) and its
         // orphan record forgotten, so a crash auto-restart cannot spawn a second beside it.
         assert!(
-            h.orphans.signalled().contains(&(9191, true)),
+            h.orphans.signalled().contains(&(PANIC_FAKE_PGID, true)),
             "the leftover child's group is SIGKILLed on the panic path"
         );
         assert!(
