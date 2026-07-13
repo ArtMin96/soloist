@@ -61,20 +61,20 @@ numbering is the priority order.
 - **PRD-05 MCP/HTTP master toggles:** LIVE teardown/spin-up on toggle (no restart) — larger scope
   than startup-gating; may warrant its own session.
 
-## How to work these (one ticket per session)
-Per the local-tracker frontier rule (`docs/agents/issue-tracker.md`): pick the lowest-numbered
-ticket that is open, **unblocked** (every id in its `Blocked by:` is done), and unclaimed.
+## How to work these — one command per session
+Each new session (fresh context), on branch `fix/stability-audit-2026-07`, run:
 
-Each session, fresh context:
-1. Run Soloist's start-of-session protocol (`CLAUDE.md §1`): read `PROGRESS.md`, then `plan/05`
-   (behavior contract) + `plan/04`/`06` (design) for the area the ticket touches.
-2. Set the ticket's `Status:` to `claimed` (or your tracker's in-progress marker) before working.
-3. Build it test-first — a failing test from the ticket's Test plan, then make it pass, slice by
-   slice — and finish with a Standards + Spec review of the diff before committing. (If you use the
-   Matt-Pocock skills: this is `/implement <path-to-ticket>`, which drives `/tdd` then
-   `/code-review` internally.) Do not pull `later`-scope in; never weaken a test to pass (§15).
-4. Update `PROGRESS.md` (§10–§11) and set the ticket `Status:` to done/`resolved`.
-5. **Clear context before the next ticket.**
+```
+/work-ticket
+```
 
-Suggested order: 01 → 02 → 03 (the P0 + the two daily-pain P1 runtime bugs) → 04 → 05 → 06 →
-07/08/09/10. Note `05` (live server teardown) and `06` carry the most design surface.
+That project skill (`.claude/skills/work-ticket/`) does the whole per-session loop for you: runs
+Soloist's start protocol (`CLAUDE.md §1`), picks the next open + unblocked ticket by the frontier
+rule (lowest number whose `Blocked by:` are all done), claims it, implements it test-first via
+`/implement` (tdd → gates → `/code-review` → commit), then flips its `Status:` and updates
+`PROGRESS.md`. To work a specific one instead: `/work-ticket 04` (or a path). Then **clear context**
+and run it again next session for the following ticket.
+
+Frontier order it will follow: 01 → 02 → 03 (the P0 + the two daily-pain P1 runtime bugs) → 04 →
+05 → 06 → 07 (after 02) / 08 / 09 / 10 (after 06). `02` and `08` finish as `needs-human-verify`
+(they need a live-app check); `05` (live server teardown) and `06` carry the most design surface.
