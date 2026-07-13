@@ -329,3 +329,19 @@ Detailed blueprint: **`plan/06-codebase-blueprint-and-cleanup.md`**. These are t
 - **Small files; tests in separate files, honest.** Split non-test source at the ~400-line smell. New tests live in their own file: unit tests of private items via `#[cfg(test)] #[path = "x_tests.rs"] mod tests;` (stays a child module, so it still reaches private items); adapter integration tests in `tests/`. Inline only when there is no other way. Every test must exercise real behavior.
 - **Reach for a pattern when its trigger fires, not before.** `plan/06` §4 table: FSM for legal state transitions; Registry for a growing handler set (MCP tools, agent providers — never a giant `match`); Strategy for per-provider behavior; Repository per durable aggregate; Builder when >4 constructor collaborators. No speculative abstraction (YAGNI).
 - **Use the recipes.** Adding a context behavior, port+adapter, MCP tool, HTTP/CLI/Tauri command, `DomainEvent`, or UI surface each has a checklist in `plan/06` §5. Follow it so the change lands in the right layer with dependency rule, single-source, and DRY intact.
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as markdown files under `.scratch/<feature>/` (in-tree, committed with the repo). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles, each label string equal to its name (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root, created lazily by `/domain-modeling`. See `docs/agents/domain.md`.
