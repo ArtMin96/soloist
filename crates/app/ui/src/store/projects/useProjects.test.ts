@@ -10,6 +10,7 @@ vi.mock("@/api", () => ({
   projectList: vi.fn(() => Promise.resolve([])),
   projectRemove: vi.fn(() => Promise.resolve()),
   onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
+  onResync: vi.fn(() => Promise.resolve(() => {})),
 }));
 
 // The persisted cache is the disk boundary; mock it so the hook revalidates against `@/api`

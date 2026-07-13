@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Notify};
 
 use crate::ports::{
     ExitFuture, ExitStatus, ProcessControl, ProcessSpawner, PtyIo, PtySize, SpawnError, SpawnSpec,
@@ -27,6 +27,11 @@ type CommandLog = Arc<Mutex<Vec<String>>>;
 /// Signal numbers a simulated kill records on a fake child's exit status.
 const SIGKILL: i32 = 9;
 const SIGTERM: i32 = 15;
+
+/// The pid — and therefore process group — of [`FakeSpawner::panics_after_running`]'s child.
+/// The panic-isolation test asserts this exact group is SIGKILLed when the actor reaps the child
+/// the panicked task left behind, so the two sites share one binding.
+pub(crate) const PANIC_FAKE_PGID: i32 = 9191;
 
 /// The exit status of a fake child terminated by `signal`.
 fn killed_by(signal: i32) -> ExitStatus {
@@ -74,6 +79,14 @@ enum Behavior {
     /// buffer — so a test can prove which command line launched a process (e.g. a resume
     /// replays the resume command while a fresh start uses the original).
     RecordsCommand(CommandLog),
+    /// Stays alive (exiting on SIGTERM) but blocks forever on every stdin write — a child
+    /// that has stopped reading its input, so a test can prove a stuck write never wedges
+    /// the owning actor. The [`Notify`] fires as the write begins to block, so the test can
+    /// wait for that deterministically before it checks the actor is still responsive.
+    BlocksOnInput(Arc<Notify>),
+    /// Fails to spawn with a fixed message — a missing binary or bad working dir — so a test
+    /// can prove the actor surfaces the reason in the terminal and crashes.
+    FailsToSpawn(String),
 }
 
 /// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is chosen
@@ -198,6 +211,28 @@ impl FakeSpawner {
             recorder,
         )
     }
+
+    /// A child that stays alive (exiting on SIGTERM) but blocks forever on every stdin
+    /// write, modelling a process that has stopped reading its input. Returns the spawner
+    /// and a [`Notify`] that fires when a write begins to block, so a test can wait for the
+    /// wedge deterministically before proving the owning actor is still responsive.
+    pub fn blocks_on_input() -> (Self, Arc<Notify>) {
+        let entered = Arc::new(Notify::new());
+        (
+            Self {
+                behavior: Behavior::BlocksOnInput(entered.clone()),
+            },
+            entered,
+        )
+    }
+
+    /// A spawner whose spawn always fails with `message` — a missing binary or bad working
+    /// dir — so a test can prove the actor writes the reason into the terminal and crashes.
+    pub fn fails_to_spawn(message: &str) -> Self {
+        Self {
+            behavior: Behavior::FailsToSpawn(message.to_string()),
+        }
+    }
 }
 
 /// A closed PTY output channel: the receiver yields nothing and reports EOF at once.
@@ -232,7 +267,9 @@ impl ProcessSpawner for FakeSpawner {
                 #[allow(clippy::panic)]
                 let exit: ExitFuture = Box::pin(async { panic!("fake child panicked") });
                 Ok(Spawned {
-                    pid: Some(0),
+                    // A realistic live pgid, so a test can prove the panic path reaps the child
+                    // the panicked inner task left behind.
+                    pid: Some(PANIC_FAKE_PGID as u32),
                     output: no_output(),
                     exit,
                     control: Box::new(NoopControl),
@@ -343,6 +380,25 @@ impl ProcessSpawner for FakeSpawner {
                     io: Box::new(NoopPtyIo),
                 })
             }
+            Behavior::FailsToSpawn(message) => Err(SpawnError::Spawn(message.clone())),
+            Behavior::BlocksOnInput(entered) => {
+                let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
+                let control = Box::new(OneshotControl {
+                    exit_tx: Mutex::new(Some(exit_tx)),
+                    dies_on: DiesOn::Terminate,
+                });
+                let exit: ExitFuture =
+                    Box::pin(async move { exit_rx.await.unwrap_or_else(|_| killed_by(SIGKILL)) });
+                Ok(Spawned {
+                    pid: Some(424247),
+                    output: no_output(),
+                    exit,
+                    control,
+                    io: Box::new(BlockingPtyIo {
+                        entered: entered.clone(),
+                    }),
+                })
+            }
         }
     }
 }
@@ -398,6 +454,28 @@ struct NoopPtyIo;
 impl PtyIo for NoopPtyIo {
     async fn write(&self, _data: &[u8]) -> Result<(), SpawnError> {
         Ok(())
+    }
+
+    async fn resize(&self, _size: PtySize) -> Result<(), SpawnError> {
+        Ok(())
+    }
+}
+
+/// A [`PtyIo`] whose every write blocks forever, modelling a child that has stopped
+/// reading its stdin so a PTY master write stalls in the kernel. Resizes still return —
+/// only writes wedge. Fires `entered` as the write begins to block so a test can
+/// synchronise on the wedge. The owning actor must stay responsive regardless.
+struct BlockingPtyIo {
+    entered: Arc<Notify>,
+}
+
+#[async_trait]
+impl PtyIo for BlockingPtyIo {
+    async fn write(&self, _data: &[u8]) -> Result<(), SpawnError> {
+        self.entered.notify_one();
+        // Never resolves: a child that has stopped draining its stdin stalls the master write
+        // in the kernel forever. The owning actor's input pump must absorb this without wedging.
+        std::future::pending().await
     }
 
     async fn resize(&self, _size: PtySize) -> Result<(), SpawnError> {

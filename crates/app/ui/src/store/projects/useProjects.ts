@@ -8,6 +8,7 @@ import {
 } from "@/api";
 import { CacheKey } from "@/store/cache/persistentCache";
 import { usePersistentSnapshot } from "@/store/cache/usePersistentSnapshot";
+import { useReconcile } from "@/store/useReconcile";
 import type { ProjectLoad, ProjectView } from "@/domain";
 
 export interface ProjectStore {
@@ -82,6 +83,10 @@ export function useProjects(reportError: (reason: unknown) => void): ProjectStor
       unlisten?.();
     };
   }, [revalidate, reportError]);
+
+  // Re-read on a backend resync signal or window focus, so a dropped ProjectOpened/Removed
+  // delta never leaves the sidebar stale.
+  useReconcile(revalidate);
 
   const open = useCallback(() => {
     openProjectDirectory()

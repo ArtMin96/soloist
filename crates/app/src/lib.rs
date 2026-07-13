@@ -43,6 +43,10 @@ use pty_bridge::PtyBridge;
 /// The webview event name carrying every serialized [`soloist_core::DomainEvent`].
 const DOMAIN_EVENT: &str = "domain-event";
 
+/// The webview event that tells the UI its delta stream fell behind and it must re-read its
+/// snapshots. Carries no payload — it is a "you may have missed something, reconcile" signal.
+const DOMAIN_RESYNC: &str = "domain-resync";
+
 #[derive(Serialize)]
 struct AppInfo {
     name: String,
@@ -126,9 +130,11 @@ fn build_facade(app: AppHandle) -> Facade {
     )
 }
 
-/// Subscribes to the core event bus and forwards each event to the webview. Lagged
-/// receivers are skipped (the UI re-syncs via `proc_list`); a closed bus ends the task
-/// at shutdown.
+/// Subscribes to the core event bus and forwards each event to the webview. When the
+/// forwarder falls behind and the bus drops events, it emits a [`DOMAIN_RESYNC`] signal so
+/// the UI re-reads its snapshots instead of running forever on a read model missing the
+/// dropped deltas (a lost delta is otherwise permanent — the projection folds per field). A
+/// closed bus ends the task at shutdown.
 fn forward_events(app: AppHandle) {
     let mut events = app.state::<Arc<Facade>>().subscribe();
     tauri::async_runtime::spawn(async move {
@@ -137,7 +143,9 @@ fn forward_events(app: AppHandle) {
                 Ok(event) => {
                     let _ = app.emit(DOMAIN_EVENT, event);
                 }
-                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Lagged(_)) => {
+                    let _ = app.emit(DOMAIN_RESYNC, ());
+                }
                 Err(RecvError::Closed) => break,
             }
         }

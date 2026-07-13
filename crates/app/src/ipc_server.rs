@@ -19,6 +19,13 @@ use soloist_ipc::{
 use tauri::{AppHandle, Manager};
 use tokio::net::{UnixListener, UnixStream};
 
+/// Backoff after a transient `accept` failure, so a persistent condition (e.g. FD exhaustion)
+/// cannot hot-loop the accept task while it keeps serving.
+const ACCEPT_RETRY_BACKOFF: Duration = Duration::from_millis(100);
+/// The most consecutive `accept` failures tolerated before the front gives up and degrades to a
+/// logged no-op. A transient condition clears well within this many backed-off retries; one that
+/// never clears is bounded here rather than retried forever (no retry without a ceiling).
+const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 64;
 /// The port-readiness wait when the caller names no timeout.
 const DEFAULT_PORT_WAIT: Duration = Duration::from_secs(10);
 /// The longest a `wait_for_bound_port` blocks, regardless of the requested timeout. Kept
@@ -52,17 +59,51 @@ pub async fn serve(app: AppHandle) {
             return;
         }
     };
+    let mut consecutive_errors: u32 = 0;
     loop {
         match listener.accept().await {
             Ok((stream, _addr)) => {
+                consecutive_errors = 0;
                 tauri::async_runtime::spawn(handle_connection(app.clone(), stream));
             }
-            Err(err) => {
-                eprintln!("soloist: MCP IPC stopped accepting connections: {err}");
+            Err(err) if accept_error_is_fatal(&err) => {
+                // The listener socket itself is unusable; retrying accept on it can never
+                // succeed, so degrade to a logged no-op rather than hot-loop forever.
+                eprintln!("soloist: MCP IPC disabled (unrecoverable accept error: {err})");
                 return;
+            }
+            Err(err) => {
+                // A transient accept error — FD pressure (EMFILE/ENFILE) in a PTY-heavy
+                // supervisor, or a peer that aborted before we accepted it — must not tear
+                // down the whole MCP front, or every agent sees "Soloist is not running"
+                // until the app restarts. Back off briefly so it cannot hot-loop, and keep
+                // serving — up to a ceiling, so a condition that never clears is bounded.
+                consecutive_errors += 1;
+                if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {
+                    eprintln!(
+                        "soloist: MCP IPC disabled (accept kept failing after \
+                         {consecutive_errors} retries: {err})"
+                    );
+                    return;
+                }
+                eprintln!(
+                    "soloist: MCP IPC accept error \
+                     (retry {consecutive_errors}/{MAX_CONSECUTIVE_ACCEPT_ERRORS}): {err}"
+                );
+                tokio::time::sleep(ACCEPT_RETRY_BACKOFF).await;
             }
         }
     }
+}
+
+/// Whether an `accept` error means the listener socket itself is unusable — retrying can never
+/// succeed. Everything else (FD pressure `EMFILE`/`ENFILE`, an aborted peer `ECONNABORTED`,
+/// transient kernel limits) is expected to clear and is retried with backoff.
+fn accept_error_is_fatal(err: &std::io::Error) -> bool {
+    matches!(
+        err.raw_os_error(),
+        Some(nix::libc::EBADF | nix::libc::EINVAL | nix::libc::ENOTSOCK | nix::libc::EOPNOTSUPP)
+    )
 }
 
 /// Serves one client connection: reads the connecting peer's process group, opens an identity
