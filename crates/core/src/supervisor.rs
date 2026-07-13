@@ -380,6 +380,10 @@ impl Supervisor {
         if let Some(handle) = handle {
             let _ = signal_stop(handle).await;
         }
+        // The process is gone for good — free its terminal channel (buffers + live broadcast).
+        // The actor is reaped above, so its recorder is dropped and nothing still writes here;
+        // without this a long session that opens and closes many processes leaks their scrollback.
+        self.terminals.remove(id);
         self.bus.publish(DomainEvent::ProcessRemoved { id });
         Ok(())
     }
@@ -459,6 +463,7 @@ impl Supervisor {
             clock: self.clock.clone(),
             locks: self.locks.clone(),
             runtime: self.runtime.clone(),
+            orphan_control: self.orphan_control.clone(),
             bus: self.bus.clone(),
             registry: self.registry.clone(),
             terminals: self.terminals.clone(),
@@ -522,7 +527,7 @@ mod tests {
         command_spec, harness, harness_with_shell_env, next_change, next_to, spawn_spec, status_of,
         terminal, wait_all, PROJECT,
     };
-    use crate::testing::{FakeShellEnvProbe, FakeSpawner};
+    use crate::testing::{FakeShellEnvProbe, FakeSpawner, PANIC_FAKE_PGID};
     use std::collections::BTreeMap;
     use std::path::Path;
     use std::time::Duration;
@@ -606,6 +611,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_blocking_stdin_write_does_not_wedge_the_actor() {
+        // A child that has stopped reading its stdin blocks every PTY write forever. Input
+        // is applied off the select loop, so the stuck write stalls only the input pump —
+        // the actor stays responsive and a stop still tears the process down. Bounded by a
+        // timeout so a regression (input awaited inline again) fails here, not hangs.
+        let (spawner, write_blocking) = FakeSpawner::blocks_on_input();
+        let mut h = harness(spawner);
+        let id = terminal(&h.sup, "sleep 60");
+
+        h.sup.start(id).expect("start");
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Starting);
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Running);
+
+        // Send input and wait until the write is actually blocking, so the assertion below
+        // is a real test of responsiveness while a write is stuck, not a race.
+        h.sup
+            .write_stdin(id, b"typing into a deaf child".to_vec())
+            .await
+            .expect("write accepted into the bounded input channel");
+        write_blocking.notified().await;
+
+        // The fake exits on SIGTERM, so a working stop reaches Stopped with no grace elapse;
+        // a wedged actor would never process the stop and the timeout would fire.
+        assert!(h.sup.stop(id), "an active process is messaged");
+        let stopped = tokio::time::timeout(Duration::from_secs(5), async {
+            while next_to(&mut h.rx).await != ProcStatus::Stopped {}
+        })
+        .await;
+        assert!(
+            stopped.is_ok(),
+            "a stuck stdin write must not wedge the actor's stop path"
+        );
+        assert_eq!(status_of(&h.sup, id), ProcStatus::Stopped);
+    }
+
+    #[tokio::test]
+    async fn best_effort_delivery_to_a_deaf_child_drops_instead_of_blocking() {
+        // Autonomous timer delivery uses the non-blocking `try_write_stdin`: a child that has
+        // stopped draining its stdin fills its bounded input channel, but delivery must drop
+        // rather than await, so one deaf agent cannot stall the scheduler for every other agent.
+        // Bounded by a timeout so a regression (delivery awaiting a full channel) fails here.
+        let (spawner, write_blocking) = FakeSpawner::blocks_on_input();
+        let mut h = harness(spawner);
+        let id = terminal(&h.sup, "sleep 60");
+
+        h.sup.start(id).expect("start");
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Starting);
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Running);
+
+        // Wedge the input pump on a blocking write, then flood far past the channel's capacity.
+        h.sup
+            .write_stdin(id, b"first".to_vec())
+            .await
+            .expect("write accepted into the bounded input channel");
+        write_blocking.notified().await;
+
+        let flooded = tokio::time::timeout(Duration::from_secs(5), async {
+            for _ in 0..1024 {
+                h.sup
+                    .try_write_stdin(id, b"timer body".to_vec())
+                    .expect("a live process accepts (and may drop) best-effort input");
+            }
+        })
+        .await;
+        assert!(
+            flooded.is_ok(),
+            "best-effort delivery to a deaf child must drop, never block the caller"
+        );
+
+        // A process with no terminal is still a not-found, as for the blocking path.
+        assert!(matches!(
+            h.sup
+                .try_write_stdin(ProcessId::from_raw(999), b"x".to_vec()),
+            Err(SupervisorError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
     async fn an_untrusted_command_cannot_run_by_any_path() {
         let mut h = harness(FakeSpawner::exits_on_kill());
         let spec = command_spec("npm run dev", true);
@@ -685,6 +768,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_spawn_failure_surfaces_the_reason_in_the_terminal_and_crashes() {
+        // A command that cannot be spawned (missing binary, bad working dir) crashes — but the
+        // reason must reach its terminal, not vanish, so the user sees why instead of an empty
+        // pane that flaps to RestartExhausted with no explanation.
+        let mut h = harness(FakeSpawner::fails_to_spawn("no such file or directory"));
+        let id = terminal(&h.sup, "definitely-not-a-binary");
+        h.sup.start(id).expect("start");
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Starting);
+        assert_eq!(next_change(&mut h.rx).await, (ProcStatus::Crashed, None));
+
+        let rendered = h
+            .sup
+            .rendered(id)
+            .expect("the crashed process kept its terminal");
+        let text = rendered.lines.join("\n");
+        assert!(
+            text.contains("failed to start") && text.contains("no such file or directory"),
+            "the spawn error is written to the terminal: {text:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn a_user_stop_is_stopped_not_crashed_even_when_sigkilled() {
         let mut h = harness(FakeSpawner::exits_on_kill());
         let id = terminal(&h.sup, "sleep 60");
@@ -737,6 +842,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn closing_a_process_frees_its_terminal_channel() {
+        // A removed process must not leak its terminal buffers. While running it has a channel to
+        // attach to; after close (a full removal, unlike a stop, which keeps the scrollback
+        // readable) the channel is gone, so a long session of opens and closes does not grow RSS.
+        let mut h = harness(FakeSpawner::exits_on_terminate());
+        let id = terminal(&h.sup, "sleep 60");
+        h.sup.start(id).expect("start");
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
+        assert!(
+            h.sup.attach_pty(id).is_some(),
+            "a running process has a terminal channel"
+        );
+
+        h.sup.close(id).await.expect("close");
+        assert!(
+            h.sup.attach_pty(id).is_none(),
+            "closing frees the terminal channel"
+        );
+    }
+
+    #[tokio::test]
     async fn a_panicking_process_is_isolated_and_the_supervisor_survives() {
         let mut h = harness(FakeSpawner::panics_after_running());
         let id = terminal(&h.sup, "boom");
@@ -747,6 +873,16 @@ mod tests {
         assert_eq!(next_to(&mut h.rx).await, ProcStatus::Crashed);
         tokio::task::yield_now().await;
         assert!(h.locks.released().contains(&id));
+        // The child the panicked task left behind is reaped (SIGKILL to its group) and its
+        // orphan record forgotten, so a crash auto-restart cannot spawn a second beside it.
+        assert!(
+            h.orphans.signalled().contains(&(PANIC_FAKE_PGID, true)),
+            "the leftover child's group is SIGKILLed on the panic path"
+        );
+        assert!(
+            h.runtime.records().is_empty(),
+            "the leftover child's orphan record is forgotten"
+        );
 
         // The supervisor is still alive: another process runs to completion.
         let mut h2 = harness(FakeSpawner::exits_on_kill());

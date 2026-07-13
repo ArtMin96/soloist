@@ -5,6 +5,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import type { Channel } from "@tauri-apps/api/core";
 import type { ProcessView } from "@/domain";
+import { PTY_FRAME_CHUNK, PTY_FRAME_RESYNC } from "@/api";
 
 // jsdom has no emulator surface, so the terminal is a write-recording fake; the hook's real
 // attach / coalesce / flush logic is what runs. Instances accumulate so a test can tell the
@@ -25,6 +26,11 @@ const { FakeTerminal } = vi.hoisted(() => {
     focus() {}
     dispose() {
       this.disposed = true;
+    }
+    reset() {
+      // A real xterm reset clears the screen and scrollback; mirror that by dropping recorded
+      // writes so a test sees only what is replayed after the reset.
+      this.writes = [];
     }
     write(data: string | Uint8Array) {
       this.writes.push(data);
@@ -99,8 +105,15 @@ async function settle(ms = 50) {
   });
 }
 
-function deliver(call: AttachCall, text: string) {
-  call.channel.onmessage(new TextEncoder().encode(text));
+// Sends a framed PTY message the way the backend does: byte 0 tags a live chunk or a
+// scrollback-snapshot resync; the rest is the payload. `api.ts` strips the tag before the hook
+// sees it, so tests must include it — using the same tag constants the backend mirror defines.
+function deliver(call: AttachCall, text: string, kind: "chunk" | "resync" = "chunk") {
+  const bytes = new TextEncoder().encode(text);
+  const frame = new Uint8Array(bytes.length + 1);
+  frame[0] = kind === "resync" ? PTY_FRAME_RESYNC : PTY_FRAME_CHUNK;
+  frame.set(bytes, 1);
+  call.channel.onmessage(frame);
 }
 
 function writtenText(term: InstanceType<typeof FakeTerminal>) {
@@ -162,8 +175,8 @@ describe("useTerminal attach lifecycle", () => {
     expect(attaches).toHaveLength(2);
 
     await act(async () => {
-      deliver(attaches[0], "REPLAYED-HISTORY\r\n");
-      deliver(attaches[1], "REPLAYED-HISTORY\r\n");
+      deliver(attaches[0], "REPLAYED-HISTORY\r\n", "resync");
+      deliver(attaches[1], "REPLAYED-HISTORY\r\n", "resync");
     });
     await settle();
 
@@ -251,6 +264,46 @@ describe("useTerminal hidden-pane pause", () => {
     expect(writtenText(term)).toContain("HIDDEN-OUTPUT");
   });
 
+  // When a chatty background process overflows the bounded backlog while hidden, the oldest queued
+  // bytes are dropped, so draining on show would splice a gap into the scrollback. Instead the pane
+  // re-attaches and replays the core's coherent scrollback — the same gap-free view a fresh mount
+  // shows — rather than draining a discontinuity.
+  it("re-attaches and replays scrollback when the backlog overflows while hidden", async () => {
+    const view = render(<VisibilityProbe process={PROCESS} visible={false} />);
+    await settle();
+    expect(attaches).toHaveLength(1);
+
+    // Two chunks that together exceed the 512 KiB backlog cap, so the oldest is evicted while hidden.
+    const chunk = "A".repeat(300 * 1024);
+    await act(async () => {
+      deliver(attaches[0], chunk);
+      deliver(attaches[0], chunk);
+    });
+    await settle();
+
+    await act(async () => {
+      view.rerender(<VisibilityProbe process={PROCESS} visible={true} />);
+    });
+    await settle();
+
+    // Shown after an overflow: the pane re-attached (a second pty_attach) and detached the first,
+    // rather than draining the gappy backlog.
+    expect(attaches).toHaveLength(2);
+    expect(detached).toContain(attaches[0].token);
+
+    // The stale bytes never reached the emulator; the fresh attachment's scrollback replay does.
+    const term = FakeTerminal.instances.find((t) => !t.disposed) as InstanceType<
+      typeof FakeTerminal
+    >;
+    await act(async () => {
+      deliver(attaches[1], "COHERENT-REPLAY\r\n", "resync");
+    });
+    await settle();
+    const text = writtenText(term);
+    expect(text).toContain("COHERENT-REPLAY");
+    expect(text).not.toContain("A".repeat(1024));
+  });
+
   it("parses bytes on the frame loop while visible", async () => {
     render(<VisibilityProbe process={PROCESS} visible={true} />);
     await settle();
@@ -264,5 +317,63 @@ describe("useTerminal hidden-pane pause", () => {
       typeof FakeTerminal
     >;
     expect(writtenText(term)).toContain("VISIBLE-OUTPUT");
+  });
+
+  // The forwarder fell behind and re-synced from the core's scrollback: the resync frame must reset
+  // the emulator and replay from that snapshot, discarding the stale bytes that preceded the gap —
+  // otherwise the emulator renders a spliced, corrupted stream.
+  it("resets and replays from a resync frame", async () => {
+    render(<VisibilityProbe process={PROCESS} visible={true} />);
+    await settle();
+
+    await act(async () => {
+      deliver(attaches[0], "BEFORE-THE-GAP\r\n");
+    });
+    await settle();
+
+    await act(async () => {
+      deliver(attaches[0], "AFTER-RESYNC\r\n", "resync");
+    });
+    await settle();
+
+    const term = FakeTerminal.instances.find((t) => !t.disposed) as InstanceType<
+      typeof FakeTerminal
+    >;
+    const text = writtenText(term);
+    expect(text).toContain("AFTER-RESYNC");
+    // The reset dropped the pre-gap bytes, so the coherent snapshot is all that remains.
+    expect(text).not.toContain("BEFORE-THE-GAP");
+  });
+
+  // A visible pane whose rAF is suspended (an occluded/minimized window) keeps accruing bytes; if
+  // the backlog overflows, draining it on restore would splice a gap. The pane must re-attach for a
+  // coherent replay, not write the gappy backlog.
+  it("re-attaches when the backlog overflows while visible", async () => {
+    render(<VisibilityProbe process={PROCESS} visible={true} />);
+    await settle();
+    expect(attaches).toHaveLength(1);
+
+    // Two chunks that together exceed the 512 KiB cap, delivered before the frame loop can flush.
+    const chunk = "B".repeat(300 * 1024);
+    await act(async () => {
+      deliver(attaches[0], chunk);
+      deliver(attaches[0], chunk);
+    });
+    await settle();
+
+    // The overflow desynced the backlog, so the flush re-attached instead of writing the gap.
+    expect(attaches).toHaveLength(2);
+    expect(detached).toContain(attaches[0].token);
+
+    const term = FakeTerminal.instances.find((t) => !t.disposed) as InstanceType<
+      typeof FakeTerminal
+    >;
+    await act(async () => {
+      deliver(attaches[1], "COHERENT-REPLAY\r\n", "resync");
+    });
+    await settle();
+    const text = writtenText(term);
+    expect(text).toContain("COHERENT-REPLAY");
+    expect(text).not.toContain("B".repeat(1024));
   });
 });

@@ -218,6 +218,22 @@ pub async fn pty_resize(
         .map_err(|err| err.to_string())
 }
 
+/// The first byte of every PTY channel frame tags what follows: a live chunk the UI appends
+/// ([`PTY_FRAME_CHUNK`]), or a raw-scrollback snapshot the UI must reset its emulator to
+/// ([`PTY_FRAME_RESYNC`], sent first and again after the forwarder falls behind). Framing keeps
+/// the efficient raw-bytes channel while letting the forwarder signal a re-sync — the UI mirror
+/// of these values lives in `api.ts`.
+const PTY_FRAME_CHUNK: u8 = 0;
+const PTY_FRAME_RESYNC: u8 = 1;
+
+/// Prefixes a payload with its frame tag.
+fn frame(tag: u8, bytes: &[u8]) -> Vec<u8> {
+    let mut framed = Vec::with_capacity(bytes.len() + 1);
+    framed.push(tag);
+    framed.extend_from_slice(bytes);
+    framed
+}
+
 /// Attaches a terminal pane to a process: replays its raw scrollback as the first channel
 /// message, then streams live PTY bytes. The keep-alive terminal pool runs several attachments
 /// at once, each an independent forwarder. Returns the token that identifies this attachment;
@@ -229,22 +245,42 @@ pub async fn pty_attach(
     facade: State<'_, Arc<Facade>>,
     bridge: State<'_, PtyBridge>,
 ) -> Result<u64, String> {
+    let pid = ProcessId::from_raw(id);
     let (scrollback, mut live) = facade
         .supervisor()
-        .attach_pty(ProcessId::from_raw(id))
+        .attach_pty(pid)
         .ok_or_else(|| "process has not started".to_string())?;
     // The scrollback is captured atomically with the live receiver, so sending it as the
-    // first message preserves the core's no-gap/no-duplicate guarantee across IPC.
-    on_chunk.send(scrollback).map_err(|err| err.to_string())?;
+    // first message preserves the core's no-gap/no-duplicate guarantee across IPC. It is a
+    // resync frame: the emulator resets to it, the same way it recovers from a re-sync below.
+    on_chunk
+        .send(frame(PTY_FRAME_RESYNC, &scrollback))
+        .map_err(|err| err.to_string())?;
+    let facade = Arc::clone(&facade);
     let handle = tauri::async_runtime::spawn(async move {
         loop {
             match live.recv().await {
                 Ok(chunk) => {
-                    if on_chunk.send(chunk.to_vec()).is_err() {
+                    if on_chunk.send(frame(PTY_FRAME_CHUNK, &chunk)).is_err() {
                         break;
                     }
                 }
-                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Lagged(_)) => {
+                    // The forwarder fell behind and the broadcast dropped chunks, leaving a
+                    // hole in the byte stream that would desync the emulator mid-escape. Do
+                    // not skip it: re-attach for a fresh, gap-free scrollback and push it as a
+                    // resync so the UI resets to a coherent screen instead of rendering junk.
+                    match facade.supervisor().attach_pty(pid) {
+                        Some((scrollback, fresh)) => {
+                            live = fresh;
+                            if on_chunk.send(frame(PTY_FRAME_RESYNC, &scrollback)).is_err() {
+                                break;
+                            }
+                        }
+                        // The process is gone; nothing more to stream.
+                        None => break,
+                    }
+                }
                 Err(RecvError::Closed) => break,
             }
         }

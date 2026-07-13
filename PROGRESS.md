@@ -27,6 +27,108 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Stability-hardening sprint (2026-07-13; owner-requested, branch `fix/stability-hardening`
+  stacked on `feat/mcp-progressive-disclosure`).** A five-agent research pass (Solo docs + core +
+  adapters + UI + repo history) found the daily-instability root cause was structural, not a pile of
+  unrelated bugs: **(a) no reconciliation layer** — the read models are snapshot-then-deltas with no
+  repair path, so any dropped event is permanent (the "stale/missing forever" class), and **(b) two
+  silent gap points in the PTY byte path** that leave xterm mid-escape (garbled panes). Fixed both
+  classes plus the worst hang and several correctness bugs. **All gates green: `just lint` exit 0
+  (fmt, clippy `-D warnings`, tsc, eslint, prettier, dep-direction; file-size advisory only),
+  `just test` — core 549, UI 282, workspace all pass.** Six commits (`103e3b6` → `7848908`):
+  1. **`103e3b6` core** — actor no longer awaits the blocking PTY write inline; a dedicated
+     per-actor input pump owns the input receiver, so a child that stops reading stdin stalls only
+     the pump (typed input backpressures on the bounded channel), never the actor — fixing frozen/
+     unkillable processes and the hang-on-quit (shutdown joins the actor). The self-healing reactor
+     now rescans the registry for stuck-`Crashed` auto_restart processes on broadcast lag (a crashed
+     process emits no further event). Tests: `a_blocking_stdin_write_does_not_wedge_the_actor` (with
+     a new `FakeSpawner::blocks_on_input`), `a_lagged_reactor_recovers_a_stuck_crashed_process_via_rescan`.
+  2. **`93d492d` terminal byte path** — the app forwarder re-attaches + pushes a fresh scrollback
+     "resync" frame on broadcast lag instead of skipping chunks (violating the core's documented
+     re-sync-from-scrollback contract). Frames gained a 1-byte tag (chunk vs resync) preserving the
+     efficient raw-bytes channel. The UI hidden-pane backlog cap now marks a desync on **any** drop
+     (not only while hidden — a visible pane with rAF suspended by an occluded window spliced a gap
+     on restore) and the flush re-attaches; the UI also handles the backend resync frame. Covered in
+     `useTerminal.test.tsx`.
+  3. **`cef1aa9` UI hydration** — `useProcesses` buffers deltas while any snapshot fetch is in flight
+     and replays them on top of the resolved snapshot (folds are idempotent), with a generation guard
+     dropping superseded fetches. Fixes a `ProcessSpawned` that raced the fetch being clobbered (and,
+     since unknown-id deltas are silent no-ops, lost until restart). New `useProcesses.test.tsx`.
+  4. **`405a511` reconciliation backstop** — the event bridge emits a `DOMAIN_RESYNC` signal when the
+     forwarder falls behind; a shared `useReconcile` hook re-runs a store's refresh on that signal
+     **and on window focus** (`useProcesses` + `useProjects`), so a missed delta self-heals. The
+     file-watch reactor now re-syncs on `ConfigChanged` (a `solo.yml` glob edit took effect only on
+     re-open before). The MCP IPC accept loop retries transient accept errors (FD pressure, aborted
+     peers) with a backoff instead of returning (one hiccup no longer kills the MCP front until an app
+     restart). Tests: filewatch `ConfigChanged` resync, `useReconcile`.
+  5. **`98906f9` core correctness** — `close()` frees the process's terminal channel after reap (a
+     long open/close session leaked 5,000-line buffers each); a spawn failure writes the reason into
+     the process's own terminal before crashing (was an empty pane); the actor panic-isolation path
+     reaps the child the panicked task left behind (SIGKILL the recorded group, clear pgid, forget the
+     orphan record) before marking `Crashed`, so a crash auto-restart can't spawn a second child beside
+     it. Tests cover all three (new `FakeSpawner::fails_to_spawn`, panic fake given a realistic pgid).
+  6. **`7848908`** — rustfmt line-wrapping on the above.
+  - **Deferred (tracked, none regressing):** (i) seed agent activity in a snapshot so a webview reload
+    doesn't drop `Permission`/`Error` badges (needs a snapshot field/query across core+serde+TS);
+    (ii) enforce the MCP/HTTP master settings toggles (currently decorative — a policy decision on
+    whether to tear down live connections); (iii) move `load_project`'s blocking fs/SQLite off the
+    main/async thread (risky — it spawns actors, so needs real-runtime verification, not a headless
+    edit). See "Next session should start with".
+  - **Solo reference drift found by the research (record in `plan/05`, not yet applied):** Solo is now
+    at **v0.9.3** (contract pinned at 0.8.2); its changelog doubles as a bug-history checklist
+    (PID-recycling kill safety, MCP reconnect-with-replay, terminal replay/resize edge cases). HTTP
+    moved to a rotating **bearer token + discovery file** (our `X-Soloist-Local-Auth` models the old
+    API — a locked-invariant decision for the owner); `auto_start: true` default is now officially
+    confirmed (❓→✅); `icon_initials` is a real top-level key; `working_dir` absolute paths must
+    resolve inside the project; Solo scrollback cap is documented at 10,000 lines; a **workspaces**
+    concept exists. These are doc updates, not code — surfaced for the owner.
+
+- **MCP progressive-disclosure pass (2026-07-12; owner-requested, sourced from Aaron Francis's
+  Solo write-up `x.com/aarondfrancis/status/2075571055041675691`, 2026-07-10 — post-v0.8.2 primary
+  evidence).** Brought the Soloist MCP surface up to the tweet's progressive-disclosure design and
+  fixed a real guide bug found while verifying it. **Six features + one bug fix, all with tests, all
+  gates green:**
+  1. **Topic-structured `help`** — `core::support::guide` is now a topic set: `help_overview()`
+     (compact menu + first-run path), `help_topic(query)` (one topic by key or alias, normalized so
+     `how do I`/`how-do-i` match), `agent_guide()` (full doc, still the single source the
+     `setup_agent_integration` file section renders). The `help` tool takes an optional `topic`;
+     unknown → overview with the query echoed. **Bug fix:** the identity topic now teaches
+     **automatic** binding — the old guide told agents to *call* `bind_session_process`, which is
+     **not** an MCP tool (auto-bind on connect), so a literal follower would have errored.
+  2. **Initialization instructions + server identity** — `SoloistMcp::get_info` advertises the
+     whoami→help→help(topic) path (single-sourced `onboarding_hint()`), enables the tools
+     capability, and identifies the binary as `soloist-mcp` (rmcp default reported `rmcp`).
+  3. **Rich `whoami`** — core `Whoami` enriched: `bound_process`/`selected_process` are the canonical
+     `ProcessView`; `effective_project` is a new lean `ProjectRef { id, name }` (reuses the UI
+     display-name rule). The `soloist-mcp` `whoami` tool attaches the `mcp_tools` block
+     (`enabled`, `server_enabled_tool_count` = composed-router size, `visibility_note`). **OS pid
+     omitted** (D-15).
+  4. **`mcp_tools_summary`** (new Setup tool) — categorized enabled tools with one-line summaries and
+     no input schemas; categories built from the **same sub-routers `new` composes**, filtered to the
+     served set (disabled groups drop out; zero hand-kept name list). Added to `EXPECTED_TOOL_SURFACE`.
+  5. **Featured `tools/list`** — `list_tools` surfaces a starter pack (whoami, help,
+     mcp_tools_summary, then the common read/act tools) ahead of the default alphabetical order;
+     `FEATURED_TOOLS` const with a served-membership drift guard.
+  6. **Decaying next-tool suggestions** — `call_tool` appends a contextual hint to a *successful*
+     result from a single `hint_for(tool)` catalog; a per-session ledger (`suggestions.rs`) caps each
+     at 2 shows then falls silent.
+  - **Finding 6 (per-individual-tool disable): declined (owner-confirmed 2026-07-12)** — group-level
+    gating (G10) already delivers "disabled → removed from discovery"; per-tool is tracked *later*.
+    **Finding 8 (scratchpad free-form verbs): unchanged** — already declined as D-7.
+  - **Decisions recorded:** 7 new rows in `plan/05 §12` (each citing the tweet) + the F12 `help` row
+    reconciled; new `KNOWN-DIVERGENCES.md` **D-15** (whoami omits OS pid; no manual bind tool).
+  - **Touched:** `core` (`support/guide.rs` rewrite + `guide_tests.rs`, `identity.rs` Whoami,
+    `projects/view.rs` ProjectRef, `facade/session.rs`), `ipc` (protocol_tests), `mcp`
+    (`server.rs`, `tools/{setup,identity}.rs`, `args/setup.rs`, new `suggestions.rs`), `app`
+    (`ipc_server.rs` uses the promoted `Facade::effective_project`). No frontend/`domain.ts` change
+    (whoami is MCP-only). No new deps.
+  - **Gate: green.** `cargo test --workspace` all pass (**core 543, mcp 84**, ipc/app/pty/httpapi/cli
+    unchanged-or-updated, 0 failed); `cargo clippy --workspace --all-targets -D warnings` clean;
+    `cargo fmt --check` clean; `scripts/check-core-deps.sh` OK (core still framework-free). UI
+    untouched, so tsc/eslint/vitest unaffected. **Committed 2026-07-13 as `9882bbf` on
+    `feat/mcp-progressive-disclosure` to serve as the base of the stacked `fix/stability-hardening`
+    branch (owner still reviews this commit before merge).**
+
 - **Performance & native-feel pass (2026-07-04, branch `perf/native-feel`, PR #69; owner-requested,
   no new features).** Fixes the three reported feel complaints: ① theme/titlebar recolor lag
   (`Titlebar.tsx` compositing promotion + `applyDarkClass` atomic swap + memoized appearance value),

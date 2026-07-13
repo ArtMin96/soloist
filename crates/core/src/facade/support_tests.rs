@@ -83,5 +83,7 @@ fn the_guide_lands_in_the_scoped_projects_root_and_reruns_replace() {
         1,
         "re-running must replace the managed section, not duplicate it"
     );
-    assert!(contents.contains("bind_session_process"));
+    // The managed section carries the full guide — its identity topic teaches automatic binding.
+    assert!(contents.contains("Identity & binding"));
+    assert!(contents.contains("whoami"));
 }

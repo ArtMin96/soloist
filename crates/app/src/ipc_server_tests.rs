@@ -43,7 +43,7 @@ async fn whoami_routes_to_the_identity_session() {
     match handle_request(&facade, session, IpcRequest::Whoami).await {
         Ok(IpcResponse::Whoami(who)) => {
             assert_eq!(who.session, session);
-            assert_eq!(who.bound_process, None);
+            assert!(who.bound_process.is_none());
         }
         other => panic!("expected a whoami reply, got {other:?}"),
     }
@@ -283,7 +283,9 @@ async fn selecting_a_process_is_acked_and_reported_by_whoami() {
         Ok(IpcResponse::Acked)
     );
     match handle_request(&facade, session, IpcRequest::Whoami).await {
-        Ok(IpcResponse::Whoami(who)) => assert_eq!(who.selected_process, Some(id)),
+        Ok(IpcResponse::Whoami(who)) => {
+            assert_eq!(who.selected_process.map(|p| p.id), Some(id))
+        }
         other => panic!("expected a whoami reply, got {other:?}"),
     }
 }

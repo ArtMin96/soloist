@@ -11,6 +11,7 @@
 use super::Facade;
 use crate::identity::{IdentityError, Whoami};
 use crate::ids::{ProcessId, ProjectId, SessionId};
+use crate::projects::ProjectRef;
 
 impl Facade {
     /// Opens an identity session for a new MCP connection (C8). The IPC server holds the
@@ -101,20 +102,35 @@ impl Facade {
     }
 
     /// Resolves who a session is and the project its scoped tools act on (the answer to
-    /// the `whoami` tool).
+    /// the `whoami` tool), enriched with the bound process's details and the project's name.
     pub fn whoami(&self, session: SessionId) -> Whoami {
         let origin = self.identity.origin(session);
         Whoami {
             session,
-            bound_process: origin.process(),
-            // Drop a selection whose process has since left the registry (e.g. it was closed),
-            // so `whoami` never echoes a dangling id.
+            bound_process: origin
+                .process()
+                .and_then(|process| self.process_view(process)),
+            // Resolving the view also drops a selection whose process has since left the registry
+            // (e.g. it was closed), so `whoami` never echoes a dangling id.
             selected_process: self
                 .identity
                 .selected_process(session)
-                .filter(|process| self.process_view(*process).is_some()),
-            effective_project: self.effective_project(session),
+                .and_then(|process| self.process_view(process)),
+            effective_project: self
+                .effective_project(session)
+                .map(|id| self.project_ref(id)),
             origin,
+        }
+    }
+
+    /// The lean id-and-name reference for a resolved effective project. The id is authoritative —
+    /// it comes from in-memory identity — while the name is a best-effort durable-store read that
+    /// resolves to `None` when the store cannot be read or the record is gone. So a transient store
+    /// error dims the name without ever dropping the scope the caller still holds.
+    fn project_ref(&self, id: ProjectId) -> ProjectRef {
+        match self.projects.get(id).ok().flatten() {
+            Some(record) => ProjectRef::from_record(&record),
+            None => ProjectRef { id, name: None },
         }
     }
 
@@ -125,7 +141,7 @@ impl Facade {
     /// failing `whoami`. The selection and bound process are themselves authenticated at
     /// bind/select time, so each non-`None` resolution is a project the caller runs in (the
     /// sole-project default is the one unambiguous exception).
-    pub(crate) fn effective_project(&self, session: SessionId) -> Option<ProjectId> {
+    pub fn effective_project(&self, session: SessionId) -> Option<ProjectId> {
         if let Some(project) = self.identity.selected_project(session) {
             return Some(project);
         }
@@ -173,3 +189,7 @@ impl Facade {
         self.home_project(session) == Some(project)
     }
 }
+
+#[cfg(test)]
+#[path = "session_tests.rs"]
+mod tests;

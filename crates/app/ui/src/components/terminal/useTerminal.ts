@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
@@ -12,10 +12,12 @@ import type { ProcessView } from "@/domain";
 
 export type TerminalState = "attaching" | "live" | "not-started";
 
-// Upper bound on bytes coalesced between animation frames. Flushing stops while the pane is hidden
-// — a background pool pane, or the whole window occluded — so without a cap a chatty process would
-// grow the queue without limit; oldest chunks are dropped first, mirroring the core's raw-scrollback
-// ring. Sized to hold a full scrollback replay (the core caps raw scrollback at 256 KiB) plus a
+// Upper bound on bytes coalesced between animation frames. Flushing stops while the pane can't be
+// drawn — a background pool pane, or the whole window occluded (WebKitGTK suspends rAF) — so without
+// a cap a chatty process would grow the queue without limit; oldest chunks are dropped first. A drop
+// leaves the remaining backlog starting mid-stream, so instead of writing that gap the pane marks
+// itself to re-attach and replay the core's coherent raw-scrollback ring — an overflow never leaves
+// a gap. Sized to hold a full scrollback replay (the core caps raw scrollback at 256 KiB) plus a
 // burst of live output.
 const PENDING_CAP_BYTES = 512 * 1024;
 
@@ -31,8 +33,10 @@ export interface TerminalSearch {
 // thrash the main thread), routes keystrokes back via `pty_write`, and keeps the PTY
 // winsize in step with the pane via `pty_resize`. While its pane is hidden in the keep-alive
 // pool the emulator stays mounted but pauses flushing, so a background process does no
-// per-frame parsing on the main thread; the backlog drains when the pane is shown. Theme and
-// terminal typography follow the Appearance settings — applied to the live emulator on change,
+// per-frame parsing on the main thread; the backlog drains when the pane is shown — or, if it
+// overflowed the cap while hidden, the pane re-attaches and replays the core's scrollback so the
+// view stays gap-free. Theme and terminal typography follow the Appearance settings — applied to
+// the live emulator on change,
 // never recreating it. Detaches deterministically on unmount.
 export function useTerminal(process: ProcessView, visible = true) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -48,6 +52,15 @@ export function useTerminal(process: ProcessView, visible = true) {
   // Drains the current attachment's flush when its pane becomes visible again, writing the bytes
   // that accumulated (bounded) while it was hidden. Null between attachments.
   const resumeRef = useRef<(() => void) | null>(null);
+  // Re-establishes the stream on the live emulator (cancel, reset, re-attach) so the core replays
+  // a coherent scrollback. Held in a ref so the attachment's flush can trigger it without a forward
+  // reference. Assigned once `reattach` is defined.
+  const reattachRef = useRef<(() => void) | null>(null);
+  // Set when the bounded backlog overflowed and dropped bytes — while hidden, or while visible but
+  // with rAF suspended (an occluded window) — so the remaining backlog is non-contiguous and
+  // draining it would splice a gap. The pane then re-attaches and replays the core's coherent
+  // scrollback instead. Reset on each (re)attach and on a backend resync.
+  const desyncedRef = useRef(false);
   const [state, setState] = useState<TerminalState>("attaching");
 
   // The latest visibility, read inside the attachment's byte handler so a hidden pool pane stops
@@ -69,6 +82,7 @@ export function useTerminal(process: ProcessView, visible = true) {
     if (!term || attachedRef.current) return;
     attachedRef.current = true;
     setState("attaching");
+    desyncedRef.current = false;
 
     // All coalescing state lives in this closure and dies with this attachment. Bytes from a
     // cancelled attachment are discarded on arrival — never queued, never given a frame — so
@@ -81,6 +95,15 @@ export function useTerminal(process: ProcessView, visible = true) {
 
     const flush = () => {
       frame = 0;
+      if (desyncedRef.current) {
+        // The backlog shed a chunk from its middle (a burst outran the cap, e.g. while the
+        // window was occluded and rAF suspended); writing it would splice a gap into the
+        // emulator. Discard it and re-attach to replay the core's coherent scrollback.
+        pending = [];
+        pendingBytes = 0;
+        reattachRef.current?.();
+        return;
+      }
       const batch = pending;
       pending = [];
       pendingBytes = 0;
@@ -93,13 +116,29 @@ export function useTerminal(process: ProcessView, visible = true) {
       frame = requestAnimationFrame(flush);
     };
 
-    const attachment = ptyAttach(id, (bytes) => {
+    const attachment = ptyAttach(id, (bytes, resync) => {
       if (cancelled) return;
+      if (resync) {
+        // The forwarder re-synced from the core's scrollback (the first attach, or after it
+        // fell behind): reset the emulator and drop the now-stale backlog, then start from
+        // this coherent snapshot. Written on the next frame — or on show, if hidden.
+        if (frame) cancelAnimationFrame(frame);
+        frame = 0;
+        pending = [bytes];
+        pendingBytes = bytes.length;
+        desyncedRef.current = false;
+        term.reset();
+        if (visibleRef.current) frame = requestAnimationFrame(flush);
+        return;
+      }
       pending.push(bytes);
       pendingBytes += bytes.length;
       while (pendingBytes > PENDING_CAP_BYTES && pending.length > 1) {
         pendingBytes -= pending[0].length;
         pending.shift();
+        // A drop leaves the backlog non-contiguous; draining it would splice a gap. Mark the
+        // pane to re-attach and replay the core's coherent scrollback instead of showing junk.
+        desyncedRef.current = true;
       }
       // A hidden pool pane keeps accruing bytes (bounded above) but does not schedule a flush, so it
       // runs no VT parsing on the main thread until it is shown again.
@@ -128,6 +167,26 @@ export function useTerminal(process: ProcessView, visible = true) {
         setState("not-started");
       });
   }, [id]);
+
+  // Re-establishes the PTY stream on the live emulator: cancels the current attachment, clears the
+  // stale (gappy) screen, and attaches afresh so the core replays its coherent raw scrollback. Used
+  // when a hidden pane's backlog overflowed — draining it would splice in a gap, so the pane instead
+  // shows the same current, gap-free view a fresh mount would. Reuses the emulator; only the stream
+  // is re-established.
+  const reattach = useCallback(() => {
+    const term = termRef.current;
+    if (!term) return;
+    cancelAttachRef.current?.();
+    attachedRef.current = false;
+    term.reset();
+    attach();
+  }, [attach]);
+  // Expose the latest `reattach` to the attachment's flush without a forward reference. Assigned
+  // in a layout effect rather than during render, so a discarded concurrent render cannot leave
+  // the ref pointing at an uncommitted callback; the rAF flush only reads it after commit.
+  useLayoutEffect(() => {
+    reattachRef.current = reattach;
+  }, [reattach]);
 
   // Fit the emulator to its host, then push the resulting winsize to the PTY. Reads the live
   // refs so it can run from any effect — initial layout, a host resize, an appearance change,
@@ -237,10 +296,14 @@ export function useTerminal(process: ProcessView, visible = true) {
   // happened off-screen, and take keyboard focus so the user can type immediately after switching.
   useEffect(() => {
     if (!visible) return;
-    resumeRef.current?.();
+    // Drain what accrued while hidden — unless the bounded backlog overflowed, in which case the
+    // drained bytes would start mid-stream (a gap): re-attach and replay the core's scrollback for a
+    // coherent, current view instead.
+    if (desyncedRef.current) reattach();
+    else resumeRef.current?.();
     syncSize();
     termRef.current?.focus();
-  }, [visible, syncSize]);
+  }, [visible, reattach, syncSize]);
 
   // Stable search callbacks — backed by the SearchAddon ref so callers don't need to
   // re-subscribe when the terminal remounts (stable reference, latest addon via ref).

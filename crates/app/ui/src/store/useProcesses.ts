@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   agentResume,
   onDomainEvent,
@@ -11,7 +11,13 @@ import {
   stackStop,
 } from "@/api";
 import { applyEvent } from "@/store/projection";
-import type { ProcessView } from "@/domain";
+import { useReconcile } from "@/store/useReconcile";
+import type { DomainEvent, ProcessView } from "@/domain";
+
+// Ceiling on events buffered during an in-flight snapshot fetch. A fetch this far behind is
+// pathological; drop the oldest rather than grow without bound. A delta lost this way still
+// self-heals — `useReconcile` re-fetches on the resync signal and on window focus.
+const MAX_BUFFERED_EVENTS = 1024;
 
 export interface ProcessStore {
   processes: ProcessView[];
@@ -39,10 +45,35 @@ export function useProcesses(): ProcessStore {
   const [processes, setProcesses] = useState<ProcessView[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // Applying a snapshot replaces the whole list, so an event folded in while the snapshot was
+  // in flight would be clobbered — and an unknown-id delta (a ProcessSpawned for a row the
+  // snapshot predates) is a silent no-op in the projection, making the loss permanent. So while
+  // a fetch is in flight events are buffered here and replayed on top of the snapshot (the folds
+  // are idempotent), and a generation guard drops a superseded fetch so overlapping refreshes
+  // (e.g. the post-trust refresh racing a spawn burst) resolve in order.
+  const fetchingRef = useRef(false);
+  const bufferRef = useRef<DomainEvent[]>([]);
+  const genRef = useRef(0);
+
   const fail = useCallback((reason: unknown) => setError(String(reason)), []);
   const clearError = useCallback(() => setError(null), []);
   const refresh = useCallback(() => {
-    procList().then(setProcesses).catch(fail);
+    const gen = ++genRef.current;
+    fetchingRef.current = true;
+    bufferRef.current = [];
+    procList()
+      .then((snapshot) => {
+        if (gen !== genRef.current) return; // a newer refresh superseded this one
+        const hydrated = bufferRef.current.reduce(applyEvent, snapshot);
+        bufferRef.current = [];
+        fetchingRef.current = false;
+        setProcesses(hydrated);
+      })
+      .catch((reason) => {
+        if (gen !== genRef.current) return;
+        fetchingRef.current = false;
+        fail(reason);
+      });
   }, [fail]);
 
   const start = useCallback((id: number) => void procStart(id).catch(fail), [fail]);
@@ -60,9 +91,18 @@ export function useProcesses(): ProcessStore {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    // Attach the listener before reading the snapshot, so an event emitted between the
-    // snapshot and the subscription cannot be lost (snapshot-then-deltas).
-    onDomainEvent((event) => setProcesses((prev) => applyEvent(prev, event)))
+    // Attach the listener before reading the snapshot, so an event emitted between the snapshot
+    // and the subscription cannot be lost (snapshot-then-deltas). While a fetch is in flight the
+    // event is buffered (replayed on top of the snapshot when it lands) rather than folded into a
+    // list the snapshot is about to replace.
+    const onEvent = (event: DomainEvent) => {
+      if (fetchingRef.current) {
+        const buffer = bufferRef.current;
+        buffer.push(event);
+        if (buffer.length > MAX_BUFFERED_EVENTS) buffer.shift();
+      } else setProcesses((prev) => applyEvent(prev, event));
+    };
+    onDomainEvent(onEvent)
       .then((stopListening) => {
         if (cancelled) {
           stopListening();
@@ -77,6 +117,10 @@ export function useProcesses(): ProcessStore {
       unlisten?.();
     };
   }, [refresh, fail]);
+
+  // Re-sync on a backend resync signal or window focus, so a dropped delta never leaves the
+  // list permanently stale.
+  useReconcile(refresh);
 
   return {
     processes,

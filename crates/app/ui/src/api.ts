@@ -239,12 +239,23 @@ export function ptyResize(id: number, cols: number, rows: number): Promise<void>
   return invoke<void>("pty_resize", { id, cols, rows });
 }
 
-// Attaches the terminal pane to a process. The first channel message is the raw
-// scrollback replay; subsequent messages are live PTY bytes. Resolves to the token that
-// identifies this attachment: pass it to `ptyDetach` to cancel the backend forwarder.
-export function ptyAttach(id: number, onChunk: (bytes: Uint8Array) => void): Promise<number> {
+// Byte 0 of every PTY frame tags the payload: a live chunk to append (`PTY_FRAME_CHUNK`) versus a
+// resync (a scrollback snapshot the emulator must reset to — sent first and again whenever the
+// forwarder falls behind). Mirrors the backend tags in `commands/mod.rs`.
+export const PTY_FRAME_CHUNK = 0;
+export const PTY_FRAME_RESYNC = 1;
+
+// Attaches the terminal pane to a process. The first channel message is a resync carrying the
+// raw scrollback replay; subsequent messages are live PTY bytes, with an occasional resync if
+// the forwarder had to recover from falling behind. Each frame's first byte is the tag; the
+// callback receives the payload (tag stripped) plus whether it is a resync. Resolves to the
+// token that identifies this attachment: pass it to `ptyDetach` to cancel the backend forwarder.
+export function ptyAttach(
+  id: number,
+  onChunk: (bytes: Uint8Array, resync: boolean) => void,
+): Promise<number> {
   const channel = new Channel<Uint8Array>();
-  channel.onmessage = onChunk;
+  channel.onmessage = (frame) => onChunk(frame.subarray(1), frame[0] === PTY_FRAME_RESYNC);
   return invoke<number>("pty_attach", { id, onChunk: channel });
 }
 
@@ -469,4 +480,12 @@ export function setProjectIcon(project: ProjectId, icon: string | null): Promise
 
 export function onDomainEvent(handler: (event: DomainEvent) => void): Promise<UnlistenFn> {
   return listen<DomainEvent>(DOMAIN_EVENT, (event) => handler(event.payload));
+}
+
+// The backend's delta stream fell behind and dropped events; stores must re-read their
+// snapshots to recover, since a lost delta is otherwise permanent. Carries no payload.
+const DOMAIN_RESYNC = "domain-resync";
+
+export function onResync(handler: () => void): Promise<UnlistenFn> {
+  return listen(DOMAIN_RESYNC, () => handler());
 }

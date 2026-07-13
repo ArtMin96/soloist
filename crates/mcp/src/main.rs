@@ -4,6 +4,7 @@
 mod args;
 mod client;
 mod server;
+mod suggestions;
 mod tools;
 
 use std::sync::Arc;

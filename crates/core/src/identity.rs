@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::ports::StoreError;
+use crate::process::ProcessView;
+use crate::projects::ProjectRef;
 use crate::sync::lock;
 
 /// The environment variable Soloist injects into every managed process, carrying that
@@ -67,19 +69,26 @@ struct Session {
     peer_pgid: Option<i32>,
 }
 
-/// What a session resolves to: its caller [`Origin`], the process it is bound to (if
-/// any), and the effective project a scoped tool would act on (if one can be resolved).
-/// The answer the `whoami` tool returns.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// What a session resolves to: its caller [`Origin`], the process it is bound to (if any) with
+/// that process's live details, the informational default-target process, and the effective
+/// project a scoped tool would act on (if one can be resolved), named. The answer the `whoami`
+/// tool returns — enriched from bare ids so an agent sees its process's name, kind, and status
+/// and its project's name without a second lookup. The process fields are the canonical
+/// [`ProcessView`] projection, so they read the same here as everywhere else.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Whoami {
     pub session: SessionId,
     pub origin: Origin,
-    pub bound_process: Option<ProcessId>,
-    /// The process the caller selected as an informational default target, if any. Confers no
-    /// scope or authority (see [`Identity::select_process`]); reported only so a caller can
-    /// confirm its selection.
-    pub selected_process: Option<ProcessId>,
-    pub effective_project: Option<ProjectId>,
+    /// The managed process this session is bound to, with its name, kind, and status — `None`
+    /// for an external or unbound caller.
+    pub bound_process: Option<ProcessView>,
+    /// The process the caller selected as an informational default target, if any and still
+    /// present. Confers no scope or authority (see [`Identity::select_process`]); reported only
+    /// so a caller can confirm its selection.
+    pub selected_process: Option<ProcessView>,
+    /// The project this session's scoped tools act on, with its display name — `None` when the
+    /// scope is unresolved (nothing bound or selected and more than one project open).
+    pub effective_project: Option<ProjectRef>,
 }
 
 /// Why an identity command failed: the referenced process or project is not registered,

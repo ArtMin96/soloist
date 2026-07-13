@@ -10,17 +10,42 @@ use crate::args::{ProcessArg, RegisterAgentArg, SelectProjectArg};
 use crate::server::SoloistMcp;
 use crate::tools::reply::{acked, app_error, structured, unexpected};
 
+/// What `whoami`'s `mcp_tools.visibility_note` tells the caller: the count is the server's own
+/// enabled-tool total, so a client showing fewer needs to refresh discovery or reconnect.
+const MCP_TOOLS_VISIBILITY_NOTE: &str =
+    "Soloist's server-side count of enabled MCP tools. If your \
+MCP client shows fewer Soloist tools, refresh tool discovery or reconnect the Soloist MCP server.";
+
 #[tool_router(router = identity_router, vis = "pub(crate)")]
 impl SoloistMcp {
     #[tool(
-        description = "Report which process this MCP session is bound to and the project its scoped tools act on."
+        description = "Report which process this MCP session is bound to, who it is acting as, the project its scoped tools act on (by name), and how many Soloist MCP tools are enabled server-side. Call this first to confirm your identity and scope."
     )]
     pub(crate) async fn whoami(&self) -> Result<CallToolResult, ErrorData> {
         match self.client.request(IpcRequest::Whoami).await {
-            Ok(IpcResponse::Whoami(who)) => structured(&who),
+            // The identity and scope come from the core; the enabled-tool count is a fact of this
+            // server's own composed surface, so it is attached here rather than round-tripped.
+            Ok(IpcResponse::Whoami(who)) => {
+                let mut value = serde_json::to_value(&who)
+                    .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("mcp_tools".into(), self.mcp_tools_status());
+                }
+                structured(&value)
+            }
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }
+    }
+
+    /// The `mcp_tools` block `whoami` reports: that tools are enabled, the server-side enabled-tool
+    /// count, and the note explaining a client-side discrepancy.
+    fn mcp_tools_status(&self) -> serde_json::Value {
+        serde_json::json!({
+            "enabled": true,
+            "server_enabled_tool_count": self.served_tool_count(),
+            "visibility_note": MCP_TOOLS_VISIBILITY_NOTE,
+        })
     }
 
     #[tool(

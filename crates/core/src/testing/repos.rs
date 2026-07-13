@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::hash::Hash;
@@ -51,6 +52,7 @@ struct FakeProjects {
 /// closely enough to exercise the [`crate::projects::Projects`] logic.
 pub struct FakeProjectRepo {
     inner: Mutex<FakeProjects>,
+    get_fails: AtomicBool,
 }
 
 impl FakeProjectRepo {
@@ -60,7 +62,15 @@ impl FakeProjectRepo {
                 next_id: 1,
                 rows: Vec::new(),
             }),
+            get_fails: AtomicBool::new(false),
         }
+    }
+
+    /// Makes [`ProjectRepo::get`] fail with a backend error while `list`/`upsert` keep working,
+    /// simulating a transient store fault (a WAL checkpoint or `SQLITE_BUSY`). Lets a test drive
+    /// the "scope resolved from memory, name unreadable from the store" path.
+    pub fn set_get_failing(&self, failing: bool) {
+        self.get_fails.store(failing, Ordering::SeqCst);
     }
 }
 
@@ -99,6 +109,9 @@ impl ProjectRepo for FakeProjectRepo {
     }
 
     fn get(&self, id: ProjectId) -> Result<Option<ProjectRecord>, StoreError> {
+        if self.get_fails.load(Ordering::SeqCst) {
+            return Err(StoreError::Backend("simulated store failure".into()));
+        }
         Ok(lock(&self.inner).rows.iter().find(|r| r.id == id).cloned())
     }
 
