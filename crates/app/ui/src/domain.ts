@@ -590,6 +590,7 @@ export interface ProjectCommandView {
   auto_start: boolean;
   auto_restart: boolean;
   restart_when_changed: string[];
+  env: Record<string, string>;
   visibility: Visibility;
   terminal_alerts: boolean;
   status: ProcStatus | null;

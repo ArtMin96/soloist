@@ -63,6 +63,7 @@ export function AddCommandModal({
         const trimmed = g.trim();
         return trimmed ? [trimmed] : [];
       }),
+      env: {},
     });
     onAdd(name.trim(), spec, visibility)
       .then(() => change(false))

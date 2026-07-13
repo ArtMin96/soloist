@@ -34,6 +34,7 @@ const webCommand: ProjectCommandView = {
   auto_start: true,
   auto_restart: false,
   restart_when_changed: [],
+  env: {},
   visibility: "shared",
   terminal_alerts: true,
   status: "Running",
