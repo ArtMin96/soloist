@@ -27,6 +27,37 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Stability & security audit — ticket 02 `needs-human-verify` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; commit `50e0e64`).** PRD-02 (P1, the owner's #1 daily symptom:
+  "open a new agent, xterm shows nothing"). Root cause was a two-part cross-boundary race:
+  (a) the per-process terminal channel was created **lazily inside the spawned actor task**
+  (`terminals.open` was called only in `actor::run`), so a viewer attaching in the window between
+  `start()` returning and the actor being scheduled hit `attach_pty → None` and the pane stranded
+  on the "Press Start" overlay; (b) the FE retry was keyed only on `process.status` + an optimistic
+  `attachedRef`, so a reject with no later status change never retried. **Fix:** open the channel
+  **synchronously in `Supervisor::launch_actor`** (after the `begin_launch` race gate, before
+  `tokio::spawn`) and pass the actor-facing `ActorTerminal` into `actor::spawn`/`run` — `attach_pty`
+  is now total for a *launched* process, while a never-started resting process still returns `None`
+  so the overlay is preserved (dropped `terminals` from `ActorPorts`). Folded in **C6 (resize
+  race):** set `current_io` **before** announcing `Running`, and a shared
+  `last_size: Arc<Mutex<PtySize>>` (written by the input pump on every `Resize`, even with no live
+  child; read when building each respawn's `SpawnSpec`) makes a within-actor relaunch re-create the
+  PTY at the last requested size instead of the 80×24 default. FE robustness: a short-backoff retry
+  effect (`useTerminal.ts`, keyed on `state`+status) recovers a rejected attach while the process is
+  active. Tests (new, red-before/green-after): core `attach_pty_is_available_synchronously_after_start`,
+  `a_never_started_process_has_no_terminal_channel`, `a_resize_reaches_the_running_pty`,
+  `a_respawn_relaunches_the_pty_at_the_last_resize_size` (new `FakeSpawner::records_resizes` +
+  `ResizeLog`); UI `useTerminal` attach-retry (reject-once-then-succeed; no-retry-while-inactive).
+  **Gates: `just lint` exit 0; `just test` exit 0 — Rust core 557 (+ all workspace crates green, 3
+  pty soak tests ignored), UI 288 across 58 files.** Independent adversarial code-review of the diff
+  found no substantive issues. **`needs-human-verify`:** the "live repro" acceptance (launch a real
+  agent ~10× via `just dev`, confirm the pane shows output every time; and a relaunch keeps the
+  pane's size) is a GUI walk this headless session can't run — implementation + unit tests are
+  complete. PRD-02's synchronous-channel change to `supervisor.rs` is now landed, so **PRD-07**
+  (reconciliation & launch races, `Blocked by: 02`) can build on it — it formally unblocks once 02
+  is human-verified → `done`. Next frontier ticket for a fresh agent session: **03** (orphan
+  PID/PGID-reuse kill safety; `ready-for-agent`, unblocked).
+
 - **Stability & security audit — ticket 01 done (2026-07-14; branch `fix/stability-audit-2026-07`).**
   PRD-01 (P0 data loss): editing any field of a command that carried a per-command `env:` block in
   `solo.yml` silently deleted the whole committed `env:` block on save. Root cause: the settings-page

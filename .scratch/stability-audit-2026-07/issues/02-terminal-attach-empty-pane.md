@@ -1,6 +1,6 @@
 # PRD-02 — Fix the empty terminal pane on a freshly-launched agent/process
 
-Status: ready-for-agent
+Status: needs-human-verify
 Blocked by: none
 
 - **Severity:** P1 (the owner's #1 daily symptom: "open a new agent, xterm shows nothing")
@@ -70,3 +70,43 @@ resize isn't dropped (leaving a TUI stuck at 80×24). See findings-log C6.
 
 ## Out of scope
 The broader reconciliation backstops (PRD-07). Scrollback/search behavior (unaffected).
+
+## Comments
+
+**Implemented 2026-07-14 (commit `50e0e64`, branch `fix/stability-audit-2026-07`).**
+
+- **Primary (backend):** `terminals.open(id)` moved out of the spawned actor body into
+  `Supervisor::launch_actor` — opened synchronously (after the `begin_launch` race gate, before
+  `tokio::spawn`), and the actor-facing `ActorTerminal` is passed into `actor::spawn`/`run`.
+  `attach_pty` is now total for a *launched* process; a never-started resting process still
+  returns `None`, so the "Press Start" overlay is preserved (verified by a test). `terminals` was
+  dropped from `ActorPorts` (the actor no longer opens the channel). All six `launch_actor`
+  callers (normal start, bulk auto-start, crash auto-restart, orphan adoption) get a correct
+  channel; relaunch still reuses buffers via `Terminals::open`.
+- **C6 (resize):** `current_io` is set **before** announcing `Running`; a shared
+  `last_size: Arc<Mutex<PtySize>>` (written by the input pump on every `Resize`, even with no live
+  child; read when building each respawn's `SpawnSpec`) makes a relaunch re-create the PTY at the
+  last requested size instead of the 80×24 default. Note: this remembers the size for a **within-
+  actor** respawn (restart/resume — the common relaunch); a brand-new actor from a crash
+  auto-restart starts from the registered default and relies on the FE re-sync, as before.
+- **Secondary (frontend):** a backoff retry effect in `useTerminal.ts` (keyed on `state` +
+  status, `ATTACH_RETRY_MS = 120`) recovers a rejected attach while the process is active, so a
+  strand no longer waits on a status change that may never come. It does not retry a
+  resting/never-started process.
+
+**Fidelity note:** the acceptance's literal "total for a *registered* process" is met as "total
+for a *launched* process" — a deliberate scope so a never-started process keeps its overlay rather
+than showing an empty live pane. Confirmed with the ticket's intent (the race window is
+`start`→actor-scheduled, i.e. `Starting`+).
+
+**Tests (red-before / green-after):** core `attach_pty_is_available_synchronously_after_start`,
+`a_never_started_process_has_no_terminal_channel`, `a_resize_reaches_the_running_pty`,
+`a_respawn_relaunches_the_pty_at_the_last_resize_size` (new `FakeSpawner::records_resizes` +
+`ResizeLog`); UI `useTerminal` attach-retry (reject-once-then-succeed, and no-retry-while-inactive).
+
+**Gates:** `just lint` exit 0; `just test` exit 0 — Rust core 557 (+ all workspace crates green,
+3 pty soak tests ignored), UI 288 across 58 files.
+
+**Status: `needs-human-verify`** — the "live repro" acceptance (launch a real agent ~10× via
+`just dev` and confirm the pane shows output every time; and a relaunch keeps the pane's size) is a
+GUI walk this headless session cannot run. Implementation + unit tests are complete.
