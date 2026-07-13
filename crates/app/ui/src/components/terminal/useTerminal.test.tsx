@@ -89,6 +89,12 @@ function VisibilityProbe({ process, visible }: { process: ProcessView; visible: 
   return <div ref={hostRef} />;
 }
 
+// Surfaces the hook's attach state so a test can assert the pane recovered to "live".
+function StateProbe({ process }: { process: ProcessView }) {
+  const { hostRef, state } = useTerminal(process);
+  return <div ref={hostRef} data-state={state} />;
+}
+
 type ChunkChannel = Channel<Uint8Array>;
 
 interface AttachCall {
@@ -375,5 +381,60 @@ describe("useTerminal hidden-pane pause", () => {
     const text = writtenText(term);
     expect(text).toContain("COHERENT-REPLAY");
     expect(text).not.toContain("B".repeat(1024));
+  });
+});
+
+describe("useTerminal attach retry", () => {
+  // The launch race: the first attach lands in the brief window before the backend channel is
+  // ready and is rejected, and the process status does not change again to re-trigger. The pane
+  // must retry and end "live" rather than stranded on the "not-started" overlay of a running
+  // process — the recovery cannot depend on a status change that may never come.
+  it("recovers to live when a rejected attach is not followed by a status change", async () => {
+    let attempts = 0;
+    let nextToken = 0;
+    mockIPC((cmd, args) => {
+      if (cmd === "pty_attach") {
+        attempts += 1;
+        // Reject the first attach (the race window), then succeed on the retry.
+        if (attempts === 1) throw new Error("process has not started");
+        const token = ++nextToken;
+        attaches.push({ channel: (args as { onChunk: ChunkChannel }).onChunk, token });
+        return token;
+      }
+      if (cmd === "pty_detach") {
+        detached.push((args as { token: number }).token);
+      }
+      return null;
+    });
+
+    const { container } = render(<StateProbe process={PROCESS} />);
+    // Settle repeatedly so the reject lands, the backoff retry fires, and the second attach
+    // resolves — polling rather than betting on a single fixed window (the mocked IPC resolves
+    // asynchronously, so the exact timing is not deterministic).
+    for (let i = 0; i < 12 && !container.querySelector("[data-state='live']"); i += 1) {
+      await settle(120);
+    }
+
+    expect(attempts).toBeGreaterThanOrEqual(2);
+    expect(container.querySelector("[data-state='live']")).not.toBeNull();
+  });
+
+  // A resting, never-started process is rejected by the backend and its status never becomes
+  // active; the pane must stay on the "not-started" overlay and not spin retrying forever.
+  it("does not retry a rejected attach while the process is not active", async () => {
+    let attempts = 0;
+    mockIPC((cmd) => {
+      if (cmd === "pty_attach") {
+        attempts += 1;
+        throw new Error("process has not started");
+      }
+      return null;
+    });
+
+    const { container } = render(<StateProbe process={{ ...PROCESS, status: "Stopped" }} />);
+    await settle(400);
+
+    expect(attempts).toBe(1);
+    expect(container.querySelector("[data-state='not-started']")).not.toBeNull();
   });
 });

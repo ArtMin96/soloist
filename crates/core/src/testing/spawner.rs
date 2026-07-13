@@ -24,6 +24,35 @@ type SpecEnvLog = Arc<Mutex<Vec<BTreeMap<String, String>>>>;
 /// process — e.g. the fresh launch versus the resume command line.
 type CommandLog = Arc<Mutex<Vec<String>>>;
 
+/// The shared record a [`FakeSpawner::records_resizes`] child fills: the winsize each spawn
+/// created its PTY at (`spawns`, in launch order) and every resize applied to a live PTY
+/// (`resizes`, in order). A test reads these to prove a resize reaches the child and that a
+/// respawn re-creates the PTY at the last requested size instead of the 80×24 default.
+#[derive(Clone, Default)]
+pub struct ResizeLog {
+    spawns: Arc<Mutex<Vec<PtySize>>>,
+    resizes: Arc<Mutex<Vec<PtySize>>>,
+    applied: Arc<Notify>,
+}
+
+impl ResizeLog {
+    /// The winsize each spawn created its PTY at, in launch order.
+    pub fn spawns(&self) -> Vec<PtySize> {
+        lock(&self.spawns).clone()
+    }
+
+    /// Every resize applied to a live PTY, in order.
+    pub fn resizes(&self) -> Vec<PtySize> {
+        lock(&self.resizes).clone()
+    }
+
+    /// Resolves once a resize has been applied to the live PTY, so a test can wait for the input
+    /// pump to have processed a resize — and thus recorded the last size — without polling.
+    pub async fn resize_applied(&self) {
+        self.applied.notified().await;
+    }
+}
+
 /// Signal numbers a simulated kill records on a fake child's exit status.
 const SIGKILL: i32 = 9;
 const SIGTERM: i32 = 15;
@@ -87,6 +116,10 @@ enum Behavior {
     /// Fails to spawn with a fixed message — a missing binary or bad working dir — so a test
     /// can prove the actor surfaces the reason in the terminal and crashes.
     FailsToSpawn(String),
+    /// Stays alive (exiting on SIGTERM) and records, per spawn, the winsize its PTY was created
+    /// at and every resize applied to it — so a test can prove a resize reaches the child and
+    /// that a respawn re-creates the PTY at the last requested size.
+    RecordsResizes(ResizeLog),
 }
 
 /// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is chosen
@@ -232,6 +265,20 @@ impl FakeSpawner {
         Self {
             behavior: Behavior::FailsToSpawn(message.to_string()),
         }
+    }
+
+    /// A long-lived child (exiting on SIGTERM) that records the winsize each spawn created its
+    /// PTY at and every resize applied to it, returning the spawner and the shared [`ResizeLog`]
+    /// the test reads. Used to prove a resize reaches the child and that a respawn re-creates the
+    /// PTY at the last requested size rather than the 80×24 default.
+    pub fn records_resizes() -> (Self, ResizeLog) {
+        let log = ResizeLog::default();
+        (
+            Self {
+                behavior: Behavior::RecordsResizes(log.clone()),
+            },
+            log,
+        )
     }
 }
 
@@ -380,6 +427,28 @@ impl ProcessSpawner for FakeSpawner {
                     io: Box::new(NoopPtyIo),
                 })
             }
+            Behavior::RecordsResizes(log) => {
+                lock(&log.spawns).push(spec.size);
+                let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
+                let control = Box::new(OneshotControl {
+                    exit_tx: Mutex::new(Some(exit_tx)),
+                    // Exits promptly on SIGTERM so a test can restart it without stepping the
+                    // grace window each time.
+                    dies_on: DiesOn::Terminate,
+                });
+                let exit: ExitFuture =
+                    Box::pin(async move { exit_rx.await.unwrap_or_else(|_| killed_by(SIGKILL)) });
+                Ok(Spawned {
+                    pid: Some(424248),
+                    output: no_output(),
+                    exit,
+                    control,
+                    io: Box::new(ResizeRecordingPtyIo {
+                        resizes: log.resizes.clone(),
+                        applied: log.applied.clone(),
+                    }),
+                })
+            }
             Behavior::FailsToSpawn(message) => Err(SpawnError::Spawn(message.clone())),
             Behavior::BlocksOnInput(entered) => {
                 let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
@@ -479,6 +548,27 @@ impl PtyIo for BlockingPtyIo {
     }
 
     async fn resize(&self, _size: PtySize) -> Result<(), SpawnError> {
+        Ok(())
+    }
+}
+
+/// A [`PtyIo`] that records every resize applied to it (discarding writes) and fires `applied`
+/// as each resize lands, so a test can prove a resize reaches the child and can wait for the
+/// input pump to have processed one without polling.
+struct ResizeRecordingPtyIo {
+    resizes: Arc<Mutex<Vec<PtySize>>>,
+    applied: Arc<Notify>,
+}
+
+#[async_trait]
+impl PtyIo for ResizeRecordingPtyIo {
+    async fn write(&self, _data: &[u8]) -> Result<(), SpawnError> {
+        Ok(())
+    }
+
+    async fn resize(&self, size: PtySize) -> Result<(), SpawnError> {
+        lock(&self.resizes).push(size);
+        self.applied.notify_one();
         Ok(())
     }
 }

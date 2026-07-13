@@ -20,12 +20,12 @@ use crate::identity::PROCESS_ID_ENV;
 use crate::ids::ProcessId;
 use crate::ports::{
     Clock, ExitFuture, ExitStatus, LockReleaser, OrphanControl, OrphanRecord, ProcessControl,
-    ProcessSpawner, PtyIo, RuntimeState, SpawnSpec, Spawned,
+    ProcessSpawner, PtyIo, PtySize, RuntimeState, SpawnSpec, Spawned,
 };
 use crate::process::ProcStatus;
 use crate::shellenv::ShellEnv;
 use crate::sync::lock;
-use crate::terminal::{ActorTerminal, PtyInput, Recorder, TerminalSignal, Terminals};
+use crate::terminal::{ActorTerminal, PtyInput, Recorder, TerminalSignal};
 
 use super::apply_transition;
 use super::registry::Registry;
@@ -73,7 +73,6 @@ pub(crate) struct ActorPorts {
     pub(crate) orphan_control: Arc<dyn OrphanControl>,
     pub(crate) bus: EventBus,
     pub(crate) registry: Registry,
-    pub(crate) terminals: Terminals,
     pub(crate) shell_env: Arc<ShellEnv>,
 }
 
@@ -87,7 +86,6 @@ impl ActorPorts {
             orphan_control: self.orphan_control.clone(),
             bus: self.bus.clone(),
             registry: self.registry.clone(),
-            terminals: self.terminals.clone(),
             shell_env: self.shell_env.clone(),
         }
     }
@@ -104,6 +102,7 @@ pub(crate) fn spawn(
     ports: ActorPorts,
     mailbox: mpsc::Receiver<ActorMsg>,
     initial: Option<Spawned>,
+    terminal: ActorTerminal,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let inner = tokio::spawn(run(
@@ -113,6 +112,7 @@ pub(crate) fn spawn(
             ports.clone_for_inner(),
             mailbox,
             initial,
+            terminal,
         ));
         if let Err(join_err) = inner.await {
             if join_err.is_panic() {
@@ -154,6 +154,7 @@ async fn run(
     ports: ActorPorts,
     mut mailbox: mpsc::Receiver<ActorMsg>,
     mut initial: Option<Spawned>,
+    terminal: ActorTerminal,
 ) {
     // Every managed process carries its own id in the environment, so an agent it runs
     // can bind its MCP session to the process it lives in. Set once here so every spawn
@@ -171,16 +172,27 @@ async fn run(
         orphan_control: _,
         bus,
         registry,
-        terminals,
         shell_env,
     } = ports;
-    let ActorTerminal { input, recorder } = terminals.open(id);
+    // The terminal channel is opened synchronously in the launch path (before this actor is
+    // spawned), so a viewer that attaches in the scheduling window finds a live channel rather
+    // than "process has not started"; the actor receives the actor-facing half here.
+    let ActorTerminal { input, recorder } = terminal;
     // Input is applied off the select loop by a dedicated pump: a blocking write to a
     // child that has stopped reading its stdin then stalls only the pump (typed input
     // backpressures on the bounded channel), never this actor — so stop, restart, exit,
     // and output draining stay responsive. The pump is torn down with the actor.
     let current_io: CurrentIo = Arc::new(Mutex::new(None));
-    let _pump = PumpGuard(spawn_input_pump(input, current_io.clone()));
+    // The last winsize a viewer requested, remembered so every (re)spawn re-creates the PTY at
+    // that size instead of the 80×24 default — otherwise a relaunched TUI stays mis-sized until
+    // the next resize. Shared with the pump, which records each resize even when no child is live
+    // (the pre-/post-`Running` window), so a resize in that window is not lost.
+    let last_size = Arc::new(Mutex::new(launch.size));
+    let _pump = PumpGuard(spawn_input_pump(
+        input,
+        current_io.clone(),
+        last_size.clone(),
+    ));
     // The supervisor has already moved this process into `Starting`.
     let mut status = ProcStatus::Starting;
 
@@ -203,7 +215,9 @@ async fn run(
                     env: shell_env.resolve(&launch.env).await,
                     command: launch.command.clone(),
                     working_dir: launch.working_dir.clone(),
-                    size: launch.size,
+                    // Re-create the PTY at the last size a viewer requested, so a relaunch keeps
+                    // the pane's dimensions rather than resetting to the 80×24 default.
+                    size: *lock(&last_size),
                 };
                 match spawner.spawn(&spec).await {
                     Ok(spawned) => spawned,
@@ -233,9 +247,11 @@ async fn run(
         // same pgid is recorded in the registry so monitoring can sample the live group.
         record_orphan(&runtime, &identity, &launch, pgid).await;
         registry.set_pgid(id, pgid);
-        advance(&registry, &bus, id, &mut status, ProcStatus::Running, None);
-        // Hand the live child's I/O to the input pump; cleared below when it stops.
+        // Hand the live child's I/O to the input pump *before* announcing `Running`, so a resize
+        // that arrives as the child comes up is applied to it rather than dropped. Cleared below
+        // when the child stops.
         *lock(&current_io) = Some(Arc::from(io));
+        advance(&registry, &bus, id, &mut status, ProcStatus::Running, None);
 
         // Once the child closes its output the branch is disabled (its `recv` would
         // otherwise return `None` forever and busy-spin the select).
@@ -392,10 +408,19 @@ impl Drop for PumpGuard {
 /// Spawns the per-actor input pump: it owns the process's input receiver and applies each
 /// message to whichever child is currently live, off the actor's select loop. A blocking
 /// PTY write therefore stalls only the pump — never stop, restart, exit, or output
-/// draining. Input that arrives with no live child has nowhere to go and is dropped.
-fn spawn_input_pump(mut input: mpsc::Receiver<PtyInput>, current_io: CurrentIo) -> JoinHandle<()> {
+/// draining. A resize updates `last_size` first, so the size is remembered for the next
+/// (re)spawn even when it has no live child to apply to right now; the write or resize is
+/// then applied to the current child if there is one, and otherwise dropped.
+fn spawn_input_pump(
+    mut input: mpsc::Receiver<PtyInput>,
+    current_io: CurrentIo,
+    last_size: Arc<Mutex<PtySize>>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(message) = input.recv().await {
+            if let PtyInput::Resize(size) = &message {
+                *lock(&last_size) = *size;
+            }
             let io = lock(&current_io).clone();
             if let Some(io) = io {
                 apply_input(io.as_ref(), message).await;

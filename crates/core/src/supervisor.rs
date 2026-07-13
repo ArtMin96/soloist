@@ -438,6 +438,11 @@ impl Supervisor {
         let Some(from) = self.registry.begin_launch(id) else {
             return false;
         };
+        // Open the terminal channel synchronously, before spawning the actor, so a viewer that
+        // attaches in the window between this launch and the actor being scheduled finds a live
+        // channel instead of "process has not started". The actor receives the actor-facing half
+        // rather than opening it itself; a relaunch reuses the existing buffers.
+        let terminal = self.terminals.open(id);
         self.bus.publish(DomainEvent::ProcessStatusChanged {
             id,
             from,
@@ -452,7 +457,15 @@ impl Supervisor {
                 name: String::new(),
             });
         let (mailbox, inbox) = tokio::sync::mpsc::channel(MAILBOX_CAPACITY);
-        let join = actor::spawn(id, launch, identity, self.actor_ports(), inbox, initial);
+        let join = actor::spawn(
+            id,
+            launch,
+            identity,
+            self.actor_ports(),
+            inbox,
+            initial,
+            terminal,
+        );
         self.registry.set_handle(id, ActorHandle { mailbox, join });
         true
     }
@@ -466,7 +479,6 @@ impl Supervisor {
             orphan_control: self.orphan_control.clone(),
             bus: self.bus.clone(),
             registry: self.registry.clone(),
-            terminals: self.terminals.clone(),
             shell_env: self.shell_env.clone(),
         }
     }
@@ -522,6 +534,7 @@ mod resume_tests;
 mod tests {
     use super::*;
     use crate::identity::PROCESS_ID_ENV;
+    use crate::ports::PtySize;
     use crate::process::ProcessKind;
     use crate::supervisor::test_support::{
         command_spec, harness, harness_with_shell_env, next_change, next_to, spawn_spec, status_of,
@@ -842,6 +855,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn attach_pty_is_available_synchronously_after_start() {
+        // The empty-pane race: a viewer that attaches in the window between `start` returning and
+        // the actor being scheduled must still find a live terminal channel. The channel is opened
+        // synchronously as the process launches, so `attach_pty` is total for a launched process
+        // and never returns `None` (which the UI surfaces as a "Press Start" overlay on a process
+        // that is actually running).
+        let h = harness(FakeSpawner::exits_on_terminate());
+        let id = terminal(&h.sup, "sleep 60");
+        h.sup.start(id).expect("start");
+        // Deliberately no `.await` first: the spawned actor has not been polled yet. When the
+        // channel was opened lazily inside the actor body this was `None`; opening it in the
+        // synchronous launch path makes it `Some`.
+        assert!(
+            h.sup.attach_pty(id).is_some(),
+            "a launched process has a terminal channel before its actor runs"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_never_started_process_has_no_terminal_channel() {
+        // A resting, never-started process must still report `None`, so the UI shows the
+        // "Press Start" overlay rather than an empty live pane. Only a launch opens the channel.
+        let h = harness(FakeSpawner::exits_on_terminate());
+        let id = terminal(&h.sup, "sleep 60");
+        assert!(
+            h.sup.attach_pty(id).is_none(),
+            "a never-started process has no terminal channel to attach to"
+        );
+    }
+
+    #[tokio::test]
     async fn closing_a_process_frees_its_terminal_channel() {
         // A removed process must not leak its terminal buffers. While running it has a channel to
         // attach to; after close (a full removal, unlike a stop, which keeps the scrollback
@@ -952,6 +996,61 @@ mod tests {
         // Attaching after the process stopped still replays its raw scrollback.
         let (scrollback, _live) = h.sup.attach_pty(id).expect("a terminal channel");
         assert_eq!(scrollback, chunk);
+    }
+
+    #[tokio::test]
+    async fn a_resize_reaches_the_running_pty() {
+        // A resize routed to a live process is applied to its PTY, not dropped — the input path
+        // carries resizes so the FE can keep the PTY winsize in step with the pane.
+        let (spawner, log) = FakeSpawner::records_resizes();
+        let mut h = harness(spawner);
+        let id = terminal(&h.sup, "tui");
+        h.sup.start(id).expect("start");
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
+
+        h.sup.resize(id, 120, 40).await.expect("resize");
+        log.resize_applied().await;
+
+        assert_eq!(
+            log.resizes(),
+            vec![PtySize {
+                cols: 120,
+                rows: 40
+            }]
+        );
+        // The first spawn created its PTY at the default, before any viewer resized it.
+        assert_eq!(log.spawns(), vec![PtySize::default()]);
+    }
+
+    #[tokio::test]
+    async fn a_respawn_relaunches_the_pty_at_the_last_resize_size() {
+        // After a viewer resizes the pane, a relaunch (here an in-place restart) re-creates the
+        // PTY at that size rather than resetting to the 80×24 default — otherwise a relaunched
+        // TUI renders into the wrong dimensions until the next resize.
+        let (spawner, log) = FakeSpawner::records_resizes();
+        let mut h = harness(spawner);
+        let id = terminal(&h.sup, "tui");
+        h.sup.start(id).expect("start");
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
+
+        h.sup.resize(id, 120, 40).await.expect("resize");
+        // Wait until the pump has applied the resize, so the last size is recorded before restart.
+        log.resize_applied().await;
+
+        h.sup.restart(id).expect("restart");
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
+
+        // Two spawns: the first at the default, the second re-created at the remembered size.
+        assert_eq!(
+            log.spawns(),
+            vec![
+                PtySize::default(),
+                PtySize {
+                    cols: 120,
+                    rows: 40
+                }
+            ]
+        );
     }
 
     #[tokio::test]
