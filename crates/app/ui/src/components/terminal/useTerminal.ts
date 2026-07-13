@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
@@ -181,8 +181,12 @@ export function useTerminal(process: ProcessView, visible = true) {
     term.reset();
     attach();
   }, [attach]);
-  // Expose the latest `reattach` to the attachment's flush without a forward reference.
-  reattachRef.current = reattach;
+  // Expose the latest `reattach` to the attachment's flush without a forward reference. Assigned
+  // in a layout effect rather than during render, so a discarded concurrent render cannot leave
+  // the ref pointing at an uncommitted callback; the rAF flush only reads it after commit.
+  useLayoutEffect(() => {
+    reattachRef.current = reattach;
+  }, [reattach]);
 
   // Fit the emulator to its host, then push the resulting winsize to the PTY. Reads the live
   // refs so it can run from any effect — initial layout, a host resize, an appearance change,
