@@ -27,6 +27,26 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Stability & security audit — ticket 01 done (2026-07-14; branch `fix/stability-audit-2026-07`).**
+  PRD-01 (P0 data loss): editing any field of a command that carried a per-command `env:` block in
+  `solo.yml` silently deleted the whole committed `env:` block on save. Root cause: the settings-page
+  read model (`ProjectCommandView`) dropped `env`, so the editor persisted an env-less spec and
+  `edit_shared_command`'s whole-spec replace wrote `env: {}` (which serializes to nothing). Fix
+  (commit `c7a9ec6`): carry `env` through the read model verbatim, mirroring the pre-existing
+  carried-but-not-rendered `working_dir` field — `env: BTreeMap<String,String>` on `ProjectCommandView`
+  (`crates/core/src/projects/page.rs`, populated in the single `::new`) + TS mirror (`domain.ts`),
+  threaded through `CommandFields`/`buildSpec` (`spec.ts`) so `specOf` preserves it; a new command
+  starts env-less, no spurious `env: {}`. Tests (new, red-before/green-after): core
+  `facade::commands` — `editing_a_field_preserves_a_commands_env_block`,
+  `editing_a_command_without_env_adds_no_spurious_env`, `renaming_a_command_preserves_its_env_block`;
+  UI `spec.test.ts` (4). **Gates: `just lint` exit 0; `just test` exit 0 — Rust 789 / 0 failed, UI 286.**
+  Fidelity note: the ticket's literal "byte-for-byte" env block holds only on the **rename** path
+  (verbatim body); an **edited** entry's body is re-rendered from the spec by serde (`config/edit.rs`),
+  so the test asserts env **semantically** (re-parse → values) plus key-line-comment preservation —
+  acceptance met. This **unblocks the Phase-11a "safe `solo.yml` round-tripping (no silent rewrite)"
+  verify.** Next frontier ticket: **02** (empty new-agent pane race) — finishes `needs-human-verify`
+  (needs a live-app GUI walk).
+
 - **Stability-hardening sprint (2026-07-13; owner-requested, branch `fix/stability-hardening`
   stacked on `feat/mcp-progressive-disclosure`).** A five-agent research pass (Solo docs + core +
   adapters + UI + repo history) found the daily-instability root cause was structural, not a pile of
