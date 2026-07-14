@@ -27,6 +27,37 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Stability & security audit — ticket 07 `done` (2026-07-15; branch
+  `fix/stability-audit-2026-07`; impl commit `ccfd29c`, docs/ledger commit follows). This closes
+  the audit backlog — all ten tickets are now `done`.** PRD-07 (P2: finish the reconciliation
+  layer + close the actor launch-window races). Five parts, each landed test-first:
+  - **C4/C5 (launch-window races):** the actor **mailbox** is now installed under the same claim
+    lock that moves a process to `Starting` (`Registry::begin_launch`), so a `stop`/`shutdown` in
+    the window before the actor is scheduled reaches it instead of being dropped while `stop()`
+    reports success. The join is attached after the task spawns (`attach_join`, which `abort()`s a
+    superseded task). The actor drains a pending stop **before spawning** (`stop_is_pending`), so a
+    stop-in-window goes `Starting → Stopping → Stopped` with no child; `shutdown` sees mid-launch
+    entries and reaps them via a **bounded** retry (`MAX_SHUTDOWN_IDLE_PASSES`). `stop`/`restart`/
+    `shutdown` route through one `registry.signal` primitive (removed the old `mailbox()`).
+  - **C3:** `apply_transition`'s illegal-`Err` arm `tracing::warn!`s (added `tracing` to core) rather
+    than dropping silently; captured in a test via a minimal in-test subscriber.
+  - **E7:** `IdleTracker::activity_snapshot` → `Facade::agent_activity` → `agent_activity` command
+    (+ `AgentSignal` DTO). `SignalsProvider` seeds the idle badges on mount and re-seeds on
+    `DOMAIN_RESYNC`/focus (`useReconcile`), reconciling the activity map to the snapshot — fixing
+    the permanently-stale idle badge on a dropped `AgentActivityChanged`. (Metrics/attempts still
+    fold from their own deltas — metrics self-heal via the periodic tick — so the seed touches only
+    the activity map, the ticket's named leak.)
+  - **E8:** `useLineage` and `useOrchestration` now `useReconcile` on resync/focus.
+  - **`/code-review`** (Standards + Spec, parallel sub-agents): Spec axis clean; Standards raised 3
+    (unbounded shutdown retry, a try-send duplication, a speculative-generality read) — **all fixed
+    before commit** (bounded the retry, routed through the one `signal` primitive, which justified
+    its generality). **Gates: `just lint` exit 0**, **`just test` — Rust 974 passed / 0 failed / 3
+    ignored, UI 315 passed / 63 files** (net Rust +6, UI +10), **`just soak` (leak gate) green**:
+    start/stop ×40 → tasks 0→0, fds 4→4, threads 5→5 — no drift from the mailbox/join lifecycle.
+    Fully headless-verified (incl. the real-PTY `orchestration.rs` integration test proving
+    `agent_activity` reflects a live idle classification) → **`done`, not `needs-human-verify`**.
+    **Next frontier ticket: none — the stability & security audit backlog is complete.**
+
 - **Stability & security audit — tickets 02/04/05/08 `done` (2026-07-15, owner-confirmed at
   runtime).** The owner ran the `just dev` acceptance walks (fixture `~/soloist-verify`) and
   confirmed all four working, so each flips `needs-human-verify` → `done`: **02** (empty
