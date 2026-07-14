@@ -1,6 +1,6 @@
 # PRD-06 — Close the local read-disclosure surface (HTTP unauth reads + MCP cross-project reads)
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 - **Severity:** P1 security (local information disclosure of another user's / another project's
@@ -74,3 +74,42 @@ HTTP, and MCP reads cross the project-isolation boundary.
 ## Out of scope
 Rotating the token mid-session / bearer-refresh (Solo v0.9.3's fuller scheme) — a per-launch token
 is sufficient here. Rate limiting (PRD-09).
+
+## Comments
+
+**Done — 2026-07-14, impl commit `4c63170` (branch `fix/stability-audit-2026-07`).**
+
+What changed:
+- **HTTP (A1/A2, per-launch token):** `ipc::http` mints a fresh 32-byte hex token per launch
+  (`generate_token`, `getrandom`), written into the runtime file (`http-api.json`) which is now
+  created **owner-only `0600`** inside the already-`0700` data dir. `HttpRuntime` carries `{ port,
+  token }`. The token is required on the **whole** router (reads + mutations) via a `require_token`
+  middleware comparing in constant time (`subtle`); a `require_local_host` middleware rejects a
+  non-loopback `Host` with 403 (A2). CORS + the Host guard share one `host::host_is_loopback` rule.
+  `LOCAL_AUTH_VALUE` (`"1"`) is gone. The CLI reads the token from the runtime file and sends it on
+  every request; `serve()` fails closed if OS randomness is unavailable.
+- **MCP (D1, project-scoped reads):** `get_process_output`/`_raw`/`search*`/`get_process_status`/
+  `get_process_ports` (and `wait_for_bound_port`) now route through scoped wrappers in
+  `core::facade::scoped` that `require_in_scope` → refuse an out-of-scope process (`OutOfScope`);
+  `list_processes` uses `snapshot_scoped`, redacting out-of-scope rows to identity via
+  `ProcessView::redacted_identity`. The unscoped accessors stay for the local UI and the (now
+  token-authed) HTTP API.
+
+**Owner-decision note:** the ticket says a "0700 discovery file"; realized as a **`0600`** file
+(canonical owner-only file mode; `0700` would set a meaningless execute bit on a JSON secret) inside
+the already-`0700` data dir — same "unreadable to other UIDs" boundary. Recorded in `KNOWN-DIVERGENCES.md`
+D-17. Also scoped `wait_for_bound_port` (not in the ticket's explicit list but the same "ports"
+disclosure class the acceptance says to refuse) after code-review flagged the residual.
+
+Tests (red-before/green-after): ipc `generate_token` freshness/length + runtime round-trip + `0600`
+mode; httpapi every-read-401-without-token, wrong-token-401, foreign/absent-Host-403, and the missing
+**B1 trust-gate 403**; the real `soloist-cli` binary round-trips the token end to end
+(`cli/tests/shell.rs`); core `read_tools_enforce_scope` (every scoped read refuses out-of-scope),
+`snapshot_scoped_redacts_out_of_scope_rows_to_identity`, `redacted_identity_*`; adapter
+`the_read_tools_refuse_an_out_of_scope_process_but_list_stays_cross_project` and
+`wait_for_bound_port_on_an_out_of_scope_process_is_refused`.
+
+Gates: **`just lint` exit 0** (fmt, clippy `-D warnings`, tsc, eslint, prettier, dep-direction;
+file-size advisory only). **`just test`: Rust 932 passed / 0 failed, UI 306 passed.** `/code-review`
+(Standards + Spec) ran clean — no hard violations, spec faithfully implemented; the two acted-on
+findings (scope `wait_for_bound_port`; drop `(D2)` doc-citations) are folded into `4c63170`.

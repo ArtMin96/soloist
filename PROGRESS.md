@@ -27,6 +27,36 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Stability & security audit — ticket 06 `done` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `4c63170`, docs/ledger commit follows).** PRD-06 (P1
+  security: local read-disclosure — unauthenticated HTTP reads + cross-project MCP reads). **HTTP:**
+  every route (reads + mutations) now requires a **per-launch random token** (`ipc::http::generate_token`
+  — 32 B `getrandom`, hex), compared in constant time (`subtle`) by a whole-router `require_token`
+  middleware; the token rides in the runtime file, now written **owner-only `0600`** inside the `0700`
+  data dir so only the owning UID reads it (the token, not the TCP port, is the per-user boundary). A
+  `require_local_host` middleware rejects a non-loopback `Host` with **403** (DNS-rebinding, A2),
+  sharing one `host::host_is_loopback` rule with CORS. `serve()` fails closed if OS randomness is
+  unavailable; the CLI reads the token and sends it on every request; `LOCAL_AUTH_VALUE` (`"1"`) is
+  removed. **MCP:** `get_process_output`/`_raw`/`search*`/`get_process_status`/`get_process_ports`
+  (and `wait_for_bound_port`) route through scoped wrappers in `core::facade::scoped`
+  (`require_in_scope` → `OutOfScope` for a cross-project process); `list_processes` uses
+  `snapshot_scoped`, redacting out-of-scope rows to identity via `ProcessView::redacted_identity`. The
+  unscoped accessors stay for the local UI + the (now token-authed) HTTP API — the local user is not
+  scope-limited (one behavior in core, many frontends). **Tests (red-before/green-after):** ipc token
+  freshness/length + runtime round-trip + `0600` perms; httpapi read-401-without-token, wrong-token-401,
+  foreign/absent-Host-403, **B1 trust-gate 403**; real `soloist-cli` binary token round-trip
+  (`cli/tests/shell.rs`); core `read_tools_enforce_scope`, `snapshot_scoped_redacts_*`, `redacted_identity_*`;
+  adapter out-of-scope read refusal + list-stays-cross-project + `wait_for_bound_port` refusal.
+  **Gates: `just lint` exit 0** (fmt, clippy `-D warnings`, tsc, eslint, prettier, dep-direction;
+  file-size advisory only), **`just test` — Rust 932 passed / 0 failed, UI 306 passed.** `/code-review`
+  (Standards + Spec) clean; two acted-on findings (scope `wait_for_bound_port`; drop `(D2)`
+  doc-citations) folded into `4c63170`. **Docs:** `plan/05` HTTP row + CLI row rewritten,
+  `KNOWN-DIVERGENCES.md` **D-17** (token scheme, supersedes the constant-header note) + **D-6**
+  (read-tool scoping), `docs/http-api.md` + Integrations-panel copy updated. Fully headless-verified
+  (incl. the real CLI binary), so **`done`, not `needs-human-verify`**. **Next frontier ticket: 08**
+  (`ready-for-agent`, `Blocked by: none`); **07** is now unblocked-by-06 but still `Blocked by: 02`
+  (needs-human-verify), and **10** (`Blocked by: 06`) is now **unblocked**.
+
 - **Stability & security audit — ticket 05 `needs-human-verify` (2026-07-14; branch
   `fix/stability-audit-2026-07`; impl commit `a95de69`, docs commit follows).** PRD-05 (P1: a
   cluster of settings persisted + displayed but had no consumer — a false-affordance surface).
