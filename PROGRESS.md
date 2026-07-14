@@ -27,6 +27,49 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Stability & security audit — ticket 10 `done` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `571af0b`, docs/ledger commit follows).** PRD-10 (P2
+  tests: close the real coverage holes + prune the trivial tautologies). The audit's "most tests are
+  pretend" worry did **not** hold, so the value was *adding* the missing tests, not deleting fakes.
+  **11 holes filled**, each written to fail against a broken version and green on `main`: (1) HTTP
+  trust-gate 403 on untrusted start **and restart** (shared `facade_with_untrusted_command` helper) +
+  a parametrized 401 over all 14 mutation routes + the CLI 403→"not trusted" mapping; (2/3)
+  `Todos`/`Scratchpads::transfer` **success** path at the C6 aggregate (re-key, clear blockers+lock,
+  readable only from the new scope) — the real gap, the façade layer was already covered; (4) a
+  populated hotkey keymap serde round-trip pinning the `"super"` wire literal + a disabled-`null`
+  override (a symmetric round-trip can't catch a rename); (5) config write-side 1 MiB ceiling
+  (`TooLarge`, file byte-unchanged); (6) **two-real-group** sys attribution — a port test where each
+  child holds a distinct listening socket past `exec` (cleared `FD_CLOEXEC`), so the exact port is the
+  cross-attribution discriminator, plus a two-group metrics test; (7) `facade/output` public reads
+  (default/explicit/capped counts, raw, search, ports, `None` for an unknown id); (8) IPC frame
+  truncated-body→`Io` / non-JSON→`Codec`; (9) a populated intermediate-version DB migration preserving
+  rows; (10) peer_cred fail-closed — strengthened the pure uid gate (no root/off-by-one bypass) and,
+  from review, extracted the connection decision into a pure `peer_cred::peer_scope` (used by
+  `handle_connection`), unit-tested Err→drop / `Ok(None)`→unauthenticated / `Ok(Some)`→scoped (the
+  ticket's "None→drop" premise was inaccurate — the code correctly opens an *unauthenticated* session
+  on `None`; no behaviour change, the locked PRD-09 uid-drop stands); (11) boundary ticks —
+  restart-window exactly-`WINDOW` edge still Exhausts, exact 5 s SIGKILL grace (`STOP_GRACE`→`pub(crate)`),
+  list-form `processes:` rejected, feedback char-vs-byte at `MAX_FEEDBACK_LEN`, integration-file
+  symlink→regular atomic replace. **14 trivial tests** deleted (pure tautologies/duplicates:
+  `ids::from_raw`, lineage single-insert, coordination-kv complex-json, store scalar-kv + two
+  round-trip duplicates, cli `Display` echo, UI self-compare) or strengthened (`PortWaitOutcome`
+  literal wire tags; the two `guide` prose smokes → registry-driven structural checks over `topics()`;
+  `EMPTY_STORE` behavioural; todo status labels distinct+non-empty). **Kept** `store/kv` object
+  round-trip: findings §B lumped it with the scalar, but it crosses the real SQLite JSON↔TEXT boundary,
+  so it is a genuine round-trip, not a tautology. **Production changes minimal + behaviour-preserving:**
+  `STOP_GRACE`→`pub(crate)` and the `peer_scope` extraction (both to enable a real test). **Only 1
+  non-test file each carried logic**; the rest are test files. **`/code-review`** (Standards + Spec)
+  cleared items 1–9/11 as faithful and discriminating; acted-on findings folded into `571af0b`: scrubbed
+  audit tags (`B1`) from two `mutations.rs` comments (§8), added the `peer_scope` policy test (item 10
+  was PARTIAL), and re-applied a required `cargo fmt` fix of pre-existing drift in `commands/mod.rs`.
+  **Gates: `just lint` exit 0** (fmt, clippy `-D warnings`, tsc, eslint, prettier, dep-direction;
+  file-size advisory only), **`just test` — Rust 968 passed / 0 failed / 3 ignored, UI 305 passed /
+  61 files** (net Rust +16 / UI −1). Fully headless-verified → **`done`, not `needs-human-verify`**.
+  **Next frontier ticket: none unblocked for an agent** — remaining open tickets are 02/04/05/08
+  (`needs-human-verify`, awaiting a live `just dev` walk) and **07** (`ready-for-agent` but still
+  `Blocked by: 02`, which is not yet `done`). The audit backlog is agent-complete pending the human
+  runtime walks.
+
 - **Stability & security audit — ticket 09 `done` (2026-07-14; branch
   `fix/stability-audit-2026-07`; impl commit `aedd202`, docs/ledger commit follows).** PRD-09 (P2/P3
   defense-in-depth + Solo-fidelity + small correctness). Eight items, each re-verified against the

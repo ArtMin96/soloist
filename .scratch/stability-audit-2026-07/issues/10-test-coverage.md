@@ -1,6 +1,6 @@
 # PRD-10 — Close the real test-coverage holes (and delete the trivial tautologies)
 
-Status: ready-for-agent
+Status: done
 Blocked by: 06
 
 - **Severity:** P2 (the suite is healthy — ~98.7% of 1040 tests are real — but has specific holes
@@ -61,3 +61,61 @@ and `MockClock`. Do **not** weaken any existing test to make a change pass (CLAU
 
 ## Out of scope
 Rewriting healthy tests. Coverage for `later`-scope features.
+
+## Comments
+
+Done 2026-07-14 (branch `fix/stability-audit-2026-07`; impl commit `571af0b`, docs/ledger commit
+follows). All 11 holes filled and 14 trivial tests deleted/strengthened, each new test written to
+fail against a broken version and green on `main`. `/code-review` (Standards + Spec) run on the
+diff; the two acted-on findings are folded into `571af0b` (below).
+
+**Holes → tests (real behaviour, discriminating):**
+1. **HTTP trust-gate 403.** B1's start-403 already existed; added `restarting_an_untrusted_command_is_403`
+   (extracted a shared `facade_with_untrusted_command` helper), the parametrized
+   `every_mutation_route_requires_the_token` over all 14 mutation routes (B2), and the CLI
+   `a_forbidden_mutation_reads_as_a_trust_prompt` (mutation vs read 403 mapping).
+2–3. **Transfer success at the C6 aggregate** (the real gap — the facade layer was already tested):
+   `todo_tests::transfer_moves_a_todo_to_the_new_scope_clearing_its_blockers_and_lock`,
+   `scratchpad_tests::transfer_moves_a_scratchpad_to_the_new_scope_keeping_its_identity` (+ a
+   NameTaken refusal) — re-key, clear blockers+lock, readable only from the new scope.
+4. **Hotkeys** `a_populated_keymap_survives_a_serde_round_trip` — pins the `"super":true` literal and
+   the disabled-`null` override (a symmetric round-trip alone can't catch a rename).
+5. **Config write ceiling** `a_write_over_the_size_ceiling_is_refused_and_leaves_the_file_unchanged`.
+6. **sys attribution** — `portscan::ports_are_attributed_to_the_group_that_holds_them` (two real
+   groups, each holding a distinct listening socket past `exec` via cleared `FD_CLOEXEC`; exact port
+   is the cross-attribution discriminator) + `metrics::two_live_groups_are_each_attributed_their_own_reading`.
+7. **facade/output** three async streaming tests (default/explicit/capped counts, raw, search, ports,
+   None for an unknown id).
+8. **IPC frame** truncated-body → `Io`, non-JSON → `Codec`.
+9. **store migration** `upgrading_a_populated_intermediate_database_preserves_its_rows` (faithful v6
+   schema seeded with rows, upgraded to current).
+10. **peer_cred** — strengthened the pure `peer_uid_permitted` gate (no root/off-by-one bypass) and,
+    from the review, extracted the connection decision into a pure `peer_cred::peer_scope` used by
+    `handle_connection`, unit-tested for Err→drop / Ok(None)→unauthenticated / Ok(Some)→scoped. Note:
+    the ticket's "None → drop" phrasing is inaccurate — the code correctly opens an *unauthenticated*
+    session on `None` (documented in `peer_cred.rs`); the uid-check call site and the unreadable-creds
+    `Err` are OS-credential branches not forceable in a headless unit test (no behaviour change; the
+    locked PRD-09 uid-drop stands).
+11. **Boundary ticks** — restart-window exactly-`WINDOW` edge (still Exhausts), exact 5 s SIGKILL
+    grace (needed `STOP_GRACE` → `pub(crate)`), list-form `processes:` rejected, feedback exact-MAX_LEN
+    + multibyte char-vs-byte, integration-file symlink→regular replace.
+
+**Cleanup (14):** deleted pure tautologies/duplicates — `ids::from_raw_round_trips`,
+`lineage::parent_of_returns_the_recorded_parent`, `coordination/kv::list_returns_complex_json_value`
+(a tautology only vs `FakeKvRepo`), `store/kv::set_and_get_round_trip_scalar`,
+`project_settings`/`settings` `save_then_load_round_trips` duplicates, cli `carried_messages_render_verbatim`,
+UI `timerPanel` self-compare. Strengthened the weak-but-real: `protocol::port_wait_outcomes_serialize_to_their_wire_tags`
+(literal tags), the two `guide` prose smokes → registry-driven structural checks over `topics()`,
+`signalStore` EMPTY_STORE → behavioural, `todo` status labels → distinct+non-empty.
+**Decision:** kept `store/kv::set_and_get_round_trip_object` (findings §B lumped `:36`+`:43`; `:43`
+crosses the real SQLite JSON↔TEXT boundary, so it is a genuine round-trip, not a tautology — deleting
+it would drop coverage the ticket's Out-of-scope warns against).
+
+**Review fixes folded in:** scrubbed audit tags (`B1`) from two `mutations.rs` comments (§8); added
+the discriminating `peer_scope` connection-policy test; re-applied a required `cargo fmt`
+normalization of pre-existing drift in `crates/app/src/commands/mod.rs`.
+
+**Gates:** `just lint` exit 0 (fmt, clippy `-D warnings`, tsc, eslint, prettier, dep-direction;
+file-size advisory only). `just test` — **Rust 968 passed / 0 failed / 3 ignored, UI 305 passed /
+61 files** (net Rust +16 / UI −1 from the deletions). Fully headless-verified → `done`, not
+`needs-human-verify`.
