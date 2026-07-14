@@ -27,6 +27,38 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Stability & security audit — ticket 03 done (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `f2494e5`).** PRD-03 (P1: orphan reconciliation could
+  SIGKILL a PID/PGID the OS recycled to an unrelated same-user group — the class Solo fixed in
+  v0.9.3). Root cause: `OrphanRecord` persisted only `{project_root,name,command,pgid}` and liveness
+  was bare `killpg(pgid, None)`, which cannot tell the original group from a recycled one; both the
+  surface/kill path (`kill_orphan`) and the adopt path could then act on the wrong group. **Fix:**
+  stamp each record with a stable identity captured at record time — kernel `boot_id` +
+  the group leader's `/proc/<pid>/stat` start-time (field 22) — and require it to match before
+  adopting, surfacing, or reaping. The match logic is a **fail-closed default on the `OrphanControl`
+  port** (`is_recorded_alive`): a recycled pgid, a dead group, or a legacy record with no captured
+  identity all read as "not the recorded orphan" → pruned, never killed. Adapters implement only the
+  `/proc` probe (`identify`); `core` stays pure (dep-direction green). Every recorded-orphan signal
+  path is guarded: classify/reconcile, `kill_orphan` (re-checks identity; a failed SIGKILL is
+  returned and the record **kept** for retry, not forgotten), the adopted-group liveness poll, and
+  `GroupSignal::terminate`/`kill`. Legacy runtime-state files migrate via serde default
+  (`identity: None`). **E9 fold-in:** a failed kill surfaces via the error banner and keeps the row;
+  `killAll` fans out over `killOne` so a partial failure drops only the groups actually reaped.
+  Fidelity recorded in `plan/05` (Orphaned processes) + `KNOWN-DIVERGENCES.md` **D-16**. Tests
+  (red-before/green-after): core recycled-boot / recycled-start-time / legacy-fail-closed /
+  kill-doesn't-signal-recycled / failed-signal-keeps-record; adopt-guard signals-match /
+  no-signal-recycled; pty adapter real-`/proc` `identify` + identity-tracked liveness; store
+  legacy-JSON migration; UI `useOrphans.test.ts` (6, incl. partial-fail). **Gates: `just lint`
+  exit 0; `just test` exit 0 — Rust workspace all green (3 pty soak ignored), UI 294 across 59
+  files.** Independent adversarial code-review of the diff: no P0/P1; three P3s resolved (killAll
+  partial-fail fixed; actor panic-path bare SIGKILL is an in-session in-memory pgid, not a persisted
+  recorded orphan, and guarding it risks reintroducing the double-spawn regression the panic-reap
+  fixes → deliberate non-change; leader-gone prune tradeoff disclosed in D-16). No GUI walk needed —
+  reconciliation is fully headless-testable. This **unblocks nothing new** (04 was already
+  unblocked); **next frontier ticket: 04** (notification toggles actually gate + bell path;
+  `ready-for-agent`, `Blocked by: none`). PRD-07 remains `Blocked by: 02` (awaiting 02's
+  human-verify → done).
+
 - **Stability & security audit — ticket 02 `needs-human-verify` (2026-07-14; branch
   `fix/stability-audit-2026-07`; commit `50e0e64`).** PRD-02 (P1, the owner's #1 daily symptom:
   "open a new agent, xterm shows nothing"). Root cause was a two-part cross-boundary race:
