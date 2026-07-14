@@ -1,5 +1,5 @@
-//! The HTTP API's shared state: a handle to the one core [`Facade`] and the callback that
-//! raises the desktop window.
+//! The HTTP API's shared state: a handle to the one core [`Facade`], the per-launch auth
+//! token every request must present, and the callback that raises the desktop window.
 
 use std::sync::Arc;
 
@@ -11,20 +11,25 @@ use soloist_core::Facade;
 /// cannot route through the [`Facade`].
 pub type FocusFn = Arc<dyn Fn() + Send + Sync>;
 
-/// What every HTTP handler is given: a clone-cheap handle to the single core façade plus
-/// the focus callback. No business state lives here — every route maps to one façade call.
+/// What every HTTP handler is given: a clone-cheap handle to the single core façade, the
+/// per-launch token the auth gate checks, plus the focus callback. No business state lives
+/// here — every route maps to one façade call.
 #[derive(Clone)]
 pub struct ApiState {
     facade: Arc<Facade>,
+    token: Arc<str>,
     focus: FocusFn,
 }
 
 impl ApiState {
-    /// Wraps the shared façade for the router, with focus a no-op until the composition
-    /// root supplies one via [`with_focus`](Self::with_focus).
-    pub fn new(facade: Arc<Facade>) -> Self {
+    /// Wraps the shared façade and the launch's auth `token` for the router, with focus a
+    /// no-op until the composition root supplies one via [`with_focus`](Self::with_focus).
+    /// The token is injected (the composition root mints it, a test passes a known value),
+    /// so the adapter stays a pure function of its inputs.
+    pub fn new(facade: Arc<Facade>, token: impl Into<Arc<str>>) -> Self {
         Self {
             facade,
+            token: token.into(),
             focus: Arc::new(|| {}),
         }
     }
@@ -38,6 +43,11 @@ impl ApiState {
     /// The core façade every read and mutation routes through.
     pub fn facade(&self) -> &Facade {
         &self.facade
+    }
+
+    /// The per-launch token every request must present, matched by the auth gate.
+    pub fn token(&self) -> &str {
+        &self.token
     }
 
     /// Raises the desktop window (a no-op when no window is wired).

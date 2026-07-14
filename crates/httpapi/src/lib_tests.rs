@@ -33,7 +33,7 @@ async fn serve_on_frees_the_port_when_the_shutdown_signal_fires() {
     let (tx, rx) = oneshot::channel::<()>();
     let server = tokio::spawn(serve_on(
         listener,
-        ApiState::new(fake_facade()),
+        ApiState::new(fake_facade(), "test-token"),
         async move {
             let _ = rx.await;
         },

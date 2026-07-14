@@ -6,6 +6,8 @@ use axum::http::{header, HeaderName, HeaderValue, Method};
 use soloist_ipc::http::LOCAL_AUTH_HEADER;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
+use crate::host::host_is_loopback;
+
 /// A CORS layer that allows only loopback origins (any scheme, any port), the methods the
 /// API uses, and the local-auth header — so cross-origin browser access is confined to
 /// pages the user is running locally.
@@ -21,8 +23,8 @@ pub fn localhost_cors() -> CorsLayer {
         ])
 }
 
-/// Whether an `Origin` header names a loopback host. Parses `scheme://host[:port][/...]`,
-/// handling the bracketed IPv6 form, and matches the host against the loopback names.
+/// Whether an `Origin` header names a loopback host. Parses `scheme://host[:port][/...]`
+/// down to its authority, then defers to the shared [`host_is_loopback`] rule.
 fn is_localhost(origin: &HeaderValue) -> bool {
     let Ok(origin) = origin.to_str() else {
         return false;
@@ -31,12 +33,7 @@ fn is_localhost(origin: &HeaderValue) -> bool {
         return false;
     };
     let authority = authority.split('/').next().unwrap_or(authority);
-    let host = match authority.strip_prefix('[') {
-        // Bracketed IPv6: the host is everything up to the closing bracket.
-        Some(rest) => rest.split_once(']').map(|(host, _)| host).unwrap_or(rest),
-        None => authority.split(':').next().unwrap_or(authority),
-    };
-    matches!(host, "localhost" | "127.0.0.1" | "::1")
+    host_is_loopback(authority)
 }
 
 #[cfg(test)]

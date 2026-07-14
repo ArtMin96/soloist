@@ -5067,6 +5067,7 @@ dependencies = [
  "serde_json",
  "soloist-core",
  "soloist-ipc",
+ "subtle",
  "tempfile",
  "tokio",
  "tower 0.5.3",
@@ -5077,9 +5078,12 @@ dependencies = [
 name = "soloist-ipc"
 version = "0.5.0"
 dependencies = [
+ "getrandom 0.3.4",
+ "hex",
  "serde",
  "serde_json",
  "soloist-core",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
 ]

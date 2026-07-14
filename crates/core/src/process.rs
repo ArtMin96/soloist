@@ -128,6 +128,25 @@ impl ProcessView {
     pub(crate) fn is_command_in(&self, project: ProjectId) -> bool {
         self.project == project && self.kind == ProcessKind::Command
     }
+
+    /// This row reduced to its identity — id, project, kind, label, and status — with every
+    /// activity- or config-derived field neutralised. The scoped process list uses it to show
+    /// that a process in *another* project exists without disclosing its ports, exit code,
+    /// trust state, or resumability across the project-isolation boundary.
+    pub(crate) fn redacted_identity(&self) -> ProcessView {
+        ProcessView {
+            id: self.id,
+            project: self.project,
+            kind: self.kind,
+            label: self.label.clone(),
+            status: self.status,
+            exit_code: None,
+            requires_trust: false,
+            resumable: false,
+            ports: Vec::new(),
+            ready: Readiness::Ungated,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -197,6 +216,35 @@ mod tests {
         ] {
             assert!(other.transition(ProcStatus::RestartExhausted).is_err());
         }
+    }
+
+    #[test]
+    fn redacted_identity_keeps_identity_and_drops_activity() {
+        let full = ProcessView {
+            id: ProcessId::from_raw(7),
+            project: ProjectId::from_raw(3),
+            kind: ProcessKind::Command,
+            label: "db".into(),
+            status: ProcStatus::Running,
+            exit_code: Some(1),
+            requires_trust: true,
+            resumable: true,
+            ports: vec![5432],
+            ready: Readiness::Ready,
+        };
+        let redacted = full.redacted_identity();
+        // Identity survives: who and what, and whether it is up.
+        assert_eq!(redacted.id, full.id);
+        assert_eq!(redacted.project, full.project);
+        assert_eq!(redacted.kind, full.kind);
+        assert_eq!(redacted.label, full.label);
+        assert_eq!(redacted.status, full.status);
+        // Everything a cross-project peer must not learn is neutralised.
+        assert_eq!(redacted.exit_code, None);
+        assert!(!redacted.requires_trust);
+        assert!(!redacted.resumable);
+        assert!(redacted.ports.is_empty());
+        assert_eq!(redacted.ready, Readiness::Ungated);
     }
 
     #[test]

@@ -1,8 +1,8 @@
 use super::*;
 
 #[test]
-fn at_port_builds_a_loopback_base_url() {
-    let client = Client::at_port(24678);
+fn at_builds_a_loopback_base_url() {
+    let client = Client::at(24678, "token");
     assert_eq!(client.url("/health"), "http://127.0.0.1:24678/health");
     assert_eq!(
         client.url("/processes/3/restart"),

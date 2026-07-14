@@ -1,11 +1,12 @@
 //! The loopback HTTP API adapter: an `axum` server bound to `127.0.0.1` that drives the
 //! same [`Facade`] the desktop UI and the MCP server use, so a shell or launcher controls
-//! the stack identically. Read routes are open on loopback; mutations require an auth
-//! header and CORS is restricted to localhost. The server holds no business state — every
+//! the stack identically. Every route requires the launch's auth token and a loopback
+//! `Host`, and CORS is restricted to localhost. The server holds no business state — every
 //! route maps to one façade call.
 
 mod auth;
 mod cors;
+mod host;
 mod mutations;
 mod routes;
 mod state;
@@ -14,7 +15,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use soloist_core::Facade;
-use soloist_ipc::http::{write_runtime, HttpRuntime, DEFAULT_PORT};
+use soloist_ipc::http::{generate_token, write_runtime, HttpRuntime, DEFAULT_PORT};
 use tokio::net::TcpListener;
 
 pub use routes::router;
@@ -47,12 +48,22 @@ pub async fn serve(
             return;
         }
     };
-    if let Err(err) = write_runtime(HttpRuntime { port }) {
-        // The server still serves; only the CLI's port-discovery file is missing, and the
-        // CLI falls back to the default port.
-        eprintln!("soloist: could not record the HTTP API port ({err})");
+    // Mint the launch's token before serving. Without OS randomness there is no safe token,
+    // so disable the API rather than serve a guessable one (fail closed).
+    let Some(token) = generate_token() else {
+        eprintln!("soloist: HTTP API disabled (no OS randomness for the auth token)");
+        return;
+    };
+    if let Err(err) = write_runtime(HttpRuntime {
+        port,
+        token: token.clone(),
+    }) {
+        // The server still requires the token; only the CLI's discovery file is missing, so
+        // the CLI cannot authenticate until the next successful write. Better than serving
+        // ungated.
+        eprintln!("soloist: could not record the HTTP API runtime file ({err})");
     }
-    let state = ApiState::new(facade).with_focus(focus);
+    let state = ApiState::new(facade, token).with_focus(focus);
     serve_on(listener, state, shutdown).await;
     // The server has stopped (a live disable, or app exit): drop the port record so the CLI does
     // not target a dead port. A re-enable rewrites it on the next bind.

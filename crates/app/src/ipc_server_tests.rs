@@ -91,14 +91,10 @@ async fn list_processes_returns_the_registered_processes() {
 }
 
 #[tokio::test]
-async fn get_process_status_returns_a_registered_process() {
+async fn get_process_status_returns_an_in_scope_process() {
     let facade = facade();
     let session = facade.open_session(Some(PEER_PGID));
-    let id = facade.supervisor().register(terminal_registration(
-        ProjectId::from_raw(1),
-        "term",
-        "sleep 60",
-    ));
+    let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     match handle_request(
         &facade,
         session,
@@ -420,14 +416,10 @@ async fn output_reads_for_an_unknown_process_are_refused() {
 }
 
 #[tokio::test]
-async fn reading_a_registered_processs_output_and_ports() {
+async fn reading_an_in_scope_processs_output_and_ports() {
     let facade = facade();
     let session = facade.open_session(Some(PEER_PGID));
-    let id = facade.supervisor().register(terminal_registration(
-        ProjectId::from_raw(1),
-        "term",
-        "sleep 60",
-    ));
+    let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     // Registered but never started: output is empty (not an error), and it has no ports.
     assert_eq!(
         handle_request(
@@ -460,6 +452,51 @@ async fn reading_a_registered_processs_output_and_ports() {
         .await,
         Ok(IpcResponse::Acked)
     );
+}
+
+#[tokio::test]
+async fn the_read_tools_refuse_an_out_of_scope_process_but_list_stays_cross_project() {
+    let facade = facade();
+    let session = facade.open_session(Some(PEER_PGID));
+    // The caller's scope is project 1; a process in project 2 is out of scope.
+    let here = scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
+    let elsewhere = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(2),
+        "elsewhere",
+        "sleep 60",
+    ));
+
+    // Every per-process read of the foreign process is refused, so its output/status/ports
+    // never cross the project boundary — the routing threads the session into the scoped read.
+    for request in [
+        IpcRequest::GetProcessRawOutput { process: elsewhere },
+        IpcRequest::GetProcessOutput {
+            process: elsewhere,
+            lines: None,
+        },
+        IpcRequest::GetProcessStatus { process: elsewhere },
+        IpcRequest::GetProcessPorts { process: elsewhere },
+        IpcRequest::SearchOutput {
+            process: elsewhere,
+            query: "x".into(),
+            limit: None,
+        },
+    ] {
+        assert_eq!(
+            handle_request(&facade, session, request).await,
+            Err(IpcError::OutOfScope)
+        );
+    }
+
+    // `list_processes` still shows both projects' processes (a cross-project overview), so the
+    // caller keeps its bearings; the foreign row is identity-only (verified in the core).
+    match handle_request(&facade, session, IpcRequest::ListProcesses).await {
+        Ok(IpcResponse::Processes(processes)) => {
+            let ids: Vec<_> = processes.iter().map(|view| view.id).collect();
+            assert!(ids.contains(&here) && ids.contains(&elsewhere));
+        }
+        other => panic!("expected the process list, got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -509,24 +546,54 @@ async fn services_list_without_scope_is_refused_and_filters_to_commands_in_scope
 async fn wait_for_bound_port_on_a_resting_process_reports_not_running() {
     let facade = facade();
     let session = facade.open_session(Some(PEER_PGID));
-    let id = facade.supervisor().register(terminal_registration(
+    // Bind to one process in project 1 to put that project in scope, then wait on a *different*,
+    // never-started process in the same project: in scope, but with no group it has no port to
+    // wait for, so it resolves at once as NotRunning (no wait).
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "bound");
+    let resting = facade.supervisor().register(terminal_registration(
         ProjectId::from_raw(1),
-        "term",
+        "resting",
         "sleep 60",
     ));
-    // The process never started, so it has no group to bind a port — resolved at once, no wait.
     assert_eq!(
         handle_request(
             &facade,
             session,
             IpcRequest::WaitForBoundPort {
-                process: id,
+                process: resting,
                 port: 3000,
                 timeout_ms: Some(50),
             },
         )
         .await,
         Ok(IpcResponse::PortWait(PortWaitOutcome::NotRunning))
+    );
+}
+
+#[tokio::test]
+async fn wait_for_bound_port_on_an_out_of_scope_process_is_refused() {
+    let facade = facade();
+    let session = facade.open_session(Some(PEER_PGID));
+    // Scope is project 1; a process in project 2 is out of scope, so the port-bind probe is
+    // refused rather than disclosing whether the foreign process bound the port.
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
+    let elsewhere = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(2),
+        "elsewhere",
+        "sleep 60",
+    ));
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::WaitForBoundPort {
+                process: elsewhere,
+                port: 3000,
+                timeout_ms: Some(50),
+            },
+        )
+        .await,
+        Err(IpcError::OutOfScope)
     );
 }
 

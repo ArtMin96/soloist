@@ -1,11 +1,13 @@
-//! Read-only terminal-output queries (context C8) — the output surface a remote caller
-//! (MCP today, the HTTP API later) reads a process's logs and ports through.
+//! Read-only terminal-output queries (context C8) — how a process's logs and ports are read.
 //!
-//! These are open reads, like `list_processes`: they expose any process's output unfiltered
-//! rather than scope-gating it, matching the rest of the read surface. Each routes to one C2
-//! accessor (which reads the C3 terminal buffers) and bounds the reply twice — by line/match
-//! *count* and by total *bytes* — so a busy process can never return an unbounded payload. The
-//! one buffer *mutation*, `clear_output`, is a scoped action and lives in `scoped.rs`.
+//! These accessors are *unscoped*: they read any process's output by id, for the local UI
+//! (the user is not scope-limited) and the token-authenticated HTTP API (the local user's
+//! authority). A remote MCP caller instead goes through the project-scoped wrappers in
+//! `scoped.rs`, which refuse a process outside the session's project — so cross-project
+//! output never crosses the isolation boundary. Each accessor routes to one C2 accessor
+//! (which reads the C3 terminal buffers) and bounds the reply twice — by line/match *count*
+//! and by total *bytes* — so a busy process can never return an unbounded payload. The one
+//! buffer *mutation*, `clear_output`, is a scoped action and lives in `scoped.rs`.
 
 use super::Facade;
 use crate::ids::ProcessId;

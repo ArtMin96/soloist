@@ -3,7 +3,7 @@ use crate::config::parse;
 use crate::events::DomainEvent;
 use crate::ids::ProjectId;
 use crate::ports::{Clock, CorePorts, TokioClock, TrustRepo};
-use crate::process::ProcStatus;
+use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::Registration;
 use crate::sync::lock;
 use crate::testing::{
@@ -442,6 +442,124 @@ fn rename_process_enforces_scope() {
     assert_eq!(
         facade.process_view(elsewhere).expect("registered").label,
         "elsewhere"
+    );
+}
+
+#[test]
+fn read_tools_enforce_scope() {
+    let (facade, _trust) = facade();
+    let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
+    let elsewhere = terminal_in(&facade, ProjectId::from_raw(2), "elsewhere");
+    let session = scoped_to(&facade, here);
+
+    // In scope: each read succeeds (an empty result for a never-started process).
+    assert!(facade.process_status_scoped(session, here).is_ok());
+    assert!(facade
+        .process_output_scoped(session, here, None)
+        .expect("in-scope output")
+        .is_empty());
+    assert!(facade
+        .process_raw_output_scoped(session, here)
+        .expect("in-scope raw output")
+        .is_empty());
+    assert!(facade
+        .search_output_scoped(session, here, "x", None)
+        .expect("in-scope search")
+        .is_empty());
+    assert!(facade
+        .search_raw_output_scoped(session, here, "x", None)
+        .expect("in-scope raw search")
+        .is_empty());
+    assert!(facade
+        .process_ports_scoped(session, here)
+        .expect("in-scope ports")
+        .is_empty());
+
+    // Out of scope: every read refuses the cross-project process, so its output — which can
+    // hold another project's secrets — never crosses the isolation boundary.
+    assert!(matches!(
+        facade.process_status_scoped(session, elsewhere),
+        Err(ScopedActionError::OutOfScope)
+    ));
+    assert!(matches!(
+        facade.process_output_scoped(session, elsewhere, None),
+        Err(ScopedActionError::OutOfScope)
+    ));
+    assert!(matches!(
+        facade.process_raw_output_scoped(session, elsewhere),
+        Err(ScopedActionError::OutOfScope)
+    ));
+    assert!(matches!(
+        facade.search_output_scoped(session, elsewhere, "x", None),
+        Err(ScopedActionError::OutOfScope)
+    ));
+    assert!(matches!(
+        facade.search_raw_output_scoped(session, elsewhere, "x", None),
+        Err(ScopedActionError::OutOfScope)
+    ));
+    assert!(matches!(
+        facade.process_ports_scoped(session, elsewhere),
+        Err(ScopedActionError::OutOfScope)
+    ));
+}
+
+#[test]
+fn a_scoped_read_refuses_an_unknown_process_and_an_unscoped_session() {
+    let (facade, _trust) = facade();
+    let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
+    let session = scoped_to(&facade, id);
+    // An unknown id is refused before scope is even consulted.
+    assert!(matches!(
+        facade.process_output_scoped(session, ProcessId::from_raw(999), None),
+        Err(ScopedActionError::UnknownProcess)
+    ));
+    // A session with no project in scope cannot read a process — ambiguous, so refused, and
+    // it discloses nothing.
+    let unscoped = facade.open_session(None);
+    assert!(matches!(
+        facade.process_output_scoped(unscoped, id, None),
+        Err(ScopedActionError::NoProjectScope)
+    ));
+}
+
+#[test]
+fn snapshot_scoped_redacts_out_of_scope_rows_to_identity() {
+    let (facade, _trust) = facade();
+    let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
+    // An untrusted command in another project: its full view flags `requires_trust`, which the
+    // scoped snapshot must strip for an out-of-scope caller.
+    let config = parse("processes:\n  Web:\n    command: npm run dev\n").expect("parse");
+    let spec = config.processes.get("Web").cloned().expect("Web");
+    let elsewhere = facade.supervisor().register(Registration::command(
+        ProjectId::from_raw(2),
+        Path::new("/p"),
+        "Web",
+        &spec,
+    ));
+    let session = scoped_to(&facade, here);
+
+    let rows = facade.snapshot_scoped(session);
+    let in_scope = rows.iter().find(|v| v.id == here).expect("in-scope row");
+    let foreign = rows
+        .iter()
+        .find(|v| v.id == elsewhere)
+        .expect("foreign row");
+
+    // The in-scope row is unchanged.
+    assert_eq!(in_scope.label, "here");
+    assert_eq!(in_scope.kind, ProcessKind::Terminal);
+    // The foreign row keeps identity (name, kind, status) but drops the trust flag.
+    assert_eq!(foreign.label, "Web", "identity (name) is kept");
+    assert_eq!(foreign.kind, ProcessKind::Command);
+    assert_eq!(foreign.status, ProcStatus::Stopped);
+    assert!(!foreign.requires_trust, "trust state is redacted away");
+    // Its full (unscoped) view still carries the flag — proving the snapshot redacted a copy,
+    // not the source of truth.
+    assert!(
+        facade
+            .process_view(elsewhere)
+            .expect("registered")
+            .requires_trust
     );
 }
 

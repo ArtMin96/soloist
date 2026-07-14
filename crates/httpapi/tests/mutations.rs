@@ -23,12 +23,18 @@ use soloist_core::{
 };
 use soloist_httpapi::{router, ApiState, FocusFn};
 use soloist_ipc::http::{
-    SpawnResponse, LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE, STATUS_FORBIDDEN, STATUS_NOT_FOUND,
-    STATUS_UNAUTHORIZED,
+    SpawnResponse, LOCAL_AUTH_HEADER, STATUS_FORBIDDEN, STATUS_NOT_FOUND, STATUS_UNAUTHORIZED,
 };
 
+/// The per-launch token these tests seed the server with and present on authorized requests.
+const TEST_TOKEN: &str = "test-token";
+
 /// The header pair an authorized mutation carries.
-const AUTH: (&str, &str) = (LOCAL_AUTH_HEADER, LOCAL_AUTH_VALUE);
+const AUTH: (&str, &str) = (LOCAL_AUTH_HEADER, TEST_TOKEN);
+
+/// A loopback `Host`, as a real HTTP/1.1 client sends — every request needs one to pass the
+/// `Host` guard.
+const LOOPBACK_HOST: (&str, &str) = ("host", "127.0.0.1");
 
 /// A façade over fakes with one registered terminal — ungated, so `start` needs no trust —
 /// returning the façade and the process id to target.
@@ -70,20 +76,35 @@ fn facade_with_agent_tool() -> (Arc<Facade>, ProjectId, tempfile::TempDir) {
     (facade, project.id, dir)
 }
 
-/// A `POST` request to `uri` carrying each given header.
-fn post(uri: &str, headers: &[(&str, &str)]) -> Request<Body> {
-    let mut builder = Request::builder().method("POST").uri(uri);
+/// A `GET` request to `uri` carrying a loopback `Host` plus each given header.
+fn get(uri: &str, headers: &[(&str, &str)]) -> Request<Body> {
+    let mut builder = Request::builder()
+        .uri(uri)
+        .header(LOOPBACK_HOST.0, LOOPBACK_HOST.1);
     for (name, value) in headers {
         builder = builder.header(*name, *value);
     }
     builder.body(Body::empty()).expect("request")
 }
 
-/// A `POST` request to `uri` with a JSON `body` and each given header.
+/// A `POST` request to `uri` carrying a loopback `Host` plus each given header.
+fn post(uri: &str, headers: &[(&str, &str)]) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(LOOPBACK_HOST.0, LOOPBACK_HOST.1);
+    for (name, value) in headers {
+        builder = builder.header(*name, *value);
+    }
+    builder.body(Body::empty()).expect("request")
+}
+
+/// A `POST` request to `uri` with a JSON `body`, a loopback `Host`, and each given header.
 fn post_json(uri: &str, headers: &[(&str, &str)], body: &str) -> Request<Body> {
     let mut builder = Request::builder()
         .method("POST")
         .uri(uri)
+        .header(LOOPBACK_HOST.0, LOOPBACK_HOST.1)
         .header("content-type", "application/json");
     for (name, value) in headers {
         builder = builder.header(*name, *value);
@@ -117,7 +138,7 @@ async fn await_status(
 #[tokio::test]
 async fn a_mutation_without_the_auth_header_is_rejected() {
     let (facade, id) = facade_with_terminal();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
         .oneshot(post(&format!("/processes/{}/start", id.get()), &[]))
         .await
@@ -128,7 +149,7 @@ async fn a_mutation_without_the_auth_header_is_rejected() {
 #[tokio::test]
 async fn a_mutation_with_a_wrong_auth_value_is_rejected() {
     let (facade, id) = facade_with_terminal();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
         .oneshot(post(
             &format!("/processes/{}/start", id.get()),
@@ -140,26 +161,64 @@ async fn a_mutation_with_a_wrong_auth_value_is_rejected() {
 }
 
 #[tokio::test]
-async fn a_read_route_stays_open_without_auth() {
+async fn a_read_route_now_requires_the_token() {
     let (facade, _id) = facade_with_terminal();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
+    // A loopback Host but no token: reads are no longer open, so this is rejected.
+    let response = app.oneshot(get("/processes", &[])).await.expect("response");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn an_authorized_read_route_succeeds() {
+    let (facade, _id) = facade_with_terminal();
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/processes")
-                .body(Body::empty())
-                .expect("request"),
-        )
+        .oneshot(get("/processes", &[AUTH]))
         .await
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
+async fn starting_an_untrusted_command_is_403() {
+    // The B1 gap: the HTTP trust gate had no 403 test. A `solo.yml` command is trust-gated,
+    // and the fake trust store starts empty, so the command is untrusted.
+    let facade = Arc::new(Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .build(),
+    ));
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(
+        dir.path().join("solo.yml"),
+        "processes:\n  Web:\n    command: npm run dev\n",
+    )
+    .expect("write");
+    facade.load_project(dir.path()).expect("load");
+    let id = facade.snapshot()[0].id.get();
+
+    let app = router(ApiState::new(Arc::clone(&facade), TEST_TOKEN));
+    let response = app
+        .oneshot(post(&format!("/processes/{id}/start"), &[AUTH]))
+        .await
+        .expect("response");
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "an untrusted command's start is refused by the core trust gate"
+    );
+}
+
+#[tokio::test]
 async fn an_authorized_start_reaches_the_core_and_runs_the_process() {
     let (facade, id) = facade_with_terminal();
     let mut events = facade.subscribe();
-    let app = router(ApiState::new(Arc::clone(&facade)));
+    let app = router(ApiState::new(Arc::clone(&facade), TEST_TOKEN));
     let response = app
         .oneshot(post(&format!("/processes/{}/start", id.get()), &[AUTH]))
         .await
@@ -171,7 +230,7 @@ async fn an_authorized_start_reaches_the_core_and_runs_the_process() {
 #[tokio::test]
 async fn restarting_an_unknown_process_maps_to_404() {
     let (facade, _id) = facade_with_terminal();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
         .oneshot(post("/processes/999999/restart", &[AUTH]))
         .await
@@ -182,7 +241,7 @@ async fn restarting_an_unknown_process_maps_to_404() {
 #[tokio::test]
 async fn a_project_bulk_stop_is_authorized_and_succeeds() {
     let (facade, _id) = facade_with_terminal();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
         .oneshot(post("/projects/1/stop-all", &[AUTH]))
         .await
@@ -196,7 +255,7 @@ async fn focus_raises_the_window() {
     let raised = Arc::new(AtomicBool::new(false));
     let probe = Arc::clone(&raised);
     let focus: FocusFn = Arc::new(move || probe.store(true, Ordering::SeqCst));
-    let app = router(ApiState::new(facade).with_focus(focus));
+    let app = router(ApiState::new(facade, TEST_TOKEN).with_focus(focus));
     let response = app
         .oneshot(post("/focus", &[AUTH]))
         .await
@@ -214,7 +273,7 @@ async fn focus_without_auth_is_rejected_before_the_handler_runs() {
     let raised = Arc::new(AtomicBool::new(false));
     let probe = Arc::clone(&raised);
     let focus: FocusFn = Arc::new(move || probe.store(true, Ordering::SeqCst));
-    let app = router(ApiState::new(facade).with_focus(focus));
+    let app = router(ApiState::new(facade, TEST_TOKEN).with_focus(focus));
     let response = app.oneshot(post("/focus", &[])).await.expect("response");
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert!(
@@ -226,7 +285,7 @@ async fn focus_without_auth_is_rejected_before_the_handler_runs() {
 #[tokio::test]
 async fn spawn_agent_launches_a_known_tool_and_returns_its_id() {
     let (facade, project, _dir) = facade_with_agent_tool();
-    let app = router(ApiState::new(Arc::clone(&facade)));
+    let app = router(ApiState::new(Arc::clone(&facade), TEST_TOKEN));
     let response = app
         .oneshot(post_json(
             &format!("/projects/{}/spawn-agent", project.get()),
@@ -253,7 +312,7 @@ async fn spawn_agent_launches_a_known_tool_and_returns_its_id() {
 #[tokio::test]
 async fn spawn_agent_with_an_unknown_tool_is_404() {
     let (facade, project, _dir) = facade_with_agent_tool();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
         .oneshot(post_json(
             &format!("/projects/{}/spawn-agent", project.get()),
@@ -268,7 +327,7 @@ async fn spawn_agent_with_an_unknown_tool_is_404() {
 #[tokio::test]
 async fn spawn_agent_without_auth_is_rejected() {
     let (facade, project, _dir) = facade_with_agent_tool();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
         .oneshot(post_json(
             &format!("/projects/{}/spawn-agent", project.get()),
@@ -304,7 +363,7 @@ async fn reload_reconciles_a_changed_solo_yml() {
         "processes:\n  Web:\n    command: npm run dev\n  Api:\n    command: cargo run\n",
     )
     .expect("write");
-    let app = router(ApiState::new(Arc::clone(&facade)));
+    let app = router(ApiState::new(Arc::clone(&facade), TEST_TOKEN));
     let response = app
         .oneshot(post(
             &format!("/projects/{}/reload", project.id.get()),
@@ -319,7 +378,7 @@ async fn reload_reconciles_a_changed_solo_yml() {
 #[tokio::test]
 async fn reload_of_an_unknown_project_is_404() {
     let (facade, _id) = facade_with_terminal();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
         .oneshot(post("/projects/999999/reload", &[AUTH]))
         .await
@@ -327,9 +386,12 @@ async fn reload_of_an_unknown_project_is_404() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-/// A `DELETE` request to `uri` carrying each given header.
+/// A `DELETE` request to `uri` carrying a loopback `Host` plus each given header.
 fn delete(uri: &str, headers: &[(&str, &str)]) -> Request<Body> {
-    let mut builder = Request::builder().method("DELETE").uri(uri);
+    let mut builder = Request::builder()
+        .method("DELETE")
+        .uri(uri)
+        .header(LOOPBACK_HOST.0, LOOPBACK_HOST.1);
     for (name, value) in headers {
         builder = builder.header(*name, *value);
     }
@@ -353,7 +415,7 @@ async fn removing_a_project_closes_its_processes_and_deletes_it() {
     let project = facade.load_project(dir.path()).expect("load");
     assert_eq!(facade.snapshot().len(), 1);
 
-    let app = router(ApiState::new(Arc::clone(&facade)));
+    let app = router(ApiState::new(Arc::clone(&facade), TEST_TOKEN));
     let response = app
         .oneshot(delete(&format!("/projects/{}", project.id.get()), &[AUTH]))
         .await
@@ -380,7 +442,7 @@ async fn removing_a_project_without_auth_is_rejected() {
     let dir = tempfile::tempdir().expect("temp dir");
     let project = facade.load_project(dir.path()).expect("load");
 
-    let app = router(ApiState::new(Arc::clone(&facade)));
+    let app = router(ApiState::new(Arc::clone(&facade), TEST_TOKEN));
     let response = app
         .oneshot(delete(&format!("/projects/{}", project.id.get()), &[]))
         .await
@@ -397,7 +459,7 @@ async fn removing_a_project_without_auth_is_rejected() {
 #[tokio::test]
 async fn removing_an_unknown_project_is_404() {
     let (facade, _id) = facade_with_terminal();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
         .oneshot(delete("/projects/999999", &[AUTH]))
         .await
@@ -450,7 +512,7 @@ async fn transfer_scratchpad_moves_it_to_the_target_project() {
     facade
         .scratchpad_write_in(a, "plan", scratchpad_doc(), None)
         .expect("seed in A");
-    let app = router(ApiState::new(Arc::clone(&facade)));
+    let app = router(ApiState::new(Arc::clone(&facade), TEST_TOKEN));
     let response = app
         .oneshot(post_json(
             &format!("/projects/{}/transfer-scratchpad", a.get()),
@@ -470,7 +532,7 @@ async fn transfer_scratchpad_to_an_unknown_target_is_404_and_does_not_orphan() {
     facade
         .scratchpad_write_in(a, "plan", scratchpad_doc(), None)
         .expect("seed in A");
-    let app = router(ApiState::new(Arc::clone(&facade)));
+    let app = router(ApiState::new(Arc::clone(&facade), TEST_TOKEN));
     let response = app
         .oneshot(post_json(
             &format!("/projects/{}/transfer-scratchpad", a.get()),
@@ -489,7 +551,7 @@ async fn transfer_scratchpad_to_an_unknown_target_is_404_and_does_not_orphan() {
 #[tokio::test]
 async fn transfer_scratchpad_without_auth_is_rejected() {
     let (facade, a, b, _a_dir, _b_dir) = facade_with_two_projects();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
         .oneshot(post_json(
             &format!("/projects/{}/transfer-scratchpad", a.get()),
@@ -504,7 +566,7 @@ async fn transfer_scratchpad_without_auth_is_rejected() {
 #[tokio::test]
 async fn transfer_todo_with_an_unknown_todo_is_404() {
     let (facade, a, b, _a_dir, _b_dir) = facade_with_two_projects();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     // The target project exists, but there is no such todo in the source → UnknownTodo → 404.
     let response = app
         .oneshot(post_json(
@@ -520,7 +582,7 @@ async fn transfer_todo_with_an_unknown_todo_is_404() {
 #[tokio::test]
 async fn transfer_todo_without_auth_is_rejected() {
     let (facade, a, b, _a_dir, _b_dir) = facade_with_two_projects();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
         .oneshot(post_json(
             &format!("/projects/{}/transfer-todo", a.get()),
@@ -544,7 +606,7 @@ fn the_shared_status_contract_matches_the_codes_the_server_returns() {
 #[tokio::test]
 async fn a_non_loopback_origin_gets_no_cors_allowance_on_a_mutation() {
     let (facade, id) = facade_with_terminal();
-    let app = router(ApiState::new(facade));
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
         .oneshot(post(
             &format!("/processes/{}/stop", id.get()),

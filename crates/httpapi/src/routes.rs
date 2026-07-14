@@ -5,26 +5,32 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::get;
-use axum::{Json, Router};
+use axum::{middleware, Json, Router};
 use serde::{Deserialize, Serialize};
 
 use soloist_core::{FeedbackEntry, ProcStatus, ProcessId, ProcessView, ProjectView};
 
+use crate::auth::{require_local_host, require_token};
 use crate::cors::localhost_cors;
 use crate::state::ApiState;
 
-/// Builds the full router: the open read routes merged with the auth-gated mutation routes,
-/// with the localhost CORS layer over both. The auth gate rides only the mutation routes
-/// (see [`crate::mutations`]); CORS applies to everything.
+/// Builds the full router: the read routes merged with the mutation routes, with three
+/// layers over both. Outermost first: localhost CORS (which also answers preflight), then
+/// the `Host` guard, then the per-launch token gate — so every route, read or mutation, is
+/// reachable only by a same-user caller presenting the token from a loopback host. The token
+/// gate carries its own state clone; the handlers get theirs from `with_state`.
 pub fn router(state: ApiState) -> Router {
     read_routes()
         .merge(crate::mutations::router())
+        .layer(middleware::from_fn_with_state(state.clone(), require_token))
+        .layer(middleware::from_fn(require_local_host))
         .layer(localhost_cors())
         .with_state(state)
 }
 
-/// The read routes — open on loopback (no auth gate), since reading the local stack is the
-/// low-risk half of the API.
+/// The read routes. Gated by the whole-router token and `Host` guards like the mutations —
+/// reading another user's process output (which can hold secrets) is not low-risk on a
+/// multi-user host, so reads authenticate too.
 fn read_routes() -> Router<ApiState> {
     Router::new()
         .route("/health", get(health))

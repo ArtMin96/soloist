@@ -2,8 +2,8 @@
 //!
 //! Each handler maps to **one** core command — the same `Facade`/`Supervisor` method the
 //! desktop UI and the MCP server drive — so an action like "restart" is implemented once in
-//! the core and never per adapter. Every route here sits behind the local-auth gate; the
-//! read routes stay open on loopback.
+//! the core and never per adapter. The token and `Host` guards apply to the whole router
+//! (see [`crate::routes::router`]), so these routes need no gate of their own.
 //!
 //! The two bulk-start scopes are deliberate (see [`soloist_core::Supervisor`]): `start-auto`
 //! starts only `auto_start` commands (the dashboard's launch-the-stack action), while
@@ -11,7 +11,6 @@
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::middleware;
 use axum::routing::{delete, post};
 use axum::{Json, Router};
 
@@ -23,12 +22,11 @@ use soloist_ipc::http::{
     SpawnRequest, SpawnResponse, TransferScratchpadRequest, TransferTodoRequest,
 };
 
-use crate::auth::require_local_auth;
 use crate::state::ApiState;
 
-/// The mutation sub-router, with the local-auth gate applied to every route on it. Using
-/// `route_layer` confines the gate to these routes — the read routes merged alongside stay
-/// open on loopback.
+/// The mutation sub-router. The whole-router token and `Host` guards cover these routes, so
+/// they carry no gate of their own; they are merged with the read routes in
+/// [`crate::routes::router`].
 pub fn router() -> Router<ApiState> {
     Router::new()
         .route("/processes/{id}/start", post(start))
@@ -48,7 +46,6 @@ pub fn router() -> Router<ApiState> {
             post(transfer_scratchpad),
         )
         .route("/focus", post(focus))
-        .route_layer(middleware::from_fn(require_local_auth))
 }
 
 /// Maps a supervisor error to the status the adapter returns: an unknown process is `404`,

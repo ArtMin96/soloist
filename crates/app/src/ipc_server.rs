@@ -176,11 +176,11 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .map_err(IpcError::from),
         IpcRequest::ListProjects => Ok(IpcResponse::Projects(project_summaries(facade)?)),
         IpcRequest::GetProjectStatus { project } => project_status(facade, session, project),
-        IpcRequest::ListProcesses => Ok(IpcResponse::Processes(facade.snapshot())),
+        IpcRequest::ListProcesses => Ok(IpcResponse::Processes(facade.snapshot_scoped(session))),
         IpcRequest::GetProcessStatus { process } => facade
-            .process_view(process)
+            .process_status_scoped(session, process)
             .map(IpcResponse::Process)
-            .ok_or(IpcError::UnknownProcess),
+            .map_err(IpcError::from),
         IpcRequest::StartProcess { process } => facade
             .start_process(session, process)
             .map(|()| IpcResponse::Acked)
@@ -238,29 +238,29 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
         IpcRequest::GetProcessOutput { process, lines } => facade
-            .process_output(process, lines)
+            .process_output_scoped(session, process, lines)
             .map(IpcResponse::Lines)
-            .ok_or(IpcError::UnknownProcess),
+            .map_err(IpcError::from),
         IpcRequest::GetProcessRawOutput { process } => facade
-            .process_raw_output(process)
+            .process_raw_output_scoped(session, process)
             .map(|bytes| IpcResponse::RawOutput(String::from_utf8_lossy(&bytes).into_owned()))
-            .ok_or(IpcError::UnknownProcess),
+            .map_err(IpcError::from),
         IpcRequest::SearchOutput {
             process,
             query,
             limit,
         } => facade
-            .search_output(process, &query, limit)
+            .search_output_scoped(session, process, &query, limit)
             .map(IpcResponse::Lines)
-            .ok_or(IpcError::UnknownProcess),
+            .map_err(IpcError::from),
         IpcRequest::SearchRawOutput {
             process,
             query,
             limit,
         } => facade
-            .search_raw_output(process, &query, limit)
+            .search_raw_output_scoped(session, process, &query, limit)
             .map(IpcResponse::Lines)
-            .ok_or(IpcError::UnknownProcess),
+            .map_err(IpcError::from),
         IpcRequest::ClearOutput { process } => facade
             .clear_output(session, process)
             .map(|_| IpcResponse::Acked)
@@ -270,9 +270,9 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .then_some(IpcResponse::Acked)
             .ok_or(IpcError::UnknownProcess),
         IpcRequest::GetProcessPorts { process } => facade
-            .process_ports(process)
+            .process_ports_scoped(session, process)
             .map(IpcResponse::Ports)
-            .ok_or(IpcError::UnknownProcess),
+            .map_err(IpcError::from),
         IpcRequest::ServicesList => facade
             .services_list(session)
             .map(IpcResponse::Processes)
@@ -282,6 +282,11 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             port,
             timeout_ms,
         } => {
+            // Waiting on a port reveals whether the process bound it — the same disclosure the
+            // scoped port read refuses, so a cross-project target is refused here too.
+            facade
+                .require_in_scope(session, process)
+                .map_err(IpcError::from)?;
             let timeout = timeout_ms
                 .map_or(DEFAULT_PORT_WAIT, Duration::from_millis)
                 .min(MAX_PORT_WAIT);

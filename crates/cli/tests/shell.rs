@@ -76,9 +76,16 @@ async fn the_binary_drives_the_running_app_and_reports_when_it_is_down() {
         .await
         .expect("bind loopback");
     let port = listener.local_addr().expect("local addr").port();
-    let app = router(ApiState::new(Arc::clone(&facade)));
+    // The server and the runtime file the real CLI binary reads must agree on the token, so
+    // the binary authenticates end to end.
+    let token = "shell-test-token";
+    let app = router(ApiState::new(Arc::clone(&facade), token));
     tokio::spawn(async move { axum::serve(listener, app).await.expect("serve") });
-    write_runtime(HttpRuntime { port }).expect("write the runtime file");
+    write_runtime(HttpRuntime {
+        port,
+        token: token.to_string(),
+    })
+    .expect("write the runtime file");
 
     let data_dir = dir.path().to_path_buf();
 
@@ -114,7 +121,11 @@ async fn the_binary_drives_the_running_app_and_reports_when_it_is_down() {
         .local_addr()
         .expect("addr")
         .port();
-    write_runtime(HttpRuntime { port: closed }).expect("rewrite the runtime file");
+    write_runtime(HttpRuntime {
+        port: closed,
+        token: token.to_string(),
+    })
+    .expect("rewrite the runtime file");
     let probe = data_dir.clone();
     let down = tokio::task::spawn_blocking(move || soloist(&probe, &["status"]))
         .await

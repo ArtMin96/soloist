@@ -255,6 +255,99 @@ impl Facade {
             .collect())
     }
 
+    /// The status view of one in-scope process — the scoped `get_process_status`. Refuses a
+    /// process outside the session's project rather than disclose its state across the
+    /// project-isolation boundary; the open [`process_view`](Self::process_view) stays for
+    /// the local (unscoped) UI and the HTTP API.
+    pub fn process_status_scoped(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+    ) -> Result<ProcessView, ScopedActionError> {
+        self.resolve_in_scope(session, process)
+    }
+
+    /// The recent rendered output of one in-scope process — the scoped `get_process_output`,
+    /// bounded exactly as the open [`process_output`](Self::process_output) it delegates to.
+    /// An out-of-scope process is refused, so an agent cannot read another project's logs
+    /// (which can carry secrets).
+    pub fn process_output_scoped(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+        lines: Option<usize>,
+    ) -> Result<Vec<String>, ScopedActionError> {
+        self.require_in_scope(session, process)?;
+        Ok(self.process_output(process, lines).unwrap_or_default())
+    }
+
+    /// The raw byte output of one in-scope process — the scoped `get_process_raw_output`.
+    pub fn process_raw_output_scoped(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+    ) -> Result<Vec<u8>, ScopedActionError> {
+        self.require_in_scope(session, process)?;
+        Ok(self.process_raw_output(process).unwrap_or_default())
+    }
+
+    /// Rendered output lines of one in-scope process containing `query` — the scoped
+    /// `search_output`.
+    pub fn search_output_scoped(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+        query: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<String>, ScopedActionError> {
+        self.require_in_scope(session, process)?;
+        Ok(self
+            .search_output(process, query, limit)
+            .unwrap_or_default())
+    }
+
+    /// Raw output lines of one in-scope process containing `query` — the scoped
+    /// `search_raw_output`.
+    pub fn search_raw_output_scoped(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+        query: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<String>, ScopedActionError> {
+        self.require_in_scope(session, process)?;
+        Ok(self
+            .search_raw_output(process, query, limit)
+            .unwrap_or_default())
+    }
+
+    /// The listening ports of one in-scope process — the scoped `get_process_ports`.
+    pub fn process_ports_scoped(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+    ) -> Result<Vec<u16>, ScopedActionError> {
+        Ok(self.resolve_in_scope(session, process)?.ports)
+    }
+
+    /// Every process, with rows outside the session's effective project reduced to identity
+    /// — the scoped `list_processes`. A caller keeps a cross-project overview (which projects
+    /// and processes exist) but reads no foreign project's ports, exit code, or output-derived
+    /// state. With no project in scope every row is foreign, so all are redacted.
+    pub fn snapshot_scoped(&self, session: SessionId) -> Vec<ProcessView> {
+        let scope = self.effective_project(session);
+        self.snapshot()
+            .into_iter()
+            .map(|view| {
+                if Some(view.project) == scope {
+                    view
+                } else {
+                    view.redacted_identity()
+                }
+            })
+            .collect()
+    }
+
     /// Resolves the session's effective project for a project-wide action, or
     /// `NoProjectScope` when none is selected, bound, or singular.
     fn scope(&self, session: SessionId) -> Result<ProjectId, ScopedActionError> {
@@ -262,21 +355,33 @@ impl Facade {
             .ok_or(ScopedActionError::NoProjectScope)
     }
 
-    /// The scope guard: the process must exist and belong to the session's effective project.
-    /// Returns `OutOfScope` rather than hiding a cross-project process, since the read tools
-    /// already expose every process unfiltered (open by design).
-    fn require_in_scope(
+    /// The scope guard, returning the in-scope process's view: the process must exist and
+    /// belong to the session's effective project, else `UnknownProcess`/`OutOfScope`. The
+    /// scoped actions and reads share this one resolution, so the rule lives in a single place.
+    fn resolve_in_scope(
         &self,
         session: SessionId,
         process: ProcessId,
-    ) -> Result<(), ScopedActionError> {
+    ) -> Result<ProcessView, ScopedActionError> {
         let view = self
             .process_view(process)
             .ok_or(ScopedActionError::UnknownProcess)?;
         if view.project != self.scope(session)? {
             return Err(ScopedActionError::OutOfScope);
         }
-        Ok(())
+        Ok(view)
+    }
+
+    /// The scope guard when the caller needs only the pass/fail, not the view. Public for the
+    /// one remote read whose own return shape differs from the scoped reads — the async
+    /// `wait_for_bound_port`, which confirms scope, then awaits — so its cross-project
+    /// port-bind probe is refused like the other reads. The scope *rule* still lives here.
+    pub fn require_in_scope(
+        &self,
+        session: SessionId,
+        process: ProcessId,
+    ) -> Result<(), ScopedActionError> {
+        self.resolve_in_scope(session, process).map(|_| ())
     }
 }
 

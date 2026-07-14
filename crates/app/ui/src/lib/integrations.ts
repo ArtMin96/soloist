@@ -194,8 +194,9 @@ export const MCP_CLIENTS: McpClientInfo[] = [
   },
 ];
 
-// The local HTTP API, shown read-only so a script can be pointed at it. Loopback only; mutations
-// require the X-Soloist-Local-Auth header.
+// The local HTTP API, shown read-only so a script can be pointed at it. Loopback only; every
+// request carries the launch's X-Soloist-Local-Auth token (the `soloist` CLI reads it from the
+// runtime file).
 export const HTTP_API_BASE_URL = "http://127.0.0.1:24678";
 
 // The documented HTTP surface (docs/http-api.md): seven reads + fourteen actions. Listed so the
