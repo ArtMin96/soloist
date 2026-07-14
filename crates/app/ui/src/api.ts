@@ -478,14 +478,25 @@ export function setProjectIcon(project: ProjectId, icon: string | null): Promise
   return invoke<void>("set_project_icon", { project, icon });
 }
 
-export function onDomainEvent(handler: (event: DomainEvent) => void): Promise<UnlistenFn> {
-  return listen<DomainEvent>(DOMAIN_EVENT, (event) => handler(event.payload));
+// Tauri's UnlistenFn is async; subscribers invoke it synchronously in effect cleanup (which
+// cannot await) and drop the returned promise, so a teardown-time unlisten failure — a late or
+// failed `plugin:event|unlisten` IPC on shutdown, or a torn-down mock under test — would surface
+// as an unhandled rejection. Hand callers a synchronous, self-catching unlisten so teardown can
+// never reject.
+function safeUnlisten(unlisten: UnlistenFn): UnlistenFn {
+  return () => void Promise.resolve(unlisten()).catch(() => {});
+}
+
+export async function onDomainEvent(handler: (event: DomainEvent) => void): Promise<UnlistenFn> {
+  const unlisten = await listen<DomainEvent>(DOMAIN_EVENT, (event) => handler(event.payload));
+  return safeUnlisten(unlisten);
 }
 
 // The backend's delta stream fell behind and dropped events; stores must re-read their
 // snapshots to recover, since a lost delta is otherwise permanent. Carries no payload.
 const DOMAIN_RESYNC = "domain-resync";
 
-export function onResync(handler: () => void): Promise<UnlistenFn> {
-  return listen(DOMAIN_RESYNC, () => handler());
+export async function onResync(handler: () => void): Promise<UnlistenFn> {
+  const unlisten = await listen(DOMAIN_RESYNC, () => handler());
+  return safeUnlisten(unlisten);
 }
