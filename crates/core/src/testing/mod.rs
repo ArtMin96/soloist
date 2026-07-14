@@ -57,7 +57,7 @@ pub use notify::RecordingNotifier;
 pub use portscan::FakePortProbe;
 pub use prompt_template::FakePromptTemplateRepo;
 pub use repos::{FakeProjectRepo, FakeTrustRepo};
-pub use runtime_state::{FakeOrphanControl, FakeRuntimeState};
+pub use runtime_state::{fake_identity, FakeOrphanControl, FakeRuntimeState};
 pub use settings::FakeSettingsRepo;
 pub use shellenv::FakeShellEnvProbe;
 #[cfg(test)]

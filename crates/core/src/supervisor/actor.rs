@@ -167,9 +167,11 @@ async fn run(
         clock,
         locks,
         runtime,
-        // Only the panic path (in `spawn`) reaps via the orphan control; the running actor
-        // reaps through its own `control` handle.
-        orphan_control: _,
+        // The running actor reaps a live child through its own `control` handle (the panic
+        // path in `spawn` reaps via the orphan control); here the orphan control is used to
+        // stamp each recorded group with the leader's stable identity, so a reused pgid is
+        // never mistaken for it on the next launch.
+        orphan_control,
         bus,
         registry,
         shell_env,
@@ -245,7 +247,7 @@ async fn run(
         // Record the running group before announcing Running, so a crash immediately
         // after the announcement still leaves a reconcilable runtime-state record. The
         // same pgid is recorded in the registry so monitoring can sample the live group.
-        record_orphan(&runtime, &identity, &launch, pgid).await;
+        record_orphan(&runtime, &orphan_control, &identity, &launch, pgid).await;
         registry.set_pgid(id, pgid);
         // Hand the live child's I/O to the input pump *before* announcing `Running`, so a resize
         // that arrives as the child comes up is applied to it rather than dropped. Cleared below
@@ -318,21 +320,32 @@ async fn run(
 /// write must not take down the actor.
 async fn record_orphan(
     runtime: &Arc<dyn RuntimeState>,
+    orphan_control: &Arc<dyn OrphanControl>,
     identity: &OrphanIdentity,
     launch: &SpawnSpec,
     pgid: Option<i32>,
 ) {
     if let Some(pgid) = pgid {
         let runtime = runtime.clone();
-        let record = OrphanRecord {
-            project_root: identity.project_root.clone(),
-            name: identity.name.clone(),
-            command: launch.command.clone(),
-            pgid,
-        };
-        // The runtime-state write touches the filesystem; run it off the async runtime
-        // so a slow disk never stalls the supervisor's worker thread.
-        let _ = tokio::task::spawn_blocking(move || runtime.record(&record)).await;
+        let orphan_control = orphan_control.clone();
+        let project_root = identity.project_root.clone();
+        let name = identity.name.clone();
+        let command = launch.command.clone();
+        // The identity probe (reads `/proc`) and the write both touch the filesystem; run
+        // them off the async runtime so a slow disk never stalls the supervisor's worker
+        // thread. The identity pins the exact process behind `pgid` so a later run can tell
+        // this group from an unrelated one the OS assigned the reused pgid.
+        let _ = tokio::task::spawn_blocking(move || {
+            let record = OrphanRecord {
+                project_root,
+                name,
+                command,
+                pgid,
+                identity: orphan_control.identify(pgid),
+            };
+            runtime.record(&record)
+        })
+        .await;
     }
 }
 

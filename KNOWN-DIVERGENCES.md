@@ -477,3 +477,39 @@ project a session acts on, now with names. The enriched payload, the auto-bind c
 the related progressive-disclosure additions (topic `help`, init instructions, `mcp_tools_summary`,
 featured `tools/list` order, decaying next-tool suggestions, and the group-level-only tool disable)
 are recorded as decisions in `plan/05 §12`.
+
+---
+
+## D-16 — Orphan reconciliation verifies process identity and fails closed on ambiguity 🟢
+
+**Introduced:** stability audit PRD-03, 2026-07-14.
+
+**Solo (ref `plan/05` §4 "Orphaned processes"):** Solo v0.9.3's changelog notes a fix so restart
+reconciliation no longer risks acting on a PID/PGID the OS **recycled** to an unrelated group. Solo
+documents *that* the class is fixed, not *how*.
+
+**Soloist:** each recorded process group is stamped, at record time, with a stable identity — the
+kernel `boot_id` (`/proc/sys/kernel/random/boot_id`) plus the group leader's start-time
+(`/proc/<pid>/stat` field 22). Reconciliation and the surfaced-orphan Kill path both re-check this
+identity through the `OrphanControl` port and treat a group as the recorded orphan **only** when it
+matches. This produces two observable fail-closed behaviors a bare-pgid check would not:
+- A **legacy record** written before identity stamping (no captured identity) is unverifiable, so it
+  is **dropped, not offered for kill** — a one-time effect on the first launch after upgrade. A
+  genuine leftover from before the upgrade is left running (leaked) rather than risk SIGKILLing a
+  recycled pgid.
+- A group whose **leader has exited but whose children linger** reads as gone (its `/proc/<pgid>`
+  entry is absent), so it is pruned rather than reaped. The lingering children are leaked, never a
+  wrong kill.
+- A **failed SIGKILL** on a matched group is surfaced to the user (error banner) and its record is
+  kept, so the leftover is re-offered next launch instead of being silently forgotten.
+
+**Rationale:** the audit's locked priority is that Soloist must **never** SIGKILL a process group
+whose identity doesn't match the recorded orphan (the exact class Solo v0.9.3 fixed). When identity
+cannot be confirmed, leaking a process is strictly safer than killing the wrong one, so every
+ambiguous case resolves to "do not kill." `boot_id` + start-time are cheap, Linux-native, and
+sufficient to detect PID/PGID reuse across both PID churn and reboots (D2 makes Linux the only
+target).
+
+**Effect on parity:** the orphaned-processes behavior (adopt on full match, else Kill/Kill All/Leave)
+is unchanged for a legitimate same-boot leftover; only recycled/legacy/leader-gone cases resolve to
+prune. No parity row regresses.

@@ -10,6 +10,7 @@
 use crate::events::DomainEvent;
 use crate::ids::ProcessId;
 use crate::orphans::{classify, OrphanFate, OrphanInfo, OrphanReport};
+use crate::ports::{OrphanRecord, SpawnError};
 
 use super::{adopt, Supervisor};
 
@@ -23,7 +24,7 @@ impl Supervisor {
         let records = self.runtime.load().unwrap_or_default();
         let fates = classify(
             records,
-            |pgid| self.orphan_control.is_alive(pgid),
+            |record| self.orphan_control.is_recorded_alive(record),
             |record| {
                 self.registry.find_resting_match(
                     &record.project_root,
@@ -38,14 +39,15 @@ impl Supervisor {
         for fate in fates {
             match fate {
                 OrphanFate::Adopt { record, target } => {
-                    if self.adopt_orphan(target, record.pgid) {
+                    let info = OrphanInfo::from(&record);
+                    if self.adopt_orphan(target, record) {
                         report.adopted.push(target);
                     } else {
                         // The target was already claimed by another record with the
                         // same identity (a rare duplicate): surface this still-live
                         // group for a user decision rather than leave it running and
                         // unattended.
-                        surfaced.push(OrphanInfo::from(&record));
+                        surfaced.push(info);
                     }
                 }
                 OrphanFate::Surface(record) => surfaced.push(OrphanInfo::from(&record)),
@@ -64,21 +66,43 @@ impl Supervisor {
         report
     }
 
-    /// Forcibly reaps a surfaced orphan the user chose to kill: SIGKILL to its process
-    /// group and drop its runtime-state record so the next launch will not see it again.
-    /// Best-effort — a group that already exited and a missing record are both no-ops.
-    pub fn kill_orphan(&self, pgid: i32) {
-        let _ = self.orphan_control.signal(pgid, true);
-        let _ = self.runtime.forget(pgid);
+    /// Forcibly reaps a surfaced orphan the user chose to kill — but only if the recorded
+    /// group is still the *same* live process: its identity is re-checked so a pgid the OS
+    /// reassigned between surfacing and this call is never SIGKILLed. On a match, SIGKILL
+    /// the group and drop its record; on a mismatch or an already-exited group, drop the
+    /// stale record without signalling. A failed SIGKILL is returned (the group survives,
+    /// so its record is kept for the next launch) so the caller can surface it.
+    pub fn kill_orphan(&self, pgid: i32) -> Result<(), SpawnError> {
+        let record = self
+            .runtime
+            .load()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|record| record.pgid == pgid);
+        match record {
+            Some(record) if self.orphan_control.is_recorded_alive(&record) => {
+                self.orphan_control.signal(pgid, true)?;
+                let _ = self.runtime.forget(pgid);
+                Ok(())
+            }
+            _ => {
+                // No record, already exited, or a recycled pgid whose identity no longer
+                // matches — nothing of ours to kill; drop the stale record.
+                let _ = self.runtime.forget(pgid);
+                Ok(())
+            }
+        }
     }
 
-    /// Re-attaches a leftover process group `pgid` to the resting registered process
-    /// `target`, running it through the normal actor over a synthesized handle.
-    fn adopt_orphan(&self, target: ProcessId, pgid: i32) -> bool {
+    /// Re-attaches a leftover process group to the resting registered process `target`,
+    /// running it through the normal actor over a synthesized handle. The whole `record`
+    /// (including its captured identity) rides along so the adopted group's liveness poll
+    /// re-checks identity, not just a bare pgid.
+    fn adopt_orphan(&self, target: ProcessId, record: OrphanRecord) -> bool {
         let Some(launch) = self.registry.describe(target).map(|info| info.launch) else {
             return false;
         };
-        let spawned = adopt::adopt(pgid, self.orphan_control.clone(), self.clock.clone());
+        let spawned = adopt::adopt(record, self.orphan_control.clone(), self.clock.clone());
         self.launch_actor(target, launch, Some(spawned))
     }
 }
@@ -86,13 +110,13 @@ impl Supervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::OrphanRecord;
+    use crate::ports::{OrphanRecord, ProcessIdentity};
     use crate::process::ProcStatus;
     use crate::supervisor::test_support::{
         command_spec, harness, next_to, terminal, wait_all, PROJECT,
     };
     use crate::supervisor::Registration;
-    use crate::testing::FakeSpawner;
+    use crate::testing::{fake_identity, FakeSpawner};
     use std::path::{Path, PathBuf};
     use std::time::Duration;
     use tokio::sync::broadcast;
@@ -101,12 +125,15 @@ mod tests {
     /// A duration past the adopted-process liveness poll, so a death is observed.
     const PAST_POLL: Duration = Duration::from_secs(2);
 
+    /// A leftover record stamped with the canonical identity a live group set via
+    /// `set_alive` also carries, so a legitimate leftover matches and is reconciled.
     fn orphan_record(name: &str, command: &str, pgid: i32) -> OrphanRecord {
         OrphanRecord {
             project_root: PathBuf::from("/p"),
             name: name.into(),
             command: command.into(),
             pgid,
+            identity: Some(fake_identity()),
         }
     }
 
@@ -232,7 +259,7 @@ mod tests {
         h.runtime.seed(orphan_record("stray", "weird --serve", 777));
         h.orphans.set_alive(777);
 
-        h.sup.kill_orphan(777);
+        h.sup.kill_orphan(777).expect("kill succeeds");
 
         assert!(
             h.orphans.signalled().contains(&(777, true)),
@@ -241,6 +268,147 @@ mod tests {
         assert!(
             h.runtime.records().is_empty(),
             "its runtime-state record is forgotten"
+        );
+    }
+
+    /// A different boot id means the recorded pgid is meaningless — the counter reset —
+    /// so the record is pruned, never adopted or offered for kill, even though a matching
+    /// command is registered.
+    #[tokio::test]
+    async fn reconcile_prunes_a_recycled_group_with_a_different_boot_id() {
+        let h = harness(FakeSpawner::exits_on_terminate());
+        let spec = command_spec("npm run dev", false);
+        h.sup.register(Registration::command(
+            PROJECT,
+            Path::new("/p"),
+            "Web",
+            &spec,
+        ));
+        h.runtime.seed(orphan_record("Web", "npm run dev", 555));
+        // The live group at pgid 555 belongs to a *different boot* than the record.
+        h.orphans.set_identity(
+            555,
+            ProcessIdentity {
+                boot_id: "boot-other".into(),
+                started_at: fake_identity().started_at,
+            },
+        );
+
+        let report = h.sup.reconcile_orphans();
+        assert_eq!(report.pruned, 1, "the recycled group is pruned");
+        assert!(
+            report.adopted.is_empty(),
+            "a recycled group is never adopted"
+        );
+        assert!(
+            report.surfaced.is_empty(),
+            "a recycled group is never surfaced for kill"
+        );
+        assert!(h.orphans.signalled().is_empty(), "nothing is signalled");
+        assert!(
+            h.runtime.records().is_empty(),
+            "the stale record is dropped"
+        );
+    }
+
+    /// Same boot but a different leader start-time means the pgid was reused within this
+    /// boot — likewise pruned, never killed.
+    #[tokio::test]
+    async fn reconcile_prunes_a_recycled_group_with_a_different_start_time() {
+        let h = harness(FakeSpawner::exits_on_terminate());
+        h.runtime.seed(orphan_record("stray", "weird --serve", 777));
+        h.orphans.set_identity(
+            777,
+            ProcessIdentity {
+                boot_id: fake_identity().boot_id,
+                started_at: fake_identity().started_at + 5000,
+            },
+        );
+
+        let report = h.sup.reconcile_orphans();
+        assert_eq!(report.pruned, 1);
+        assert!(report.surfaced.is_empty());
+        assert!(h.orphans.signalled().is_empty());
+    }
+
+    /// A legacy record written before identity stamping (no identity fields) is
+    /// unverifiable, so it fails closed: pruned, never adopted, surfaced, or killed —
+    /// even though its group is live and matches a registered command.
+    #[tokio::test]
+    async fn reconcile_fails_closed_on_a_legacy_record_without_identity() {
+        let h = harness(FakeSpawner::exits_on_terminate());
+        let spec = command_spec("npm run dev", false);
+        h.sup.register(Registration::command(
+            PROJECT,
+            Path::new("/p"),
+            "Web",
+            &spec,
+        ));
+        h.runtime.seed(OrphanRecord {
+            project_root: PathBuf::from("/p"),
+            name: "Web".into(),
+            command: "npm run dev".into(),
+            pgid: 555,
+            identity: None,
+        });
+        h.orphans.set_alive(555);
+
+        let report = h.sup.reconcile_orphans();
+        assert_eq!(report.pruned, 1, "a legacy record fails closed to prune");
+        assert!(report.adopted.is_empty());
+        assert!(report.surfaced.is_empty());
+        assert!(h.orphans.signalled().is_empty());
+    }
+
+    /// The surface/kill TOCTOU: if the pgid is reassigned between being surfaced and the
+    /// user clicking Kill, the identity re-check stops the SIGKILL — the unrelated group
+    /// is not touched, and the stale record is dropped.
+    #[tokio::test]
+    async fn kill_orphan_does_not_signal_a_recycled_group() {
+        let h = harness(FakeSpawner::exits_on_terminate());
+        h.runtime.seed(orphan_record("stray", "weird --serve", 777));
+        // By the time the user acts, pgid 777 is an unrelated group (different boot).
+        h.orphans.set_identity(
+            777,
+            ProcessIdentity {
+                boot_id: "boot-other".into(),
+                started_at: fake_identity().started_at,
+            },
+        );
+
+        h.sup
+            .kill_orphan(777)
+            .expect("no error when nothing is killed");
+
+        assert!(
+            h.orphans.signalled().is_empty(),
+            "the recycled group is never SIGKILLed"
+        );
+        assert!(
+            h.runtime.records().is_empty(),
+            "the stale record is dropped"
+        );
+    }
+
+    /// A failed SIGKILL is surfaced (returned as an error) and the record is kept, so the
+    /// leftover is re-offered on the next launch rather than silently forgotten.
+    #[tokio::test]
+    async fn kill_orphan_reports_a_failed_signal_and_keeps_the_record() {
+        let h = harness(FakeSpawner::exits_on_terminate());
+        h.runtime.seed(orphan_record("stray", "weird --serve", 777));
+        h.orphans.set_alive(777);
+        h.orphans.fail_signals();
+
+        let result = h.sup.kill_orphan(777);
+
+        assert!(
+            result.is_err(),
+            "a failed SIGKILL is surfaced to the caller"
+        );
+        assert_eq!(
+            h.runtime.records().len(),
+            1,
+            "the record is kept when the kill failed"
         );
     }
 }

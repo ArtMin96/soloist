@@ -297,16 +297,32 @@ pub async fn pty_detach(token: u64, bridge: State<'_, PtyBridge>) -> Result<(), 
     Ok(())
 }
 
-/// Resolves surfaced orphans the user chose to reap: SIGKILLs each listed process
-/// group and forgets its runtime-state record. "Leave running" sends an empty list, so
-/// nothing is signalled — the dialog simply dismisses.
+/// Resolves surfaced orphans the user chose to reap: SIGKILLs each listed process group
+/// whose recorded identity still matches, and forgets its runtime-state record. "Leave
+/// running" sends an empty list, so nothing is signalled — the dialog simply dismisses. A
+/// group whose SIGKILL fails is reported so the UI can surface the error and keep its row.
 #[tauri::command]
 pub async fn orphans_resolve(
     pgids: Vec<i32>,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<(), String> {
+    let mut failures = Vec::new();
     for pgid in pgids {
-        facade.supervisor().kill_orphan(pgid);
+        if let Err(err) = facade.supervisor().kill_orphan(pgid) {
+            failures.push(format!("pgid {pgid} ({err})"));
+        }
     }
-    Ok(())
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Could not stop leftover {}: {}",
+            if failures.len() == 1 {
+                "process"
+            } else {
+                "processes"
+            },
+            failures.join(", "),
+        ))
+    }
 }

@@ -21,14 +21,13 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use nix::errno::Errno;
 use nix::libc;
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::{Pid, Uid, User};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize as PtPtySize};
 use soloist_core::{
-    ExitFuture, ExitStatus, OrphanControl, ProcessControl, ProcessSpawner, PtyIo, PtySize,
-    SpawnError, SpawnSpec, Spawned,
+    ExitFuture, ExitStatus, OrphanControl, ProcessControl, ProcessIdentity, ProcessSpawner, PtyIo,
+    PtySize, SpawnError, SpawnSpec, Spawned,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -245,13 +244,11 @@ impl ProcessControl for GroupControl {
 pub struct PgidOrphanControl;
 
 impl OrphanControl for PgidOrphanControl {
-    fn is_alive(&self, pgid: i32) -> bool {
-        // The null signal performs only existence/permission checks: `Ok` or `EPERM`
-        // means the group still has a member; `ESRCH` means it is gone.
-        match killpg(Pid::from_raw(pgid), None) {
-            Ok(()) | Err(Errno::EPERM) => true,
-            Err(_) => false,
-        }
+    fn identify(&self, pgid: i32) -> Option<ProcessIdentity> {
+        // A process group is created with its leader's pid as the pgid (the spawner puts
+        // each child in its own group), so the leader's `/proc/<pgid>` entry carries the
+        // group's identity. If it is gone (leader reaped), the group is treated as dead.
+        read_process_identity(pgid)
     }
 
     fn signal(&self, pgid: i32, force: bool) -> Result<(), SpawnError> {
@@ -262,6 +259,43 @@ impl OrphanControl for PgidOrphanControl {
         };
         killpg(Pid::from_raw(pgid), signal).map_err(|err| SpawnError::Signal(err.to_string()))
     }
+}
+
+/// The kernel's per-boot UUID: constant within a boot, regenerated on reboot. A record
+/// stamped under a different boot is meaningless because pids reset — the recorded pgid
+/// could name anything now.
+const BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
+
+/// Zero-based index of the `starttime` field (field 22 in `/proc/<pid>/stat`) within the
+/// whitespace-split remainder that follows the `(comm)` field — the comm field ends the
+/// unparseable prefix, so counting resumes at field 3 (`state`), making field 22 the
+/// 20th token, i.e. index 19.
+const STARTTIME_INDEX_AFTER_COMM: usize = 19;
+
+/// Reads the stable identity of the process-group leader `pgid` from `/proc`: the boot id
+/// and the leader's start-time in clock ticks since boot. Returns `None` if either cannot
+/// be read (the leader has exited, or `/proc` is unavailable), which the caller treats as
+/// the group being gone.
+fn read_process_identity(pgid: i32) -> Option<ProcessIdentity> {
+    let boot_id = std::fs::read_to_string(BOOT_ID_PATH).ok()?;
+    let started_at = read_start_time(pgid)?;
+    Some(ProcessIdentity {
+        boot_id: boot_id.trim().to_string(),
+        started_at,
+    })
+}
+
+/// Parses the leader's start-time from `/proc/<pid>/stat`. The `comm` field (field 2) is
+/// parenthesized and may contain spaces or `)`, so the numeric fields are located after
+/// the *last* `)` rather than by splitting the whole line.
+fn read_start_time(pid: i32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_comm = &stat[stat.rfind(')')? + 1..];
+    after_comm
+        .split_whitespace()
+        .nth(STARTTIME_INDEX_AFTER_COMM)?
+        .parse()
+        .ok()
 }
 
 fn to_pt_size(size: PtySize) -> PtPtySize {

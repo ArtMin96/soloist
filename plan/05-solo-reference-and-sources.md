@@ -125,6 +125,12 @@ allow. Untrusted + auto-start → reported **blocked**, not run.
 On restart after crash/force-quit, Solo prunes stale orphan records and **adopts** running orphans only
 when project path + process name + command config all match; otherwise a dialog offers **Kill / Kill
 All / Leave running**. Historical output from the disconnected window may be unrecoverable.
+🟡 Fidelity (Solo v0.9.3): Solo's changelog notes a fix so reconciliation no longer risks acting on a
+**PID/PGID the OS recycled** to an unrelated group. We honor that class of safety: each recorded group is
+stamped with a stable process identity (kernel `boot_id` + the leader's `/proc/<pid>/stat` start-time) and
+a record is adopted or killed only when that identity still matches the live group — a reused pgid is
+dropped, never killed. The identity mechanism is clean-room (Solo documents the fix, not its
+implementation); the observable fail-closed nuances are recorded in `KNOWN-DIVERGENCES.md` D-16.
 
 ### Trust / security
 ✅ Source: [docs/commands/trust-security](https://soloterm.com/docs/commands/trust-security),

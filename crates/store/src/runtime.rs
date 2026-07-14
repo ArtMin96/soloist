@@ -94,6 +94,7 @@ fn backend<E: std::fmt::Display>(err: E) -> RuntimeStateError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soloist_core::ProcessIdentity;
     use tempfile::tempdir;
 
     fn rec(pgid: i32) -> OrphanRecord {
@@ -102,6 +103,10 @@ mod tests {
             name: "Web".into(),
             command: "npm run dev".into(),
             pgid,
+            identity: Some(ProcessIdentity {
+                boot_id: "boot-1".into(),
+                started_at: 42,
+            }),
         }
     }
 
@@ -115,10 +120,18 @@ mod tests {
             rt.record(&rec(2)).expect("record 2");
             rt.forget(1).expect("forget 1");
         }
-        // A fresh handle sees what was persisted: only pgid 2 remains.
+        // A fresh handle sees what was persisted: only pgid 2 remains, identity intact.
         let loaded = FileRuntimeState::at(path).load().expect("load");
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].pgid, 2);
+        assert_eq!(
+            loaded[0].identity,
+            Some(ProcessIdentity {
+                boot_id: "boot-1".into(),
+                started_at: 42,
+            }),
+            "the captured identity round-trips through the file"
+        );
     }
 
     #[test]
@@ -126,5 +139,24 @@ mod tests {
         let dir = tempdir().expect("temp dir");
         let rt = FileRuntimeState::at(dir.path().join("absent.json"));
         assert!(rt.load().expect("load").is_empty());
+    }
+
+    #[test]
+    fn a_legacy_record_without_identity_loads_as_unverifiable() {
+        // A runtime-state file written before identity stamping has no `identity` field;
+        // it must deserialize (not fail the whole load) with `identity: None`, which the
+        // core treats as fail-closed.
+        let dir = tempdir().expect("temp dir");
+        let path = dir.path().join(FILE);
+        let legacy = r#"[{"project_root":"/p","name":"Web","command":"npm run dev","pgid":9}]"#;
+        std::fs::write(&path, legacy).expect("write legacy file");
+
+        let loaded = FileRuntimeState::at(path).load().expect("load");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].pgid, 9);
+        assert!(
+            loaded[0].identity.is_none(),
+            "a legacy record has no captured identity"
+        );
     }
 }

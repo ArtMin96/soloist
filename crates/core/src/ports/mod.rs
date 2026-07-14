@@ -289,16 +289,33 @@ impl LockReleaser for CompositeLockReleaser {
 
 // ───────────────────────────── Orphan adoption ──────────────────────────────
 
+/// A stable identity for a process-group leader, captured when its orphan record is
+/// written so PID/PGID reuse across a reboot or PID churn is detectable. `boot_id` is
+/// the kernel's per-boot UUID (a different boot means the recorded pgid is meaningless —
+/// the counter reset); `started_at` is the leader's start-time in clock ticks since boot
+/// (`/proc/<pid>/stat` field 22), which distinguishes the original process from a later
+/// one that reused its pid within the same boot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessIdentity {
+    pub boot_id: String,
+    pub started_at: u64,
+}
+
 /// A record of a managed process that was running when Soloist last persisted state,
 /// written to the runtime-state file so a leftover from a crash or force-quit can be
 /// reconciled on the next launch. The identity `{project_root, name, command}` is what
-/// an adoption match is keyed on; `pgid` is the process group to adopt or reap.
+/// an adoption match is keyed on; `pgid` is the process group to adopt or reap; and
+/// `identity` pins the exact process behind that pgid so a recycled group is never
+/// mistaken for the original. A legacy record written before identity stamping
+/// deserializes with `identity: None` and is treated as unverifiable (fail-closed).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrphanRecord {
     pub project_root: PathBuf,
     pub name: String,
     pub command: String,
     pub pgid: i32,
+    #[serde(default)]
+    pub identity: Option<ProcessIdentity>,
 }
 
 /// Errors a runtime-state adapter surfaces.
@@ -325,8 +342,25 @@ pub trait RuntimeState: Send + Sync {
 /// original child handle is gone: check whether it is still alive, and signal it to
 /// stop. Targets the whole group (as the spawner does) so a forking orphan is reaped.
 pub trait OrphanControl: Send + Sync {
-    /// Whether the process group `pgid` still has a live member.
-    fn is_alive(&self, pgid: i32) -> bool;
+    /// The current identity of the process-group leader `pgid`, or `None` if the group
+    /// is gone or its identity cannot be read. Captured at record time and re-checked
+    /// before adopting or reaping, so a pgid the OS reassigned to an unrelated group is
+    /// never mistaken for the original process.
+    fn identify(&self, pgid: i32) -> Option<ProcessIdentity>;
+
+    /// Whether the recorded orphan is still the *same* live group: its leader's current
+    /// identity must equal the one captured in `record`. A recycled pgid (different boot
+    /// or start-time), a group that has since exited, or a legacy record with no captured
+    /// identity all read as **not** the recorded orphan — fail-closed, so such a record
+    /// is never adopted or killed. The comparison lives here so every adapter shares one
+    /// safety rule and only implements the `/proc` probe.
+    fn is_recorded_alive(&self, record: &OrphanRecord) -> bool {
+        match (&record.identity, self.identify(record.pgid)) {
+            (Some(recorded), Some(current)) => *recorded == current,
+            _ => false,
+        }
+    }
+
     /// Signals the group: a graceful SIGTERM, or SIGKILL when `force`.
     fn signal(&self, pgid: i32, force: bool) -> Result<(), SpawnError>;
 }
@@ -354,8 +388,8 @@ impl RuntimeState for NoopRuntimeState {
 pub struct NoopOrphanControl;
 
 impl OrphanControl for NoopOrphanControl {
-    fn is_alive(&self, _pgid: i32) -> bool {
-        false
+    fn identify(&self, _pgid: i32) -> Option<ProcessIdentity> {
+        None
     }
     fn signal(&self, _pgid: i32, _force: bool) -> Result<(), SpawnError> {
         Ok(())
