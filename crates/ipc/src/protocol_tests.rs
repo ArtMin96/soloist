@@ -484,6 +484,24 @@ fn core_coordination_errors_map_to_the_wire_error() {
         IpcError::from(CoordinationError::NoBoundProcess),
         IpcError::NoBoundProcess
     );
+    assert_eq!(
+        IpcError::from(CoordinationError::PayloadTooLarge {
+            what: "kv value",
+            max_bytes: 4096,
+        }),
+        IpcError::PayloadTooLarge {
+            what: "kv value".to_owned(),
+            max_bytes: 4096,
+        }
+    );
+    assert!(
+        IpcError::PayloadTooLarge {
+            what: "kv value".to_owned(),
+            max_bytes: 4096,
+        }
+        .is_request_error(),
+        "an oversized payload is the caller's to fix"
+    );
 }
 
 #[test]

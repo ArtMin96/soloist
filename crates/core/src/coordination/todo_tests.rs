@@ -60,6 +60,20 @@ fn a_blank_required_field_is_rejected_naming_every_problem() {
 }
 
 #[test]
+fn a_document_over_the_byte_cap_is_rejected() {
+    let todos = todos();
+    let mut oversized = doc("ship", TodoStatus::Open);
+    oversized.description = "x".repeat(MAX_TODO_DOC_BYTES + 1);
+    let err = todos
+        .create(PROJECT, oversized)
+        .expect_err("a document past the cap is refused");
+    let TodoError::Invalid(message) = err else {
+        panic!("expected an Invalid error, got {err:?}");
+    };
+    assert!(message.contains("exceeds"), "{message}");
+}
+
+#[test]
 fn update_is_revision_guarded() {
     let todos = todos();
     let todo = todos

@@ -13,9 +13,10 @@ use tokio::sync::broadcast::error::RecvError;
 
 /// A façade over in-memory fakes — an alternate composition root, the same way the core's
 /// own tests build one. Routing is what we exercise here; the behaviour behind each call
-/// is tested in the core.
-fn facade() -> Facade {
-    Facade::new(
+/// is tested in the core. Returned as an [`Arc`] because [`handle_request`] takes the façade by
+/// shared handle (it clones it onto the blocking pool for the synchronous dispatch).
+fn facade() -> Arc<Facade> {
+    Arc::new(Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
             Arc::new(TokioClock),
@@ -23,7 +24,7 @@ fn facade() -> Facade {
             Arc::new(FakeProjectRepo::new()),
         )
         .build(),
-    )
+    ))
 }
 
 async fn wait_for(rx: &mut broadcast::Receiver<DomainEvent>, target: ProcStatus) {
@@ -600,7 +601,7 @@ async fn wait_for_bound_port_on_an_out_of_scope_process_is_refused() {
 #[tokio::test]
 async fn acquiring_a_lease_in_scope_is_granted_then_released() {
     // The lease store must be wired for the round-trip to persist, so this builds its own facade.
-    let facade = Facade::new(
+    let facade = Arc::new(Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
             Arc::new(TokioClock),
@@ -609,7 +610,7 @@ async fn acquiring_a_lease_in_scope_is_granted_then_released() {
         )
         .lock_repo(Arc::new(FakeLockRepo::new()))
         .build(),
-    );
+    ));
     let session = facade.open_session(Some(PEER_PGID));
     let owner = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
 
@@ -705,8 +706,8 @@ async fn an_action_on_another_projects_process_maps_to_out_of_scope() {
 }
 
 /// A façade whose settings persist to an in-memory fake, so a toggle round-trips.
-fn facade_with_settings() -> Facade {
-    Facade::new(
+fn facade_with_settings() -> Arc<Facade> {
+    Arc::new(Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
             Arc::new(TokioClock),
@@ -715,7 +716,7 @@ fn facade_with_settings() -> Facade {
         )
         .settings_repo(Arc::new(FakeSettingsRepo::new()))
         .build(),
-    )
+    ))
 }
 
 #[tokio::test]
@@ -791,7 +792,7 @@ async fn setup_agent_integration_writes_into_the_scoped_project_root() {
     projects
         .upsert(dir.path(), Some("p"), None)
         .expect("seed one project");
-    let facade = Facade::new(
+    let facade = Arc::new(Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
             Arc::new(TokioClock),
@@ -799,7 +800,7 @@ async fn setup_agent_integration_writes_into_the_scoped_project_root() {
             projects,
         )
         .build(),
-    );
+    ));
     // The sole loaded project gives the unbound session its default scope.
     let session = facade.open_session(None);
     match handle_request(
@@ -821,7 +822,7 @@ async fn setup_agent_integration_writes_into_the_scoped_project_root() {
 
 /// A façade with one project loaded and the template store wired — the sole loaded project
 /// gives an unbound session its default scope.
-fn facade_with_templates() -> Facade {
+fn facade_with_templates() -> Arc<Facade> {
     let projects = Arc::new(FakeProjectRepo::new());
     projects
         .upsert(
@@ -830,7 +831,7 @@ fn facade_with_templates() -> Facade {
             None,
         )
         .expect("seed one project");
-    Facade::new(
+    Arc::new(Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
             Arc::new(TokioClock),
@@ -839,7 +840,7 @@ fn facade_with_templates() -> Facade {
         )
         .prompt_template_repo(Arc::new(FakePromptTemplateRepo::new()))
         .build(),
-    )
+    ))
 }
 
 #[tokio::test]

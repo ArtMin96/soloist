@@ -11,6 +11,8 @@ use std::sync::Arc;
 use soloist_core::{Facade, LineageEdge, OrchestrationSnapshot, ProjectId};
 use tauri::State;
 
+use super::offload;
+
 /// The orchestration read-model for `project`: its agent lineage tree plus the coordination
 /// state agents share (todos, timers, leases, scratchpads, key-value). The snapshot half of
 /// snapshot-then-deltas for the orchestration tree; a coordination or process-lifecycle
@@ -20,8 +22,8 @@ pub async fn orchestration_snapshot(
     facade: State<'_, Arc<Facade>>,
     project: ProjectId,
 ) -> Result<OrchestrationSnapshot, String> {
-    facade
-        .orchestration_snapshot(project)
+    offload(facade.inner(), move |f| f.orchestration_snapshot(project))
+        .await
         .map_err(|err| err.to_string())
 }
 

@@ -31,14 +31,20 @@ pub fn open(app: &AppHandle, path: &Path) {
     let Some(root) = project_root_for(path) else {
         return;
     };
-    if let Err(err) = app.state::<Arc<Facade>>().load_project(&root) {
-        eprintln!(
-            "soloist: could not open project at {} ({err})",
-            root.display()
-        );
-        return;
-    }
-    reveal(app);
+    // Loading a project creates a `solo.yml`, writes durable rows, and spawns actors — blocking
+    // work. Run it on the blocking pool so opening a handed-in project never blocks the calling
+    // (main/event) thread; the window is revealed from the task once the project is loaded.
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(err) = app.state::<Arc<Facade>>().load_project(&root) {
+            eprintln!(
+                "soloist: could not open project at {} ({err})",
+                root.display()
+            );
+            return;
+        }
+        reveal(&app);
+    });
 }
 
 /// Opens the first existing path among `args`, skipping `args[0]` (the binary itself).

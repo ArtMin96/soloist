@@ -60,21 +60,24 @@ struct Health {
 /// `GET /status` — a small cross-project summary: how many projects are open and a tally
 /// of processes, for a shell to glance at without reading every row.
 async fn status(State(state): State<ApiState>) -> Result<Json<Status>, StatusCode> {
-    let processes = state.facade().snapshot();
-    let running = processes
-        .iter()
-        .filter(|process| process.status == ProcStatus::Running)
-        .count();
-    let projects = state
-        .facade()
-        .projects_snapshot()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .len();
-    Ok(Json(Status {
-        projects,
-        processes: processes.len(),
-        running,
-    }))
+    state
+        .blocking(|facade| {
+            let processes = facade.snapshot();
+            let running = processes
+                .iter()
+                .filter(|process| process.status == ProcStatus::Running)
+                .count();
+            let projects = facade
+                .projects_snapshot()
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                .len();
+            Ok(Json(Status {
+                projects,
+                processes: processes.len(),
+                running,
+            }))
+        })
+        .await
 }
 
 #[derive(Serialize)]
@@ -127,18 +130,24 @@ struct OutputQuery {
 /// `GET /projects` — every opened project's display identity.
 async fn projects(State(state): State<ApiState>) -> Result<Json<Vec<ProjectView>>, StatusCode> {
     state
-        .facade()
-        .projects_snapshot()
-        .map(Json)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        .blocking(|facade| {
+            facade
+                .projects_snapshot()
+                .map(Json)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        })
+        .await
 }
 
 /// `GET /feedback` — every locally stored feedback entry, oldest first: the read-back for
 /// what agents leave via the `submit_solo_feedback` MCP tool (nothing is ever transmitted).
 async fn feedback(State(state): State<ApiState>) -> Result<Json<Vec<FeedbackEntry>>, StatusCode> {
     state
-        .facade()
-        .feedback_list()
-        .map(Json)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        .blocking(|facade| {
+            facade
+                .feedback_list()
+                .map(Json)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        })
+        .await
 }

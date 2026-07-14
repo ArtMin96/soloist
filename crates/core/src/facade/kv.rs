@@ -8,8 +8,9 @@
 
 use serde_json::Value;
 
+use super::coordination::check_payload_size;
 use super::Facade;
-use crate::coordination::KvEntry;
+use crate::coordination::{KvEntry, MAX_KV_VALUE_BYTES};
 use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
 use crate::ids::SessionId;
@@ -24,6 +25,7 @@ impl Facade {
         value: Value,
     ) -> Result<(), CoordinationError> {
         let project = self.coordination_scope(session)?;
+        check_payload_size(value.to_string().len(), MAX_KV_VALUE_BYTES, "kv value")?;
         self.kv
             .set(project, &key, &value)
             .map_err(CoordinationError::Store)?;

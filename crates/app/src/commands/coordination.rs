@@ -14,6 +14,8 @@ use soloist_core::{
 };
 use tauri::State;
 
+use super::offload;
+
 /// The full scratchpad `name` in `project` — its disciplined document, rendering, and revision —
 /// for the panel to open and edit.
 #[tauri::command]
@@ -22,9 +24,11 @@ pub async fn scratchpad_read(
     project: ProjectId,
     name: String,
 ) -> Result<ScratchpadView, String> {
-    facade
-        .scratchpad_read_in(project, &name)
-        .map_err(|err| err.to_string())
+    offload(facade.inner(), move |f| {
+        f.scratchpad_read_in(project, &name)
+    })
+    .await
+    .map_err(|err| err.to_string())
 }
 
 /// Saves the scratchpad `name` in `project`, revision-guarded by `expected_revision` (omit to
@@ -37,9 +41,11 @@ pub async fn scratchpad_write(
     doc: ScratchpadDoc,
     expected_revision: Option<u64>,
 ) -> Result<ScratchpadView, String> {
-    facade
-        .scratchpad_write_in(project, &name, doc, expected_revision)
-        .map_err(|err| err.to_string())
+    offload(facade.inner(), move |f| {
+        f.scratchpad_write_in(project, &name, doc, expected_revision)
+    })
+    .await
+    .map_err(|err| err.to_string())
 }
 
 /// Creates a todo from the disciplined `doc` in `project`.
@@ -49,8 +55,8 @@ pub async fn todo_create(
     project: ProjectId,
     doc: TodoDoc,
 ) -> Result<TodoView, String> {
-    facade
-        .todo_create_in(project, doc)
+    offload(facade.inner(), move |f| f.todo_create_in(project, doc))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -63,9 +69,11 @@ pub async fn todo_update(
     doc: TodoDoc,
     expected_revision: u64,
 ) -> Result<TodoView, String> {
-    facade
-        .todo_update_in(project, id, doc, expected_revision)
-        .map_err(|err| err.to_string())
+    offload(facade.inner(), move |f| {
+        f.todo_update_in(project, id, doc, expected_revision)
+    })
+    .await
+    .map_err(|err| err.to_string())
 }
 
 /// Marks todo `id` done in `project` — refused (as an error string) while it has unmet blockers.
@@ -75,8 +83,8 @@ pub async fn todo_complete(
     project: ProjectId,
     id: TodoId,
 ) -> Result<TodoView, String> {
-    facade
-        .todo_complete_in(project, id)
+    offload(facade.inner(), move |f| f.todo_complete_in(project, id))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -88,9 +96,11 @@ pub async fn todo_set_blockers(
     id: TodoId,
     blockers: Vec<TodoId>,
 ) -> Result<TodoView, String> {
-    facade
-        .todo_set_blockers_in(project, id, blockers)
-        .map_err(|err| err.to_string())
+    offload(facade.inner(), move |f| {
+        f.todo_set_blockers_in(project, id, blockers)
+    })
+    .await
+    .map_err(|err| err.to_string())
 }
 
 /// Adds one blocker to todo `id` in `project`.
@@ -101,9 +111,11 @@ pub async fn todo_add_blocker(
     id: TodoId,
     blocker: TodoId,
 ) -> Result<TodoView, String> {
-    facade
-        .todo_add_blocker_in(project, id, blocker)
-        .map_err(|err| err.to_string())
+    offload(facade.inner(), move |f| {
+        f.todo_add_blocker_in(project, id, blocker)
+    })
+    .await
+    .map_err(|err| err.to_string())
 }
 
 /// Removes one blocker from todo `id` in `project`.
@@ -114,9 +126,11 @@ pub async fn todo_remove_blocker(
     id: TodoId,
     blocker: TodoId,
 ) -> Result<TodoView, String> {
-    facade
-        .todo_remove_blocker_in(project, id, blocker)
-        .map_err(|err| err.to_string())
+    offload(facade.inner(), move |f| {
+        f.todo_remove_blocker_in(project, id, blocker)
+    })
+    .await
+    .map_err(|err| err.to_string())
 }
 
 /// The `solo://` link to scratchpad `id` in `project` — for the panel's "Copy link" affordance.

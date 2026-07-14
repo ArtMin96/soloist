@@ -31,6 +31,12 @@ use soloist_core::StoreError;
 
 pub use runtime::FileRuntimeState;
 
+/// How long a statement waits for the write lock before giving up with `SQLITE_BUSY`, in
+/// milliseconds. Defense-in-depth: with one connection there is no in-process contention, but this
+/// future-proofs a second reader (and a concurrent process opening the same file) so a brief lock
+/// is waited out rather than failing immediately — bounded, so a stuck lock still surfaces.
+const BUSY_TIMEOUT_MS: i32 = 5_000;
+
 /// A durable store backed by a single SQLite connection.
 ///
 /// `rusqlite::Connection` is `Send` but not `Sync`, so it is guarded by a `Mutex`
@@ -91,6 +97,8 @@ impl SqliteStore {
 fn configure(conn: &Connection) -> Result<(), StoreError> {
     conn.pragma_update(None, "foreign_keys", true)
         .map_err(sql_err)?;
+    conn.pragma_update(None, "busy_timeout", BUSY_TIMEOUT_MS)
+        .map_err(sql_err)?;
     migrate::migrate(conn)
 }
 
@@ -135,5 +143,18 @@ mod tests {
             .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
             .expect("read foreign_keys");
         assert_eq!(fk, 1, "foreign keys must be enforced for trust cascade");
+    }
+
+    #[test]
+    fn configure_sets_a_bounded_busy_timeout() {
+        let store = SqliteStore::open_in_memory().expect("open store");
+        let conn = store.lock();
+        let timeout: i32 = conn
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+            .expect("read busy_timeout");
+        assert_eq!(
+            timeout, BUSY_TIMEOUT_MS,
+            "a busy statement must wait the bounded timeout, not fail immediately"
+        );
     }
 }

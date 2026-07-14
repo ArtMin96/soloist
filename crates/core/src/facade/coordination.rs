@@ -14,6 +14,7 @@ use std::time::Duration;
 use super::Facade;
 use crate::coordination::{
     watched_is_idle, AcquireOutcome, IdleMode, LeaseView, SetWhenIdleOutcome, TimerView,
+    MAX_TIMER_BODY_BYTES,
 };
 use crate::events::DomainEvent;
 use crate::ids::{ProcessId, ProjectId, SessionId, TimerId, TodoId};
@@ -115,9 +116,32 @@ pub enum CoordinationError {
     /// target loaded — so it can only arise on the local/trusted `*_transfer_in` path.
     #[error("no such project is loaded")]
     UnknownProject,
+    /// A write carried a payload larger than its kind allows, so it was refused rather than
+    /// letting one write grow the durable store without bound. `what` names the payload (a kv
+    /// value, a timer body); `max_bytes` is the cap it exceeded.
+    #[error("{what} exceeds the {max_bytes} byte cap")]
+    PayloadTooLarge {
+        what: &'static str,
+        max_bytes: usize,
+    },
     /// A durable read or write failed.
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+/// Refuses a coordination payload larger than `max_bytes`, so a single write can never grow the
+/// durable store without bound. `what` names the payload in the error. Shared by the coordination
+/// write surfaces (timer bodies, kv values) so the one bounded-write rule lives in one place.
+pub(crate) fn check_payload_size(
+    len: usize,
+    max_bytes: usize,
+    what: &'static str,
+) -> Result<(), CoordinationError> {
+    if len > max_bytes {
+        Err(CoordinationError::PayloadTooLarge { what, max_bytes })
+    } else {
+        Ok(())
+    }
 }
 
 impl Facade {
@@ -190,6 +214,7 @@ impl Facade {
     ) -> Result<TimerView, CoordinationError> {
         let project = self.coordination_scope(session)?;
         let owner = self.coordination_owner(session)?;
+        check_payload_size(body.len(), MAX_TIMER_BODY_BYTES, "timer body")?;
         let timer = self.timers.set(project, owner, body, after)?;
         self.bus.publish(DomainEvent::TimerArmed {
             owner,
@@ -215,6 +240,7 @@ impl Facade {
     ) -> Result<SetWhenIdleOutcome, CoordinationError> {
         let project = self.coordination_scope(session)?;
         let owner = self.coordination_owner(session)?;
+        check_payload_size(body.len(), MAX_TIMER_BODY_BYTES, "timer body")?;
         let waiting_on: Vec<ProcessId> = processes
             .iter()
             .copied()

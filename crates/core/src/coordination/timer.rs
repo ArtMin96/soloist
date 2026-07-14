@@ -31,6 +31,11 @@ use crate::supervisor::Supervisor;
 /// floor: a zero (or omitted) delay is legitimate — "deliver this to me now, as a fresh turn".
 const MAX_TIMER_DELAY: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// The most a timer's body may hold, in bytes. A body is a short instruction delivered to the
+/// owning agent as one fresh turn, not a document; this bounds it so a runaway caller cannot grow
+/// the table through one write. Enforced by the facade, the one write path, before persistence.
+pub const MAX_TIMER_BODY_BYTES: usize = 16 * 1024;
+
 /// The max-wait backstop applied to a fire-when-idle timer when the caller names none, so a
 /// watched process that never goes idle (a stuck agent) cannot leave the timer waiting forever —
 /// it fires after this regardless. Long enough to outlast a real piece of work.

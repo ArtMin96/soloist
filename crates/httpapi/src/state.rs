@@ -45,6 +45,21 @@ impl ApiState {
         &self.facade
     }
 
+    /// Runs a synchronous façade `op` on tokio's blocking pool and awaits it, so a durable-store
+    /// `fsync` (slow or full disk) can never park a runtime worker — no blocking call runs on the
+    /// runtime. The cloned `Arc` keeps the façade alive for the task. Every synchronous read and
+    /// mutation routes through here; the handful that await the core stay on the runtime.
+    pub async fn blocking<T, F>(&self, op: F) -> T
+    where
+        F: FnOnce(&Facade) -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        let facade = Arc::clone(&self.facade);
+        tokio::task::spawn_blocking(move || op(&facade))
+            .await
+            .expect("a façade call must not panic on the blocking pool")
+    }
+
     /// The per-launch token every request must present, matched by the auth gate.
     pub fn token(&self) -> &str {
         &self.token

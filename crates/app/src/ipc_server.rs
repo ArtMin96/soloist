@@ -151,12 +151,89 @@ async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
     app.state::<Arc<Facade>>().close_session(session);
 }
 
-/// Routes one request to the single matching [`Facade`] method and projects the result
-/// back. The only place the IPC wire meets the core — and it adds no domain logic of its
-/// own (identity, scope, and the trust gate all live in the core). Async because some
-/// behaviours (e.g. `send_input` with a wait) await the core.
-async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest) -> IpcResult {
+/// Routes one request to the single matching [`Facade`] method and projects the result back — the
+/// only place the IPC wire meets the core, adding no domain logic of its own (identity, scope, and
+/// the trust gate all live in the core).
+///
+/// The three requests that themselves await the core (`send_input`/`close_process`/a port wait)
+/// stay on the runtime; every other request is a **synchronous** core call, so it runs on the
+/// blocking pool via [`spawn_blocking`]. A durable-store write's `fsync` can then never park a
+/// runtime worker — no blocking call runs on the `tokio` runtime.
+///
+/// [`spawn_blocking`]: tokio::task::spawn_blocking
+async fn handle_request(
+    facade: &Arc<Facade>,
+    session: SessionId,
+    request: IpcRequest,
+) -> IpcResult {
     match request {
+        IpcRequest::CloseProcess { process } => {
+            return facade
+                .close_process(session, process)
+                .await
+                .map(|()| IpcResponse::Acked)
+                .map_err(IpcError::from);
+        }
+        IpcRequest::SendInput {
+            process,
+            input,
+            wait_ms,
+        } => {
+            return facade
+                .send_input(
+                    session,
+                    process,
+                    input.into_bytes(),
+                    wait_ms.map(Duration::from_millis),
+                )
+                .await
+                .map(IpcResponse::InputSent)
+                .map_err(IpcError::from);
+        }
+        IpcRequest::WaitForBoundPort {
+            process,
+            port,
+            timeout_ms,
+        } => {
+            // Waiting on a port reveals whether the process bound it — the same disclosure the
+            // scoped port read refuses, so a cross-project target is refused here too.
+            facade
+                .require_in_scope(session, process)
+                .map_err(IpcError::from)?;
+            let timeout = timeout_ms
+                .map_or(DEFAULT_PORT_WAIT, Duration::from_millis)
+                .min(MAX_PORT_WAIT);
+            let outcome = match facade.wait_for_port(process, port, timeout).await {
+                Ok(()) => PortWaitOutcome::Bound,
+                Err(WaitForPortError::Timeout) => PortWaitOutcome::TimedOut,
+                Err(WaitForPortError::NotRunning) => PortWaitOutcome::NotRunning,
+            };
+            return Ok(IpcResponse::PortWait(outcome));
+        }
+        _ => {}
+    }
+    let facade = Arc::clone(facade);
+    tokio::task::spawn_blocking(move || dispatch_blocking(&facade, session, request))
+        .await
+        .unwrap_or_else(|err| {
+            Err(IpcError::Internal(format!(
+                "request handler panicked: {err}"
+            )))
+        })
+}
+
+/// The synchronous request dispatch — every request except the three that await the core. Runs on
+/// the blocking pool (see [`handle_request`]) so its durable-store calls never block a runtime
+/// worker.
+fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -> IpcResult {
+    match request {
+        // Handled on the runtime by `handle_request` before reaching here; a value (not a panic)
+        // keeps the connection alive if one ever slipped through.
+        IpcRequest::CloseProcess { .. }
+        | IpcRequest::SendInput { .. }
+        | IpcRequest::WaitForBoundPort { .. } => Err(IpcError::Internal(
+            "request must be awaited on the runtime".into(),
+        )),
         IpcRequest::Whoami => Ok(IpcResponse::Whoami(facade.whoami(session))),
         IpcRequest::BindSessionProcess { process } => facade
             .bind_session_process(session, process)
@@ -196,25 +273,6 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
         IpcRequest::RenameProcess { process, label } => facade
             .rename_process(session, process, label)
             .map(|()| IpcResponse::Acked)
-            .map_err(IpcError::from),
-        IpcRequest::CloseProcess { process } => facade
-            .close_process(session, process)
-            .await
-            .map(|()| IpcResponse::Acked)
-            .map_err(IpcError::from),
-        IpcRequest::SendInput {
-            process,
-            input,
-            wait_ms,
-        } => facade
-            .send_input(
-                session,
-                process,
-                input.into_bytes(),
-                wait_ms.map(Duration::from_millis),
-            )
-            .await
-            .map(IpcResponse::InputSent)
             .map_err(IpcError::from),
         IpcRequest::SpawnAgent { tool, extra_args } => facade
             .spawn_agent(session, &tool, extra_args)
@@ -277,26 +335,6 @@ async fn handle_request(facade: &Facade, session: SessionId, request: IpcRequest
             .services_list(session)
             .map(IpcResponse::Processes)
             .map_err(IpcError::from),
-        IpcRequest::WaitForBoundPort {
-            process,
-            port,
-            timeout_ms,
-        } => {
-            // Waiting on a port reveals whether the process bound it — the same disclosure the
-            // scoped port read refuses, so a cross-project target is refused here too.
-            facade
-                .require_in_scope(session, process)
-                .map_err(IpcError::from)?;
-            let timeout = timeout_ms
-                .map_or(DEFAULT_PORT_WAIT, Duration::from_millis)
-                .min(MAX_PORT_WAIT);
-            let outcome = match facade.wait_for_port(process, port, timeout).await {
-                Ok(()) => PortWaitOutcome::Bound,
-                Err(WaitForPortError::Timeout) => PortWaitOutcome::TimedOut,
-                Err(WaitForPortError::NotRunning) => PortWaitOutcome::NotRunning,
-            };
-            Ok(IpcResponse::PortWait(outcome))
-        }
         IpcRequest::LockAcquire { key, ttl_ms } => facade
             .lock_acquire(session, &key, ttl_ms.map(Duration::from_millis))
             .map(IpcResponse::LeaseOutcome)

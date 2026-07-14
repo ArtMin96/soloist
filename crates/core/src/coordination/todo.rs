@@ -21,6 +21,12 @@ use super::todo_repo::{CommentEdit, StoredTodo, TodoRepo, TodoWriteResult};
 use crate::ids::{ProcessId, ProjectId, TodoId};
 use crate::ports::StoreError;
 
+/// The most text a todo's document may carry, summed across its fields, in bytes. A todo is a
+/// work-item specification, not a document store; this bounds the persisted row so a runaway
+/// caller cannot grow the table without limit. Tags, blockers, and comments are separate columns,
+/// each mutated by its own operation, so they are not counted here.
+pub const MAX_TODO_DOC_BYTES: usize = 64 * 1024;
+
 /// A todo's lifecycle status — the label the owning agent declares, a closed set so it is never a
 /// free-form string. Distinct from the *blocker gate*: an agent may mark a todo `Blocked` to
 /// communicate, but what mechanically prevents completion is its unmet [`blockers`](TodoView::blockers),
@@ -85,11 +91,33 @@ impl TodoDoc {
             "risks entries must not be blank",
             &mut problems,
         );
-        if problems.is_empty() {
+        let mut messages: Vec<String> = problems
+            .iter()
+            .map(|problem| (*problem).to_owned())
+            .collect();
+        if self.content_bytes() > MAX_TODO_DOC_BYTES {
+            messages.push(format!(
+                "the document exceeds the {} KiB cap",
+                MAX_TODO_DOC_BYTES / 1024
+            ));
+        }
+        if messages.is_empty() {
             Ok(())
         } else {
-            Err(problems.join("; "))
+            Err(messages.join("; "))
         }
+    }
+
+    /// The total bytes of the document's text across every field — what a size cap bounds.
+    fn content_bytes(&self) -> usize {
+        self.title.len()
+            + self.description.len()
+            + self
+                .acceptance_criteria
+                .iter()
+                .map(String::len)
+                .sum::<usize>()
+            + self.risks.iter().map(String::len).sum::<usize>()
     }
 }
 

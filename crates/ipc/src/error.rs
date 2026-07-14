@@ -41,6 +41,10 @@ pub enum IpcError {
     /// A coordination action that needs an owning process was made by a session bound to none.
     #[error("not bound to a process; bind a session before owning a timer or lease")]
     NoBoundProcess,
+    /// A coordination write carried a payload larger than its kind allows; `what` names it and
+    /// `max_bytes` is the cap it exceeded.
+    #[error("{what} exceeds the {max_bytes} byte cap")]
+    PayloadTooLarge { what: String, max_bytes: usize },
     /// A scratchpad write carried a malformed document; the detail names every problem.
     #[error("scratchpad is not well-formed: {0}")]
     InvalidScratchpad(String),
@@ -143,6 +147,7 @@ impl IpcError {
             | IpcError::ForeignProject
             | IpcError::NoProjectScope
             | IpcError::NoBoundProcess
+            | IpcError::PayloadTooLarge { .. }
             | IpcError::InvalidScratchpad(_)
             | IpcError::RevisionConflict { .. }
             | IpcError::UnknownScratchpad
@@ -273,6 +278,10 @@ impl From<CoordinationError> for IpcError {
             CoordinationError::ForeignScopeLink => IpcError::ForeignScopeLink,
             CoordinationError::ForeignProject => IpcError::ForeignProject,
             CoordinationError::UnknownProject => IpcError::UnknownProject,
+            CoordinationError::PayloadTooLarge { what, max_bytes } => IpcError::PayloadTooLarge {
+                what: what.to_owned(),
+                max_bytes,
+            },
             CoordinationError::Store(err) => IpcError::Internal(err.to_string()),
         }
     }

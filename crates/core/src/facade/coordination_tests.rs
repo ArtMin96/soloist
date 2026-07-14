@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::*;
-use crate::coordination::{AcquireOutcome, IdleMode, TimerStatus};
+use crate::coordination::{AcquireOutcome, IdleMode, TimerStatus, MAX_TIMER_BODY_BYTES};
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{CorePorts, ProjectRepo, TokioClock};
 use crate::testing::{
@@ -137,6 +137,34 @@ fn a_bound_session_sets_lists_pauses_and_cancels_a_timer() {
 
     assert!(facade.timer_cancel(session, view.id).expect("cancel"));
     assert!(facade.timer_list(session).expect("list").is_empty());
+}
+
+#[test]
+fn setting_a_timer_with_a_body_over_the_cap_arms_nothing() {
+    let facade = facade_with(Arc::new(FakeProjectRepo::new()));
+    let (session, _owner) = bound_session(&facade, ProjectId::from_raw(1));
+
+    let oversized = "x".repeat(MAX_TIMER_BODY_BYTES + 1);
+    assert!(matches!(
+        facade.timer_set(session, oversized, Some(Duration::from_secs(30))),
+        Err(CoordinationError::PayloadTooLarge { .. })
+    ));
+    assert!(
+        facade.timer_list(session).expect("list").is_empty(),
+        "a rejected write must arm no timer"
+    );
+}
+
+#[test]
+fn setting_a_timer_with_a_body_at_the_cap_arms_it() {
+    let facade = facade_with(Arc::new(FakeProjectRepo::new()));
+    let (session, _owner) = bound_session(&facade, ProjectId::from_raw(1));
+
+    let at_cap = "x".repeat(MAX_TIMER_BODY_BYTES);
+    facade
+        .timer_set(session, at_cap, Some(Duration::from_secs(30)))
+        .expect("a body exactly at the cap is accepted");
+    assert_eq!(facade.timer_list(session).expect("list").len(), 1);
 }
 
 #[test]

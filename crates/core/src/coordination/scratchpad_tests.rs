@@ -66,6 +66,33 @@ fn validate_rejects_a_blank_list_entry() {
 }
 
 #[test]
+fn validate_rejects_content_over_the_byte_cap() {
+    let mut doc = doc();
+    // One oversized section pushes total content just past the cap.
+    doc.notes = Some("x".repeat(MAX_SCRATCHPAD_CONTENT_BYTES + 1));
+    let message = doc
+        .validate()
+        .expect_err("content past the cap is rejected");
+    assert!(
+        message.contains("exceeds"),
+        "the message should explain the size cap: {message}"
+    );
+}
+
+#[test]
+fn validate_accepts_content_exactly_at_the_byte_cap() {
+    let mut doc = doc();
+    // Grow notes so the summed content lands exactly on the cap.
+    let headroom = MAX_SCRATCHPAD_CONTENT_BYTES - doc.content_bytes();
+    doc.notes = Some("x".repeat(headroom));
+    assert_eq!(doc.content_bytes(), MAX_SCRATCHPAD_CONTENT_BYTES);
+    assert!(
+        doc.validate().is_ok(),
+        "content exactly at the cap is accepted"
+    );
+}
+
+#[test]
 fn render_lays_out_the_canonical_sections_titled_by_name() {
     let rendered = doc().render("release-plan");
     assert!(rendered.starts_with("# release-plan"));

@@ -14,6 +14,12 @@ use super::kv_repo::{KvEntry, KvRepo};
 use crate::ids::ProjectId;
 use crate::ports::StoreError;
 
+/// The most a single key-value entry may hold, measured on its serialized JSON, in bytes. Kv is
+/// small structured state, not logs or long text; this bounds each entry so a runaway caller
+/// cannot grow the table through one write. Enforced by the facade, the one write path, before
+/// persistence.
+pub const MAX_KV_VALUE_BYTES: usize = 64 * 1024;
+
 /// The key-value aggregate. Wraps the port and provides the project-scoped CRUD surface; the
 /// `Facade` owns one instance and resolves session scope before calling here.
 pub struct Kv {

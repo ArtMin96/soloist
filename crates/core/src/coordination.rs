@@ -33,7 +33,7 @@ mod todo;
 mod todo_releaser;
 mod todo_repo;
 
-pub use kv::Kv;
+pub use kv::{Kv, MAX_KV_VALUE_BYTES};
 pub use kv_repo::{KvEntry, KvRepo, NoopKvRepo};
 pub use lease::{AcquireOutcome, LeaseView, Leases};
 pub use link::{is_link, Link, LinkContent, LinkError, LinkTarget};
@@ -50,16 +50,19 @@ pub use repo::{LockRepo, NoopLockRepo, StoredLease};
 pub use scheduler::TimerScheduler;
 pub use scratchpad::{
     RenameError, ScratchpadDoc, ScratchpadSummary, ScratchpadView, Scratchpads, WriteError,
+    MAX_SCRATCHPAD_CONTENT_BYTES,
 };
 pub use scratchpad_repo::{
     NoopScratchpadRepo, RenameResult, ScratchpadRepo, StoredScratchpad, TransferResult, WriteResult,
 };
 pub(crate) use timer::watched_is_idle;
-pub use timer::{FireCond, IdleMode, SetWhenIdleOutcome, TimerStatus, TimerView, Timers};
+pub use timer::{
+    FireCond, IdleMode, SetWhenIdleOutcome, TimerStatus, TimerView, Timers, MAX_TIMER_BODY_BYTES,
+};
 pub use timer_repo::{NewTimer, NoopTimerRepo, StoredTimer, TimerRepo};
 pub use todo::{
     Comment, CommentAuthor, CommentOutcome, TodoDoc, TodoError, TodoStatus, TodoSummary, TodoView,
-    Todos,
+    Todos, MAX_TODO_DOC_BYTES,
 };
 pub use todo_releaser::TodoLockReleaser;
 pub use todo_repo::{CommentEdit, NoopTodoRepo, StoredTodo, TodoRepo, TodoWriteResult};

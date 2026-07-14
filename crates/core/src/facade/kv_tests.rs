@@ -4,6 +4,7 @@ use std::sync::Arc;
 use serde_json::json;
 
 use super::*;
+use crate::coordination::MAX_KV_VALUE_BYTES;
 use crate::ids::SessionId;
 use crate::ports::{CorePorts, ProjectRepo, TokioClock};
 use crate::testing::{FakeKvRepo, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
@@ -70,6 +71,32 @@ fn kv_delete_returns_true_when_present() {
 fn kv_delete_returns_false_when_absent() {
     let (facade, session) = scoped_facade();
     assert!(!facade.kv_delete(session, "missing".into()).unwrap());
+}
+
+#[test]
+fn kv_set_rejects_a_value_over_the_byte_cap_and_writes_nothing() {
+    let (facade, session) = scoped_facade();
+    // A JSON string of the cap length serializes to cap + 2 bytes (the quotes) — over the limit.
+    let oversized = json!("x".repeat(MAX_KV_VALUE_BYTES));
+    assert!(matches!(
+        facade.kv_set(session, "k".into(), oversized),
+        Err(CoordinationError::PayloadTooLarge { .. })
+    ));
+    assert_eq!(
+        facade.kv_get(session, "k".into()).unwrap(),
+        None,
+        "a rejected write must persist nothing"
+    );
+}
+
+#[test]
+fn kv_set_accepts_a_value_exactly_at_the_byte_cap() {
+    let (facade, session) = scoped_facade();
+    // A JSON string of (cap - 2) chars serializes to exactly cap bytes with its quotes.
+    let at_cap = json!("x".repeat(MAX_KV_VALUE_BYTES - 2));
+    assert_eq!(at_cap.to_string().len(), MAX_KV_VALUE_BYTES);
+    facade.kv_set(session, "k".into(), at_cap.clone()).unwrap();
+    assert_eq!(facade.kv_get(session, "k".into()).unwrap(), Some(at_cap));
 }
 
 #[test]
