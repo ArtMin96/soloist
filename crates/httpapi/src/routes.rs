@@ -8,7 +8,7 @@ use axum::routing::get;
 use axum::{middleware, Json, Router};
 use serde::{Deserialize, Serialize};
 
-use soloist_core::{FeedbackEntry, ProcStatus, ProcessId, ProcessView, ProjectView};
+use soloist_core::{FeedbackEntry, ProcessId, ProcessView, ProjectView, StatusSummary};
 
 use crate::auth::{require_local_host, require_token};
 use crate::cors::localhost_cors;
@@ -58,33 +58,17 @@ struct Health {
 }
 
 /// `GET /status` — a small cross-project summary: how many projects are open and a tally
-/// of processes, for a shell to glance at without reading every row.
-async fn status(State(state): State<ApiState>) -> Result<Json<Status>, StatusCode> {
+/// of processes, for a shell to glance at without reading every row. The tally is computed
+/// in the core ([`Facade::status_summary`]), so the route only projects it to JSON.
+async fn status(State(state): State<ApiState>) -> Result<Json<StatusSummary>, StatusCode> {
     state
         .blocking(|facade| {
-            let processes = facade.snapshot();
-            let running = processes
-                .iter()
-                .filter(|process| process.status == ProcStatus::Running)
-                .count();
-            let projects = facade
-                .projects_snapshot()
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-                .len();
-            Ok(Json(Status {
-                projects,
-                processes: processes.len(),
-                running,
-            }))
+            facade
+                .status_summary()
+                .map(Json)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
         })
         .await
-}
-
-#[derive(Serialize)]
-struct Status {
-    projects: usize,
-    processes: usize,
-    running: usize,
 }
 
 /// `GET /processes` — the live process read model as JSON.

@@ -1,4 +1,27 @@
 use super::*;
+use soloist_ipc::http::HttpRuntime;
+
+#[test]
+fn from_runtime_refuses_when_no_server_recorded_a_file() {
+    // With no runtime file the app is either down or running as another user (its 0600 file
+    // unreadable to us). Blindly hitting the default port could address a foreign server, so
+    // the CLI refuses rather than guess — the same "not running" the acceptance walk expects.
+    assert!(matches!(
+        Client::from_runtime_opt(None),
+        Err(CliError::NotRunning)
+    ));
+}
+
+#[test]
+fn from_runtime_uses_the_recorded_port_and_token() {
+    let client = Client::from_runtime_opt(Some(HttpRuntime {
+        port: 40000,
+        token: "secret".to_string(),
+    }))
+    .expect("a recorded runtime yields a client");
+    assert_eq!(client.url("/health"), "http://127.0.0.1:40000/health");
+    assert_eq!(client.token, "secret");
+}
 
 #[test]
 fn at_builds_a_loopback_base_url() {

@@ -310,6 +310,35 @@ async fn spawn_agent_launches_a_known_tool_and_returns_its_id() {
 }
 
 #[tokio::test]
+async fn spawn_agent_is_rate_limited_after_a_burst() {
+    // A same-user caller is already authenticated, but nothing stopped a runaway loop from
+    // spawning agent processes without bound. After the per-window cap, further spawns are 429.
+    let (facade, project, _dir) = facade_with_agent_tool();
+    let app = router(ApiState::new(Arc::clone(&facade), TEST_TOKEN));
+    let mut last = StatusCode::OK;
+    for _ in 0..40 {
+        last = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/projects/{}/spawn-agent", project.get()),
+                &[AUTH],
+                r#"{"tool":"Claude","args":[]}"#,
+            ))
+            .await
+            .expect("response")
+            .status();
+        if last == StatusCode::TOO_MANY_REQUESTS {
+            break;
+        }
+    }
+    assert_eq!(
+        last,
+        StatusCode::TOO_MANY_REQUESTS,
+        "the spawn burst is eventually refused by the rate cap"
+    );
+}
+
+#[tokio::test]
 async fn spawn_agent_with_an_unknown_tool_is_404() {
     let (facade, project, _dir) = facade_with_agent_tool();
     let app = router(ApiState::new(facade, TEST_TOKEN));

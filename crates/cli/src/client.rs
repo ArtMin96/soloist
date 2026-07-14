@@ -9,7 +9,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use soloist_ipc::http::{
-    read_runtime, DEFAULT_PORT, LOCAL_AUTH_HEADER, STATUS_FORBIDDEN, STATUS_NOT_FOUND,
+    read_runtime, HttpRuntime, LOCAL_AUTH_HEADER, STATUS_FORBIDDEN, STATUS_NOT_FOUND,
     STATUS_UNAUTHORIZED,
 };
 
@@ -44,16 +44,22 @@ pub struct Client {
 }
 
 impl Client {
-    /// Resolves the base URL and token from what the running server recorded, falling back to
-    /// the default loopback port and an empty token when the runtime file is absent. The
-    /// server rewrites the file on every bind, so a present file always names the live port
-    /// and token; an absent one means "try the default — the app may simply not be running",
-    /// which a refused connection then reports (or, if it is running without a readable file,
-    /// a rejected empty token).
-    pub fn from_runtime() -> Self {
-        match read_runtime() {
-            Some(runtime) => Self::at(runtime.port, runtime.token),
-            None => Self::at(DEFAULT_PORT, String::new()),
+    /// Resolves the base URL and token from what the running server recorded, or refuses when no
+    /// runtime file is present. The server rewrites the file on every bind, so a present file
+    /// always names the live port and its token; an absent one means the app is not running, or
+    /// is running as another user whose `0600` file we cannot read. Either way there is no token
+    /// to authenticate with, and blindly probing the default port could address a *foreign*
+    /// server, so the CLI reports "not running" rather than guess.
+    pub fn from_runtime() -> Result<Self, CliError> {
+        Self::from_runtime_opt(read_runtime())
+    }
+
+    /// The pure decision behind [`from_runtime`](Self::from_runtime): a recorded runtime yields a
+    /// client at its port with its token; its absence is [`CliError::NotRunning`].
+    fn from_runtime_opt(runtime: Option<HttpRuntime>) -> Result<Self, CliError> {
+        match runtime {
+            Some(runtime) => Ok(Self::at(runtime.port, runtime.token)),
+            None => Err(CliError::NotRunning),
         }
     }
 

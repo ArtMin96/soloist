@@ -121,14 +121,14 @@ fn accept_error_is_fatal(err: &std::io::Error) -> bool {
 /// session so its scope and binding are forgotten. The peer group is what authenticates a
 /// session's project scope — the core matches it to the managed process the caller runs in —
 /// so a client cannot bind to or act on a sibling project it does not run in. A connection
-/// whose peer credentials cannot be read at all is dropped (fail closed).
+/// whose peer credentials cannot be read, or whose peer is a different UID than Soloist runs
+/// as, is dropped (fail closed).
 async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
     let peer_pgid = match peer_cred::peer_pgid(&stream) {
         Ok(peer_pgid) => peer_pgid,
         Err(err) => {
-            eprintln!(
-                "soloist: MCP IPC dropped a connection (cannot read peer credentials: {err})"
-            );
+            // Credentials unreadable, or the peer is a different user — refuse either way.
+            eprintln!("soloist: MCP IPC dropped a connection ({err})");
             return;
         }
     };

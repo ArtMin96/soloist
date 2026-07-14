@@ -196,6 +196,10 @@ async fn spawn_agent(
     Path(id): Path<u64>,
     Json(body): Json<SpawnRequest>,
 ) -> Result<Json<SpawnResponse>, StatusCode> {
+    // Bound a runaway caller before doing any work: past the per-launch cap, refuse with 429.
+    if !state.allow_spawn() {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
     match state
         .blocking(move |f| f.launch_agent(ProjectId::from_raw(id), &body.tool, body.args))
         .await

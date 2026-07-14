@@ -26,7 +26,7 @@ use crate::metrics::MetricsProbe;
 use crate::notify::Notifier;
 use crate::ports::{Clock, CorePorts, PtySize, SpawnSpec, StoreError};
 use crate::portscan::{self, PortProbe, WaitForPortError};
-use crate::process::{ProcessKind, ProcessView};
+use crate::process::{ProcStatus, ProcessKind, ProcessView};
 use crate::projects::{
     LoadProjectError, ProjectLoad, ProjectService, ProjectView, Projects, ReloadError,
     RemoveProjectError,
@@ -35,6 +35,21 @@ use crate::settings::{ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::support::Feedback;
 use crate::trust::TrustStore;
+
+use serde::Serialize;
+
+/// A small cross-project status tally for a shell to glance at: how many projects are open, how
+/// many processes are registered, and how many of those are running. Computed in the core (not
+/// an adapter) so every surface reads the same numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct StatusSummary {
+    /// Open projects.
+    pub projects: usize,
+    /// Registered processes across all projects.
+    pub processes: usize,
+    /// Registered processes currently [`ProcStatus::Running`].
+    pub running: usize,
+}
 
 mod commands;
 mod coordination;
@@ -248,6 +263,22 @@ impl Facade {
     /// half of snapshot-then-deltas — pair it with [`DomainEvent::ProjectOpened`].
     pub fn projects_snapshot(&self) -> Result<Vec<ProjectView>, StoreError> {
         self.projects.views()
+    }
+
+    /// The cross-project status tally — open projects, registered processes, and how many are
+    /// running. The one place the `running` count is computed, so the HTTP `/status` route (and
+    /// any future caller) reads it from the core rather than re-deriving it in an adapter.
+    pub fn status_summary(&self) -> Result<StatusSummary, StoreError> {
+        let processes = self.supervisor.snapshot();
+        let running = processes
+            .iter()
+            .filter(|process| process.status == ProcStatus::Running)
+            .count();
+        Ok(StatusSummary {
+            projects: self.projects.views()?.len(),
+            processes: processes.len(),
+            running,
+        })
     }
 
     /// Trusts a project's command by name: resolves the command to its current variant

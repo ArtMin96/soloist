@@ -60,6 +60,30 @@ async fn the_facade_registers_starts_and_stops_a_process() {
 }
 
 #[tokio::test]
+async fn status_summary_tallies_processes_projects_and_running() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let mut rx = facade.subscribe();
+
+    let running = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "web",
+        "sleep 60",
+    ));
+    facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "api",
+        "sleep 60",
+    ));
+    facade.supervisor().start(running).expect("ungated start");
+    wait_for(&mut rx, ProcStatus::Running).await;
+
+    let summary = facade.status_summary().expect("summary");
+    assert_eq!(summary.processes, 2, "both registrations are counted");
+    assert_eq!(summary.running, 1, "only the started one is running");
+    assert_eq!(summary.projects, 0, "no projects were loaded");
+}
+
+#[tokio::test]
 async fn the_trust_gate_is_enforced_through_the_facade() {
     let (facade, trust) = facade(FakeSpawner::exits_on_terminate());
     let config =

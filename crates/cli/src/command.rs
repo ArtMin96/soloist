@@ -218,7 +218,9 @@ fn render_table(processes: &[ProcessView], filter: Option<StatusFilter>) -> Stri
         .map(|p| {
             [
                 p.id.to_string(),
-                p.label.clone(),
+                // The label is the one user-controlled cell (a process name from `solo.yml`
+                // or an agent), so it is the only one that could carry terminal escapes.
+                sanitize_cell(&p.label),
                 kind_label(p.kind).to_string(),
                 status_label(p.status).to_string(),
                 ports_label(&p.ports),
@@ -233,6 +235,17 @@ fn render_table(processes: &[ProcessView], filter: Option<StatusFilter>) -> Stri
         write_row(&mut out, row, &widths);
     }
     out.trim_end().to_string()
+}
+
+/// Replaces control characters with the Unicode replacement character so a value printed into
+/// the aligned status table cannot carry a live terminal escape — a crafted process name with an
+/// embedded `ESC[2J` (clear screen) or carriage return renders as inert text instead of spoofing
+/// the `soloist status` output. Printable characters, including multibyte ones, are untouched.
+fn sanitize_cell(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .collect()
 }
 
 /// The widest cell in each column, header included, so columns line up. Measured in characters

@@ -22,8 +22,7 @@ use command::Verb;
 /// `soloist: …` error on stderr with a failing status (so a script can branch on it).
 pub fn run() -> ExitCode {
     let cli = Cli::parse();
-    let client = Client::from_runtime();
-    let result = match cli.command {
+    let result = Client::from_runtime().and_then(|client| match cli.command {
         Command::Status { status } => command::status(&client, status),
         Command::Start(target) => command::control(&client, Verb::Start, &target),
         Command::Stop(target) => command::control(&client, Verb::Stop, &target),
@@ -36,7 +35,7 @@ pub fn run() -> ExitCode {
             args,
         } => command::spawn(&client, &tool, &args, project.as_deref()),
         Command::RemoveProject { project } => command::remove_project(&client, &project),
-    };
+    });
     match result {
         Ok(message) => {
             println!("{message}");
