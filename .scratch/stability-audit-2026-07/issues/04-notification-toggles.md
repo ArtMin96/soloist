@@ -1,6 +1,6 @@
 # PRD-04 — Notification toggles must actually gate notifications (+ add the terminal-bell path)
 
-Status: ready-for-agent
+Status: needs-human-verify
 Blocked by: none
 
 - **Severity:** P1 (user-visible controls that do nothing; a promised feature — bell alerts — has
@@ -59,3 +59,46 @@ Contract: phase-11a NOTIFICATIONS — "Get notified when commands crash or exit 
 
 ## Out of scope
 Notification styling/content; OS-level notification backend choice (unchanged).
+
+## Comments
+
+**Implemented — commit `7e5807c` (branch `fix/stability-audit-2026-07`).** Gates green:
+`just lint` exit 0; `just test` exit 0 (full Rust workspace; UI vitest 60 files / 296 tests).
+
+What changed:
+- **Reactor gating (`notify/reactor.rs`).** Each attention event now resolves its process's
+  project + label (`supervisor.view`) and consults the durable settings before composing a toast.
+  A closed `Attention` enum maps each event → the switch that gates it → the toast it shows:
+  crash / exhausted → `crash_exit_alerts`; **bell + agent Permission/Error → `terminal_alerts`**
+  (honouring the per-command `terminal_alerts_for` override).
+- **Bell path added** — `TerminalBell` had no notification arm before; the "Terminal alerts" switch
+  now gates a real bell toast.
+- **Global master switch is real + persisted.** New `Notifications { enabled }` sub-document on
+  global `Settings` (serde-default on); `notification_settings` / `set_notification_settings`
+  façade + Tauri command; a **Notifications tab** in the global Settings overlay (removed from
+  `UNDEFINED_TABS`), mirroring the Integrations pattern. The reactor reads the durable value **live**
+  (the ephemeral, unreachable `AtomicBool` was removed).
+- **Owner decision (this session):** global flag → "Build a real master toggle" (persisted +
+  UI). Also, gating agent Permission/Error under `terminal_alerts` is slightly beyond the literal
+  Fix-approach but matches the switch's own copy ("rings the terminal bell **or asks for
+  attention**") and the `DomainEvent` contract — recorded as intended.
+
+Tests (all green): reactor crash/bell/attention gating incl. **second-project scoping** and the
+per-command override **both directions**; the global master silences all; façade round-trip;
+SQLite round-trip of the new field; UI load/persist of the master toggle. `/code-review`
+(Standards + Spec) ran clean — no hard violations, spec satisfied.
+
+**Why `needs-human-verify` (not `done`):** a new user-facing Settings tab was added (CLAUDE.md §5
+wants a live UI pass) and the end-to-end real-desktop-toast suppression is adapter/runtime — both
+need a GUI walk this headless session can't do. The gating **logic** is fully unit-verified.
+
+**Human check (`just dev`), with a trusted `auto_restart:false` command in a project:**
+1. Settings → **Notifications** tab renders; the "Desktop notifications" master switch reflects the
+   stored state and toggles cleanly (looks consistent with the other tabs / a quick `/impeccable`
+   glance).
+2. Project settings → Notifications → turn **Crash & exit alerts** off → `kill -9` the command →
+   **no** toast. Turn it back on → crash again → a **"<name> crashed"** toast fires.
+3. Turn **Terminal alerts** off → make the command `printf '\a'` (ring the bell) → **no** toast;
+   on → **"<name> rang the bell"** toast. (Same switch also gates an agent's permission prompt.)
+4. Global master **off** → neither of the above fires anywhere; **on** → they resume.
+5. Restart the app → the global master switch keeps its last value (persisted).

@@ -27,6 +27,37 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Stability & security audit — ticket 04 `needs-human-verify` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `7e5807c`, docs commit follows).** PRD-04 (P1 wiring:
+  two per-project notification switches were decorative and the promised terminal-bell alert had no
+  backend path). **Root cause:** the reactor gated every toast on one global flag (an ephemeral
+  `AtomicBool` no adapter could reach) and never consulted project settings; `crash_exit_alerts`
+  had no consumer; `TerminalBell` had no notification arm. **Fix:** the reactor now resolves each
+  attention event's process (project + label via `supervisor.view`) and reads the **durable
+  settings live** — a closed `Attention` enum maps each event to the switch that gates it and the
+  toast it shows: crash / exhausted restart → `crash_exit_alerts`; **bell + agent Permission/Error
+  → `terminal_alerts`** (honouring the per-command `terminal_alerts_for` override). The missing
+  `TerminalBell → notification` arm was added. The **global master switch is now real + persisted**:
+  a `Notifications { enabled }` sub-document on global `Settings` (serde-default on),
+  `notification_settings`/`set_notification_settings` façade + Tauri command, and a **Notifications
+  tab** in the global Settings overlay (removed from `UNDEFINED_TABS`) — mirroring the Integrations
+  pattern; the ephemeral `AtomicBool` was removed (single-source: the store is the only truth, read
+  live). **Owner decision (this session):** global flag → *build a real master toggle* (persisted +
+  UI); gating agent Permission/Error under `terminal_alerts` is slightly beyond the literal
+  Fix-approach but matches the switch's copy ("rings the terminal bell **or asks for attention**")
+  and the `DomainEvent` contract — recorded as intended. **Tests (red-before/green-after):** reactor
+  crash/bell/attention gating incl. **second-project scoping** and the per-command override **both
+  directions**; global master silences all; façade round-trip; SQLite round-trip of the new field;
+  UI load/persist of the master toggle. **Gates: `just lint` exit 0; `just test` exit 0 — full Rust
+  workspace green (3 pty soak ignored), UI 296 across 60 files.** `/code-review` (Standards + Spec)
+  ran clean — no hard violations; spec satisfied; two minor review nits folded in (default const
+  moved to `@/lib/notifications`, hook return-type inferred like siblings, override on-beats-off
+  test added). **`needs-human-verify`** because a new user-facing Settings tab was added (§5 wants a
+  live UI pass) and end-to-end real-desktop-toast suppression is adapter/runtime — the gating
+  *logic* is fully unit-verified; the ticket's Comments list the exact `just dev` walk. Unblocks
+  nothing new. **Next frontier ticket: 05** (no decorative settings — summarizer/MCP-HTTP/sidebar;
+  `ready-for-agent`, `Blocked by: none`). PRD-07 remains `Blocked by: 02`.
+
 - **Stability & security audit — ticket 03 done (2026-07-14; branch
   `fix/stability-audit-2026-07`; impl commit `f2494e5`).** PRD-03 (P1: orphan reconciliation could
   SIGKILL a PID/PGID the OS recycled to an unrelated same-user group — the class Solo fixed in
