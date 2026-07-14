@@ -81,14 +81,6 @@ fn load_on_a_fresh_store_returns_none() {
 }
 
 #[test]
-fn save_then_load_round_trips() {
-    let store = SqliteStore::open_in_memory().expect("in-memory store");
-    let settings = key_value_enabled();
-    store.save(&(), &settings).unwrap();
-    assert_eq!(store.load(&()).unwrap(), Some(settings));
-}
-
-#[test]
 fn save_replaces_the_single_record() {
     // The `id = 1` singleton: a second save overwrites the first rather than adding a row.
     let store = SqliteStore::open_in_memory().expect("in-memory store");

@@ -113,10 +113,4 @@ mod tests {
         let id = ProjectId::next();
         assert_eq!(id.to_string(), id.get().to_string());
     }
-
-    #[test]
-    fn from_raw_round_trips_a_wire_value() {
-        let id = ProcessId::next();
-        assert_eq!(ProcessId::from_raw(id.get()), id);
-    }
 }

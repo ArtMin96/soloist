@@ -106,6 +106,47 @@ fn a_duplicated_section_is_refused_and_the_file_left_untouched() {
 }
 
 #[test]
+fn a_symlinked_target_is_replaced_by_a_regular_file() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    // A real file the instructions path is symlinked to, with the user's own content.
+    let linked = dir.path().join("real-notes.md");
+    let original = "# Linked notes\n\nHouse rules.\n";
+    std::fs::write(&linked, original).expect("seed the linked file");
+    let target = dir.path().join("AGENTS.md");
+    std::os::unix::fs::symlink(&linked, &target).expect("create the symlink");
+
+    let write = write_integration_guide(dir.path(), IntegrationFile::AgentsMd)
+        .expect("write through a symlinked target");
+
+    // The write reads through the link, then the rename replaces the link itself with a regular
+    // file — so the file the symlink pointed at is left untouched.
+    assert!(!write.created, "the symlink resolved to existing content");
+    assert!(
+        !std::fs::symlink_metadata(&target)
+            .expect("target metadata")
+            .file_type()
+            .is_symlink(),
+        "the target is now a regular file, not a symlink"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&linked).expect("read the linked file"),
+        original,
+        "the file the symlink pointed at is not modified"
+    );
+    let contents = read(&dir, IntegrationFile::AgentsMd);
+    assert!(
+        contents.starts_with(original),
+        "the read-through content is preserved"
+    );
+    assert!(contents.contains(SECTION_BEGIN));
+    // The temporary sibling is renamed away, never left behind.
+    assert!(
+        !dir.path().join(".AGENTS.md.soloist-tmp").exists(),
+        "no stray temp file remains"
+    );
+}
+
+#[test]
 fn an_unwritable_root_surfaces_the_io_error() {
     let missing = std::path::Path::new("/nonexistent-soloist-test-root");
 

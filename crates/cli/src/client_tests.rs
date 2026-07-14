@@ -40,9 +40,21 @@ fn not_running_renders_the_acceptance_message() {
 }
 
 #[test]
-fn carried_messages_render_verbatim() {
-    let resolve = CliError::Resolve("no process named \"web\"".to_string());
-    assert_eq!(resolve.to_string(), "no process named \"web\"");
-    let request = CliError::Request("the API returned HTTP 500".to_string());
-    assert_eq!(request.to_string(), "the API returned HTTP 500");
+fn a_forbidden_mutation_reads_as_a_trust_prompt() {
+    // The adapter's status codes carry meaning: 403 is the trust gate, 404 an unknown target. The
+    // mutation mapper turns each into its actionable message, so `soloist restart` on an untrusted
+    // command surfaces "not trusted" rather than a bare status code.
+    assert_eq!(
+        mutation_error(ureq::Error::StatusCode(STATUS_FORBIDDEN)).to_string(),
+        "that command is not trusted — trust it in Soloist first"
+    );
+    assert_eq!(
+        mutation_error(ureq::Error::StatusCode(STATUS_NOT_FOUND)).to_string(),
+        "no such process, project, or agent tool"
+    );
+    // The read path deliberately does not map 403 to the trust message — only mutations do.
+    assert_eq!(
+        read_error(ureq::Error::StatusCode(STATUS_FORBIDDEN)).to_string(),
+        format!("the API returned HTTP {STATUS_FORBIDDEN}")
+    );
 }

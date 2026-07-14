@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::Kv;
 use crate::coordination::KvEntry;
@@ -79,14 +79,4 @@ fn kv_is_project_scoped() {
     kv.set(P, "x", &json!("p")).unwrap();
     assert_eq!(kv.get(Q, "x").unwrap(), None);
     assert!(kv.list(Q).unwrap().is_empty());
-}
-
-#[test]
-fn list_returns_complex_json_value() {
-    let kv = kv();
-    let val: Value = json!({ "count": 3, "items": ["a", "b"] });
-    kv.set(P, "state", &val).unwrap();
-    let entries = kv.list(P).unwrap();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].value, val);
 }

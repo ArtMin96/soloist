@@ -312,6 +312,77 @@ mod tests {
     }
 
     #[test]
+    fn upgrading_a_populated_intermediate_database_preserves_its_rows() {
+        // A v6 database (scratchpads landed at 6) with real rows, exactly as an older build left it.
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch(
+            "CREATE TABLE projects (
+                 id   INTEGER PRIMARY KEY,
+                 root TEXT NOT NULL UNIQUE,
+                 name TEXT,
+                 icon TEXT
+             );
+             CREATE TABLE scratchpads (
+                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 name       TEXT NOT NULL,
+                 doc        TEXT NOT NULL,
+                 tags       TEXT NOT NULL,
+                 archived   INTEGER NOT NULL DEFAULT 0,
+                 revision   INTEGER NOT NULL,
+                 UNIQUE (project_id, name)
+             );",
+        )
+        .expect("seed the v6 schema");
+        conn.execute("INSERT INTO projects (id, root) VALUES (1, '/tmp/p')", [])
+            .expect("seed a project row");
+        conn.execute(
+            "INSERT INTO scratchpads (project_id, name, doc, tags, revision) \
+             VALUES (1, 'note', '{}', '[]', 1)",
+            [],
+        )
+        .expect("seed a scratchpad row");
+        conn.pragma_update(None, "user_version", 6)
+            .expect("mark it as a v6 database");
+
+        migrate(&conn).expect("a populated intermediate database upgrades");
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user_version");
+        assert_eq!(
+            version, SCHEMA_VERSION,
+            "the upgrade advances a populated database to the current schema"
+        );
+
+        // A table added after v6 now exists...
+        let has_prompt_templates = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prompt_templates'",
+                [],
+                |_| Ok(()),
+            )
+            .is_ok();
+        assert!(
+            has_prompt_templates,
+            "the upgrade creates tables added after the intermediate version"
+        );
+
+        // ...and the pre-existing rows survive it.
+        let scratchpads: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM scratchpads WHERE name = 'note'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count the seeded scratchpad");
+        assert_eq!(
+            scratchpads, 1,
+            "rows in an intermediate-version database survive the upgrade"
+        );
+    }
+
+    #[test]
     fn refuses_a_schema_newer_than_this_build() {
         let conn = Connection::open_in_memory().expect("in-memory db");
         conn.pragma_update(None, "user_version", SCHEMA_VERSION + 1)

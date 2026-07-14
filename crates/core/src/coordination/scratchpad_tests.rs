@@ -327,3 +327,59 @@ fn list_is_scoped_to_the_project_and_ordered_by_name() {
         .collect();
     assert_eq!(names, vec!["alpha".to_string(), "zebra".to_string()]);
 }
+
+#[test]
+fn transfer_moves_a_scratchpad_to_the_new_scope_keeping_its_identity() {
+    const OTHER: ProjectId = ProjectId::from_raw(2);
+    let pads = scratchpads();
+
+    let written = pads
+        .write(PROJECT, "release-plan", doc(), None)
+        .expect("write a scratchpad in the source project");
+    pads.add_tags(PROJECT, "release-plan", &["v1".to_string()])
+        .expect("tag it");
+    let before = pads
+        .read(PROJECT, "release-plan")
+        .expect("read")
+        .expect("exists before the move");
+
+    let after = pads
+        .transfer(PROJECT, "release-plan", OTHER)
+        .expect("transfer succeeds");
+
+    // The durable id, name, tags, document, and revision survive the relocation.
+    assert_eq!(after.id, written.id);
+    assert_eq!(after.name, "release-plan");
+    assert_eq!(after.tags, before.tags);
+    assert_eq!(after.doc, before.doc);
+    assert_eq!(after.revision, before.revision);
+
+    // The scratchpad is now readable only from the new scope.
+    assert_eq!(
+        pads.read(OTHER, "release-plan")
+            .expect("read from the new scope"),
+        Some(after)
+    );
+    assert_eq!(
+        pads.read(PROJECT, "release-plan")
+            .expect("read from the old scope"),
+        None,
+        "the scratchpad no longer reads from the project it left"
+    );
+}
+
+#[test]
+fn transfer_refuses_when_the_target_name_is_taken() {
+    const OTHER: ProjectId = ProjectId::from_raw(2);
+    let pads = scratchpads();
+    pads.write(PROJECT, "plan", doc(), None).expect("source");
+    pads.write(OTHER, "plan", doc(), None)
+        .expect("a same-named scratchpad already in the target");
+
+    assert!(matches!(
+        pads.transfer(PROJECT, "plan", OTHER),
+        Err(RenameError::NameTaken)
+    ));
+    // The refusal leaves the source scratchpad in place.
+    assert!(pads.read(PROJECT, "plan").expect("read").is_some());
+}

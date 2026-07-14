@@ -300,6 +300,27 @@ mod tests {
     }
 
     #[test]
+    fn a_restart_exactly_at_the_window_edge_still_counts() {
+        // Eviction is strict `<` the cutoff (now - WINDOW), so a restart exactly WINDOW old is
+        // retained and the window stays full — the boundary is inclusive, not off-by-one lenient.
+        let clock = MockClock::new();
+        let mut window = RestartWindow::new();
+        for _ in 0..MAX_RESTARTS {
+            window.on_crash(clock.now());
+        }
+        // The oldest restart is now exactly WINDOW old: its age equals the cutoff, not below it.
+        clock.advance(WINDOW);
+        assert_eq!(window.on_crash(clock.now()), RestartDecision::Exhaust);
+
+        // One instant past the edge, the whole window ages out and a restart is granted again.
+        clock.advance(Duration::from_nanos(1));
+        assert_eq!(
+            window.on_crash(clock.now()),
+            RestartDecision::Restart { attempt: 1 }
+        );
+    }
+
+    #[test]
     fn forgetting_a_process_clears_its_window() {
         let clock = MockClock::new();
         let policy = RestartPolicy::default();

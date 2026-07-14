@@ -304,7 +304,10 @@ pub async fn pty_attach(
                     match facade.supervisor().attach_pty(pid) {
                         Some((scrollback, fresh)) => {
                             live = fresh;
-                            if on_chunk.send(pty_frame(PTY_FRAME_RESYNC, &scrollback)).is_err() {
+                            if on_chunk
+                                .send(pty_frame(PTY_FRAME_RESYNC, &scrollback))
+                                .is_err()
+                            {
                                 break;
                             }
                         }

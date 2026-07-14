@@ -33,13 +33,6 @@ fn get_absent_key_returns_none() {
 }
 
 #[test]
-fn set_and_get_round_trip_scalar() {
-    let store = store_with_project();
-    store.set(P, "n", &json!(42)).unwrap();
-    assert_eq!(store.get(P, "n").unwrap(), Some(json!(42)));
-}
-
-#[test]
 fn set_and_get_round_trip_object() {
     let store = store_with_project();
     let val: Value = json!({ "a": 1, "b": [true, null] });

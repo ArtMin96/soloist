@@ -54,7 +54,14 @@ describe("fixedSignalStore", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it("EMPTY_STORE reads the empty signals", () => {
+  it("EMPTY_STORE is a fixed, non-notifying store", () => {
+    // The exported singleton must behave as a fixed store, not merely return one constant: an
+    // applied event leaves its snapshot untouched and never notifies a subscriber.
+    const listener = vi.fn();
+    EMPTY_STORE.subscribe(listener)();
+    EMPTY_STORE.apply({ type: "MetricsTick", id: 1, cpu_pct: 1, rss: 1 });
+
     expect(EMPTY_STORE.getSnapshot()).toBe(EMPTY_SIGNALS);
+    expect(listener).not.toHaveBeenCalled();
   });
 });

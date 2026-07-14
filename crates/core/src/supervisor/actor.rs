@@ -33,7 +33,7 @@ use super::registry::Registry;
 /// Grace window between SIGTERM and SIGKILL on a graceful stop. The *timing* is a core
 /// policy (driven by the [`Clock`] port so it is testable without real time elapsing);
 /// the *signalling* is the adapter's job.
-const STOP_GRACE: Duration = Duration::from_secs(5);
+pub(crate) const STOP_GRACE: Duration = Duration::from_secs(5);
 
 /// How long the actor waits for the read loop's final, in-flight bytes after the child
 /// has exited before giving up. Bounded so a forked grandchild that keeps the PTY slave

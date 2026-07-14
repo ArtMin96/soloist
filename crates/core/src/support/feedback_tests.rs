@@ -58,6 +58,34 @@ fn an_oversized_message_is_refused_before_it_persists() {
 }
 
 #[test]
+fn a_message_at_exactly_the_limit_is_accepted() {
+    let (feedback, _repo, _clock) = feedback();
+    let at_limit = "x".repeat(MAX_FEEDBACK_LEN);
+
+    let entry = feedback
+        .submit(&at_limit)
+        .expect("exactly the limit is allowed");
+    assert_eq!(entry.message.chars().count(), MAX_FEEDBACK_LEN);
+}
+
+#[test]
+fn the_limit_counts_characters_not_bytes() {
+    let (feedback, _repo, _clock) = feedback();
+    // MAX_FEEDBACK_LEN four-byte characters: at the character limit, but 4x over it in bytes. A
+    // byte-based check would wrongly reject this as TooLong.
+    let multibyte = "😀".repeat(MAX_FEEDBACK_LEN);
+    assert!(
+        multibyte.len() > MAX_FEEDBACK_LEN,
+        "the fixture is multibyte"
+    );
+
+    let entry = feedback
+        .submit(&multibyte)
+        .expect("the limit is measured in characters, so this is accepted");
+    assert_eq!(entry.message.chars().count(), MAX_FEEDBACK_LEN);
+}
+
+#[test]
 fn a_full_store_refuses_further_submissions() {
     let (feedback, repo, _clock) = feedback();
     for n in 0..MAX_FEEDBACK_ENTRIES {

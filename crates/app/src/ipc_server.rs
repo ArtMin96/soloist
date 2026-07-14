@@ -124,11 +124,14 @@ fn accept_error_is_fatal(err: &std::io::Error) -> bool {
 /// whose peer credentials cannot be read, or whose peer is a different UID than Soloist runs
 /// as, is dropped (fail closed).
 async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
-    let peer_pgid = match peer_cred::peer_pgid(&stream) {
-        Ok(peer_pgid) => peer_pgid,
-        Err(err) => {
+    let resolved = peer_cred::peer_pgid(&stream);
+    let peer_pgid = match peer_cred::peer_scope(&resolved) {
+        peer_cred::PeerScope::Open(peer_pgid) => peer_pgid,
+        peer_cred::PeerScope::Drop => {
             // Credentials unreadable, or the peer is a different user — refuse either way.
-            eprintln!("soloist: MCP IPC dropped a connection ({err})");
+            if let Err(err) = &resolved {
+                eprintln!("soloist: MCP IPC dropped a connection ({err})");
+            }
             return;
         }
     };

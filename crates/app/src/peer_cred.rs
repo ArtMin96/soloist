@@ -46,6 +46,26 @@ fn peer_uid_permitted(peer_uid: u32, own_uid: u32) -> bool {
     peer_uid == own_uid
 }
 
+/// What to do with a new connection given the resolved peer group from [`peer_pgid`]: open a
+/// session with that scope, or drop the connection. A `None` scope is *unauthenticated* (open
+/// read tools only, no bind or project select) — it is **not** a drop; only refused credentials
+/// (unreadable, or a foreign UID, surfaced as an `Err`) drop the connection. Split out as a pure
+/// mapping so this fail-closed decision is unit-tested directly, without a real broken socket.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PeerScope {
+    /// Open a session scoped to this peer group; `None` is unauthenticated.
+    Open(Option<i32>),
+    /// Refuse the connection outright.
+    Drop,
+}
+
+pub fn peer_scope(resolved: &std::io::Result<Option<i32>>) -> PeerScope {
+    match resolved {
+        Ok(pgid) => PeerScope::Open(*pgid),
+        Err(_) => PeerScope::Drop,
+    }
+}
+
 #[cfg(test)]
 #[path = "peer_cred_tests.rs"]
 mod tests;

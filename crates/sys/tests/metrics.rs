@@ -71,6 +71,35 @@ fn samples_a_live_group_with_a_plausible_memory_figure() {
 }
 
 #[test]
+fn two_live_groups_are_each_attributed_their_own_reading() {
+    // Two concurrent live groups must each be a distinct keyed entry with its own reading — neither
+    // dropped nor merged into the other — while a dead group is still omitted.
+    let probe = ProcMetricsProbe::new();
+    let mut child_a = spawn_group_leader();
+    let mut child_b = spawn_group_leader();
+    let pgid_a = child_a.id() as i32;
+    let pgid_b = child_b.id() as i32;
+    assert_ne!(pgid_a, pgid_b, "the two children lead distinct groups");
+    sleep(Duration::from_millis(50));
+    let _ = probe.sample(&[pgid_a, pgid_b]);
+    sleep(Duration::from_millis(100));
+    let readings = probe.sample(&[pgid_a, pgid_b, ABSENT_PID]);
+
+    let a = readings.get(&pgid_a).expect("group a is sampled");
+    let b = readings.get(&pgid_b).expect("group b is sampled");
+    assert!(a.rss > 0 && b.rss > 0, "both live groups use some memory");
+    assert!(
+        !readings.contains_key(&ABSENT_PID),
+        "a group with no live process is omitted"
+    );
+
+    let _ = child_a.kill();
+    let _ = child_a.wait();
+    let _ = child_b.kill();
+    let _ = child_b.wait();
+}
+
+#[test]
 fn no_groups_means_no_readings() {
     let probe = ProcMetricsProbe::new();
     assert!(probe.sample(&[]).is_empty());

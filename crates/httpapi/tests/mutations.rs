@@ -76,6 +76,30 @@ fn facade_with_agent_tool() -> (Arc<Facade>, ProjectId, tempfile::TempDir) {
     (facade, project.id, dir)
 }
 
+/// A façade with one loaded `solo.yml` command and an empty trust store, so the command is
+/// untrusted — the setup the HTTP trust-gate (403) tests need. Returns the façade, the process
+/// id to target, and the temp dir to keep alive for the test's duration.
+fn facade_with_untrusted_command() -> (Arc<Facade>, u64, tempfile::TempDir) {
+    let facade = Arc::new(Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .build(),
+    ));
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(
+        dir.path().join("solo.yml"),
+        "processes:\n  Web:\n    command: npm run dev\n",
+    )
+    .expect("write");
+    facade.load_project(dir.path()).expect("load");
+    let id = facade.snapshot()[0].id.get();
+    (facade, id, dir)
+}
+
 /// A `GET` request to `uri` carrying a loopback `Host` plus each given header.
 fn get(uri: &str, headers: &[(&str, &str)]) -> Request<Body> {
     let mut builder = Request::builder()
@@ -181,28 +205,59 @@ async fn an_authorized_read_route_succeeds() {
 }
 
 #[tokio::test]
-async fn starting_an_untrusted_command_is_403() {
-    // The B1 gap: the HTTP trust gate had no 403 test. A `solo.yml` command is trust-gated,
-    // and the fake trust store starts empty, so the command is untrusted.
-    let facade = Arc::new(Facade::new(
-        CorePorts::builder(
-            Arc::new(FakeSpawner::exits_on_terminate()),
-            Arc::new(TokioClock),
-            Arc::new(FakeTrustRepo::new()),
-            Arc::new(FakeProjectRepo::new()),
-        )
-        .build(),
-    ));
-    let dir = tempfile::tempdir().expect("temp dir");
-    std::fs::write(
-        dir.path().join("solo.yml"),
-        "processes:\n  Web:\n    command: npm run dev\n",
-    )
-    .expect("write");
-    facade.load_project(dir.path()).expect("load");
-    let id = facade.snapshot()[0].id.get();
+async fn every_mutation_route_requires_the_token() {
+    // One guard layer authenticates all mutations; this pins that every mutation route is actually
+    // behind it, so a route accidentally added to the open read router would be caught. The token
+    // layer rejects before the handler runs, so a placeholder id and an empty body suffice.
+    let (facade, _id) = facade_with_terminal();
+    let app = router(ApiState::new(facade, TEST_TOKEN));
 
-    let app = router(ApiState::new(Arc::clone(&facade), TEST_TOKEN));
+    let post_routes = [
+        "/processes/1/start",
+        "/processes/1/stop",
+        "/processes/1/restart",
+        "/projects/1/start-auto",
+        "/projects/1/start-all",
+        "/projects/1/stop-all",
+        "/projects/1/restart-running",
+        "/projects/1/restart-all",
+        "/projects/1/reload",
+        "/projects/1/spawn-agent",
+        "/projects/1/transfer-todo",
+        "/projects/1/transfer-scratchpad",
+        "/focus",
+    ];
+    for path in post_routes {
+        let response = app
+            .clone()
+            .oneshot(post(path, &[]))
+            .await
+            .expect("response");
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "POST {path} must require the token"
+        );
+    }
+    // The one non-POST mutation.
+    let response = app
+        .clone()
+        .oneshot(delete("/projects/1", &[]))
+        .await
+        .expect("response");
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "DELETE /projects/1 must require the token"
+    );
+}
+
+#[tokio::test]
+async fn starting_an_untrusted_command_is_403() {
+    // A `solo.yml` command is trust-gated, and the fake trust store starts empty, so the command
+    // is untrusted — its start must be refused over HTTP with a 403.
+    let (facade, id, _dir) = facade_with_untrusted_command();
+    let app = router(ApiState::new(facade, TEST_TOKEN));
     let response = app
         .oneshot(post(&format!("/processes/{id}/start"), &[AUTH]))
         .await
@@ -211,6 +266,22 @@ async fn starting_an_untrusted_command_is_403() {
         response.status(),
         StatusCode::FORBIDDEN,
         "an untrusted command's start is refused by the core trust gate"
+    );
+}
+
+#[tokio::test]
+async fn restarting_an_untrusted_command_is_403() {
+    // The trust gate also covers restart over the adapter, not just start.
+    let (facade, id, _dir) = facade_with_untrusted_command();
+    let app = router(ApiState::new(facade, TEST_TOKEN));
+    let response = app
+        .oneshot(post(&format!("/processes/{id}/restart"), &[AUTH]))
+        .await
+        .expect("response");
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "an untrusted command's restart is refused by the core trust gate"
     );
 }
 
