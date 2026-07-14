@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applySignal, EMPTY_SIGNALS } from "@/store/signals";
+import { applySignal, EMPTY_SIGNALS, seedActivity } from "@/store/signals";
 
 describe("applySignal", () => {
   it("records the latest CPU/memory reading per process", () => {
@@ -100,5 +100,41 @@ describe("applySignal", () => {
     const state = applySignal(EMPTY_SIGNALS, { type: "MetricsTick", id: 1, cpu_pct: 5, rss: 1 });
     const next = applySignal(state, { type: "TerminalBell", id: 1 });
     expect(next).toBe(state);
+  });
+});
+
+describe("seedActivity", () => {
+  it("replaces the activity map with the snapshot, dropping entries not in it", () => {
+    // A stale badge from a dropped `AgentActivityChanged`: id 1 shows Working, but the true state
+    // is Idle, and id 2 has left the registry entirely. The seed reconciles to the snapshot.
+    let state = applySignal(EMPTY_SIGNALS, {
+      type: "AgentActivityChanged",
+      id: 1,
+      state: "Working",
+    });
+    state = applySignal(state, { type: "AgentActivityChanged", id: 2, state: "Thinking" });
+
+    const seeded = seedActivity(state, [{ id: 1, activity: "Idle" }]);
+    expect(seeded.activity.get(1)).toBe("Idle");
+    expect(seeded.activity.has(2)).toBe(false);
+  });
+
+  it("leaves metrics and attempts untouched — it reconciles only the idle badges", () => {
+    let state = applySignal(EMPTY_SIGNALS, { type: "MetricsTick", id: 1, cpu_pct: 5, rss: 1024 });
+    state = applySignal(state, { type: "RestartScheduled", id: 1, attempt: 2 });
+
+    const seeded = seedActivity(state, [{ id: 9, activity: "Idle" }]);
+    expect(seeded.metrics.get(1)).toEqual({ cpu_pct: 5, rss: 1024 });
+    expect(seeded.attempts.get(1)).toBe(2);
+    expect(seeded.activity.get(9)).toBe("Idle");
+  });
+
+  it("returns the same reference when the badge set is unchanged", () => {
+    const state = applySignal(EMPTY_SIGNALS, {
+      type: "AgentActivityChanged",
+      id: 1,
+      state: "Working",
+    });
+    expect(seedActivity(state, [{ id: 1, activity: "Working" }])).toBe(state);
   });
 });

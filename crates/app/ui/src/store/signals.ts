@@ -1,4 +1,4 @@
-import type { AgentActivity, DomainEvent } from "@/domain";
+import type { AgentActivity, AgentSignal, DomainEvent } from "@/domain";
 
 // A coalesced CPU/memory reading for one process, derived from the MetricsTick payload so its
 // shape has a single source. cpu_pct is whole-machine (100 = every core busy, never above);
@@ -60,6 +60,31 @@ export function applySignal(state: SignalState, event: DomainEvent): SignalState
     default:
       return state;
   }
+}
+
+// Reconcile the activity map to the core's current agent-activity snapshot, dropping any entry not
+// in it — an agent that left the registry, or one whose `AgentActivityChanged` was dropped during
+// bus lag. The snapshot is the authoritative set, so no idle badge stays stale after a resync,
+// focus, or reload. Returns the same reference when the map is unchanged, so a seed that changes
+// nothing never notifies (mirroring `applySignal`). Metrics and restart attempts fold from their
+// own deltas — metrics self-heal via the periodic tick — so the seed touches only activity.
+export function seedActivity(state: SignalState, entries: readonly AgentSignal[]): SignalState {
+  const activity = new Map<number, AgentActivity>(
+    entries.map((entry) => [entry.id, entry.activity]),
+  );
+  if (sameActivity(state.activity, activity)) return state;
+  return { ...state, activity };
+}
+
+function sameActivity(
+  a: ReadonlyMap<number, AgentActivity>,
+  b: ReadonlyMap<number, AgentActivity>,
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const [id, activity] of b) {
+    if (a.get(id) !== activity) return false;
+  }
+  return true;
 }
 
 function clearAttempt(state: SignalState, id: number): SignalState {

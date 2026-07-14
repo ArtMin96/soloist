@@ -47,6 +47,20 @@ impl IdleTracker {
         lock(&self.agents).get(&id).and_then(Classifier::current)
     }
 
+    /// The current activity of every tracked agent classified at least once, as `(id, activity)`
+    /// pairs. The snapshot the UI seeds its idle badges from: an agent still starting up (tracked
+    /// but not yet classified) contributes nothing, since its badge shows the status glyph until
+    /// its first activity. A webview reload, or a dropped [`AgentActivityChanged`] during bus lag,
+    /// recovers the true state from this rather than leaving an edge-triggered badge stale.
+    ///
+    /// [`AgentActivityChanged`]: crate::events::DomainEvent::AgentActivityChanged
+    pub fn activity_snapshot(&self) -> Vec<(ProcessId, AgentActivity)> {
+        lock(&self.agents)
+            .iter()
+            .filter_map(|(id, classifier)| classifier.current().map(|activity| (*id, activity)))
+            .collect()
+    }
+
     /// Feeds a running agent its latest terminal signals; returns the new activity if it
     /// changed (the edge to emit). A no-op (returns `None`) for an untracked id.
     pub(super) fn observe(

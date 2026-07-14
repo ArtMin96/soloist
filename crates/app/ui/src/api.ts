@@ -6,6 +6,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
+  AgentSignal,
   AgentTool,
   Appearance,
   AppInfo,
@@ -58,6 +59,13 @@ export function orchestrationSnapshot(project: number): Promise<OrchestrationSna
 // list to nest workers under their leads, re-reading on process lifecycle events.
 export function lineageEdges(): Promise<LineageEdge[]> {
   return invoke<LineageEdge[]>("lineage_edges");
+}
+
+// Every tracked agent's current idle activity across all projects — the snapshot the signal store
+// seeds its idle badges from, so a webview reload or a dropped `AgentActivityChanged` recovers the
+// true state instead of an edge-triggered stale badge.
+export function agentActivity(): Promise<AgentSignal[]> {
+  return invoke<AgentSignal[]>("agent_activity");
 }
 
 // --- Coordination panels: the scratchpad panel and the to-do board read/write through these.

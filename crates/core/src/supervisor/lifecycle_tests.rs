@@ -153,8 +153,9 @@ async fn a_closed_process_cannot_be_relaunched_into_an_orphan() {
     let h = harness(FakeSpawner::exits_on_kill());
     let id = terminal(&h.sup, "sleep 60");
     h.sup.close(id).await.expect("close");
+    let (mailbox, _inbox) = tokio::sync::mpsc::channel(1);
     assert!(
-        h.sup.registry.begin_launch(id).is_none(),
+        h.sup.registry.begin_launch(id, mailbox).is_none(),
         "a closed id is gone, so the crash-restart launch primitive cannot reclaim it"
     );
 }

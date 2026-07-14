@@ -199,6 +199,18 @@ async fn run(
     let mut status = ProcStatus::Starting;
 
     loop {
+        // Honor a stop that landed in the launch window before this fresh child was spawned: a
+        // stop or shutdown issued after `begin_launch` installed the mailbox but before this task
+        // was scheduled is queued and drained here, so the process stops without ever spawning a
+        // child — the command is never lost and no child is orphaned by a quit racing the launch.
+        // An adopted orphan already owns a live child, so it is reaped through the select loop
+        // below instead. `Starting -> Stopped` is not a legal edge, so pass through `Stopping`.
+        if initial.is_none() && stop_is_pending(&mut mailbox) {
+            advance(&registry, &bus, id, &mut status, ProcStatus::Stopping, None);
+            advance(&registry, &bus, id, &mut status, ProcStatus::Stopped, None);
+            locks.release_all(id);
+            return;
+        }
         // If this process already has output from a previous run — an in-place restart
         // looping here, or a fresh actor reusing the buffers after a crash auto-restart —
         // mark the boundary so the kept output is divided from the new run's. A no-op on
@@ -311,6 +323,22 @@ async fn run(
                 advance(&registry, &bus, id, &mut status, ProcStatus::Starting, None);
                 // Loop to respawn a fresh child under the same actor (and buffers).
             }
+        }
+    }
+}
+
+/// Reports whether a stop is already queued for a not-yet-spawned child — a `Stop` message, or a
+/// dropped mailbox (a `close`/`shutdown` that took it). A queued `Restart` is redundant before the
+/// first spawn (the process is starting either way) and is drained past. Non-blocking: only
+/// messages already waiting are considered, so a stop that lands after this is caught by the
+/// running actor's select loop instead.
+fn stop_is_pending(mailbox: &mut mpsc::Receiver<ActorMsg>) -> bool {
+    loop {
+        match mailbox.try_recv() {
+            Ok(ActorMsg::Stop) => return true,
+            Ok(ActorMsg::Restart) => continue,
+            Err(mpsc::error::TryRecvError::Empty) => return false,
+            Err(mpsc::error::TryRecvError::Disconnected) => return true,
         }
     }
 }

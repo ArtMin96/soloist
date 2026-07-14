@@ -41,6 +41,32 @@ describe("createSignalStore", () => {
 
     expect(listener).not.toHaveBeenCalled();
   });
+
+  it("seeds the idle badges from a snapshot, reconciling a stale delta and notifying once", () => {
+    const store = createSignalStore();
+    // A stale badge from a dropped `AgentActivityChanged`: the store thinks id 1 is Working.
+    store.apply({ type: "AgentActivityChanged", id: 1, state: "Working" });
+    const listener = vi.fn();
+    store.subscribe(listener);
+
+    store.seed([{ id: 1, activity: "Idle" }]);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot().activity.get(1)).toBe("Idle");
+  });
+
+  it("does not churn or notify when the seed matches the current badges", () => {
+    const store = createSignalStore();
+    store.apply({ type: "AgentActivityChanged", id: 1, state: "Working" });
+    const before = store.getSnapshot();
+    const listener = vi.fn();
+    store.subscribe(listener);
+
+    store.seed([{ id: 1, activity: "Working" }]);
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(store.getSnapshot()).toBe(before);
+  });
 });
 
 describe("fixedSignalStore", () => {

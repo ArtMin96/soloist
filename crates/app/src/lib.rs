@@ -412,6 +412,7 @@ pub fn run() {
             commands::set_project_icon,
             commands::orchestration_snapshot,
             commands::lineage_edges,
+            commands::agent_activity,
             commands::scratchpad_read,
             commands::scratchpad_write,
             commands::todo_create,

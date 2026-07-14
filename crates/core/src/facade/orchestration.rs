@@ -13,10 +13,25 @@ use std::collections::HashSet;
 use super::Facade;
 use crate::coordination::watched_is_idle;
 use crate::ids::{ProcessId, ProjectId};
-use crate::orchestration::{AgentNode, LineageEdge, OrchestrationSnapshot};
+use crate::orchestration::{AgentNode, AgentSignal, LineageEdge, OrchestrationSnapshot};
 use crate::ports::StoreError;
 
 impl Facade {
+    /// Every tracked agent's current idle activity across all projects — the snapshot the UI's
+    /// signal store seeds from so a dropped
+    /// [`AgentActivityChanged`](crate::events::DomainEvent::AgentActivityChanged) during bus lag,
+    /// or a webview reload, recovers the idle badges rather than running on edge-triggered stale
+    /// state. Derived on read from the idle tracker (C4); only agents classified at least once
+    /// appear. A local read like [`snapshot`](Self::snapshot): authorization is the caller's, so
+    /// an adapter exposing it over MCP/HTTP would have to scope it to the caller's own project.
+    pub fn agent_activity(&self) -> Vec<AgentSignal> {
+        self.idle
+            .activity_snapshot()
+            .into_iter()
+            .map(|(id, activity)| AgentSignal { id, activity })
+            .collect()
+    }
+
     /// Every live spawn-lineage edge across all projects — the sidebar's cross-project nesting
     /// read, cheap enough to re-query on process lifecycle events. An edge appears only while
     /// both its worker and its lead are in the registry, the same re-root-on-read rule as

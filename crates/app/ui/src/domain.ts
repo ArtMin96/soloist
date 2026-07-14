@@ -140,6 +140,14 @@ export interface DetectedTool {
 // vs Idle) and "does it need a human?" (Permission/Error, the attention states).
 export type AgentActivity = "Idle" | "Permission" | "Thinking" | "Working" | "Error";
 
+// One tracked agent's current idle activity (mirrors core::orchestration::AgentSignal). The
+// snapshot the signal store seeds its idle badges from — only agents classified at least once —
+// so a webview reload or a dropped `AgentActivityChanged` recovers the true state.
+export interface AgentSignal {
+  id: number;
+  activity: AgentActivity;
+}
+
 // Mirrors the core's `DomainEvent` (serde `tag = "type"`).
 export type DomainEvent =
   | {

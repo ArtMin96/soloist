@@ -22,11 +22,14 @@ use super::actor::{ActorMsg, OrphanIdentity};
 
 mod queries;
 
-/// A live actor's control surface: a bounded mailbox to message it and the join
-/// handle awaited at shutdown to confirm its child was reaped.
+/// A live actor's control surface: a bounded mailbox to message it and — once the task is
+/// spawned — the join handle awaited at shutdown to confirm its child was reaped. The mailbox
+/// is installed as the launch is claimed ([`Registry::begin_launch`]) so a stop or shutdown that
+/// lands in the launch window still reaches the actor; the join is attached a moment later
+/// ([`Registry::attach_join`]) once the task exists, so it is `None` for that window only.
 pub(crate) struct ActorHandle {
     pub(crate) mailbox: mpsc::Sender<ActorMsg>,
-    pub(crate) join: JoinHandle<()>,
+    pub(crate) join: Option<JoinHandle<()>>,
 }
 
 /// One managed process: its read-model view, everything needed to (re)launch it, and
@@ -343,11 +346,19 @@ impl Registry {
     }
 
     /// Atomically claims the right to launch a resting process: if it is not already
-    /// active, transitions it to `Starting` under the lock and returns its prior
-    /// status; if it is already active (another launch won, or it is running), returns
-    /// `None`. Setting the status under the same lock as the check is what makes the
-    /// supervisor's start path race-free without holding the lock across the spawn.
-    pub(crate) fn begin_launch(&self, id: ProcessId) -> Option<ProcStatus> {
+    /// active, transitions it to `Starting` under the lock, installs the actor `mailbox`,
+    /// and returns its prior status; if it is already active (another launch won, or it is
+    /// running), returns `None` and drops the mailbox. Setting the status *and* the control
+    /// surface under the same lock as the check is what makes the supervisor's start path
+    /// race-free without holding the lock across the spawn: from the instant the process is
+    /// `Starting`, a concurrent stop or shutdown finds a mailbox to message, so a command in
+    /// the launch window is neither lost nor falsely reported delivered. The join handle is
+    /// [`attached`](Self::attach_join) once the task is spawned.
+    pub(crate) fn begin_launch(
+        &self,
+        id: ProcessId,
+        mailbox: mpsc::Sender<ActorMsg>,
+    ) -> Option<ProcStatus> {
         let mut guard = lock(&self.inner);
         let entry = guard.get_mut(&id)?;
         let from = entry.view.status;
@@ -357,6 +368,10 @@ impl Registry {
         let next = from.transition(ProcStatus::Starting).ok()?;
         entry.view.status = next;
         entry.view.exit_code = None;
+        entry.handle = Some(ActorHandle {
+            mailbox,
+            join: None,
+        });
         Some(from)
     }
 
@@ -381,28 +396,46 @@ impl Registry {
         }
     }
 
-    /// Stores the handle of a freshly launched actor.
-    pub(crate) fn set_handle(&self, id: ProcessId, handle: ActorHandle) {
+    /// Attaches the join handle of a freshly spawned actor to the mailbox
+    /// [`begin_launch`](Self::begin_launch) already installed. If the process was closed or
+    /// removed in the launch window (its handle is gone), the launch has been superseded:
+    /// abort the orphaned task rather than leak one that would spawn a child no one owns.
+    pub(crate) fn attach_join(&self, id: ProcessId, join: JoinHandle<()>) {
         let mut guard = lock(&self.inner);
-        if let Some(entry) = guard.get_mut(&id) {
-            entry.handle = Some(handle);
+        match guard.get_mut(&id).and_then(|entry| entry.handle.as_mut()) {
+            Some(handle) => handle.join = Some(join),
+            None => join.abort(),
         }
     }
 
-    /// Clones a live actor's mailbox to message it without removing its handle, so a
-    /// restart keeps the same actor task.
-    pub(crate) fn mailbox(&self, id: ProcessId) -> Option<mpsc::Sender<ActorMsg>> {
-        let guard = lock(&self.inner);
-        guard
-            .get(&id)
-            .and_then(|entry| entry.handle.as_ref().map(|h| h.mailbox.clone()))
-    }
-
-    /// Removes and returns a live actor's handle, used at shutdown to message then
-    /// await it.
+    /// Removes and returns a *fully attached* actor handle (mailbox + join) for shutdown to
+    /// message then await. Returns `None` — leaving the entry intact — when the launch has
+    /// installed the mailbox but not yet attached the join (the launch window), so the caller
+    /// stops it in place via [`signal`](Self::signal) and retries once the join attaches,
+    /// rather than taking a handle it cannot await.
     pub(crate) fn take_handle(&self, id: ProcessId) -> Option<ActorHandle> {
         let mut guard = lock(&self.inner);
-        guard.get_mut(&id).and_then(|entry| entry.handle.take())
+        let entry = guard.get_mut(&id)?;
+        // Only take it once the join is attached; a mid-launch entry keeps its mailbox so a
+        // retry (or an in-place signal) still reaches the actor.
+        match &entry.handle {
+            Some(handle) if handle.join.is_some() => entry.handle.take(),
+            _ => None,
+        }
+    }
+
+    /// Best-effort messages a live actor without removing its handle — the single "tell the actor"
+    /// primitive behind [`Supervisor::stop`](super::Supervisor::stop),
+    /// [`Supervisor::restart`](super::Supervisor::restart), and shutdown's in-place stop for a
+    /// mid-launch actor whose join is not yet attached (so it stops before it can spawn). Since the
+    /// mailbox is installed as the launch is claimed, an active process always has one here — even
+    /// in its launch window. A full mailbox or a resting process is a harmless no-op; the `try_send`
+    /// never blocks, so holding the lock across it is a tiny, bounded critical section.
+    pub(crate) fn signal(&self, id: ProcessId, message: ActorMsg) {
+        let guard = lock(&self.inner);
+        if let Some(handle) = guard.get(&id).and_then(|entry| entry.handle.as_ref()) {
+            let _ = handle.mailbox.try_send(message);
+        }
     }
 
     /// Removes a process from the registry entirely and hands back its actor handle if it held
@@ -497,6 +530,73 @@ mod tests {
         );
         registry.set_status(id, status, None);
         (registry, id)
+    }
+
+    #[tokio::test]
+    async fn begin_launch_installs_the_mailbox_before_the_join_is_attached() {
+        // The launch window: a stop or shutdown that lands after the launch is claimed but before
+        // the actor task is spawned must still reach the actor. `begin_launch` installs the mailbox
+        // under the claim lock; the join is only attached once the task exists. So `signal` reaches
+        // the actor in the window, while `take_handle` (which must be able to await a reap) declines
+        // until the join is present — leaving the entry for an in-place stop and a retry rather than
+        // a handle it cannot await.
+        let (registry, id) = registry_holding(ProcStatus::Stopped);
+        let (mailbox, mut inbox) = mpsc::channel(4);
+
+        assert_eq!(
+            registry.begin_launch(id, mailbox),
+            Some(ProcStatus::Stopped)
+        );
+        assert_eq!(registry.status(id), Some(ProcStatus::Starting));
+        assert!(
+            registry.take_handle(id).is_none(),
+            "no join yet — left intact for an in-place stop and a retry"
+        );
+
+        registry.signal(id, ActorMsg::Stop);
+        assert!(
+            matches!(inbox.try_recv(), Ok(ActorMsg::Stop)),
+            "an in-place signal reaches the mid-launch actor in the window"
+        );
+
+        // Once the task is spawned and its join attached, shutdown can take and await it.
+        registry.attach_join(id, tokio::spawn(async {}));
+        assert!(
+            registry.take_handle(id).is_some(),
+            "a fully attached handle is taken for reaping"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_superseded_launch_aborts_its_orphaned_actor() {
+        // If the process is closed/removed in the launch window, its handle is gone by the time
+        // the task spawns: `attach_join` must abort the orphaned task rather than leave it to
+        // spawn a child no one owns. Verified by the task's captured marker being dropped (the
+        // future cancelled), which never happens while a `pending` future keeps running.
+        let (registry, id) = registry_holding(ProcStatus::Stopped);
+        let (mailbox, _inbox) = mpsc::channel(4);
+        registry.begin_launch(id, mailbox);
+        registry.remove_returning_handle(id); // the close/remove path took the handle
+
+        let marker = Arc::new(());
+        let weak = Arc::downgrade(&marker);
+        let orphan = tokio::spawn(async move {
+            let _held = marker; // released only when the future is dropped
+            std::future::pending::<()>().await;
+        });
+        registry.attach_join(id, orphan);
+
+        // The abort drops the cancelled task's future; give the runtime a few turns to run it.
+        for _ in 0..8 {
+            if weak.upgrade().is_none() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            weak.upgrade().is_none(),
+            "the orphaned actor task is aborted, not left running"
+        );
     }
 
     #[test]

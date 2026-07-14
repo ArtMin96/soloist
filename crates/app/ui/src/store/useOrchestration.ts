@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { onDomainEvent, orchestrationSnapshot } from "@/api";
 import { buildOrchestrationTree, type OrchestrationTreeNode } from "@/store/orchestrationTree";
+import { useReconcile } from "@/store/useReconcile";
 import type { AgentNode, DomainEvent, ScratchpadSummary, TimerView, TodoView } from "@/domain";
 
 // Domain events that change anything the orchestration surface renders: a process entering or
@@ -111,6 +112,10 @@ export function useOrchestration(project: number | null): OrchestrationStore {
       if (frame != null) cancelAnimationFrame(frame);
     };
   }, [project, refresh, fail]);
+
+  // Re-read on a backend resync signal or window focus, so a dropped coordination or lifecycle
+  // delta never leaves the orchestration board stale. A no-op while no project is selected.
+  useReconcile(refresh);
 
   // A snapshot captured for another project (or before the first load) is stale: surface EMPTY
   // until this project's own data arrives, so switching projects never flashes the previous tree

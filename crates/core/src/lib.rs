@@ -51,8 +51,8 @@ mod sync;
 pub mod testing;
 
 pub use agents::{
-    AgentKind, AgentTool, AgentToolRepo, Agents, DetectedTool, NoopAgentToolRepo, NoopVersionProbe,
-    PromptMode, VersionProbe,
+    AgentActivity, AgentKind, AgentTool, AgentToolRepo, Agents, DetectedTool, NoopAgentToolRepo,
+    NoopVersionProbe, PromptMode, VersionProbe,
 };
 pub use config::{
     ConfigEngine, ConfigError, ConfigSync, ConfigWriteError, ProcessSpec, Rename, SoloYml,
@@ -82,7 +82,7 @@ pub use identity::{Identity, IdentityError, Origin, Whoami, PROCESS_ID_ENV};
 pub use ids::{ProcessId, ProjectId, PromptTemplateId, ScratchpadId, SessionId, TimerId, TodoId};
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use notify::{NoopNotifier, Notification, NotificationReactor, Notifier};
-pub use orchestration::{AgentNode, LineageEdge, OrchestrationSnapshot};
+pub use orchestration::{AgentNode, AgentSignal, LineageEdge, OrchestrationSnapshot};
 pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{
     Clock, CompositeLockReleaser, CorePorts, CorePortsBuilder, ExitFuture, ExitStatus,

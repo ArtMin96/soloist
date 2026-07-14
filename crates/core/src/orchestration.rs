@@ -43,6 +43,18 @@ pub struct LineageEdge {
     pub parent: ProcessId,
 }
 
+/// One tracked agent's current idle activity, keyed by process id. The cross-project snapshot the
+/// UI's signal store seeds its idle badges from, so a dropped
+/// [`AgentActivityChanged`](crate::events::DomainEvent::AgentActivityChanged) during bus lag, or a
+/// webview reload, recovers the true state instead of leaving an edge-triggered badge stale. Only
+/// agents classified at least once appear — a still-starting agent shows its status glyph until
+/// then.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct AgentSignal {
+    pub id: ProcessId,
+    pub activity: AgentActivity,
+}
+
 /// The orchestration read-model for one project: the agent tree and the coordination state agents
 /// share to orchestrate each other. Assembled purely from existing reads, in stable order so the UI
 /// diffs it cleanly. Every field is a projection — the durable source of truth stays in the C6

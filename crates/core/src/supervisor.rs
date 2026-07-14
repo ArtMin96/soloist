@@ -51,6 +51,13 @@ pub use registration::Registration;
 /// rule.
 const MAILBOX_CAPACITY: usize = 4;
 
+/// Ceiling on consecutive [`shutdown`](Supervisor::shutdown) passes that find only mid-launch
+/// entries (mailbox installed, join not yet attached) with no join to await. The launch window is
+/// a handful of synchronous statements, so the join attaches within a pass or two; this bounds the
+/// wait (the no-unbounded-retry rule) should a launcher wedge before attaching one. Generous, as a
+/// yield-per-pass is cheap and the cap is only a safety backstop, never reached in practice.
+const MAX_SHUTDOWN_IDLE_PASSES: u32 = 1_000;
+
 /// Why a supervisor command failed.
 #[derive(Debug, thiserror::Error)]
 pub enum SupervisorError {
@@ -231,13 +238,13 @@ impl Supervisor {
     }
 
     /// Requests a graceful stop. Returns whether an active process was messaged; a
-    /// resting or already-finished process reports `false`.
+    /// resting or already-finished process reports `false`. Because the mailbox is installed as
+    /// the launch is claimed, an active process always has a live control surface — including one
+    /// still in its launch window — so the stop is delivered, never dropped while reporting success.
     pub fn stop(&self, id: ProcessId) -> bool {
         match self.registry.status(id) {
             Some(status) if status.is_active() => {
-                if let Some(mailbox) = self.registry.mailbox(id) {
-                    let _ = mailbox.try_send(ActorMsg::Stop);
-                }
+                self.registry.signal(id, ActorMsg::Stop);
                 true
             }
             _ => false,
@@ -256,9 +263,7 @@ impl Supervisor {
         // would (the auto-restart path relaunches directly and never clears).
         self.restart_policy.forget(id);
         if info.status.is_active() {
-            if let Some(mailbox) = self.registry.mailbox(id) {
-                let _ = mailbox.try_send(ActorMsg::Restart);
-            }
+            self.registry.signal(id, ActorMsg::Restart);
         } else {
             self.launch_actor(id, info.launch, None);
         }
@@ -376,9 +381,13 @@ impl Supervisor {
             return Err(SupervisorError::NotFound(id));
         };
         // Reap a live actor's group — the single-process form of `shutdown`'s reap step. The
-        // entry is already gone, so no relaunch can re-enter the registry behind us.
+        // entry is already gone, so no relaunch can re-enter the registry behind us. A mid-launch
+        // actor whose join is not yet attached has no child to await; the stop (and the dropped
+        // mailbox) reach it before it can spawn one.
         if let Some(handle) = handle {
-            let _ = signal_stop(handle).await;
+            if let Some(join) = signal_stop(handle) {
+                let _ = join.await;
+            }
         }
         // The process is gone for good — free its terminal channel (buffers + live broadcast).
         // The actor is reaped above, so its recorder is dropped and nothing still writes here;
@@ -399,18 +408,48 @@ impl Supervisor {
         // just before the latch became visible can still spawn one last actor while we
         // reap; the latch stops the reactor from launching any further, so the set is
         // finite and this converges.
+        let mut idle_passes = 0;
         loop {
             let mut joins = Vec::new();
+            let mut mid_launch = false;
             for id in self.registry.with_live_actor() {
-                if let Some(handle) = self.registry.take_handle(id) {
-                    joins.push(signal_stop(handle));
+                match self.registry.take_handle(id) {
+                    Some(handle) => {
+                        if let Some(join) = signal_stop(handle) {
+                            joins.push(join);
+                        }
+                    }
+                    // A launch installed the mailbox but has not attached the join yet (the
+                    // launch window). Stop it in place — honored before it can spawn its child —
+                    // and retry so its exit is still awaited and no child is abandoned. The
+                    // window is a few synchronous statements in the launcher, so it closes at once.
+                    None => {
+                        self.registry.signal(id, ActorMsg::Stop);
+                        mid_launch = true;
+                    }
                 }
             }
-            if joins.is_empty() {
-                break;
-            }
+            let awaited = !joins.is_empty();
             for join in joins {
                 let _ = join.await;
+            }
+            if !mid_launch {
+                break;
+            }
+            // Only mid-launch entries remained this pass: yield so their launchers can attach the
+            // join before the next scan, rather than spinning on the lock. Bounded per the
+            // no-unbounded-retry rule: awaiting a join is progress and resets the count; a run of
+            // pure-mid-launch passes with no join to await means a launcher is wedged before
+            // `attach_join`, so stop retrying. Bailing is safe — the in-place stop is honored before
+            // the actor spawns, so no child is abandoned even unawaited.
+            if awaited {
+                idle_passes = 0;
+            } else {
+                idle_passes += 1;
+                if idle_passes >= MAX_SHUTDOWN_IDLE_PASSES {
+                    break;
+                }
+                tokio::task::yield_now().await;
             }
         }
     }
@@ -435,7 +474,12 @@ impl Supervisor {
     /// `false` without spawning if the process was already active — closing the start
     /// race when two callers target the same process at once.
     fn launch_actor(&self, id: ProcessId, launch: SpawnSpec, initial: Option<Spawned>) -> bool {
-        let Some(from) = self.registry.begin_launch(id) else {
+        // Create the mailbox up front and install it as the launch is claimed, so a stop or
+        // shutdown that lands in the window before the actor is scheduled still reaches it — the
+        // command is neither lost nor falsely reported delivered, and shutdown can see a
+        // mid-launch process to reap. The join handle is attached below once the task exists.
+        let (mailbox, inbox) = tokio::sync::mpsc::channel(MAILBOX_CAPACITY);
+        let Some(from) = self.registry.begin_launch(id, mailbox) else {
             return false;
         };
         // Open the terminal channel synchronously, before spawning the actor, so a viewer that
@@ -456,7 +500,6 @@ impl Supervisor {
                 project_root: PathBuf::new(),
                 name: String::new(),
             });
-        let (mailbox, inbox) = tokio::sync::mpsc::channel(MAILBOX_CAPACITY);
         let join = actor::spawn(
             id,
             launch,
@@ -466,7 +509,7 @@ impl Supervisor {
             initial,
             terminal,
         );
-        self.registry.set_handle(id, ActorHandle { mailbox, join });
+        self.registry.attach_join(id, join);
         true
     }
 
@@ -484,11 +527,13 @@ impl Supervisor {
     }
 }
 
-/// Messages a live actor to stop and hands back its join handle to await — the shared reap
-/// step behind [`Supervisor::close`] (which awaits the one) and [`Supervisor::shutdown`]
-/// (which messages every actor, then awaits them together). Best-effort and tolerant: a full
-/// mailbox is ignored and awaiting an already-finished actor returns at once.
-fn signal_stop(handle: ActorHandle) -> JoinHandle<()> {
+/// Messages a live actor to stop and hands back its join handle to await, if it has one — the
+/// shared reap step behind [`Supervisor::close`] (which awaits the one) and
+/// [`Supervisor::shutdown`] (which messages every actor, then awaits them together). Dropping the
+/// mailbox at the end of this call is itself a stop signal for a mid-launch actor whose join is
+/// not yet attached (its `recv` unblocks to `None`). Best-effort and tolerant: a full mailbox is
+/// ignored and awaiting an already-finished actor returns at once.
+fn signal_stop(handle: ActorHandle) -> Option<JoinHandle<()>> {
     let ActorHandle { mailbox, join } = handle;
     let _ = mailbox.try_send(ActorMsg::Stop);
     join
@@ -517,7 +562,19 @@ pub(crate) fn apply_transition(
             });
             new
         }
-        Err(_) => from,
+        // The FSM is the contract, so an illegal edge is a bug in a caller, not an expected
+        // input: refuse it (leaving the state unchanged) but trace it, so a regression that
+        // would silently desync the registry from the actor's status mirror is diagnosable
+        // instead of invisible.
+        Err(_) => {
+            tracing::warn!(
+                process = id.get(),
+                ?from,
+                ?to,
+                "refused an illegal process status transition"
+            );
+            from
+        }
     }
 }
 
@@ -952,6 +1009,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_stop_in_the_launch_window_is_delivered_and_stops_without_spawning() {
+        // The launch-window race: `start` claims the launch and installs the actor mailbox
+        // synchronously, but the actor task has not been polled yet (no `.await` here). A stop
+        // that lands in that window must reach the actor — reported delivered, not silently
+        // dropped — and the process must actually stop. Because the mailbox is installed as the
+        // launch is claimed, the stop reaches the actor, and the actor's pre-spawn drain honors
+        // it before spawning: the status goes straight Starting -> Stopping -> Stopped, never
+        // Running, so no child is ever spawned.
+        let mut h = harness(FakeSpawner::exits_on_terminate());
+        let id = terminal(&h.sup, "sleep 60");
+
+        h.sup.start(id).expect("start");
+        assert!(
+            h.sup.stop(id),
+            "a stop in the launch window is delivered, not dropped"
+        );
+
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Starting);
+        assert_eq!(
+            next_to(&mut h.rx).await,
+            ProcStatus::Stopping,
+            "the actor honors the queued stop before spawning — never reaches Running"
+        );
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Stopped);
+        assert_eq!(status_of(&h.sup, id), ProcStatus::Stopped);
+        assert!(
+            h.runtime.records().is_empty(),
+            "no child was ever spawned in the launch window"
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_reaps_a_process_still_in_its_launch_window() {
+        // A shutdown racing a launch must not miss a process whose actor has not been polled yet:
+        // the mailbox installed at claim time makes it visible to `with_live_actor`, and the
+        // pre-spawn drain honors the shutdown's stop, so no child is spawned and none survives the
+        // quit. The status settles at Stopped (via Stopping), never having reached Running.
+        let h = harness(FakeSpawner::exits_on_terminate());
+        let id = terminal(&h.sup, "sleep 60");
+
+        h.sup.start(id).expect("start");
+        // The actor is spawned but unpolled — the launch window. Shutdown must still reap it.
+        h.sup.shutdown().await;
+
+        assert_eq!(status_of(&h.sup, id), ProcStatus::Stopped);
+        assert!(
+            h.runtime.records().is_empty(),
+            "no child survives the quit via the launch window"
+        );
+    }
+
+    #[tokio::test]
     async fn pty_output_is_buffered_and_a_title_is_published() {
         let chunk = b"\x1b]0;my title\x07hello\n".to_vec();
         let mut h = harness(FakeSpawner::streams_then_exits(vec![chunk.clone()]));
@@ -1065,5 +1174,70 @@ mod tests {
             h.sup.resize(unknown, 80, 24).await,
             Err(SupervisorError::NotFound(_))
         ));
+    }
+
+    /// A minimal `tracing` subscriber that only records whether a `WARN` event was emitted — just
+    /// enough to prove the illegal-transition path traces rather than staying silent, without a
+    /// subscriber dependency.
+    #[derive(Clone, Default)]
+    struct WarnFlag(Arc<std::sync::atomic::AtomicBool>);
+
+    impl WarnFlag {
+        fn was_warned(&self) -> bool {
+            self.0.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl tracing::Subscriber for WarnFlag {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            if *event.metadata().level() == tracing::Level::WARN {
+                self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    #[test]
+    fn an_illegal_transition_is_refused_and_traced() {
+        // `Stopped -> Running` skips `Starting`: the FSM forbids it. `apply_transition` must
+        // refuse it — return the unchanged state and publish no delta — but trace it, so a
+        // regression that would desync the registry from the actor's status mirror is
+        // diagnosable rather than invisible.
+        let registry = Registry::default();
+        let bus = EventBus::new(16);
+        let mut rx = bus.subscribe();
+        let id = ProcessId::next();
+
+        let warned = WarnFlag::default();
+        let result = tracing::subscriber::with_default(warned.clone(), || {
+            apply_transition(
+                &registry,
+                &bus,
+                id,
+                ProcStatus::Stopped,
+                ProcStatus::Running,
+                None,
+            )
+        });
+
+        assert_eq!(
+            result,
+            ProcStatus::Stopped,
+            "an illegal transition leaves the state unchanged"
+        );
+        assert!(warned.was_warned(), "an illegal transition is traced");
+        assert!(
+            rx.try_recv().is_err(),
+            "no status delta is published for a refused transition"
+        );
     }
 }

@@ -20,8 +20,8 @@ use soloist_core::testing::{
     FakeTodoRepo, FakeTrustRepo,
 };
 use soloist_core::{
-    AgentKind, AgentTool, CorePorts, Facade, IdleMode, ProcStatus, ProcessId, PromptMode, TodoDoc,
-    TodoStatus, TokioClock,
+    AgentActivity, AgentKind, AgentSignal, AgentTool, CorePorts, Facade, IdleMode, ProcStatus,
+    ProcessId, PromptMode, TodoDoc, TodoStatus, TokioClock,
 };
 use soloist_pty::PtyProcessSpawner;
 use tokio::time::{sleep, timeout};
@@ -153,6 +153,17 @@ async fn a_lead_spawns_a_worker_assigns_a_locked_todo_and_is_woken_when_the_work
     assert!(
         woken,
         "the lead is woken with the timer's body once the worker goes idle"
+    );
+
+    // The same real classification the timer fired on is what the UI seeds its idle badges from:
+    // `agent_activity` reports the worker as Idle, so a webview reload or a dropped
+    // `AgentActivityChanged` recovers the true badge rather than showing edge-triggered stale state.
+    assert!(
+        facade.agent_activity().contains(&AgentSignal {
+            id: worker,
+            activity: AgentActivity::Idle,
+        }),
+        "agent_activity reflects the worker's live idle classification"
     );
 
     // The fired timer delivered exactly once and is gone, so the lead owns no armed timer now.

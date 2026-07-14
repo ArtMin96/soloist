@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use soloist_core::{Facade, LineageEdge, OrchestrationSnapshot, ProjectId};
+use soloist_core::{AgentSignal, Facade, LineageEdge, OrchestrationSnapshot, ProjectId};
 use tauri::State;
 
 use super::offload;
@@ -32,4 +32,13 @@ pub async fn orchestration_snapshot(
 #[tauri::command]
 pub async fn lineage_edges(facade: State<'_, Arc<Facade>>) -> Result<Vec<LineageEdge>, String> {
     Ok(facade.lineage_edges())
+}
+
+/// Every tracked agent's current idle activity across all projects — the snapshot the signal
+/// store seeds its idle badges from, so a webview reload or a dropped `AgentActivityChanged`
+/// during bus lag recovers the true state instead of an edge-triggered stale badge. An in-memory
+/// read like [`lineage_edges`], so it runs on the runtime rather than the blocking pool.
+#[tauri::command]
+pub async fn agent_activity(facade: State<'_, Arc<Facade>>) -> Result<Vec<AgentSignal>, String> {
+    Ok(facade.agent_activity())
 }
