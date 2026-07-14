@@ -28,7 +28,7 @@ use std::sync::Arc;
 use soloist_core::{
     AgentTool, DetectedTool, Facade, ProcessId, ProcessView, ProjectId, ProjectLoad, ProjectView,
 };
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, Response};
 use tauri::State;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -255,12 +255,14 @@ pub async fn pty_resize(
 const PTY_FRAME_CHUNK: u8 = 0;
 const PTY_FRAME_RESYNC: u8 = 1;
 
-/// Prefixes a payload with its frame tag.
-fn frame(tag: u8, bytes: &[u8]) -> Vec<u8> {
+/// Prefixes a payload with its frame tag and wraps it as a raw-bytes IPC response, so the channel
+/// delivers a binary `ArrayBuffer` to the webview instead of a JSON number array — the full
+/// scrollback replay crosses the boundary as bytes, with no per-byte JSON expansion.
+fn pty_frame(tag: u8, bytes: &[u8]) -> Response {
     let mut framed = Vec::with_capacity(bytes.len() + 1);
     framed.push(tag);
     framed.extend_from_slice(bytes);
-    framed
+    Response::new(framed)
 }
 
 /// Attaches a terminal pane to a process: replays its raw scrollback as the first channel
@@ -270,7 +272,7 @@ fn frame(tag: u8, bytes: &[u8]) -> Vec<u8> {
 #[tauri::command]
 pub async fn pty_attach(
     id: u64,
-    on_chunk: Channel<Vec<u8>>,
+    on_chunk: Channel<Response>,
     facade: State<'_, Arc<Facade>>,
     bridge: State<'_, PtyBridge>,
 ) -> Result<u64, String> {
@@ -283,14 +285,14 @@ pub async fn pty_attach(
     // first message preserves the core's no-gap/no-duplicate guarantee across IPC. It is a
     // resync frame: the emulator resets to it, the same way it recovers from a re-sync below.
     on_chunk
-        .send(frame(PTY_FRAME_RESYNC, &scrollback))
+        .send(pty_frame(PTY_FRAME_RESYNC, &scrollback))
         .map_err(|err| err.to_string())?;
     let facade = Arc::clone(&facade);
     let handle = tauri::async_runtime::spawn(async move {
         loop {
             match live.recv().await {
                 Ok(chunk) => {
-                    if on_chunk.send(frame(PTY_FRAME_CHUNK, &chunk)).is_err() {
+                    if on_chunk.send(pty_frame(PTY_FRAME_CHUNK, &chunk)).is_err() {
                         break;
                     }
                 }
@@ -302,7 +304,7 @@ pub async fn pty_attach(
                     match facade.supervisor().attach_pty(pid) {
                         Some((scrollback, fresh)) => {
                             live = fresh;
-                            if on_chunk.send(frame(PTY_FRAME_RESYNC, &scrollback)).is_err() {
+                            if on_chunk.send(pty_frame(PTY_FRAME_RESYNC, &scrollback)).is_err() {
                                 break;
                             }
                         }

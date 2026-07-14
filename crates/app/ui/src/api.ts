@@ -254,8 +254,15 @@ export function ptyAttach(
   id: number,
   onChunk: (bytes: Uint8Array, resync: boolean) => void,
 ): Promise<number> {
-  const channel = new Channel<Uint8Array>();
-  channel.onmessage = (frame) => onChunk(frame.subarray(1), frame[0] === PTY_FRAME_RESYNC);
+  // The backend sends each frame as a raw-bytes IPC response, which Tauri delivers here as an
+  // `ArrayBuffer` (not a JSON number array — no per-byte expansion on the scrollback replay). Wrap
+  // it in a `Uint8Array` view to read the tag byte and hand on the tag-stripped payload the
+  // emulator writes; the view is zero-copy over the buffer.
+  const channel = new Channel<ArrayBuffer>();
+  channel.onmessage = (frame) => {
+    const bytes = new Uint8Array(frame);
+    onChunk(bytes.subarray(1), bytes[0] === PTY_FRAME_RESYNC);
+  };
   return invoke<number>("pty_attach", { id, onChunk: channel });
 }
 

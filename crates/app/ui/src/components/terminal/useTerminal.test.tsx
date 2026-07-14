@@ -95,7 +95,10 @@ function StateProbe({ process }: { process: ProcessView }) {
   return <div ref={hostRef} data-state={state} />;
 }
 
-type ChunkChannel = Channel<Uint8Array>;
+// The backend sends each frame as a raw-bytes IPC response, so Tauri hands the channel's
+// `onmessage` an `ArrayBuffer`. The fake must carry that exact runtime type — a `Uint8Array` or a
+// `number[]` here would exercise a shape the real IPC never delivers and hide a broken frame handler.
+type ChunkChannel = Channel<ArrayBuffer>;
 
 interface AttachCall {
   channel: ChunkChannel;
@@ -114,12 +117,15 @@ async function settle(ms = 50) {
 // Sends a framed PTY message the way the backend does: byte 0 tags a live chunk or a
 // scrollback-snapshot resync; the rest is the payload. `api.ts` strips the tag before the hook
 // sees it, so tests must include it — using the same tag constants the backend mirror defines.
+// The frame is delivered as an `ArrayBuffer` because that is exactly what Tauri hands the channel's
+// `onmessage` for a raw-bytes response — a `Uint8Array` would test a fiction (it has `subarray`;
+// an `ArrayBuffer` does not, so the handler must wrap it first).
 function deliver(call: AttachCall, text: string, kind: "chunk" | "resync" = "chunk") {
   const bytes = new TextEncoder().encode(text);
   const frame = new Uint8Array(bytes.length + 1);
   frame[0] = kind === "resync" ? PTY_FRAME_RESYNC : PTY_FRAME_CHUNK;
   frame.set(bytes, 1);
-  call.channel.onmessage(frame);
+  call.channel.onmessage(frame.buffer);
 }
 
 function writtenText(term: InstanceType<typeof FakeTerminal>) {
