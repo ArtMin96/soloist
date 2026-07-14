@@ -27,6 +27,38 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Stability & security audit — ticket 08 `needs-human-verify` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `f15dcad`, docs/ledger commit follows).** PRD-08 (P2:
+  SQLite ran inline on the tokio runtime — a WAL `fsync` on a slow/full disk parked a worker (D4);
+  and coordination writes had no per-value ceiling — a misbehaving agent could grow `soloist.db`
+  through one write (D3)). **Owner decision this session (`AskUserQuestion` → "Comprehensive"):** the
+  durable ports are **synchronous**, so the ticket-recommended DB-thread actor would still block the
+  calling worker on its reply for the `fsync`'s duration — it does not fix the stated problem. The
+  fix is **`spawn_blocking` at the adapter boundary** (the only design that frees the worker),
+  applied across all three in-process adapters: MCP `handle_request` peels the three await-the-core
+  requests and routes every other through one `spawn_blocking(dispatch_blocking)`; HTTP
+  `ApiState::blocking` offloads each sync handler; a Tauri `offload()` helper wraps every sync
+  store-touching command; `open_project::open` loads a handed-in project off the main thread. Added
+  `PRAGMA busy_timeout=5s` (named const). **Bounded writes:** named byte caps per aggregate (kv 64
+  KiB, scratchpad 256 KiB, todo doc 64 KiB, timer body 16 KiB), enforced **before** persistence with
+  a typed request error (`CoordinationError::PayloadTooLarge` for kv/timer; folded into the
+  aggregate's `validate()` for scratchpad/todo, covering the MCP **and** local Tauri paths); new
+  `IpcError::PayloadTooLarge`. **Tests (red-before/green-after):** four cap boundaries (at cap
+  accepted / over cap rejected + persists nothing), busy_timeout read-back, `PayloadTooLarge` wire
+  mapping + request-error classification, and a **non-timing barrier test** proving the blocking
+  helper runs façade ops off the runtime thread (inline would deadlock). **Gates: `just lint` exit
+  0** (fmt, clippy `-D warnings`, tsc, eslint, prettier, dep-direction; file-size advisory only),
+  **`just test` — Rust 941 passed / 0 failed / 3 ignored (pty soak), UI 306 passed.** `/code-review`
+  (independent subagent) clean on the four correctness-critical areas; one acted-on finding (a
+  `plan/05 §7` citation in a comment, removed per §8). **Docs:** `plan/05` §12 records the caps +
+  off-runtime + busy_timeout as clean-room engineering bounds. **`needs-human-verify`** (not `done`)
+  because `load_project` spawns actors and needs a live `just dev` check — the ticket Comments list
+  the exact walk (open a project incl. one with no `solo.yml`; open via file-association/CLI arg;
+  scratchpad/todo/settings still persist; smooth under a chatty process). **Known residual:** async
+  façade methods that touch the store (`remove_project`, `agent_detect`) can't be adapter-wrapped;
+  tracked for a future core-level split. **Next frontier ticket: 09** (`ready-for-agent`, unblocked);
+  07 remains `Blocked by: 02` (needs-human-verify); 10 is unblocked.
+
 - **Stability & security audit — ticket 06 `done` (2026-07-14; branch
   `fix/stability-audit-2026-07`; impl commit `4c63170`, docs/ledger commit follows).** PRD-06 (P1
   security: local read-disclosure — unauthenticated HTTP reads + cross-project MCP reads). **HTTP:**
