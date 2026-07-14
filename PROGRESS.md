@@ -27,6 +27,42 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Stability & security audit — ticket 09 `done` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `aedd202`, docs/ledger commit follows).** PRD-09 (P2/P3
+  defense-in-depth + Solo-fidelity + small correctness). Eight items, each re-verified against the
+  code then fixed test-first (red→green): **H1** `ProcessSpec::resolved_working_dir` now clamps an
+  escaping `working_dir` (absolute, or `..` above root) back to the project root — lexical (holds
+  before the dir exists), infallible (avoids rippling a `Result` through `Registration::command`'s
+  ~30 call sites), defense-in-depth atop the trust variant. **H2** `peer_cred::peer_pgid` reads the
+  socket peer's uid and **drops** the connection when it is not Soloist's own uid (fail-closed over
+  the `0700` dir); pure `peer_uid_permitted` unit-tested. **H3** doc-only — `plan/05` §4 now records
+  the narrow re-trust set (command/working_dir/env) and points at `KNOWN-DIVERGENCES` D-1 (settled;
+  widening the hash would break the CLAUDE.md §3 lock). **H4** the `--version` probe runs through the
+  login shell (`$SHELL -ilc`), so detection resolves a CLI on the same PATH a launch sees
+  (nvm/asdf/volta); the command is a shell **positional** (`$1`), never interpolated — no word-split,
+  no injection — with `exec` for clean reap; timeout raised to 3s (login-shell headroom). **A3**
+  `POST /projects/:id/spawn-agent` is bounded by a fixed-window `SpawnRateLimiter` → **429**. **A4**
+  `Client::from_runtime` **refuses** ("Soloist is not running") when the runtime file is absent
+  instead of probing `DEFAULT_PORT` with an empty token (foreign-server safety). **A5** `/status`
+  routes to `Facade::status_summary` (`StatusSummary`) — the `running` tally is computed once in
+  core; the adapter-local `Status` struct is gone. **A6** `render_table` sanitizes control bytes in
+  the process label so a crafted name cannot inject terminal escapes into `soloist status`.
+  **Tests:** core (`working_dir_is_contained_within_the_root`, `status_summary_*`), sys unit
+  (`probe_command`, positional-not-shell-text) + real-OS integration (deterministic stub `$SHELL`),
+  httpapi unit (rate-limiter cap + rollover) + integration (429 burst, status shape), cli unit
+  (`from_runtime` refuse/use, `render_table` neutralizes control bytes), app (`peer_uid_permitted`).
+  **`/code-review`** (adversarial subagent) cleared H1/H2/A3/A4/A5/A6/H3 and caught an H4
+  command-quoting gap (unquoted interpolation → mis-detection + latent injection for a
+  spaced/metacharacter command) — fixed via the positional-arg design — plus one PRD tag in a test
+  comment (removed). **Gates: `just lint` exit 0** (fmt, clippy `-D warnings`, tsc, eslint, prettier,
+  dep-direction; file-size advisory only), **`just test` — Rust 952 passed / 0 failed, UI 306 passed
+  / 61 files.** Fully headless-verified, so **`done`, not `needs-human-verify`**. **Note:** an
+  unrelated, pre-existing `__DIAG__` terminal-desync instrumentation in `useTerminal.ts` (the owner's
+  live debugging) was present in the tree; it was **left untouched and excluded from the commit**,
+  and the gates were confirmed green against a tree containing only the ticket-09 changes. **Next
+  frontier ticket: 10** (`ready-for-agent`; `Blocked by: 06`, which is `done` → unblocked); **07**
+  stays `Blocked by: 02` (`needs-human-verify`, not `done`).
+
 - **Stability & security audit — ticket 08 `needs-human-verify` (2026-07-14; branch
   `fix/stability-audit-2026-07`; impl commit `f15dcad`, docs/ledger commit follows).** PRD-08 (P2:
   SQLite ran inline on the tokio runtime — a WAL `fsync` on a slow/full disk parked a worker (D4);

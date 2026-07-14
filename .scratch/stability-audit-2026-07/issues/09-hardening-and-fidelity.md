@@ -1,6 +1,6 @@
 # PRD-09 — Security hardening + Solo-fidelity + small correctness fixes
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 - **Severity:** P2/P3 (defense-in-depth + doc fidelity + small UX correctness)
@@ -61,3 +61,50 @@ locked list. Owner decides; likely a doc fix.
 
 ## Out of scope
 The core read-authorization decision (PRD-06). The blocking-store work (PRD-08).
+
+## Comments
+
+**Done — 2026-07-14 (impl commit `aedd202`, docs/ledger commit follows). All headless-verified.**
+Each finding was re-checked against the code before coding; all fixed test-first (red→green).
+
+- **H1** — `ProcessSpec::resolved_working_dir` now folds the dir onto the root lexically and
+  clamps any escape (absolute path, or `..` above root) back to the root; a relative dir that
+  stays inside (even via `..`) still resolves. Kept infallible to avoid rippling a `Result`
+  through `Registration::command`'s ~30 call sites. Core test
+  `working_dir_is_contained_within_the_root`. Fidelity recorded in `plan/05` §12.
+- **H2** — `peer_cred::peer_pgid` reads the peer uid and **drops** the connection
+  (`PermissionDenied`) when it is not Soloist's own uid; pure `peer_uid_permitted` unit-tested,
+  fail-closed drop wired in `handle_connection`.
+- **H3** — doc-only: `plan/05` §4 now records the narrow re-trust set and points at
+  `KNOWN-DIVERGENCES.md` D-1 (already settled). No code change (widening the hash would break
+  the CLAUDE.md §3 locked variant).
+- **H4** — `CommandVersionProbe` probes `$SHELL -ilc <PROBE_SCRIPT> soloist-detect <command>`
+  with the command as the shell positional `$1` (never interpolated → no word-split, no
+  injection; `exec` for clean reap). Timeout raised to 3s (login-shell headroom, matching the
+  env capture). Unit tests (`probe_command`, positional-not-shell-text) + real-OS integration
+  test (deterministic via a stub `$SHELL`).
+- **A3** — `ApiState` carries a fixed-window `SpawnRateLimiter`; `spawn_agent` returns **429**
+  past the cap. Unit tests (cap + window rollover) + integration burst test.
+- **A4** — `Client::from_runtime` returns `Result` and **refuses** ("Soloist is not running")
+  when the runtime file is absent instead of probing `DEFAULT_PORT` with an empty token. Pure
+  `from_runtime_opt` unit-tested.
+- **A5** — `/status` routes to `Facade::status_summary` (`StatusSummary`), computing the
+  `running` tally once in core; the adapter-local `Status` struct is gone. Core + route tests.
+- **A6** — `render_table` sanitizes control bytes in the process label (`sanitize_cell` →
+  `char::is_control()`), rendering a crafted name inert. Unit test.
+
+**Code review** (adversarial subagent): cleared H1/H2/A3/A4/A5/A6/H3; found and I fixed an H4
+command-quoting gap (unquoted interpolation → mis-detection + latent injection for a
+spaced/metacharacter command — the positional-arg design above closes it) and one PRD tag in a
+test comment. Accepted (documented) tradeoffs: the per-tool `-ilc` startup cost (bounded 3s,
+cached 600s, off-runtime) and grandchild reaping on a hung probe (now `exec`-mitigated, and
+consistent with the existing `shellenv` capture).
+
+**Gates:** `just lint` exit 0 (fmt, clippy `-D warnings`, tsc, eslint, prettier, dep-direction;
+file-size advisory only). `just test` — Rust **952 passed / 0 failed**, UI **306 passed / 61
+files**. (Both verified against a tree containing only the ticket-09 changes — an unrelated,
+pre-existing `__DIAG__` instrumentation in `useTerminal.ts`, the owner's live terminal-desync
+debugging, was left untouched and excluded from the commit.)
+
+**Next frontier: 10** (`ready-for-agent`; `Blocked by: 06`, which is `done` → unblocked). **07**
+stays `Blocked by: 02` (`needs-human-verify`, not `done`).
