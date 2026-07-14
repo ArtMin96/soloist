@@ -30,7 +30,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
 
 // The tabs whose contents were never shown in the source and remain undefined pending an owner
 // decision — rendered as an explicit "to be defined" stub, never invented.
-export const UNDEFINED_TABS: ReadonlySet<SettingsTabId> = new Set(["notifications", "account"]);
+export const UNDEFINED_TABS: ReadonlySet<SettingsTabId> = new Set(["account"]);
 
 // The DOM id of a tab's rail button — shared so the tabpanel can label itself by the active tab.
 export function settingsTabButtonId(id: SettingsTabId): string {

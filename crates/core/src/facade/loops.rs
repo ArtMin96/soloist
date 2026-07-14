@@ -106,14 +106,16 @@ impl Facade {
     }
 
     /// The notification reactor loop (notifications C7), returned for the composition root to
-    /// spawn once on its runtime. It shows a desktop toast on a crash or an exhausted
-    /// auto-restart (honouring the global on/off), watching the supervisor weakly so it ends
-    /// when the facade is dropped. With the default [`crate::notify::NoopNotifier`] it shows
-    /// nothing — the real desktop adapter is chosen in the composition root.
+    /// spawn once on its runtime. It shows a desktop toast for the attention-worthy events,
+    /// honouring the global master switch and the per-project alert switches (read live from
+    /// settings), watching the supervisor weakly so it ends when the facade is dropped. With the
+    /// default [`crate::notify::NoopNotifier`] it shows nothing — the real desktop adapter is
+    /// chosen in the composition root.
     pub fn notifications_loop(&self) -> impl Future<Output = ()> + Send + 'static {
         NotificationReactor::new(
             self.notifier.clone(),
-            self.notifications_enabled.clone(),
+            self.settings.clone(),
+            self.project_settings.clone(),
             &self.bus,
             Arc::downgrade(&self.supervisor),
         )

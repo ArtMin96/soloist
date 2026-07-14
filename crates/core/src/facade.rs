@@ -10,7 +10,6 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -70,7 +69,6 @@ pub struct Facade {
     port_probe: Arc<dyn PortProbe>,
     file_watcher: Arc<dyn FileWatcher>,
     notifier: Arc<dyn Notifier>,
-    notifications_enabled: Arc<AtomicBool>,
     supervisor: Arc<Supervisor>,
     projects: Projects,
     trust: TrustStore,
@@ -85,8 +83,8 @@ pub struct Facade {
     scratchpads: Scratchpads,
     todos: Todos,
     prompt_templates: PromptTemplates,
-    settings: SettingsStore<(), Settings>,
-    project_settings: SettingsStore<ProjectId, ProjectSettings>,
+    settings: Arc<SettingsStore<(), Settings>>,
+    project_settings: Arc<SettingsStore<ProjectId, ProjectSettings>>,
     feedback: Feedback,
 }
 
@@ -129,16 +127,14 @@ impl Facade {
             scratchpads: Scratchpads::new(scratchpad_repo),
             todos: Todos::new(todo_repo),
             prompt_templates: PromptTemplates::new(prompt_template_repo),
-            settings: SettingsStore::new(settings_repo),
-            project_settings: SettingsStore::new(project_settings_repo),
+            settings: Arc::new(SettingsStore::new(settings_repo)),
+            project_settings: Arc::new(SettingsStore::new(project_settings_repo)),
             feedback: Feedback::new(feedback_repo, clock.clone()),
             clock,
             metrics,
             port_probe,
             file_watcher,
             notifier,
-            // Notifications are on by default; the user can silence them at runtime.
-            notifications_enabled: Arc::new(AtomicBool::new(true)),
             projects: Projects::new(projects),
             trust: TrustStore::new(trust.clone()),
             config: ConfigEngine::new(trust, bus.clone()),
@@ -170,17 +166,6 @@ impl Facade {
     /// The process supervisor (C2) — start/stop/restart and bulk operations.
     pub fn supervisor(&self) -> &Supervisor {
         self.supervisor.as_ref()
-    }
-
-    /// Turns desktop notifications on or off globally — the single switch the notification
-    /// reactor honours, so the UI, MCP, and CLI all toggle the same flag.
-    pub fn set_notifications_enabled(&self, enabled: bool) {
-        self.notifications_enabled.store(enabled, Ordering::Relaxed);
-    }
-
-    /// Whether desktop notifications are currently enabled.
-    pub fn notifications_enabled(&self) -> bool {
-        self.notifications_enabled.load(Ordering::Relaxed)
     }
 
     /// Waits until process `id` is listening on `port`, or times out — port readiness (C5).

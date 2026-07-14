@@ -1,6 +1,6 @@
 use soloist_core::{
     AgentSettings, Appearance, Binding, FontScale, FontWeight, HotkeyAction, Hotkeys, Integrations,
-    LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups, ProcessCpuThreshold,
+    LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups, Notifications, ProcessCpuThreshold,
     ProcessMemThreshold, ProjectCpuThreshold, ProjectMemThreshold, Settings, SettingsRepo, Sidebar,
     TerminalAppearance, Theme, ToolDefaults,
 };
@@ -68,6 +68,7 @@ fn fully_populated() -> Settings {
             mcp_enabled: false,
             http_api_enabled: false,
         },
+        notifications: Notifications { enabled: false },
         mcp_tool_groups,
     }
 }

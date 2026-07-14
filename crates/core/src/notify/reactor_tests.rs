@@ -1,12 +1,11 @@
 //! Behavioural tests for [`NotificationReactor`]: it composes the right toast for the
-//! attention-worthy events, resolves the process label, and honours the global on/off. They
-//! drive a real [`Supervisor`] over fakes (for the label read model) and publish events on the
-//! bus directly, so the reactor's own logic is tested without the crash machinery (covered in
-//! the restart policy's tests).
+//! attention-worthy events, resolves the process label, and honours the global master switch and
+//! the per-project alert switches. They drive a real [`Supervisor`] over fakes (for the label read
+//! model) and publish events on the bus directly, so the reactor's own logic is tested without the
+//! crash machinery (covered in the restart policy's tests).
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::agents::AgentActivity;
@@ -15,19 +14,24 @@ use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::CorePorts;
 use crate::process::ProcStatus;
+use crate::settings::{ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor};
-use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock, RecordingNotifier};
+use crate::testing::{
+    FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo, MockClock, RecordingNotifier,
+};
 
 use super::NotificationReactor;
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);
+const OTHER: ProjectId = ProjectId::from_raw(2);
 const ROOT: &str = "/project";
 
 struct Setup {
     sup: Arc<Supervisor>,
     bus: EventBus,
     notifier: RecordingNotifier,
-    enabled: Arc<AtomicBool>,
+    global: Arc<SettingsStore<(), Settings>>,
+    projects: Arc<SettingsStore<ProjectId, ProjectSettings>>,
 }
 
 fn setup() -> Setup {
@@ -44,7 +48,8 @@ fn setup() -> Setup {
         sup,
         bus,
         notifier: RecordingNotifier::new(),
-        enabled: Arc::new(AtomicBool::new(true)),
+        global: Arc::new(SettingsStore::new(Arc::new(FakeSettingsRepo::new()))),
+        projects: Arc::new(SettingsStore::new(Arc::new(FakeSettingsRepo::new()))),
     }
 }
 
@@ -59,22 +64,28 @@ fn command_spec() -> ProcessSpec {
     }
 }
 
-/// Registers a command so the reactor can resolve its label; returns its id.
-fn register(s: &Setup, name: &str) -> ProcessId {
+/// Registers a command under `project` so the reactor can resolve its label; returns its id.
+fn register_in(s: &Setup, project: ProjectId, name: &str) -> ProcessId {
     s.sup.register(Registration::command(
-        PROJECT,
+        project,
         Path::new(ROOT),
         name,
         &command_spec(),
     ))
 }
 
-/// Spawns the reactor over the spy notifier and the on/off flag.
+/// Registers a command under the default project.
+fn register(s: &Setup, name: &str) -> ProcessId {
+    register_in(s, PROJECT, name)
+}
+
+/// Spawns the reactor over the spy notifier and the settings stores.
 fn spawn_reactor(s: &Setup) {
     tokio::spawn(
         NotificationReactor::new(
             Arc::new(s.notifier.clone()),
-            s.enabled.clone(),
+            s.global.clone(),
+            s.projects.clone(),
             &s.bus,
             Arc::downgrade(&s.sup),
         )
@@ -152,6 +163,18 @@ async fn an_agent_error_shows_a_toast() {
 }
 
 #[tokio::test]
+async fn a_terminal_bell_shows_a_toast() {
+    let s = setup();
+    let web = register(&s, "Web");
+    spawn_reactor(&s);
+
+    s.bus.publish(DomainEvent::TerminalBell { id: web });
+
+    let shown = s.notifier.wait_until_shown(1).await;
+    assert_eq!(shown[0].title, "Web rang the bell");
+}
+
+#[tokio::test]
 async fn a_busy_agent_shows_nothing() {
     let s = setup();
     let agent = register(&s, "Claude");
@@ -171,10 +194,12 @@ async fn a_busy_agent_shows_nothing() {
 }
 
 #[tokio::test]
-async fn notifications_are_silenced_when_disabled() {
+async fn crash_alerts_off_silences_a_crash() {
     let s = setup();
     let web = register(&s, "Web");
-    s.enabled.store(false, Ordering::Relaxed);
+    s.projects
+        .update(&PROJECT, |p| p.crash_exit_alerts = false)
+        .unwrap();
     spawn_reactor(&s);
 
     s.bus.publish(crashed(web));
@@ -182,7 +207,134 @@ async fn notifications_are_silenced_when_disabled() {
 
     assert!(
         s.notifier.shown().is_empty(),
-        "a disabled notifier shows nothing",
+        "with crash & exit alerts off, a crash raises no toast",
+    );
+}
+
+#[tokio::test]
+async fn crash_alerts_are_scoped_to_the_crashing_process_project() {
+    let s = setup();
+    // Off for PROJECT, on (default) for OTHER — a crash in each must respect its own project.
+    let hushed = register_in(&s, PROJECT, "Hushed");
+    let loud = register_in(&s, OTHER, "Loud");
+    s.projects
+        .update(&PROJECT, |p| p.crash_exit_alerts = false)
+        .unwrap();
+    spawn_reactor(&s);
+
+    s.bus.publish(crashed(hushed));
+    s.bus.publish(crashed(loud));
+
+    let shown = s.notifier.wait_until_shown(1).await;
+    assert_eq!(
+        shown.len(),
+        1,
+        "only the other project's crash toasts; the hushed project's is suppressed",
+    );
+    assert_eq!(shown[0].title, "Loud crashed");
+}
+
+#[tokio::test]
+async fn terminal_alerts_off_silences_a_bell() {
+    let s = setup();
+    let web = register(&s, "Web");
+    s.projects
+        .update(&PROJECT, |p| p.terminal_alerts = false)
+        .unwrap();
+    spawn_reactor(&s);
+
+    s.bus.publish(DomainEvent::TerminalBell { id: web });
+    yield_many().await;
+
+    assert!(
+        s.notifier.shown().is_empty(),
+        "with terminal alerts off, a bell raises no toast",
+    );
+}
+
+#[tokio::test]
+async fn terminal_alerts_off_silences_an_agent_asking_for_attention() {
+    let s = setup();
+    let agent = register(&s, "Claude");
+    s.projects
+        .update(&PROJECT, |p| p.terminal_alerts = false)
+        .unwrap();
+    spawn_reactor(&s);
+
+    // "Terminal alerts" gates both the bell and an agent asking for attention.
+    s.bus.publish(DomainEvent::AgentActivityChanged {
+        id: agent,
+        state: AgentActivity::Permission,
+    });
+    yield_many().await;
+
+    assert!(
+        s.notifier.shown().is_empty(),
+        "with terminal alerts off, an agent permission prompt raises no toast",
+    );
+}
+
+#[tokio::test]
+async fn a_per_command_terminal_override_wins_over_the_project_default() {
+    let s = setup();
+    let web = register(&s, "Web");
+    let api = register(&s, "Api");
+    // Project default on, but "Web" is individually silenced.
+    s.projects
+        .update(&PROJECT, |p| {
+            p.command_terminal_alerts.insert("Web".into(), false);
+        })
+        .unwrap();
+    spawn_reactor(&s);
+
+    s.bus.publish(DomainEvent::TerminalBell { id: web });
+    s.bus.publish(DomainEvent::TerminalBell { id: api });
+
+    let shown = s.notifier.wait_until_shown(1).await;
+    assert_eq!(
+        shown.len(),
+        1,
+        "the silenced command rings no toast; the other still does",
+    );
+    assert_eq!(shown[0].title, "Api rang the bell");
+}
+
+#[tokio::test]
+async fn a_per_command_terminal_override_can_re_enable_a_silenced_project() {
+    let s = setup();
+    let web = register(&s, "Web");
+    // Project default off, but "Web" is individually re-enabled — the override wins either way.
+    s.projects
+        .update(&PROJECT, |p| {
+            p.terminal_alerts = false;
+            p.command_terminal_alerts.insert("Web".into(), true);
+        })
+        .unwrap();
+    spawn_reactor(&s);
+
+    s.bus.publish(DomainEvent::TerminalBell { id: web });
+
+    let shown = s.notifier.wait_until_shown(1).await;
+    assert_eq!(shown[0].title, "Web rang the bell");
+}
+
+#[tokio::test]
+async fn the_global_master_switch_silences_everything() {
+    let s = setup();
+    let web = register(&s, "Web");
+    s.global
+        .update(&(), |g| g.notifications.enabled = false)
+        .unwrap();
+    spawn_reactor(&s);
+
+    // Off globally: neither a crash (crash/exit alerts on per project) nor a bell fires.
+    s.bus.publish(crashed(web));
+    s.bus.publish(DomainEvent::TerminalBell { id: web });
+    yield_many().await;
+
+    assert!(
+        s.notifier.shown().is_empty(),
+        "the global master switch off silences every toast",
     );
 }
 

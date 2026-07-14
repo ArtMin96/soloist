@@ -25,6 +25,7 @@ mod agents;
 mod appearance;
 mod hotkeys;
 mod integrations;
+mod notifications;
 mod project;
 mod sidebar;
 mod tools;
@@ -35,6 +36,7 @@ pub use appearance::{
 };
 pub use hotkeys::{Binding, HotkeyAction, HotkeyBindingView, HotkeyScope, Hotkeys};
 pub use integrations::Integrations;
+pub use notifications::Notifications;
 pub use project::ProjectSettings;
 pub use sidebar::{
     ProcessCpuThreshold, ProcessMemThreshold, ProjectCpuThreshold, ProjectMemThreshold, Sidebar,
@@ -140,6 +142,7 @@ pub struct Settings {
     pub agents: AgentSettings,
     pub tools: ToolDefaults,
     pub integrations: Integrations,
+    pub notifications: Notifications,
     pub mcp_tool_groups: McpToolGroups,
 }
 

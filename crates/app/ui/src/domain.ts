@@ -521,6 +521,13 @@ export interface Integrations {
   http_api_enabled: boolean;
 }
 
+// The Notifications settings — the master on/off for every desktop toast. Off silences
+// notifications everywhere; the per-project crash/exit and terminal-alert switches refine what an
+// enabled reactor shows. Mirrors soloist_core::Notifications.
+export interface Notifications {
+  enabled: boolean;
+}
+
 // A toggleable MCP feature-tool group (mirrors core::McpFeatureGroup). Core groups are always
 // served and are not represented here.
 export type McpFeatureGroup = "scratchpads" | "todos" | "timers" | "key_value" | "prompt_templates";

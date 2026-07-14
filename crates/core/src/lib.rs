@@ -101,7 +101,7 @@ pub use projects::{
 pub use settings::{
     AgentSettings, Appearance, Binding, FontScale, FontWeight, HotkeyAction, HotkeyBindingView,
     HotkeyScope, Hotkeys, Integrations, LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups,
-    NoopSettingsRepo, ProcessCpuThreshold, ProcessMemThreshold, ProjectCpuThreshold,
+    NoopSettingsRepo, Notifications, ProcessCpuThreshold, ProcessMemThreshold, ProjectCpuThreshold,
     ProjectMemThreshold, ProjectSettings, Settings, SettingsRepo, SettingsStore, Sidebar,
     TerminalAppearance, Theme, ToolDefaults,
 };

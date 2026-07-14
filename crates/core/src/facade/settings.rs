@@ -11,7 +11,7 @@ use super::Facade;
 use crate::ports::StoreError;
 use crate::settings::{
     AgentSettings, Appearance, Binding, HotkeyAction, HotkeyBindingView, Integrations,
-    McpFeatureGroup, McpToolGroups, Sidebar, ToolDefaults,
+    McpFeatureGroup, McpToolGroups, Notifications, Sidebar, ToolDefaults,
 };
 
 impl Facade {
@@ -125,6 +125,27 @@ impl Facade {
             .settings
             .update(&(), |s| s.integrations = integrations)?
             .integrations)
+    }
+
+    /// The Notifications settings — the master on/off the notification reactor consults before any
+    /// toast. Off silences notifications everywhere; the per-project crash/exit and terminal-alert
+    /// switches ([`Self::project_settings`]) refine what an enabled reactor shows. Absent settings
+    /// read as the documented default (on).
+    pub fn notification_settings(&self) -> Result<Notifications, StoreError> {
+        Ok(self.settings.get(&())?.notifications)
+    }
+
+    /// Replaces the Notifications sub-document and persists it (auto-save), returning the stored
+    /// value. The reactor reads the same durable record, so the master switch takes effect on the
+    /// next event without a restart.
+    pub fn set_notification_settings(
+        &self,
+        notifications: Notifications,
+    ) -> Result<Notifications, StoreError> {
+        Ok(self
+            .settings
+            .update(&(), |s| s.notifications = notifications)?
+            .notifications)
     }
 
     /// The MCP feature-group enablement — the read the MCP server consults to decide which

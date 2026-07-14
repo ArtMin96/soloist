@@ -5,6 +5,7 @@ import { AgentsPanel } from "@/components/settings/AgentsPanel";
 import { AppearancePanel } from "@/components/settings/AppearancePanel";
 import { HotkeysPanel } from "@/components/settings/HotkeysPanel";
 import { IntegrationsPanel } from "@/components/settings/IntegrationsPanel";
+import { NotificationsPanel } from "@/components/settings/NotificationsPanel";
 import { PlaceholderPanel } from "@/components/settings/PlaceholderPanel";
 import { SettingsTabRail } from "@/components/settings/SettingsTabRail";
 import { SidebarPanel } from "@/components/settings/SidebarPanel";
@@ -27,6 +28,7 @@ const PANELS: Partial<Record<SettingsTabId, ComponentType>> = {
   agents: AgentsPanel,
   hotkeys: HotkeysPanel,
   integrations: IntegrationsPanel,
+  notifications: NotificationsPanel,
   sidebar: SidebarPanel,
   tools: ToolsPanel,
 };

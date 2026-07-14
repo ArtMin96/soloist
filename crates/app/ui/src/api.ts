@@ -20,6 +20,7 @@ import type {
   McpFeatureGroup,
   McpSetupInfo,
   McpToolGroups,
+  Notifications,
   OrchestrationSnapshot,
   ProcessSpec,
   ProcessView,
@@ -334,6 +335,14 @@ export function integrationSettings(): Promise<Integrations> {
 
 export function setIntegrationSettings(integrations: Integrations): Promise<Integrations> {
   return invoke<Integrations>("set_integration_settings", { integrations });
+}
+
+export function notificationSettings(): Promise<Notifications> {
+  return invoke<Notifications>("notification_settings");
+}
+
+export function setNotificationSettings(notifications: Notifications): Promise<Notifications> {
+  return invoke<Notifications>("set_notification_settings", { notifications });
 }
 
 export function mcpToolGroups(): Promise<McpToolGroups> {

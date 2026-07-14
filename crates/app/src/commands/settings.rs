@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use soloist_core::{
     AgentSettings, Appearance, Binding, Facade, HotkeyAction, HotkeyBindingView, Integrations,
-    McpFeatureGroup, McpToolGroups, Sidebar, ToolDefaults,
+    McpFeatureGroup, McpToolGroups, Notifications, Sidebar, ToolDefaults,
 };
 use tauri::State;
 
@@ -143,6 +143,27 @@ pub async fn set_integration_settings(
 ) -> Result<Integrations, String> {
     facade
         .set_integration_settings(integrations)
+        .map_err(|err| err.to_string())
+}
+
+/// The Notifications settings — the master on/off for every desktop toast.
+#[tauri::command]
+pub async fn notification_settings(
+    facade: State<'_, Arc<Facade>>,
+) -> Result<Notifications, String> {
+    facade
+        .notification_settings()
+        .map_err(|err| err.to_string())
+}
+
+/// Replaces the Notifications sub-document (auto-save), returning the stored value.
+#[tauri::command]
+pub async fn set_notification_settings(
+    notifications: Notifications,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<Notifications, String> {
+    facade
+        .set_notification_settings(notifications)
         .map_err(|err| err.to_string())
 }
 
