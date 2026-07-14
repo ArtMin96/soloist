@@ -27,6 +27,44 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Stability & security audit — ticket 05 `needs-human-verify` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `a95de69`, docs commit follows).** PRD-05 (P1: a
+  cluster of settings persisted + displayed but had no consumer — a false-affordance surface).
+  **Three clusters, per the recorded owner decisions:** (1) **Summarizer opt-in — removed end to
+  end** (acceptance demands *nothing persisted is ignored*, so hiding the UI alone would leave the
+  persisted doc a false affordance): dropped the `AgentSettings` doc, the `agents` field on
+  `Settings`, the facade getter/setter, both Tauri commands, and the UI/store/api/domain wiring; the
+  Agents tab keeps the read-only tool registry; the empty `Summarizer` later-phase port stub stays
+  (E6 remains `later`/OFF). (2) **Sidebar — implemented filter + process thresholds, removed the 5
+  project-header controls**: the name filter (pure `filterSidebar` helper, gated on
+  `show_filter_input`) and the per-process CPU/memory thresholds (`ProcessMeta` hides a read-out
+  below its mapped floor) now take effect; the two project thresholds + three open-in-external-app
+  toggles gated displays/actions that don't exist and were removed (the "or remove" branch),
+  dropping `Project{Cpu,Mem}Threshold` too. (3) **MCP/HTTP master toggles — LIVE teardown/respawn**:
+  new composition-root `integration_servers` module (`ToggleableServer` + `IntegrationServers`) owns
+  each server's task + `CancellationToken`; the persisted `Integrations` is applied at boot (a
+  disabled server never binds) and on every `set_integration_settings` (live start/stop, no restart)
+  — HTTP drains in-flight via axum graceful shutdown, MCP stops accepting and unlinks its socket
+  while accepted connections drain; server lifecycle lives only in the composition root, the toggle
+  command still routes through the one core setter. **Tests (red-before/green-after):** core
+  settings round-trip minus the removed docs; store fully-populated round-trip; UI AgentsPanel
+  (no summarizer), SidebarPanel (process thresholds + filter present, project controls gone),
+  ProcessMeta floor gating, Sidebar name filter, `filterSidebar`; httpapi `serve_on` graceful
+  shutdown frees the port; app-crate `integration_servers` real-socket lifecycle
+  (disabled-never-binds / enable-disable-frees-port / respawn / idempotent / apply-routing both
+  directions). **Gates: `just lint` exit 0** (clippy `-D warnings`, fmt, tsc, eslint, prettier,
+  dep-direction; file-size advisory only), **`just test` exit 0 — Rust workspace green, UI 306
+  across 61 files.** `/code-review` (Standards + Spec) ran clean after two comment-hygiene fixes
+  (removed two `Phase-7` tags per §8; "header/badge" enum docs → "row/read-out"); Spec confirmed the
+  removals are faithful to "implement OR remove" and no persisted setting is still ignored.
+  **`needs-human-verify`** because the gating *logic* is fully unit-tested but three things need a
+  live `just dev` app: the visual/UX of the new sidebar filter + reworked Sidebar tab; the **MCP**
+  server's real live teardown (the headless test uses a fake TCP server, not the AppHandle-driven
+  `ipc_server::serve`); and the HTTP toggle end to end through the command — the ticket Comments list
+  the exact walk. **Closes the I7g persist-only-sidebar gap** (each remaining sidebar control now has
+  a live, tested consumer; the decorative ones are gone). **Next frontier ticket: 06** (local read
+  authorization; `ready-for-agent`, `Blocked by: none`). PRD-07 remains `Blocked by: 02`.
+
 - **Stability & security audit — ticket 04 `needs-human-verify` (2026-07-14; branch
   `fix/stability-audit-2026-07`; impl commit `7e5807c`, docs commit follows).** PRD-04 (P1 wiring:
   two per-project notification switches were decorative and the promised terminal-bell alert had no

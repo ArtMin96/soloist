@@ -1,6 +1,6 @@
 # PRD-05 — No decorative settings: every control either works or doesn't exist
 
-Status: ready-for-agent
+Status: needs-human-verify
 Blocked by: none
 
 - **Severity:** P1 (multiple user-visible controls persist but change nothing — erodes trust in
@@ -71,3 +71,59 @@ splitting the MCP/HTTP live-toggle into its own session.
 
 ## Out of scope
 Building the summarization subsystem (E6, `later`) — the UI is only hidden/disabled here.
+
+## Comments
+
+**Done (impl commit `a95de69`, branch `fix/stability-audit-2026-07`).** All three clusters landed
+per the owner decisions.
+
+- **Summarizer — removed end to end.** Acceptance says *nothing persisted is ignored*, so hiding
+  the UI alone would leave the persisted `AgentSettings` doc a false affordance; removed the doc,
+  facade `agent_settings`/`set_agent_settings`, both Tauri commands, and the UI/store/api/domain
+  wiring. The Agents tab keeps the read-only tool registry. `Settings` is `#[serde(default)]`, so an
+  old record with an `agents` key still deserializes. The empty `Summarizer` later-phase port stub
+  was left (E6 stays `later`/OFF).
+- **Sidebar — implemented filter + process thresholds; removed the 5 project-header controls.** The
+  name filter (pure `filterSidebar` helper, gated on `show_filter_input`) and the process CPU/memory
+  thresholds (`ProcessMeta` hides a read-out below its mapped floor) now take effect. The two project
+  thresholds gated a project-header metrics display that does not exist, and the three
+  open-in-external-app toggles need a scoped opener capability that is its own feature — so all five
+  were removed (the "or remove the control" branch). `Project{Cpu,Mem}Threshold` enums dropped too.
+- **MCP/HTTP master toggles — LIVE teardown/respawn.** New composition-root `integration_servers`
+  module (`ToggleableServer` + `IntegrationServers`) owns each server's task + `CancellationToken`.
+  Persisted `Integrations` is applied at boot (a disabled server never binds) and on every
+  `set_integration_settings` (live start/stop, no restart). HTTP drains in-flight via axum graceful
+  shutdown; MCP stops accepting and unlinks its socket while accepted connections drain on their own.
+
+**Gates:** `just lint` exit 0 (clippy `-D warnings`, fmt, tsc, eslint, prettier, dep-direction);
+`just test` exit 0 — Rust workspace green, UI 306 across 61 files. `/code-review` (Standards + Spec)
+ran clean after two comment-hygiene fixes were folded in (removed two `Phase-7` tags per CLAUDE.md
+§8; corrected stale "header/badge" enum docs to "row/read-out"); Spec confirmed the removals are
+faithful to "implement OR remove" and that no persisted setting is still ignored.
+
+**Why `needs-human-verify`:** the gating *logic* is fully unit-tested (incl. HTTP `serve_on`
+graceful-shutdown over a real ephemeral port and the `ToggleableServer` real-socket
+lifecycle/respawn/routing), but three things need a live `just dev` app: the visual/UX of the new
+sidebar filter + reworked Sidebar tab; the **MCP** server's real live teardown (the headless test
+uses a fake TCP server, not the AppHandle-driven `ipc_server::serve`); and the HTTP toggle end to end
+through the command. **Walk to confirm:**
+
+1. **Summarizer gone** — Settings → Agents: only the read-only tool list + Detect; no
+   "Auto-summarization" / "Summarizer tool" / "Model".
+2. **Filter** — Settings → Sidebar → "Show filter input" ON adds a box atop the sidebar; typing a
+   process name narrows the tree (project name matches too); clearing restores all; toggling OFF
+   removes the box and shows everything.
+3. **Process thresholds** — Settings → Sidebar → Process rows: set CPU e.g. 60% / Memory e.g. 500 MB;
+   a running process below those hides its CPU/mem read-out in the row, one above shows it. "Never"
+   hides always, "Always" shows always. (Terminal-header read-out is unaffected — sidebar-only.)
+4. **Project controls gone** — Settings → Sidebar has no "Project headers" section.
+5. **MCP live toggle** — with the `soloist-mcp` sidecar / an MCP client connected, Settings →
+   Integrations → turn OFF "MCP server": a new MCP connection is refused (socket unlinked in the data
+   dir); turn ON → a new connection succeeds. No app restart.
+6. **HTTP live toggle** — `curl http://127.0.0.1:24678/health` → 200; turn OFF "HTTP API" → curl
+   refused; turn ON → 200 again (and `soloist status` follows).
+7. **Startup gate** — turn a toggle OFF, fully quit + relaunch: the disabled server never binds at
+   boot; the enabled one works.
+
+**PROGRESS.md I7g gap:** closed for the persist-only sidebar controls — each remaining control now has
+a live, tested consumer, and the decorative ones were removed.
