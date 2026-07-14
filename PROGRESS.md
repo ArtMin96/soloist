@@ -27,6 +27,20 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Stability & security audit — tickets 02/04/05/08 `done` (2026-07-15, owner-confirmed at
+  runtime).** The owner ran the `just dev` acceptance walks (fixture `~/soloist-verify`) and
+  confirmed all four working, so each flips `needs-human-verify` → `done`: **02** (empty
+  new-agent/process terminal pane no longer races — pane shows output on every launch, relaunch
+  keeps its size), **04** (notification toggles gate real toasts — crash, the new terminal-bell
+  path, and the persisted global master), **05** (no decorative settings — summarizer removed,
+  sidebar filter + process thresholds take effect, project-header controls gone, MCP/HTTP master
+  toggles do live socket/port teardown+respawn), **08** (SQLite off the runtime — project open via
+  picker/CLI stays responsive, coordination panels persist, smooth under a chatty process). This
+  clears the whole audit's human-verify queue. **Consequence: ticket 07 is now unblocked** — its
+  `Blocked by: 02` is satisfied, so **07 (reconciliation + actor launch races) is the sole
+  remaining open ticket and the next `/work-ticket` frontier.** All other audit tickets (01, 03,
+  06, 09, 10 + these four) are `done`.
+
 - **Stability & security audit — ticket 10 `done` (2026-07-14; branch
   `fix/stability-audit-2026-07`; impl commit `571af0b`, docs/ledger commit follows).** PRD-10 (P2
   tests: close the real coverage holes + prune the trivial tautologies). The audit's "most tests are

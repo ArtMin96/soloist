@@ -1,6 +1,6 @@
 # PRD-04 — Notification toggles must actually gate notifications (+ add the terminal-bell path)
 
-Status: needs-human-verify
+Status: done
 Blocked by: none
 
 - **Severity:** P1 (user-visible controls that do nothing; a promised feature — bell alerts — has
@@ -102,3 +102,5 @@ need a GUI walk this headless session can't do. The gating **logic** is fully un
    on → **"<name> rang the bell"** toast. (Same switch also gates an agent's permission prompt.)
 4. Global master **off** → neither of the above fires anywhere; **on** → they resume.
 5. Restart the app → the global master switch keeps its last value (persisted).
+
+**Owner-confirmed working at runtime 2026-07-15** (`just dev`, fixture `~/soloist-verify`). All walk steps passed → `Status: done`.

@@ -1,6 +1,6 @@
 # PRD-02 — Fix the empty terminal pane on a freshly-launched agent/process
 
-Status: needs-human-verify
+Status: done
 Blocked by: none
 
 - **Severity:** P1 (the owner's #1 daily symptom: "open a new agent, xterm shows nothing")
@@ -110,3 +110,5 @@ than showing an empty live pane. Confirmed with the ticket's intent (the race wi
 **Status: `needs-human-verify`** — the "live repro" acceptance (launch a real agent ~10× via
 `just dev` and confirm the pane shows output every time; and a relaunch keeps the pane's size) is a
 GUI walk this headless session cannot run. Implementation + unit tests are complete.
+
+**Owner-confirmed working at runtime 2026-07-15** (`just dev`, fixture `~/soloist-verify`). All walk steps passed → `Status: done`.

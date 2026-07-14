@@ -1,6 +1,6 @@
 # PRD-05 — No decorative settings: every control either works or doesn't exist
 
-Status: needs-human-verify
+Status: done
 Blocked by: none
 
 - **Severity:** P1 (multiple user-visible controls persist but change nothing — erodes trust in
@@ -127,3 +127,5 @@ through the command. **Walk to confirm:**
 
 **PROGRESS.md I7g gap:** closed for the persist-only sidebar controls — each remaining control now has
 a live, tested consumer, and the decorative ones were removed.
+
+**Owner-confirmed working at runtime 2026-07-15** (`just dev`, fixture `~/soloist-verify`). All walk steps passed → `Status: done`.

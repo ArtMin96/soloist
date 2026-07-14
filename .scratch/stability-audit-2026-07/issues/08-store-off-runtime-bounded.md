@@ -1,6 +1,6 @@
 # PRD-08 — Move SQLite off the async runtime + bound coordination payloads
 
-Status: needs-human-verify
+Status: done
 Blocked by: none
 
 - **Severity:** P2 (runtime-thread blocking under I/O stalls; unbounded DB growth from a
@@ -119,3 +119,5 @@ the ticket calls out that `load_project` **spawns actors** and needs a real-runt
 
 **Next frontier ticket: 09** (`ready-for-agent`, `Blocked by: none`) — working_dir/peer-uid/trust-hash/
 PATH/CLI hardening. (07 is still `Blocked by: 02`, which remains `needs-human-verify`; 10 is unblocked.)
+
+**Owner-confirmed working at runtime 2026-07-15** (`just dev`, fixture `~/soloist-verify`). All walk steps passed → `Status: done`.
