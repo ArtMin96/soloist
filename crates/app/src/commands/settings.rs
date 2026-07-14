@@ -9,12 +9,13 @@
 use std::sync::Arc;
 
 use soloist_core::{
-    AgentSettings, Appearance, Binding, Facade, HotkeyAction, HotkeyBindingView, Integrations,
-    McpFeatureGroup, McpToolGroups, Notifications, Sidebar, ToolDefaults,
+    Appearance, Binding, Facade, HotkeyAction, HotkeyBindingView, Integrations, McpFeatureGroup,
+    McpToolGroups, Notifications, Sidebar, ToolDefaults,
 };
 use tauri::State;
 
 use crate::companion_bins::{self, is_executable_file, MCP_HELPER_BIN};
+use crate::integration_servers::IntegrationServers;
 
 /// The Appearance settings — theme and terminal typography.
 #[tauri::command]
@@ -95,23 +96,6 @@ pub async fn reset_all_hotkeys(
     facade.reset_all_hotkeys().map_err(|err| err.to_string())
 }
 
-/// The Agents settings — the auto-summarization opt-in.
-#[tauri::command]
-pub async fn agent_settings(facade: State<'_, Arc<Facade>>) -> Result<AgentSettings, String> {
-    facade.agent_settings().map_err(|err| err.to_string())
-}
-
-/// Replaces the Agents sub-document (auto-save), returning the stored value.
-#[tauri::command]
-pub async fn set_agent_settings(
-    agents: AgentSettings,
-    facade: State<'_, Arc<Facade>>,
-) -> Result<AgentSettings, String> {
-    facade
-        .set_agent_settings(agents)
-        .map_err(|err| err.to_string())
-}
-
 /// The Tools settings — the default editor and terminal.
 #[tauri::command]
 pub async fn tool_defaults(facade: State<'_, Arc<Facade>>) -> Result<ToolDefaults, String> {
@@ -135,15 +119,20 @@ pub async fn integration_settings(facade: State<'_, Arc<Facade>>) -> Result<Inte
     facade.integration_settings().map_err(|err| err.to_string())
 }
 
-/// Replaces the Integrations sub-document (auto-save), returning the stored value.
+/// Replaces the Integrations sub-document (auto-save) and applies it to the live sockets, so a
+/// change to either master toggle starts or stops its server immediately — no app restart —
+/// then returns the stored value.
 #[tauri::command]
 pub async fn set_integration_settings(
     integrations: Integrations,
     facade: State<'_, Arc<Facade>>,
+    servers: State<'_, Arc<IntegrationServers>>,
 ) -> Result<Integrations, String> {
-    facade
+    let stored = facade
         .set_integration_settings(integrations)
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?;
+    servers.apply(stored).await;
+    Ok(stored)
 }
 
 /// The Notifications settings — the master on/off for every desktop toast.

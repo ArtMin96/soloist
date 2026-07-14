@@ -6,6 +6,7 @@
 export { useProjects, type ProjectStore } from "@/store/projects/useProjects";
 export {
   groupByProject,
+  filterSidebar,
   runningCount,
   type ProjectTree,
   type RunningCount,

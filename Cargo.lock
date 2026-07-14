@@ -5019,6 +5019,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tempfile",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

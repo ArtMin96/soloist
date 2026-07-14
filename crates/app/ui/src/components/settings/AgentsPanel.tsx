@@ -1,44 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
-import { NullableSelect } from "@/components/settings/controls/NullableSelect";
 import { SettingRow } from "@/components/settings/controls/SettingRow";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { toolInvocation } from "@/lib/agents";
-import type { Option } from "@/lib/appearance";
-import { useAgentSettings } from "@/store/useAgentSettings";
 import { useAgentTools } from "@/store/useAgentTools";
 
-// The Agents tab: the read-only registry of detectable agent CLIs (Phase-7), and the
-// auto-summarization opt-in (tool + model, OFF by default — the locked decision; the core never
-// hard-depends on an LLM). Pure presentation over the projected read models.
+// The Agents tab: the read-only registry of detectable agent CLIs Soloist can launch. Pure
+// presentation over the projected read model.
 export function AgentsPanel() {
   const { tools, detect } = useAgentTools();
-  const { value: settings, update } = useAgentSettings();
-
-  // The model commits on blur / Enter, not per keystroke; local state tracks the field and is
-  // re-synced whenever the stored value changes.
-  const [model, setModel] = useState(settings.summarizer_model ?? "");
-  useEffect(() => setModel(settings.summarizer_model ?? ""), [settings.summarizer_model]);
-
-  const commitModel = useCallback(() => {
-    const trimmed = model.trim();
-    const next = trimmed === "" ? null : trimmed;
-    if (next !== settings.summarizer_model) update({ ...settings, summarizer_model: next });
-  }, [model, settings, update]);
-
-  // Off (the null option) plus each configured tool; a stored tool absent from the detected list
-  // is kept as an option so the current selection always renders.
-  const toolOptions: Option<string | null>[] = [
-    { value: null, label: "Off" },
-    ...tools.map((detected) => ({ value: detected.tool.name, label: detected.tool.name })),
-  ];
-  if (settings.summarizer_tool && !tools.some((d) => d.tool.name === settings.summarizer_tool)) {
-    toolOptions.push({ value: settings.summarizer_tool, label: settings.summarizer_tool });
-  }
-
-  const summarizerOff = settings.summarizer_tool === null;
 
   return (
     <div className="flex flex-col">
@@ -63,35 +33,6 @@ export function AgentsPanel() {
           <Button variant="outline" size="sm" onClick={detect}>
             Detect
           </Button>
-        </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection
-        title="Auto-summarization"
-        description="Write a one-line summary when an agent or terminal goes idle. Off by default; choose a tool to opt in."
-      >
-        <SettingRow label="Summarizer tool" description="The agent CLI that writes the summary.">
-          <NullableSelect<string>
-            value={settings.summarizer_tool}
-            options={toolOptions}
-            onValueChange={(summarizer_tool) => update({ ...settings, summarizer_tool })}
-            ariaLabel="Summarizer tool"
-            className="w-44"
-          />
-        </SettingRow>
-        <SettingRow label="Model" description="Passed to the tool via its model flag (e.g. haiku).">
-          <Input
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-            onBlur={commitModel}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") event.currentTarget.blur();
-            }}
-            disabled={summarizerOff}
-            placeholder="default"
-            aria-label="Summarizer model"
-            className="w-44"
-          />
         </SettingRow>
       </SettingsSection>
     </div>

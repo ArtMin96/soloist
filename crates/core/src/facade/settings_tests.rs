@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::*;
 use crate::ports::{CorePorts, TokioClock};
 use crate::settings::{
-    AgentSettings, Appearance, Binding, HotkeyAction, Integrations, McpFeatureGroup, Notifications,
+    Appearance, Binding, HotkeyAction, Integrations, McpFeatureGroup, Notifications,
     ProcessCpuThreshold, Sidebar, TerminalAppearance, Theme, ToolDefaults,
 };
 use crate::testing::{FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo};
@@ -162,15 +162,6 @@ fn each_tab_round_trips_through_the_facade_independently() {
     );
     assert_eq!(facade.sidebar_settings().unwrap(), sidebar);
 
-    // Agents (summarization opt-in; off by default).
-    assert_eq!(facade.agent_settings().unwrap(), AgentSettings::default());
-    let agents = AgentSettings {
-        summarizer_tool: Some("claude".into()),
-        summarizer_model: Some("haiku".into()),
-    };
-    assert_eq!(facade.set_agent_settings(agents.clone()).unwrap(), agents);
-    assert_eq!(facade.agent_settings().unwrap(), agents);
-
     // Tools.
     let tools = ToolDefaults {
         default_editor: Some("zed".into()),
@@ -208,6 +199,5 @@ fn each_tab_round_trips_through_the_facade_independently() {
 
     // Every earlier tab survived the later writes (independent sub-documents, one record).
     assert_eq!(facade.sidebar_settings().unwrap(), sidebar);
-    assert_eq!(facade.agent_settings().unwrap(), agents);
     assert_eq!(facade.integration_settings().unwrap(), integrations);
 }

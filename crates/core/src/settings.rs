@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ports::StoreError;
 
-mod agents;
 mod appearance;
 mod hotkeys;
 mod integrations;
@@ -30,7 +29,6 @@ mod project;
 mod sidebar;
 mod tools;
 
-pub use agents::AgentSettings;
 pub use appearance::{
     Appearance, FontScale, FontWeight, LetterSpacing, LineHeight, TerminalAppearance, Theme,
 };
@@ -38,9 +36,7 @@ pub use hotkeys::{Binding, HotkeyAction, HotkeyBindingView, HotkeyScope, Hotkeys
 pub use integrations::Integrations;
 pub use notifications::Notifications;
 pub use project::ProjectSettings;
-pub use sidebar::{
-    ProcessCpuThreshold, ProcessMemThreshold, ProjectCpuThreshold, ProjectMemThreshold, Sidebar,
-};
+pub use sidebar::{ProcessCpuThreshold, ProcessMemThreshold, Sidebar};
 pub use tools::ToolDefaults;
 
 /// A toggleable MCP feature-tool group. The core groups (Project, Process, Output, Bulk,
@@ -139,7 +135,6 @@ pub struct Settings {
     pub appearance: Appearance,
     pub sidebar: Sidebar,
     pub hotkeys: Hotkeys,
-    pub agents: AgentSettings,
     pub tools: ToolDefaults,
     pub integrations: Integrations,
     pub notifications: Notifications,

@@ -99,11 +99,10 @@ pub use projects::{
     Visibility,
 };
 pub use settings::{
-    AgentSettings, Appearance, Binding, FontScale, FontWeight, HotkeyAction, HotkeyBindingView,
-    HotkeyScope, Hotkeys, Integrations, LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups,
-    NoopSettingsRepo, Notifications, ProcessCpuThreshold, ProcessMemThreshold, ProjectCpuThreshold,
-    ProjectMemThreshold, ProjectSettings, Settings, SettingsRepo, SettingsStore, Sidebar,
-    TerminalAppearance, Theme, ToolDefaults,
+    Appearance, Binding, FontScale, FontWeight, HotkeyAction, HotkeyBindingView, HotkeyScope,
+    Hotkeys, Integrations, LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups,
+    NoopSettingsRepo, Notifications, ProcessCpuThreshold, ProcessMemThreshold, ProjectSettings,
+    Settings, SettingsRepo, SettingsStore, Sidebar, TerminalAppearance, Theme, ToolDefaults,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};

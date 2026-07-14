@@ -7,6 +7,7 @@
 
 mod commands;
 mod companion_bins;
+mod integration_servers;
 #[cfg(feature = "mcp")]
 mod ipc_server;
 mod notifier;
@@ -227,6 +228,8 @@ pub fn run() {
             // core-only adapter that cannot see the AppHandle — can share the one core; the
             // commands read it back from managed state.
             let facade = Arc::new(build_facade(app.handle().clone()));
+            // A clone for the integration servers' boot apply (reads the persisted toggles).
+            let integration_boot = Arc::clone(&facade);
             #[cfg(feature = "http")]
             let http_facade = Arc::clone(&facade);
             app.manage(facade);
@@ -284,26 +287,60 @@ pub fn run() {
             // open. It reloads a running watched command when a matching file changes via the
             // notify watcher wired in `build_facade` (weakly held, ends when the bus closes).
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().file_watch_loop());
-            // Start the local IPC server so the soloist-mcp sidecar can drive the core over
-            // a Unix socket. Compiled in only under the `mcp` feature; it degrades to a
-            // logged no-op if the socket cannot be bound, never blocking app launch.
+            // Assemble the toggleable integration servers, each present only when its adapter is
+            // compiled in. The composition root owns each server's task + cancellation handle so a
+            // runtime toggle of the Integrations setting starts or stops it live, no app restart —
+            // and a server the setting has disabled never binds at boot.
+            //   - MCP IPC (`mcp`): the Unix socket the soloist-mcp sidecar drives the core over.
+            //   - Loopback HTTP (`http`): 127.0.0.1, driven identically to the UI and MCP; its
+            //     focus callback raises the desktop window for `POST /focus`, the one effect the
+            //     core-only server cannot perform itself.
+            // Each degrades to a logged no-op if its socket/port cannot be bound, never blocking
+            // launch — that resilience lives in the serve functions.
             #[cfg(feature = "mcp")]
-            tauri::async_runtime::spawn(ipc_server::serve(app.handle().clone()));
-            // Start the loopback HTTP API so a shell or launcher can drive the core over
-            // 127.0.0.1, identically to the UI and MCP. Compiled in only under the `http`
-            // feature; it degrades to a logged no-op if no loopback port can be bound,
-            // never blocking app launch. The focus callback raises the desktop window for
-            // `POST /focus` — the one effect the core-only server cannot perform itself.
+            let mcp_server = {
+                let handle = app.handle().clone();
+                Some(integration_servers::ToggleableServer::new(
+                    "MCP IPC server",
+                    move |shutdown| ipc_server::serve(handle.clone(), shutdown),
+                ))
+            };
+            #[cfg(not(feature = "mcp"))]
+            let mcp_server: Option<integration_servers::ToggleableServer> = None;
+
             #[cfg(feature = "http")]
-            {
-                let window_handle = app.handle().clone();
-                let focus: soloist_httpapi::FocusFn = Arc::new(move || {
-                    if let Some(window) = window_handle.get_webview_window("main") {
-                        let _ = window.set_focus();
-                    }
-                });
-                tauri::async_runtime::spawn(soloist_httpapi::serve(http_facade, focus));
-            }
+            let http_server =
+                {
+                    let window_handle = app.handle().clone();
+                    let focus: soloist_httpapi::FocusFn = Arc::new(move || {
+                        if let Some(window) = window_handle.get_webview_window("main") {
+                            let _ = window.set_focus();
+                        }
+                    });
+                    Some(integration_servers::ToggleableServer::new(
+                        "HTTP API server",
+                        move |shutdown| {
+                            let facade = Arc::clone(&http_facade);
+                            let focus = Arc::clone(&focus);
+                            soloist_httpapi::serve(facade, focus, async move {
+                                shutdown.cancelled().await
+                            })
+                        },
+                    ))
+                };
+            #[cfg(not(feature = "http"))]
+            let http_server: Option<integration_servers::ToggleableServer> = None;
+
+            let integration_servers = Arc::new(integration_servers::IntegrationServers::new(
+                mcp_server,
+                http_server,
+            ));
+            app.manage(Arc::clone(&integration_servers));
+            // Apply the persisted Integrations at boot so a disabled server never starts.
+            tauri::async_runtime::spawn(async move {
+                let integrations = integration_boot.integration_settings().unwrap_or_default();
+                integration_servers.apply(integrations).await;
+            });
             // Install the system tray (status icon + show, launch-on-login, update check,
             // quit). A failure here is non-fatal — the app runs without a tray.
             if let Err(err) = tray::install(app.handle()) {
@@ -345,8 +382,6 @@ pub fn run() {
             commands::disable_hotkey,
             commands::reset_hotkey,
             commands::reset_all_hotkeys,
-            commands::agent_settings,
-            commands::set_agent_settings,
             commands::tool_defaults,
             commands::set_tool_defaults,
             commands::integration_settings,

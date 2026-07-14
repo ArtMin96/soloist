@@ -1,8 +1,7 @@
 use soloist_core::{
-    AgentSettings, Appearance, Binding, FontScale, FontWeight, HotkeyAction, Hotkeys, Integrations,
-    LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups, Notifications, ProcessCpuThreshold,
-    ProcessMemThreshold, ProjectCpuThreshold, ProjectMemThreshold, Settings, SettingsRepo, Sidebar,
-    TerminalAppearance, Theme, ToolDefaults,
+    Appearance, Binding, FontScale, FontWeight, HotkeyAction, Hotkeys, Integrations, LetterSpacing,
+    LineHeight, McpFeatureGroup, McpToolGroups, Notifications, ProcessCpuThreshold,
+    ProcessMemThreshold, Settings, SettingsRepo, Sidebar, TerminalAppearance, Theme, ToolDefaults,
 };
 use tempfile::tempdir;
 
@@ -46,20 +45,11 @@ fn fully_populated() -> Settings {
         sidebar: Sidebar {
             show_filter_input: false,
             hide_empty_sections: true,
-            project_cpu_threshold: ProjectCpuThreshold::Pct50,
-            project_mem_threshold: ProjectMemThreshold::Gb2,
-            project_open_in_editor: false,
-            project_open_in_terminal: false,
-            project_reveal_in_file_manager: false,
             process_cpu_threshold: ProcessCpuThreshold::Pct60,
             process_mem_threshold: ProcessMemThreshold::Mb500,
             show_settings_footer: false,
         },
         hotkeys,
-        agents: AgentSettings {
-            summarizer_tool: Some("claude".into()),
-            summarizer_model: Some("haiku".into()),
-        },
         tools: ToolDefaults {
             default_editor: Some("zed".into()),
             default_terminal: Some("kitty".into()),

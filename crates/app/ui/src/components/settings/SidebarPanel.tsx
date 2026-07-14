@@ -2,40 +2,23 @@ import { SettingRow } from "@/components/settings/controls/SettingRow";
 import { SettingSelect } from "@/components/settings/controls/SettingSelect";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { Switch } from "@/components/ui/switch";
-import {
-  PROCESS_CPU_OPTIONS,
-  PROCESS_MEM_OPTIONS,
-  PROJECT_CPU_OPTIONS,
-  PROJECT_MEM_OPTIONS,
-} from "@/lib/sidebar";
+import { PROCESS_CPU_OPTIONS, PROCESS_MEM_OPTIONS } from "@/lib/sidebar";
 import { useSidebarSettings } from "@/store/sidebarSettingsContext";
-import type {
-  ProcessCpuThreshold,
-  ProcessMemThreshold,
-  ProjectCpuThreshold,
-  ProjectMemThreshold,
-  Sidebar,
-} from "@/domain";
+import type { ProcessCpuThreshold, ProcessMemThreshold, Sidebar } from "@/domain";
 
-// The Sidebar tab: what the always-rendered process tree shows. "Hide empty sections" and "Show
-// settings footer" drive the live sidebar projection today; the filter input, header usage
-// badges, and project hover actions are later sidebar features, so their settings are saved and
-// apply once those land (the note below). Pure presentation over the live Sidebar settings.
+// The Sidebar tab: what the always-rendered process tree shows. Every control here drives the live
+// sidebar — the filter input, empty-section hiding, the per-process usage thresholds, and the
+// settings footer. Pure presentation over the live Sidebar settings.
 export function SidebarPanel() {
   const { sidebar, setSidebar } = useSidebarSettings();
   const set = (patch: Partial<Sidebar>) => setSidebar({ ...sidebar, ...patch });
 
   return (
     <div className="flex flex-col">
-      <p className="mb-5 max-w-[54ch] text-xs text-muted-foreground">
-        Filtering, header usage badges, and the project hover actions are coming in a later update —
-        your choices below are saved and apply once they land.
-      </p>
-
       <SettingsSection title="Filter">
         <SettingRow
           label="Show filter input"
-          description="Show a filter box at the top of the sidebar."
+          description="Show a box at the top of the sidebar for filtering processes by name."
         >
           <Switch
             checked={sidebar.show_filter_input}
@@ -58,61 +41,10 @@ export function SidebarPanel() {
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection title="Project headers">
+      <SettingsSection title="Process rows">
         <SettingRow
           label="CPU usage"
-          description="Show the CPU badge once usage reaches this level."
-        >
-          <SettingSelect
-            value={sidebar.project_cpu_threshold}
-            options={PROJECT_CPU_OPTIONS}
-            onValueChange={(value) => set({ project_cpu_threshold: value as ProjectCpuThreshold })}
-            ariaLabel="Project CPU usage threshold"
-            className="w-28"
-          />
-        </SettingRow>
-        <SettingRow
-          label="Memory usage"
-          description="Show the memory badge once usage reaches this level."
-        >
-          <SettingSelect
-            value={sidebar.project_mem_threshold}
-            options={PROJECT_MEM_OPTIONS}
-            onValueChange={(value) => set({ project_mem_threshold: value as ProjectMemThreshold })}
-            ariaLabel="Project memory usage threshold"
-            className="w-28"
-          />
-        </SettingRow>
-        <SettingRow label="Open in editor" description="Offer the open-in-editor hover action.">
-          <Switch
-            checked={sidebar.project_open_in_editor}
-            onCheckedChange={(value) => set({ project_open_in_editor: value })}
-            aria-label="Open in editor"
-          />
-        </SettingRow>
-        <SettingRow label="Open in terminal" description="Offer the open-in-terminal hover action.">
-          <Switch
-            checked={sidebar.project_open_in_terminal}
-            onCheckedChange={(value) => set({ project_open_in_terminal: value })}
-            aria-label="Open in terminal"
-          />
-        </SettingRow>
-        <SettingRow
-          label="Show in file manager"
-          description="Offer the show-in-file-manager hover action."
-        >
-          <Switch
-            checked={sidebar.project_reveal_in_file_manager}
-            onCheckedChange={(value) => set({ project_reveal_in_file_manager: value })}
-            aria-label="Show in file manager"
-          />
-        </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection title="Process headers">
-        <SettingRow
-          label="CPU usage"
-          description="Show the CPU badge once usage reaches this level."
+          description="Show a row's CPU read-out once usage reaches this level."
         >
           <SettingSelect
             value={sidebar.process_cpu_threshold}
@@ -124,7 +56,7 @@ export function SidebarPanel() {
         </SettingRow>
         <SettingRow
           label="Memory usage"
-          description="Show the memory badge once usage reaches this level."
+          description="Show a row's memory read-out once usage reaches this level."
         >
           <SettingSelect
             value={sidebar.process_mem_threshold}

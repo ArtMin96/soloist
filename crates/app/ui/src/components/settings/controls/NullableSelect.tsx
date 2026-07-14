@@ -3,7 +3,7 @@ import type { Option } from "@/lib/appearance";
 
 // Radix Select cannot use null/empty as an item value, so a nullable choice rides a private
 // sentinel mapped to/from null here — the one place that mapping lives, instead of each panel
-// (font family, default editor/terminal, summarizer model) re-inventing its own sentinel.
+// (font family, default editor/terminal) re-inventing its own sentinel.
 const NULL_SENTINEL = "__null__";
 
 export function NullableSelect<T extends string>({

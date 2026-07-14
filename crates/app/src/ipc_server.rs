@@ -18,6 +18,7 @@ use soloist_ipc::{
 };
 use tauri::{AppHandle, Manager};
 use tokio::net::{UnixListener, UnixStream};
+use tokio_util::sync::CancellationToken;
 
 /// Backoff after a transient `accept` failure, so a persistent condition (e.g. FD exhaustion)
 /// cannot hot-loop the accept task while it keeps serving.
@@ -34,10 +35,12 @@ const DEFAULT_PORT_WAIT: Duration = Duration::from_secs(10);
 /// connection with a huge value.
 const MAX_PORT_WAIT: Duration = Duration::from_secs(25);
 
-/// Binds the IPC socket and serves connections until the app shuts down. Degrades to a
-/// logged no-op if the socket cannot be resolved or bound, so a packaging or permissions
-/// problem disables MCP rather than taking down the app (graceful degradation).
-pub async fn serve(app: AppHandle) {
+/// Binds the IPC socket and serves connections until `shutdown` fires (a live disable of the
+/// integration, or app shutdown), then unlinks the socket so a disabled server leaves nothing to
+/// connect to; already-accepted connections keep their own descriptors and drain on their own.
+/// Degrades to a logged no-op if the socket cannot be resolved or bound, so a packaging or
+/// permissions problem disables MCP rather than taking down the app (graceful degradation).
+pub async fn serve(app: AppHandle, shutdown: CancellationToken) {
     // Resolves the socket path and creates its owner-only data directory in one step — the
     // single resolution the store shares, so the socket and database keep one private home.
     let path = match ensure_socket_path() {
@@ -61,7 +64,11 @@ pub async fn serve(app: AppHandle) {
     };
     let mut consecutive_errors: u32 = 0;
     loop {
-        match listener.accept().await {
+        let accepted = tokio::select! {
+            _ = shutdown.cancelled() => break,
+            accepted = listener.accept() => accepted,
+        };
+        match accepted {
             Ok((stream, _addr)) => {
                 consecutive_errors = 0;
                 tauri::async_runtime::spawn(handle_connection(app.clone(), stream));
@@ -94,6 +101,9 @@ pub async fn serve(app: AppHandle) {
             }
         }
     }
+    // Shutdown requested: unlink the socket so a re-enabled server can rebind the same path and,
+    // meanwhile, no client can connect to a server that has stopped accepting.
+    let _ = std::fs::remove_file(&path);
 }
 
 /// Whether an `accept` error means the listener socket itself is unusable — retrying can never

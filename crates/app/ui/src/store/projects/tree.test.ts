@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupByProject, runningCount } from "@/store/projects/tree";
+import { filterSidebar, groupByProject, runningCount } from "@/store/projects/tree";
 import type { ProcessView, ProjectView } from "@/domain";
 
 function process(id: number, kind: ProcessView["kind"], label: string): ProcessView {
@@ -82,5 +82,39 @@ describe("groupByProject", () => {
     const empty = trees[1];
     expect(empty.kinds).toEqual([]);
     expect(empty.count).toEqual({ running: 0, total: 0 });
+  });
+});
+
+describe("filterSidebar", () => {
+  const PROCESSES = [
+    withProject(process(1, "Command", "web-server"), 1),
+    withProject(process(2, "Agent", "claude"), 1),
+    withProject(process(3, "Command", "web-worker"), 2),
+  ];
+  const PROJECTS = [projectView(1, "app"), projectView(2, "infra")];
+
+  it("keeps everything for a blank query", () => {
+    const result = filterSidebar(PROCESSES, PROJECTS, "  ");
+    expect(result.processes).toBe(PROCESSES);
+    expect(result.projects).toBe(PROJECTS);
+  });
+
+  it("matches processes by label, case-insensitively, and hides projects with no match", () => {
+    const result = filterSidebar(PROCESSES, PROJECTS, "WEB");
+    expect(result.processes.map((p) => p.label)).toEqual(["web-server", "web-worker"]);
+    // Both projects hold a matching "web-*" process, so both remain.
+    expect(result.projects.map((p) => p.name)).toEqual(["app", "infra"]);
+  });
+
+  it("drops a project whose only processes do not match", () => {
+    const result = filterSidebar(PROCESSES, PROJECTS, "claude");
+    expect(result.processes.map((p) => p.label)).toEqual(["claude"]);
+    expect(result.projects.map((p) => p.name)).toEqual(["app"]);
+  });
+
+  it("keeps all of a project's processes when the project name matches", () => {
+    const result = filterSidebar(PROCESSES, PROJECTS, "infra");
+    expect(result.processes.map((p) => p.label)).toEqual(["web-worker"]);
+    expect(result.projects.map((p) => p.name)).toEqual(["infra"]);
   });
 });

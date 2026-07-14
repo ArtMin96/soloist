@@ -428,10 +428,7 @@ export interface Appearance {
   terminal: TerminalAppearance;
 }
 
-// When a project header shows its CPU/memory badge (mirrors the core Sidebar threshold enums).
-// The option sets differ between project and process headers, so each is its own closed enum.
-export type ProjectCpuThreshold = "always" | "pct25" | "pct50" | "pct100" | "pct200" | "never";
-export type ProjectMemThreshold = "always" | "mb500" | "gb1" | "gb2" | "gb8" | "never";
+// When a process row shows its CPU/memory read-out (mirrors the core Sidebar threshold enums).
 export type ProcessCpuThreshold = "always" | "pct10" | "pct30" | "pct60" | "pct90" | "never";
 export type ProcessMemThreshold = "always" | "mb100" | "mb500" | "gb1" | "gb2" | "never";
 
@@ -439,11 +436,6 @@ export type ProcessMemThreshold = "always" | "mb100" | "mb500" | "gb1" | "gb2" |
 export interface Sidebar {
   show_filter_input: boolean;
   hide_empty_sections: boolean;
-  project_cpu_threshold: ProjectCpuThreshold;
-  project_mem_threshold: ProjectMemThreshold;
-  project_open_in_editor: boolean;
-  project_open_in_terminal: boolean;
-  project_reveal_in_file_manager: boolean;
   process_cpu_threshold: ProcessCpuThreshold;
   process_mem_threshold: ProcessMemThreshold;
   show_settings_footer: boolean;
@@ -498,13 +490,6 @@ export interface HotkeyBindingView {
   binding: Binding | null;
   is_default: boolean;
   conflict: boolean;
-}
-
-// The Agents tab document (mirrors core::AgentSettings) — the auto-summarization opt-in only
-// (OFF by default: both null). The agent tool registry itself is the Phase-7 surface.
-export interface AgentSettings {
-  summarizer_tool: string | null;
-  summarizer_model: string | null;
 }
 
 // The Tools tab document (mirrors core::ToolDefaults) — the default editor and terminal launch

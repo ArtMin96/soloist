@@ -20,7 +20,7 @@ default = ["mcp", "http"]
 # without it. (soloist-ipc itself is an unconditional dependency — the store delegates its
 # data-directory resolution to it and the settings surface reports the resolved paths — but
 # no IPC server is wired in without the feature.)
-mcp = ["dep:nix", "tokio/net"]
+mcp = ["dep:nix", "tokio/net", "tokio/macros"]
 # The loopback HTTP API adapter, likewise linked into the app binary and so gated at compile
 # time: turning it off drops the axum server and its dependency, and the app still builds and runs.
 http = ["dep:soloist-httpapi"]
@@ -59,12 +59,13 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-store = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "rt"] }
+tokio-util = "0.7"
 
 [dev-dependencies]
 soloist-core = { path = "../core", features = ["testing"] }
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "net", "rt"] }
 
 [build-dependencies]
 tauri-build = { version = "2.6.2", features = [] }

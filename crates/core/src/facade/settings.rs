@@ -10,8 +10,8 @@
 use super::Facade;
 use crate::ports::StoreError;
 use crate::settings::{
-    AgentSettings, Appearance, Binding, HotkeyAction, HotkeyBindingView, Integrations,
-    McpFeatureGroup, McpToolGroups, Notifications, Sidebar, ToolDefaults,
+    Appearance, Binding, HotkeyAction, HotkeyBindingView, Integrations, McpFeatureGroup,
+    McpToolGroups, Notifications, Sidebar, ToolDefaults,
 };
 
 impl Facade {
@@ -88,16 +88,6 @@ impl Facade {
             .update(&(), |s| s.hotkeys.reset_all())?
             .hotkeys
             .view())
-    }
-
-    /// The Agents settings — the auto-summarization opt-in (the tool registry itself is C4).
-    pub fn agent_settings(&self) -> Result<AgentSettings, StoreError> {
-        Ok(self.settings.get(&())?.agents)
-    }
-
-    /// Replaces the Agents sub-document and persists it (auto-save), returning the stored value.
-    pub fn set_agent_settings(&self, agents: AgentSettings) -> Result<AgentSettings, StoreError> {
-        Ok(self.settings.update(&(), |s| s.agents = agents)?.agents)
     }
 
     /// The Tools settings — the default editor and terminal.
