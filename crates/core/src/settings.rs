@@ -1,5 +1,5 @@
 //! Durable application settings (a focused context): user preferences that persist across runs,
-//! distinct from `solo.yml` project config (C1, [`Visibility::Shared`](crate::config)) and from
+//! distinct from `solo.yml` project config (C1, [`Visibility::Shared`](crate::projects::Visibility)) and from
 //! ephemeral runtime state.
 //!
 //! One generic base serves every settings surface. A [`SettingsStore<K, D>`] reads and writes a

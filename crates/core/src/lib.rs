@@ -5,10 +5,10 @@
 //! or `rusqlite`. OS, UI, transport, and storage concerns live in adapter crates
 //! behind ports; the dependency-direction check enforces this.
 //!
-//! The walking skeleton wires three live ports ([`ports::ProcessSpawner`],
-//! [`ports::Clock`], [`ports::Store`]) and the event bus ([`events::EventBus`])
-//! through a single [`facade::Facade`], proving the architecture end to end before
-//! any feature lands.
+//! Bounded contexts own their own behaviour and the port traits they drive it through;
+//! adapters reach all of it via the single [`facade::Facade`], and observe it via the
+//! event bus ([`events::EventBus`]). The composition root is the one place a real
+//! adapter is chosen over a `Noop`.
 
 // The core must not panic in long-running tasks: unwrap/expect/panic are denied
 // outside test builds.

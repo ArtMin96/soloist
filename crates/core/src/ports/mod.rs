@@ -128,9 +128,8 @@ pub trait PtyIo: Send + Sync {
     async fn resize(&self, size: PtySize) -> Result<(), SpawnError>;
 }
 
-/// Spawns OS processes. The real adapter spawns into a fresh process group via a
-/// PTY (later phases) or `tokio::process` (the skeleton); the test adapter returns a
-/// fully in-memory fake child.
+/// Spawns OS processes into a fresh process group, so the whole group can later be
+/// signalled and reaped as one; the test adapter returns a fully in-memory fake child.
 #[async_trait]
 pub trait ProcessSpawner: Send + Sync {
     /// Spawns `spec` into a fresh process group.
@@ -236,17 +235,19 @@ pub trait TrustRepo: Send + Sync {
 // ──────────────────────────────── LockReleaser ─────────────────────────────
 
 /// Notified when a managed process closes so any cross-process coordination state it
-/// holds — todo locks, leases — can be released. The coordination context (C6)
-/// provides the real implementation in a later phase; until then [`NoopLockReleaser`]
-/// satisfies the port. The supervisor calls this whenever a process reaches a
-/// terminal state (stopped or crashed), matching Solo's "locks auto-release when the
-/// owning process closes".
+/// holds — todo locks, leases — can be released. The supervisor calls this whenever a
+/// process reaches a terminal state (stopped or crashed), matching Solo's "locks
+/// auto-release when the owning process closes".
+///
+/// Coordination supplies one releaser per lock kind; [`CompositeLockReleaser`] fans the
+/// single close hook out to all of them.
 pub trait LockReleaser: Send + Sync {
     /// Releases every lock or lease owned by `process`. Must not block or panic.
     fn release_all(&self, process: ProcessId);
 }
 
-/// A [`LockReleaser`] that does nothing — the default until coordination (C6) lands.
+/// A [`LockReleaser`] that does nothing — the default for a composition root that wires
+/// no coordination state, so nothing is process-owned and a close releases nothing.
 #[derive(Clone, Copy, Default)]
 pub struct NoopLockReleaser;
 

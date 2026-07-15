@@ -154,9 +154,9 @@ pub enum DomainEvent {
 
 /// The outbound event port: anything the core publishes domain events through.
 ///
-/// Realized in the walking skeleton by [`EventBus`]. Defined as a trait so an
-/// adapter that needs a different fan-out shape (e.g. an MCP push sink) can provide
-/// its own implementation without the core depending on it.
+/// Realized by [`EventBus`]. Defined as a trait so an adapter that needs a different
+/// fan-out shape (e.g. an MCP push sink) can provide its own implementation without
+/// the core depending on it.
 pub trait EventSink: Send + Sync {
     /// Publishes an event. Best-effort: a sink with no live receivers drops it.
     fn emit(&self, event: DomainEvent);

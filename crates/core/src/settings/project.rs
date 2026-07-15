@@ -1,7 +1,7 @@
 //! Per-project local settings — a per-project surface over the one settings base. The durable
 //! preference record for a single project: its auto-start gate, editor override, notification
 //! toggles, and per-command alert overrides. These are **app-local** preferences, stored apart from
-//! the project's shared `solo.yml` config (C1, [`Visibility::Shared`](crate::config)) and never
+//! the project's shared `solo.yml` config (C1, [`Visibility::Shared`](crate::projects::Visibility)) and never
 //! written to it. The same [`SettingsStore`](crate::settings::SettingsStore) base serves this
 //! surface with `K = ProjectId`, so adding a field stays one `#[serde(default)]` field plus one
 //! façade getter/setter — never a new store.
