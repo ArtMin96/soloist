@@ -483,6 +483,14 @@ async fn the_read_tools_refuse_an_out_of_scope_process_but_list_stays_cross_proj
             query: "x".into(),
             limit: None,
         },
+        IpcRequest::SearchRawOutput {
+            process: elsewhere,
+            query: "x".into(),
+            limit: None,
+        },
+        // Even the no-op flush: an ack for a foreign id, where an unknown id refuses, would
+        // answer whether that process exists.
+        IpcRequest::FlushTerminalPerf { process: elsewhere },
     ] {
         assert_eq!(
             handle_request(&facade, session, request).await,

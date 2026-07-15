@@ -2,6 +2,7 @@ use super::*;
 use crate::composition::CorePorts;
 use crate::config::parse;
 use crate::events::DomainEvent;
+use crate::facade::scoped_process::MAX_INPUT_WAIT;
 use crate::ids::ProjectId;
 use crate::ports::{Clock, TokioClock, TrustRepo};
 use crate::process::{ProcStatus, ProcessKind};
