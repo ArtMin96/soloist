@@ -8,6 +8,7 @@
 //! the effective-project scope the [scoped actions](super::scoped) trust is unforgeable. The
 //! Tauri UI never opens a session — the local user is not scope-limited.
 
+use super::scoped::ScopedFacade;
 use super::Facade;
 use crate::identity::{IdentityError, Whoami};
 use crate::ids::{ProcessId, ProjectId, SessionId};
@@ -22,105 +23,6 @@ impl Facade {
     /// against it, so a session can only scope to a process it actually runs in.
     pub fn open_session(&self, peer_pgid: Option<i32>) -> SessionId {
         self.identity.open(peer_pgid)
-    }
-
-    /// Closes an identity session when its connection ends, dropping its state.
-    pub fn close_session(&self, session: SessionId) {
-        self.identity.close(session);
-    }
-
-    /// Binds a session to the supervised process it runs in — the process whose
-    /// [`PROCESS_ID_ENV`](crate::ids::PROCESS_ID_ENV) the agent's MCP client read.
-    /// Fails [`UnknownProcess`](IdentityError::UnknownProcess) if no such process is
-    /// registered, or [`ForeignProcess`](IdentityError::ForeignProcess) if the binding is not
-    /// authentic — the caller's connecting peer does not run in that process's group. The
-    /// authenticity check is what makes the effective-project scope trustworthy: a client on
-    /// the local socket cannot bind to a sibling project's process it does not run in.
-    pub fn bind_session_process(
-        &self,
-        session: SessionId,
-        process: ProcessId,
-    ) -> Result<(), IdentityError> {
-        if self.supervisor.label_of(process).is_none() {
-            return Err(IdentityError::UnknownProcess);
-        }
-        if self.home_process(session) != Some(process) {
-            return Err(IdentityError::ForeignProcess);
-        }
-        self.identity.bind_process(session, process);
-        Ok(())
-    }
-
-    /// Registers an external caller (one with no Soloist-supervised process) under a
-    /// label, so `whoami` can report who it is.
-    pub fn register_agent(&self, session: SessionId, label: String) {
-        self.identity.register_external(session, label);
-    }
-
-    /// Sets a session's effective project scope explicitly. Fails
-    /// [`UnknownProject`](IdentityError::UnknownProject) if the project is not loaded, or
-    /// [`ForeignProject`](IdentityError::ForeignProject) if the caller does not run in it —
-    /// no process in the caller's own process group belongs to it. A session can therefore
-    /// only select a project it actually runs in, never a sibling on the shared local socket.
-    pub fn select_project(
-        &self,
-        session: SessionId,
-        project: ProjectId,
-    ) -> Result<(), IdentityError> {
-        if self.projects.get(project)?.is_none() {
-            return Err(IdentityError::UnknownProject);
-        }
-        if self.home_project(session) != Some(project) {
-            return Err(IdentityError::ForeignProject);
-        }
-        self.identity.select_project(session, project);
-        Ok(())
-    }
-
-    /// Records a session's selected process — an informational default-target hint reported by
-    /// `whoami`. Unlike [`select_project`](Self::select_project) it confers no scope or
-    /// authority: every scoped tool takes an explicit process id, so the selection is a
-    /// convenience marker, not a gate, and needs no peer-group authentication. It is still
-    /// confined to the caller's effective project, though: a process outside scope is reported
-    /// as [`UnknownProcess`](IdentityError::UnknownProcess), indistinguishable from one that
-    /// does not exist, so selecting can never confirm the existence of another project's
-    /// processes. Fails `UnknownProcess` when the process is not in the session's scope.
-    pub fn select_process(
-        &self,
-        session: SessionId,
-        process: ProcessId,
-    ) -> Result<(), IdentityError> {
-        let in_scope = self
-            .effective_project(session)
-            .zip(self.process_view(process))
-            .is_some_and(|(scope, view)| view.project == scope);
-        if !in_scope {
-            return Err(IdentityError::UnknownProcess);
-        }
-        self.identity.select_process(session, process);
-        Ok(())
-    }
-
-    /// Resolves who a session is and the project its scoped tools act on (the answer to
-    /// the `whoami` tool), enriched with the bound process's details and the project's name.
-    pub fn whoami(&self, session: SessionId) -> Whoami {
-        let origin = self.identity.origin(session);
-        Whoami {
-            session,
-            bound_process: origin
-                .process()
-                .and_then(|process| self.process_view(process)),
-            // Resolving the view also drops a selection whose process has since left the registry
-            // (e.g. it was closed), so `whoami` never echoes a dangling id.
-            selected_process: self
-                .identity
-                .selected_process(session)
-                .and_then(|process| self.process_view(process)),
-            effective_project: self
-                .effective_project(session)
-                .map(|id| self.project_ref(id)),
-            origin,
-        }
     }
 
     /// The lean id-and-name reference for a resolved effective project. The id is authoritative —
@@ -155,23 +57,116 @@ impl Facade {
             _ => None,
         }
     }
+}
+
+impl ScopedFacade<'_> {
+    /// Closes an identity session when its connection ends, dropping its state.
+    pub fn close_session(&self) {
+        self.inner.identity.close(self.session);
+    }
+
+    /// Binds a session to the supervised process it runs in — the process whose
+    /// [`PROCESS_ID_ENV`](crate::ids::PROCESS_ID_ENV) the agent's MCP client read.
+    /// Fails [`UnknownProcess`](IdentityError::UnknownProcess) if no such process is
+    /// registered, or [`ForeignProcess`](IdentityError::ForeignProcess) if the binding is not
+    /// authentic — the caller's connecting peer does not run in that process's group. The
+    /// authenticity check is what makes the effective-project scope trustworthy: a client on
+    /// the local socket cannot bind to a sibling project's process it does not run in.
+    pub fn bind_session_process(&self, process: ProcessId) -> Result<(), IdentityError> {
+        if self.inner.supervisor.label_of(process).is_none() {
+            return Err(IdentityError::UnknownProcess);
+        }
+        if self.home_process() != Some(process) {
+            return Err(IdentityError::ForeignProcess);
+        }
+        self.inner.identity.bind_process(self.session, process);
+        Ok(())
+    }
+
+    /// Registers an external caller (one with no Soloist-supervised process) under a
+    /// label, so `whoami` can report who it is.
+    pub fn register_agent(&self, label: String) {
+        self.inner.identity.register_external(self.session, label);
+    }
+
+    /// Sets a session's effective project scope explicitly. Fails
+    /// [`UnknownProject`](IdentityError::UnknownProject) if the project is not loaded, or
+    /// [`ForeignProject`](IdentityError::ForeignProject) if the caller does not run in it —
+    /// no process in the caller's own process group belongs to it. A session can therefore
+    /// only select a project it actually runs in, never a sibling on the shared local socket.
+    pub fn select_project(&self, project: ProjectId) -> Result<(), IdentityError> {
+        if self.inner.projects.get(project)?.is_none() {
+            return Err(IdentityError::UnknownProject);
+        }
+        if self.home_project() != Some(project) {
+            return Err(IdentityError::ForeignProject);
+        }
+        self.inner.identity.select_project(self.session, project);
+        Ok(())
+    }
+
+    /// Records a session's selected process — an informational default-target hint reported by
+    /// `whoami`. Unlike [`select_project`](Self::select_project) it confers no scope or
+    /// authority: every scoped tool takes an explicit process id, so the selection is a
+    /// convenience marker, not a gate, and needs no peer-group authentication. It is still
+    /// confined to the caller's effective project, though: a process outside scope is reported
+    /// as [`UnknownProcess`](IdentityError::UnknownProcess), indistinguishable from one that
+    /// does not exist, so selecting can never confirm the existence of another project's
+    /// processes. Fails `UnknownProcess` when the process is not in the session's scope.
+    pub fn select_process(&self, process: ProcessId) -> Result<(), IdentityError> {
+        let in_scope = self
+            .inner
+            .effective_project(self.session)
+            .zip(self.inner.process_view(process))
+            .is_some_and(|(scope, view)| view.project == scope);
+        if !in_scope {
+            return Err(IdentityError::UnknownProcess);
+        }
+        self.inner.identity.select_process(self.session, process);
+        Ok(())
+    }
+
+    /// Resolves who a session is and the project its scoped tools act on (the answer to
+    /// the `whoami` tool), enriched with the bound process's details and the project's name.
+    pub fn whoami(&self) -> Whoami {
+        let origin = self.inner.identity.origin(self.session);
+        Whoami {
+            session: self.session,
+            bound_process: origin
+                .process()
+                .and_then(|process| self.inner.process_view(process)),
+            // Resolving the view also drops a selection whose process has since left the registry
+            // (e.g. it was closed), so `whoami` never echoes a dangling id.
+            selected_process: self
+                .inner
+                .identity
+                .selected_process(self.session)
+                .and_then(|process| self.inner.process_view(process)),
+            effective_project: self
+                .inner
+                .effective_project(self.session)
+                .map(|id| self.inner.project_ref(id)),
+            origin,
+        }
+    }
 
     /// The managed process the session's connecting peer runs in (its *home* process),
     /// resolved from the kernel-reported peer process group via the supervisor — the
     /// unforgeable basis for authenticating a bind or a project selection. `None` when the
     /// transport supplied no peer group, or no live managed process owns it (an external
     /// caller, or a stale group).
-    fn home_process(&self, session: SessionId) -> Option<ProcessId> {
-        self.identity
-            .peer_pgid(session)
-            .and_then(|pgid| self.supervisor.process_at_pgid(pgid))
+    fn home_process(&self) -> Option<ProcessId> {
+        self.inner
+            .identity
+            .peer_pgid(self.session)
+            .and_then(|pgid| self.inner.supervisor.process_at_pgid(pgid))
     }
 
     /// The project the session's home process belongs to — the only project a caller can
     /// authentically select. `None` when the caller has no home process.
-    fn home_project(&self, session: SessionId) -> Option<ProjectId> {
-        self.home_process(session)
-            .and_then(|id| self.process_view(id))
+    fn home_project(&self) -> Option<ProjectId> {
+        self.home_process()
+            .and_then(|id| self.inner.process_view(id))
             .map(|view| view.project)
     }
 
@@ -181,12 +176,8 @@ impl Facade {
     /// effective scope), so content only ever moves between two projects the caller actually runs
     /// in. Because a single connection authenticates to one project, a genuine cross-project
     /// transfer over MCP is refused; the reachable path is the local/trusted surface.
-    pub(in crate::facade) fn authentic_scope(
-        &self,
-        session: SessionId,
-        project: ProjectId,
-    ) -> bool {
-        self.home_project(session) == Some(project)
+    pub(in crate::facade) fn authentic_scope(&self, project: ProjectId) -> bool {
+        self.home_project() == Some(project)
     }
 }
 

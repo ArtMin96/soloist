@@ -70,7 +70,7 @@ mod todo;
 
 pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
-pub use scoped::{ScopedActionError, SpawnAgentError};
+pub use scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
 pub use support::SetupIntegrationError;
 
 /// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot

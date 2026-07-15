@@ -294,7 +294,7 @@ async fn whoami_of_a_fresh_session_is_unbound_and_unscoped() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
     let session = facade.open_session(None);
 
-    let who = facade.whoami(session);
+    let who = facade.scoped(session).whoami();
     assert_eq!(who.session, session);
     assert_eq!(who.origin, Origin::Unbound);
     assert!(who.bound_process.is_none());
@@ -314,10 +314,11 @@ async fn binding_scopes_a_session_to_its_process_project() {
     // The session's peer runs in this process's group, so binding to it is authentic.
     let session = authentic_session(&facade, id, TEST_PEER_PGID);
     facade
-        .bind_session_process(session, id)
+        .scoped(session)
+        .bind_session_process(id)
         .expect("bind to the process the caller runs in");
 
-    let who = facade.whoami(session);
+    let who = facade.scoped(session).whoami();
     assert_eq!(who.origin, Origin::Process(id));
     // The bound process is reported with its live details, not just its id.
     let bound = who.bound_process.expect("a bound process view");
@@ -336,7 +337,9 @@ async fn binding_an_unknown_process_is_rejected() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
     let session = facade.open_session(None);
     assert!(matches!(
-        facade.bind_session_process(session, ProcessId::from_raw(999)),
+        facade
+            .scoped(session)
+            .bind_session_process(ProcessId::from_raw(999)),
         Err(IdentityError::UnknownProcess)
     ));
 }
@@ -355,7 +358,7 @@ async fn binding_a_process_the_caller_does_not_run_in_is_refused() {
     facade.supervisor().assign_test_group(id, TEST_PEER_PGID);
     let session = facade.open_session(Some(9999)); // a peer group owning no managed process
     assert!(matches!(
-        facade.bind_session_process(session, id),
+        facade.scoped(session).bind_session_process(id),
         Err(IdentityError::ForeignProcess)
     ));
 }
@@ -371,15 +374,21 @@ async fn selecting_an_in_scope_process_records_it_for_whoami() {
     // An authentic bind gives the session an effective project to scope the selection to.
     let session = authentic_session(&facade, id, TEST_PEER_PGID);
     facade
-        .bind_session_process(session, id)
+        .scoped(session)
+        .bind_session_process(id)
         .expect("an authentic bind establishes the session's scope");
 
     // Informational only: confers no authority — just a default-target hint whoami echoes.
     facade
-        .select_process(session, id)
+        .scoped(session)
+        .select_process(id)
         .expect("select an in-scope process");
     assert_eq!(
-        facade.whoami(session).selected_process.map(|p| p.id),
+        facade
+            .scoped(session)
+            .whoami()
+            .selected_process
+            .map(|p| p.id),
         Some(id)
     );
 }
@@ -401,14 +410,15 @@ async fn selecting_an_out_of_scope_process_is_refused() {
     ));
     let session = authentic_session(&facade, here, TEST_PEER_PGID);
     facade
-        .bind_session_process(session, here)
+        .scoped(session)
+        .bind_session_process(here)
         .expect("an authentic bind establishes the session's scope");
 
     assert!(matches!(
-        facade.select_process(session, elsewhere),
+        facade.scoped(session).select_process(elsewhere),
         Err(IdentityError::UnknownProcess)
     ));
-    assert!(facade.whoami(session).selected_process.is_none());
+    assert!(facade.scoped(session).whoami().selected_process.is_none());
 }
 
 #[tokio::test]
@@ -416,7 +426,9 @@ async fn selecting_an_unknown_process_is_rejected() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
     let session = facade.open_session(None);
     assert!(matches!(
-        facade.select_process(session, ProcessId::from_raw(999)),
+        facade
+            .scoped(session)
+            .select_process(ProcessId::from_raw(999)),
         Err(IdentityError::UnknownProcess)
     ));
 }
@@ -431,7 +443,11 @@ async fn a_lone_loaded_project_is_the_default_scope() {
     // unambiguous single-project default, granted even to an unauthenticated peer.
     let session = facade.open_session(None);
     assert_eq!(
-        facade.whoami(session).effective_project.map(|p| p.id),
+        facade
+            .scoped(session)
+            .whoami()
+            .effective_project
+            .map(|p| p.id),
         Some(project.id)
     );
 }
@@ -453,21 +469,30 @@ async fn scope_is_ambiguous_with_several_projects_until_one_is_selected() {
     let session = authentic_session(&facade, in_b, TEST_PEER_PGID);
 
     // Two projects, nothing bound or selected: the scope cannot be inferred.
-    assert!(facade.whoami(session).effective_project.is_none());
+    assert!(facade.scoped(session).whoami().effective_project.is_none());
 
     // It can select its own project; an unknown project is rejected, and a sibling it does not
     // run in is refused as foreign — the authenticity check on the select path.
-    facade.select_project(session, b.id).expect("select b");
+    facade
+        .scoped(session)
+        .select_project(b.id)
+        .expect("select b");
     assert_eq!(
-        facade.whoami(session).effective_project.map(|p| p.id),
+        facade
+            .scoped(session)
+            .whoami()
+            .effective_project
+            .map(|p| p.id),
         Some(b.id)
     );
     assert!(matches!(
-        facade.select_project(session, ProjectId::from_raw(9999)),
+        facade
+            .scoped(session)
+            .select_project(ProjectId::from_raw(9999)),
         Err(IdentityError::UnknownProject)
     ));
     assert!(matches!(
-        facade.select_project(session, a.id),
+        facade.scoped(session).select_project(a.id),
         Err(IdentityError::ForeignProject)
     ));
 }

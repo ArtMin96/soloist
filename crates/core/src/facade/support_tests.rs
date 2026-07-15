@@ -48,7 +48,9 @@ fn writing_the_guide_with_no_project_in_scope_is_refused() {
     let session = facade.open_session(None);
 
     assert!(matches!(
-        facade.setup_agent_integration(session, IntegrationFile::ClaudeMd),
+        facade
+            .scoped(session)
+            .setup_agent_integration(IntegrationFile::ClaudeMd),
         Err(SetupIntegrationError::Scope(
             CoordinationError::NoProjectScope
         ))
@@ -67,10 +69,12 @@ fn the_guide_lands_in_the_scoped_projects_root_and_reruns_replace() {
     let session = facade.open_session(None);
 
     let first = facade
-        .setup_agent_integration(session, IntegrationFile::ClaudeMd)
+        .scoped(session)
+        .setup_agent_integration(IntegrationFile::ClaudeMd)
         .expect("first write");
     let second = facade
-        .setup_agent_integration(session, IntegrationFile::ClaudeMd)
+        .scoped(session)
+        .setup_agent_integration(IntegrationFile::ClaudeMd)
         .expect("second write");
 
     assert!(first.created);

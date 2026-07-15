@@ -206,7 +206,8 @@ fn scoped_terminal(
         .register(terminal_registration(project, name, "sleep 60"));
     facade.supervisor().assign_test_group(id, PEER_PGID);
     facade
-        .bind_session_process(session, id)
+        .scoped(session)
+        .bind_session_process(id)
         .expect("an authentic bind to the process the caller runs in");
     id
 }

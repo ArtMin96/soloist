@@ -7,9 +7,9 @@
 
 use std::path::PathBuf;
 
+use super::scoped::ScopedFacade;
 use super::Facade;
 use crate::facade::CoordinationError;
-use crate::ids::SessionId;
 use crate::ports::StoreError;
 use crate::support::{
     write_integration_guide, FeedbackEntry, FeedbackError, IntegrationFile, IntegrationWrite,
@@ -41,16 +41,18 @@ impl Facade {
     pub fn feedback_list(&self) -> Result<Vec<FeedbackEntry>, StoreError> {
         self.feedback.list()
     }
+}
 
+impl ScopedFacade<'_> {
     /// Writes the agent guide into `file` at the session's effective project root as a
     /// managed section (created, appended, or replaced in place — never duplicated).
     pub fn setup_agent_integration(
         &self,
-        session: SessionId,
         file: IntegrationFile,
     ) -> Result<IntegrationWrite, SetupIntegrationError> {
-        let project = self.coordination_scope(session)?;
+        let project = self.coordination_scope()?;
         let root: PathBuf = self
+            .inner
             .projects
             .get(project)?
             .ok_or(SetupIntegrationError::UnknownProject)?

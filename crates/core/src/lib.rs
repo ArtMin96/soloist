@@ -76,7 +76,8 @@ pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
     CoordinationError, Facade, LaunchAgentError, LocalCommandError, MoveCommandError,
-    ScopedActionError, SetupIntegrationError, SpawnAgentError, StatusSummary, TrustCommandError,
+    ScopedActionError, ScopedFacade, SetupIntegrationError, SpawnAgentError, StatusSummary,
+    TrustCommandError,
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};

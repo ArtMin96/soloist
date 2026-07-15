@@ -1,3 +1,5 @@
+use crate::facade::Facade;
+use crate::ids::SessionId;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -60,12 +62,14 @@ fn facade() -> (Facade, SessionId, ProjectId) {
 fn a_scratchpad_link_resolves_within_scope() {
     let (facade, session, project) = facade();
     let pad = facade
-        .scratchpad_write(session, "release-plan", scratchpad_doc(), None)
+        .scoped(session)
+        .scratchpad_write("release-plan", scratchpad_doc(), None)
         .expect("create");
     let link = Link::scratchpad(project, pad.id).to_link();
 
     let content = facade
-        .resolve_link(session, &link)
+        .scoped(session)
+        .resolve_link(&link)
         .expect("resolves in scope");
     assert_eq!(content, LinkContent::Scratchpad(pad));
 }
@@ -73,11 +77,15 @@ fn a_scratchpad_link_resolves_within_scope() {
 #[test]
 fn a_todo_link_resolves_within_scope() {
     let (facade, session, project) = facade();
-    let todo = facade.todo_create(session, todo_doc()).expect("create");
+    let todo = facade
+        .scoped(session)
+        .todo_create(todo_doc())
+        .expect("create");
     let link = Link::todo(project, todo.id).to_link();
 
     let content = facade
-        .resolve_link(session, &link)
+        .scoped(session)
+        .resolve_link(&link)
         .expect("resolves in scope");
     assert_eq!(content, LinkContent::Todo(todo));
 }
@@ -86,13 +94,14 @@ fn a_todo_link_resolves_within_scope() {
 fn a_foreign_scope_link_is_refused_not_resolved() {
     let (facade, session, project) = facade();
     let pad = facade
-        .scratchpad_write(session, "release-plan", scratchpad_doc(), None)
+        .scoped(session)
+        .scratchpad_write("release-plan", scratchpad_doc(), None)
         .expect("create");
     // The same id but a different project must be refused, never resolved to our content.
     let foreign = Link::scratchpad(ProjectId::from_raw(project.get() + 1), pad.id).to_link();
 
     assert!(matches!(
-        facade.resolve_link(session, &foreign),
+        facade.scoped(session).resolve_link(&foreign),
         Err(CoordinationError::ForeignScopeLink)
     ));
 }
@@ -101,7 +110,7 @@ fn a_foreign_scope_link_is_refused_not_resolved() {
 fn a_malformed_link_is_refused() {
     let (facade, session, _) = facade();
     assert!(matches!(
-        facade.resolve_link(session, "not-a-link"),
+        facade.scoped(session).resolve_link("not-a-link"),
         Err(CoordinationError::MalformedLink)
     ));
 }
@@ -112,7 +121,7 @@ fn an_unknown_in_scope_target_is_reported() {
     let link = Link::scratchpad(project, ScratchpadId::from_raw(999)).to_link();
 
     assert!(matches!(
-        facade.resolve_link(session, &link),
+        facade.scoped(session).resolve_link(&link),
         Err(CoordinationError::UnknownScratchpad)
     ));
 }

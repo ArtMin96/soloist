@@ -48,7 +48,8 @@ fn terminal_in(facade: &Facade, project: ProjectId, name: &str) -> ProcessId {
 fn scoped_to(facade: &Facade, process: ProcessId) -> SessionId {
     let session = authentic_session(facade, process, TEST_PEER_PGID);
     facade
-        .bind_session_process(session, process)
+        .scoped(session)
+        .bind_session_process(process)
         .expect("an authentic bind to the process the caller runs in");
     session
 }
@@ -74,12 +75,16 @@ async fn an_in_scope_process_starts_and_stops() {
     let session = scoped_to(&facade, id);
 
     facade
-        .start_process(session, id)
+        .scoped(session)
+        .start_process(id)
         .expect("an in-scope terminal starts");
     wait_for(&mut rx, ProcStatus::Running).await;
 
     assert!(
-        facade.stop_process(session, id).expect("in-scope stop"),
+        facade
+            .scoped(session)
+            .stop_process(id)
+            .expect("in-scope stop"),
         "a running process reports it was live"
     );
     wait_for(&mut rx, ProcStatus::Stopped).await;
@@ -90,7 +95,9 @@ fn an_unknown_process_is_refused() {
     let (facade, _trust) = facade();
     let session = facade.open_session(None);
     assert!(matches!(
-        facade.start_process(session, ProcessId::from_raw(999)),
+        facade
+            .scoped(session)
+            .start_process(ProcessId::from_raw(999)),
         Err(ScopedActionError::UnknownProcess)
     ));
 }
@@ -103,7 +110,7 @@ fn acting_without_a_project_in_scope_is_refused() {
     let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
     let session = facade.open_session(None);
     assert!(matches!(
-        facade.start_process(session, id),
+        facade.scoped(session).start_process(id),
         Err(ScopedActionError::NoProjectScope)
     ));
 }
@@ -117,15 +124,15 @@ fn another_projects_process_is_out_of_scope() {
 
     // The guard is shared by every action, so start, stop, and restart all refuse it.
     assert!(matches!(
-        facade.start_process(session, elsewhere),
+        facade.scoped(session).start_process(elsewhere),
         Err(ScopedActionError::OutOfScope)
     ));
     assert!(matches!(
-        facade.stop_process(session, elsewhere),
+        facade.scoped(session).stop_process(elsewhere),
         Err(ScopedActionError::OutOfScope)
     ));
     assert!(matches!(
-        facade.restart_process(session, elsewhere),
+        facade.scoped(session).restart_process(elsewhere),
         Err(ScopedActionError::OutOfScope)
     ));
 }
@@ -168,14 +175,16 @@ async fn send_input_clamps_an_excessive_wait() {
     let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
     let session = scoped_to(&facade, id);
     facade
-        .start_process(session, id)
+        .scoped(session)
+        .start_process(id)
         .expect("an in-scope start");
     wait_for(&mut rx, ProcStatus::Running).await;
 
     // A wait far beyond the cap is clamped to MAX_INPUT_WAIT before the clock ever sleeps, so a
     // remote caller cannot tie up the request (and the connection behind it) with a huge value.
     facade
-        .send_input(session, id, b"x".to_vec(), Some(Duration::from_secs(3600)))
+        .scoped(session)
+        .send_input(id, b"x".to_vec(), Some(Duration::from_secs(3600)))
         .await
         .expect("send_input succeeds");
     assert_eq!(*lock(&clock.slept), Some(MAX_INPUT_WAIT));
@@ -190,7 +199,8 @@ async fn send_input_enforces_scope() {
     // send_input shares the one scope guard, so a cross-project target is refused too.
     assert!(matches!(
         facade
-            .send_input(session, elsewhere, b"x".to_vec(), None)
+            .scoped(session)
+            .send_input(elsewhere, b"x".to_vec(), None)
             .await,
         Err(ScopedActionError::OutOfScope)
     ));
@@ -201,7 +211,7 @@ fn spawn_agent_without_a_project_in_scope_is_refused() {
     let (facade, _trust) = facade();
     let session = facade.open_session(None);
     assert!(matches!(
-        facade.spawn_agent(session, "Claude", Vec::new()),
+        facade.scoped(session).spawn_agent("Claude", Vec::new()),
         Err(SpawnAgentError::NoProjectScope)
     ));
 }
@@ -214,7 +224,7 @@ fn spawn_agent_with_an_unknown_tool_is_refused() {
     let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
     let session = scoped_to(&facade, id);
     assert!(matches!(
-        facade.spawn_agent(session, "NoSuchTool", Vec::new()),
+        facade.scoped(session).spawn_agent("NoSuchTool", Vec::new()),
         Err(SpawnAgentError::Launch(LaunchAgentError::UnknownTool))
     ));
 }
@@ -227,18 +237,22 @@ async fn a_spawned_worker_cannot_spawn_its_own_worker() {
         .register(agent_registration(project, "lead"));
     let lead_session = scoped_to(&facade, lead);
     let worker = facade
-        .spawn_agent(lead_session, "worker", Vec::new())
+        .scoped(lead_session)
+        .spawn_agent("worker", Vec::new())
         .expect("a lead spawns a worker");
 
     // The worker's own MCP client binds to it, exactly as the lead's did — but its spawn is
     // refused, and the refusal has no side effects: nothing new in the registry, no lineage.
     let worker_session = authentic_session(&facade, worker, TEST_PEER_PGID + 1);
     facade
-        .bind_session_process(worker_session, worker)
+        .scoped(worker_session)
+        .bind_session_process(worker)
         .expect("an authentic bind to the worker");
     let registered_before = facade.snapshot().len();
     assert!(matches!(
-        facade.spawn_agent(worker_session, "worker", Vec::new()),
+        facade
+            .scoped(worker_session)
+            .spawn_agent("worker", Vec::new()),
         Err(SpawnAgentError::WorkerMayNotSpawn)
     ));
     assert_eq!(
@@ -256,11 +270,13 @@ async fn the_worker_gate_outlives_a_closed_lead() {
         .register(agent_registration(project, "lead"));
     let lead_session = scoped_to(&facade, lead);
     let worker = facade
-        .spawn_agent(lead_session, "worker", Vec::new())
+        .scoped(lead_session)
+        .spawn_agent("worker", Vec::new())
         .expect("a lead spawns a worker");
     let worker_session = authentic_session(&facade, worker, TEST_PEER_PGID + 1);
     facade
-        .bind_session_process(worker_session, worker)
+        .scoped(worker_session)
+        .bind_session_process(worker)
         .expect("an authentic bind to the worker");
 
     facade
@@ -272,7 +288,9 @@ async fn the_worker_gate_outlives_a_closed_lead() {
     // The tree re-roots the worker, but the gate does not: a closed lead never promotes its
     // workers to spawners.
     assert!(matches!(
-        facade.spawn_agent(worker_session, "worker", Vec::new()),
+        facade
+            .scoped(worker_session)
+            .spawn_agent("worker", Vec::new()),
         Err(SpawnAgentError::WorkerMayNotSpawn)
     ));
 }
@@ -285,15 +303,15 @@ fn bulk_commands_without_a_project_in_scope_are_refused() {
     terminal_in(&facade, ProjectId::from_raw(1), "term");
     let session = facade.open_session(None);
     assert!(matches!(
-        facade.start_all_commands(session),
+        facade.scoped(session).start_all_commands(),
         Err(ScopedActionError::NoProjectScope)
     ));
     assert!(matches!(
-        facade.stop_all_commands(session),
+        facade.scoped(session).stop_all_commands(),
         Err(ScopedActionError::NoProjectScope)
     ));
     assert!(matches!(
-        facade.restart_all_commands(session),
+        facade.scoped(session).restart_all_commands(),
         Err(ScopedActionError::NoProjectScope)
     ));
 }
@@ -329,7 +347,8 @@ fn services_list_returns_only_the_in_scope_projects_commands() {
     let session = scoped_to(&facade, command);
 
     let services = facade
-        .services_list(session)
+        .scoped(session)
+        .services_list()
         .expect("an in-scope services list");
     let ids: Vec<_> = services.iter().map(|view| view.id).collect();
     assert_eq!(ids, vec![command], "only the in-scope project's commands");
@@ -337,7 +356,7 @@ fn services_list_returns_only_the_in_scope_projects_commands() {
     // Unscoped, the query is ambiguous and refused like the other scoped operations.
     let unscoped = facade.open_session(None);
     assert!(matches!(
-        facade.services_list(unscoped),
+        facade.scoped(unscoped).services_list(),
         Err(ScopedActionError::NoProjectScope)
     ));
 }
@@ -354,7 +373,8 @@ async fn start_all_commands_acts_only_on_the_in_scope_project() {
     let session = scoped_to(&facade, here);
 
     let summary = facade
-        .start_all_commands(session)
+        .scoped(session)
+        .start_all_commands()
         .expect("an in-scope bulk start");
     assert_eq!(
         summary.started,
@@ -379,13 +399,14 @@ fn clear_output_enforces_scope() {
     // to clear, reported as false — but the call is permitted, not refused.
     assert!(
         !facade
-            .clear_output(session, here)
+            .scoped(session)
+            .clear_output(here)
             .expect("an in-scope clear"),
         "a never-started process has no terminal to clear"
     );
     // Out of scope: refused by the shared scope guard, like the other scoped actions.
     assert!(matches!(
-        facade.clear_output(session, elsewhere),
+        facade.scoped(session).clear_output(elsewhere),
         Err(ScopedActionError::OutOfScope)
     ));
 }
@@ -406,7 +427,7 @@ async fn an_untrusted_command_in_scope_is_refused() {
 
     // In scope, but the trust gate in C2 still refuses an untrusted command.
     assert!(matches!(
-        facade.start_process(session, id),
+        facade.scoped(session).start_process(id),
         Err(ScopedActionError::Untrusted)
     ));
 
@@ -415,7 +436,8 @@ async fn an_untrusted_command_in_scope_is_refused() {
         .set_trusted(project, &spec.variant_hash())
         .expect("trust the command");
     facade
-        .start_process(session, id)
+        .scoped(session)
+        .start_process(id)
         .expect("starts once trusted");
 }
 
@@ -428,7 +450,8 @@ fn rename_process_enforces_scope() {
 
     // In scope: the relabel lands on the read model (no trust gate — a rename runs nothing).
     facade
-        .rename_process(session, here, "renamed".into())
+        .scoped(session)
+        .rename_process(here, "renamed".into())
         .expect("an in-scope rename");
     assert_eq!(
         facade.process_view(here).expect("registered").label,
@@ -437,7 +460,7 @@ fn rename_process_enforces_scope() {
 
     // Out of scope: refused by the shared scope guard, leaving the label untouched.
     assert!(matches!(
-        facade.rename_process(session, elsewhere, "x".into()),
+        facade.scoped(session).rename_process(elsewhere, "x".into()),
         Err(ScopedActionError::OutOfScope)
     ));
     assert_eq!(
@@ -454,52 +477,63 @@ fn read_tools_enforce_scope() {
     let session = scoped_to(&facade, here);
 
     // In scope: each read succeeds (an empty result for a never-started process).
-    assert!(facade.process_status_scoped(session, here).is_ok());
+    assert!(facade.scoped(session).process_status_scoped(here).is_ok());
     assert!(facade
-        .process_output_scoped(session, here, None)
+        .scoped(session)
+        .process_output_scoped(here, None)
         .expect("in-scope output")
         .is_empty());
     assert!(facade
-        .process_raw_output_scoped(session, here)
+        .scoped(session)
+        .process_raw_output_scoped(here)
         .expect("in-scope raw output")
         .is_empty());
     assert!(facade
-        .search_output_scoped(session, here, "x", None)
+        .scoped(session)
+        .search_output_scoped(here, "x", None)
         .expect("in-scope search")
         .is_empty());
     assert!(facade
-        .search_raw_output_scoped(session, here, "x", None)
+        .scoped(session)
+        .search_raw_output_scoped(here, "x", None)
         .expect("in-scope raw search")
         .is_empty());
     assert!(facade
-        .process_ports_scoped(session, here)
+        .scoped(session)
+        .process_ports_scoped(here)
         .expect("in-scope ports")
         .is_empty());
 
     // Out of scope: every read refuses the cross-project process, so its output — which can
     // hold another project's secrets — never crosses the isolation boundary.
     assert!(matches!(
-        facade.process_status_scoped(session, elsewhere),
+        facade.scoped(session).process_status_scoped(elsewhere),
         Err(ScopedActionError::OutOfScope)
     ));
     assert!(matches!(
-        facade.process_output_scoped(session, elsewhere, None),
+        facade
+            .scoped(session)
+            .process_output_scoped(elsewhere, None),
         Err(ScopedActionError::OutOfScope)
     ));
     assert!(matches!(
-        facade.process_raw_output_scoped(session, elsewhere),
+        facade.scoped(session).process_raw_output_scoped(elsewhere),
         Err(ScopedActionError::OutOfScope)
     ));
     assert!(matches!(
-        facade.search_output_scoped(session, elsewhere, "x", None),
+        facade
+            .scoped(session)
+            .search_output_scoped(elsewhere, "x", None),
         Err(ScopedActionError::OutOfScope)
     ));
     assert!(matches!(
-        facade.search_raw_output_scoped(session, elsewhere, "x", None),
+        facade
+            .scoped(session)
+            .search_raw_output_scoped(elsewhere, "x", None),
         Err(ScopedActionError::OutOfScope)
     ));
     assert!(matches!(
-        facade.process_ports_scoped(session, elsewhere),
+        facade.scoped(session).process_ports_scoped(elsewhere),
         Err(ScopedActionError::OutOfScope)
     ));
 }
@@ -511,14 +545,16 @@ fn a_scoped_read_refuses_an_unknown_process_and_an_unscoped_session() {
     let session = scoped_to(&facade, id);
     // An unknown id is refused before scope is even consulted.
     assert!(matches!(
-        facade.process_output_scoped(session, ProcessId::from_raw(999), None),
+        facade
+            .scoped(session)
+            .process_output_scoped(ProcessId::from_raw(999), None),
         Err(ScopedActionError::UnknownProcess)
     ));
     // A session with no project in scope cannot read a process — ambiguous, so refused, and
     // it discloses nothing.
     let unscoped = facade.open_session(None);
     assert!(matches!(
-        facade.process_output_scoped(unscoped, id, None),
+        facade.scoped(unscoped).process_output_scoped(id, None),
         Err(ScopedActionError::NoProjectScope)
     ));
 }
@@ -539,7 +575,7 @@ fn snapshot_scoped_redacts_out_of_scope_rows_to_identity() {
     ));
     let session = scoped_to(&facade, here);
 
-    let rows = facade.snapshot_scoped(session);
+    let rows = facade.scoped(session).snapshot_scoped();
     let in_scope = rows.iter().find(|v| v.id == here).expect("in-scope row");
     let foreign = rows
         .iter()
@@ -573,7 +609,7 @@ async fn close_process_enforces_scope() {
 
     // Out of scope: refused before anything is removed.
     assert!(matches!(
-        facade.close_process(session, elsewhere).await,
+        facade.scoped(session).close_process(elsewhere).await,
         Err(ScopedActionError::OutOfScope)
     ));
     assert!(
@@ -583,11 +619,67 @@ async fn close_process_enforces_scope() {
 
     // In scope (a resting process): removed from the registry entirely.
     facade
-        .close_process(session, here)
+        .scoped(session)
+        .close_process(here)
         .await
         .expect("an in-scope close");
     assert!(
         facade.process_view(here).is_none(),
         "an in-scope close forgets the process"
     );
+}
+
+#[test]
+fn project_processes_scoped_redacts_a_foreign_project_the_caller_names() {
+    // Naming another project is allowed — `list_projects` lists them all — but asking for its
+    // status must not hand back what `snapshot_scoped` refuses. This is the read the IPC adapter
+    // used to compose from an unscoped snapshot, which returned foreign rows in full.
+    let (facade, _trust) = facade();
+    let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
+    let config = parse("processes:\n  Web:\n    command: npm run dev\n").expect("parse");
+    let spec = config.processes.get("Web").cloned().expect("Web");
+    let foreign_project = ProjectId::from_raw(2);
+    let elsewhere = facade.supervisor().register(Registration::command(
+        foreign_project,
+        Path::new("/p"),
+        "Web",
+        &spec,
+    ));
+    let session = scoped_to(&facade, here);
+
+    let rows = facade
+        .scoped(session)
+        .project_processes_scoped(foreign_project);
+
+    let row = rows
+        .iter()
+        .find(|v| v.id == elsewhere)
+        .expect("foreign row");
+    assert_eq!(row.label, "Web", "identity is kept");
+    assert!(
+        !row.requires_trust,
+        "a foreign project's trust state is redacted, as it is in snapshot_scoped"
+    );
+    assert!(
+        facade
+            .process_view(elsewhere)
+            .expect("registered")
+            .requires_trust,
+        "the unscoped view still carries it — a copy was redacted, not the source"
+    );
+}
+
+#[test]
+fn project_processes_scoped_returns_the_callers_own_project_in_full() {
+    let (facade, _trust) = facade();
+    let here = terminal_in(&facade, ProjectId::from_raw(1), "here");
+    let session = scoped_to(&facade, here);
+
+    let rows = facade
+        .scoped(session)
+        .project_processes_scoped(ProjectId::from_raw(1));
+
+    let row = rows.iter().find(|v| v.id == here).expect("in-scope row");
+    assert_eq!(row.label, "here");
+    assert_eq!(row.kind, ProcessKind::Terminal);
 }

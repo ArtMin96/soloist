@@ -7,39 +7,35 @@
 //! `Global` needs none. A list may span both — it merges the global rows with the effective
 //! project's when one is in scope, and never fails on scope alone.
 
-use super::Facade;
+use super::scoped::ScopedFacade;
 use crate::coordination::{
     ExportedPromptTemplate, PromptScope, PromptTemplateSummary, PromptTemplateView,
     PromptTemplateWriteError,
 };
 use crate::facade::CoordinationError;
-use crate::ids::{ProjectId, SessionId};
+use crate::ids::ProjectId;
 
-impl Facade {
+impl ScopedFacade<'_> {
     /// The repo scope a session's template action addresses: the effective project for
     /// [`PromptScope::Project`], nothing for [`PromptScope::Global`].
-    fn prompt_scope(
-        &self,
-        session: SessionId,
-        scope: PromptScope,
-    ) -> Result<Option<ProjectId>, CoordinationError> {
+    fn prompt_scope(&self, scope: PromptScope) -> Result<Option<ProjectId>, CoordinationError> {
         match scope {
             PromptScope::Global => Ok(None),
-            PromptScope::Project => Ok(Some(self.coordination_scope(session)?)),
+            PromptScope::Project => Ok(Some(self.coordination_scope()?)),
         }
     }
 
     /// Creates the template `name` in the chosen scope. A taken name is refused.
     pub fn prompt_template_create(
         &self,
-        session: SessionId,
         scope: PromptScope,
         name: &str,
         description: Option<&str>,
         body: &str,
     ) -> Result<PromptTemplateView, CoordinationError> {
-        let project = self.prompt_scope(session, scope)?;
-        self.prompt_templates
+        let project = self.prompt_scope(scope)?;
+        self.inner
+            .prompt_templates
             .create(project, name, description, body)
             .map_err(create_error)
     }
@@ -48,15 +44,15 @@ impl Facade {
     /// omitted description keeps the stored one; a blank description clears it.
     pub fn prompt_template_update(
         &self,
-        session: SessionId,
         scope: PromptScope,
         name: &str,
         description: Option<&str>,
         body: &str,
         expected_revision: u64,
     ) -> Result<PromptTemplateView, CoordinationError> {
-        let project = self.prompt_scope(session, scope)?;
-        self.prompt_templates
+        let project = self.prompt_scope(scope)?;
+        self.inner
+            .prompt_templates
             .update(project, name, description, body, expected_revision)
             .map_err(update_error)
     }
@@ -64,12 +60,12 @@ impl Facade {
     /// The template `name` in the chosen scope.
     pub fn prompt_template_read(
         &self,
-        session: SessionId,
         scope: PromptScope,
         name: &str,
     ) -> Result<PromptTemplateView, CoordinationError> {
-        let project = self.prompt_scope(session, scope)?;
-        self.prompt_templates
+        let project = self.prompt_scope(scope)?;
+        self.inner
+            .prompt_templates
             .read(project, name)?
             .ok_or(CoordinationError::UnknownPromptTemplate)
     }
@@ -79,18 +75,17 @@ impl Facade {
     /// absent when no project resolves — an unscoped list never fails on scope).
     pub fn prompt_template_list(
         &self,
-        session: SessionId,
         scope: Option<PromptScope>,
     ) -> Result<Vec<PromptTemplateSummary>, CoordinationError> {
         match scope {
             Some(scope) => {
-                let project = self.prompt_scope(session, scope)?;
-                Ok(self.prompt_templates.list(project)?)
+                let project = self.prompt_scope(scope)?;
+                Ok(self.inner.prompt_templates.list(project)?)
             }
             None => {
-                let mut merged = self.prompt_templates.list(None)?;
-                if let Some(project) = self.effective_project(session) {
-                    merged.extend(self.prompt_templates.list(Some(project))?);
+                let mut merged = self.inner.prompt_templates.list(None)?;
+                if let Some(project) = self.inner.effective_project(self.session) {
+                    merged.extend(self.inner.prompt_templates.list(Some(project))?);
                 }
                 // Stable by name; a name in both scopes lists its global row first (the
                 // merge order).
@@ -103,23 +98,22 @@ impl Facade {
     /// Removes the template `name` from the chosen scope, returning whether one existed.
     pub fn prompt_template_delete(
         &self,
-        session: SessionId,
         scope: PromptScope,
         name: &str,
     ) -> Result<bool, CoordinationError> {
-        let project = self.prompt_scope(session, scope)?;
-        Ok(self.prompt_templates.delete(project, name)?)
+        let project = self.prompt_scope(scope)?;
+        Ok(self.inner.prompt_templates.delete(project, name)?)
     }
 
     /// The template `name` as a portable export envelope.
     pub fn prompt_template_export(
         &self,
-        session: SessionId,
         scope: PromptScope,
         name: &str,
     ) -> Result<ExportedPromptTemplate, CoordinationError> {
-        let project = self.prompt_scope(session, scope)?;
-        self.prompt_templates
+        let project = self.prompt_scope(scope)?;
+        self.inner
+            .prompt_templates
             .export(project, name)?
             .ok_or(CoordinationError::UnknownPromptTemplate)
     }

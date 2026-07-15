@@ -151,7 +151,7 @@ async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
             break;
         }
     }
-    app.state::<Arc<Facade>>().close_session(session);
+    app.state::<Arc<Facade>>().scoped(session).close_session();
 }
 
 /// Routes one request to the single matching [`Facade`] method and projects the result back — the
@@ -172,7 +172,8 @@ async fn handle_request(
     match request {
         IpcRequest::CloseProcess { process } => {
             return facade
-                .close_process(session, process)
+                .scoped(session)
+                .close_process(process)
                 .await
                 .map(|()| IpcResponse::Acked)
                 .map_err(IpcError::from);
@@ -183,8 +184,8 @@ async fn handle_request(
             wait_ms,
         } => {
             return facade
+                .scoped(session)
                 .send_input(
-                    session,
                     process,
                     input.into_bytes(),
                     wait_ms.map(Duration::from_millis),
@@ -201,7 +202,8 @@ async fn handle_request(
             // Waiting on a port reveals whether the process bound it — the same disclosure the
             // scoped port read refuses, so a cross-project target is refused here too.
             facade
-                .require_in_scope(session, process)
+                .scoped(session)
+                .require_in_scope(process)
                 .map_err(IpcError::from)?;
             let timeout = timeout_ms
                 .map_or(DEFAULT_PORT_WAIT, Duration::from_millis)
@@ -237,48 +239,59 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
         | IpcRequest::WaitForBoundPort { .. } => Err(IpcError::Internal(
             "request must be awaited on the runtime".into(),
         )),
-        IpcRequest::Whoami => Ok(IpcResponse::Whoami(facade.whoami(session))),
+        IpcRequest::Whoami => Ok(IpcResponse::Whoami(facade.scoped(session).whoami())),
         IpcRequest::BindSessionProcess { process } => facade
-            .bind_session_process(session, process)
+            .scoped(session)
+            .bind_session_process(process)
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
         IpcRequest::RegisterAgent { label } => {
-            facade.register_agent(session, label);
+            facade.scoped(session).register_agent(label);
             Ok(IpcResponse::Acked)
         }
         IpcRequest::SelectProject { project } => facade
-            .select_project(session, project)
+            .scoped(session)
+            .select_project(project)
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
         IpcRequest::SelectProcess { process } => facade
-            .select_process(session, process)
+            .scoped(session)
+            .select_process(process)
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
         IpcRequest::ListProjects => Ok(IpcResponse::Projects(project_summaries(facade)?)),
         IpcRequest::GetProjectStatus { project } => project_status(facade, session, project),
-        IpcRequest::ListProcesses => Ok(IpcResponse::Processes(facade.snapshot_scoped(session))),
+        IpcRequest::ListProcesses => Ok(IpcResponse::Processes(
+            facade.scoped(session).snapshot_scoped(),
+        )),
         IpcRequest::GetProcessStatus { process } => facade
-            .process_status_scoped(session, process)
+            .scoped(session)
+            .process_status_scoped(process)
             .map(IpcResponse::Process)
             .map_err(IpcError::from),
         IpcRequest::StartProcess { process } => facade
-            .start_process(session, process)
+            .scoped(session)
+            .start_process(process)
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
         IpcRequest::StopProcess { process } => facade
-            .stop_process(session, process)
+            .scoped(session)
+            .stop_process(process)
             .map(IpcResponse::Stopped)
             .map_err(IpcError::from),
         IpcRequest::RestartProcess { process } => facade
-            .restart_process(session, process)
+            .scoped(session)
+            .restart_process(process)
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
         IpcRequest::RenameProcess { process, label } => facade
-            .rename_process(session, process, label)
+            .scoped(session)
+            .rename_process(process, label)
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
         IpcRequest::SpawnAgent { tool, extra_args } => facade
-            .spawn_agent(session, &tool, extra_args)
+            .scoped(session)
+            .spawn_agent(&tool, extra_args)
             .map(IpcResponse::Spawned)
             .map_err(IpcError::from),
         IpcRequest::ListAgentTools => facade
@@ -287,23 +300,28 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .map(IpcResponse::AgentTools)
             .map_err(|err| IpcError::Internal(err.to_string())),
         IpcRequest::StartAllCommands => facade
-            .start_all_commands(session)
+            .scoped(session)
+            .start_all_commands()
             .map(IpcResponse::BulkStarted)
             .map_err(IpcError::from),
         IpcRequest::StopAllCommands => facade
-            .stop_all_commands(session)
+            .scoped(session)
+            .stop_all_commands()
             .map(IpcResponse::BulkStopped)
             .map_err(IpcError::from),
         IpcRequest::RestartAllCommands => facade
-            .restart_all_commands(session)
+            .scoped(session)
+            .restart_all_commands()
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
         IpcRequest::GetProcessOutput { process, lines } => facade
-            .process_output_scoped(session, process, lines)
+            .scoped(session)
+            .process_output_scoped(process, lines)
             .map(IpcResponse::Lines)
             .map_err(IpcError::from),
         IpcRequest::GetProcessRawOutput { process } => facade
-            .process_raw_output_scoped(session, process)
+            .scoped(session)
+            .process_raw_output_scoped(process)
             .map(|bytes| IpcResponse::RawOutput(String::from_utf8_lossy(&bytes).into_owned()))
             .map_err(IpcError::from),
         IpcRequest::SearchOutput {
@@ -311,7 +329,8 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             query,
             limit,
         } => facade
-            .search_output_scoped(session, process, &query, limit)
+            .scoped(session)
+            .search_output_scoped(process, &query, limit)
             .map(IpcResponse::Lines)
             .map_err(IpcError::from),
         IpcRequest::SearchRawOutput {
@@ -319,11 +338,13 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             query,
             limit,
         } => facade
-            .search_raw_output_scoped(session, process, &query, limit)
+            .scoped(session)
+            .search_raw_output_scoped(process, &query, limit)
             .map(IpcResponse::Lines)
             .map_err(IpcError::from),
         IpcRequest::ClearOutput { process } => facade
-            .clear_output(session, process)
+            .scoped(session)
+            .clear_output(process)
             .map(|_| IpcResponse::Acked)
             .map_err(IpcError::from),
         IpcRequest::FlushTerminalPerf { process } => facade
@@ -331,27 +352,33 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .then_some(IpcResponse::Acked)
             .ok_or(IpcError::UnknownProcess),
         IpcRequest::GetProcessPorts { process } => facade
-            .process_ports_scoped(session, process)
+            .scoped(session)
+            .process_ports_scoped(process)
             .map(IpcResponse::Ports)
             .map_err(IpcError::from),
         IpcRequest::ServicesList => facade
-            .services_list(session)
+            .scoped(session)
+            .services_list()
             .map(IpcResponse::Processes)
             .map_err(IpcError::from),
         IpcRequest::LockAcquire { key, ttl_ms } => facade
-            .lock_acquire(session, &key, ttl_ms.map(Duration::from_millis))
+            .scoped(session)
+            .lock_acquire(&key, ttl_ms.map(Duration::from_millis))
             .map(IpcResponse::LeaseOutcome)
             .map_err(IpcError::from),
         IpcRequest::LockStatus { key } => facade
-            .lock_status(session, &key)
+            .scoped(session)
+            .lock_status(&key)
             .map(IpcResponse::LeaseStatus)
             .map_err(IpcError::from),
         IpcRequest::LockRelease { key } => facade
-            .lock_release(session, &key)
+            .scoped(session)
+            .lock_release(&key)
             .map(IpcResponse::LeaseReleased)
             .map_err(IpcError::from),
         IpcRequest::TimerSet { body, after_ms } => facade
-            .timer_set(session, body, after_ms.map(Duration::from_millis))
+            .scoped(session)
+            .timer_set(body, after_ms.map(Duration::from_millis))
             .map(IpcResponse::TimerArmed)
             .map_err(IpcError::from),
         IpcRequest::TimerFireWhenIdleAny {
@@ -359,8 +386,8 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             processes,
             max_wait_ms,
         } => facade
+            .scoped(session)
             .timer_fire_when_idle(
-                session,
                 body,
                 processes,
                 IdleMode::Any,
@@ -373,8 +400,8 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             processes,
             max_wait_ms,
         } => facade
+            .scoped(session)
             .timer_fire_when_idle(
-                session,
                 body,
                 processes,
                 IdleMode::All,
@@ -383,19 +410,23 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .map(IpcResponse::TimerWhenIdle)
             .map_err(IpcError::from),
         IpcRequest::TimerCancel { timer } => facade
-            .timer_cancel(session, timer)
+            .scoped(session)
+            .timer_cancel(timer)
             .map(IpcResponse::TimerChanged)
             .map_err(IpcError::from),
         IpcRequest::TimerPause { timer } => facade
-            .timer_pause(session, timer)
+            .scoped(session)
+            .timer_pause(timer)
             .map(IpcResponse::TimerChanged)
             .map_err(IpcError::from),
         IpcRequest::TimerResume { timer } => facade
-            .timer_resume(session, timer)
+            .scoped(session)
+            .timer_resume(timer)
             .map(IpcResponse::TimerChanged)
             .map_err(IpcError::from),
         IpcRequest::TimerList => facade
-            .timer_list(session)
+            .scoped(session)
+            .timer_list()
             .map(IpcResponse::Timers)
             .map_err(IpcError::from),
         IpcRequest::ScratchpadWrite {
@@ -403,55 +434,68 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             doc,
             expected_revision,
         } => facade
-            .scratchpad_write(session, &name, doc, expected_revision)
+            .scoped(session)
+            .scratchpad_write(&name, doc, expected_revision)
             .map(IpcResponse::Scratchpad)
             .map_err(IpcError::from),
         IpcRequest::ScratchpadRead { name } => facade
-            .scratchpad_read(session, &name)
+            .scoped(session)
+            .scratchpad_read(&name)
             .map(IpcResponse::Scratchpad)
             .map_err(IpcError::from),
         IpcRequest::ScratchpadList => facade
-            .scratchpad_list(session)
+            .scoped(session)
+            .scratchpad_list()
             .map(IpcResponse::Scratchpads)
             .map_err(IpcError::from),
         IpcRequest::ScratchpadRename { name, new_name } => facade
-            .scratchpad_rename(session, &name, &new_name)
+            .scoped(session)
+            .scratchpad_rename(&name, &new_name)
             .map(IpcResponse::Scratchpad)
             .map_err(IpcError::from),
         IpcRequest::ScratchpadAddTags { name, tags } => facade
-            .scratchpad_add_tags(session, &name, &tags)
+            .scoped(session)
+            .scratchpad_add_tags(&name, &tags)
             .map(IpcResponse::Scratchpad)
             .map_err(IpcError::from),
         IpcRequest::ScratchpadRemoveTags { name, tags } => facade
-            .scratchpad_remove_tags(session, &name, &tags)
+            .scoped(session)
+            .scratchpad_remove_tags(&name, &tags)
             .map(IpcResponse::Scratchpad)
             .map_err(IpcError::from),
         IpcRequest::ScratchpadTagsList => facade
-            .scratchpad_tags_list(session)
+            .scoped(session)
+            .scratchpad_tags_list()
             .map(IpcResponse::ScratchpadTags)
             .map_err(IpcError::from),
         IpcRequest::ScratchpadArchive { name, archived } => facade
-            .scratchpad_archive(session, &name, archived)
+            .scoped(session)
+            .scratchpad_archive(&name, archived)
             .map(IpcResponse::Scratchpad)
             .map_err(IpcError::from),
         IpcRequest::ScratchpadDelete { name } => facade
-            .scratchpad_delete(session, &name)
+            .scoped(session)
+            .scratchpad_delete(&name)
             .map(IpcResponse::ScratchpadDeleted)
             .map_err(IpcError::from),
         IpcRequest::ScratchpadTransfer { name, to_project } => facade
-            .scratchpad_transfer(session, &name, to_project)
+            .scoped(session)
+            .scratchpad_transfer(&name, to_project)
             .map(IpcResponse::Scratchpad)
             .map_err(IpcError::from),
         IpcRequest::TodoCreate { doc } => facade
-            .todo_create(session, doc)
+            .scoped(session)
+            .todo_create(doc)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoList => facade
-            .todo_list(session)
+            .scoped(session)
+            .todo_list()
             .map(IpcResponse::Todos)
             .map_err(IpcError::from),
         IpcRequest::TodoGet { todo } => facade
-            .todo_get(session, todo)
+            .scoped(session)
+            .todo_get(todo)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoUpdate {
@@ -459,55 +503,68 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             doc,
             expected_revision,
         } => facade
-            .todo_update(session, todo, doc, expected_revision)
+            .scoped(session)
+            .todo_update(todo, doc, expected_revision)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoComplete { todo } => facade
-            .todo_complete(session, todo)
+            .scoped(session)
+            .todo_complete(todo)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoDelete { todo } => facade
-            .todo_delete(session, todo)
+            .scoped(session)
+            .todo_delete(todo)
             .map(IpcResponse::TodoDeleted)
             .map_err(IpcError::from),
         IpcRequest::TodoTransfer { todo, to_project } => facade
-            .todo_transfer(session, to_project, todo)
+            .scoped(session)
+            .todo_transfer(to_project, todo)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoTagsList => facade
-            .todo_tags_list(session)
+            .scoped(session)
+            .todo_tags_list()
             .map(IpcResponse::TodoTags)
             .map_err(IpcError::from),
         IpcRequest::TodoAddTag { todo, tag } => facade
-            .todo_add_tag(session, todo, &tag)
+            .scoped(session)
+            .todo_add_tag(todo, &tag)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoRemoveTag { todo, tag } => facade
-            .todo_remove_tag(session, todo, &tag)
+            .scoped(session)
+            .todo_remove_tag(todo, &tag)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoSetBlockers { todo, blockers } => facade
-            .todo_set_blockers(session, todo, blockers)
+            .scoped(session)
+            .todo_set_blockers(todo, blockers)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoAddBlocker { todo, blocker } => facade
-            .todo_add_blocker(session, todo, blocker)
+            .scoped(session)
+            .todo_add_blocker(todo, blocker)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoRemoveBlocker { todo, blocker } => facade
-            .todo_remove_blocker(session, todo, blocker)
+            .scoped(session)
+            .todo_remove_blocker(todo, blocker)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoLock { todo } => facade
-            .todo_lock(session, todo)
+            .scoped(session)
+            .todo_lock(todo)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoUnlock { todo } => facade
-            .todo_unlock(session, todo)
+            .scoped(session)
+            .todo_unlock(todo)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoCommentCreate { todo, body } => facade
-            .todo_comment_create(session, todo, &body)
+            .scoped(session)
+            .todo_comment_create(todo, &body)
             .map(|(todo, comment)| IpcResponse::TodoComment { todo, comment })
             .map_err(IpcError::from),
         IpcRequest::TodoCommentUpdate {
@@ -515,35 +572,43 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             comment,
             body,
         } => facade
-            .todo_comment_update(session, todo, comment, &body)
+            .scoped(session)
+            .todo_comment_update(todo, comment, &body)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoCommentDelete { todo, comment } => facade
-            .todo_comment_delete(session, todo, comment)
+            .scoped(session)
+            .todo_comment_delete(todo, comment)
             .map(IpcResponse::Todo)
             .map_err(IpcError::from),
         IpcRequest::TodoCommentList { todo } => facade
-            .todo_comment_list(session, todo)
+            .scoped(session)
+            .todo_comment_list(todo)
             .map(IpcResponse::TodoComments)
             .map_err(IpcError::from),
         IpcRequest::ResolveLink { link } => facade
-            .resolve_link(session, &link)
+            .scoped(session)
+            .resolve_link(&link)
             .map(IpcResponse::Link)
             .map_err(IpcError::from),
         IpcRequest::KvSet { key, value } => facade
-            .kv_set(session, key, value)
+            .scoped(session)
+            .kv_set(key, value)
             .map(|()| IpcResponse::KvValue(None))
             .map_err(IpcError::from),
         IpcRequest::KvGet { key } => facade
-            .kv_get(session, key)
+            .scoped(session)
+            .kv_get(key)
             .map(IpcResponse::KvValue)
             .map_err(IpcError::from),
         IpcRequest::KvDelete { key } => facade
-            .kv_delete(session, key)
+            .scoped(session)
+            .kv_delete(key)
             .map(IpcResponse::KvDeleted)
             .map_err(IpcError::from),
         IpcRequest::KvList => facade
-            .kv_list(session)
+            .scoped(session)
+            .kv_list()
             .map(IpcResponse::KvPairs)
             .map_err(IpcError::from),
         IpcRequest::McpToolGroups => facade
@@ -555,15 +620,18 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .map(IpcResponse::Feedback)
             .map_err(IpcError::from),
         IpcRequest::SetupAgentIntegration { file } => facade
-            .setup_agent_integration(session, file)
+            .scoped(session)
+            .setup_agent_integration(file)
             .map(IpcResponse::IntegrationWritten)
             .map_err(IpcError::from),
         IpcRequest::PromptTemplateList { scope } => facade
-            .prompt_template_list(session, scope)
+            .scoped(session)
+            .prompt_template_list(scope)
             .map(IpcResponse::PromptTemplates)
             .map_err(IpcError::from),
         IpcRequest::PromptTemplateRead { scope, name } => facade
-            .prompt_template_read(session, scope, &name)
+            .scoped(session)
+            .prompt_template_read(scope, &name)
             .map(IpcResponse::PromptTemplate)
             .map_err(IpcError::from),
         IpcRequest::PromptTemplateCreate {
@@ -572,7 +640,8 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             description,
             body,
         } => facade
-            .prompt_template_create(session, scope, &name, description.as_deref(), &body)
+            .scoped(session)
+            .prompt_template_create(scope, &name, description.as_deref(), &body)
             .map(IpcResponse::PromptTemplate)
             .map_err(IpcError::from),
         IpcRequest::PromptTemplateUpdate {
@@ -582,8 +651,8 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             body,
             expected_revision,
         } => facade
+            .scoped(session)
             .prompt_template_update(
-                session,
                 scope,
                 &name,
                 description.as_deref(),
@@ -593,11 +662,13 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .map(IpcResponse::PromptTemplate)
             .map_err(IpcError::from),
         IpcRequest::PromptTemplateDelete { scope, name } => facade
-            .prompt_template_delete(session, scope, &name)
+            .scoped(session)
+            .prompt_template_delete(scope, &name)
             .map(IpcResponse::PromptTemplateDeleted)
             .map_err(IpcError::from),
         IpcRequest::PromptTemplateExport { scope, name } => facade
-            .prompt_template_export(session, scope, &name)
+            .scoped(session)
+            .prompt_template_export(scope, &name)
             .map(IpcResponse::PromptTemplateExport)
             .map_err(IpcError::from),
     }
@@ -627,11 +698,7 @@ fn project_status(facade: &Facade, session: SessionId, project: Option<ProjectId
         .into_iter()
         .find(|view| view.id == target)
         .ok_or(IpcError::UnknownProject)?;
-    let processes = facade
-        .snapshot()
-        .into_iter()
-        .filter(|view| view.project == target)
-        .collect();
+    let processes = facade.scoped(session).project_processes_scoped(target);
     Ok(IpcResponse::ProjectStatus(ProjectStatus {
         project: ProjectSummary::from_view(&view),
         processes,

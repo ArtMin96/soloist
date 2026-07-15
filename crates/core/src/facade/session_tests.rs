@@ -35,7 +35,8 @@ fn whoami_keeps_the_scope_id_when_the_project_name_cannot_be_read() {
 
     // Normally the name resolves from the store alongside the id.
     let resolved = facade
-        .whoami(session)
+        .scoped(session)
+        .whoami()
         .effective_project
         .expect("a resolved scope");
     assert_eq!(resolved.id, record.id);
@@ -44,7 +45,8 @@ fn whoami_keeps_the_scope_id_when_the_project_name_cannot_be_read() {
     // Under a transient store fault the name is unreadable, but the id and the scope must survive.
     projects.set_get_failing(true);
     let dimmed = facade
-        .whoami(session)
+        .scoped(session)
+        .whoami()
         .effective_project
         .expect("the scope is still resolved");
     assert_eq!(dimmed.id, record.id, "the resolved scope id is preserved");

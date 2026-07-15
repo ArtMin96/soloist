@@ -366,13 +366,14 @@ async fn send_input_writes_to_the_pty_and_returns_the_rendered_tail() {
         .expect("a running process has a live group");
     let session = facade.open_session(Some(pgid));
     facade
-        .bind_session_process(session, id)
+        .scoped(session)
+        .bind_session_process(id)
         .expect("scope the session to the running process it shares a group with");
 
     // The wait is generous so the echo is recorded before the snapshot; cat echoes at once.
     let tail = facade
+        .scoped(session)
         .send_input(
-            session,
             id,
             b"marco-polo\r".to_vec(),
             Some(Duration::from_millis(750)),
@@ -584,7 +585,8 @@ async fn spawn_agent_launches_a_worker_in_the_sessions_project() {
     let session = facade.open_session(None);
 
     let id = facade
-        .spawn_agent(session, "Stub", Vec::new())
+        .scoped(session)
+        .spawn_agent("Stub", Vec::new())
         .expect("spawn the worker agent");
 
     let view = facade

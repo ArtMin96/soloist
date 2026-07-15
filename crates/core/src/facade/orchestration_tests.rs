@@ -49,7 +49,8 @@ fn bound_session(facade: &Facade, project: ProjectId) -> (SessionId, ProcessId) 
         .register(terminal_registration(project, "term", "sleep 60"));
     let session = authentic_session(facade, id, TEST_PEER_PGID);
     facade
-        .bind_session_process(session, id)
+        .scoped(session)
+        .bind_session_process(id)
         .expect("an authentic bind to the process the caller runs in");
     (session, id)
 }
@@ -107,20 +108,23 @@ fn the_snapshot_projects_the_tree_todos_timers_leases_scratchpads_and_kv_for_a_p
 
     // A blocked todo: `ship` is gated by `build`.
     let build = facade
-        .todo_create(session, todo_doc("build"))
+        .scoped(session)
+        .todo_create(todo_doc("build"))
         .expect("create build");
     let ship = facade
-        .todo_create(session, todo_doc("ship"))
+        .scoped(session)
+        .todo_create(todo_doc("ship"))
         .expect("create ship");
     let ship = facade
-        .todo_set_blockers(session, ship.id, vec![build.id])
+        .scoped(session)
+        .todo_set_blockers(ship.id, vec![build.id])
         .expect("gate ship on build");
     assert!(ship.blocked, "ship is gated by build");
 
     // An armed fire-when-idle timer waiting on the two workers.
     let timer = facade
+        .scoped(session)
         .timer_fire_when_idle(
-            session,
             "integrate".into(),
             vec![worker_a, worker_b],
             IdleMode::All,
@@ -130,17 +134,16 @@ fn the_snapshot_projects_the_tree_todos_timers_leases_scratchpads_and_kv_for_a_p
 
     // A held lease, a scratchpad, and a kv entry.
     facade
-        .lock_acquire(session, "deploy", Some(Duration::from_secs(30)))
+        .scoped(session)
+        .lock_acquire("deploy", Some(Duration::from_secs(30)))
         .expect("acquire the lease");
     facade
-        .scratchpad_write(session, "plan", scratchpad_doc(), None)
+        .scoped(session)
+        .scratchpad_write("plan", scratchpad_doc(), None)
         .expect("write the scratchpad");
     facade
-        .kv_set(
-            session,
-            "config".into(),
-            serde_json::json!({ "ready": true }),
-        )
+        .scoped(session)
+        .kv_set("config".into(), serde_json::json!({ "ready": true }))
         .expect("set the kv entry");
 
     let snap = facade
@@ -206,7 +209,8 @@ fn the_snapshot_is_scoped_to_its_project() {
     let facade = facade();
     let (session, _owner) = bound_session(&facade, PROJECT);
     facade
-        .todo_create(session, todo_doc("only in project one"))
+        .scoped(session)
+        .todo_create(todo_doc("only in project one"))
         .expect("create a todo in project one");
 
     // A different project shares no processes or coordination state.
@@ -224,7 +228,8 @@ fn creating_a_todo_emits_one_todo_changed() {
     let mut rx = facade.subscribe();
 
     let todo = facade
-        .todo_create(session, todo_doc("build"))
+        .scoped(session)
+        .todo_create(todo_doc("build"))
         .expect("create");
 
     let events = drain(&mut rx);
@@ -240,11 +245,15 @@ fn completing_a_todo_emits_one_todo_changed() {
     let facade = facade();
     let (session, _owner) = bound_session(&facade, PROJECT);
     let todo = facade
-        .todo_create(session, todo_doc("build"))
+        .scoped(session)
+        .todo_create(todo_doc("build"))
         .expect("create");
     let mut rx = facade.subscribe();
 
-    facade.todo_complete(session, todo.id).expect("complete");
+    facade
+        .scoped(session)
+        .todo_complete(todo.id)
+        .expect("complete");
 
     let events = drain(&mut rx);
     assert_eq!(events.len(), 1, "exactly one event: {events:?}");
@@ -261,7 +270,8 @@ fn acquiring_then_releasing_a_lease_each_emit_one_lease_changed() {
 
     let mut rx = facade.subscribe();
     facade
-        .lock_acquire(session, "deploy", Some(Duration::from_secs(30)))
+        .scoped(session)
+        .lock_acquire("deploy", Some(Duration::from_secs(30)))
         .expect("acquire");
     let acquired = drain(&mut rx);
     assert_eq!(acquired.len(), 1, "one event on acquire: {acquired:?}");
@@ -271,7 +281,10 @@ fn acquiring_then_releasing_a_lease_each_emit_one_lease_changed() {
     ));
 
     let mut rx = facade.subscribe();
-    assert!(facade.lock_release(session, "deploy").expect("release"));
+    assert!(facade
+        .scoped(session)
+        .lock_release("deploy")
+        .expect("release"));
     let released = drain(&mut rx);
     assert_eq!(released.len(), 1, "one event on release: {released:?}");
     assert!(matches!(
@@ -287,7 +300,8 @@ fn arming_a_timer_emits_one_timer_armed() {
     let mut rx = facade.subscribe();
 
     let view = facade
-        .timer_set(session, "ping".into(), Some(Duration::from_secs(30)))
+        .scoped(session)
+        .timer_set("ping".into(), Some(Duration::from_secs(30)))
         .expect("set");
 
     let events = drain(&mut rx);
@@ -303,11 +317,15 @@ fn cancelling_a_timer_emits_one_timer_cleared() {
     let facade = facade();
     let (session, owner) = bound_session(&facade, PROJECT);
     let view = facade
-        .timer_set(session, "ping".into(), Some(Duration::from_secs(30)))
+        .scoped(session)
+        .timer_set("ping".into(), Some(Duration::from_secs(30)))
         .expect("set");
     let mut rx = facade.subscribe();
 
-    assert!(facade.timer_cancel(session, view.id).expect("cancel"));
+    assert!(facade
+        .scoped(session)
+        .timer_cancel(view.id)
+        .expect("cancel"));
 
     let events = drain(&mut rx);
     assert_eq!(events.len(), 1, "exactly one event: {events:?}");
@@ -324,7 +342,8 @@ fn writing_a_scratchpad_emits_one_scratchpad_changed() {
     let mut rx = facade.subscribe();
 
     facade
-        .scratchpad_write(session, "plan", scratchpad_doc(), None)
+        .scoped(session)
+        .scratchpad_write("plan", scratchpad_doc(), None)
         .expect("write");
 
     let events = drain(&mut rx);
@@ -342,11 +361,8 @@ fn setting_a_kv_entry_emits_one_kv_changed() {
     let mut rx = facade.subscribe();
 
     facade
-        .kv_set(
-            session,
-            "config".into(),
-            serde_json::json!({ "ready": true }),
-        )
+        .scoped(session)
+        .kv_set("config".into(), serde_json::json!({ "ready": true }))
         .expect("set");
 
     let events = drain(&mut rx);
@@ -364,11 +380,13 @@ async fn a_worker_spawned_by_a_bound_lead_nests_under_it() {
     let lead = agent(&facade, project, "lead");
     let session = authentic_session(&facade, lead, TEST_PEER_PGID);
     facade
-        .bind_session_process(session, lead)
+        .scoped(session)
+        .bind_session_process(lead)
         .expect("bind the lead to its own process");
 
     let worker = facade
-        .spawn_agent(session, "worker", Vec::new())
+        .scoped(session)
+        .spawn_agent("worker", Vec::new())
         .expect("spawn the worker under the lead");
 
     let snap = facade
@@ -394,7 +412,8 @@ async fn an_unbound_spawn_is_a_root() {
     let session = facade.open_session(None);
 
     let worker = facade
-        .spawn_agent(session, "worker", Vec::new())
+        .scoped(session)
+        .spawn_agent("worker", Vec::new())
         .expect("spawn the worker with no bound lead");
 
     let snap = facade
@@ -417,10 +436,12 @@ async fn closing_a_lead_re_parents_its_worker_to_root() {
     let lead = agent(&facade, project, "lead");
     let session = authentic_session(&facade, lead, TEST_PEER_PGID);
     facade
-        .bind_session_process(session, lead)
+        .scoped(session)
+        .bind_session_process(lead)
         .expect("bind the lead to its own process");
     let worker = facade
-        .spawn_agent(session, "worker", Vec::new())
+        .scoped(session)
+        .spawn_agent("worker", Vec::new())
         .expect("spawn the worker under the lead");
 
     // The lead leaves the registry; its worker must not be stranded.
@@ -454,10 +475,12 @@ async fn lineage_edges_omits_an_edge_whose_parent_left_the_registry() {
     let lead = agent(&facade, project, "lead");
     let session = authentic_session(&facade, lead, TEST_PEER_PGID);
     facade
-        .bind_session_process(session, lead)
+        .scoped(session)
+        .bind_session_process(lead)
         .expect("bind the lead to its own process");
     let worker = facade
-        .spawn_agent(session, "worker", Vec::new())
+        .scoped(session)
+        .spawn_agent("worker", Vec::new())
         .expect("spawn the worker under the lead");
 
     assert_eq!(
