@@ -1,0 +1,26 @@
+# Supply-chain hardening for the e2e harness's dependency installs, mirroring the UI package's
+# policy (crates/app/ui/pnpm-workspace.yaml). minimumReleaseAge holds back newly published versions
+# (in minutes) so a compromised release has time to be caught and unpublished before it can be
+# installed; 10080 = 7 days. It only gates *future* resolutions, so the current locked install is
+# unaffected.
+minimumReleaseAge: 10080
+
+# Install scripts are denied by default. `@wdio/cli` transitively carries the Edge and Gecko
+# drivers, whose install scripts fetch browser binaries over the network; nothing here drives a
+# browser (the Tauri service's embedded provider talks to the app's own WebDriver server), so they
+# stay off. esbuild is the one script we allow — tsx needs its binary to run the TypeScript config
+# and specs.
+allowBuilds:
+  edgedriver: false
+  geckodriver: false
+  esbuild: true
+
+# Upstream release drift, not a preference: @wdio/tauri-service@1.2.0 imports
+# `installMockSyncOverride` from @wdio/native-utils but pins that dependency to 2.4.0, which does
+# not export it — so the service fails to initialise on a clean install. The symbol landed in
+# native-utils 2.5.0, which the maintainer published for exactly this reason
+# (webdriverio/desktop-mobile#506) and then re-released the sibling electron service against; the
+# tauri service has not had that follow-up release yet. This pin applies the same remedy. Drop it
+# once a tauri-service release corrects its own pin, and re-run `pnpm test` to confirm.
+overrides:
+  "@wdio/native-utils": "2.5.0"

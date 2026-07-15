@@ -1,0 +1,8 @@
+name: e2e-basic
+processes:
+  Echo:
+    command: ./bin/echo-loop.sh
+    auto_start: false
+  Crasher:
+    command: ./bin/crasher.sh
+    auto_start: false

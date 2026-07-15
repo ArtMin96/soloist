@@ -40,6 +40,24 @@ test:
     cargo test --workspace
     pnpm -C {{ui}} test
 
+# Real-window end-to-end tests: builds the app with the `wdio` feature (an in-app WebDriver server,
+# never in a release build) and drives the actual window through WebdriverIO. A separate, slower gate
+# than `just test` — it compiles and launches the app. Needs a display; on a headless box install
+# xvfb and WebdriverIO uses it automatically. One-time setup: `pnpm -C e2e install`.
+e2e:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    major=$(node -p 'process.versions.node.split(".")[0]')
+    if [ "$major" -ge 26 ]; then
+      echo "error: e2e needs Node < 26 (found ${major})." >&2
+      echo "WebdriverIO 9.29.1 sets Content-Length/Connection headers that Node 26's undici rejects," >&2
+      echo "so no WebDriver session can start (webdriverio/webdriverio#15265 — fixed upstream, not" >&2
+      echo "yet released). Switch to the pinned LTS, which e2e/.nvmrc records:  fnm use  (in e2e/)" >&2
+      exit 1
+    fi
+    pnpm -C e2e typecheck
+    pnpm -C e2e test
+
 # Regenerate solo.schema.json (the editor JSON Schema for solo.yml) from the SoloYml model.
 # Run after changing the config model; the drift guard in `just lint` fails if it is stale.
 schema:

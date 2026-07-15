@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": [
+        "default",
+        {
+          "identifier": "wdio",
+          "description": "E2e-only: lets the WebdriverIO harness attach to and drive the main webview.",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "wdio-webdriver:default"
+          ]
+        }
+      ]
+    }
+  }
+}

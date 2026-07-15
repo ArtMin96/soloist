@@ -169,7 +169,7 @@ pub fn run() {
     let devtools = tauri_plugin_devtools::init();
 
     #[cfg_attr(
-        not(any(feature = "devtools", feature = "agent-bridge")),
+        not(any(feature = "devtools", feature = "agent-bridge", feature = "wdio")),
         allow(unused_mut)
     )]
     // The single-instance plugin must be registered first: a second `soloist` launch (for
@@ -193,6 +193,12 @@ pub fn run() {
     #[cfg(feature = "agent-bridge")]
     {
         builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+    // E2e-only: the in-app WebDriver server the WebdriverIO harness attaches to. Compiled in only
+    // under the `wdio` feature; release and default builds never link a WebDriver server.
+    #[cfg(feature = "wdio")]
+    {
+        builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
     }
 
     builder
