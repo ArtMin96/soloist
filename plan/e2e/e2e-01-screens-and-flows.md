@@ -1,12 +1,16 @@
 # e2e-01 — Screens, Flows & the First Journey
 
-**Goal:** Turn the proven harness into a **reusable architecture**, and prove it carries real behavior by
-landing the first catalog walk — **Dashboard core**. This is the phase that decides what every later spec
-looks like, so its output is a pattern as much as a test. Read [`README.md`](README.md) §2–§3 (scope +
-architecture) first; [e2e-00](e2e-00-harness-and-ci.md) must be green before starting.
+**Status: built and green (2026-07-16).** The three-layer architecture exists and carries its first
+journey: opening a project, launching Claude into it, and asserting the app really starts it and
+renders it. 4 specs, ~6 s. What follows describes what exists; the remaining catalog walks (charter
+§4) are e2e-02+.
 
-**Delivers:** `src/screens/`, `src/flows/`, `src/harness/`, the domain `specs/` tree, and the Dashboard-core
-journey. **No product code** (a missing accessible name is the one exception — see Task 2).
+**Goal:** Turn the proven harness into a **reusable architecture**, and prove it carries real behavior by
+landing a real journey. This is the phase that decides what every later spec looks like, so its output is
+a pattern as much as a test. Read [`README.md`](README.md) §2–§3 (scope + architecture) first.
+
+**Delivers:** `src/screens/`, `src/flows/`, `src/harness/`, the domain `specs/` tree, and the
+launch-an-agent journey. **No product code.**
 
 ## Scope
 
@@ -34,41 +38,48 @@ specs → flows → screens → harness
 If a spec reads like a script of clicks and selectors, the phase failed. It should read like the catalog
 row it implements.
 
-## Tasks
+## What each layer holds
 
-1. **`src/harness/`:**
-   - `appDataDir.ts` — a fresh `SOLOIST_APP_DATA_DIR` per session; torn down after.
-   - `fixtureProject.ts` — materialize `fixtures/projects/<name>` into a temp dir and hand back its path,
-     so a spec names a fixture and never a path.
-   - `waits.ts` — the shared event-based waits. **No `sleep`, ever.** Prefer waiting on the concrete
-     rendered state the user would look at (a status glyph's accessible name), not a timer.
+1. **`src/harness/`** — `fixtureProject.ts` copies `fixtures/projects/<name>` into a scratch dir and
+   returns its path, so a spec names a fixture and never a path (and never dirties the checked-in
+   fixture, which opening a project would write to). `waits.ts` holds the two named timeouts — a local
+   render, and a round trip through the real core — so no spec carries a bare number. `tauri.ts` is the
+   app's own IPC, for **arrange only**.
 
-2. **`src/screens/`** — one per surface the first journey touches: `Sidebar`, `ProcessControls`,
-   `TrustDialog`. Each exposes intent-shaped methods (`sidebar.selectProcess(name)`,
-   `controls.start()`, `trust.approve()`) and **queries by accessible name** — `$('aria/Start')` — per
-   charter §3.2.
-   **The one product-code exception:** if a surface the journey needs has no stable accessible name, add
-   one **to the component** via `/impeccable` (CLAUDE.md §5) — an `aria-label` that improves the real
-   app's accessibility, or a `data-testid` only where no semantic handle fits. Never a test-only hack,
-   never a brittle CSS selector as a workaround.
+2. **`src/screens/`** — `Sidebar`, `AgentPicker`, `Titlebar`, `TerminalPane`. Each exposes
+   intent-shaped methods and **queries by accessible name** where one exists (`$('aria/Launch agent')`),
+   per charter §3.2. Where one does not, prefer a **structural** handle over a styling one: the sidebar
+   reads a row's label as the direct child span carrying none of the indicator's markers, which
+   survives a restyle and breaks only if the row stops rendering a label.
+   **The product-code exception, unused so far:** if a surface genuinely has no handle, add an
+   `aria-label` **to the component** via `/impeccable` (CLAUDE.md §5) — improving the real app's
+   accessibility. Never a test-only hack, never a brittle CSS selector as a workaround.
 
-3. **`specs/` domain tree:** create the directories from charter §3 (`projects/`, `supervision/`,
-   `terminal/`, `monitoring/`, `agents/`, `coordination/`, `orchestration/`, `shell/`, `cross-surface/`).
-   Empty directories are not committed — they arrive as their first spec lands. **Name for what they
-   are**: no parity letters, no phase numbers, in directories, filenames, or test titles (CLAUDE.md §8).
+3. **`specs/` domain tree** — the directories from charter §3, each arriving with its first spec.
+   **Named for what they are**: no parity letters or phase numbers in directories, filenames, or test
+   titles (CLAUDE.md §8).
 
-4. **The Dashboard-core journey (`specs/supervision/`):** the charter §4 row —
-   - the tree groups by project and kind;
-   - selecting a process shows it;
-   - Start / Stop / Restart reach the **real core** and the status glyph updates;
-   - the trust dialog gates an untrusted command until approved.
+4. **The launch-an-agent journey (`specs/agents/`)** — open a project, and:
+   - the picker targets that project and offers Claude with the command it would spawn;
+   - launching renders the agent in the sidebar, labelled and selected, under Agents;
+   - the app **actually starts it** — the status leaves `Stopped`;
+   - a terminal opens for it, mounted and measured non-zero.
 
-   Drive the real core against the hermetic fixture. Assert on `ProcStatus` imported from the UI's
-   `domain.ts` (charter §3.1) — never a literal `"Running"`.
+   Assert on `ProcStatus` imported from the UI's `domain.ts` via the `@domain` alias — never a literal.
 
-5. **Traceability:** flip the Dashboard-core row in charter §4 to covered, and update the corresponding
-   `PROGRESS.md` line for the Phase-5 deferred walk. Traceability lives in those two places — **not** in a
-   code comment (CLAUDE.md §8).
+5. **Traceability** lives in charter §4 and `PROGRESS.md` — **not** in a code comment (CLAUDE.md §8).
+
+## Two things the journey deliberately does not assert
+
+Both are environment-dependent, so asserting them would make the spec pass or fail for reasons that
+have nothing to do with the app. Named here rather than buried in a comment:
+
+- **That the agent reaches `Running`.** That needs Claude Code installed — true on a developer's box,
+  false in CI. The spec asserts the app *tried*: the status leaves `Stopped`, which holds either way
+  and is what the mutation table below proves is load-bearing.
+- **The terminal header's exact text.** The header shows the process's label only until the process
+  sets its own title over OSC — a real Claude Code renames it to `✳ Claude Code` within a second.
+  Pinning the string would assert Claude Code's branding, not this app's behavior.
 
 ## Interfaces
 
@@ -76,41 +87,57 @@ row it implements.
 e2e/
 ├── src/
 │   ├── harness/
-│   │   ├── appDataDir.ts     # fresh SOLOIST_APP_DATA_DIR per session
-│   │   ├── fixtureProject.ts # fixture name → materialized temp path
-│   │   └── waits.ts          # event-based waits; no sleeps
-│   ├── screens/
-│   │   ├── Sidebar.ts        # selectProcess, groups, row status
-│   │   ├── ProcessControls.ts# start/stop/restart/resume
-│   │   └── TrustDialog.ts    # approve/reject; is-blocking
+│   │   ├── fixtureProject.ts # fixture name → a clean scratch copy's path
+│   │   ├── tauri.ts          # the app's own IPC — arrange steps only
+│   │   └── waits.ts          # the two named timeouts; no sleeps
+│   ├── screens/              # the only place selectors live
+│   │   ├── Sidebar.ts        # rows: label, status, selection
+│   │   ├── AgentPicker.ts    # target project, tools, choose
+│   │   ├── Titlebar.ts       # launch agent, open project
+│   │   └── TerminalPane.ts   # title, mounted, measured size
 │   └── flows/
-│       ├── trustProject.ts   # open fixture → trust it
-│       └── startProcess.ts   # select → start → await Running
+│       ├── openProject.ts    # materialize fixture → load → shown
+│       └── launchAgent.ts    # picker → choose → row appears
 └── specs/
-    └── supervision/          # the Dashboard-core journey
+    └── agents/               # the launch-an-agent journey
 ```
 
-Later phases add screens as their walk needs them (`TerminalPane`, `OrphanDialog`, `CommandPalette`,
-`SettingsOverlay`, `ProjectSettingsPane`, `OrchestrationPane`) — each when its trigger fires, never
-speculatively (CLAUDE.md §16, YAGNI).
+Later phases add screens as their walk needs them (`ProcessControls`, `TrustDialog`, `OrphanDialog`,
+`CommandPalette`, `SettingsOverlay`, `ProjectSettingsPane`, `OrchestrationPane`) — each when its
+trigger fires, never speculatively (CLAUDE.md §16, YAGNI).
+
+**One arrange step is not a click, and cannot be.** Opening a project goes through the OS folder
+dialog, which a WebDriver session cannot drive. `harness/tauri.ts` calls the same core command that
+dialog's handler calls; nothing else uses it, and every assertion stays on what the window renders.
+Reaching for it to *act* rather than to arrange is the line not to cross.
+
+**Reads are atomic.** The sidebar snapshots its rows in one pass rather than walking them element by
+element: a live agent re-renders its row as its activity changes, and a row-at-a-time walk races that
+re-render and dies on a stale element reference — a flake for a reason unrelated to the assertion.
 
 ## Acceptance criteria
 
-- The Dashboard-core journey passes locally (`just e2e`) and headless under `xvfb-run`.
-- **No selector appears in a spec** — grep the `specs/` tree for `aria/`, `$(`, `data-testid` and find
-  nothing.
-- **No `sleep`** anywhere in `e2e/`.
-- No status/kind string literal in a spec — they come from `domain.ts`.
-- The run is hermetic: it passes twice in a row, and passes with the developer's real Soloist state
-  present and untouched.
-- Charter §4 Dashboard-core row and the matching `PROGRESS.md` line both flipped to covered.
-- `just lint` / `just test` unaffected.
+- ✅ The journey passes locally (`just e2e`); the headless `xvfb-run` path is owed with e2e-00's CI job.
+- ✅ **No selector appears in a spec** — they live only in `src/screens/`.
+- ✅ **No `sleep`** anywhere in `e2e/`.
+- ✅ No status literal in a spec: `ProcStatus` is imported from the UI's `domain.ts` via the `@domain`
+  alias, so a renamed variant is a type error rather than a silently-passing string.
+- ✅ Hermetic: each run wipes its data dir and copies the fixture to scratch; the developer's real
+  Soloist state is never read or written.
+- ✅ `just lint` / `just test` unaffected.
 
-## Test plan
+## Test plan — the journey must fail for a real reason
 
-The journey **is** the test. Its value is that it fails for a real reason: break `proc_start` in the core
-and this spec must go red. Confirm that once, deliberately, before calling the phase done — a spec that
-cannot fail is a pretend test (CLAUDE.md §15).
+A spec that cannot fail is a pretend test (CLAUDE.md §15), and a green e2e is exactly where that hides.
+Both assertions were confirmed by mutating the **product** and watching the right test go red:
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Drop `supervisor.start(id)` in `facade.rs` — register the agent, never run it | only "actually starts the agent's process" fails | exactly that; the other three still passed, because the row *is* still drawn |
+| Render `{process.label + "X"}` in `ProcessRow` | the label assertions fail | "renders the agent…" and "actually starts…" failed, naming the rendered rows |
+
+Repeat this whenever a walk lands. The first mutation is the one that matters: without it, "renders the
+agent in the sidebar" passes against a row that was merely painted.
 
 ## Risks & mitigations
 

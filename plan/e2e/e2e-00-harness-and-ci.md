@@ -23,10 +23,10 @@ e2e/
     └── smoke.spec.ts       # app launches + shell renders
 ```
 
-Plus, outside `e2e/`: the `wdio` cargo feature and one gated plugin registration in `crates/app`,
-`crates/app/tauri.e2e.conf.json`, the `just e2e` recipe, `.github/workflows/e2e.yml`, the
-`CONTRIBUTING.md` section, and `/e2e/.tmp/` + `/e2e/logs/` in `.gitignore`. **The frontend is
-untouched** (§1.1).
+Plus, outside `e2e/`: the `wdio` cargo feature and its gated plugin registration in `crates/app`,
+`crates/app/tauri.e2e.conf.json`, the `VITE_E2E`-gated plugin injection in the UI's `vite.config.ts`
+(§1.1), the `just e2e` recipe, `.github/workflows/e2e.yml`, the `CONTRIBUTING.md` section, and
+`/e2e/.tmp/` + `/e2e/logs/` in `.gitignore`.
 
 ## How it works
 
@@ -65,9 +65,11 @@ Three things cost real time and are recorded so they cost nobody else any:
    `POST /session`, which looks like a config error and is not. `just e2e` now guards it.
 2. **`@wdio/tauri-service@1.2.0` cannot initialise on a clean install** (§1.3) — upstream release
    drift, fixed by the forward pin.
-3. **The npm `@wdio/tauri-plugin` is not needed and is not benign.** Installing it into the UI package
-   pulled `esbuild` with an unapproved install script into the product's dependency tree and broke
-   `pnpm build`. The smoke spec passes without it and without its Rust sibling (§1.1).
+3. **"It passes without the wdio plugins" is true and misleading.** They are documented as required
+   for `execute`/mocking/log-capture — none of which this track uses — so dropping them looks like
+   sound YAGNI, and the spec stays green. It also goes **434 ms → 45.7 s**, because the service's
+   eval bridge polls for a global they install and times out five seconds on every command (§1.1).
+   Correctness was verified and cost was not; both are needed before calling something unnecessary.
 
 ## Risks & mitigations
 

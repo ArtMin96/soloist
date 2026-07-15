@@ -68,17 +68,23 @@ verified:
 | Piece | Kind | Why |
 |-------|------|-----|
 | `tauri-plugin-wdio-webdriver` | Cargo (optional) | The in-app WebDriver server the harness attaches to. |
-| `wdio-webdriver:default` | capability permission | Its ACL entry, in the e2e config overlay only. |
+| `tauri-plugin-wdio` | Cargo (optional) | Backs the service's window/eval bridge. |
+| `@wdio/tauri-plugin` | npm (UI dev dep) | Its frontend half; installs the globals that bridge looks for. |
+| `wdio:default`, `wdio-webdriver:default` | capability permissions | Their ACL entries, in the e2e config overlay only. |
 | `withGlobalTauri: true` | config | Required by the plugin setup; e2e overlay only. |
 
-**The frontend is untouched — zero changes.** The docs also list `tauri-plugin-wdio` + the npm
-`@wdio/tauri-plugin`, described as required. They are required only for `browser.tauri.execute()`,
-mocking, and log capture; the docs' own "what works without the plugin" list — element interactions,
-navigation, basic WebDriver commands — *is* the whole vocabulary of a user journey. Verified on this
-repo: the smoke spec passes with neither installed. They are deliberately absent, and adding the npm
-half proved actively harmful (it pulled `esbuild` with an unapproved install script into the **product**
-UI package, breaking `pnpm build`). If a future spec genuinely needs `execute` for setup, add them then
-— not before (CLAUDE.md §15, YAGNI).
+**The docs call the last three "required", and they are — for a reason the docs do not give.** Their
+stated purpose is `browser.tauri.execute()`, mocking, and log capture, none of which this track uses
+(§1.2). A spec does pass without them. But the service's eval bridge polls for
+`window.__wdio_original_core__` — a global `@wdio/tauri-plugin` installs — and **every driver command
+then waits five seconds and gives up**: measured here, the same smoke spec runs in **434 ms with them
+and 45.7 s without**. Correct either way; unusable one way. This is recorded because "it passes
+without them" is true, tempting, and wrong.
+
+The npm half is a **dev dependency of the UI package**, which is the one place Vite can resolve it
+from, and it never reaches a bundle: `vite.config.ts` prepends the import only under `VITE_E2E`, so a
+normal build never resolves the dependency at all. That gate is checked in both directions (§6) —
+a production build must not contain it, and the e2e build must.
 
 **Gating — the load-bearing rule.** None of this may reach a shipped build (CLAUDE.md §6 size budget,
 and a WebDriver server is an open door). The official docs show `#[cfg(debug_assertions)]`, but that is
@@ -89,7 +95,9 @@ comment reads "Grants the agent broad webview access — run only in a trusted s
 same gate:
 
 - A cargo feature **`wdio`** in `crates/app`, absent from `default`, mirroring `agent-bridge` /
-  `devtools` / `tokio-console`. Release builds never link the plugin.
+  `devtools` / `tokio-console`. Release builds never link the plugins.
+- The frontend import gated behind `VITE_E2E` in `vite.config.ts`, mirroring the `ANALYZE` switch
+  beside it, so a normal build is byte-identical and never resolves the dependency.
 - A **`tauri.e2e.conf.json`** overlay mirroring `tauri.dev.conf.json`, carrying `withGlobalTauri` and the
   wdio capability. It must be its own file, **not** the dev config: `tauri.dev.conf.json` declares the
   `mcp-bridge` capability, whose permissions only resolve when `agent-bridge` links that plugin.
@@ -212,6 +220,7 @@ where spec → parity-row traceability lives.
 
 | Walk | Domain | Feature(s) | What the spec asserts | Recorded in | Status |
 |------|--------|-----------|-----------------------|-------------|--------|
+| Launch an agent | `agents` | Phase 7 (E-UI) | The picker targets the open project and offers Claude with the command it spawns; launching renders it in the sidebar, labelled and selected under Agents; the app really starts it (the status leaves `Stopped`); a terminal opens for it, mounted and measured non-zero | e2e-01 | ✅ **covered** |
 | Dashboard core | `supervision` | Phase 5 (C-UI) | Tree groups by project/kind; select a process; Start/Stop/Restart reach the core and the status glyph updates; trust dialog gates an untrusted command | `phase-05` | ⬜ not built |
 | **Resume last session** | `supervision` | **B9** | A stopped resumable agent shows **Resume last session** beside Start (sidebar row + terminal header); click → it relaunches continuing the prior session; a non-resumable target (Amp, Generic, command, terminal) shows **only** Start; the resumed terminal fits the pane (no right/bottom gaps) | `plan/05 §12`, `KNOWN-DIVERGENCES.md` D-9, `PROGRESS.md` | ⬜ not built |
 | Agent lineage tree | `orchestration` | orch-01 (O3/O4) | A bound lead's spawned worker nests under it; a manual launch is a root; a worker's glyph flips on an activity event; a closed lead re-roots its workers | `plan/orchestrator/orch-01` | ⬜ not built |
@@ -229,7 +238,7 @@ gate), backend command mocking (§1.2), and any cross-platform matrix (D2 — Li
 | Phase | Title | Delivers | Status |
 |-------|-------|----------|--------|
 | [e2e-00](e2e-00-harness-and-ci.md) | Harness, plugin wiring, fixture & CI | The `e2e/` workspace, the feature-gated in-app WebDriver server, `just e2e`, a CI job, and **one smoke spec** (app launches, window renders) | ✅ **Built & green** (2026-07-15); the CI job's headless run is owed |
-| [e2e-01](e2e-01-screens-and-flows.md) | Screens, flows & the first journey | The `screens/` + `flows/` layer and the **Dashboard core** walk — the first real journey, proving the architecture carries behavior | ⬜ next |
+| [e2e-01](e2e-01-screens-and-flows.md) | Screens, flows & the first journey | The `screens/` + `flows/` layer and the **launch an agent** journey — the first real walk, proving the architecture carries behavior | ✅ **Built & green** (2026-07-16) |
 
 Subsequent phases (`e2e-02`+) each implement one catalog row as specs under its domain directory; they
 are independent once e2e-01 lands and can be done in any order, highest-value first. The catalog in §4 is

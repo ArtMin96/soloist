@@ -49,9 +49,10 @@ export const config: WebdriverIO.Config = {
     rmSync(appDataDir, { recursive: true, force: true });
     mkdirSync(appDataDir, { recursive: true });
 
-    // `--config` merges the e2e overlay (withGlobalTauri + the wdio capability) over
-    // tauri.conf.json, and `--features wdio` links the in-app WebDriver server. Neither is set by
-    // any other build path, so no other build can produce this binary by accident.
+    // Three switches, none of which any other build path sets, so no ordinary build can produce
+    // this binary by accident: `--features wdio` links the in-app WebDriver server, `--config`
+    // merges the e2e overlay (withGlobalTauri + the wdio capabilities), and `VITE_E2E` makes the
+    // frontend build inject the wdio plugin the harness drives the app through.
     const build = spawnSync(
       "cargo",
       [
@@ -64,7 +65,11 @@ export const config: WebdriverIO.Config = {
         "--config",
         "tauri.e2e.conf.json",
       ],
-      { cwd: path.join(repoRoot, "crates", "app"), stdio: "inherit" },
+      {
+        cwd: path.join(repoRoot, "crates", "app"),
+        env: { ...process.env, VITE_E2E: "1" },
+        stdio: "inherit",
+      },
     );
     if (build.status !== 0) {
       throw new Error(`Failed to build the Soloist app for e2e (exit ${build.status})`);

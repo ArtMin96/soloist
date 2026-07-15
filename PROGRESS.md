@@ -27,10 +27,47 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **E2e track — e2e-01 BUILT and green (2026-07-16): the first real journey.** `just e2e` opens a
+  fixture project, launches **Claude** into it from the picker, and asserts the app really starts it
+  and renders it. **7 specs / ~18 s** on a live WebKitGTK 605.1.15 session.
+  - **The layers landed as chartered:** `specs → flows → screens → harness`. Specs hold no selectors;
+    `src/screens/` (`Sidebar`, `AgentPicker`, `Titlebar`, `TerminalPane`) is the single source per
+    surface; `src/flows/` (`openProject`, `launchAgent`) are the reusable journeys; `src/harness/`
+    owns the fixture copy, the two named timeouts, and the IPC used **for arrange only**. `ProcStatus`
+    is imported from the UI's `domain.ts` via the `@domain` alias, so no spec types a status literal.
+  - **Three findings the code now encodes:**
+    1. **Opening a project cannot be clicked** — it goes through the OS folder dialog, which WebDriver
+       cannot drive. `harness/tauri.ts` calls the same core command the dialog's handler calls; it is
+       arrange-only and every assertion stays on the window. Agents are **not** trust-gated
+       (`Registration::launched` sets `trust_variant: None`), so the journey needs no trust step.
+    2. **The picker lists uninstalled tools** (`installed` only picks a badge), so the journey is
+       CI-safe without a stub `claude`, and detection's `$SHELL -ilc` probe never has to be fought.
+    3. **The terminal header shows the process's OSC title once it sets one** — a live Claude Code
+       renames it to `✳ Claude Code`. Caught by tightening an assertion to an exact match; the spec
+       now asserts identity, not Claude Code's branding.
+  - **Mutation-verified, because a green e2e is where a pretend test hides.** Mutating the **product**
+    and watching the right test go red: dropping `supervisor.start(id)` in `facade.rs` failed **only**
+    "actually starts the agent's process" (`Expected: not "Stopped"`) while the other three correctly
+    passed — the row *is* still drawn; rendering `{process.label + "X"}` in `ProcessRow` failed the
+    label assertions, naming the rendered rows. Product code restored byte-clean after each.
+  - **Two of my own defects the mutation runs exposed:** the spec initially asserted only that a row
+    was *drawn* (added "actually starts the agent's process", which the mutation proves is
+    load-bearing), and `waitUntil`'s `timeoutMsg` is interpolated when the options object is built —
+    before a single poll — so it could only ever report the initial state (`rows: []` while three rows
+    existed). It now reports lazily.
+  - **Deliberately not asserted, and said out loud rather than buried:** that the agent reaches
+    `Running` (needs Claude Code installed — true here, false in CI), and the header's exact text.
+    Both are environment-dependent; the spec asserts the app *tried*.
+  - **Gates:** `just lint` exit 0, `just test` exit 0 (315 UI / 63 files + the Rust suite), release
+    gating re-verified **in both directions** (a production bundle contains no wdio; the `VITE_E2E`
+    build does, proving the gate is not simply always-off) and `cargo tree` shows no wdio crate by
+    default.
+
 - **E2e track — e2e-00 BUILT and green (2026-07-15). `just e2e` compiles the app and drives the real
   window; the smoke spec passes on a live WebKitGTK 605.1.15 session (3 passing).** Owner asked for
-  the foundation to be scaffolded this session so a later session writes only journeys. **No journey
-  specs written, by instruction.**
+  the foundation to be scaffolded this session so a later session writes only journeys. **Superseded
+  in one respect by the entry above: the claim "the frontend needs zero changes" was wrong** — see
+  the correction below.
   - **What landed:** the `e2e/` workspace (`wdio.conf.ts`, `.nvmrc`, `tsconfig.json` with a `@domain`
     alias onto the UI's `domain.ts`, `pnpm-workspace.yaml`, a self-contained `fixtures/projects/basic`,
     `specs/smoke.spec.ts`); the **`wdio` cargo feature** + one gated plugin registration in
@@ -46,17 +83,19 @@
     1. **`browserName` is `"tauri"`, not `"wry"`.** `"wry"` is the `tauri-driver` convention the old
        charter inherited; the service uses `"tauri"`. Found by reading the maintainers' own
        `wdio.tauri-embedded.conf.ts`, not by guessing.
-    2. **The frontend needs *zero* changes.** The docs call `tauri-plugin-wdio` + npm
-       `@wdio/tauri-plugin` "required"; they are required only for `execute`/mocking/log-capture, and
-       the docs' own "works without the plugin" list (element interaction, navigation, basic
-       commands) is the entire vocabulary of a user journey. **Verified by removing them: the smoke
-       spec still passes.** The planned `VITE_E2E` Vite injection, the UI devDependency, and the
-       second Rust plugin were all deleted. Net product touch is one optional Cargo dep + one config
-       overlay.
+    2. **~~The frontend needs *zero* changes.~~ WRONG — corrected 2026-07-16.** I removed
+       `tauri-plugin-wdio` + npm `@wdio/tauri-plugin`, saw the smoke spec still pass, and reported
+       them unnecessary. They passed at **45.7 s instead of 434 ms**: the service's eval bridge polls
+       for `window.__wdio_original_core__`, a global the npm plugin installs, and **every driver
+       command then waits five seconds and gives up**. I verified correctness and never measured
+       cost, then wrote it up as verified. Both plugins are restored, the frontend import is
+       `VITE_E2E`-gated in `vite.config.ts`, and the gate is checked in both directions.
     3. **Adding the npm plugin to the UI package broke the product build** — it pulled `esbuild` with
        an unapproved install script into `crates/app/ui`, so `pnpm install`/`pnpm build` failed.
-       Caught by the release-gating check, then reverted; `crates/app/ui` is **byte-pristine**
-       (`git diff` empty). A reminder that test infrastructure in a product package is not free.
+       Caught by the release-gating check. Now resolved deliberately rather than by removal: the UI's
+       `pnpm-workspace.yaml` allows the `esbuild` script (already the compiler under Vite, so it
+       grants nothing the build did not run), and the plugin stays a UI **dev** dependency — the one
+       place Vite can resolve it — gated out of every production bundle.
   - **Two upstream defects worked around, both recorded with sources (charter §1.3):**
     - **Node 26 breaks WebdriverIO.** WDIO 9.29.1 sets `Content-Length`/`Connection` headers that
       Node 26's undici rejects → an opaque `UND_ERR_INVALID_ARG` on `POST /session` that reads like a
@@ -4920,21 +4959,22 @@ culprit commits are from the unticketed set above.
 
 ## Next session should start with
 
-**◆ NEW (2026-07-15) — E2E: the harness is BUILT and green; write journeys next.** `just e2e` works
-today — it compiles the app and drives the real window (smoke: 3 passing on WebKitGTK 605.1.15).
-Start with [`plan/e2e/e2e-01-screens-and-flows.md`](plan/e2e/e2e-01-screens-and-flows.md) (the
-`specs → flows → screens → harness` layering + the Dashboard-core journey), after reading
-`plan/e2e/README.md` §2 (scope) and §3 (architecture). Before touching anything:
+**◆ NEW (2026-07-16) — E2E: the harness AND the first journey are built and green.** `just e2e` opens
+a fixture project, launches Claude into it, and asserts the app really starts it (7 specs, ~18 s).
+The pattern to copy is `e2e/specs/agents/launch-agent.spec.ts` + `e2e/src/` — **not** the smoke spec,
+which is deliberately direct. Next walk: pick a row from `plan/e2e/README.md` §4 (Dashboard core and
+Resume-last-session are the highest-value); read §2 (scope) and §3 (architecture) first. Before
+touching anything:
   1. **Use Node < 26 or nothing works.** This box defaults to 26.3.0; `e2e/.nvmrc` pins 24 (already
      installed) — run `fnm use` in `e2e/`. `just e2e` refuses on 26 with an explanation. The
      underlying defect and the `@wdio/native-utils` 2.5.0 pin are charter §1.3.
   2. **One-time:** `pnpm -C e2e install`. There is **no** `sudo`, no `tauri-driver`, no
      `webkit2gtk-driver` — the embedded provider puts the WebDriver server inside the app.
-  3. **Don't re-add the wdio frontend plugins.** They are documented as "required" and are not;
-     removing them was verified, and adding the npm half breaks the product UI build (charter §1.1).
-     **No `browser.tauri.mock()`** — specs drive the real core (§1.2).
-  4. **The harness is `e2e/wdio.conf.ts` only.** `screens/`/`flows/`/`harness/` do not exist yet —
-     e2e-01 creates them. The smoke spec is deliberately direct; don't take it as the pattern.
+  3. **Don't "simplify" the wdio plugins away.** Dropping them looks like sound YAGNI and the specs
+     stay green — at **45.7 s instead of 434 ms** (charter §1.1). **No `browser.tauri.mock()`** —
+     specs drive the real core (§1.2).
+  4. **Mutate the product to prove a new walk can fail** before calling it done — e2e-01's test plan
+     records the two that are checked. A green e2e is exactly where a pretend test hides.
   5. **Owed from e2e-00:** the CI job (`.github/workflows/e2e.yml`) has never run; it fires on the
      first PR touching `crates/app/**` or `e2e/**`. Treat that run as the acceptance check for the
      headless `xvfb-run` path.
