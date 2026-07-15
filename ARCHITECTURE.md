@@ -59,8 +59,15 @@ adapter. Adapters hold **no** business state and make **no** domain decisions.
 
 ```
   adapters ──► C8 Facade ──► C1…C7      (adapters touch C8 ONLY)
+  scope-limited callers ──► ScopedFacade  (no accessor onto a context; enforced by the type)
   composition ──► every context         (one-way: the only module that may name them all)
 ```
+
+`Facade` is the local user's authority: it hands whole contexts out (`supervisor()`, `projects()`,
+…) because the Tauri UI and the loopback HTTP API are not scope-limited. A caller that **is** — MCP
+today — gets a `ScopedFacade` instead: the session is bound once (so it is in no signature) and
+there is no accessor to reach an ungated context with, so it cannot route around its own guard.
+`compile_fail` doc tests on the type keep that true.
 
 Contexts do not import each other in a ring, and `scripts/check-core-cycles.sh` enforces it on
 every build rather than leaving it to be asserted here. It allows two known edges, listed in the
@@ -84,7 +91,7 @@ the layer those contexts import.
 | **C5** Monitoring | `metrics/` `portscan/` | CPU/mem sampling, `/proc` port discovery, readiness | live (P6: D1/D2/D3) |
 | **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos + key-value); end-to-end orchestration (E7) proven |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
-| **C8** Integration façade | `facade` `identity` | the public command/query API; MCP identity & effective scope | live (`facade`) |
+| **C8** Integration façade | `facade` `identity` | the public command/query API (`Facade`, local authority) + the session-scoped surface (`ScopedFacade`); MCP identity & effective scope | live (`facade`) |
 
 Cross-cutting in `core`: `events` (the `DomainEvent` bus), `composition` (the `CorePorts` set the root
 assembles), `ports` (the traits no single context owns, each with its `Noop` default),

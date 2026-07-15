@@ -27,10 +27,10 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
-- **Codebase-design audit — 6 of 8 findings landed (2026-07-15; commits `8f6badf`…`49a0641`).** An
+- **Codebase-design audit — all 8 findings landed (2026-07-15; commits `8f6badf`…`8c806d8`).** An
   owner-requested structural review of quality/architecture/domains, run outside the phase plan. Gate
-  green after every commit: **Rust 976 passed / 0 failed** (baseline was 974; +2 new), UI **315 passed
-  / 63 files**, `cargo clippy -D warnings` exit 0, `cargo fmt --check` exit 0, `tsc --noEmit` exit 0,
+  green after every commit: **Rust 983 passed / 0 failed** (baseline was 974; +9 new, incl. 5
+  compile_fail doc tests), UI **315 passed / 63 files**, `cargo clippy -D warnings` exit 0, `cargo fmt --check` exit 0, `tsc --noEmit` exit 0,
   eslint exit 0, dependency-direction OK. What landed:
   - **Dead ports removed** (`8f6badf`): `Summarizer` was an empty trait with zero methods, zero impls
     and zero references; `Store` had no `dyn Store` call site and was not a `CorePorts` field. The
@@ -60,6 +60,22 @@
     `identity → projects → supervisor → identity`. `ports/` collapsed to `ports.rs`.
     **New gate: `scripts/check-core-cycles.sh`** (in `just lint` + CI), verified by reintroducing one
     import into `ports.rs` → 20 rings, exit 1.
+
+  - **Scope became a type + a real disclosure closed** (`8c806d8`): the Facade handed whole contexts
+    to any caller (`supervisor()`, `projects()`, `trust()`, `agents()`, `config()`), so ~241 methods
+    were reachable through the "single entry point" and scope rested on which method a caller picked.
+    The 77 session-taking methods moved onto a new **`ScopedFacade`**, which exposes no accessor;
+    `Facade` drops **169 → 94** public methods. Binding the session also removes it from every
+    signature: `facade.scoped(session).todo_create(doc)`. Five `compile_fail` doc tests pin it —
+    `scoped.supervisor()` does not compile — and were mutation-checked by swapping one for a call
+    that *should* compile and watching the test go red.
+    **The type immediately found a live bug:** `ipc_server`'s `get_project_status` composed its reply
+    from an unscoped `snapshot()` filtered by an explicit project id with **no scope check**, so a
+    scoped MCP caller naming another project read that project's rows *in full* — bypassing the
+    redaction `snapshot_scoped` enforces. The rule now lives in core as `project_processes_scoped`
+    (foreign rows reduced to identity); mutation-tested by reintroducing the leak. The IPC adapter
+    routes all 77 scoped requests through `ScopedFacade` and reaches no ungated context. HTTP/Tauri
+    still call the supervisor directly — they are the local user's authority, deliberately unscoped.
 
   **Known debt this surfaced (not fixed, decision owed):** the cycle gate allows exactly **two** edges —
   `events → agents` and `events → config`. `DomainEvent` names the payload types it carries
@@ -4724,29 +4740,14 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-**★ NEW (2026-07-15) — the codebase-design audit left exactly two things open. Both are decisions, not
-typing:**
+**★ NEW (2026-07-15) — the codebase-design audit is complete: all eight findings landed. One
+decision is still owed:**
 
-  1. **ScopedFacade (audit finding #3) — owner picked "yes", then the measurement changed the case.**
-     The `Facade` hands out whole contexts by reference (`supervisor()`, `projects()`, `trust()`,
-     `agents()`, `config()`), so ~241 methods are reachable through the "single entry point" and scope
-     enforcement rests on *which method a caller happens to pick* rather than on a type. Today's code is
-     correct — MCP is out-of-process and physically cannot reach the ungated door; the in-process
-     bypassers (Tauri, HTTP) are deliberately local-user authority. The plan was a `ScopedFacade`
-     exposing only session-scoped actions. **Measured before building: the scoped surface is 77 methods**
-     (`session: SessionId` is its first parameter), against **5** accessors that are the actual problem.
-     A 77-method delegating wrapper is a shallow module — a large interface over no implementation —
-     which trades one design smell for another. **The cheaper and strictly stronger option is to seal the
-     5 accessors** (`pub(crate)`) and add ~13 named `Facade` methods for what `app`/`httpapi` legitimately
-     need (start/stop/restart/resume/start_all/stop_all/restart_running/restart_all_commands/attach_pty/
-     kill_orphan/shutdown/rename): then **no** adapter has an ungated door, because the door stops
-     existing publicly. Not done — it reverses an explicit owner choice, so it needs their call.
-     Evidence for the numbers: `grep` for `pub fn` taking `session: SessionId` across `facade.rs` +
-     `facade/*.rs`.
-  2. **The two allowed cycle edges** (`events → agents`, `events → config`) — see the Current-state entry.
-     Fixing them means deciding where `DomainEvent`'s payload vocabulary lives. `process.rs` is the
-     precedent: it holds `ProcStatus` for both `events` and the supervisor without either owning it.
-     Until decided, `scripts/check-core-cycles.sh` blocks any *new* cycle.
+  1. **The two allowed cycle edges** (`events → agents`, `events → config`) — see the Current-state
+     entry. Fixing them means deciding where `DomainEvent`'s payload vocabulary lives. `process.rs`
+     is the precedent: it holds `ProcStatus` for both `events` and the supervisor without either
+     owning it. Until decided, `scripts/check-core-cycles.sh` blocks any *new* cycle, and the two
+     known edges are listed with rationale in its `ALLOWED` array.
 
 **⊳ NEW (2026-07-03): `feat/project-removal` is complete, gate-green, and real-window-verified (see the Current-state entry) — the owner opens its PR (no self-merge). No follow-up work is owed on it.**
 
