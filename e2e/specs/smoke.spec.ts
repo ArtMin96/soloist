@@ -1,4 +1,10 @@
-import { browser, $ } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import { sidebar } from "../src/screens/Sidebar.js";
+import { titlebar } from "../src/screens/Titlebar.js";
+
+// The window title set in tauri.conf.json and the page title in index.html; nothing retitles it at
+// runtime, so the session reporting it proves the driver is attached to the app's own webview.
+const APP_TITLE = "Soloist";
 
 // Proves the harness itself: the built app launches, the embedded WebDriver server accepts the
 // session, and the real window renders its shell. No feature behavior — that is what the journey
@@ -9,18 +15,14 @@ import { browser, $ } from "@wdio/globals";
 // assumed an empty app would pass or fail on spec ordering.
 describe("app shell", () => {
   it("renders the project sidebar", async () => {
-    const projects = await $('nav[aria-label="Projects"]');
-    await projects.waitForExist({ timeout: 30_000 });
-    expect(await projects.isDisplayed()).toBe(true);
+    await sidebar.waitUntilReady();
   });
 
   it("offers the open-project action", async () => {
-    const openProject = await $("aria/Open project");
-    await openProject.waitForExist({ timeout: 30_000 });
-    expect(await openProject.isDisplayed()).toBe(true);
+    expect(await titlebar.offersOpenProject()).toBe(true);
   });
 
   it("reports the window title", async () => {
-    expect(await browser.getTitle()).toBeDefined();
+    expect(await browser.getTitle()).toBe(APP_TITLE);
   });
 });

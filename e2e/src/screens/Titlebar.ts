@@ -10,10 +10,14 @@ export const titlebar = {
     await button.click();
   },
 
-  /** Clicks "Open project", which raises the OS folder picker — unusable from a spec. */
-  async openProject(): Promise<void> {
+  /**
+   * Whether "Open project" is offered. Clicking it raises the OS folder picker, which a WebDriver
+   * session cannot drive — so the affordance is only ever asserted on, never driven; flows open
+   * projects through `openProject` instead.
+   */
+  async offersOpenProject(): Promise<boolean> {
     const button = await $("aria/Open project");
-    await button.waitForClickable({ timeout: WAIT.render });
-    await button.click();
+    await button.waitForExist({ timeout: WAIT.render });
+    return button.isDisplayed();
   },
 };

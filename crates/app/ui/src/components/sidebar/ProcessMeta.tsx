@@ -36,6 +36,7 @@ export function ProcessMeta({
   if (!resolved) return null;
   return (
     <span
+      data-testid="process-meta"
       title={resolved.title}
       className={cn(
         "font-mono whitespace-nowrap text-muted-foreground tabular-nums",

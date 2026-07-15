@@ -22,7 +22,7 @@ const bundleReport = process.env.ANALYZE
 
 // Set VITE_E2E=1 (see `just e2e`) to prepend the WebdriverIO frontend plugin to the entry module.
 // The e2e harness drives the app through it — it installs the globals the wdio Tauri service's
-// eval bridge looks for, and without it every driver command waits five seconds and gives up. It
+// eval bridge looks for, and without them the bridge cannot reach the page at all. It
 // must never reach a shipped bundle, so it is injected here rather than imported by `main.tsx`:
 // empty by default, which leaves a normal build byte-identical and never even resolves the
 // dependency. A static prepended import also runs the plugin before React mounts without forcing

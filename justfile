@@ -47,10 +47,13 @@ test:
 e2e:
     #!/usr/bin/env bash
     set -euo pipefail
+    # The supported Node range lives in e2e/package.json (`engines.node`); this only reads its
+    # ceiling out, so tightening or lifting the range is a one-file change.
+    ceiling=$(node -p 'require("./e2e/package.json").engines.node.match(/<\s*(\d+)/)[1]')
     major=$(node -p 'process.versions.node.split(".")[0]')
-    if [ "$major" -ge 26 ]; then
-      echo "error: e2e needs Node < 26 (found ${major})." >&2
-      echo "WebdriverIO 9.29.1 sets Content-Length/Connection headers that Node 26's undici rejects," >&2
+    if [ "$major" -ge "$ceiling" ]; then
+      echo "error: e2e needs Node < ${ceiling} (found ${major})." >&2
+      echo "WebdriverIO 9.29.1 sets Content-Length/Connection headers that Node ${ceiling}'s undici rejects," >&2
       echo "so no WebDriver session can start (webdriverio/webdriverio#15265 — fixed upstream, not" >&2
       echo "yet released). Switch to the pinned LTS, which e2e/.nvmrc records:  fnm use  (in e2e/)" >&2
       exit 1

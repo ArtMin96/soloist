@@ -21,3 +21,12 @@ export function materializeProject(name: string): string {
   cpSync(path.join(fixtures, name), target, { recursive: true });
   return target;
 }
+
+/**
+ * Whether a path the app reports lies inside the harness's scratch area. The isolation
+ * tripwire: an app under test must only ever see fixture projects, so a foreign path means the
+ * sandboxing failed and the run is about to drive the developer's real state — abort loudly.
+ */
+export function isScratchPath(reported: string): boolean {
+  return reported.startsWith(scratch + path.sep) || reported === scratch;
+}

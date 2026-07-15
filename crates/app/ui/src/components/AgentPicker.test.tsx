@@ -55,7 +55,7 @@ describe("AgentPicker", () => {
     expect(screen.getByText("installed")).toBeTruthy();
     expect(screen.getByText("not found")).toBeTruthy();
     // The footer names the launch target so it is never ambiguous.
-    expect(screen.getByText("▸ Storefront")).toBeTruthy();
+    expect(screen.getByTestId("palette-target").textContent).toBe("Storefront");
   });
 
   it("launches the chosen tool with no flags into the active project", () => {

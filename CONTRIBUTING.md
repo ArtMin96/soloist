@@ -86,7 +86,12 @@ Two requirements the harness cannot paper over:
   under `xvfb-run -a` (what CI does). Under Wayland the harness sets `GDK_BACKEND=x11` for you.
 
 Each run is hermetic: it builds the app, points `SOLOIST_APP_DATA_DIR` at a scratch directory it
-wipes first, and drives a fixture project — it never reads or writes your real Soloist state.
+wipes first, and drives a fixture project — it never reads or writes your real Soloist state. Stub
+agent CLIs (`e2e/fixtures/bin/`) are prepended to `PATH`, shadowing any real ones, so a launched
+"Claude" is the stub and no real agent session is ever opened. The e2e binary builds into its own
+`target/e2e/` (the `wdio` feature links a WebDriver server into it), so it never overwrites the
+ordinary `target/debug/soloist` and alternating `just dev` / `just e2e` never thrashes a rebuild —
+at the cost of a second debug build's disk.
 
 The track's charter and phase plan live in [`plan/e2e/`](plan/e2e/README.md).
 

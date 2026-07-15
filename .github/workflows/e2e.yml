@@ -16,7 +16,7 @@ env:
 
 jobs:
   e2e:
-    # Matches the CI floor and the supported runtime target (D-11: Ubuntu 22.04+).
+    # Matches the CI floor and the supported runtime target, Ubuntu 22.04+.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -42,9 +42,10 @@ jobs:
         with:
           version: 11
 
-      # e2e/.nvmrc is the single source for the Node version. It is pinned below 26: WebdriverIO
-      # 9.29.1 sets Content-Length/Connection headers that Node 26's undici rejects, so no session
-      # can start (webdriverio/webdriverio#15265 — fixed upstream, not yet released).
+      # e2e/.nvmrc pins the exact Node CI runs; the supported range is e2e/package.json's
+      # `engines.node`, which caps below 26: WebdriverIO 9.29.1 sets Content-Length/Connection
+      # headers that Node 26's undici rejects, so no session can start
+      # (webdriverio/webdriverio#15265 — fixed upstream, not yet released).
       - uses: actions/setup-node@v4
         with:
           node-version-file: e2e/.nvmrc

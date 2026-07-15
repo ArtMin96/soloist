@@ -14,5 +14,5 @@
       "@domain": ["../crates/app/ui/src/domain.ts"]
     }
   },
-  "include": ["wdio.conf.ts", "specs/**/*.ts", "src/**/*.ts", "types/**/*.d.ts"]
+  "include": ["wdio.conf.ts", "specs/**/*.ts", "src/**/*.ts"]
 }

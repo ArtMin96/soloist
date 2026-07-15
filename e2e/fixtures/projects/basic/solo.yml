@@ -6,3 +6,6 @@ processes:
   Crasher:
     command: ./bin/crasher.sh
     auto_start: false
+  Listener:
+    command: ./bin/listener.sh
+    auto_start: false

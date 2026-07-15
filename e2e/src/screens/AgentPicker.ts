@@ -22,14 +22,11 @@ export const agentPicker = {
     return names.filter((name): name is string => name !== null);
   },
 
-  /**
-   * The project the picker will launch into, as the footer reports it. The footer renders a "▸ "
-   * marker before the name; this returns just the name.
-   */
+  /** The project the picker will launch into, as the footer reports it. */
   async targetProject(): Promise<string> {
-    const footer = await $(ROOT).$("span*=▸");
-    await footer.waitForDisplayed({ timeout: WAIT.render });
-    return (await footer.getText()).replace("▸", "").trim();
+    const target = await $(ROOT).$('[data-testid="palette-target"]');
+    await target.waitForDisplayed({ timeout: WAIT.render });
+    return (await target.getText()).trim();
   },
 
   /** The command line shown beside a tool — what the app would actually spawn. */

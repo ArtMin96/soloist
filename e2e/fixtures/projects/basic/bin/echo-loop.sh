@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A long-lived stub process: prints a ready marker, then echoes each line it is given back with a
-# stable prefix. Specs assert on the marker to know it is up, and drive the echo to prove typed
-# input reaches the real PTY and its output reaches the terminal.
+# stable prefix. Long-lived is the point — a start/stop spec needs a process that stays up until
+# told otherwise; the echo gives a future PTY round-trip spec something deterministic to drive.
 set -euo pipefail
 
 echo "echo-loop ready"
