@@ -1,93 +1,88 @@
-# e2e-00 — Harness, Fixture Project & CI
+# e2e-00 — Harness, Plugin Wiring, Fixture & CI
 
-**Goal:** Stand up the one reusable real-window e2e harness — **WebdriverIO + `tauri-driver`** driving the
-built `soloist` desktop app — plus a hermetic fixture project, a `just e2e` runner, and a CI job. Land a
-single **smoke spec** so the path is proven end to end before any feature walk is written. Read
-[`README.md`](README.md) (the track charter) first.
+**Status: built and green (2026-07-15).** `just e2e` compiles the app and drives the real window;
+the smoke spec passes on a live WebKitGTK 605.1.15 session. What follows is what exists, not a plan.
 
-**Delivers:** the harness every catalog walk (charter §3) builds on. **No product code.**
+**Goal:** Stand up the one reusable real-window e2e harness — **WebdriverIO + `@wdio/tauri-service`**
+(embedded provider) driving the built `soloist` app — plus the feature-gated server the embedded
+provider needs, a hermetic fixture, a `just e2e` runner, and a CI job. Read [`README.md`](README.md)
+first — especially §1.1 (gating), §1.2 (no mocking), §1.3 (environment constraints).
 
-## Scope
-
-**In:** a top-level `e2e/` workspace; `tauri-driver` + WebKitWebDriver setup (documented in
-`CONTRIBUTING.md`); `wdio.conf.ts`; a controlled fixture (a `solo.yml` + stub scripts the specs drive,
-not the developer's live stack); a `just e2e` recipe (`xvfb-run`-aware); a GitHub Actions job on
-`ubuntu-latest`; one smoke spec.
-**Out:** any feature walk spec (those are e2e-01+); changing product code; cross-platform CI (D2 — Linux
-x86_64 only).
-
-## Tasks
-
-1. **System deps + driver (owner-run once; document, don't automate behind `sudo`):** `sudo apt install
-   webkit2gtk-driver xvfb`; `cargo install tauri-driver --locked`; verify `which WebKitWebDriver`. Add
-   these to `CONTRIBUTING.md` under a new "Running e2e tests" section.
-2. **`e2e/` workspace:** its own `package.json` (`@wdio/cli`, `@wdio/local-runner`, `@wdio/mocha-framework`,
-   `@wdio/spec-reporter`; TS via `tsx`/`ts-node` per the project's TS setup) — kept **separate** from the
-   UI package so the heavy WebDriver deps never enter the app bundle's tree.
-3. **`wdio.conf.ts`:** `browserName: "wry"`, `tauri:options.application = ../target/debug/soloist`, port
-   4444, `maxInstances: 1`. `onPrepare` builds the UI + app (`pnpm -C crates/app/ui build` then
-   `cargo build -p soloist-app`). `beforeSession` spawns `tauri-driver` and resolves once it logs
-   `listening`; `afterSession` kills it. Generous `mochaOpts.timeout` for app init.
-4. **Hermetic fixture:** an `e2e/fixtures/` project — a `solo.yml` with a trivial command and a **stub
-   agent** script (a tiny shell script that prints a marker and stays alive, reused from the pattern in
-   `crates/pty/tests/integration.rs`) — and a fresh `SOLOIST_APP_DATA_DIR` per run (the documented data-dir
-   override, §3 invariants) so a spec never touches real state and always starts clean.
-5. **`just e2e` recipe:** builds, then runs WebdriverIO; wraps in `xvfb-run` when no `$DISPLAY` is present
-   so it works headless (CI) and on a real desktop alike.
-6. **CI job (`.github/workflows/e2e.yml`):** `ubuntu-latest`; install the Tauri build deps +
-   `webkit2gtk-driver xvfb`; `cargo install tauri-driver --locked`; build; `xvfb-run` the e2e run.
-   Triggered on PRs labelled `e2e` or touching `crates/app/ui/**` / `crates/app/**` — **not** every push
-   (it builds and launches the app, so it is the slow gate).
-7. **Smoke spec (`e2e/specs/smoke.spec.ts`):** launch the app against the fixture and assert the window
-   renders its shell (e.g. the sidebar `nav[aria-label="Projects"]` exists and the app chrome is present).
-   No feature behavior — just proof the harness drives the real window.
-
-## Interfaces
+## What exists
 
 ```
 e2e/
-├── package.json          # WebdriverIO deps (isolated from the UI package)
-├── wdio.conf.ts          # wry capability → target/debug/soloist; tauri-driver lifecycle
+├── package.json            # WebdriverIO + tauri-service; engines: node >=20 <26
+├── pnpm-workspace.yaml     # minimumReleaseAge, denied install scripts, the native-utils pin
+├── .nvmrc                  # 24 — the Node pin (§1.3); CI reads this file
+├── tsconfig.json           # types + the @domain path alias onto the UI's domain.ts
+├── wdio.conf.ts            # the only file that knows the service exists; builds the app in onPrepare
 ├── fixtures/
-│   ├── solo.yml          # a trivial command + a stub agent the specs control
-│   └── stub-agent.sh     # prints a marker, stays alive (reused integration-test pattern)
+│   └── projects/basic/     # solo.yml + bin/echo-loop.sh + bin/crasher.sh (self-contained)
 └── specs/
-    └── smoke.spec.ts     # app launches + shell renders
+    └── smoke.spec.ts       # app launches + shell renders
 ```
 
-Specs target the stable handles components already expose: `aria-label` on the process-control buttons
-(`Start` / `Resume last session` / `Restart` / `Stop`), `role="option"` rows, `data-testid="terminal-host"`,
-`nav[aria-label="Projects"]`. Add a `data-testid` to a component only when no semantic handle fits — in the
-component, via `/impeccable`, not as a test-only hack.
+Plus, outside `e2e/`: the `wdio` cargo feature and one gated plugin registration in `crates/app`,
+`crates/app/tauri.e2e.conf.json`, the `just e2e` recipe, `.github/workflows/e2e.yml`, the
+`CONTRIBUTING.md` section, and `/e2e/.tmp/` + `/e2e/logs/` in `.gitignore`. **The frontend is
+untouched** (§1.1).
 
-## Acceptance criteria
+## How it works
 
-- `just e2e` builds and launches `target/debug/soloist` and the smoke spec passes on a real desktop.
-- The same run passes headless under `xvfb-run` (the CI path).
-- The CI job is green on a PR that touches the UI.
-- `CONTRIBUTING.md` documents the one-time `sudo` deps + `cargo install tauri-driver` so a fresh machine
-  can run e2e from the docs alone.
-- No product code changed; `just lint` / `just test` unaffected.
+- **Provider:** embedded, pinned explicitly in `wdio.conf.ts`. No `tauri-driver`, no
+  `webkit2gtk-driver`, no `sudo`. `browserName: "tauri"` (not `"wry"` — that is the tauri-driver
+  convention this track does not use).
+- **Build:** `onPrepare` runs `cargo tauri build --debug --no-bundle --features wdio --config
+  tauri.e2e.conf.json` from `crates/app`. `-c/--config` merges the overlay over `tauri.conf.json`;
+  no other build path sets either flag, so no ordinary build can produce this binary by accident.
+- **Hermetic:** `wdio.conf.ts` wipes `e2e/.tmp/app-data` and points `SOLOIST_APP_DATA_DIR` at it.
+  The env is set on `process.env` rather than as a capability because the published Tauri capability
+  type has no `env` field even though the launcher honours one — setting it directly avoids depending
+  on an untyped field. Verified: a run writes `soloist.db` there and leaves
+  `~/.local/share/soloist/` untouched.
+- **Wayland:** the config sets `GDK_BACKEND=x11`; the developer does not have to know.
+- **Display:** a desktop session works as-is; CI wraps in `xvfb-run`.
 
-## Test plan
+## Acceptance criteria — all met
 
-The smoke spec **is** the test for this phase (it proves the harness). Keep it minimal and stable
-(explicit `waitForExist`, no `sleep`). Feature behavior is verified by e2e-01+ specs, each per a charter
-§3 walk.
+- ✅ `just e2e` builds and launches the app; the smoke spec passes on a real desktop (3 passing).
+- ✅ **The `wdio` feature is absent from `default` and a release build links nothing** — verified by
+  `cargo tree -p soloist-app -e normal` (no `wdio`), with the `--features wdio` tree as the control.
+  The frontend carries no wdio reference because it was never modified.
+- ✅ `just lint` exit 0; `just test` exit 0 (315 UI tests + the Rust suite); `cargo check -p
+  soloist-app` (default features) builds.
+- ✅ `CONTRIBUTING.md` documents the steps; the one-time cost is `pnpm -C e2e install` and a Node LTS.
+- ⬜ **Owed:** the CI job has not run yet — it lands with the first PR that touches `crates/app/**` or
+  `e2e/**`. The headless `xvfb-run` path is therefore unproven; treat the first CI run as the
+  acceptance check for it.
+
+## Findings worth keeping
+
+Three things cost real time and are recorded so they cost nobody else any:
+
+1. **Node 26 breaks WebdriverIO** (§1.3). The failure is an opaque `UND_ERR_INVALID_ARG` on
+   `POST /session`, which looks like a config error and is not. `just e2e` now guards it.
+2. **`@wdio/tauri-service@1.2.0` cannot initialise on a clean install** (§1.3) — upstream release
+   drift, fixed by the forward pin.
+3. **The npm `@wdio/tauri-plugin` is not needed and is not benign.** Installing it into the UI package
+   pulled `esbuild` with an unapproved install script into the product's dependency tree and broke
+   `pnpm build`. The smoke spec passes without it and without its Rust sibling (§1.1).
 
 ## Risks & mitigations
 
-- **WebKitGTK has no CDP** → use WebDriver via `tauri-driver` (the whole reason for this track); never
-  reach for a CDP/Playwright driver.
-- **Flaky app-init timing** → wait on a concrete rendered element, not a fixed delay; generous init
-  timeout; `maxInstances: 1` (one window at a time).
-- **State bleed between runs** → a fresh `SOLOIST_APP_DATA_DIR` + the hermetic fixture per run; never the
-  developer's projects.
-- **Slow CI** → e2e is a separate, label/path-gated job, not part of the per-push `lint`/`test` gate.
-- **`sudo` deps can't be installed from the agent sandbox** → this phase is **owner-driven setup**; the
-  agent authors `e2e/` + the spec, the owner runs the one-time install and the first `just e2e`.
+- **A WebDriver server leaking into a shipped build** → the `wdio` cargo feature, absent by default,
+  plus an acceptance check that is run rather than assumed.
+- **The embedded provider is young** (`tauri-plugin-wdio-webdriver` first published 2026-05-03) →
+  proven working here before any journey depends on it. If it regresses, revisit charter §1 as a
+  decision — do not quietly add a provider fallback.
+- **Flaky app-init timing** → wait on a concrete rendered element, never a fixed delay;
+  `maxInstances: 1` (the app is single-instance — a second launch forwards to the first).
+- **State bleed** → a wiped `SOLOIST_APP_DATA_DIR` per run; never the developer's projects.
+- **Slow CI** → e2e is a separate, path/dispatch-gated job, not part of the per-push gate.
 
-## Effort
+## A benign warning you will see
 
-~1 day for the harness + smoke spec + CI (owner runs the one-time deps); each subsequent catalog walk is
-~½–1 day of spec.
+`WARN tauri-service:service: Failed to clear mock store: A sessionId is required` on teardown. It is
+the service's own mock-store cleanup running after the session closes; we never register mocks
+(§1.2), and the run exits 0. Not worth chasing.

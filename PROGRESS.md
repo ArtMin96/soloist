@@ -27,6 +27,113 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **E2e track — e2e-00 BUILT and green (2026-07-15). `just e2e` compiles the app and drives the real
+  window; the smoke spec passes on a live WebKitGTK 605.1.15 session (3 passing).** Owner asked for
+  the foundation to be scaffolded this session so a later session writes only journeys. **No journey
+  specs written, by instruction.**
+  - **What landed:** the `e2e/` workspace (`wdio.conf.ts`, `.nvmrc`, `tsconfig.json` with a `@domain`
+    alias onto the UI's `domain.ts`, `pnpm-workspace.yaml`, a self-contained `fixtures/projects/basic`,
+    `specs/smoke.spec.ts`); the **`wdio` cargo feature** + one gated plugin registration in
+    `crates/app`; `crates/app/tauri.e2e.conf.json`; `just e2e`; `.github/workflows/e2e.yml`; a
+    `CONTRIBUTING.md` "Running e2e tests" section; `.gitignore` entries.
+  - **Gates green:** `just lint` exit 0, `just test` exit 0 (315 UI / 63 files + the Rust suite),
+    `cargo check -p soloist-app` (default) builds. **Release-gating verified, not assumed:**
+    `cargo tree -p soloist-app -e normal` contains no `wdio` (control: `--features wdio` shows
+    `tauri-plugin-wdio-webdriver v1.2.0`), and the frontend carries nothing because **it was never
+    modified**. Hermeticity verified: a run writes `soloist.db` into `e2e/.tmp/app-data` and leaves
+    `~/.local/share/soloist/` untouched.
+  - **Three plan corrections reality forced — the docs now describe what is, not what I expected:**
+    1. **`browserName` is `"tauri"`, not `"wry"`.** `"wry"` is the `tauri-driver` convention the old
+       charter inherited; the service uses `"tauri"`. Found by reading the maintainers' own
+       `wdio.tauri-embedded.conf.ts`, not by guessing.
+    2. **The frontend needs *zero* changes.** The docs call `tauri-plugin-wdio` + npm
+       `@wdio/tauri-plugin` "required"; they are required only for `execute`/mocking/log-capture, and
+       the docs' own "works without the plugin" list (element interaction, navigation, basic
+       commands) is the entire vocabulary of a user journey. **Verified by removing them: the smoke
+       spec still passes.** The planned `VITE_E2E` Vite injection, the UI devDependency, and the
+       second Rust plugin were all deleted. Net product touch is one optional Cargo dep + one config
+       overlay.
+    3. **Adding the npm plugin to the UI package broke the product build** — it pulled `esbuild` with
+       an unapproved install script into `crates/app/ui`, so `pnpm install`/`pnpm build` failed.
+       Caught by the release-gating check, then reverted; `crates/app/ui` is **byte-pristine**
+       (`git diff` empty). A reminder that test infrastructure in a product package is not free.
+  - **Two upstream defects worked around, both recorded with sources (charter §1.3):**
+    - **Node 26 breaks WebdriverIO.** WDIO 9.29.1 sets `Content-Length`/`Connection` headers that
+      Node 26's undici rejects → an opaque `UND_ERR_INVALID_ARG` on `POST /session` that reads like a
+      config error (webdriverio/webdriverio#15265 — merged 2026-06-27, *unreleased*: latest
+      `webdriver` 9.29.1 predates it and still sets the header). This box defaults to **Node 26.3.0**.
+      Fix: `e2e/.nvmrc` pins 24 (LTS, already installed), `engines: node >=20 <26`, and `just e2e`
+      guards it with an explanatory error instead of failing obscurely. CI reads `.nvmrc`.
+    - **`@wdio/tauri-service@1.2.0` cannot initialise on a clean install** — it imports
+      `installMockSyncOverride` from `@wdio/native-utils` but pins that dep to 2.4.0, which lacks the
+      export. Upstream release drift the maintainer fixed by publishing native-utils 2.5.0 and
+      re-releasing the *electron* service (desktop-mobile#506, "changes to my release tooling so we
+      don't get this drift again"); the tauri service has had no such follow-up. Fix: a documented
+      `overrides` pin to 2.5.0 in `e2e/pnpm-workspace.yaml`, to be dropped when a tauri-service
+      release corrects its own pin.
+  - **Also hardened:** `e2e/pnpm-workspace.yaml` mirrors the UI's `minimumReleaseAge: 10080` and
+    **denies the `edgedriver`/`geckodriver` install scripts** (`@wdio/cli` carries them; they fetch
+    browser binaries we never drive), allowing only `esbuild`.
+  - **Owed:** the **CI job has not run** — it triggers on the first PR touching `crates/app/**` or
+    `e2e/**`, so the headless `xvfb-run` path is unproven; treat that first run as its acceptance
+    check. **Next: e2e-01** (`plan/e2e/e2e-01-screens-and-flows.md`) — the `screens/`/`flows/` layer
+    and the Dashboard-core journey.
+
+- **E2e track — charter reconciled to the official Tauri path; phase files written (2026-07-15).
+  Research + plan only; no `e2e/` code, no product code, nothing built.** Owner-requested research
+  of [v2.tauri.app/develop/tests](https://v2.tauri.app/develop/tests/) →
+  [.../webdriver](https://v2.tauri.app/develop/tests/webdriver/) ahead of writing real e2e in a
+  separate session.
+  - **Decision/change — `plan/e2e/README.md` §1 rewritten.** The charter's "WebdriverIO +
+    `tauri-driver`" is **superseded by WebdriverIO + `@wdio/tauri-service` (embedded provider)**. The
+    WebdriverIO half was and remains right (WebKitGTK exposes no CDP → Playwright cannot attach); what
+    changed is the mechanism. The live Tauri docs present the service as the recommended setup and the
+    hand-rolled `tauri-driver` spawn as legacy ("most projects should use `@wdio/tauri-service`
+    instead"), and the service's `platform-support.md` states **`'embedded'` is the default on every
+    platform when `driverProvider` is unset**. **Owner directive: one clean official path, no fallback
+    and no provider knob** — external/`tauri-driver` and CrabNebula are not carried.
+  - **Consequence — the charter's "owner must run `sudo`" blocker is gone.** The embedded server runs
+    *inside* the app; `webkit2gtk-driver` is required only by the `'external'` provider we are not
+    using, and `cargo install tauri-driver` is not needed at all. Only `xvfb` (headless CI) remains,
+    and `ci.yml` already installs it for the packaging smoke.
+  - **Consequence — e2e-00 now touches product code, narrowly.** The embedded provider requires
+    `tauri-plugin-wdio` (the service errors without it) + `tauri-plugin-wdio-webdriver`, the npm
+    `@wdio/tauri-plugin` frontend half, `wdio:default`/`wdio-webdriver:default` permissions, and
+    `withGlobalTauri`. All gated behind a new **`wdio` cargo feature absent from `default`** (mirroring
+    `agent-bridge`, the existing dev-only webview-driving plugin) + a **separate
+    `tauri.e2e.conf.json`** (the dev config can't be reused — it declares the `mcp-bridge` capability,
+    which only resolves when `agent-bridge` links that plugin) + a Vite-flag-gated frontend import.
+    Verified-absent-from-release is an e2e-00 acceptance criterion, not an assumption.
+  - **Scope decided (owner):** e2e owns **user journeys per domain**; the 974 Rust / 315 UI tests keep
+    owning logic. e2e is an additional gate, never a replacement. **Backend command mocking
+    (`browser.tauri.mock()`) is explicitly out of scope** — it would reintroduce the `mockIPC` stubbing
+    this track exists to remove.
+  - **Architecture recorded (charter §3):** `specs → flows → screens → harness`; specs hold no
+    selectors, screens are the single source per UI surface (mirroring `components/`), only
+    `wdio.conf.ts` knows the service exists. Specs partition by **domain named for what it is** — no
+    parity letters or phase numbers in directories/filenames/test titles (§8); traceability lives in the
+    charter §4 catalog + this ledger. `F` (MCP) and `H` (HTTP/CLI) have no window and stay headless; a
+    new **`cross-surface/`** domain drives CLI/MCP and asserts the window updates — the "one behavior,
+    many frontends" invariant, currently unproven by any test. Determinism: fresh
+    `SOLOIST_APP_DATA_DIR` + hermetic fixture + `domain.ts` imported via a tsconfig alias so no spec
+    types `"Running"`. Selectors are **accessible-name-first** (`$('aria/Start')`, WDIO-native) — the app
+    has exactly one `data-testid` and queries by role/label everywhere, so e2e inherits that convention
+    instead of forcing a testid rollout across ~80 components.
+  - **Verified, not assumed:** `@wdio/tauri-service` 1.2.0 + `tauri-plugin-wdio` 1.2.0 +
+    `tauri-plugin-wdio-webdriver` 1.2.0 (all published 2026-06-25, repo `webdriverio/desktop-mobile`);
+    `tauri-driver` 2.0.6. `$('aria/…')` confirmed against the WebdriverIO selector docs. **Local box has
+    no `WebKitWebDriver`/`xvfb-run`/`tauri-driver`, and is Wayland** (`WAYLAND_DISPLAY=wayland-0`) → the
+    runner must set `GDK_BACKEND=x11` per the service docs, matching the recorded Wayland focus gotcha.
+  - **Open risk, recorded not hidden:** `tauri-plugin-wdio-webdriver` is young (first published
+    2026-05-03, ~5.8k downloads) vs `tauri-driver`'s 229k. It is the officially documented default, and
+    e2e-00's smoke spec is the cheap proof before any journey depends on it. If it fails, revisit
+    charter §1 as a decision — do not quietly add a fallback.
+  - **Files:** `plan/e2e/README.md` (rewritten §1–§3, §5–§6; catalog gained a `cross-surface` row),
+    `plan/e2e/e2e-00-harness-and-ci.md` (rewritten), `plan/e2e/e2e-01-screens-and-flows.md` (new).
+    Stale "Playwright" wording in `CLAUDE.md` §5/§14, `plan/04` §286, `phase-01`/`phase-05`/`phase-11*`/
+    `phase-13`, and `plan/orchestrator/*` is **not** reconciled — per the charter's standing rule, each
+    defers to this track and is fixed when that doc is next touched.
+
 - **Codebase-design audit — all 8 findings landed (2026-07-15; commits `8f6badf`…`8c806d8`).** An
   owner-requested structural review of quality/architecture/domains, run outside the phase plan. Gate
   green after every commit: **Rust 983 passed / 0 failed** (baseline was 974; +9 new, incl. 5
@@ -4812,6 +4919,25 @@ culprit commits are from the unticketed set above.
   altered, only where code lives and which thread two store calls run on.
 
 ## Next session should start with
+
+**◆ NEW (2026-07-15) — E2E: the harness is BUILT and green; write journeys next.** `just e2e` works
+today — it compiles the app and drives the real window (smoke: 3 passing on WebKitGTK 605.1.15).
+Start with [`plan/e2e/e2e-01-screens-and-flows.md`](plan/e2e/e2e-01-screens-and-flows.md) (the
+`specs → flows → screens → harness` layering + the Dashboard-core journey), after reading
+`plan/e2e/README.md` §2 (scope) and §3 (architecture). Before touching anything:
+  1. **Use Node < 26 or nothing works.** This box defaults to 26.3.0; `e2e/.nvmrc` pins 24 (already
+     installed) — run `fnm use` in `e2e/`. `just e2e` refuses on 26 with an explanation. The
+     underlying defect and the `@wdio/native-utils` 2.5.0 pin are charter §1.3.
+  2. **One-time:** `pnpm -C e2e install`. There is **no** `sudo`, no `tauri-driver`, no
+     `webkit2gtk-driver` — the embedded provider puts the WebDriver server inside the app.
+  3. **Don't re-add the wdio frontend plugins.** They are documented as "required" and are not;
+     removing them was verified, and adding the npm half breaks the product UI build (charter §1.1).
+     **No `browser.tauri.mock()`** — specs drive the real core (§1.2).
+  4. **The harness is `e2e/wdio.conf.ts` only.** `screens/`/`flows/`/`harness/` do not exist yet —
+     e2e-01 creates them. The smoke spec is deliberately direct; don't take it as the pattern.
+  5. **Owed from e2e-00:** the CI job (`.github/workflows/e2e.yml`) has never run; it fires on the
+     first PR touching `crates/app/**` or `e2e/**`. Treat that run as the acceptance check for the
+     headless `xvfb-run` path.
 
 **★ NEW (2026-07-15) — the codebase-design audit is complete. All eight findings landed, plus the
 cycle debt they surfaced; nothing is owed from it.** `scripts/check-core-cycles.sh` now reports
