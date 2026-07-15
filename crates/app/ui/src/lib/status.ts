@@ -61,7 +61,6 @@ export const STATUS: Record<ProcStatus, StatusDisplay> = {
   },
 };
 
-
 /** Whether a process is currently running (the steady green state, not in-flight). */
 export function isRunning(status: ProcStatus): boolean {
   return status === "Running";

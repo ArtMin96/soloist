@@ -14,7 +14,12 @@ describe("applySignal", () => {
   });
 
   it("tracks the auto-restart attempt and clears it once the command settles", () => {
-    let state = applySignal(EMPTY_SIGNALS, { type: "RestartScheduled", id: 1, attempt: 3, limit: 10 });
+    let state = applySignal(EMPTY_SIGNALS, {
+      type: "RestartScheduled",
+      id: 1,
+      attempt: 3,
+      limit: 10,
+    });
     expect(state.attempts.get(1)).toEqual({ attempt: 3, limit: 10 });
 
     state = applySignal(state, {
@@ -28,13 +33,23 @@ describe("applySignal", () => {
   });
 
   it("clears the attempt when the command is held exhausted", () => {
-    let state = applySignal(EMPTY_SIGNALS, { type: "RestartScheduled", id: 1, attempt: 10, limit: 10 });
+    let state = applySignal(EMPTY_SIGNALS, {
+      type: "RestartScheduled",
+      id: 1,
+      attempt: 10,
+      limit: 10,
+    });
     state = applySignal(state, { type: "RestartExhausted", id: 1 });
     expect(state.attempts.has(1)).toBe(false);
   });
 
   it("keeps the attempt through the restart cycle's transient states", () => {
-    let state = applySignal(EMPTY_SIGNALS, { type: "RestartScheduled", id: 1, attempt: 2, limit: 10 });
+    let state = applySignal(EMPTY_SIGNALS, {
+      type: "RestartScheduled",
+      id: 1,
+      attempt: 2,
+      limit: 10,
+    });
     state = applySignal(state, {
       type: "ProcessStatusChanged",
       id: 1,
