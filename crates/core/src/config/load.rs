@@ -188,6 +188,17 @@ processes:
     }
 
     #[test]
+    fn a_list_form_processes_block_is_rejected() {
+        // `processes:` is a MAP keyed by process name, never a sequence. A list form (which would
+        // parse if `processes` were ever a Vec) must fail as a parse error, not be silently accepted.
+        let err = parse("processes:\n  - command: npm run dev\n").unwrap_err();
+        assert!(
+            matches!(err, ConfigError::Parse(_)),
+            "a sequence under processes is a parse error, got {err:?}"
+        );
+    }
+
+    #[test]
     fn empty_glob_is_rejected() {
         let err = parse("processes:\n  Web:\n    command: x\n    restart_when_changed: ['']\n")
             .unwrap_err();

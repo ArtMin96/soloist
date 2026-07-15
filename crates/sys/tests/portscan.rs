@@ -4,12 +4,36 @@
 use std::collections::HashMap;
 use std::fs;
 use std::net::TcpListener;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::process::CommandExt;
+use std::process::Command;
+use std::thread::sleep;
+use std::time::Duration;
 
 use soloist_core::PortProbe;
 use soloist_sys::ProcPortProbe;
 
 /// A pgid that will not exist on a normal Linux system.
 const ABSENT_PGID: i32 = 999_999_999;
+
+/// Spawns a child as its own process-group leader that holds `fd` (a listening socket) open past
+/// `exec`, so `/proc/<child>/fd` exposes exactly that socket and the probe attributes its port to
+/// the child's group. Clearing `FD_CLOEXEC` keeps the inherited socket open across the exec.
+fn spawn_group_holding(fd: RawFd) -> std::process::Child {
+    let mut command = Command::new("sleep");
+    command.arg("30");
+    // SAFETY: `fcntl` and `setpgid` are async-signal-safe and the only calls in the hook.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            libc::setpgid(0, 0);
+            Ok(())
+        });
+    }
+    command.spawn().expect("spawn a child process group")
+}
 
 /// This process's own process-group id, read from `/proc/self/stat` (the fields after the
 /// final `)` are `state ppid pgrp …`). The probe groups by pgid, so the test asks about the
@@ -41,6 +65,51 @@ fn discovers_a_port_a_process_in_the_group_is_listening_on() {
         ports.contains(&port),
         "expected the bound port {port} in {ports:?}",
     );
+}
+
+#[test]
+fn ports_are_attributed_to_the_group_that_holds_them() {
+    // Two concurrent live groups, each holding a distinct listening socket. The exact port number
+    // is an unambiguous discriminator: a cross-attribution bug would credit one group with the
+    // other's port.
+    let listener_a = TcpListener::bind("127.0.0.1:0").expect("bind port a");
+    let listener_b = TcpListener::bind("127.0.0.1:0").expect("bind port b");
+    let port_a = listener_a.local_addr().expect("addr a").port();
+    let port_b = listener_b.local_addr().expect("addr b").port();
+
+    let mut child_a = spawn_group_holding(listener_a.as_raw_fd());
+    let mut child_b = spawn_group_holding(listener_b.as_raw_fd());
+    let pgid_a = child_a.id() as i32;
+    let pgid_b = child_b.id() as i32;
+    // Give the children a moment to reach exec and appear in /proc.
+    sleep(Duration::from_millis(100));
+
+    let probe = ProcPortProbe::new();
+    let discovered = probe.listening_ports(&[pgid_a, pgid_b]);
+    let ports_a = discovered.get(&pgid_a).expect("group a is present");
+    let ports_b = discovered.get(&pgid_b).expect("group b is present");
+
+    assert!(
+        ports_a.contains(&port_a),
+        "group a holds its own port {port_a}: {ports_a:?}"
+    );
+    assert!(
+        !ports_a.contains(&port_b),
+        "group a must not be credited group b's port {port_b}: {ports_a:?}"
+    );
+    assert!(
+        ports_b.contains(&port_b),
+        "group b holds its own port {port_b}: {ports_b:?}"
+    );
+    assert!(
+        !ports_b.contains(&port_a),
+        "group b must not be credited group a's port {port_a}: {ports_b:?}"
+    );
+
+    let _ = child_a.kill();
+    let _ = child_a.wait();
+    let _ = child_b.kill();
+    let _ = child_b.wait();
 }
 
 #[test]

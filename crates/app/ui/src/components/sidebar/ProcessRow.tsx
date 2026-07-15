@@ -2,8 +2,10 @@ import { ChevronRight } from "lucide-react";
 import { ProcessControls } from "@/components/ProcessControls";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessMeta } from "@/components/sidebar/ProcessMeta";
+import { PROCESS_CPU_FLOOR, PROCESS_MEM_FLOOR } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 import { useSignal } from "@/store/signalsContext";
+import { useSidebarSettings } from "@/store/sidebarSettingsContext";
 import type { ProcessView } from "@/domain";
 
 /** The row's base left padding; each lineage level indents one step further. */
@@ -52,7 +54,8 @@ export function ProcessRow({
   expanded = true,
   onToggleExpand,
 }: ProcessRowProps) {
-  const { metrics, attempt, activity } = useSignal(process.id);
+  const { metrics, restart, activity } = useSignal(process.id);
+  const { sidebar } = useSidebarSettings();
   // Controls are always present for the selected row and for an untrusted command (so its
   // trust affordance stays visible); otherwise they reveal on hover/focus, replacing the
   // at-rest telemetry.
@@ -131,7 +134,9 @@ export function ProcessRow({
             ready={process.ready}
             ports={process.ports}
             metrics={metrics}
-            attempt={attempt}
+            restart={restart}
+            cpuFloor={PROCESS_CPU_FLOOR[sidebar.process_cpu_threshold]}
+            memFloor={PROCESS_MEM_FLOOR[sidebar.process_mem_threshold]}
           />
         </div>
         <div

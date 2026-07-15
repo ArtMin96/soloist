@@ -12,10 +12,12 @@ use std::time::Duration;
 
 use tokio::sync::broadcast;
 
-use crate::config::{ConfigSync, ProcessSpec};
+use crate::composition::CorePorts;
+use crate::config::ProcessSpec;
+use crate::configchange::ConfigSync;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::{CorePorts, PtySize, SpawnSpec, TrustRepo};
+use crate::ports::{PtySize, SpawnSpec, TrustRepo};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, Supervisor};
 use crate::testing::{
@@ -52,7 +54,7 @@ fn setup() -> Setup {
         Arc::new(FakeProjectRepo::new()),
     )
     .build();
-    let sup = Arc::new(Supervisor::new(&ports, bus.clone()));
+    let sup = Arc::new(Supervisor::new(ports.supervisor_ports(), bus.clone()));
     Setup {
         sup,
         clock,

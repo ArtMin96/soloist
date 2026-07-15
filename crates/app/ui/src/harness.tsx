@@ -120,6 +120,7 @@ function command(over: Partial<ProjectCommandView> & { name: string }): ProjectC
     auto_start: false,
     auto_restart: false,
     restart_when_changed: [],
+    env: {},
     visibility: "shared",
     terminal_alerts: true,
     status: null,

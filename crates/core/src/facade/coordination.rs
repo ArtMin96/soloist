@@ -11,9 +11,11 @@
 
 use std::time::Duration;
 
+use super::scoped::ScopedFacade;
 use super::Facade;
 use crate::coordination::{
     watched_is_idle, AcquireOutcome, IdleMode, LeaseView, SetWhenIdleOutcome, TimerView,
+    MAX_TIMER_BODY_BYTES,
 };
 use crate::events::DomainEvent;
 use crate::ids::{ProcessId, ProjectId, SessionId, TimerId, TodoId};
@@ -115,171 +117,39 @@ pub enum CoordinationError {
     /// target loaded — so it can only arise on the local/trusted `*_transfer_in` path.
     #[error("no such project is loaded")]
     UnknownProject,
+    /// A write carried a payload larger than its kind allows, so it was refused rather than
+    /// letting one write grow the durable store without bound. `what` names the payload (a kv
+    /// value, a timer body); `max_bytes` is the cap it exceeded.
+    #[error("{what} exceeds the {max_bytes} byte cap")]
+    PayloadTooLarge {
+        what: &'static str,
+        max_bytes: usize,
+    },
     /// A durable read or write failed.
     #[error(transparent)]
     Store(#[from] StoreError),
 }
 
+/// Refuses a coordination payload larger than `max_bytes`, so a single write can never grow the
+/// durable store without bound. `what` names the payload in the error. Shared by the coordination
+/// write surfaces (timer bodies, kv values) so the one bounded-write rule lives in one place.
+pub(crate) fn check_payload_size(
+    len: usize,
+    max_bytes: usize,
+    what: &'static str,
+) -> Result<(), CoordinationError> {
+    if len > max_bytes {
+        Err(CoordinationError::PayloadTooLarge { what, max_bytes })
+    } else {
+        Ok(())
+    }
+}
+
 impl Facade {
-    /// Acquires the lease `key` in the session's effective project, owned by its bound process,
-    /// for `ttl` (the aggregate's default when `None`, bounded by it otherwise). Non-blocking: if
-    /// the key is already held by another process, returns [`AcquireOutcome::Held`] with the
-    /// holder rather than waiting. Re-acquiring a key the caller already holds renews it.
-    pub fn lock_acquire(
-        &self,
-        session: SessionId,
-        key: &str,
-        ttl: Option<Duration>,
-    ) -> Result<AcquireOutcome, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        let owner = self.coordination_owner(session)?;
-        let outcome = self.leases.acquire(project, key, owner, ttl)?;
-        // Only a grant or renewal changed the lease; a `Held` outcome left another owner's lease
-        // untouched, so it raises no change.
-        if matches!(outcome, AcquireOutcome::Acquired(_)) {
-            self.bus.publish(DomainEvent::LeaseChanged {
-                project,
-                key: key.to_owned(),
-            });
-        }
-        Ok(outcome)
-    }
-
-    /// The current holder of the lease `key` in the session's effective project, or `None` if it
-    /// is free or has expired. A read — it needs the project scope but not a bound process.
-    pub fn lock_status(
-        &self,
-        session: SessionId,
-        key: &str,
-    ) -> Result<Option<LeaseView>, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        Ok(self.leases.status(project, key)?)
-    }
-
-    /// Releases the lease `key` in the session's effective project if it is held by the caller's
-    /// bound process, returning whether the caller's lease was released. A caller cannot release a
-    /// lease another process holds.
-    pub fn lock_release(&self, session: SessionId, key: &str) -> Result<bool, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        let owner = self.coordination_owner(session)?;
-        let released = self.leases.release(project, key, owner)?;
-        if released {
-            self.bus.publish(DomainEvent::LeaseChanged {
-                project,
-                key: key.to_owned(),
-            });
-        }
-        Ok(released)
-    }
-
     /// Clears every stale lease on launch — see [`Leases::reconcile`](crate::coordination::Leases::reconcile).
     /// Not session-scoped; the composition root calls it once at startup.
     pub fn reconcile_leases(&self) -> Result<usize, StoreError> {
         self.leases.reconcile()
-    }
-
-    /// Arms a plain timer in the session's effective project, owned by its bound process, that
-    /// delivers `body` to that process as a fresh turn after `after` (immediately when `None`).
-    /// Needs a bound process — the owner the body is delivered to and that the timer is cleaned up
-    /// with on close.
-    pub fn timer_set(
-        &self,
-        session: SessionId,
-        body: String,
-        after: Option<Duration>,
-    ) -> Result<TimerView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        let owner = self.coordination_owner(session)?;
-        let timer = self.timers.set(project, owner, body, after)?;
-        self.bus.publish(DomainEvent::TimerArmed {
-            owner,
-            id: timer.id,
-        });
-        Ok(timer)
-    }
-
-    /// Arms a fire-when-idle timer owned by the session's bound process: it delivers `body` to
-    /// that process when the watched `processes` reach the `mode` idle quorum, or when `max_wait`
-    /// elapses. Reports whether the condition is **already** satisfied and which processes it is
-    /// still waiting on, read from the live idle state — a non-blocking signal. The watched
-    /// processes need not be in scope: a timer only ever delivers to its own owner, and idle state
-    /// is already open through the read tools, so watching another process observes nothing it
-    /// could not already see.
-    pub fn timer_fire_when_idle(
-        &self,
-        session: SessionId,
-        body: String,
-        processes: Vec<ProcessId>,
-        mode: IdleMode,
-        max_wait: Option<Duration>,
-    ) -> Result<SetWhenIdleOutcome, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        let owner = self.coordination_owner(session)?;
-        let waiting_on: Vec<ProcessId> = processes
-            .iter()
-            .copied()
-            .filter(|&process| !self.is_idle_now(process))
-            .collect();
-        let already_idle = mode.quorum_met(&processes, |process| self.is_idle_now(process));
-        let timer = self
-            .timers
-            .set_when_idle(project, owner, body, processes, mode, max_wait)?;
-        self.bus.publish(DomainEvent::TimerArmed {
-            owner,
-            id: timer.id,
-        });
-        Ok(SetWhenIdleOutcome {
-            timer,
-            already_idle,
-            waiting_on,
-        })
-    }
-
-    /// Cancels a timer the session's bound process owns, returning whether one was removed.
-    pub fn timer_cancel(
-        &self,
-        session: SessionId,
-        timer: TimerId,
-    ) -> Result<bool, CoordinationError> {
-        let owner = self.coordination_owner(session)?;
-        let cancelled = self.timers.cancel(timer, owner)?;
-        if cancelled {
-            self.bus
-                .publish(DomainEvent::TimerCleared { owner, id: timer });
-        }
-        Ok(cancelled)
-    }
-
-    /// Pauses a timer the session's bound process owns (freezing the time that remains), returning
-    /// whether one was paused.
-    pub fn timer_pause(
-        &self,
-        session: SessionId,
-        timer: TimerId,
-    ) -> Result<bool, CoordinationError> {
-        let owner = self.coordination_owner(session)?;
-        let paused = self.timers.pause(timer, owner)?;
-        if paused {
-            self.bus
-                .publish(DomainEvent::TimerPaused { owner, id: timer });
-        }
-        Ok(paused)
-    }
-
-    /// Resumes a paused timer the session's bound process owns (re-arming it with the time that
-    /// remained), returning whether one was resumed.
-    pub fn timer_resume(
-        &self,
-        session: SessionId,
-        timer: TimerId,
-    ) -> Result<bool, CoordinationError> {
-        let owner = self.coordination_owner(session)?;
-        let resumed = self.timers.resume(timer, owner)?;
-        if resumed {
-            self.bus
-                .publish(DomainEvent::TimerResumed { owner, id: timer });
-        }
-        Ok(resumed)
     }
 
     /// Cancels a timer owned by `owner` — the local, trusted Tauri surface passes the owner
@@ -311,12 +181,6 @@ impl Facade {
                 .publish(DomainEvent::TimerResumed { owner, id: timer });
         }
         Ok(resumed)
-    }
-
-    /// Every timer the session's bound process owns (armed or paused).
-    pub fn timer_list(&self, session: SessionId) -> Result<Vec<TimerView>, CoordinationError> {
-        let owner = self.coordination_owner(session)?;
-        Ok(self.timers.list(owner)?)
     }
 
     /// Clears every stale timer on launch — see [`Timers::reconcile`](crate::coordination::Timers::reconcile).
@@ -358,6 +222,156 @@ impl Facade {
             .origin(session)
             .process()
             .ok_or(CoordinationError::NoBoundProcess)
+    }
+}
+
+impl ScopedFacade<'_> {
+    /// Acquires the lease `key` in the session's effective project, owned by its bound process,
+    /// for `ttl` (the aggregate's default when `None`, bounded by it otherwise). Non-blocking: if
+    /// the key is already held by another process, returns [`AcquireOutcome::Held`] with the
+    /// holder rather than waiting. Re-acquiring a key the caller already holds renews it.
+    pub fn lock_acquire(
+        &self,
+        key: &str,
+        ttl: Option<Duration>,
+    ) -> Result<AcquireOutcome, CoordinationError> {
+        let project = self.coordination_scope()?;
+        let owner = self.coordination_owner()?;
+        let outcome = self.inner.leases.acquire(project, key, owner, ttl)?;
+        // Only a grant or renewal changed the lease; a `Held` outcome left another owner's lease
+        // untouched, so it raises no change.
+        if matches!(outcome, AcquireOutcome::Acquired(_)) {
+            self.inner.bus.publish(DomainEvent::LeaseChanged {
+                project,
+                key: key.to_owned(),
+            });
+        }
+        Ok(outcome)
+    }
+
+    /// The current holder of the lease `key` in the session's effective project, or `None` if it
+    /// is free or has expired. A read — it needs the project scope but not a bound process.
+    pub fn lock_status(&self, key: &str) -> Result<Option<LeaseView>, CoordinationError> {
+        let project = self.coordination_scope()?;
+        Ok(self.inner.leases.status(project, key)?)
+    }
+
+    /// Releases the lease `key` in the session's effective project if it is held by the caller's
+    /// bound process, returning whether the caller's lease was released. A caller cannot release a
+    /// lease another process holds.
+    pub fn lock_release(&self, key: &str) -> Result<bool, CoordinationError> {
+        let project = self.coordination_scope()?;
+        let owner = self.coordination_owner()?;
+        let released = self.inner.leases.release(project, key, owner)?;
+        if released {
+            self.inner.bus.publish(DomainEvent::LeaseChanged {
+                project,
+                key: key.to_owned(),
+            });
+        }
+        Ok(released)
+    }
+
+    /// Arms a plain timer in the session's effective project, owned by its bound process, that
+    /// delivers `body` to that process as a fresh turn after `after` (immediately when `None`).
+    /// Needs a bound process — the owner the body is delivered to and that the timer is cleaned up
+    /// with on close.
+    pub fn timer_set(
+        &self,
+        body: String,
+        after: Option<Duration>,
+    ) -> Result<TimerView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        let owner = self.coordination_owner()?;
+        check_payload_size(body.len(), MAX_TIMER_BODY_BYTES, "timer body")?;
+        let timer = self.inner.timers.set(project, owner, body, after)?;
+        self.inner.bus.publish(DomainEvent::TimerArmed {
+            owner,
+            id: timer.id,
+        });
+        Ok(timer)
+    }
+
+    /// Arms a fire-when-idle timer owned by the session's bound process: it delivers `body` to
+    /// that process when the watched `processes` reach the `mode` idle quorum, or when `max_wait`
+    /// elapses. Reports whether the condition is **already** satisfied and which processes it is
+    /// still waiting on, read from the live idle state — a non-blocking signal. The watched
+    /// processes need not be in scope: a timer only ever delivers to its own owner, and idle state
+    /// is already open through the read tools, so watching another process observes nothing it
+    /// could not already see.
+    pub fn timer_fire_when_idle(
+        &self,
+        body: String,
+        processes: Vec<ProcessId>,
+        mode: IdleMode,
+        max_wait: Option<Duration>,
+    ) -> Result<SetWhenIdleOutcome, CoordinationError> {
+        let project = self.coordination_scope()?;
+        let owner = self.coordination_owner()?;
+        check_payload_size(body.len(), MAX_TIMER_BODY_BYTES, "timer body")?;
+        let waiting_on: Vec<ProcessId> = processes
+            .iter()
+            .copied()
+            .filter(|&process| !self.inner.is_idle_now(process))
+            .collect();
+        let already_idle = mode.quorum_met(&processes, |process| self.inner.is_idle_now(process));
+        let timer = self
+            .inner
+            .timers
+            .set_when_idle(project, owner, body, processes, mode, max_wait)?;
+        self.inner.bus.publish(DomainEvent::TimerArmed {
+            owner,
+            id: timer.id,
+        });
+        Ok(SetWhenIdleOutcome {
+            timer,
+            already_idle,
+            waiting_on,
+        })
+    }
+
+    /// Cancels a timer the session's bound process owns, returning whether one was removed.
+    pub fn timer_cancel(&self, timer: TimerId) -> Result<bool, CoordinationError> {
+        let owner = self.coordination_owner()?;
+        let cancelled = self.inner.timers.cancel(timer, owner)?;
+        if cancelled {
+            self.inner
+                .bus
+                .publish(DomainEvent::TimerCleared { owner, id: timer });
+        }
+        Ok(cancelled)
+    }
+
+    /// Pauses a timer the session's bound process owns (freezing the time that remains), returning
+    /// whether one was paused.
+    pub fn timer_pause(&self, timer: TimerId) -> Result<bool, CoordinationError> {
+        let owner = self.coordination_owner()?;
+        let paused = self.inner.timers.pause(timer, owner)?;
+        if paused {
+            self.inner
+                .bus
+                .publish(DomainEvent::TimerPaused { owner, id: timer });
+        }
+        Ok(paused)
+    }
+
+    /// Resumes a paused timer the session's bound process owns (re-arming it with the time that
+    /// remained), returning whether one was resumed.
+    pub fn timer_resume(&self, timer: TimerId) -> Result<bool, CoordinationError> {
+        let owner = self.coordination_owner()?;
+        let resumed = self.inner.timers.resume(timer, owner)?;
+        if resumed {
+            self.inner
+                .bus
+                .publish(DomainEvent::TimerResumed { owner, id: timer });
+        }
+        Ok(resumed)
+    }
+
+    /// Every timer the session's bound process owns (armed or paused).
+    pub fn timer_list(&self) -> Result<Vec<TimerView>, CoordinationError> {
+        let owner = self.coordination_owner()?;
+        Ok(self.inner.timers.list(owner)?)
     }
 }
 

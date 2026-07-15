@@ -73,7 +73,7 @@ export default function App() {
   const lineage = useLineage();
   const projects = useProjects(store.reportError);
   const trust = useTrust(store.refresh, store.reportError);
-  const orphans = useOrphans();
+  const orphans = useOrphans(store.reportError);
   const agents = useAgents(store.reportError);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);

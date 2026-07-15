@@ -59,6 +59,7 @@ lint:
     pnpm -C {{ui}} lint
     pnpm -C {{ui}} run format:check
     ./scripts/check-core-deps.sh
+    ./scripts/check-core-cycles.sh
     ./scripts/check-file-size.sh
     cargo test -q -p soloist-core --features schema config::schema
 

@@ -37,20 +37,26 @@ The API is local-only by three independent measures:
 - **Localhost CORS.** A browser may call the API only from a page served by `localhost`,
   `127.0.0.1`, or `[::1]`. A page on the wider web that the user happens to be viewing cannot script
   the loopback server.
-- **Mutation auth header.** Every mutating request must carry `X-Soloist-Local-Auth: 1`. A request
-  without it, or with a different value, is rejected with `401` before the handler runs. Reads carry
-  no header and stay open on loopback.
+- **Per-launch auth token (all routes).** Every request — reads and mutations alike — must carry
+  `X-Soloist-Local-Auth: <token>`, where `<token>` is the fresh random value the running server minted
+  this launch and recorded in the runtime file. A request without it, or with a wrong value, is
+  rejected with `401` before the handler runs.
+- **Loopback `Host` guard.** A request whose `Host` header is not a loopback name
+  (`127.0.0.1`/`localhost`/`[::1]`, with any port) is rejected with `403`, closing the DNS-rebinding
+  path where a page resolves its own domain to `127.0.0.1`.
 
-The header is a deliberately weak local gate. Its job is to stop a drive-by request from a page the
-user is merely viewing, not to authenticate a remote caller. There is no remote access and no
-stronger auth, by design.
+The token is the boundary between local users. The API binds a TCP port, which any local user can
+reach and CORS never constrains for a non-browser client — but the runtime file holding the token
+lives in the owner-only (`0700`) data directory and is itself `0600`, so only the user Soloist runs
+as can read the token. The comparison is constant-time. Rotating the token mid-session is not
+implemented; a per-launch token is sufficient for the local boundary.
 
 ## Conventions
 
 - **Base URL:** `http://127.0.0.1:<port>`, where `<port>` is the value in the runtime file (default
   `24678`).
-- **Bodies:** responses are JSON. Mutating requests take no body; the header carries the only input
-  beyond the URL.
+- **Bodies:** responses are JSON. Mutating requests take no body beyond the URL; the token header and
+  the URL carry the input.
 - **Response types:** read responses reuse the core read-model types, so the JSON shape is the same
   one the UI and MCP see. The field-by-field definitions are in [Response types](#response-types).
 
@@ -62,17 +68,18 @@ core outcome:
 | Status | Meaning |
 |--------|---------|
 | `200 OK` | The command succeeded. `stop` and `stop-all` are idempotent, so stopping something already at rest is also `200`. |
-| `401 Unauthorized` | The `X-Soloist-Local-Auth` header was missing or wrong (mutations only). |
-| `403 Forbidden` | The command is not trusted. Trust it in Soloist first. |
+| `401 Unauthorized` | The `X-Soloist-Local-Auth` token was missing or wrong (any route). |
+| `403 Forbidden` | The command is not trusted (trust it in Soloist first), **or** the `Host` header was not loopback. |
 | `404 Not Found` | No process or project with that id. |
 | `500 Internal Server Error` | A durable-store read or write failed. |
 
-Reads do not use `403`/`404`: an unknown id reads as an empty result (see each endpoint). The only
-read codes are `200`, and `500` for `/status`, `/projects`, and `/feedback` if the store cannot be read.
+A read never returns `404`: an unknown id reads as an empty result (see each endpoint). Reads can
+return `401` (missing/wrong token) and `403` (foreign `Host`) like any route, plus `200`, and `500`
+for `/status`, `/projects`, and `/feedback` if the store cannot be read.
 
 ## Read endpoints
 
-Open on loopback; no header required.
+Each requires the token header and a loopback `Host`, like every route.
 
 | Method | Path | Returns |
 |--------|------|---------|
@@ -169,7 +176,7 @@ Feedback is stored locally and never transmitted; this endpoint is how the owner
 
 ## Mutation endpoints
 
-Every endpoint below requires the `X-Soloist-Local-Auth: 1` header and returns a
+Every endpoint below requires the token header and returns a
 [status code](#status-codes) with no body. Each one delegates to a single core command, the same one
 the UI button and the MCP tool drive.
 
@@ -278,8 +285,8 @@ These are the core read-model types, serialized as-is. Both ids serialize as pla
 ## The `soloist` CLI
 
 `soloist` controls the local stack from a shell over the API above. It reads the runtime file to
-find the port (falling back to the default `24678` when the file is absent), sends the auth header on
-every mutation, and prints one line of result. A success goes to stdout with exit code `0`; an error
+find the port and the per-launch token (falling back to the default `24678` and an empty token when
+the file is absent), sends the token on every request, and prints one line of result. A success goes to stdout with exit code `0`; an error
 goes to stderr as `soloist: <message>` with a non-zero exit code, so a script can branch on it.
 
 The packaged installs ship it as **`/usr/bin/soloist-cli`** — the desktop app owns the bare

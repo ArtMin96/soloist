@@ -41,6 +41,32 @@ describe("createSignalStore", () => {
 
     expect(listener).not.toHaveBeenCalled();
   });
+
+  it("seeds the idle badges from a snapshot, reconciling a stale delta and notifying once", () => {
+    const store = createSignalStore();
+    // A stale badge from a dropped `AgentActivityChanged`: the store thinks id 1 is Working.
+    store.apply({ type: "AgentActivityChanged", id: 1, state: "Working" });
+    const listener = vi.fn();
+    store.subscribe(listener);
+
+    store.seed([{ id: 1, activity: "Idle" }]);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot().activity.get(1)).toBe("Idle");
+  });
+
+  it("does not churn or notify when the seed matches the current badges", () => {
+    const store = createSignalStore();
+    store.apply({ type: "AgentActivityChanged", id: 1, state: "Working" });
+    const before = store.getSnapshot();
+    const listener = vi.fn();
+    store.subscribe(listener);
+
+    store.seed([{ id: 1, activity: "Working" }]);
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(store.getSnapshot()).toBe(before);
+  });
 });
 
 describe("fixedSignalStore", () => {
@@ -54,7 +80,14 @@ describe("fixedSignalStore", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it("EMPTY_STORE reads the empty signals", () => {
+  it("EMPTY_STORE is a fixed, non-notifying store", () => {
+    // The exported singleton must behave as a fixed store, not merely return one constant: an
+    // applied event leaves its snapshot untouched and never notifies a subscriber.
+    const listener = vi.fn();
+    EMPTY_STORE.subscribe(listener)();
+    EMPTY_STORE.apply({ type: "MetricsTick", id: 1, cpu_pct: 1, rss: 1 });
+
     expect(EMPTY_STORE.getSnapshot()).toBe(EMPTY_SIGNALS);
+    expect(listener).not.toHaveBeenCalled();
   });
 });

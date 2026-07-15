@@ -1,13 +1,15 @@
 import type { ProcessSpec, ProjectCommandView } from "@/domain";
 
-// The editable shape of a command on this surface: the ProcessSpec fields the editor and the add
-// modal collect. `env` is absent — this surface neither shows nor edits a command's environment.
+// The full ProcessSpec shape this surface persists for a command. The forms edit some fields
+// (command, the toggles, the watch globs) and carry the rest untouched — `working_dir` and `env`,
+// which this surface never renders — so an edit never drops a field it does not show.
 export interface CommandFields {
   command: string;
   working_dir: string | null;
   auto_start: boolean;
   auto_restart: boolean;
   restart_when_changed: string[];
+  env: Record<string, string>;
 }
 
 // Build the ProcessSpec a command add or edit persists from the collected fields. One place both
@@ -19,6 +21,7 @@ export function buildSpec(fields: CommandFields): ProcessSpec {
     auto_start: fields.auto_start,
     auto_restart: fields.auto_restart,
     restart_when_changed: fields.restart_when_changed,
+    env: fields.env,
   };
 }
 

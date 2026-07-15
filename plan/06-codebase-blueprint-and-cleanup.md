@@ -32,7 +32,7 @@ the phase file (the task).
         │  (driven ports — traits the core defines)
         ▼
  DRIVEN adapters (the core calls)
-   ProcessSpawner→pty   Store→store   Clock→core   FileWatcher/Notifier/Summarizer→later phases
+   ProcessSpawner→pty   repos→store   Clock→core   MetricsProbe/PortProbe/FileWatcher→sys   Notifier→app
 ```
 
 Two directions of dependency, **one rule**: everything points *at* `core`; `core` points at *nothing
@@ -149,7 +149,7 @@ trigger that tells you to reach for it. Use a pattern when its trigger fires —
 | **Settings document + generic store** | `core::settings` — `Settings` global singleton (migration v9) today; **to add (11a/11b)** a generic `SettingsStore<K, D>` reused by global (`K = ()`) and per-project local (`K = ProjectId`) | a durable typed **preference** record — no revision guard, not `solo.yml` config (C1) → one serde-default document + `get(key)`/`update(key, mutator)` over a `SettingsRepo<K, D>` port; **add a field, not a store** (recipe §5.9) |
 | **Newtype + closed enum** | `ids.rs`, `process.rs` | a domain id/state → newtype/enum, never a bare `String`/`int` |
 | **Null Object** | `Noop{LockReleaser,RuntimeState,OrphanControl}` in `ports/mod.rs` | a **driven** subsystem is optional → ship a `Noop` default so the core runs without the real adapter (§8) |
-| **Parameter Object / Builder** | `core::ports::CorePorts` + `CorePortsBuilder` — the port set for `Facade::new`/`Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) → group them in a struct/builder |
+| **Parameter Object / Builder** | `core::composition::CorePorts` + `CorePortsBuilder` — the port set for `Facade::new`; it projects `SupervisorPorts` for `Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) → group them in a struct/builder |
 | **Registry** | `config::detect::DETECTORS` (C1, command auto-detection); the MCP tool router composed from per-category sub-routers (`crates/mcp/src/tools/`, R8); **to add** — agent-tool defs (P7) | a growing set of "one of many" handlers → register entries, don't extend a giant `match` |
 | **Strategy** | `config::detect::Detector` — one impl per ecosystem (C1); **to add** — per-provider idle heuristics (P7), per-agent-tool launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
 | **Optimistic concurrency** | `core::coordination::{Scratchpads, Todos}` over their repos (P9: scratchpads + todos done — revision-guarded document writes) | concurrent writers to one durable record → revision guard, reject stale writes |
@@ -186,8 +186,9 @@ DRY, and the dependency rule intact. These *are* the "how future sessions archit
    adapter crate if it's a genuinely new technology — justify a new crate against the size budget, `04` §10).
 3. Wire it in the **composition root** (`app::build_facade`, §8) — pass the real adapter; tests pass a fake.
 4. Add a fake to `core::testing` so every consumer tests against one shared fake (§6).
-5. Keep the port **minimal**: add methods when a phase needs them (the `FileWatcher`/`Notifier`/`Summarizer`
-   stubs are methods-less on purpose until their phase).
+5. Keep the port **minimal**: add methods when something needs them. Do not define a port before it has a
+   caller — a methods-less trait with no implementation is speculative, not a contract (the `Summarizer`
+   stub sat empty and unreferenced until it was deleted).
 
 ### 5.3 Add an MCP tool (Phase 8+)
 1. The tool is a **thin handler** in the matching `crates/mcp/src/tools/<category>.rs` sub-router (a `#[tool]`
@@ -408,7 +409,7 @@ are **R-phases** (refactor), orthogonal to the build phases.
   own module — but the **older driven ports still live in the shared `core/ports/mod.rs`**, now a partial
   god-file mixing several contexts: `ProcessSpawner`/`PtyIo`/`ProcessControl`/`Spawned`/`SpawnSpec`/`PtySize`/
   `ExitStatus`/`SpawnError` (C2/C3), `Store`/`ProjectRepo`/`TrustRepo`/`ProjectRecord`/`StoreError` (C1),
-  `LockReleaser` (C6), `RuntimeState`/`OrphanControl`/`OrphanRecord` (C2 orphan adoption), `Summarizer` (C4).
+  `LockReleaser` (C6), `RuntimeState`/`OrphanControl`/`OrphanRecord` (C2 orphan adoption).
   This is an **internal consistency drift, not a Solo-behavior divergence** (so not a `KNOWN-DIVERGENCES.md`
   entry).
 - Migrate each into its bounded-context module (with its `Noop` default), leaving `ports/` to hold only the
@@ -450,10 +451,43 @@ are **R-phases** (refactor), orthogonal to the build phases.
   fails CI instead of shipping (mcp 31 → 32; proven by a mutation test). `just lint && just test` green;
   `mcp/src/server.rs` no longer an outlier (only the pre-existing `core/src/supervisor.rs` 401 remains).
 
+### R9 — Re-split the files the stability audit grew (done)
+- **The drift (resolved):** the 2026-07 stability/security audit pushed four files over the smell —
+  `app/src/ipc_server.rs` 584 → 707, `core/src/facade/scoped.rs` 283 → **462** (a new outlier),
+  `core/src/supervisor.rs` 511 → 599, and `core/src/supervisor/registry.rs` 459 → 492. Only `scoped.rs`
+  crossed the line on this work; the other three were already over and were pushed further. An
+  **internal structure drift, not a Solo-behavior divergence** (no `KNOWN-DIVERGENCES.md` entry).
+- **What was done (2026-07-15):** each file was split along the concern it had grown a second of.
+  `ipc_server.rs` **707 → 148** — it was doing socket transport *and* request routing; the routing
+  moved to `ipc_server/dispatch.rs` and its 1024-line test file moved with it (R2's rule: tests move
+  with their code). `scoped.rs` **462 → 193** — it kept the seam (the type, the refusal taxonomy, and
+  the scope guard) and handed each domain's scoped methods to that domain's module, which is what the
+  eight other `facade/*.rs` modules carrying `impl ScopedFacade` already did; its module doc claimed
+  to hold "everything a scoped caller may do", which had not been true for some time. `supervisor.rs`
+  **599 → under** (lifecycle commands → `supervisor/lifecycle.rs`) and `registry.rs` **492 → under**
+  (actor launch/handle lifecycle → `registry/actors.rs`). Outliers overall: **15 → 12** (`main` had 14).
+- **The deliberate residual — `ipc_server/dispatch.rs` (580):** left as one flat `match`, and **not**
+  converted to a Registry. §4's rule scopes that pattern to a set that is **open-ended**, and names the
+  anti-pattern as a giant match over *names*; `IpcRequest` is a **closed** enum whose names `serde`
+  already maps to variants (`#[serde(tag = "op")]`), so serde *is* the registry and the trigger has not
+  fired. Matching the variants is what makes a new request a **compile error** until it is routed —
+  the guarantee §16 asks for, and the one `0005fd1` had just restored to the `is_active` mirror. A
+  lookup table would trade it for a runtime miss, and per-family sub-matches would reintroduce the
+  `_ =>` default that commit removed. The file reads long because it is **wide** — one flat arm per
+  request, none interacting — not because it is complex, which is the case where the ~400-line smell
+  does not indicate a design problem. Revisit only if `IpcRequest` ever stops being closed.
+- **Also fixed in the same pass:** `Facade::blocking` now single-sources the `spawn_blocking` helper
+  that `app/commands/mod.rs::offload` and `httpapi::ApiState::blocking` had each copied, delegating to
+  the `supervision::run_blocking` that already existed — a **three-way** duplication, which is also why
+  the helper no longer carries an `expect` (`core` denies `clippy::expect_used`).
+- **Done when:** no file this audit pushed over the smell remains over; the `dispatch.rs` decision is
+  recorded here rather than left as an oversight; `just lint && just test` green.
+
 **Sequencing rationale:** R0 sets the bar and the file-size signal; R1 makes the later phases' tests cheap
 to keep honest; R2/R3/R4 are the structural edits (smallest blast radius first: split, then the constructor,
 then scaffolding removal); R5 is best done after the structure settles; R6 closes the ledger. R7 (pending)
-finishes the port-ownership migration the newer domains established. R8 (done) split the MCP tool router by
+finishes the port-ownership migration the newer domains established. R9 (done) re-split what the
+2026-07 stability audit grew, and records why the IPC dispatch stays one exhaustive match. R8 (done) split the MCP tool router by
 category once the tool set had stabilised (deferred from Phase-8 session 5 by the user, to keep that slice
 small; executed before Phase 9 so its ~50 coordination tools land in category sub-routers, not a flat block).
 Each is a single reviewable commit.
@@ -488,8 +522,8 @@ core has **zero** knowledge of them, and the dependency-direction guard (K7) mak
 **Driven adapters (optional subsystems the core calls) use the Null Object pattern.** A subsystem the core
 *uses* but that may be absent (lock releaser, runtime-state/orphan adoption, file watcher, notifier,
 summarizer) is a **port with a `Noop` default**. The core always holds *a* `Arc<dyn Port>`; if the real
-adapter isn't wired, it holds the `Noop`. The port set is bundled in **`core::ports::CorePorts`** (a
-parameter object, R3) whose **builder defaults the optional subsystems to their `Noop` port**: the lock
+adapter isn't wired, it holds the `Noop`. The port set is bundled in **`core::composition::CorePorts`** (a
+parameter object) whose **builder defaults the optional subsystems to their `Noop` port**: the lock
 releaser defaults to `NoopLockReleaser` (coordination lands in C6), and `build_facade` degrades
 runtime-state to `NoopRuntimeState` when the data dir is unavailable — the supervisor never branches on
 "is coordination present?", it just calls `release_all` and the `Noop` swallows it. A future optional port

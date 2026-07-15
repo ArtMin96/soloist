@@ -13,8 +13,8 @@ use crate::ids::ProcessId;
 use crate::sync::lock;
 use crate::terminal::TerminalActivity;
 
-use super::activity::AgentActivity;
 use super::classifier::Classifier;
+use crate::idle::AgentActivity;
 
 /// Tracks the activity classifier of every launched agent, keyed by process. Cloneable state
 /// is unnecessary — it is shared behind an `Arc`; the launch path calls [`Self::track`] and
@@ -45,6 +45,20 @@ impl IdleTracker {
     /// snapshot read the façade uses to report whether a fire-when-idle timer is already satisfied.
     pub fn activity(&self, id: ProcessId) -> Option<AgentActivity> {
         lock(&self.agents).get(&id).and_then(Classifier::current)
+    }
+
+    /// The current activity of every tracked agent classified at least once, as `(id, activity)`
+    /// pairs. The snapshot the UI seeds its idle badges from: an agent still starting up (tracked
+    /// but not yet classified) contributes nothing, since its badge shows the status glyph until
+    /// its first activity. A webview reload, or a dropped [`AgentActivityChanged`] during bus lag,
+    /// recovers the true state from this rather than leaving an edge-triggered badge stale.
+    ///
+    /// [`AgentActivityChanged`]: crate::events::DomainEvent::AgentActivityChanged
+    pub fn activity_snapshot(&self) -> Vec<(ProcessId, AgentActivity)> {
+        lock(&self.agents)
+            .iter()
+            .filter_map(|(id, classifier)| classifier.current().map(|activity| (*id, activity)))
+            .collect()
     }
 
     /// Feeds a running agent its latest terminal signals; returns the new activity if it

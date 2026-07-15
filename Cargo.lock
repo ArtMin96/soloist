@@ -4994,7 +4994,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-app"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "console-subscriber",
  "nix 0.29.0",
@@ -5019,11 +5019,12 @@ dependencies = [
  "tauri-plugin-window-state",
  "tempfile",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
 name = "soloist-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "axum 0.8.9",
  "clap",
@@ -5039,7 +5040,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -5054,18 +5055,20 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tracing",
  "vte",
 ]
 
 [[package]]
 name = "soloist-httpapi"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "axum 0.8.9",
  "serde",
  "serde_json",
  "soloist-core",
  "soloist-ipc",
+ "subtle",
  "tempfile",
  "tokio",
  "tower 0.5.3",
@@ -5074,18 +5077,21 @@ dependencies = [
 
 [[package]]
 name = "soloist-ipc"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
+ "getrandom 0.3.4",
+ "hex",
  "serde",
  "serde_json",
  "soloist-core",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
 ]
 
 [[package]]
 name = "soloist-mcp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "rmcp",
  "serde",
@@ -5098,7 +5104,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-pty"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "nix 0.29.0",
@@ -5110,7 +5116,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-store"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -5121,7 +5127,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-sys"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "libc",
  "nix 0.29.0",

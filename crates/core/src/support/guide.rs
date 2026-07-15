@@ -7,7 +7,7 @@
 //! managed `AGENTS.md`/`CLAUDE.md` section carries. [`onboarding_hint`] is the short first-run
 //! path the MCP server also advertises in its initialization instructions.
 
-use crate::identity::PROCESS_ID_ENV;
+use crate::ids::PROCESS_ID_ENV;
 use crate::settings::McpFeatureGroup;
 
 /// What Soloist is — the one-paragraph framing that opens the full guide and every overview.

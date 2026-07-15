@@ -21,6 +21,13 @@ export type TerminalState = "attaching" | "live" | "not-started";
 // burst of live output.
 const PENDING_CAP_BYTES = 512 * 1024;
 
+// How long to wait before retrying an attach that was rejected while the process is active. The
+// backend opens the terminal channel synchronously as a process launches, so an attach to a live
+// process resolves; this backoff covers a transient rejection (a brief window, or a race with
+// removal) without spinning, so a live pane is never left stranded on the "not-started" overlay
+// waiting for a status change that may never arrive.
+const ATTACH_RETRY_MS = 120;
+
 /** Stable API for in-terminal text search — backed by SearchAddon once mounted. */
 export interface TerminalSearch {
   findNext: (query: string) => void;
@@ -281,6 +288,17 @@ export function useTerminal(process: ProcessView, visible = true) {
   useEffect(() => {
     if (!attachedRef.current && isActive(process.status)) attach();
   }, [process.status, attach]);
+
+  // Drive recovery off the attach *result*, not just status: if an attach was rejected while the
+  // process is active, the pane is stranded on the "not-started" overlay with no status change
+  // left to re-fire the effect above. Retry after a short backoff while the process stays active;
+  // `attach` is a no-op once attached, so a successful attach ends the loop. A resting process
+  // (rejected and not active) keeps the overlay and does not retry.
+  useEffect(() => {
+    if (state !== "not-started" || !isActive(process.status)) return;
+    const timer = setTimeout(attach, ATTACH_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [state, process.status, attach]);
 
   // A relaunch (resume, restart, or start-after-stop) spawns a *new* PTY at a default winsize
   // while the existing emulator and its live stream are reused; re-sync the pane's size to the

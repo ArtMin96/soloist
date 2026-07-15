@@ -64,12 +64,18 @@ describe("ProcessRow telemetry", () => {
     expect(screen.getByText("not ready")).toBeTruthy();
   });
 
-  it("shows the auto-restart attempt against the limit while restarting", () => {
+  // The limit is rendered from the event, never from a constant on this side: a limit the core
+  // could not currently emit proves the row reports what it was told rather than what it assumed.
+  it("shows the auto-restart attempt against the limit the core reported", () => {
     renderRow(
       { ...running, status: "Starting" },
-      { metrics: new Map(), attempts: new Map([[1, 3]]), activity: new Map() },
+      {
+        metrics: new Map(),
+        attempts: new Map([[1, { attempt: 3, limit: 7 }]]),
+        activity: new Map(),
+      },
     );
-    expect(screen.getByText("restarting 3/10")).toBeTruthy();
+    expect(screen.getByText("restarting 3/7")).toBeTruthy();
   });
 
   it("shows no telemetry for a stopped process", () => {

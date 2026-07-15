@@ -19,12 +19,51 @@ fn the_guide_teaches_automatic_binding_not_a_manual_bind_call() {
 }
 
 #[test]
-fn the_guide_covers_scope_trust_and_idle_timers() {
+fn every_topic_is_rendered_into_the_full_guide_and_the_overview_menu() {
+    // The topic set is the single source for all three renderings, so none may be silently dropped:
+    // the full guide must carry every topic's section, and the overview must list every topic key.
     let guide = agent_guide();
-    assert!(guide.contains("select_project"));
-    assert!(guide.contains("untrusted"));
-    assert!(guide.contains("timer_fire_when_idle_any"));
-    assert!(guide.contains("wait_for_bound_port"));
+    let overview = help_overview();
+    for topic in topics() {
+        assert!(
+            guide.contains(&topic.rendered()),
+            "the full guide must render the {} topic",
+            topic.key
+        );
+        assert!(
+            overview.contains(&format!("`{}`", topic.key)),
+            "the overview menu must list the {} topic",
+            topic.key
+        );
+    }
+}
+
+#[test]
+fn every_topic_resolves_by_its_key_and_aliases_and_renders_a_body() {
+    // What each smoke gestured at, made structural: every registered topic is reachable by its key
+    // and by every alias it declares, and none renders an empty section.
+    for topic in topics() {
+        let rendered = topic.rendered();
+        assert_eq!(
+            help_topic(topic.key).as_deref(),
+            Some(rendered.as_str()),
+            "the {} topic resolves by its own key",
+            topic.key
+        );
+        assert!(
+            !topic.body.trim().is_empty(),
+            "the {} topic renders a non-empty body",
+            topic.key
+        );
+        for alias in topic.aliases {
+            assert_eq!(
+                help_topic(alias).as_deref(),
+                Some(rendered.as_str()),
+                "the alias {alias:?} resolves to the {} topic",
+                topic.key
+            );
+        }
+    }
 }
 
 #[test]
@@ -37,14 +76,6 @@ fn the_full_guide_lists_every_toggleable_group() {
             group.label()
         );
     }
-}
-
-#[test]
-fn the_guide_prescribes_coordination_etiquette() {
-    let guide = agent_guide();
-    assert!(guide.contains("lock_acquire"));
-    assert!(guide.contains("todo_lock"));
-    assert!(guide.contains("revision"));
 }
 
 #[test]

@@ -1,49 +1,20 @@
-// The Sidebar tab's pre-load default and the discrete threshold option sets. Each usage
-// threshold is a closed enum (mirrors core); the panel maps a variant to its display label
-// here, in one place. The comparison value each threshold implies belongs with the header
-// usage badges, which are a later sidebar feature — only the labels are needed today.
+// The Sidebar tab's pre-load default, the process-threshold option sets, and the usage floor each
+// threshold implies. Each threshold is a closed enum (mirrors core); the panel maps a variant to
+// its display label, and a process row shows its CPU/memory read-out only once usage reaches the
+// mapped floor — both mappings live here, in one place.
 
 import type { Option } from "@/lib/appearance";
-import type {
-  ProcessCpuThreshold,
-  ProcessMemThreshold,
-  ProjectCpuThreshold,
-  ProjectMemThreshold,
-  Sidebar,
-} from "@/domain";
+import type { ProcessCpuThreshold, ProcessMemThreshold, Sidebar } from "@/domain";
 
-// Mirrors core::Sidebar::default(): filter on, empty sections shown, badges always, hover
-// actions on, footer on. The facade's stored value supersedes this on load.
+// Mirrors core::Sidebar::default(): filter on, empty sections shown, usage always shown, footer on.
+// The facade's stored value supersedes this on load.
 export const DEFAULT_SIDEBAR: Sidebar = {
   show_filter_input: true,
   hide_empty_sections: false,
-  project_cpu_threshold: "always",
-  project_mem_threshold: "always",
-  project_open_in_editor: true,
-  project_open_in_terminal: true,
-  project_reveal_in_file_manager: true,
   process_cpu_threshold: "always",
   process_mem_threshold: "always",
   show_settings_footer: true,
 };
-
-export const PROJECT_CPU_OPTIONS: Option<ProjectCpuThreshold>[] = [
-  { value: "always", label: "Always" },
-  { value: "pct25", label: "25%" },
-  { value: "pct50", label: "50%" },
-  { value: "pct100", label: "100%" },
-  { value: "pct200", label: "200%" },
-  { value: "never", label: "Never" },
-];
-
-export const PROJECT_MEM_OPTIONS: Option<ProjectMemThreshold>[] = [
-  { value: "always", label: "Always" },
-  { value: "mb500", label: "500 MB" },
-  { value: "gb1", label: "1 GB" },
-  { value: "gb2", label: "2 GB" },
-  { value: "gb8", label: "8 GB" },
-  { value: "never", label: "Never" },
-];
 
 export const PROCESS_CPU_OPTIONS: Option<ProcessCpuThreshold>[] = [
   { value: "always", label: "Always" },
@@ -62,3 +33,27 @@ export const PROCESS_MEM_OPTIONS: Option<ProcessMemThreshold>[] = [
   { value: "gb2", label: "2 GB" },
   { value: "never", label: "Never" },
 ];
+
+const MIB = 1024 * 1024;
+const GIB = 1024 * MIB;
+
+// The CPU-percent a process must reach for its row to show the CPU read-out. `always` shows at any
+// usage (floor 0); `never` hides it (floor Infinity).
+export const PROCESS_CPU_FLOOR: Record<ProcessCpuThreshold, number> = {
+  always: 0,
+  pct10: 10,
+  pct30: 30,
+  pct60: 60,
+  pct90: 90,
+  never: Infinity,
+};
+
+// The resident bytes a process must reach for its row to show the memory read-out.
+export const PROCESS_MEM_FLOOR: Record<ProcessMemThreshold, number> = {
+  always: 0,
+  mb100: 100 * MIB,
+  mb500: 500 * MIB,
+  gb1: GIB,
+  gb2: 2 * GIB,
+  never: Infinity,
+};

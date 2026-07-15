@@ -60,6 +60,84 @@ fn a_blank_required_field_is_rejected_naming_every_problem() {
 }
 
 #[test]
+fn a_document_over_the_byte_cap_is_rejected() {
+    let todos = todos();
+    let mut oversized = doc("ship", TodoStatus::Open);
+    oversized.description = "x".repeat(MAX_TODO_DOC_BYTES + 1);
+    let err = todos
+        .create(PROJECT, oversized)
+        .expect_err("a document past the cap is refused");
+    let TodoError::Invalid(message) = err else {
+        panic!("expected an Invalid error, got {err:?}");
+    };
+    assert!(message.contains("exceeds"), "{message}");
+}
+
+#[test]
+fn transfer_moves_a_todo_to_the_new_scope_clearing_its_blockers_and_lock() {
+    const OTHER: ProjectId = ProjectId::from_raw(2);
+    let owner = ProcessId::from_raw(7);
+    let todos = todos();
+
+    // A source-project todo with a tag, a comment, a blocker, and a lock. The blocker and lock
+    // reference the source project, so they must not follow the todo into its new scope.
+    let moved = todos
+        .create(PROJECT, doc("ship", TodoStatus::Open))
+        .expect("create the todo to move");
+    let blocker = todos
+        .create(PROJECT, doc("prereq", TodoStatus::Open))
+        .expect("create a blocker in the source project");
+    todos.add_tag(PROJECT, moved.id, "release").expect("tag it");
+    todos
+        .comment_create(PROJECT, moved.id, "context", None)
+        .expect("comment it");
+    todos
+        .add_blocker(PROJECT, moved.id, blocker.id)
+        .expect("block it on the prereq");
+    todos
+        .lock(PROJECT, moved.id, owner)
+        .expect("lock it in the source project");
+
+    let before = todos
+        .get(PROJECT, moved.id)
+        .expect("get")
+        .expect("exists before the move");
+    assert_eq!(before.blockers, vec![blocker.id]);
+    assert_eq!(before.locked_by, Some(owner));
+
+    let after = todos
+        .transfer(PROJECT, OTHER, moved.id)
+        .expect("transfer succeeds")
+        .expect("the source project had the todo");
+
+    // Identity, document, tags, comments, and revision survive; the source-scoped blocker and lock
+    // are cleared.
+    assert_eq!(after.id, moved.id);
+    assert_eq!(after.doc, before.doc);
+    assert_eq!(after.tags, before.tags);
+    assert_eq!(after.comments, before.comments);
+    assert_eq!(after.revision, before.revision);
+    assert!(
+        after.blockers.is_empty(),
+        "blockers reference the old project and are cleared on the move"
+    );
+    assert_eq!(after.locked_by, None, "the lock is cleared on the move");
+
+    // The todo is now readable only from the new scope.
+    assert_eq!(
+        todos.get(OTHER, moved.id).expect("get from the new scope"),
+        Some(after)
+    );
+    assert_eq!(
+        todos
+            .get(PROJECT, moved.id)
+            .expect("get from the old scope"),
+        None,
+        "the todo no longer reads from the project it left"
+    );
+}
+
+#[test]
 fn update_is_revision_guarded() {
     let todos = todos();
     let todo = todos

@@ -75,6 +75,42 @@ pub struct ProcessSpec {
     pub env: BTreeMap<String, String>,
 }
 
+/// Why a command an app surface asked to store is not admissible.
+///
+/// Enforced on the mutation paths that add, edit, or rename a command — never on
+/// [`load`](super::load): a hand-authored `solo.yml` is the user's file and still parses as it
+/// always did, so this refuses writing a malformed command without refusing to open a project
+/// that already contains one.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidCommand {
+    /// The name was empty or only whitespace; it is the command's key and its display label.
+    #[error("a command needs a name")]
+    BlankName,
+    /// The command line was empty or only whitespace, so there would be nothing to run.
+    #[error("a command needs a command line to run")]
+    BlankCommand,
+}
+
+/// Checks the invariant every stored command holds: it has a name to be keyed and shown by, and
+/// a command line to run. The one place the rule lives, so every write path — shared or local,
+/// add or edit or rename — refuses the same things, and no caller can define a command that
+/// cannot start.
+pub fn check_command(name: &str, spec: &ProcessSpec) -> Result<(), InvalidCommand> {
+    check_command_name(name)?;
+    if spec.command.trim().is_empty() {
+        return Err(InvalidCommand::BlankCommand);
+    }
+    Ok(())
+}
+
+/// The name half of [`check_command`], for a rename — which sets a name without touching the spec.
+pub fn check_command_name(name: &str) -> Result<(), InvalidCommand> {
+    if name.trim().is_empty() {
+        return Err(InvalidCommand::BlankName);
+    }
+    Ok(())
+}
+
 fn default_true() -> bool {
     true
 }
@@ -114,14 +150,41 @@ impl ProcessSpec {
         h.finish()
     }
 
-    /// The working directory resolved against the project root. A relative
-    /// `working_dir` is joined onto the root; `None` resolves to the root itself.
+    /// The working directory resolved against the project root, guaranteed to stay within
+    /// it. A relative `working_dir` is resolved onto the root; `None` resolves to the root
+    /// itself. A `working_dir` that would escape the project — an absolute path, or one whose
+    /// `..` segments climb above the root — is clamped back to the root rather than run
+    /// outside the project.
     pub fn resolved_working_dir(&self, project_root: &Path) -> PathBuf {
         match &self.working_dir {
-            Some(dir) => project_root.join(dir),
+            Some(dir) => contain_within(project_root, dir),
             None => project_root.to_path_buf(),
         }
     }
+}
+
+/// Resolves `dir` (a `solo.yml` `working_dir`, meant relative to the project root) to an
+/// absolute path that never leaves `root`. Containment is lexical — the segments are folded
+/// onto the root without touching the filesystem, so it works before the directory exists —
+/// and any escape (an absolute path, or a `..` that would climb above the root) clamps to the
+/// root itself. The trust variant already covers `working_dir`, so an edited escaping path is
+/// a fresh untrusted variant; this containment is the defense-in-depth Solo requires on top of
+/// that gate.
+fn contain_within(root: &Path, dir: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut resolved = root.to_path_buf();
+    for component in dir.components() {
+        match component {
+            Component::Normal(segment) => resolved.push(segment),
+            Component::CurDir => {}
+            // Pop only within the project; a `..` that would rise above the root escapes.
+            Component::ParentDir if resolved.pop() && resolved.starts_with(root) => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return root.to_path_buf();
+            }
+        }
+    }
+    resolved
 }
 
 #[cfg(test)]
@@ -181,6 +244,31 @@ mod tests {
         nested.working_dir = Some(PathBuf::from("api"));
         assert_eq!(
             nested.resolved_working_dir(root),
+            PathBuf::from("/projects/app/api")
+        );
+    }
+
+    #[test]
+    fn working_dir_is_contained_within_the_root() {
+        let root = Path::new("/projects/app");
+
+        // An absolute working_dir escapes the project (a `join` would replace the root
+        // wholesale); it is clamped back to the root rather than run at `/etc`.
+        let mut absolute = spec("x");
+        absolute.working_dir = Some(PathBuf::from("/etc"));
+        assert_eq!(absolute.resolved_working_dir(root), root);
+
+        // `..` segments that climb above the root escape too, and are clamped.
+        let mut climbs = spec("x");
+        climbs.working_dir = Some(PathBuf::from("../../etc"));
+        assert_eq!(climbs.resolved_working_dir(root), root);
+
+        // A relative dir that stays inside the project still resolves, even when it uses
+        // `..` to step back down within the root.
+        let mut within = spec("x");
+        within.working_dir = Some(PathBuf::from("web/../api"));
+        assert_eq!(
+            within.resolved_working_dir(root),
             PathBuf::from("/projects/app/api")
         );
     }

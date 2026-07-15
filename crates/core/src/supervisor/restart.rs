@@ -158,8 +158,11 @@ impl Supervisor {
         }
         match self.restart_policy.on_crash(id, self.clock.now()) {
             RestartDecision::Restart { attempt } => {
-                self.bus
-                    .publish(DomainEvent::RestartScheduled { id, attempt });
+                self.bus.publish(DomainEvent::RestartScheduled {
+                    id,
+                    attempt,
+                    limit: MAX_RESTARTS,
+                });
                 // Relaunch through the shared launch primitive (the one place a process is
                 // spawned) rather than the public `restart`, which would clear the window.
                 self.launch_actor(id, info.launch, None);
@@ -300,6 +303,27 @@ mod tests {
     }
 
     #[test]
+    fn a_restart_exactly_at_the_window_edge_still_counts() {
+        // Eviction is strict `<` the cutoff (now - WINDOW), so a restart exactly WINDOW old is
+        // retained and the window stays full — the boundary is inclusive, not off-by-one lenient.
+        let clock = MockClock::new();
+        let mut window = RestartWindow::new();
+        for _ in 0..MAX_RESTARTS {
+            window.on_crash(clock.now());
+        }
+        // The oldest restart is now exactly WINDOW old: its age equals the cutoff, not below it.
+        clock.advance(WINDOW);
+        assert_eq!(window.on_crash(clock.now()), RestartDecision::Exhaust);
+
+        // One instant past the edge, the whole window ages out and a restart is granted again.
+        clock.advance(Duration::from_nanos(1));
+        assert_eq!(
+            window.on_crash(clock.now()),
+            RestartDecision::Restart { attempt: 1 }
+        );
+    }
+
+    #[test]
     fn forgetting_a_process_clears_its_window() {
         let clock = MockClock::new();
         let policy = RestartPolicy::default();
@@ -342,9 +366,16 @@ mod tests {
         let mut scheduled = 0u32;
         loop {
             match h.rx.recv().await {
-                Ok(DomainEvent::RestartScheduled { id: got, attempt }) if got == id => {
+                Ok(DomainEvent::RestartScheduled {
+                    id: got,
+                    attempt,
+                    limit,
+                }) if got == id => {
                     scheduled += 1;
                     assert_eq!(attempt, scheduled, "attempts are sequential");
+                    // Every attempt reports the gate it is counting towards, so a display never
+                    // has to know the policy to render "attempt of limit".
+                    assert_eq!(limit, MAX_RESTARTS, "the event carries the live gate");
                 }
                 Ok(DomainEvent::RestartExhausted { id: got }) if got == id => break,
                 Ok(_) | Err(RecvError::Lagged(_)) => {}
@@ -375,7 +406,9 @@ mod tests {
         // banner — without racing the per-run output drains.
         loop {
             match h.rx.recv().await {
-                Ok(DomainEvent::RestartScheduled { id: got, attempt }) if got == id => {
+                Ok(DomainEvent::RestartScheduled {
+                    id: got, attempt, ..
+                }) if got == id => {
                     if attempt >= 2 {
                         break;
                     }

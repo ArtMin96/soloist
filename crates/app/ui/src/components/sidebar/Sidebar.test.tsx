@@ -148,6 +148,31 @@ describe("Sidebar footer", () => {
   });
 });
 
+describe("Sidebar filter", () => {
+  it("narrows the tree to processes matching the query", () => {
+    renderSidebar();
+    // All three processes present before filtering.
+    expect(screen.getByRole("treeitem", { name: /claude/ })).toBeTruthy();
+    expect(screen.getByRole("treeitem", { name: /build/ })).toBeTruthy();
+    expect(screen.getByRole("treeitem", { name: /worker/ })).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter processes" }), {
+      target: { value: "claude" },
+    });
+
+    expect(screen.getByRole("treeitem", { name: /claude/ })).toBeTruthy();
+    expect(screen.queryByRole("treeitem", { name: /build/ })).toBeNull();
+    expect(screen.queryByRole("treeitem", { name: /worker/ })).toBeNull();
+  });
+
+  it("hides the filter input and shows every process when the setting is off", () => {
+    renderSidebar({ settings: { ...DEFAULT_SIDEBAR, show_filter_input: false } });
+    expect(screen.queryByRole("searchbox", { name: "Filter processes" })).toBeNull();
+    expect(screen.getByRole("treeitem", { name: /claude/ })).toBeTruthy();
+    expect(screen.getByRole("treeitem", { name: /worker/ })).toBeTruthy();
+  });
+});
+
 describe("Sidebar lineage nesting", () => {
   const WORKER = {
     id: 12,

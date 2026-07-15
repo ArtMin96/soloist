@@ -20,11 +20,11 @@ pub mod sync;
 pub mod write;
 
 pub use detect::detect_in;
-pub use diff::{diff, ConfigSync, Rename};
+pub use diff::diff;
 pub use load::{
     config_path, load, load_or_empty, parse, ConfigError, CONFIG_FILENAME, MAX_CONFIG_BYTES,
 };
-pub use model::{ProcessSpec, SoloYml};
-pub use review::TrustReviewCommand;
+pub use model::{check_command, check_command_name, InvalidCommand, ProcessSpec, SoloYml};
+
 pub use sync::{ConfigEngine, ConfigWriteError, SyncError};
 pub use write::{create_if_absent, WriteError};

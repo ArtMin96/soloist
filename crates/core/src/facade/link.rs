@@ -6,10 +6,11 @@
 //! so a pasted link can never leak another project's content. The link's durable id is mapped to the
 //! current content through the existing aggregate reads, so a renamed scratchpad still resolves.
 
+use super::scoped::ScopedFacade;
 use super::Facade;
 use crate::coordination::{Link, LinkContent, LinkTarget};
 use crate::facade::CoordinationError;
-use crate::ids::{ProjectId, ScratchpadId, SessionId, TodoId};
+use crate::ids::{ProjectId, ScratchpadId, TodoId};
 
 impl Facade {
     /// The `solo://` link to scratchpad `id` in `project` — the string the local-UI "Copy link"
@@ -22,18 +23,16 @@ impl Facade {
     pub fn todo_link(&self, project: ProjectId, id: TodoId) -> String {
         Link::todo(project, id).to_link()
     }
+}
 
+impl ScopedFacade<'_> {
     /// Resolves a `solo://proj/<project>/scratchpad|todo/<id>` link to its content within the
     /// session's effective project. A malformed link is [`CoordinationError::MalformedLink`]; a link
     /// to another project is [`CoordinationError::ForeignScopeLink`] (refused, never resolved); an id
     /// with no live content is [`CoordinationError::UnknownScratchpad`]/[`UnknownTodo`](CoordinationError::UnknownTodo).
-    pub fn resolve_link(
-        &self,
-        session: SessionId,
-        link: &str,
-    ) -> Result<LinkContent, CoordinationError> {
+    pub fn resolve_link(&self, link: &str) -> Result<LinkContent, CoordinationError> {
         let parsed = Link::parse(link).map_err(|_| CoordinationError::MalformedLink)?;
-        let project = self.coordination_scope(session)?;
+        let project = self.coordination_scope()?;
         if parsed.project != project {
             return Err(CoordinationError::ForeignScopeLink);
         }
@@ -41,6 +40,7 @@ impl Facade {
             LinkTarget::Scratchpad(id) => {
                 // Scratchpads are addressed by name; map the durable id to the current name, then read.
                 let name = self
+                    .inner
                     .scratchpads
                     .list(project)?
                     .into_iter()
@@ -48,6 +48,7 @@ impl Facade {
                     .map(|summary| summary.name)
                     .ok_or(CoordinationError::UnknownScratchpad)?;
                 let view = self
+                    .inner
                     .scratchpads
                     .read(project, &name)?
                     .ok_or(CoordinationError::UnknownScratchpad)?;
@@ -55,6 +56,7 @@ impl Facade {
             }
             LinkTarget::Todo(id) => {
                 let view = self
+                    .inner
                     .todos
                     .get(project, id)?
                     .ok_or(CoordinationError::UnknownTodo)?;

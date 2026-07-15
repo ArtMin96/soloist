@@ -125,6 +125,27 @@ fn render_table_filters_by_status() {
 }
 
 #[test]
+fn render_table_neutralizes_control_bytes_in_a_label() {
+    // A crafted process name carrying a screen-clear escape must not reach the terminal as a
+    // live control sequence when `soloist status` prints the table.
+    let procs = vec![process(
+        1,
+        1,
+        "web\x1b[2J\rspoof",
+        ProcStatus::Running,
+        vec![],
+    )];
+    let table = render_table(&procs, None);
+    assert!(!table.contains('\x1b'), "no ESC byte survives: {table:?}");
+    assert!(
+        !table.contains('\r'),
+        "no carriage return survives: {table:?}"
+    );
+    // The printable text is still shown (rendered inert), so the row is not silently dropped.
+    assert!(table.contains("web") && table.contains("spoof"));
+}
+
+#[test]
 fn render_table_reports_an_empty_stack() {
     assert_eq!(render_table(&[], None), "No processes.");
     let only_running = vec![process(1, 1, "web", ProcStatus::Running, vec![])];

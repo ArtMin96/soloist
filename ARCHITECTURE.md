@@ -21,7 +21,7 @@ CQRS-lite, SQLite for durable state.
   │  Tauri UI ── crates/app            │                   │  ProcessSpawner / PtyIo ── crates/pty│
   │  MCP      ── crates/mcp     [→P8]  │                   │  Store / repos          ── crates/store│
   │  HTTP     ── crates/httpapi [→P10] │                   │  Clock                  ── core (tokio)│
-  │  CLI      ── crates/cli     [→P10] │                   │  FileWatcher/Notifier/Summarizer [→Pn]│
+  │  CLI      ── crates/cli     [→P10] │                   │  MetricsProbe/PortProbe/FileWatcher ── crates/sys│
   └─────────────────┬─────────────────┘                   └───────────────────┬────────────────┘
                     │ one Facade call                                          ▲ trait (port)
                     ▼                                                          │
@@ -58,23 +58,51 @@ adapter. Adapters hold **no** business state and make **no** domain decisions.
 ## 2. Domain separation — 8 bounded contexts
 
 ```
-  adapters ──► C8 Facade ──► C1…C7      (adapters touch C8 ONLY; no cycles between contexts)
+  adapters ──► C8 Facade ──► C1…C7      (adapters touch C8 ONLY)
+  scope-limited callers ──► ScopedFacade  (no accessor onto a context; enforced by the type)
+  composition ──► every context         (one-way: the only module that may name them all)
 ```
+
+`Facade` is the local user's authority: it hands whole contexts out (`supervisor()`, `projects()`,
+…) because the Tauri UI and the loopback HTTP API are not scope-limited. A caller that **is** — MCP
+today — gets a `ScopedFacade` instead: the session is bound once (so it is in no signature) and
+there is no accessor to reach an ungated context with, so it cannot route around its own guard.
+`compile_fail` doc tests on the type keep that true.
+
+Contexts do not import each other in a ring, and `scripts/check-core-cycles.sh` enforces it on
+every build rather than leaving it to be asserted here. There is no allow-list.
+
+That holds because a value type shared by several contexts lives in a **shared-kernel module that
+depends on nothing** — `ids`, `process` (`ProcStatus`), `idle` (`AgentActivity`), `configchange`
+(`ConfigSync`, `TrustReviewCommand`), `orphans` — rather than in whichever context feels closest.
+`DomainEvent` names the payloads it carries, and the contexts that produce them also publish to the
+bus; if either owned the type, the two would import each other. Only the types live there — the
+heuristics that decide an `AgentActivity`, and the `diff` that builds a `ConfigSync`, stay in their
+contexts.
+
+A port trait lives with the context that drives it (`TodoRepo` in `coordination`, `MetricsProbe`
+in `metrics`); `ports` holds only what no single context owns (`Clock`, `ProcessSpawner`, `PtyIo`,
+the shared stores). The port *set* — `CorePorts` and its builder — is the composition root's
+parameter object and lives in `composition`, because a bundle naming every context cannot sit in
+the layer those contexts import.
 
 | Ctx | Modules in `core` | Owns | Status |
 |-----|-------------------|------|--------|
 | **C1** Projects & Config | `config/` `projects` `trust` `hash` `debounce` | `solo.yml` load/validate/sync, project registry, trust gate, hashing, debounce | live (P2) |
 | **C2** Process Supervision | `supervisor/` `process` `orphans` | registry, `ProcStatus` FSM, start/stop/restart, bulk ops, orphan reconcile | live (P3) |
 | **C3** Terminal I/O | `terminal/` | PTY read loop, rendered+raw buffers, OSC parse, attach replay | live (P4) |
-| **C4** Agents & Idle | `agents` `idle` | agent-tool defs, launch, 5-state idle FSM, optional summary | placeholder → P7 |
+| **C4** Agents & Idle | `agents` (incl. `agents/idle/`) | agent-tool defs, launch, the 5-state idle FSM that decides `idle::AgentActivity` | live (P7) |
 | **C5** Monitoring | `metrics/` `portscan/` | CPU/mem sampling, `/proc` port discovery, readiness | live (P6: D1/D2/D3) |
 | **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos + key-value); end-to-end orchestration (E7) proven |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
-| **C8** Integration façade | `facade` `identity` | the public command/query API; MCP identity & effective scope | live (`facade`) |
+| **C8** Integration façade | `facade` `identity` | the public command/query API (`Facade`, local authority) + the session-scoped surface (`ScopedFacade`); MCP identity & effective scope | live (`facade`) |
 
-Cross-cutting in `core`: `events` (the `DomainEvent` bus), `ports` (every trait + its `Noop` default),
+Cross-cutting in `core`: `events` (the `DomainEvent` bus), `composition` (the `CorePorts` set the root
+assembles), `ports` (the traits no single context owns, each with its `Noop` default),
 `ids` (newtype IDs), `sync` (poison-safe lock helper), `cache` (Clock-driven read-through memo),
-`testing` (shared fakes).
+`testing` (shared fakes). Shared-kernel value types — owned by no context, depending on nothing:
+`process` (`ProcStatus`/`ProcessKind`/`ProcessView`), `idle` (`AgentActivity`), `configchange`
+(`ConfigSync`/`Rename`/`TrustReviewCommand`), `orphans` (`OrphanInfo`).
 
 **Isolation guarantees.** A bug in summarization (C4) cannot corrupt the process registry (C2);
 coordination state (C6) persists in SQLite independently of live processes (C2), so todos/scratchpads
@@ -144,7 +172,7 @@ Reach for a pattern when its **trigger** fires — not preemptively (YAGNI).
 | **Newtype + closed enum** | `ids.rs`, `process.rs` | a domain id/state → never a bare `String`/`int` |
 | **Null Object** | `Noop{LockReleaser,RuntimeState,OrphanControl}` | a **driven** subsystem is optional → ship a `Noop` so core runs without the real adapter |
 | **Read-through cache (TTL memo)** | `cache::ReadCache` (shell-env capture, agent `--version` detection) | an expensive, repeatable off-runtime read a burst of callers would each redo → one `Clock`-driven, single-flighted TTL memo, not a re-rolled mutex |
-| **Parameter Object / Builder** | `core::ports::CorePorts` (+ `CorePortsBuilder`) — the port set for `Facade::new`/`Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) |
+| **Parameter Object / Builder** | `core::composition::CorePorts` (+ `CorePortsBuilder`) — the port set for `Facade::new`; projects `SupervisorPorts` for `Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) |
 | **Registry** | `config::detect::DETECTORS` (C1); the MCP tool router composed from per-category sub-routers (`crates/mcp/src/tools/`, R8); *to add* — agent-tool defs (P7) | a growing set of "one of many" handlers → register, don't extend a giant `match` |
 | **Strategy** | `config::detect::Detector` — one impl per ecosystem (C1); *to add* — per-provider idle heuristics (P7), per-agent launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
 | **Optimistic concurrency** | `coordination::{Scratchpads, Todos}` over their repos (P9: scratchpads + todos done) | concurrent writers to one durable record → revision guard |

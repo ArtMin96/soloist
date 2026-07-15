@@ -93,6 +93,38 @@ fn writing_a_no_op_change_leaves_the_file_untouched() {
 }
 
 #[test]
+fn a_write_over_the_size_ceiling_is_refused_and_leaves_the_file_unchanged() {
+    let (engine, _trust, _rx, project, dir) =
+        setup("processes:\n  Web:\n    command: npm run dev\n");
+    let before = std::fs::read_to_string(config_path(dir.path())).unwrap();
+
+    // A command large enough that the rewritten file blows past the 1 MiB ceiling.
+    let huge = "x".repeat((MAX_CONFIG_BYTES + 16) as usize);
+    let err = engine
+        .write(project, |c| {
+            c.processes.insert("Big".into(), spec(&huge));
+            Ok(())
+        })
+        .expect_err("an over-limit write must be refused");
+
+    match err {
+        ConfigWriteError::Config(ConfigError::TooLarge { size, .. }) => {
+            assert!(
+                size > MAX_CONFIG_BYTES,
+                "the reported size is over the limit"
+            );
+        }
+        other => panic!("expected TooLarge, got {other:?}"),
+    }
+
+    assert_eq!(
+        std::fs::read_to_string(config_path(dir.path())).unwrap(),
+        before,
+        "the ceiling check runs before the atomic write, so solo.yml is byte-unchanged"
+    );
+}
+
+#[test]
 fn writing_an_unknown_project_errors() {
     let (engine, ..) = setup("processes:\n  Web:\n    command: x\n");
     assert!(matches!(

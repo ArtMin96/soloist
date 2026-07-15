@@ -10,6 +10,7 @@
 //! the core, so every remote surface inherits the identical rules; this surface maps the aggregate's
 //! typed outcomes to the shared [`CoordinationError`].
 
+use super::scoped::ScopedFacade;
 use super::Facade;
 use crate::coordination::{
     Comment, CommentAuthor, CommentOutcome, TodoDoc, TodoError, TodoSummary, TodoView,
@@ -17,144 +18,10 @@ use crate::coordination::{
 use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
 use crate::identity::Origin;
-use crate::ids::{ProjectId, SessionId, TodoId};
+use crate::ids::{ProjectId, TodoId};
 use crate::ports::StoreError;
 
 impl Facade {
-    /// Creates a todo from the disciplined `doc` in the session's effective project. A malformed
-    /// document is [`CoordinationError::InvalidTodo`].
-    pub fn todo_create(
-        &self,
-        session: SessionId,
-        doc: TodoDoc,
-    ) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        self.todo_create_in(project, doc)
-    }
-
-    /// Every todo in the session's effective project, as one-line summaries.
-    pub fn todo_list(&self, session: SessionId) -> Result<Vec<TodoSummary>, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        Ok(self.todos.list(project)?)
-    }
-
-    /// The todo `id` in the session's effective project, or [`CoordinationError::UnknownTodo`].
-    pub fn todo_get(&self, session: SessionId, id: TodoId) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        self.todos
-            .get(project, id)?
-            .ok_or(CoordinationError::UnknownTodo)
-    }
-
-    /// Replaces the document of todo `id` with `doc` in the session's effective project,
-    /// **revision-guarded** by `expected`; setting status to done is gated on the todo's blockers.
-    pub fn todo_update(
-        &self,
-        session: SessionId,
-        id: TodoId,
-        doc: TodoDoc,
-        expected: u64,
-    ) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        self.todo_update_in(project, id, doc, expected)
-    }
-
-    /// Marks todo `id` done in the session's effective project — refused with
-    /// [`CoordinationError::TodoBlocked`] while it has unmet blockers (the gate).
-    pub fn todo_complete(
-        &self,
-        session: SessionId,
-        id: TodoId,
-    ) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        self.todo_complete_in(project, id)
-    }
-
-    /// Deletes todo `id` in the session's effective project, returning whether one was removed.
-    pub fn todo_delete(&self, session: SessionId, id: TodoId) -> Result<bool, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        let removed = self.todos.delete(project, id)?;
-        if removed {
-            self.bus.publish(DomainEvent::TodoChanged { project, id });
-        }
-        Ok(removed)
-    }
-
-    /// The distinct tags used across the session's effective project's todos, sorted.
-    pub fn todo_tags_list(&self, session: SessionId) -> Result<Vec<String>, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        Ok(self.todos.tags(project)?)
-    }
-
-    /// Adds `tag` to todo `id` in the session's effective project, returning the updated todo, or
-    /// [`CoordinationError::UnknownTodo`] if there is none.
-    pub fn todo_add_tag(
-        &self,
-        session: SessionId,
-        id: TodoId,
-        tag: &str,
-    ) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        self.emit_todo(
-            project,
-            self.todos
-                .add_tag(project, id, tag)?
-                .ok_or(CoordinationError::UnknownTodo),
-        )
-    }
-
-    /// Removes `tag` from todo `id` in the session's effective project, returning the updated todo,
-    /// or [`CoordinationError::UnknownTodo`] if there is none.
-    pub fn todo_remove_tag(
-        &self,
-        session: SessionId,
-        id: TodoId,
-        tag: &str,
-    ) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        self.emit_todo(
-            project,
-            self.todos
-                .remove_tag(project, id, tag)?
-                .ok_or(CoordinationError::UnknownTodo),
-        )
-    }
-
-    /// Replaces the blockers of todo `id` in the session's effective project, after validating each
-    /// exists and is not the todo itself.
-    pub fn todo_set_blockers(
-        &self,
-        session: SessionId,
-        id: TodoId,
-        blockers: Vec<TodoId>,
-    ) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        self.todo_set_blockers_in(project, id, blockers)
-    }
-
-    /// Adds `blocker` to todo `id` in the session's effective project, after the same checks.
-    pub fn todo_add_blocker(
-        &self,
-        session: SessionId,
-        id: TodoId,
-        blocker: TodoId,
-    ) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        self.todo_add_blocker_in(project, id, blocker)
-    }
-
-    /// Removes `blocker` from todo `id` in the session's effective project, returning the updated
-    /// todo, or [`CoordinationError::UnknownTodo`] if there is none.
-    pub fn todo_remove_blocker(
-        &self,
-        session: SessionId,
-        id: TodoId,
-        blocker: TodoId,
-    ) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        self.todo_remove_blocker_in(project, id, blocker)
-    }
-
     // The project-scoped write surface the local-UI to-do board drives. Each mirrors its
     // session-scoped sibling above with `project` supplied directly, trusting the caller to be
     // entitled to it — like [`orchestration_snapshot`](Self::orchestration_snapshot), so none must
@@ -246,26 +113,6 @@ impl Facade {
         )
     }
 
-    /// Moves todo `id` into project `to` for a scoped session (context C8 → C6). Authorized
-    /// only when the caller is authenticated to **both** its own effective project (the source) and
-    /// `to` (the target, via [`authentic_scope`](Facade::authentic_scope)); otherwise
-    /// [`CoordinationError::ForeignProject`]. Because an MCP session authenticates to a single
-    /// project, a genuine cross-project transfer is refused here — the reachable path is the local
-    /// [`todo_transfer_in`](Self::todo_transfer_in). Preserves comments/completion, clears
-    /// blockers/lock.
-    pub fn todo_transfer(
-        &self,
-        session: SessionId,
-        to: ProjectId,
-        id: TodoId,
-    ) -> Result<TodoView, CoordinationError> {
-        let from = self.coordination_scope(session)?;
-        if !self.authentic_scope(session, to) {
-            return Err(CoordinationError::ForeignProject);
-        }
-        self.todo_transfer_in(from, to, id)
-    }
-
     /// [`todo_transfer`](Self::todo_transfer) scoped to `from`/`to` directly (local-UI path — never
     /// takes a project from an untrusted surface). Moves todo `id` from `from` to `to`, keeping its
     /// comments and completion and clearing its blockers (which referenced source-project ids) and
@@ -292,116 +139,6 @@ impl Facade {
         Ok(view)
     }
 
-    /// Locks todo `id` in the session's effective project for the caller's bound process —
-    /// "signals, not ownership": the returned todo's `locked_by` reports the holder, so the caller
-    /// checks whether it won. Needs a bound process (the owner the lock auto-releases for on close).
-    pub fn todo_lock(&self, session: SessionId, id: TodoId) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        let owner = self.coordination_owner(session)?;
-        self.emit_todo(
-            project,
-            self.todos
-                .lock(project, id, owner)?
-                .ok_or(CoordinationError::UnknownTodo),
-        )
-    }
-
-    /// Releases the lock on todo `id` in the session's effective project if held by the caller's
-    /// bound process, returning the updated todo, or [`CoordinationError::UnknownTodo`] if there is
-    /// none.
-    pub fn todo_unlock(
-        &self,
-        session: SessionId,
-        id: TodoId,
-    ) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        let owner = self.coordination_owner(session)?;
-        self.emit_todo(
-            project,
-            self.todos
-                .unlock(project, id, owner)?
-                .ok_or(CoordinationError::UnknownTodo),
-        )
-    }
-
-    /// Adds a comment to todo `id` in the session's effective project, returning the updated todo and
-    /// the new comment's id, or [`CoordinationError::UnknownTodo`] if there is none.
-    pub fn todo_comment_create(
-        &self,
-        session: SessionId,
-        id: TodoId,
-        body: &str,
-    ) -> Result<(TodoView, u64), CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        let author = self.comment_author(session);
-        let created = self
-            .todos
-            .comment_create(project, id, body, author)?
-            .ok_or(CoordinationError::UnknownTodo)?;
-        self.bus.publish(DomainEvent::TodoChanged { project, id });
-        Ok(created)
-    }
-
-    /// The author to stamp on a new comment, resolved in the core from the caller's identity: a
-    /// bound process (its id plus the label resolved now and kept durably), an external caller (its
-    /// label), or `None` for an unbound caller. The caller never supplies this, so the author of a
-    /// comment cannot be forged.
-    fn comment_author(&self, session: SessionId) -> Option<CommentAuthor> {
-        match self.identity.origin(session) {
-            Origin::Process(id) => Some(CommentAuthor::Process {
-                id,
-                label: self
-                    .process_view(id)
-                    .map(|view| view.label)
-                    .unwrap_or_else(|| format!("process {}", id.get())),
-            }),
-            Origin::External(label) => Some(CommentAuthor::External { label }),
-            Origin::Unbound => None,
-        }
-    }
-
-    /// Updates comment `comment` of todo `id` in the session's effective project.
-    pub fn todo_comment_update(
-        &self,
-        session: SessionId,
-        id: TodoId,
-        comment: u64,
-        body: &str,
-    ) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        self.emit_todo(
-            project,
-            map_comment(self.todos.comment_update(project, id, comment, body)?),
-        )
-    }
-
-    /// Deletes comment `comment` of todo `id` in the session's effective project.
-    pub fn todo_comment_delete(
-        &self,
-        session: SessionId,
-        id: TodoId,
-        comment: u64,
-    ) -> Result<TodoView, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        self.emit_todo(
-            project,
-            map_comment(self.todos.comment_delete(project, id, comment)?),
-        )
-    }
-
-    /// The comments on todo `id` in the session's effective project, or
-    /// [`CoordinationError::UnknownTodo`] if there is none.
-    pub fn todo_comment_list(
-        &self,
-        session: SessionId,
-        id: TodoId,
-    ) -> Result<Vec<Comment>, CoordinationError> {
-        let project = self.coordination_scope(session)?;
-        self.todos
-            .comment_list(project, id)?
-            .ok_or(CoordinationError::UnknownTodo)
-    }
-
     /// Clears every stale todo lock on launch — see [`Todos::reconcile`](crate::coordination::Todos::reconcile).
     /// Not session-scoped; the composition root calls it once at startup. The todos themselves
     /// persist; only their process-owned locks (whose per-run owners are gone) are dropped.
@@ -425,6 +162,250 @@ impl Facade {
             });
         }
         result
+    }
+}
+
+impl ScopedFacade<'_> {
+    /// Creates a todo from the disciplined `doc` in the session's effective project. A malformed
+    /// document is [`CoordinationError::InvalidTodo`].
+    pub fn todo_create(&self, doc: TodoDoc) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        self.inner.todo_create_in(project, doc)
+    }
+
+    /// Every todo in the session's effective project, as one-line summaries.
+    pub fn todo_list(&self) -> Result<Vec<TodoSummary>, CoordinationError> {
+        let project = self.coordination_scope()?;
+        Ok(self.inner.todos.list(project)?)
+    }
+
+    /// The todo `id` in the session's effective project, or [`CoordinationError::UnknownTodo`].
+    pub fn todo_get(&self, id: TodoId) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        self.inner
+            .todos
+            .get(project, id)?
+            .ok_or(CoordinationError::UnknownTodo)
+    }
+
+    /// Replaces the document of todo `id` with `doc` in the session's effective project,
+    /// **revision-guarded** by `expected`; setting status to done is gated on the todo's blockers.
+    pub fn todo_update(
+        &self,
+        id: TodoId,
+        doc: TodoDoc,
+        expected: u64,
+    ) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        self.inner.todo_update_in(project, id, doc, expected)
+    }
+
+    /// Marks todo `id` done in the session's effective project — refused with
+    /// [`CoordinationError::TodoBlocked`] while it has unmet blockers (the gate).
+    pub fn todo_complete(&self, id: TodoId) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        self.inner.todo_complete_in(project, id)
+    }
+
+    /// Deletes todo `id` in the session's effective project, returning whether one was removed.
+    pub fn todo_delete(&self, id: TodoId) -> Result<bool, CoordinationError> {
+        let project = self.coordination_scope()?;
+        let removed = self.inner.todos.delete(project, id)?;
+        if removed {
+            self.inner
+                .bus
+                .publish(DomainEvent::TodoChanged { project, id });
+        }
+        Ok(removed)
+    }
+
+    /// The distinct tags used across the session's effective project's todos, sorted.
+    pub fn todo_tags_list(&self) -> Result<Vec<String>, CoordinationError> {
+        let project = self.coordination_scope()?;
+        Ok(self.inner.todos.tags(project)?)
+    }
+
+    /// Adds `tag` to todo `id` in the session's effective project, returning the updated todo, or
+    /// [`CoordinationError::UnknownTodo`] if there is none.
+    pub fn todo_add_tag(&self, id: TodoId, tag: &str) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        self.inner.emit_todo(
+            project,
+            self.inner
+                .todos
+                .add_tag(project, id, tag)?
+                .ok_or(CoordinationError::UnknownTodo),
+        )
+    }
+
+    /// Removes `tag` from todo `id` in the session's effective project, returning the updated todo,
+    /// or [`CoordinationError::UnknownTodo`] if there is none.
+    pub fn todo_remove_tag(&self, id: TodoId, tag: &str) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        self.inner.emit_todo(
+            project,
+            self.inner
+                .todos
+                .remove_tag(project, id, tag)?
+                .ok_or(CoordinationError::UnknownTodo),
+        )
+    }
+
+    /// Replaces the blockers of todo `id` in the session's effective project, after validating each
+    /// exists and is not the todo itself.
+    pub fn todo_set_blockers(
+        &self,
+        id: TodoId,
+        blockers: Vec<TodoId>,
+    ) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        self.inner.todo_set_blockers_in(project, id, blockers)
+    }
+
+    /// Adds `blocker` to todo `id` in the session's effective project, after the same checks.
+    pub fn todo_add_blocker(
+        &self,
+        id: TodoId,
+        blocker: TodoId,
+    ) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        self.inner.todo_add_blocker_in(project, id, blocker)
+    }
+
+    /// Removes `blocker` from todo `id` in the session's effective project, returning the updated
+    /// todo, or [`CoordinationError::UnknownTodo`] if there is none.
+    pub fn todo_remove_blocker(
+        &self,
+        id: TodoId,
+        blocker: TodoId,
+    ) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        self.inner.todo_remove_blocker_in(project, id, blocker)
+    }
+
+    /// Moves todo `id` into project `to` for a scoped session (context C8 → C6). Authorized
+    /// only when the caller is authenticated to **both** its own effective project (the source) and
+    /// `to` (the target, via [`authentic_scope`](Facade::authentic_scope)); otherwise
+    /// [`CoordinationError::ForeignProject`]. Because an MCP session authenticates to a single
+    /// project, a genuine cross-project transfer is refused here — the reachable path is the local
+    /// [`todo_transfer_in`](Self::todo_transfer_in). Preserves comments/completion, clears
+    /// blockers/lock.
+    pub fn todo_transfer(&self, to: ProjectId, id: TodoId) -> Result<TodoView, CoordinationError> {
+        let from = self.coordination_scope()?;
+        if !self.authentic_scope(to) {
+            return Err(CoordinationError::ForeignProject);
+        }
+        self.inner.todo_transfer_in(from, to, id)
+    }
+
+    /// Locks todo `id` in the session's effective project for the caller's bound process —
+    /// "signals, not ownership": the returned todo's `locked_by` reports the holder, so the caller
+    /// checks whether it won. Needs a bound process (the owner the lock auto-releases for on close).
+    pub fn todo_lock(&self, id: TodoId) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        let owner = self.coordination_owner()?;
+        self.inner.emit_todo(
+            project,
+            self.inner
+                .todos
+                .lock(project, id, owner)?
+                .ok_or(CoordinationError::UnknownTodo),
+        )
+    }
+
+    /// Releases the lock on todo `id` in the session's effective project if held by the caller's
+    /// bound process, returning the updated todo, or [`CoordinationError::UnknownTodo`] if there is
+    /// none.
+    pub fn todo_unlock(&self, id: TodoId) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        let owner = self.coordination_owner()?;
+        self.inner.emit_todo(
+            project,
+            self.inner
+                .todos
+                .unlock(project, id, owner)?
+                .ok_or(CoordinationError::UnknownTodo),
+        )
+    }
+
+    /// Adds a comment to todo `id` in the session's effective project, returning the updated todo and
+    /// the new comment's id, or [`CoordinationError::UnknownTodo`] if there is none.
+    pub fn todo_comment_create(
+        &self,
+        id: TodoId,
+        body: &str,
+    ) -> Result<(TodoView, u64), CoordinationError> {
+        let project = self.coordination_scope()?;
+        let author = self.comment_author();
+        let created = self
+            .inner
+            .todos
+            .comment_create(project, id, body, author)?
+            .ok_or(CoordinationError::UnknownTodo)?;
+        self.inner
+            .bus
+            .publish(DomainEvent::TodoChanged { project, id });
+        Ok(created)
+    }
+
+    /// The author to stamp on a new comment, resolved in the core from the caller's identity: a
+    /// bound process (its id plus the label resolved now and kept durably), an external caller (its
+    /// label), or `None` for an unbound caller. The caller never supplies this, so the author of a
+    /// comment cannot be forged.
+    fn comment_author(&self) -> Option<CommentAuthor> {
+        match self.inner.identity.origin(self.session) {
+            Origin::Process(id) => Some(CommentAuthor::Process {
+                id,
+                label: self
+                    .inner
+                    .process_view(id)
+                    .map(|view| view.label)
+                    .unwrap_or_else(|| format!("process {}", id.get())),
+            }),
+            Origin::External(label) => Some(CommentAuthor::External { label }),
+            Origin::Unbound => None,
+        }
+    }
+
+    /// Updates comment `comment` of todo `id` in the session's effective project.
+    pub fn todo_comment_update(
+        &self,
+        id: TodoId,
+        comment: u64,
+        body: &str,
+    ) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        self.inner.emit_todo(
+            project,
+            map_comment(
+                self.inner
+                    .todos
+                    .comment_update(project, id, comment, body)?,
+            ),
+        )
+    }
+
+    /// Deletes comment `comment` of todo `id` in the session's effective project.
+    pub fn todo_comment_delete(
+        &self,
+        id: TodoId,
+        comment: u64,
+    ) -> Result<TodoView, CoordinationError> {
+        let project = self.coordination_scope()?;
+        self.inner.emit_todo(
+            project,
+            map_comment(self.inner.todos.comment_delete(project, id, comment)?),
+        )
+    }
+
+    /// The comments on todo `id` in the session's effective project, or
+    /// [`CoordinationError::UnknownTodo`] if there is none.
+    pub fn todo_comment_list(&self, id: TodoId) -> Result<Vec<Comment>, CoordinationError> {
+        let project = self.coordination_scope()?;
+        self.inner
+            .todos
+            .comment_list(project, id)?
+            .ok_or(CoordinationError::UnknownTodo)
     }
 }
 

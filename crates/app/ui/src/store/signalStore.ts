@@ -1,5 +1,5 @@
-import { applySignal, EMPTY_SIGNALS, type SignalState } from "@/store/signals";
-import type { DomainEvent } from "@/domain";
+import { applySignal, EMPTY_SIGNALS, seedActivity, type SignalState } from "@/store/signals";
+import type { AgentSignal, DomainEvent } from "@/domain";
 
 // A framework-free external store holding the coalesced per-process signals, read by the leaves via
 // `useSyncExternalStore` (see `signalsContext`). It exists so a ~1 Hz MetricsTick re-renders only the
@@ -13,6 +13,9 @@ export interface SignalStore {
   getSnapshot: () => SignalState;
   /** Fold one core event in, notifying subscribers only when the state reference changed. */
   apply: (event: DomainEvent) => void;
+  /** Reconcile the idle badges to the core's current agent-activity snapshot — the resync/reload
+   *  backstop for a dropped `AgentActivityChanged` — notifying only if the set actually changed. */
+  seed: (entries: readonly AgentSignal[]) => void;
 }
 
 export function createSignalStore(): SignalStore {
@@ -34,6 +37,14 @@ export function createSignalStore(): SignalStore {
       state = next;
       for (const listener of listeners) listener();
     },
+    seed(entries) {
+      // Same no-churn rule as `apply`: `seedActivity` returns the same reference when the badge set
+      // is unchanged, so a routine resync that finds nothing new never re-renders a reader.
+      const next = seedActivity(state, entries);
+      if (next === state) return;
+      state = next;
+      for (const listener of listeners) listener();
+    },
   };
 }
 
@@ -44,6 +55,7 @@ export function fixedSignalStore(state: SignalState): SignalStore {
     subscribe: () => () => {},
     getSnapshot: () => state,
     apply: () => {},
+    seed: () => {},
   };
 }
 

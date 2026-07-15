@@ -20,13 +20,17 @@ use crate::sync::lock;
 
 use super::actor::{ActorMsg, OrphanIdentity};
 
+mod actors;
 mod queries;
 
-/// A live actor's control surface: a bounded mailbox to message it and the join
-/// handle awaited at shutdown to confirm its child was reaped.
+/// A live actor's control surface: a bounded mailbox to message it and — once the task is
+/// spawned — the join handle awaited at shutdown to confirm its child was reaped. The mailbox
+/// is installed as the launch is claimed ([`Registry::begin_launch`]) so a stop or shutdown that
+/// lands in the launch window still reaches the actor; the join is attached a moment later
+/// ([`Registry::attach_join`]) once the task exists, so it is `None` for that window only.
 pub(crate) struct ActorHandle {
     pub(crate) mailbox: mpsc::Sender<ActorMsg>,
-    pub(crate) join: JoinHandle<()>,
+    pub(crate) join: Option<JoinHandle<()>>,
 }
 
 /// One managed process: its read-model view, everything needed to (re)launch it, and
@@ -342,91 +346,6 @@ impl Registry {
         }
     }
 
-    /// Atomically claims the right to launch a resting process: if it is not already
-    /// active, transitions it to `Starting` under the lock and returns its prior
-    /// status; if it is already active (another launch won, or it is running), returns
-    /// `None`. Setting the status under the same lock as the check is what makes the
-    /// supervisor's start path race-free without holding the lock across the spawn.
-    pub(crate) fn begin_launch(&self, id: ProcessId) -> Option<ProcStatus> {
-        let mut guard = lock(&self.inner);
-        let entry = guard.get_mut(&id)?;
-        let from = entry.view.status;
-        if from.is_active() {
-            return None;
-        }
-        let next = from.transition(ProcStatus::Starting).ok()?;
-        entry.view.status = next;
-        entry.view.exit_code = None;
-        Some(from)
-    }
-
-    /// Atomically holds a still-crashed process in [`ProcStatus::RestartExhausted`]: if it
-    /// is currently `Crashed`, transitions it and returns `true`; otherwise leaves it
-    /// untouched and returns `false`. Because the FSM permits `RestartExhausted` from no
-    /// state but `Crashed`, a concurrent user start/restart (now `Starting` or running) is
-    /// never clobbered — the transition simply fails. The caller publishes the status
-    /// delta after this returns, as with [`Registry::begin_launch`].
-    pub(crate) fn exhaust_if_crashed(&self, id: ProcessId) -> bool {
-        let mut guard = lock(&self.inner);
-        let Some(entry) = guard.get_mut(&id) else {
-            return false;
-        };
-        match entry.view.status.transition(ProcStatus::RestartExhausted) {
-            Ok(next) => {
-                entry.view.status = next;
-                entry.view.exit_code = None;
-                true
-            }
-            Err(_) => false,
-        }
-    }
-
-    /// Stores the handle of a freshly launched actor.
-    pub(crate) fn set_handle(&self, id: ProcessId, handle: ActorHandle) {
-        let mut guard = lock(&self.inner);
-        if let Some(entry) = guard.get_mut(&id) {
-            entry.handle = Some(handle);
-        }
-    }
-
-    /// Clones a live actor's mailbox to message it without removing its handle, so a
-    /// restart keeps the same actor task.
-    pub(crate) fn mailbox(&self, id: ProcessId) -> Option<mpsc::Sender<ActorMsg>> {
-        let guard = lock(&self.inner);
-        guard
-            .get(&id)
-            .and_then(|entry| entry.handle.as_ref().map(|h| h.mailbox.clone()))
-    }
-
-    /// Removes and returns a live actor's handle, used at shutdown to message then
-    /// await it.
-    pub(crate) fn take_handle(&self, id: ProcessId) -> Option<ActorHandle> {
-        let mut guard = lock(&self.inner);
-        guard.get_mut(&id).and_then(|entry| entry.handle.take())
-    }
-
-    /// Removes a process from the registry entirely and hands back its actor handle if it held
-    /// one — the one path that forgets a managed process, unlike a stop, which leaves it
-    /// resting. Returns [`None`] if it was not registered. Taking the entry and its handle
-    /// under a single lock lets [`Supervisor::close`] forget the process *before* it reaps, so
-    /// a concurrent crash auto-restart finds no entry to relaunch and cannot leave a child
-    /// orphaned behind the removal.
-    pub(crate) fn remove_returning_handle(&self, id: ProcessId) -> Option<Option<ActorHandle>> {
-        lock(&self.inner).remove(&id).map(|entry| entry.handle)
-    }
-
-    /// Every process that still holds an actor handle — the shutdown set. Messaging
-    /// then awaiting each reaps any child still alive; it is a harmless no-op for an
-    /// actor that already finished but whose handle was not reclaimed.
-    pub(crate) fn with_live_actor(&self) -> Vec<ProcessId> {
-        let guard = lock(&self.inner);
-        guard
-            .values()
-            .filter(|entry| entry.handle.is_some())
-            .map(|entry| entry.view.id)
-            .collect()
-    }
-
     /// Every `Command` that declares `restart_when_changed` globs, as `(id, project_root,
     /// globs)` — the file-watch reactor's watch and match inputs. Terminals, agents, and
     /// commands with no globs are omitted (they are never file-watched). Trust is not checked
@@ -497,6 +416,73 @@ mod tests {
         );
         registry.set_status(id, status, None);
         (registry, id)
+    }
+
+    #[tokio::test]
+    async fn begin_launch_installs_the_mailbox_before_the_join_is_attached() {
+        // The launch window: a stop or shutdown that lands after the launch is claimed but before
+        // the actor task is spawned must still reach the actor. `begin_launch` installs the mailbox
+        // under the claim lock; the join is only attached once the task exists. So `signal` reaches
+        // the actor in the window, while `take_handle` (which must be able to await a reap) declines
+        // until the join is present — leaving the entry for an in-place stop and a retry rather than
+        // a handle it cannot await.
+        let (registry, id) = registry_holding(ProcStatus::Stopped);
+        let (mailbox, mut inbox) = mpsc::channel(4);
+
+        assert_eq!(
+            registry.begin_launch(id, mailbox),
+            Some(ProcStatus::Stopped)
+        );
+        assert_eq!(registry.status(id), Some(ProcStatus::Starting));
+        assert!(
+            registry.take_handle(id).is_none(),
+            "no join yet — left intact for an in-place stop and a retry"
+        );
+
+        registry.signal(id, ActorMsg::Stop);
+        assert!(
+            matches!(inbox.try_recv(), Ok(ActorMsg::Stop)),
+            "an in-place signal reaches the mid-launch actor in the window"
+        );
+
+        // Once the task is spawned and its join attached, shutdown can take and await it.
+        registry.attach_join(id, tokio::spawn(async {}));
+        assert!(
+            registry.take_handle(id).is_some(),
+            "a fully attached handle is taken for reaping"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_superseded_launch_aborts_its_orphaned_actor() {
+        // If the process is closed/removed in the launch window, its handle is gone by the time
+        // the task spawns: `attach_join` must abort the orphaned task rather than leave it to
+        // spawn a child no one owns. Verified by the task's captured marker being dropped (the
+        // future cancelled), which never happens while a `pending` future keeps running.
+        let (registry, id) = registry_holding(ProcStatus::Stopped);
+        let (mailbox, _inbox) = mpsc::channel(4);
+        registry.begin_launch(id, mailbox);
+        registry.remove_returning_handle(id); // the close/remove path took the handle
+
+        let marker = Arc::new(());
+        let weak = Arc::downgrade(&marker);
+        let orphan = tokio::spawn(async move {
+            let _held = marker; // released only when the future is dropped
+            std::future::pending::<()>().await;
+        });
+        registry.attach_join(id, orphan);
+
+        // The abort drops the cancelled task's future; give the runtime a few turns to run it.
+        for _ in 0..8 {
+            if weak.upgrade().is_none() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            weak.upgrade().is_none(),
+            "the orphaned actor task is aborted, not left running"
+        );
     }
 
     #[test]

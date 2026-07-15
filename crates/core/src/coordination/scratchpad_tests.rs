@@ -66,6 +66,33 @@ fn validate_rejects_a_blank_list_entry() {
 }
 
 #[test]
+fn validate_rejects_content_over_the_byte_cap() {
+    let mut doc = doc();
+    // One oversized section pushes total content just past the cap.
+    doc.notes = Some("x".repeat(MAX_SCRATCHPAD_CONTENT_BYTES + 1));
+    let message = doc
+        .validate()
+        .expect_err("content past the cap is rejected");
+    assert!(
+        message.contains("exceeds"),
+        "the message should explain the size cap: {message}"
+    );
+}
+
+#[test]
+fn validate_accepts_content_exactly_at_the_byte_cap() {
+    let mut doc = doc();
+    // Grow notes so the summed content lands exactly on the cap.
+    let headroom = MAX_SCRATCHPAD_CONTENT_BYTES - doc.content_bytes();
+    doc.notes = Some("x".repeat(headroom));
+    assert_eq!(doc.content_bytes(), MAX_SCRATCHPAD_CONTENT_BYTES);
+    assert!(
+        doc.validate().is_ok(),
+        "content exactly at the cap is accepted"
+    );
+}
+
+#[test]
 fn render_lays_out_the_canonical_sections_titled_by_name() {
     let rendered = doc().render("release-plan");
     assert!(rendered.starts_with("# release-plan"));
@@ -299,4 +326,60 @@ fn list_is_scoped_to_the_project_and_ordered_by_name() {
         .map(|summary| summary.name)
         .collect();
     assert_eq!(names, vec!["alpha".to_string(), "zebra".to_string()]);
+}
+
+#[test]
+fn transfer_moves_a_scratchpad_to_the_new_scope_keeping_its_identity() {
+    const OTHER: ProjectId = ProjectId::from_raw(2);
+    let pads = scratchpads();
+
+    let written = pads
+        .write(PROJECT, "release-plan", doc(), None)
+        .expect("write a scratchpad in the source project");
+    pads.add_tags(PROJECT, "release-plan", &["v1".to_string()])
+        .expect("tag it");
+    let before = pads
+        .read(PROJECT, "release-plan")
+        .expect("read")
+        .expect("exists before the move");
+
+    let after = pads
+        .transfer(PROJECT, "release-plan", OTHER)
+        .expect("transfer succeeds");
+
+    // The durable id, name, tags, document, and revision survive the relocation.
+    assert_eq!(after.id, written.id);
+    assert_eq!(after.name, "release-plan");
+    assert_eq!(after.tags, before.tags);
+    assert_eq!(after.doc, before.doc);
+    assert_eq!(after.revision, before.revision);
+
+    // The scratchpad is now readable only from the new scope.
+    assert_eq!(
+        pads.read(OTHER, "release-plan")
+            .expect("read from the new scope"),
+        Some(after)
+    );
+    assert_eq!(
+        pads.read(PROJECT, "release-plan")
+            .expect("read from the old scope"),
+        None,
+        "the scratchpad no longer reads from the project it left"
+    );
+}
+
+#[test]
+fn transfer_refuses_when_the_target_name_is_taken() {
+    const OTHER: ProjectId = ProjectId::from_raw(2);
+    let pads = scratchpads();
+    pads.write(PROJECT, "plan", doc(), None).expect("source");
+    pads.write(OTHER, "plan", doc(), None)
+        .expect("a same-named scratchpad already in the target");
+
+    assert!(matches!(
+        pads.transfer(PROJECT, "plan", OTHER),
+        Err(RenameError::NameTaken)
+    ));
+    // The refusal leaves the source scratchpad in place.
+    assert!(pads.read(PROJECT, "plan").expect("read").is_some());
 }

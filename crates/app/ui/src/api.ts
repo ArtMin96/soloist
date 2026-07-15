@@ -6,7 +6,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
-  AgentSettings,
+  AgentSignal,
   AgentTool,
   Appearance,
   AppInfo,
@@ -20,6 +20,7 @@ import type {
   McpFeatureGroup,
   McpSetupInfo,
   McpToolGroups,
+  Notifications,
   OrchestrationSnapshot,
   ProcessSpec,
   ProcessView,
@@ -58,6 +59,13 @@ export function orchestrationSnapshot(project: number): Promise<OrchestrationSna
 // list to nest workers under their leads, re-reading on process lifecycle events.
 export function lineageEdges(): Promise<LineageEdge[]> {
   return invoke<LineageEdge[]>("lineage_edges");
+}
+
+// Every tracked agent's current idle activity across all projects — the snapshot the signal store
+// seeds its idle badges from, so a webview reload or a dropped `AgentActivityChanged` recovers the
+// true state instead of an edge-triggered stale badge.
+export function agentActivity(): Promise<AgentSignal[]> {
+  return invoke<AgentSignal[]>("agent_activity");
 }
 
 // --- Coordination panels: the scratchpad panel and the to-do board read/write through these.
@@ -254,8 +262,15 @@ export function ptyAttach(
   id: number,
   onChunk: (bytes: Uint8Array, resync: boolean) => void,
 ): Promise<number> {
-  const channel = new Channel<Uint8Array>();
-  channel.onmessage = (frame) => onChunk(frame.subarray(1), frame[0] === PTY_FRAME_RESYNC);
+  // The backend sends each frame as a raw-bytes IPC response, which Tauri delivers here as an
+  // `ArrayBuffer` (not a JSON number array — no per-byte expansion on the scrollback replay). Wrap
+  // it in a `Uint8Array` view to read the tag byte and hand on the tag-stripped payload the
+  // emulator writes; the view is zero-copy over the buffer.
+  const channel = new Channel<ArrayBuffer>();
+  channel.onmessage = (frame) => {
+    const bytes = new Uint8Array(frame);
+    onChunk(bytes.subarray(1), bytes[0] === PTY_FRAME_RESYNC);
+  };
   return invoke<number>("pty_attach", { id, onChunk: channel });
 }
 
@@ -312,14 +327,6 @@ export function resetAllHotkeys(): Promise<HotkeyBindingView[]> {
   return invoke<HotkeyBindingView[]>("reset_all_hotkeys");
 }
 
-export function agentSettings(): Promise<AgentSettings> {
-  return invoke<AgentSettings>("agent_settings");
-}
-
-export function setAgentSettings(agents: AgentSettings): Promise<AgentSettings> {
-  return invoke<AgentSettings>("set_agent_settings", { agents });
-}
-
 export function toolDefaults(): Promise<ToolDefaults> {
   return invoke<ToolDefaults>("tool_defaults");
 }
@@ -334,6 +341,14 @@ export function integrationSettings(): Promise<Integrations> {
 
 export function setIntegrationSettings(integrations: Integrations): Promise<Integrations> {
   return invoke<Integrations>("set_integration_settings", { integrations });
+}
+
+export function notificationSettings(): Promise<Notifications> {
+  return invoke<Notifications>("notification_settings");
+}
+
+export function setNotificationSettings(notifications: Notifications): Promise<Notifications> {
+  return invoke<Notifications>("set_notification_settings", { notifications });
 }
 
 export function mcpToolGroups(): Promise<McpToolGroups> {
@@ -478,14 +493,25 @@ export function setProjectIcon(project: ProjectId, icon: string | null): Promise
   return invoke<void>("set_project_icon", { project, icon });
 }
 
-export function onDomainEvent(handler: (event: DomainEvent) => void): Promise<UnlistenFn> {
-  return listen<DomainEvent>(DOMAIN_EVENT, (event) => handler(event.payload));
+// Tauri's UnlistenFn is async; subscribers invoke it synchronously in effect cleanup (which
+// cannot await) and drop the returned promise, so a teardown-time unlisten failure — a late or
+// failed `plugin:event|unlisten` IPC on shutdown, or a torn-down mock under test — would surface
+// as an unhandled rejection. Hand callers a synchronous, self-catching unlisten so teardown can
+// never reject.
+function safeUnlisten(unlisten: UnlistenFn): UnlistenFn {
+  return () => void Promise.resolve(unlisten()).catch(() => {});
+}
+
+export async function onDomainEvent(handler: (event: DomainEvent) => void): Promise<UnlistenFn> {
+  const unlisten = await listen<DomainEvent>(DOMAIN_EVENT, (event) => handler(event.payload));
+  return safeUnlisten(unlisten);
 }
 
 // The backend's delta stream fell behind and dropped events; stores must re-read their
 // snapshots to recover, since a lost delta is otherwise permanent. Carries no payload.
 const DOMAIN_RESYNC = "domain-resync";
 
-export function onResync(handler: () => void): Promise<UnlistenFn> {
-  return listen(DOMAIN_RESYNC, () => handler());
+export async function onResync(handler: () => void): Promise<UnlistenFn> {
+  const unlisten = await listen(DOMAIN_RESYNC, () => handler());
+  return safeUnlisten(unlisten);
 }

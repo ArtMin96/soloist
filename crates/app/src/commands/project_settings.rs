@@ -5,7 +5,9 @@
 //! stored value; the shared-command edits route through the comment-preserving `solo.yml` write and
 //! return the commands left needing trust; the move transfers a command between the shared and local
 //! stores. The page command assembles the whole read model in one call. No policy lives here — the
-//! per-project settings are the single source, driven identically by every front.
+//! per-project settings are the single source, driven identically by every front. Each store call
+//! runs on the blocking pool via [`Facade::blocking`], so a settings or `solo.yml` write's `fsync`
+//! never parks a runtime worker.
 
 use std::sync::Arc;
 
@@ -22,7 +24,8 @@ pub async fn project_settings_page(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettingsPage, String> {
     facade
-        .project_settings_page(project)
+        .blocking(move |f| f.project_settings_page(project))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -33,7 +36,8 @@ pub async fn project_settings(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .project_settings(project)
+        .blocking(move |f| f.project_settings(project))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -45,7 +49,8 @@ pub async fn set_project_auto_start_gate(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .set_project_auto_start_gate(project, engaged)
+        .blocking(move |f| f.set_project_auto_start_gate(project, engaged))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -59,7 +64,8 @@ pub async fn set_project_auto_trust_command_changes(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .set_project_auto_trust_command_changes(project, enabled)
+        .blocking(move |f| f.set_project_auto_trust_command_changes(project, enabled))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -71,7 +77,8 @@ pub async fn set_project_editor_override(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .set_project_editor_override(project, editor)
+        .blocking(move |f| f.set_project_editor_override(project, editor))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -83,7 +90,8 @@ pub async fn set_project_crash_exit_alerts(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .set_project_crash_exit_alerts(project, enabled)
+        .blocking(move |f| f.set_project_crash_exit_alerts(project, enabled))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -95,7 +103,8 @@ pub async fn set_project_terminal_alerts(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .set_project_terminal_alerts(project, enabled)
+        .blocking(move |f| f.set_project_terminal_alerts(project, enabled))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -108,7 +117,8 @@ pub async fn set_command_terminal_alerts(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .set_command_terminal_alerts(project, &command, enabled)
+        .blocking(move |f| f.set_command_terminal_alerts(project, &command, enabled))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -121,7 +131,8 @@ pub async fn add_shared_command(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Vec<TrustReviewCommand>, String> {
     facade
-        .add_shared_command(project, &name, spec)
+        .blocking(move |f| f.add_shared_command(project, &name, spec))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -134,7 +145,8 @@ pub async fn edit_shared_command(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Vec<TrustReviewCommand>, String> {
     facade
-        .edit_shared_command(project, &name, spec)
+        .blocking(move |f| f.edit_shared_command(project, &name, spec))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -147,7 +159,8 @@ pub async fn rename_shared_command(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Vec<TrustReviewCommand>, String> {
     facade
-        .rename_shared_command(project, &from, &to)
+        .blocking(move |f| f.rename_shared_command(project, &from, &to))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -159,7 +172,8 @@ pub async fn remove_shared_command(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Vec<TrustReviewCommand>, String> {
     facade
-        .remove_shared_command(project, &name)
+        .blocking(move |f| f.remove_shared_command(project, &name))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -172,7 +186,8 @@ pub async fn add_local_command(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .add_local_command(project, &name, spec)
+        .blocking(move |f| f.add_local_command(project, &name, spec))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -185,7 +200,8 @@ pub async fn edit_local_command(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .edit_local_command(project, &name, spec)
+        .blocking(move |f| f.edit_local_command(project, &name, spec))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -198,7 +214,8 @@ pub async fn rename_local_command(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .rename_local_command(project, &from, &to)
+        .blocking(move |f| f.rename_local_command(project, &from, &to))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -210,7 +227,8 @@ pub async fn remove_local_command(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .remove_local_command(project, &name)
+        .blocking(move |f| f.remove_local_command(project, &name))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -222,7 +240,8 @@ pub async fn make_command_local(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .make_command_local(project, &name)
+        .blocking(move |f| f.make_command_local(project, &name))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -235,7 +254,8 @@ pub async fn save_command_to_yaml(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Vec<TrustReviewCommand>, String> {
     facade
-        .save_command_to_yaml(project, &name)
+        .blocking(move |f| f.save_command_to_yaml(project, &name))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -247,6 +267,7 @@ pub async fn set_project_icon(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<(), String> {
     facade
-        .set_project_icon(project, icon)
+        .blocking(move |f| f.set_project_icon(project, icon))
+        .await
         .map_err(|err| err.to_string())
 }

@@ -1,39 +1,7 @@
 //! Diffing two `solo.yml` snapshots into an add/update/remove/rename change set.
 
-use serde::Serialize;
-
 use super::model::SoloYml;
-
-/// A rename: the same command string moved from one process name to another.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Rename {
-    pub from: String,
-    pub to: String,
-}
-
-/// The difference between a previous and current config, by process name. Carried
-/// to adapters in [`crate::events::DomainEvent::ConfigChanged`].
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct ConfigSync {
-    /// Newly added process names.
-    pub added: Vec<String>,
-    /// Process names whose spec changed in place (any field).
-    pub updated: Vec<String>,
-    /// Removed process names.
-    pub removed: Vec<String>,
-    /// Unambiguous renames (a removed/added pair sharing one command string).
-    pub renamed: Vec<Rename>,
-}
-
-impl ConfigSync {
-    /// True when nothing changed between the two snapshots.
-    pub fn is_empty(&self) -> bool {
-        self.added.is_empty()
-            && self.updated.is_empty()
-            && self.removed.is_empty()
-            && self.renamed.is_empty()
-    }
-}
+use crate::configchange::{ConfigSync, Rename};
 
 /// Computes the change set from `old` to `new`.
 ///

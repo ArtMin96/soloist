@@ -47,3 +47,32 @@ export function groupByProject(
     };
   });
 }
+
+/**
+ * Narrows the sidebar to what matches a filter query: processes whose label contains it (case-
+ * insensitive), plus every process of a project whose own name matches — so a query can pick out
+ * one process or a whole project. A project appears when its name matches or it still holds a
+ * visible process. A blank query keeps everything. Pure: it filters the two read-model arrays;
+ * `groupByProject` still owns the grouping.
+ */
+export function filterSidebar(
+  processes: ProcessView[],
+  projects: ProjectView[],
+  query: string,
+): { processes: ProcessView[]; projects: ProjectView[] } {
+  const q = query.trim().toLowerCase();
+  if (!q) return { processes, projects };
+  const projectNameMatches = new Set(
+    projects
+      .filter((project) => project.name.toLowerCase().includes(q))
+      .map((project) => project.id),
+  );
+  const visibleProcesses = processes.filter(
+    (process) => process.label.toLowerCase().includes(q) || projectNameMatches.has(process.project),
+  );
+  const holdsVisible = new Set(visibleProcesses.map((process) => process.project));
+  const visibleProjects = projects.filter(
+    (project) => projectNameMatches.has(project.id) || holdsVisible.has(project.id),
+  );
+  return { processes: visibleProcesses, projects: visibleProjects };
+}

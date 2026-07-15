@@ -140,6 +140,14 @@ export interface DetectedTool {
 // vs Idle) and "does it need a human?" (Permission/Error, the attention states).
 export type AgentActivity = "Idle" | "Permission" | "Thinking" | "Working" | "Error";
 
+// One tracked agent's current idle activity (mirrors core::orchestration::AgentSignal). The
+// snapshot the signal store seeds its idle badges from — only agents classified at least once —
+// so a webview reload or a dropped `AgentActivityChanged` recovers the true state.
+export interface AgentSignal {
+  id: number;
+  activity: AgentActivity;
+}
+
 // Mirrors the core's `DomainEvent` (serde `tag = "type"`).
 export type DomainEvent =
   | {
@@ -175,8 +183,9 @@ export type DomainEvent =
   // awaited port has not bound yet, true = it bound. Reflected on ProcessView.ready.
   | { type: "ReadyStateChanged"; id: number; ready: boolean }
   // The restart policy is relaunching a crashed auto_restart command; `attempt` is its
-  // position in the rate-limit window (the status also moves Crashed -> Starting).
-  | { type: "RestartScheduled"; id: number; attempt: number }
+  // position in the rate-limit window and `limit` is what that window allows before the
+  // command is held exhausted (the status also moves Crashed -> Starting).
+  | { type: "RestartScheduled"; id: number; attempt: number; limit: number }
   // The restart policy gave up after too many restarts in the window; the command is held
   // in RestartExhausted until the user restarts it.
   | { type: "RestartExhausted"; id: number }
@@ -428,10 +437,7 @@ export interface Appearance {
   terminal: TerminalAppearance;
 }
 
-// When a project header shows its CPU/memory badge (mirrors the core Sidebar threshold enums).
-// The option sets differ between project and process headers, so each is its own closed enum.
-export type ProjectCpuThreshold = "always" | "pct25" | "pct50" | "pct100" | "pct200" | "never";
-export type ProjectMemThreshold = "always" | "mb500" | "gb1" | "gb2" | "gb8" | "never";
+// When a process row shows its CPU/memory read-out (mirrors the core Sidebar threshold enums).
 export type ProcessCpuThreshold = "always" | "pct10" | "pct30" | "pct60" | "pct90" | "never";
 export type ProcessMemThreshold = "always" | "mb100" | "mb500" | "gb1" | "gb2" | "never";
 
@@ -439,11 +445,6 @@ export type ProcessMemThreshold = "always" | "mb100" | "mb500" | "gb1" | "gb2" |
 export interface Sidebar {
   show_filter_input: boolean;
   hide_empty_sections: boolean;
-  project_cpu_threshold: ProjectCpuThreshold;
-  project_mem_threshold: ProjectMemThreshold;
-  project_open_in_editor: boolean;
-  project_open_in_terminal: boolean;
-  project_reveal_in_file_manager: boolean;
   process_cpu_threshold: ProcessCpuThreshold;
   process_mem_threshold: ProcessMemThreshold;
   show_settings_footer: boolean;
@@ -500,13 +501,6 @@ export interface HotkeyBindingView {
   conflict: boolean;
 }
 
-// The Agents tab document (mirrors core::AgentSettings) — the auto-summarization opt-in only
-// (OFF by default: both null). The agent tool registry itself is the Phase-7 surface.
-export interface AgentSettings {
-  summarizer_tool: string | null;
-  summarizer_model: string | null;
-}
-
 // The Tools tab document (mirrors core::ToolDefaults) — the default editor and terminal launch
 // names (null = use the system default).
 export interface ToolDefaults {
@@ -519,6 +513,13 @@ export interface ToolDefaults {
 export interface Integrations {
   mcp_enabled: boolean;
   http_api_enabled: boolean;
+}
+
+// The Notifications settings — the master on/off for every desktop toast. Off silences
+// notifications everywhere; the per-project crash/exit and terminal-alert switches refine what an
+// enabled reactor shows. Mirrors soloist_core::Notifications.
+export interface Notifications {
+  enabled: boolean;
 }
 
 // A toggleable MCP feature-tool group (mirrors core::McpFeatureGroup). Core groups are always
@@ -590,6 +591,7 @@ export interface ProjectCommandView {
   auto_start: boolean;
   auto_restart: boolean;
   restart_when_changed: string[];
+  env: Record<string, string>;
   visibility: Visibility;
   terminal_alerts: boolean;
   status: ProcStatus | null;

@@ -13,20 +13,29 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::ports::{
-    Clock, ExitFuture, ExitStatus, OrphanControl, ProcessControl, PtyIo, PtySize, SpawnError,
-    Spawned,
+    Clock, ExitFuture, ExitStatus, OrphanControl, OrphanRecord, ProcessControl, PtyIo, PtySize,
+    SpawnError, Spawned,
 };
 
 /// How often an adopted process group's liveness is polled.
 const LIVENESS_POLL: Duration = Duration::from_secs(1);
 
-/// Builds a [`Spawned`] over the existing process group `pgid`.
-pub(super) fn adopt(pgid: i32, control: Arc<dyn OrphanControl>, clock: Arc<dyn Clock>) -> Spawned {
+/// Builds a [`Spawned`] over the existing process group recorded in `record`. The poll
+/// verifies the recorded *identity*, not a bare pgid, so if the adopted group dies and the
+/// OS reassigns its pgid to an unrelated group, the poll still observes the death instead
+/// of mistaking the impostor for the adopted process (and later signalling it on stop).
+pub(super) fn adopt(
+    record: OrphanRecord,
+    control: Arc<dyn OrphanControl>,
+    clock: Arc<dyn Clock>,
+) -> Spawned {
+    let pgid = record.pgid;
+    let signal_record = record.clone();
     let liveness = control.clone();
     let exit: ExitFuture = Box::pin(async move {
         loop {
             clock.sleep(LIVENESS_POLL).await;
-            if !liveness.is_alive(pgid) {
+            if !liveness.is_recorded_alive(&record) {
                 // Died outside our control — no exit code or signal is recoverable.
                 return ExitStatus {
                     code: None,
@@ -41,25 +50,40 @@ pub(super) fn adopt(pgid: i32, control: Arc<dyn OrphanControl>, clock: Arc<dyn C
         pid: Some(pgid as u32),
         output,
         exit,
-        control: Box::new(GroupSignal { pgid, control }),
+        control: Box::new(GroupSignal {
+            record: signal_record,
+            control,
+        }),
         io: Box::new(NoTerminal),
     }
 }
 
-/// Signals an adopted process group through the [`OrphanControl`] port.
+/// Signals an adopted process group through the [`OrphanControl`] port — but only while
+/// the recorded identity still matches, so a stop or kill can never signal a pgid the OS
+/// reassigned to an unrelated group after the adopted process died.
 struct GroupSignal {
-    pgid: i32,
+    record: OrphanRecord,
     control: Arc<dyn OrphanControl>,
 }
 
 #[async_trait]
 impl ProcessControl for GroupSignal {
     async fn terminate(&mut self) -> Result<(), SpawnError> {
-        self.control.signal(self.pgid, false)
+        if self.control.is_recorded_alive(&self.record) {
+            self.control.signal(self.record.pgid, false)
+        } else {
+            // Gone or recycled — nothing of ours to signal.
+            Ok(())
+        }
     }
 
     async fn kill(&mut self) -> Result<(), SpawnError> {
-        self.control.signal(self.pgid, true)
+        if self.control.is_recorded_alive(&self.record) {
+            self.control.signal(self.record.pgid, true)
+        } else {
+            // Gone or recycled — nothing of ours to signal.
+            Ok(())
+        }
     }
 }
 
@@ -76,3 +100,7 @@ impl PtyIo for NoTerminal {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "adopt_tests.rs"]
+mod tests;

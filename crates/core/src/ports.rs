@@ -1,4 +1,12 @@
-//! Hexagonal ports: the traits the pure core defines and adapters implement.
+//! The cross-cutting hexagonal ports: the traits no single context owns, because the whole core
+//! drives them — spawning and signalling OS processes, telling the time, and the durable stores
+//! and runtime state the contexts share.
+//!
+//! A port belonging to exactly one context lives *with* that context instead ([`TodoRepo`] in
+//! [`coordination`](crate::coordination), [`MetricsProbe`] in [`metrics`](crate::metrics), and so
+//! on), so a context's contract and its behaviour stay together and this module never becomes a
+//! registry that depends on everything. The set the composition root assembles is
+//! [`CorePorts`](crate::CorePorts).
 //!
 //! The core depends only on these abstractions, never on a concrete OS, UI,
 //! transport, or storage technology. Each port states its contract in doc comments;
@@ -19,10 +27,6 @@ use tokio::sync::mpsc;
 
 use crate::hash::Hash;
 use crate::ids::{ProcessId, ProjectId};
-
-mod bundle;
-
-pub use bundle::{CorePorts, CorePortsBuilder};
 
 // ───────────────────────────── ProcessSpawner ──────────────────────────────
 
@@ -128,9 +132,8 @@ pub trait PtyIo: Send + Sync {
     async fn resize(&self, size: PtySize) -> Result<(), SpawnError>;
 }
 
-/// Spawns OS processes. The real adapter spawns into a fresh process group via a
-/// PTY (later phases) or `tokio::process` (the skeleton); the test adapter returns a
-/// fully in-memory fake child.
+/// Spawns OS processes into a fresh process group, so the whole group can later be
+/// signalled and reaped as one; the test adapter returns a fully in-memory fake child.
 #[async_trait]
 pub trait ProcessSpawner: Send + Sync {
     /// Spawns `spec` into a fresh process group.
@@ -191,16 +194,6 @@ pub enum StoreError {
     Backend(String),
 }
 
-/// Durable key/value metadata — the walking-skeleton seed of the repository surface
-/// (trust, projects, todos, scratchpads, …) that later phases grow on top of the
-/// SQLite adapter. Kept synchronous: backing reads/writes are tiny and local.
-pub trait Store: Send + Sync {
-    /// Reads a metadata value by key, `None` if absent.
-    fn meta_get(&self, key: &str) -> Result<Option<String>, StoreError>;
-    /// Inserts or replaces a metadata value.
-    fn meta_set(&self, key: &str, value: &str) -> Result<(), StoreError>;
-}
-
 /// A persisted project: a workspace root plus optional display metadata. `id` is
 /// the durable [`ProjectId`] (stable across runs), assigned by the store from the
 /// project's canonical root path.
@@ -246,17 +239,19 @@ pub trait TrustRepo: Send + Sync {
 // ──────────────────────────────── LockReleaser ─────────────────────────────
 
 /// Notified when a managed process closes so any cross-process coordination state it
-/// holds — todo locks, leases — can be released. The coordination context (C6)
-/// provides the real implementation in a later phase; until then [`NoopLockReleaser`]
-/// satisfies the port. The supervisor calls this whenever a process reaches a
-/// terminal state (stopped or crashed), matching Solo's "locks auto-release when the
-/// owning process closes".
+/// holds — todo locks, leases — can be released. The supervisor calls this whenever a
+/// process reaches a terminal state (stopped or crashed), matching Solo's "locks
+/// auto-release when the owning process closes".
+///
+/// Coordination supplies one releaser per lock kind; [`CompositeLockReleaser`] fans the
+/// single close hook out to all of them.
 pub trait LockReleaser: Send + Sync {
     /// Releases every lock or lease owned by `process`. Must not block or panic.
     fn release_all(&self, process: ProcessId);
 }
 
-/// A [`LockReleaser`] that does nothing — the default until coordination (C6) lands.
+/// A [`LockReleaser`] that does nothing — the default for a composition root that wires
+/// no coordination state, so nothing is process-owned and a close releases nothing.
 #[derive(Clone, Copy, Default)]
 pub struct NoopLockReleaser;
 
@@ -289,16 +284,33 @@ impl LockReleaser for CompositeLockReleaser {
 
 // ───────────────────────────── Orphan adoption ──────────────────────────────
 
+/// A stable identity for a process-group leader, captured when its orphan record is
+/// written so PID/PGID reuse across a reboot or PID churn is detectable. `boot_id` is
+/// the kernel's per-boot UUID (a different boot means the recorded pgid is meaningless —
+/// the counter reset); `started_at` is the leader's start-time in clock ticks since boot
+/// (`/proc/<pid>/stat` field 22), which distinguishes the original process from a later
+/// one that reused its pid within the same boot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessIdentity {
+    pub boot_id: String,
+    pub started_at: u64,
+}
+
 /// A record of a managed process that was running when Soloist last persisted state,
 /// written to the runtime-state file so a leftover from a crash or force-quit can be
 /// reconciled on the next launch. The identity `{project_root, name, command}` is what
-/// an adoption match is keyed on; `pgid` is the process group to adopt or reap.
+/// an adoption match is keyed on; `pgid` is the process group to adopt or reap; and
+/// `identity` pins the exact process behind that pgid so a recycled group is never
+/// mistaken for the original. A legacy record written before identity stamping
+/// deserializes with `identity: None` and is treated as unverifiable (fail-closed).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrphanRecord {
     pub project_root: PathBuf,
     pub name: String,
     pub command: String,
     pub pgid: i32,
+    #[serde(default)]
+    pub identity: Option<ProcessIdentity>,
 }
 
 /// Errors a runtime-state adapter surfaces.
@@ -325,8 +337,25 @@ pub trait RuntimeState: Send + Sync {
 /// original child handle is gone: check whether it is still alive, and signal it to
 /// stop. Targets the whole group (as the spawner does) so a forking orphan is reaped.
 pub trait OrphanControl: Send + Sync {
-    /// Whether the process group `pgid` still has a live member.
-    fn is_alive(&self, pgid: i32) -> bool;
+    /// The current identity of the process-group leader `pgid`, or `None` if the group
+    /// is gone or its identity cannot be read. Captured at record time and re-checked
+    /// before adopting or reaping, so a pgid the OS reassigned to an unrelated group is
+    /// never mistaken for the original process.
+    fn identify(&self, pgid: i32) -> Option<ProcessIdentity>;
+
+    /// Whether the recorded orphan is still the *same* live group: its leader's current
+    /// identity must equal the one captured in `record`. A recycled pgid (different boot
+    /// or start-time), a group that has since exited, or a legacy record with no captured
+    /// identity all read as **not** the recorded orphan — fail-closed, so such a record
+    /// is never adopted or killed. The comparison lives here so every adapter shares one
+    /// safety rule and only implements the `/proc` probe.
+    fn is_recorded_alive(&self, record: &OrphanRecord) -> bool {
+        match (&record.identity, self.identify(record.pgid)) {
+            (Some(recorded), Some(current)) => *recorded == current,
+            _ => false,
+        }
+    }
+
     /// Signals the group: a graceful SIGTERM, or SIGKILL when `force`.
     fn signal(&self, pgid: i32, force: bool) -> Result<(), SpawnError>;
 }
@@ -354,17 +383,10 @@ impl RuntimeState for NoopRuntimeState {
 pub struct NoopOrphanControl;
 
 impl OrphanControl for NoopOrphanControl {
-    fn is_alive(&self, _pgid: i32) -> bool {
-        false
+    fn identify(&self, _pgid: i32) -> Option<ProcessIdentity> {
+        None
     }
     fn signal(&self, _pgid: i32, _force: bool) -> Result<(), SpawnError> {
         Ok(())
     }
 }
-
-// ───────────── Ports realized in later phases (contracts only) ──────────────
-
-/// Produces an idle summary for an agent from a rendered-text snapshot. Optional by
-/// design: when absent, idle detection degrades to the heuristic-only signal.
-/// Methods are added when the agent-summary feature lands.
-pub trait Summarizer: Send + Sync {}

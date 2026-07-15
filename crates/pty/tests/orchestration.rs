@@ -20,8 +20,8 @@ use soloist_core::testing::{
     FakeTodoRepo, FakeTrustRepo,
 };
 use soloist_core::{
-    AgentKind, AgentTool, CorePorts, Facade, IdleMode, ProcStatus, ProcessId, PromptMode, TodoDoc,
-    TodoStatus, TokioClock,
+    AgentActivity, AgentKind, AgentSignal, AgentTool, CorePorts, Facade, IdleMode, ProcStatus,
+    ProcessId, PromptMode, TodoDoc, TodoStatus, TokioClock,
 };
 use soloist_pty::PtyProcessSpawner;
 use tokio::time::{sleep, timeout};
@@ -95,12 +95,14 @@ async fn a_lead_spawns_a_worker_assigns_a_locked_todo_and_is_woken_when_the_work
         .expect("the running lead has a live group");
     let session = facade.open_session(Some(pgid));
     facade
-        .bind_session_process(session, lead)
+        .scoped(session)
+        .bind_session_process(lead)
         .expect("bind the session to the lead it shares a group with");
 
     // The lead spawns a worker into its own project — the scoped spawn_agent over launch_agent.
     let worker = facade
-        .spawn_agent(session, "Worker", Vec::new())
+        .scoped(session)
+        .spawn_agent("Worker", Vec::new())
         .expect("spawn the worker agent");
     assert!(
         await_status(&facade, worker, ProcStatus::Running).await,
@@ -110,9 +112,13 @@ async fn a_lead_spawns_a_worker_assigns_a_locked_todo_and_is_woken_when_the_work
     // The lead writes a disciplined todo and locks it — "signals, not ownership": the lock records
     // the lead as the holder.
     let todo = facade
-        .todo_create(session, worker_todo())
+        .scoped(session)
+        .todo_create(worker_todo())
         .expect("create the todo");
-    let locked = facade.todo_lock(session, todo.id).expect("lock the todo");
+    let locked = facade
+        .scoped(session)
+        .todo_lock(todo.id)
+        .expect("lock the todo");
     assert_eq!(
         locked.locked_by,
         Some(lead),
@@ -122,8 +128,8 @@ async fn a_lead_spawns_a_worker_assigns_a_locked_todo_and_is_woken_when_the_work
     // The lead arms a fire-when-idle-all timer watching the worker, with a long backstop so only the
     // worker going idle — never the max-wait — can fire it.
     let outcome = facade
+        .scoped(session)
         .timer_fire_when_idle(
-            session,
             "integrate the worker's result".into(),
             vec![worker],
             IdleMode::All,
@@ -155,9 +161,24 @@ async fn a_lead_spawns_a_worker_assigns_a_locked_todo_and_is_woken_when_the_work
         "the lead is woken with the timer's body once the worker goes idle"
     );
 
+    // The same real classification the timer fired on is what the UI seeds its idle badges from:
+    // `agent_activity` reports the worker as Idle, so a webview reload or a dropped
+    // `AgentActivityChanged` recovers the true badge rather than showing edge-triggered stale state.
+    assert!(
+        facade.agent_activity().contains(&AgentSignal {
+            id: worker,
+            activity: AgentActivity::Idle,
+        }),
+        "agent_activity reflects the worker's live idle classification"
+    );
+
     // The fired timer delivered exactly once and is gone, so the lead owns no armed timer now.
     assert!(
-        facade.timer_list(session).expect("list timers").is_empty(),
+        facade
+            .scoped(session)
+            .timer_list()
+            .expect("list timers")
+            .is_empty(),
         "the fired timer is consumed, not left armed"
     );
 

@@ -3,9 +3,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::*;
-use crate::coordination::{AcquireOutcome, IdleMode, TimerStatus};
+use crate::composition::CorePorts;
+use crate::coordination::{AcquireOutcome, IdleMode, TimerStatus, MAX_TIMER_BODY_BYTES};
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::{CorePorts, ProjectRepo, TokioClock};
+use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{
     authentic_session, terminal_registration, FakeLockRepo, FakeProjectRepo, FakeSpawner,
     FakeTimerRepo, FakeTrustRepo, TEST_PEER_PGID,
@@ -35,7 +36,8 @@ fn bound_session(facade: &Facade, project: ProjectId) -> (SessionId, ProcessId) 
         .register(terminal_registration(project, "term", "sleep 60"));
     let session = authentic_session(facade, id, TEST_PEER_PGID);
     facade
-        .bind_session_process(session, id)
+        .scoped(session)
+        .bind_session_process(id)
         .expect("an authentic bind to the process the caller runs in");
     (session, id)
 }
@@ -47,7 +49,9 @@ fn acquiring_with_no_project_in_scope_is_refused() {
     let session = facade.open_session(None);
 
     assert!(matches!(
-        facade.lock_acquire(session, "deploy", Some(Duration::from_secs(30))),
+        facade
+            .scoped(session)
+            .lock_acquire("deploy", Some(Duration::from_secs(30))),
         Err(CoordinationError::NoProjectScope)
     ));
 }
@@ -64,7 +68,9 @@ fn acquiring_without_a_bound_process_is_refused() {
     let session = facade.open_session(None);
 
     assert!(matches!(
-        facade.lock_acquire(session, "deploy", Some(Duration::from_secs(30))),
+        facade
+            .scoped(session)
+            .lock_acquire("deploy", Some(Duration::from_secs(30))),
         Err(CoordinationError::NoBoundProcess)
     ));
 }
@@ -75,23 +81,31 @@ fn a_bound_session_acquires_reads_and_releases_a_lease() {
     let (session, owner) = bound_session(&facade, ProjectId::from_raw(1));
 
     let outcome = facade
-        .lock_acquire(session, "deploy", Some(Duration::from_secs(30)))
+        .scoped(session)
+        .lock_acquire("deploy", Some(Duration::from_secs(30)))
         .expect("acquire");
     assert!(
         matches!(outcome, AcquireOutcome::Acquired(ref view) if view.owner == owner),
         "the bound process owns the lease"
     );
 
-    let held = facade.lock_status(session, "deploy").expect("status");
+    let held = facade
+        .scoped(session)
+        .lock_status("deploy")
+        .expect("status");
     assert_eq!(held.map(|view| view.owner), Some(owner));
 
     assert!(
-        facade.lock_release(session, "deploy").expect("release"),
+        facade
+            .scoped(session)
+            .lock_release("deploy")
+            .expect("release"),
         "the owner releases its own lease"
     );
     assert!(
         facade
-            .lock_status(session, "deploy")
+            .scoped(session)
+            .lock_status("deploy")
             .expect("status")
             .is_none(),
         "the key is free after release"
@@ -110,7 +124,9 @@ fn setting_a_timer_without_a_bound_process_is_refused() {
     let session = facade.open_session(None);
 
     assert!(matches!(
-        facade.timer_set(session, "ping".into(), Some(Duration::from_secs(30))),
+        facade
+            .scoped(session)
+            .timer_set("ping".into(), Some(Duration::from_secs(30))),
         Err(CoordinationError::NoBoundProcess)
     ));
 }
@@ -121,22 +137,65 @@ fn a_bound_session_sets_lists_pauses_and_cancels_a_timer() {
     let (session, _owner) = bound_session(&facade, ProjectId::from_raw(1));
 
     let view = facade
-        .timer_set(session, "resume".into(), Some(Duration::from_secs(30)))
+        .scoped(session)
+        .timer_set("resume".into(), Some(Duration::from_secs(30)))
         .expect("set");
     assert_eq!(view.status, TimerStatus::Armed);
 
-    let listed = facade.timer_list(session).expect("list");
+    let listed = facade.scoped(session).timer_list().expect("list");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].body, "resume");
 
-    assert!(facade.timer_pause(session, view.id).expect("pause"));
+    assert!(facade.scoped(session).timer_pause(view.id).expect("pause"));
     assert_eq!(
-        facade.timer_list(session).expect("list")[0].status,
+        facade.scoped(session).timer_list().expect("list")[0].status,
         TimerStatus::Paused
     );
 
-    assert!(facade.timer_cancel(session, view.id).expect("cancel"));
-    assert!(facade.timer_list(session).expect("list").is_empty());
+    assert!(facade
+        .scoped(session)
+        .timer_cancel(view.id)
+        .expect("cancel"));
+    assert!(facade
+        .scoped(session)
+        .timer_list()
+        .expect("list")
+        .is_empty());
+}
+
+#[test]
+fn setting_a_timer_with_a_body_over_the_cap_arms_nothing() {
+    let facade = facade_with(Arc::new(FakeProjectRepo::new()));
+    let (session, _owner) = bound_session(&facade, ProjectId::from_raw(1));
+
+    let oversized = "x".repeat(MAX_TIMER_BODY_BYTES + 1);
+    assert!(matches!(
+        facade
+            .scoped(session)
+            .timer_set(oversized, Some(Duration::from_secs(30))),
+        Err(CoordinationError::PayloadTooLarge { .. })
+    ));
+    assert!(
+        facade
+            .scoped(session)
+            .timer_list()
+            .expect("list")
+            .is_empty(),
+        "a rejected write must arm no timer"
+    );
+}
+
+#[test]
+fn setting_a_timer_with_a_body_at_the_cap_arms_it() {
+    let facade = facade_with(Arc::new(FakeProjectRepo::new()));
+    let (session, _owner) = bound_session(&facade, ProjectId::from_raw(1));
+
+    let at_cap = "x".repeat(MAX_TIMER_BODY_BYTES);
+    facade
+        .scoped(session)
+        .timer_set(at_cap, Some(Duration::from_secs(30)))
+        .expect("a body exactly at the cap is accepted");
+    assert_eq!(facade.scoped(session).timer_list().expect("list").len(), 1);
 }
 
 #[test]
@@ -156,8 +215,8 @@ fn fire_when_idle_reports_the_processes_it_is_waiting_on() {
     ];
 
     let outcome = facade
+        .scoped(session)
         .timer_fire_when_idle(
-            session,
             "all done".into(),
             watched.clone(),
             IdleMode::All,
@@ -181,8 +240,8 @@ fn fire_when_idle_counts_a_process_absent_from_the_registry_as_idle() {
     let gone = ProcessId::from_raw(9999); // never registered → not in the supervisor
 
     let outcome = facade
+        .scoped(session)
         .timer_fire_when_idle(
-            session,
             "all done".into(),
             vec![gone],
             IdleMode::All,

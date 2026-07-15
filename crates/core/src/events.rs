@@ -12,8 +12,8 @@
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-use crate::agents::AgentActivity;
-use crate::config::{ConfigSync, TrustReviewCommand};
+use crate::configchange::{ConfigSync, TrustReviewCommand};
+use crate::idle::AgentActivity;
 use crate::ids::{ProcessId, ProjectId, TimerId, TodoId};
 use crate::orphans::OrphanInfo;
 use crate::process::{ProcStatus, ProcessKind};
@@ -78,13 +78,22 @@ pub enum DomainEvent {
     /// fired while a readiness gate is active; reflected on [`ProcessView::ready`].
     ReadyStateChanged { id: ProcessId, ready: bool },
     /// The restart policy is relaunching a crashed `auto_restart` command. `attempt` is
-    /// its position in the current rate-limit window (1 = the first restart). The status
-    /// also moves `Crashed -> Starting`; this delta additionally carries the attempt
-    /// count for the "restarting (k/N)" affordance and crash notifications.
-    RestartScheduled { id: ProcessId, attempt: u32 },
-    /// The restart policy gave up on a command that crashed too fast, too often (the
-    /// 10-restarts-in-60s gate): it is held in [`ProcStatus::RestartExhausted`] until the
-    /// user restarts it. Distinct from the status delta so notifications can fire on it.
+    /// its position in the current rate-limit window (1 = the first restart), and `limit`
+    /// is how many that window allows before the command is held exhausted. The status
+    /// also moves `Crashed -> Starting`; this delta additionally carries both numbers for
+    /// the "restarting (k/N)" affordance and crash notifications.
+    ///
+    /// `limit` rides along with every event so the policy stays the core's alone: a
+    /// display that renders `attempt/limit` never has to know the gate's value to
+    /// describe it, and cannot fall out of step with it.
+    RestartScheduled {
+        id: ProcessId,
+        attempt: u32,
+        limit: u32,
+    },
+    /// The restart policy gave up on a command that crashed too fast, too often: it is
+    /// held in [`ProcStatus::RestartExhausted`] until the user restarts it. Distinct from
+    /// the status delta so notifications can fire on it.
     RestartExhausted { id: ProcessId },
     /// A command was restarted because a watched file changed (the file-watch policy). The
     /// status also cycles through the usual restart deltas; this discrete signal lets the UI
@@ -154,9 +163,9 @@ pub enum DomainEvent {
 
 /// The outbound event port: anything the core publishes domain events through.
 ///
-/// Realized in the walking skeleton by [`EventBus`]. Defined as a trait so an
-/// adapter that needs a different fan-out shape (e.g. an MCP push sink) can provide
-/// its own implementation without the core depending on it.
+/// Realized by [`EventBus`]. Defined as a trait so an adapter that needs a different
+/// fan-out shape (e.g. an MCP push sink) can provide its own implementation without
+/// the core depending on it.
 pub trait EventSink: Send + Sync {
     /// Publishes an event. Best-effort: a sink with no live receivers drops it.
     fn emit(&self, event: DomainEvent);

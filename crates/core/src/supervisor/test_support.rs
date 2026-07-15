@@ -9,10 +9,11 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
+use crate::composition::CorePorts;
 use crate::config::ProcessSpec;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::{CorePorts, PtySize, SpawnSpec};
+use crate::ports::{PtySize, SpawnSpec};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::shellenv::{NoopShellEnvProbe, ShellEnvProbe};
 use crate::testing::{
@@ -70,7 +71,7 @@ pub(crate) fn harness_with_shell_env(
     .shell_env_probe(shell_env_probe)
     .app_env(app_env)
     .build();
-    let sup = Arc::new(Supervisor::new(&ports, bus));
+    let sup = Arc::new(Supervisor::new(ports.supervisor_ports(), bus));
     Harness {
         sup,
         trust,

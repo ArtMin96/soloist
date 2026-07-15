@@ -1,8 +1,11 @@
+use crate::facade::Facade;
+use crate::ids::SessionId;
 use std::path::Path;
 use std::sync::Arc;
 
 use super::*;
-use crate::ports::{CorePorts, ProjectRepo, TokioClock};
+use crate::composition::CorePorts;
+use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{
     authentic_session, terminal_registration, FakeProjectRepo, FakeScratchpadRepo, FakeSpawner,
     FakeTrustRepo, TEST_PEER_PGID,
@@ -59,7 +62,7 @@ fn writing_with_no_project_in_scope_is_refused() {
     let session = facade.open_session(None);
 
     assert!(matches!(
-        facade.scratchpad_write(session, "plan", doc(), None),
+        facade.scoped(session).scratchpad_write("plan", doc(), None),
         Err(CoordinationError::NoProjectScope)
     ));
 }
@@ -69,16 +72,21 @@ fn a_scoped_session_writes_reads_and_lists_without_binding_a_process() {
     let (facade, session) = scoped_facade();
 
     let created = facade
-        .scratchpad_write(session, "release-plan", doc(), None)
+        .scoped(session)
+        .scratchpad_write("release-plan", doc(), None)
         .expect("create succeeds with only project scope");
     assert_eq!(created.revision, 1);
 
     let read = facade
-        .scratchpad_read(session, "release-plan")
+        .scoped(session)
+        .scratchpad_read("release-plan")
         .expect("read succeeds");
     assert_eq!(read, created);
 
-    let listed = facade.scratchpad_list(session).expect("list succeeds");
+    let listed = facade
+        .scoped(session)
+        .scratchpad_list()
+        .expect("list succeeds");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].name, "release-plan");
     assert_eq!(listed[0].objective, "Ship v1");
@@ -88,14 +96,18 @@ fn a_scoped_session_writes_reads_and_lists_without_binding_a_process() {
 fn a_stale_write_surfaces_a_revision_conflict() {
     let (facade, session) = scoped_facade();
     facade
-        .scratchpad_write(session, "plan", doc(), None)
+        .scoped(session)
+        .scratchpad_write("plan", doc(), None)
         .expect("create");
     facade
-        .scratchpad_write(session, "plan", doc(), Some(1))
+        .scoped(session)
+        .scratchpad_write("plan", doc(), Some(1))
         .expect("first update");
 
     assert!(matches!(
-        facade.scratchpad_write(session, "plan", doc(), Some(1)),
+        facade
+            .scoped(session)
+            .scratchpad_write("plan", doc(), Some(1)),
         Err(CoordinationError::RevisionConflict {
             expected: Some(1),
             actual: Some(2)
@@ -110,7 +122,7 @@ fn a_malformed_write_surfaces_an_invalid_scratchpad() {
     bad.acceptance_criteria = Vec::new();
 
     assert!(matches!(
-        facade.scratchpad_write(session, "plan", bad, None),
+        facade.scoped(session).scratchpad_write("plan", bad, None),
         Err(CoordinationError::InvalidScratchpad(_))
     ));
 }
@@ -119,7 +131,7 @@ fn a_malformed_write_surfaces_an_invalid_scratchpad() {
 fn reading_a_missing_scratchpad_is_unknown() {
     let (facade, session) = scoped_facade();
     assert!(matches!(
-        facade.scratchpad_read(session, "absent"),
+        facade.scoped(session).scratchpad_read("absent"),
         Err(CoordinationError::UnknownScratchpad)
     ));
 }
@@ -128,23 +140,26 @@ fn reading_a_missing_scratchpad_is_unknown() {
 fn renaming_onto_a_taken_name_is_refused() {
     let (facade, session) = scoped_facade();
     facade
-        .scratchpad_write(session, "a", doc(), None)
+        .scoped(session)
+        .scratchpad_write("a", doc(), None)
         .expect("create a");
     facade
-        .scratchpad_write(session, "b", doc(), None)
+        .scoped(session)
+        .scratchpad_write("b", doc(), None)
         .expect("create b");
 
     assert!(matches!(
-        facade.scratchpad_rename(session, "a", "b"),
+        facade.scoped(session).scratchpad_rename("a", "b"),
         Err(CoordinationError::ScratchpadNameTaken)
     ));
     assert!(matches!(
-        facade.scratchpad_rename(session, "missing", "x"),
+        facade.scoped(session).scratchpad_rename("missing", "x"),
         Err(CoordinationError::UnknownScratchpad)
     ));
 
     let renamed = facade
-        .scratchpad_rename(session, "a", "c")
+        .scoped(session)
+        .scratchpad_rename("a", "c")
         .expect("rename to a free name succeeds");
     assert_eq!(renamed.name, "c");
 }
@@ -153,31 +168,43 @@ fn renaming_onto_a_taken_name_is_refused() {
 fn tags_and_archive_round_trip_through_the_facade() {
     let (facade, session) = scoped_facade();
     facade
-        .scratchpad_write(session, "a", doc(), None)
+        .scoped(session)
+        .scratchpad_write("a", doc(), None)
         .expect("create");
 
     let tagged = facade
-        .scratchpad_add_tags(session, "a", &["release".into()])
+        .scoped(session)
+        .scratchpad_add_tags("a", &["release".into()])
         .expect("add tags");
     assert_eq!(tagged.tags, vec!["release".to_string()]);
     assert_eq!(
-        facade.scratchpad_tags_list(session).expect("tags list"),
+        facade
+            .scoped(session)
+            .scratchpad_tags_list()
+            .expect("tags list"),
         vec!["release".to_string()]
     );
 
     let untagged = facade
-        .scratchpad_remove_tags(session, "a", &["release".into()])
+        .scoped(session)
+        .scratchpad_remove_tags("a", &["release".into()])
         .expect("remove tags");
     assert!(untagged.tags.is_empty());
 
     let archived = facade
-        .scratchpad_archive(session, "a", true)
+        .scoped(session)
+        .scratchpad_archive("a", true)
         .expect("archive");
     assert!(archived.archived);
 
-    assert!(facade.scratchpad_delete(session, "a").expect("delete"));
+    assert!(facade
+        .scoped(session)
+        .scratchpad_delete("a")
+        .expect("delete"));
     assert!(matches!(
-        facade.scratchpad_add_tags(session, "a", &["x".into()]),
+        facade
+            .scoped(session)
+            .scratchpad_add_tags("a", &["x".into()]),
         Err(CoordinationError::UnknownScratchpad)
     ));
 }
@@ -258,14 +285,15 @@ fn scratchpad_transfer_refuses_a_target_outside_the_callers_authenticated_scope(
         .register(terminal_registration(a, "w", "sleep 1"));
     let session = authentic_session(&facade, owner, TEST_PEER_PGID);
     facade
-        .bind_session_process(session, owner)
+        .scoped(session)
+        .bind_session_process(owner)
         .expect("bind the session to its process in A");
     facade
         .scratchpad_write_in(a, "plan", doc(), None)
         .expect("create in A");
 
     assert!(matches!(
-        facade.scratchpad_transfer(session, "plan", b),
+        facade.scoped(session).scratchpad_transfer("plan", b),
         Err(CoordinationError::ForeignProject)
     ));
 }

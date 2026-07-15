@@ -13,9 +13,10 @@ use tokio::sync::broadcast::error::RecvError;
 
 /// A façade over in-memory fakes — an alternate composition root, the same way the core's
 /// own tests build one. Routing is what we exercise here; the behaviour behind each call
-/// is tested in the core.
-fn facade() -> Facade {
-    Facade::new(
+/// is tested in the core. Returned as an [`Arc`] because [`handle_request`] takes the façade by
+/// shared handle (it clones it onto the blocking pool for the synchronous dispatch).
+fn facade() -> Arc<Facade> {
+    Arc::new(Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
             Arc::new(TokioClock),
@@ -23,7 +24,7 @@ fn facade() -> Facade {
             Arc::new(FakeProjectRepo::new()),
         )
         .build(),
-    )
+    ))
 }
 
 async fn wait_for(rx: &mut broadcast::Receiver<DomainEvent>, target: ProcStatus) {
@@ -91,14 +92,10 @@ async fn list_processes_returns_the_registered_processes() {
 }
 
 #[tokio::test]
-async fn get_process_status_returns_a_registered_process() {
+async fn get_process_status_returns_an_in_scope_process() {
     let facade = facade();
     let session = facade.open_session(Some(PEER_PGID));
-    let id = facade.supervisor().register(terminal_registration(
-        ProjectId::from_raw(1),
-        "term",
-        "sleep 60",
-    ));
+    let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     match handle_request(
         &facade,
         session,
@@ -209,7 +206,8 @@ fn scoped_terminal(
         .register(terminal_registration(project, name, "sleep 60"));
     facade.supervisor().assign_test_group(id, PEER_PGID);
     facade
-        .bind_session_process(session, id)
+        .scoped(session)
+        .bind_session_process(id)
         .expect("an authentic bind to the process the caller runs in");
     id
 }
@@ -420,14 +418,10 @@ async fn output_reads_for_an_unknown_process_are_refused() {
 }
 
 #[tokio::test]
-async fn reading_a_registered_processs_output_and_ports() {
+async fn reading_an_in_scope_processs_output_and_ports() {
     let facade = facade();
     let session = facade.open_session(Some(PEER_PGID));
-    let id = facade.supervisor().register(terminal_registration(
-        ProjectId::from_raw(1),
-        "term",
-        "sleep 60",
-    ));
+    let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     // Registered but never started: output is empty (not an error), and it has no ports.
     assert_eq!(
         handle_request(
@@ -460,6 +454,59 @@ async fn reading_a_registered_processs_output_and_ports() {
         .await,
         Ok(IpcResponse::Acked)
     );
+}
+
+#[tokio::test]
+async fn the_read_tools_refuse_an_out_of_scope_process_but_list_stays_cross_project() {
+    let facade = facade();
+    let session = facade.open_session(Some(PEER_PGID));
+    // The caller's scope is project 1; a process in project 2 is out of scope.
+    let here = scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
+    let elsewhere = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(2),
+        "elsewhere",
+        "sleep 60",
+    ));
+
+    // Every per-process read of the foreign process is refused, so its output/status/ports
+    // never cross the project boundary — the routing threads the session into the scoped read.
+    for request in [
+        IpcRequest::GetProcessRawOutput { process: elsewhere },
+        IpcRequest::GetProcessOutput {
+            process: elsewhere,
+            lines: None,
+        },
+        IpcRequest::GetProcessStatus { process: elsewhere },
+        IpcRequest::GetProcessPorts { process: elsewhere },
+        IpcRequest::SearchOutput {
+            process: elsewhere,
+            query: "x".into(),
+            limit: None,
+        },
+        IpcRequest::SearchRawOutput {
+            process: elsewhere,
+            query: "x".into(),
+            limit: None,
+        },
+        // Even the no-op flush: an ack for a foreign id, where an unknown id refuses, would
+        // answer whether that process exists.
+        IpcRequest::FlushTerminalPerf { process: elsewhere },
+    ] {
+        assert_eq!(
+            handle_request(&facade, session, request).await,
+            Err(IpcError::OutOfScope)
+        );
+    }
+
+    // `list_processes` still shows both projects' processes (a cross-project overview), so the
+    // caller keeps its bearings; the foreign row is identity-only (verified in the core).
+    match handle_request(&facade, session, IpcRequest::ListProcesses).await {
+        Ok(IpcResponse::Processes(processes)) => {
+            let ids: Vec<_> = processes.iter().map(|view| view.id).collect();
+            assert!(ids.contains(&here) && ids.contains(&elsewhere));
+        }
+        other => panic!("expected the process list, got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -509,18 +556,21 @@ async fn services_list_without_scope_is_refused_and_filters_to_commands_in_scope
 async fn wait_for_bound_port_on_a_resting_process_reports_not_running() {
     let facade = facade();
     let session = facade.open_session(Some(PEER_PGID));
-    let id = facade.supervisor().register(terminal_registration(
+    // Bind to one process in project 1 to put that project in scope, then wait on a *different*,
+    // never-started process in the same project: in scope, but with no group it has no port to
+    // wait for, so it resolves at once as NotRunning (no wait).
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "bound");
+    let resting = facade.supervisor().register(terminal_registration(
         ProjectId::from_raw(1),
-        "term",
+        "resting",
         "sleep 60",
     ));
-    // The process never started, so it has no group to bind a port — resolved at once, no wait.
     assert_eq!(
         handle_request(
             &facade,
             session,
             IpcRequest::WaitForBoundPort {
-                process: id,
+                process: resting,
                 port: 3000,
                 timeout_ms: Some(50),
             },
@@ -531,9 +581,36 @@ async fn wait_for_bound_port_on_a_resting_process_reports_not_running() {
 }
 
 #[tokio::test]
+async fn wait_for_bound_port_on_an_out_of_scope_process_is_refused() {
+    let facade = facade();
+    let session = facade.open_session(Some(PEER_PGID));
+    // Scope is project 1; a process in project 2 is out of scope, so the port-bind probe is
+    // refused rather than disclosing whether the foreign process bound the port.
+    scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
+    let elsewhere = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(2),
+        "elsewhere",
+        "sleep 60",
+    ));
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::WaitForBoundPort {
+                process: elsewhere,
+                port: 3000,
+                timeout_ms: Some(50),
+            },
+        )
+        .await,
+        Err(IpcError::OutOfScope)
+    );
+}
+
+#[tokio::test]
 async fn acquiring_a_lease_in_scope_is_granted_then_released() {
     // The lease store must be wired for the round-trip to persist, so this builds its own facade.
-    let facade = Facade::new(
+    let facade = Arc::new(Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
             Arc::new(TokioClock),
@@ -542,7 +619,7 @@ async fn acquiring_a_lease_in_scope_is_granted_then_released() {
         )
         .lock_repo(Arc::new(FakeLockRepo::new()))
         .build(),
-    );
+    ));
     let session = facade.open_session(Some(PEER_PGID));
     let owner = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
 
@@ -638,8 +715,8 @@ async fn an_action_on_another_projects_process_maps_to_out_of_scope() {
 }
 
 /// A façade whose settings persist to an in-memory fake, so a toggle round-trips.
-fn facade_with_settings() -> Facade {
-    Facade::new(
+fn facade_with_settings() -> Arc<Facade> {
+    Arc::new(Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
             Arc::new(TokioClock),
@@ -648,7 +725,7 @@ fn facade_with_settings() -> Facade {
         )
         .settings_repo(Arc::new(FakeSettingsRepo::new()))
         .build(),
-    )
+    ))
 }
 
 #[tokio::test]
@@ -724,7 +801,7 @@ async fn setup_agent_integration_writes_into_the_scoped_project_root() {
     projects
         .upsert(dir.path(), Some("p"), None)
         .expect("seed one project");
-    let facade = Facade::new(
+    let facade = Arc::new(Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
             Arc::new(TokioClock),
@@ -732,7 +809,7 @@ async fn setup_agent_integration_writes_into_the_scoped_project_root() {
             projects,
         )
         .build(),
-    );
+    ));
     // The sole loaded project gives the unbound session its default scope.
     let session = facade.open_session(None);
     match handle_request(
@@ -754,7 +831,7 @@ async fn setup_agent_integration_writes_into_the_scoped_project_root() {
 
 /// A façade with one project loaded and the template store wired — the sole loaded project
 /// gives an unbound session its default scope.
-fn facade_with_templates() -> Facade {
+fn facade_with_templates() -> Arc<Facade> {
     let projects = Arc::new(FakeProjectRepo::new());
     projects
         .upsert(
@@ -763,7 +840,7 @@ fn facade_with_templates() -> Facade {
             None,
         )
         .expect("seed one project");
-    Facade::new(
+    Arc::new(Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
             Arc::new(TokioClock),
@@ -772,7 +849,7 @@ fn facade_with_templates() -> Facade {
         )
         .prompt_template_repo(Arc::new(FakePromptTemplateRepo::new()))
         .build(),
-    )
+    ))
 }
 
 #[tokio::test]

@@ -65,7 +65,7 @@ export function IntegrationsPanel() {
 
       <SettingsSection
         title="HTTP API"
-        description="A local REST API on loopback for scripts and tools. Mutations require the X-Soloist-Local-Auth header."
+        description="A local REST API on loopback for scripts and tools. Every request carries a per-launch token (the `soloist` CLI reads it for you)."
       >
         <div className="flex flex-col gap-3 py-3">
           <CodeBlock>{HTTP_API_BASE_URL}</CodeBlock>

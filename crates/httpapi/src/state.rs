@@ -1,9 +1,18 @@
-//! The HTTP API's shared state: a handle to the one core [`Facade`] and the callback that
-//! raises the desktop window.
+//! The HTTP API's shared state: a handle to the one core [`Facade`], the per-launch auth
+//! token every request must present, and the callback that raises the desktop window.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use soloist_core::Facade;
+
+/// The most agent spawns admitted per [`SPAWN_WINDOW`] on `POST /projects/:id/spawn-agent`. A
+/// same-user caller is already authenticated by the token, so this is not access control; it caps
+/// a runaway loop or script from launching agent processes without bound (defense-in-depth).
+const SPAWN_MAX_PER_WINDOW: u32 = 10;
+
+/// The fixed window over which [`SPAWN_MAX_PER_WINDOW`] applies.
+const SPAWN_WINDOW: Duration = Duration::from_secs(10);
 
 /// Raises and focuses the desktop window. The composition root wires this to the Tauri
 /// window; it defaults to a no-op so the adapter stays Tauri-free and testable without a
@@ -11,21 +20,29 @@ use soloist_core::Facade;
 /// cannot route through the [`Facade`].
 pub type FocusFn = Arc<dyn Fn() + Send + Sync>;
 
-/// What every HTTP handler is given: a clone-cheap handle to the single core façade plus
-/// the focus callback. No business state lives here — every route maps to one façade call.
+/// What every HTTP handler is given: a clone-cheap handle to the single core façade, the
+/// per-launch token the auth gate checks, the focus callback, and the agent-spawn rate cap. No
+/// business state lives here — every route maps to one façade call; the rate cap is transport-level
+/// throttling, like the CORS and `Host` guards.
 #[derive(Clone)]
 pub struct ApiState {
     facade: Arc<Facade>,
+    token: Arc<str>,
     focus: FocusFn,
+    spawn_limiter: Arc<SpawnRateLimiter>,
 }
 
 impl ApiState {
-    /// Wraps the shared façade for the router, with focus a no-op until the composition
-    /// root supplies one via [`with_focus`](Self::with_focus).
-    pub fn new(facade: Arc<Facade>) -> Self {
+    /// Wraps the shared façade and the launch's auth `token` for the router, with focus a
+    /// no-op until the composition root supplies one via [`with_focus`](Self::with_focus).
+    /// The token is injected (the composition root mints it, a test passes a known value),
+    /// so the adapter stays a pure function of its inputs.
+    pub fn new(facade: Arc<Facade>, token: impl Into<Arc<str>>) -> Self {
         Self {
             facade,
+            token: token.into(),
             focus: Arc::new(|| {}),
+            spawn_limiter: Arc::new(SpawnRateLimiter::new(Instant::now())),
         }
     }
 
@@ -35,13 +52,72 @@ impl ApiState {
         self
     }
 
-    /// The core façade every read and mutation routes through.
-    pub fn facade(&self) -> &Facade {
+    /// The core façade every read and mutation routes through. Handed out as the shared `Arc` so a
+    /// synchronous call can run off the runtime via [`Facade::blocking`].
+    pub fn facade(&self) -> &Arc<Facade> {
         &self.facade
+    }
+
+    /// The per-launch token every request must present, matched by the auth gate.
+    pub fn token(&self) -> &str {
+        &self.token
     }
 
     /// Raises the desktop window (a no-op when no window is wired).
     pub fn focus(&self) {
         (self.focus)();
     }
+
+    /// Whether another agent spawn is admitted now under the per-launch rate cap; a denial maps
+    /// to `429` in the handler. Records the admission against the current window.
+    pub fn allow_spawn(&self) -> bool {
+        self.spawn_limiter.check(Instant::now())
+    }
 }
+
+/// A fixed-window rate limiter: at most [`SPAWN_MAX_PER_WINDOW`] admissions per [`SPAWN_WINDOW`].
+/// The count resets when a request arrives after the window elapses, so a steady, sub-cap rate is
+/// never throttled while a burst past the cap is.
+struct SpawnRateLimiter {
+    window: Mutex<Window>,
+}
+
+/// The current window's start and how many admissions it has granted.
+struct Window {
+    start: Instant,
+    count: u32,
+}
+
+impl SpawnRateLimiter {
+    /// A limiter whose first window opens at `now`.
+    fn new(now: Instant) -> Self {
+        Self {
+            window: Mutex::new(Window {
+                start: now,
+                count: 0,
+            }),
+        }
+    }
+
+    /// Whether a spawn at `now` is admitted, counting it against the current window and rolling
+    /// the window over first when `now` is past it.
+    fn check(&self, now: Instant) -> bool {
+        // A caller that panicked mid-check poisons the lock. The window is a plain start-and-count
+        // pair with no invariant a panic can leave broken, so take it back rather than let one
+        // poisoning panic every later spawn request for the life of the process.
+        let mut window = self.window.lock().unwrap_or_else(|err| err.into_inner());
+        if now.saturating_duration_since(window.start) >= SPAWN_WINDOW {
+            window.start = now;
+            window.count = 0;
+        }
+        if window.count >= SPAWN_MAX_PER_WINDOW {
+            return false;
+        }
+        window.count += 1;
+        true
+    }
+}
+
+#[cfg(test)]
+#[path = "state_tests.rs"]
+mod tests;

@@ -23,7 +23,8 @@ pub async fn scratchpad_read(
     name: String,
 ) -> Result<ScratchpadView, String> {
     facade
-        .scratchpad_read_in(project, &name)
+        .blocking(move |f| f.scratchpad_read_in(project, &name))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -38,7 +39,8 @@ pub async fn scratchpad_write(
     expected_revision: Option<u64>,
 ) -> Result<ScratchpadView, String> {
     facade
-        .scratchpad_write_in(project, &name, doc, expected_revision)
+        .blocking(move |f| f.scratchpad_write_in(project, &name, doc, expected_revision))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -50,7 +52,8 @@ pub async fn todo_create(
     doc: TodoDoc,
 ) -> Result<TodoView, String> {
     facade
-        .todo_create_in(project, doc)
+        .blocking(move |f| f.todo_create_in(project, doc))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -64,7 +67,8 @@ pub async fn todo_update(
     expected_revision: u64,
 ) -> Result<TodoView, String> {
     facade
-        .todo_update_in(project, id, doc, expected_revision)
+        .blocking(move |f| f.todo_update_in(project, id, doc, expected_revision))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -76,7 +80,8 @@ pub async fn todo_complete(
     id: TodoId,
 ) -> Result<TodoView, String> {
     facade
-        .todo_complete_in(project, id)
+        .blocking(move |f| f.todo_complete_in(project, id))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -89,7 +94,8 @@ pub async fn todo_set_blockers(
     blockers: Vec<TodoId>,
 ) -> Result<TodoView, String> {
     facade
-        .todo_set_blockers_in(project, id, blockers)
+        .blocking(move |f| f.todo_set_blockers_in(project, id, blockers))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -102,7 +108,8 @@ pub async fn todo_add_blocker(
     blocker: TodoId,
 ) -> Result<TodoView, String> {
     facade
-        .todo_add_blocker_in(project, id, blocker)
+        .blocking(move |f| f.todo_add_blocker_in(project, id, blocker))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -115,7 +122,8 @@ pub async fn todo_remove_blocker(
     blocker: TodoId,
 ) -> Result<TodoView, String> {
     facade
-        .todo_remove_blocker_in(project, id, blocker)
+        .blocking(move |f| f.todo_remove_blocker_in(project, id, blocker))
+        .await
         .map_err(|err| err.to_string())
 }
 

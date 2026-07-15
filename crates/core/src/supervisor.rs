@@ -16,6 +16,7 @@
 mod actor;
 mod adopt;
 mod bulk;
+mod lifecycle;
 mod monitoring;
 mod reconcile;
 mod registration;
@@ -28,15 +29,17 @@ use std::sync::Arc;
 
 use tokio::task::JoinHandle;
 
+use std::collections::BTreeMap;
+
 use crate::events::{DomainEvent, EventBus};
 use crate::hash::Hash;
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{
-    Clock, CorePorts, LockReleaser, OrphanControl, ProcessSpawner, RuntimeState, SpawnSpec,
-    Spawned, StoreError, TrustRepo,
+    Clock, LockReleaser, OrphanControl, ProcessSpawner, RuntimeState, SpawnSpec, Spawned,
+    StoreError, TrustRepo,
 };
 use crate::process::{ProcStatus, ProcessView, Readiness};
-use crate::shellenv::ShellEnv;
+use crate::shellenv::{ShellEnv, ShellEnvProbe};
 use crate::terminal::Terminals;
 
 use actor::{ActorMsg, ActorPorts, OrphanIdentity};
@@ -50,6 +53,13 @@ pub use registration::Registration;
 /// are ever in flight for one process, and a bounded channel honours the no-unbounded
 /// rule.
 const MAILBOX_CAPACITY: usize = 4;
+
+/// Ceiling on consecutive [`shutdown`](Supervisor::shutdown) passes that find only mid-launch
+/// entries (mailbox installed, join not yet attached) with no join to await. The launch window is
+/// a handful of synchronous statements, so the join attaches within a pass or two; this bounds the
+/// wait (the no-unbounded-retry rule) should a launcher wedge before attaching one. Generous, as a
+/// yield-per-pass is cheap and the cap is only a safety backstop, never reached in practice.
+pub(super) const MAX_SHUTDOWN_IDLE_PASSES: u32 = 1_000;
 
 /// Why a supervisor command failed.
 #[derive(Debug, thiserror::Error)]
@@ -82,28 +92,45 @@ pub struct Supervisor {
     shell_env: Arc<ShellEnv>,
 }
 
+/// Exactly the ports process supervision drives. Named here, by the context that uses them, so
+/// the supervisor never has to know the shape of the whole-core port set — the composition root
+/// projects this out of it. Without that split a context would depend on the assembler that
+/// depends on every context, which is a cycle.
+pub struct SupervisorPorts {
+    pub spawner: Arc<dyn ProcessSpawner>,
+    pub clock: Arc<dyn Clock>,
+    pub trust: Arc<dyn TrustRepo>,
+    pub locks: Arc<dyn LockReleaser>,
+    pub runtime: Arc<dyn RuntimeState>,
+    pub orphan_control: Arc<dyn OrphanControl>,
+    pub shell_env_probe: Arc<dyn ShellEnvProbe>,
+    /// The app's own environment, captured at the composition root, that the login-shell
+    /// resolver layers under each process's `env`.
+    pub app_env: BTreeMap<String, String>,
+}
+
 impl Supervisor {
-    /// Builds a supervisor from the core port set, reading the ports it owns. The bus is
-    /// shared with the façade so adapters see process events alongside config events;
-    /// `runtime` persists running process groups and `orphan_control` operates on them
-    /// for orphan adoption.
-    pub fn new(ports: &CorePorts, bus: EventBus) -> Self {
+    /// Builds a supervisor over the ports it drives. The bus is shared with the façade so
+    /// adapters see process events alongside config events; `runtime` persists running process
+    /// groups and `orphan_control` operates on them for orphan adoption.
+    pub fn new(ports: SupervisorPorts, bus: EventBus) -> Self {
+        let shell_env = Arc::new(ShellEnv::new(
+            ports.shell_env_probe,
+            ports.clock.clone(),
+            ports.app_env,
+        ));
         Self {
-            spawner: ports.spawner.clone(),
-            clock: ports.clock.clone(),
-            trust: ports.trust.clone(),
-            locks: ports.locks.clone(),
-            runtime: ports.runtime.clone(),
-            orphan_control: ports.orphan_control.clone(),
+            spawner: ports.spawner,
+            clock: ports.clock,
+            trust: ports.trust,
+            locks: ports.locks,
+            runtime: ports.runtime,
+            orphan_control: ports.orphan_control,
             bus,
             registry: Registry::default(),
             terminals: Terminals::default(),
             restart_policy: RestartPolicy::default(),
-            shell_env: Arc::new(ShellEnv::new(
-                ports.shell_env_probe.clone(),
-                ports.clock.clone(),
-                ports.app_env.clone(),
-            )),
+            shell_env,
         }
     }
 
@@ -211,210 +238,6 @@ impl Supervisor {
         self.registry.mark_variant_trusted(project, variant);
     }
 
-    /// Starts a process. A trust-gated command whose variant is not trusted is refused
-    /// (untrusted cannot run by any path). Starting an already-active
-    /// process is a no-op.
-    pub fn start(&self, id: ProcessId) -> Result<(), SupervisorError> {
-        let info = self
-            .registry
-            .describe(id)
-            .ok_or(SupervisorError::NotFound(id))?;
-        if info.status.is_active() {
-            return Ok(());
-        }
-        self.guard_trust(info.project, info.trust_variant.as_ref())?;
-        // A user-initiated start is an explicit retry: clear any crash-restart history so
-        // a previously exhausted command starts with a fresh rate-limit window.
-        self.restart_policy.forget(id);
-        self.launch_actor(id, info.launch, None);
-        Ok(())
-    }
-
-    /// Requests a graceful stop. Returns whether an active process was messaged; a
-    /// resting or already-finished process reports `false`.
-    pub fn stop(&self, id: ProcessId) -> bool {
-        match self.registry.status(id) {
-            Some(status) if status.is_active() => {
-                if let Some(mailbox) = self.registry.mailbox(id) {
-                    let _ = mailbox.try_send(ActorMsg::Stop);
-                }
-                true
-            }
-            _ => false,
-        }
-    }
-
-    /// Restarts a process: a running one is told to cycle in place; a stopped one is
-    /// started. Trust is re-checked on either path.
-    pub fn restart(&self, id: ProcessId) -> Result<(), SupervisorError> {
-        let info = self
-            .registry
-            .describe(id)
-            .ok_or(SupervisorError::NotFound(id))?;
-        self.guard_trust(info.project, info.trust_variant.as_ref())?;
-        // A user-initiated restart is an explicit retry — reset crash tracking, as a stop
-        // would (the auto-restart path relaunches directly and never clears).
-        self.restart_policy.forget(id);
-        if info.status.is_active() {
-            if let Some(mailbox) = self.registry.mailbox(id) {
-                let _ = mailbox.try_send(ActorMsg::Restart);
-            }
-        } else {
-            self.launch_actor(id, info.launch, None);
-        }
-        Ok(())
-    }
-
-    /// Resumes a resting process from its stored resume command — an agent's "Resume last
-    /// session", relaunching its CLI on the conversation it left rather than a fresh one. The
-    /// resume command runs **in place of** the fresh `launch.command` for this launch only; the
-    /// stored fresh command is untouched, so a later plain [`start`](Self::start) still starts
-    /// fresh (Start and Resume are independent affordances). Trust is re-checked and crash
-    /// history cleared exactly as a start. Refused with [`SupervisorError::NotResumable`] if the
-    /// process has no resume command (a command, terminal, or unsupported-provider agent);
-    /// resuming an already-active process is a no-op.
-    pub fn resume(&self, id: ProcessId) -> Result<(), SupervisorError> {
-        let info = self
-            .registry
-            .describe(id)
-            .ok_or(SupervisorError::NotFound(id))?;
-        let Some(resume_command) = info.resume_command else {
-            return Err(SupervisorError::NotResumable(id));
-        };
-        if info.status.is_active() {
-            return Ok(());
-        }
-        self.guard_trust(info.project, info.trust_variant.as_ref())?;
-        self.restart_policy.forget(id);
-        let mut spec = info.launch;
-        spec.command = resume_command;
-        self.launch_actor(id, spec, None);
-        Ok(())
-    }
-
-    /// Renames a process's display label, announcing the change so adapters update its row.
-    /// The label is display-only: it never affects trust (keyed on the command variant) or
-    /// identity/scope. Returns [`SupervisorError::NotFound`] if the process is no longer
-    /// registered.
-    pub fn rename(&self, id: ProcessId, label: String) -> Result<(), SupervisorError> {
-        if !self.registry.set_label(id, label.clone()) {
-            return Err(SupervisorError::NotFound(id));
-        }
-        self.bus.publish(DomainEvent::ProcessRenamed { id, label });
-        Ok(())
-    }
-
-    /// Resolves a `solo.yml` process name to its registered command's id in `project`, if one
-    /// exists — the config-reload path's lookup for the registration to update or drop.
-    pub(crate) fn command_id_by_name(&self, project: ProjectId, name: &str) -> Option<ProcessId> {
-        self.registry.command_id_by_name(project, name)
-    }
-
-    /// Applies a changed `solo.yml` spec to an already-registered command **in place**, keeping
-    /// its id (config-reload never duplicates a command) and its live actor if it is running —
-    /// the new spec takes effect on the next restart, which the trust gate re-checks. Recomputes
-    /// whether the new variant needs trust; announces [`DomainEvent::ProcessRenamed`] only when
-    /// the label actually changed (a `solo.yml` rename). Returns whether it was still registered.
-    pub(crate) fn update_command(&self, id: ProcessId, registration: Registration) -> bool {
-        let Registration {
-            project,
-            label,
-            launch,
-            trust_variant,
-            auto_start,
-            auto_restart,
-            restart_when_changed,
-            // `kind`, `project_root`, and `resume_command` are invariant for a reloaded command.
-            ..
-        } = registration;
-        let requires_trust = self.requires_trust(project, trust_variant.as_ref());
-        let renamed = self
-            .registry
-            .label_of(id)
-            .is_some_and(|previous| previous != label);
-        let updated = self.registry.update_command_spec(
-            id,
-            label.clone(),
-            launch,
-            trust_variant,
-            auto_start,
-            auto_restart,
-            restart_when_changed,
-            requires_trust,
-        );
-        if updated && renamed {
-            self.bus.publish(DomainEvent::ProcessRenamed { id, label });
-        }
-        updated
-    }
-
-    /// Drops a registration **only if it is not active** — the config-reload path removing a
-    /// command deleted from `solo.yml` without killing running work. Returns `true` when the
-    /// resting entry was removed (announcing [`DomainEvent::ProcessRemoved`]), `false` when the
-    /// process was live and so left running for the caller to surface. A resting entry holds no
-    /// actor, so removal needs no reap and stays synchronous.
-    pub(crate) fn deregister_if_resting(&self, id: ProcessId) -> bool {
-        if self.registry.remove_if_resting(id) {
-            self.bus.publish(DomainEvent::ProcessRemoved { id });
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Stops a process and removes it from the registry entirely — the one path that forgets
-    /// a managed process, unlike [`stop`](Self::stop), which leaves it resting. The entry is
-    /// removed up front, atomically taking any live actor handle; its group is then reaped
-    /// (messaged to stop, then awaited) before [`DomainEvent::ProcessRemoved`] is announced,
-    /// so no child is abandoned. Removing the entry *first* is what keeps that safe under a
-    /// concurrent crash: once the id is gone the self-healing loop's relaunch finds no entry
-    /// (`begin_launch` returns `None`), so a crash mid-close cannot resurrect a child that the
-    /// removal would then orphan. `ProcessRemoved` also drops the process's crash history
-    /// (single source). Returns [`SupervisorError::NotFound`] if it is no longer registered.
-    pub async fn close(&self, id: ProcessId) -> Result<(), SupervisorError> {
-        let Some(handle) = self.registry.remove_returning_handle(id) else {
-            return Err(SupervisorError::NotFound(id));
-        };
-        // Reap a live actor's group — the single-process form of `shutdown`'s reap step. The
-        // entry is already gone, so no relaunch can re-enter the registry behind us.
-        if let Some(handle) = handle {
-            let _ = signal_stop(handle).await;
-        }
-        // The process is gone for good — free its terminal channel (buffers + live broadcast).
-        // The actor is reaped above, so its recorder is dropped and nothing still writes here;
-        // without this a long session that opens and closes many processes leaks their scrollback.
-        self.terminals.remove(id);
-        self.bus.publish(DomainEvent::ProcessRemoved { id });
-        Ok(())
-    }
-
-    /// Stops every live process across all projects and awaits each actor's exit, so no
-    /// children leak on app quit (the deterministic-shutdown contract). Wired into the
-    /// Tauri shell's exit event so a normal quit reaps every process group.
-    pub async fn shutdown(&self) {
-        // Latch the policy closed first so no crash during teardown is auto-restarted: the
-        // children we are about to reap must not be relaunched.
-        self.restart_policy.begin_shutdown();
-        // Reap in passes until none remain. A crash whose auto-restart check slipped in
-        // just before the latch became visible can still spawn one last actor while we
-        // reap; the latch stops the reactor from launching any further, so the set is
-        // finite and this converges.
-        loop {
-            let mut joins = Vec::new();
-            for id in self.registry.with_live_actor() {
-                if let Some(handle) = self.registry.take_handle(id) {
-                    joins.push(signal_stop(handle));
-                }
-            }
-            if joins.is_empty() {
-                break;
-            }
-            for join in joins {
-                let _ = join.await;
-            }
-        }
-    }
-
     /// Refuses an untrusted trust-gated command; ungated processes always pass.
     fn guard_trust(
         &self,
@@ -435,9 +258,19 @@ impl Supervisor {
     /// `false` without spawning if the process was already active — closing the start
     /// race when two callers target the same process at once.
     fn launch_actor(&self, id: ProcessId, launch: SpawnSpec, initial: Option<Spawned>) -> bool {
-        let Some(from) = self.registry.begin_launch(id) else {
+        // Create the mailbox up front and install it as the launch is claimed, so a stop or
+        // shutdown that lands in the window before the actor is scheduled still reaches it — the
+        // command is neither lost nor falsely reported delivered, and shutdown can see a
+        // mid-launch process to reap. The join handle is attached below once the task exists.
+        let (mailbox, inbox) = tokio::sync::mpsc::channel(MAILBOX_CAPACITY);
+        let Some(from) = self.registry.begin_launch(id, mailbox) else {
             return false;
         };
+        // Open the terminal channel synchronously, before spawning the actor, so a viewer that
+        // attaches in the window between this launch and the actor being scheduled finds a live
+        // channel instead of "process has not started". The actor receives the actor-facing half
+        // rather than opening it itself; a relaunch reuses the existing buffers.
+        let terminal = self.terminals.open(id);
         self.bus.publish(DomainEvent::ProcessStatusChanged {
             id,
             from,
@@ -451,9 +284,16 @@ impl Supervisor {
                 project_root: PathBuf::new(),
                 name: String::new(),
             });
-        let (mailbox, inbox) = tokio::sync::mpsc::channel(MAILBOX_CAPACITY);
-        let join = actor::spawn(id, launch, identity, self.actor_ports(), inbox, initial);
-        self.registry.set_handle(id, ActorHandle { mailbox, join });
+        let join = actor::spawn(
+            id,
+            launch,
+            identity,
+            self.actor_ports(),
+            inbox,
+            initial,
+            terminal,
+        );
+        self.registry.attach_join(id, join);
         true
     }
 
@@ -466,17 +306,18 @@ impl Supervisor {
             orphan_control: self.orphan_control.clone(),
             bus: self.bus.clone(),
             registry: self.registry.clone(),
-            terminals: self.terminals.clone(),
             shell_env: self.shell_env.clone(),
         }
     }
 }
 
-/// Messages a live actor to stop and hands back its join handle to await — the shared reap
-/// step behind [`Supervisor::close`] (which awaits the one) and [`Supervisor::shutdown`]
-/// (which messages every actor, then awaits them together). Best-effort and tolerant: a full
-/// mailbox is ignored and awaiting an already-finished actor returns at once.
-fn signal_stop(handle: ActorHandle) -> JoinHandle<()> {
+/// Messages a live actor to stop and hands back its join handle to await, if it has one — the
+/// shared reap step behind [`Supervisor::close`] (which awaits the one) and
+/// [`Supervisor::shutdown`] (which messages every actor, then awaits them together). Dropping the
+/// mailbox at the end of this call is itself a stop signal for a mid-launch actor whose join is
+/// not yet attached (its `recv` unblocks to `None`). Best-effort and tolerant: a full mailbox is
+/// ignored and awaiting an already-finished actor returns at once.
+pub(super) fn signal_stop(handle: ActorHandle) -> Option<JoinHandle<()>> {
     let ActorHandle { mailbox, join } = handle;
     let _ = mailbox.try_send(ActorMsg::Stop);
     join
@@ -505,7 +346,19 @@ pub(crate) fn apply_transition(
             });
             new
         }
-        Err(_) => from,
+        // The FSM is the contract, so an illegal edge is a bug in a caller, not an expected
+        // input: refuse it (leaving the state unchanged) but trace it, so a regression that
+        // would silently desync the registry from the actor's status mirror is diagnosable
+        // instead of invisible.
+        Err(_) => {
+            tracing::warn!(
+                process = id.get(),
+                ?from,
+                ?to,
+                "refused an illegal process status transition"
+            );
+            from
+        }
     }
 }
 
@@ -521,7 +374,8 @@ mod resume_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::identity::PROCESS_ID_ENV;
+    use crate::ids::PROCESS_ID_ENV;
+    use crate::ports::PtySize;
     use crate::process::ProcessKind;
     use crate::supervisor::test_support::{
         command_spec, harness, harness_with_shell_env, next_change, next_to, spawn_spec, status_of,
@@ -842,6 +696,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn attach_pty_is_available_synchronously_after_start() {
+        // The empty-pane race: a viewer that attaches in the window between `start` returning and
+        // the actor being scheduled must still find a live terminal channel. The channel is opened
+        // synchronously as the process launches, so `attach_pty` is total for a launched process
+        // and never returns `None` (which the UI surfaces as a "Press Start" overlay on a process
+        // that is actually running).
+        let h = harness(FakeSpawner::exits_on_terminate());
+        let id = terminal(&h.sup, "sleep 60");
+        h.sup.start(id).expect("start");
+        // Deliberately no `.await` first: the spawned actor has not been polled yet. When the
+        // channel was opened lazily inside the actor body this was `None`; opening it in the
+        // synchronous launch path makes it `Some`.
+        assert!(
+            h.sup.attach_pty(id).is_some(),
+            "a launched process has a terminal channel before its actor runs"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_never_started_process_has_no_terminal_channel() {
+        // A resting, never-started process must still report `None`, so the UI shows the
+        // "Press Start" overlay rather than an empty live pane. Only a launch opens the channel.
+        let h = harness(FakeSpawner::exits_on_terminate());
+        let id = terminal(&h.sup, "sleep 60");
+        assert!(
+            h.sup.attach_pty(id).is_none(),
+            "a never-started process has no terminal channel to attach to"
+        );
+    }
+
+    #[tokio::test]
     async fn closing_a_process_frees_its_terminal_channel() {
         // A removed process must not leak its terminal buffers. While running it has a channel to
         // attach to; after close (a full removal, unlike a stop, which keeps the scrollback
@@ -908,6 +793,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_stop_in_the_launch_window_is_delivered_and_stops_without_spawning() {
+        // The launch-window race: `start` claims the launch and installs the actor mailbox
+        // synchronously, but the actor task has not been polled yet (no `.await` here). A stop
+        // that lands in that window must reach the actor — reported delivered, not silently
+        // dropped — and the process must actually stop. Because the mailbox is installed as the
+        // launch is claimed, the stop reaches the actor, and the actor's pre-spawn drain honors
+        // it before spawning: the status goes straight Starting -> Stopping -> Stopped, never
+        // Running, so no child is ever spawned.
+        let mut h = harness(FakeSpawner::exits_on_terminate());
+        let id = terminal(&h.sup, "sleep 60");
+
+        h.sup.start(id).expect("start");
+        assert!(
+            h.sup.stop(id),
+            "a stop in the launch window is delivered, not dropped"
+        );
+
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Starting);
+        assert_eq!(
+            next_to(&mut h.rx).await,
+            ProcStatus::Stopping,
+            "the actor honors the queued stop before spawning — never reaches Running"
+        );
+        assert_eq!(next_to(&mut h.rx).await, ProcStatus::Stopped);
+        assert_eq!(status_of(&h.sup, id), ProcStatus::Stopped);
+        assert!(
+            h.runtime.records().is_empty(),
+            "no child was ever spawned in the launch window"
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_reaps_a_process_still_in_its_launch_window() {
+        // A shutdown racing a launch must not miss a process whose actor has not been polled yet:
+        // the mailbox installed at claim time makes it visible to `with_live_actor`, and the
+        // pre-spawn drain honors the shutdown's stop, so no child is spawned and none survives the
+        // quit. The status settles at Stopped (via Stopping), never having reached Running.
+        let h = harness(FakeSpawner::exits_on_terminate());
+        let id = terminal(&h.sup, "sleep 60");
+
+        h.sup.start(id).expect("start");
+        // The actor is spawned but unpolled — the launch window. Shutdown must still reap it.
+        h.sup.shutdown().await;
+
+        assert_eq!(status_of(&h.sup, id), ProcStatus::Stopped);
+        assert!(
+            h.runtime.records().is_empty(),
+            "no child survives the quit via the launch window"
+        );
+    }
+
+    #[tokio::test]
     async fn pty_output_is_buffered_and_a_title_is_published() {
         let chunk = b"\x1b]0;my title\x07hello\n".to_vec();
         let mut h = harness(FakeSpawner::streams_then_exits(vec![chunk.clone()]));
@@ -955,6 +892,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_resize_reaches_the_running_pty() {
+        // A resize routed to a live process is applied to its PTY, not dropped — the input path
+        // carries resizes so the FE can keep the PTY winsize in step with the pane.
+        let (spawner, log) = FakeSpawner::records_resizes();
+        let mut h = harness(spawner);
+        let id = terminal(&h.sup, "tui");
+        h.sup.start(id).expect("start");
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
+
+        h.sup.resize(id, 120, 40).await.expect("resize");
+        log.resize_applied().await;
+
+        assert_eq!(
+            log.resizes(),
+            vec![PtySize {
+                cols: 120,
+                rows: 40
+            }]
+        );
+        // The first spawn created its PTY at the default, before any viewer resized it.
+        assert_eq!(log.spawns(), vec![PtySize::default()]);
+    }
+
+    #[tokio::test]
+    async fn a_respawn_relaunches_the_pty_at_the_last_resize_size() {
+        // After a viewer resizes the pane, a relaunch (here an in-place restart) re-creates the
+        // PTY at that size rather than resetting to the 80×24 default — otherwise a relaunched
+        // TUI renders into the wrong dimensions until the next resize.
+        let (spawner, log) = FakeSpawner::records_resizes();
+        let mut h = harness(spawner);
+        let id = terminal(&h.sup, "tui");
+        h.sup.start(id).expect("start");
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
+
+        h.sup.resize(id, 120, 40).await.expect("resize");
+        // Wait until the pump has applied the resize, so the last size is recorded before restart.
+        log.resize_applied().await;
+
+        h.sup.restart(id).expect("restart");
+        wait_all(&mut h.rx, &[id], ProcStatus::Running).await;
+
+        // Two spawns: the first at the default, the second re-created at the remembered size.
+        assert_eq!(
+            log.spawns(),
+            vec![
+                PtySize::default(),
+                PtySize {
+                    cols: 120,
+                    rows: 40
+                }
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn input_to_an_unknown_process_is_not_found() {
         let h = harness(FakeSpawner::exits_on_kill());
         let unknown = ProcessId::from_raw(999);
@@ -966,5 +958,70 @@ mod tests {
             h.sup.resize(unknown, 80, 24).await,
             Err(SupervisorError::NotFound(_))
         ));
+    }
+
+    /// A minimal `tracing` subscriber that only records whether a `WARN` event was emitted — just
+    /// enough to prove the illegal-transition path traces rather than staying silent, without a
+    /// subscriber dependency.
+    #[derive(Clone, Default)]
+    struct WarnFlag(Arc<std::sync::atomic::AtomicBool>);
+
+    impl WarnFlag {
+        fn was_warned(&self) -> bool {
+            self.0.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl tracing::Subscriber for WarnFlag {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            if *event.metadata().level() == tracing::Level::WARN {
+                self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    #[test]
+    fn an_illegal_transition_is_refused_and_traced() {
+        // `Stopped -> Running` skips `Starting`: the FSM forbids it. `apply_transition` must
+        // refuse it — return the unchanged state and publish no delta — but trace it, so a
+        // regression that would desync the registry from the actor's status mirror is
+        // diagnosable rather than invisible.
+        let registry = Registry::default();
+        let bus = EventBus::new(16);
+        let mut rx = bus.subscribe();
+        let id = ProcessId::next();
+
+        let warned = WarnFlag::default();
+        let result = tracing::subscriber::with_default(warned.clone(), || {
+            apply_transition(
+                &registry,
+                &bus,
+                id,
+                ProcStatus::Stopped,
+                ProcStatus::Running,
+                None,
+            )
+        });
+
+        assert_eq!(
+            result,
+            ProcStatus::Stopped,
+            "an illegal transition leaves the state unchanged"
+        );
+        assert!(warned.was_warned(), "an illegal transition is traced");
+        assert!(
+            rx.try_recv().is_err(),
+            "no status delta is published for a refused transition"
+        );
     }
 }

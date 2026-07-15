@@ -4,15 +4,6 @@ use super::AgentLineage;
 use crate::ids::ProcessId;
 
 #[test]
-fn parent_of_returns_the_recorded_parent() {
-    let lineage = AgentLineage::new();
-    let lead = ProcessId::next();
-    let worker = ProcessId::next();
-    lineage.record(worker, lead);
-    assert_eq!(lineage.parent_of(worker), Some(lead));
-}
-
-#[test]
 fn an_unrecorded_process_has_no_parent() {
     let lineage = AgentLineage::new();
     assert_eq!(lineage.parent_of(ProcessId::next()), None);

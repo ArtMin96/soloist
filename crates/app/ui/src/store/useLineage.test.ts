@@ -2,19 +2,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 
-// The lineage read and the event subscription are the IPC boundary; mock them so the test
-// drives the hook's own logic — seeding the map and re-reading on a lifecycle event.
+// The lineage read, the event subscription, and the resync signal are the IPC boundary; mock them
+// so the test drives the hook's own logic — seeding the map, re-reading on a lifecycle event, and
+// re-reading on a backend resync.
 vi.mock("@/api", () => ({
   lineageEdges: vi.fn(),
   onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
+  onResync: vi.fn(() => Promise.resolve(() => {})),
 }));
 
-import { lineageEdges, onDomainEvent } from "@/api";
+import { lineageEdges, onDomainEvent, onResync } from "@/api";
 import type { DomainEvent } from "@/domain";
 import { useLineage } from "@/store/useLineage";
 
 const read = vi.mocked(lineageEdges);
 const subscribe = vi.mocked(onDomainEvent);
+const resync = vi.mocked(onResync);
 
 afterEach(() => vi.clearAllMocks());
 
@@ -53,5 +56,18 @@ describe("useLineage", () => {
     // The rAF the hook coalesces into would have fired well within this wait.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(read.mock.calls.length).toBe(readsAfterSeed);
+  });
+
+  it("re-reads on a backend resync, healing a dropped lifecycle delta", async () => {
+    read.mockResolvedValue([{ child: 2, parent: 1 }]);
+    const { result } = renderHook(() => useLineage());
+    await waitFor(() => expect(result.current.size).toBe(1));
+
+    // A `ProcessRemoved` was dropped, so the map still nests the departed worker; a resync re-reads.
+    read.mockResolvedValue([]);
+    const handler = resync.mock.calls[0]?.[0];
+    if (!handler) throw new Error("no resync subscriber registered");
+    act(() => handler());
+    await waitFor(() => expect(result.current.size).toBe(0));
   });
 });

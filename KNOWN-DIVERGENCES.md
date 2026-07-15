@@ -195,9 +195,22 @@ on the `0700` socket, and with no sibling to cross into. With **≥2** projects 
 no authenticated scope and the scoped mutating tools refuse. This external-caller policy is recorded
 in `plan/05` §12 (MCP session↔process binding authenticity).
 
+**Read tools scoped too (stability audit PRD-06, 2026-07-14):** the original F13 note left the MCP
+**read** tools open by design — any session could read any process's output/status/ports by id. On a
+shared `0700` socket with ≥2 projects that let an agent in project A read project B's raw scrollback
+(which can carry secrets). PRD-06 closes it: `get_process_output` / `get_process_raw_output` /
+`search_output` / `search_raw_output` / `get_process_status` / `get_process_ports` now resolve the
+caller's effective project and **refuse an out-of-scope process** (`OutOfScope`), exactly as the
+action tools do (the rule lives once in `core::facade::scoped`, so every remote adapter inherits it).
+`list_processes` stays cross-project — a caller keeps its overview — but **redacts** out-of-scope rows
+to identity only (id, project, kind, label, status; no ports, exit code, trust flag, or resumability).
+The local UI and the (now token-authenticated, see D-17) HTTP API keep the unscoped reads, since the
+local user is not scope-limited.
+
 **Effect on parity:** F3 (effective project scope) and F13 (a tool cannot touch another project) are
 **delivered** — the scope is now authenticated, so the cross-project isolation guarantee holds for the
-action tools. Tests prove a forged bind/select to a sibling project is refused.
+action tools **and** the read tools. Tests prove a forged bind/select and a cross-project read are
+both refused.
 
 ---
 
@@ -477,3 +490,73 @@ project a session acts on, now with names. The enriched payload, the auto-bind c
 the related progressive-disclosure additions (topic `help`, init instructions, `mcp_tools_summary`,
 featured `tools/list` order, decaying next-tool suggestions, and the group-level-only tool disable)
 are recorded as decisions in `plan/05 §12`.
+
+---
+
+## D-16 — Orphan reconciliation verifies process identity and fails closed on ambiguity 🟢
+
+**Introduced:** stability audit PRD-03, 2026-07-14.
+
+**Solo (ref `plan/05` §4 "Orphaned processes"):** Solo v0.9.3's changelog notes a fix so restart
+reconciliation no longer risks acting on a PID/PGID the OS **recycled** to an unrelated group. Solo
+documents *that* the class is fixed, not *how*.
+
+**Soloist:** each recorded process group is stamped, at record time, with a stable identity — the
+kernel `boot_id` (`/proc/sys/kernel/random/boot_id`) plus the group leader's start-time
+(`/proc/<pid>/stat` field 22). Reconciliation and the surfaced-orphan Kill path both re-check this
+identity through the `OrphanControl` port and treat a group as the recorded orphan **only** when it
+matches. This produces two observable fail-closed behaviors a bare-pgid check would not:
+- A **legacy record** written before identity stamping (no captured identity) is unverifiable, so it
+  is **dropped, not offered for kill** — a one-time effect on the first launch after upgrade. A
+  genuine leftover from before the upgrade is left running (leaked) rather than risk SIGKILLing a
+  recycled pgid.
+- A group whose **leader has exited but whose children linger** reads as gone (its `/proc/<pgid>`
+  entry is absent), so it is pruned rather than reaped. The lingering children are leaked, never a
+  wrong kill.
+- A **failed SIGKILL** on a matched group is surfaced to the user (error banner) and its record is
+  kept, so the leftover is re-offered next launch instead of being silently forgotten.
+
+**Rationale:** the audit's locked priority is that Soloist must **never** SIGKILL a process group
+whose identity doesn't match the recorded orphan (the exact class Solo v0.9.3 fixed). When identity
+cannot be confirmed, leaking a process is strictly safer than killing the wrong one, so every
+ambiguous case resolves to "do not kill." `boot_id` + start-time are cheap, Linux-native, and
+sufficient to detect PID/PGID reuse across both PID churn and reboots (D2 makes Linux the only
+target).
+
+**Effect on parity:** the orphaned-processes behavior (adopt on full match, else Kill/Kill All/Leave)
+is unchanged for a legitimate same-boot leftover; only recycled/legacy/leader-gone cases resolve to
+prune. No parity row regresses.
+
+---
+
+## D-17 — The HTTP API authenticates every route with a per-launch token, not a constant header 🟢
+
+**Introduced:** stability audit PRD-06, 2026-07-14. **Supersedes** the constant-header note in
+`plan/05` §8/§12 (`X-Soloist-Local-Auth: 1`, mutations only).
+
+**Solo (ref `plan/05` §8):** Solo's documented HTTP API gates **mutations** with a fixed header
+(`X-Solo-Local-Auth: 1`) and leaves reads open on loopback; a later Solo build (v0.9.3) is noted to
+rotate a bearer token. Solo documents the header, not a per-user boundary.
+
+**The gap this closes:** the fixed value `"1"` is CSRF protection, not authentication, and the reads
+had no gate at all. But the API binds a **TCP** loopback port, which — unlike the `0700` Unix socket
+the MCP server uses — any local user can reach, and CORS never constrains a non-browser client. On
+the multi-user Ubuntu target (D2), any local UID could `GET /processes/:id/output` and read another
+user's process logs (which can carry secrets).
+
+**Soloist (PRD-06):**
+- **A fresh random token per launch** (32 bytes of OS randomness, hex-encoded) is required on
+  **every** route — reads and mutations alike — compared in constant time (`subtle`). The token is
+  written into the runtime file (`http-api.json`) inside the already-`0700` data directory and the
+  file itself is `0600`, so only the user Soloist runs as can read it. The token — not the socket —
+  is the boundary between local users; the CLI reads it from the same file it already reads the port
+  from. A missing/wrong token is **401**.
+- **A `Host`-header guard** rejects (**403**) any request whose `Host` is not loopback, closing the
+  DNS-rebinding path where a page the user is viewing resolves its own domain to `127.0.0.1` and
+  talks to the server as same-origin (CORS never applies to that).
+- Out of scope (kept as `later`, per the ticket): rotating the token mid-session / bearer refresh
+  (Solo v0.9.3's fuller scheme). A per-launch token is sufficient for the local boundary.
+
+**Effect on parity:** H1 (HTTP API) and H4 (CLI) are unchanged in surface — the same endpoints, the
+same status mapping (403 trust gate, 404 unknown, 401 auth) — but every route now authenticates and
+the CLI sends the token on every request. No parity row regresses.

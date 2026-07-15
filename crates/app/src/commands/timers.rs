@@ -20,7 +20,8 @@ pub async fn timer_cancel(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<bool, String> {
     facade
-        .timer_cancel_for(ProcessId::from_raw(owner), TimerId::from_raw(timer))
+        .blocking(move |f| f.timer_cancel_for(ProcessId::from_raw(owner), TimerId::from_raw(timer)))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -33,7 +34,8 @@ pub async fn timer_pause(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<bool, String> {
     facade
-        .timer_pause_for(ProcessId::from_raw(owner), TimerId::from_raw(timer))
+        .blocking(move |f| f.timer_pause_for(ProcessId::from_raw(owner), TimerId::from_raw(timer)))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -46,6 +48,7 @@ pub async fn timer_resume(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<bool, String> {
     facade
-        .timer_resume_for(ProcessId::from_raw(owner), TimerId::from_raw(timer))
+        .blocking(move |f| f.timer_resume_for(ProcessId::from_raw(owner), TimerId::from_raw(timer)))
+        .await
         .map_err(|err| err.to_string())
 }

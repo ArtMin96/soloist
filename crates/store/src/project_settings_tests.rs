@@ -41,14 +41,6 @@ fn load_on_a_fresh_store_returns_none() {
 }
 
 #[test]
-fn save_then_load_round_trips() {
-    let store = store_with_projects();
-    let settings = non_default();
-    store.save(&P, &settings).unwrap();
-    assert_eq!(store.load(&P).unwrap(), Some(settings));
-}
-
-#[test]
 fn save_replaces_the_single_record_per_project() {
     // `project_id` is the primary key: a second save for the same project overwrites the first.
     let store = store_with_projects();

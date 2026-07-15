@@ -73,8 +73,9 @@ impl ShellEnvProbe for CommandShellEnvProbe {
 
 /// Resolves the user's login shell: `$SHELL`, then the passwd-entry shell, then `/bin/sh`.
 /// The same resolution the PTY spawner uses, so the captured environment is the one the
-/// command shell would have.
-fn login_shell() -> String {
+/// command shell would have. Shared within the crate so `--version` auto-detection probes
+/// through the very same shell (and thus the same `PATH`) a launched process runs under.
+pub(crate) fn login_shell() -> String {
     if let Ok(shell) = std::env::var("SHELL") {
         if !shell.is_empty() {
             return shell;

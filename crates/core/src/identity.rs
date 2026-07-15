@@ -1,7 +1,7 @@
 //! Caller identity and effective-project scope (context C8).
 //!
 //! Each connection from an MCP client is one session. A process Soloist launched finds
-//! its own [`ProcessId`] in the [`PROCESS_ID_ENV`] variable Soloist injects and binds
+//! its own [`ProcessId`] in the [`PROCESS_ID_ENV`](crate::ids::PROCESS_ID_ENV) variable Soloist injects and binds
 //! its session to it; an external client registers under a label instead. The bound
 //! process, or an explicit [`select_project`](Identity::select_project) choice,
 //! determines the effective project a scoped tool acts on — composed by the façade,
@@ -18,12 +18,6 @@ use crate::process::ProcessView;
 use crate::projects::ProjectRef;
 use crate::sync::lock;
 
-/// The environment variable Soloist injects into every managed process, carrying that
-/// process's own [`ProcessId`] as a decimal string. An agent that launches the MCP
-/// server reads it and calls `bind_session_process`, so its tool calls are attributed
-/// to — and scoped by — the process it runs in.
-pub const PROCESS_ID_ENV: &str = "SOLOIST_PROCESS_ID";
-
 /// Who a session's caller is. A session starts [`Unbound`](Origin::Unbound); a
 /// Soloist-supervised process binds to itself, while an external client registers a
 /// label.
@@ -33,7 +27,7 @@ pub enum Origin {
     /// The caller has not identified itself.
     #[default]
     Unbound,
-    /// A Soloist-supervised process, bound via [`PROCESS_ID_ENV`].
+    /// A Soloist-supervised process, bound via [`PROCESS_ID_ENV`](crate::ids::PROCESS_ID_ENV).
     Process(ProcessId),
     /// An external client that registered under a label.
     External(String),
@@ -146,7 +140,7 @@ impl Identity {
         id
     }
 
-    /// Binds a session to the supervised process it runs in (from [`PROCESS_ID_ENV`]).
+    /// Binds a session to the supervised process it runs in (from [`PROCESS_ID_ENV`](crate::ids::PROCESS_ID_ENV)).
     pub fn bind_process(&self, session: SessionId, process: ProcessId) {
         self.update(session, |s| s.origin = Origin::Process(process));
     }

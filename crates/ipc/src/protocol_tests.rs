@@ -356,15 +356,20 @@ fn every_response_variant_round_trips_through_json() {
 }
 
 #[test]
-fn every_port_wait_outcome_round_trips() {
-    for outcome in [
-        PortWaitOutcome::Bound,
-        PortWaitOutcome::TimedOut,
-        PortWaitOutcome::NotRunning,
+fn port_wait_outcomes_serialize_to_their_wire_tags() {
+    // Out-of-process clients read these tags off the wire, so the exact string per variant is the
+    // contract — a symmetric to_string→from_str round-trip would pass through a rename that silently
+    // breaks every reader. Pin the literal tag (and that it deserializes back) instead.
+    for (outcome, tag) in [
+        (PortWaitOutcome::Bound, "\"bound\""),
+        (PortWaitOutcome::TimedOut, "\"timed_out\""),
+        (PortWaitOutcome::NotRunning, "\"not_running\""),
     ] {
-        let json = serde_json::to_string(&outcome).expect("serialize");
-        let back: PortWaitOutcome = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(back, outcome);
+        assert_eq!(serde_json::to_string(&outcome).expect("serialize"), tag);
+        assert_eq!(
+            serde_json::from_str::<PortWaitOutcome>(tag).expect("deserialize"),
+            outcome
+        );
     }
 }
 
@@ -483,6 +488,24 @@ fn core_coordination_errors_map_to_the_wire_error() {
     assert_eq!(
         IpcError::from(CoordinationError::NoBoundProcess),
         IpcError::NoBoundProcess
+    );
+    assert_eq!(
+        IpcError::from(CoordinationError::PayloadTooLarge {
+            what: "kv value",
+            max_bytes: 4096,
+        }),
+        IpcError::PayloadTooLarge {
+            what: "kv value".to_owned(),
+            max_bytes: 4096,
+        }
+    );
+    assert!(
+        IpcError::PayloadTooLarge {
+            what: "kv value".to_owned(),
+            max_bytes: 4096,
+        }
+        .is_request_error(),
+        "an oversized payload is the caller's to fix"
     );
 }
 

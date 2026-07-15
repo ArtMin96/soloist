@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { lineageEdges, onDomainEvent } from "@/api";
+import { useReconcile } from "@/store/useReconcile";
 import type { DomainEvent } from "@/domain";
 
 // Domain events that can change the lineage map: a spawn records an edge, a removal drops one,
@@ -60,6 +61,10 @@ export function useLineage(): ReadonlyMap<number, number> {
       if (frame != null) cancelAnimationFrame(frame);
     };
   }, [refresh]);
+
+  // Re-read on a backend resync signal or window focus, so a dropped lifecycle delta never leaves
+  // the sidebar's worker nesting stale.
+  useReconcile(refresh);
 
   return parents;
 }

@@ -17,7 +17,12 @@ export interface StatusDisplay {
 }
 
 export const STATUS: Record<ProcStatus, StatusDisplay> = {
-  Running: { label: "Running", glyph: "●", toneClass: "text-status-running", transitional: false },
+  Running: {
+    label: "Running",
+    glyph: "●",
+    toneClass: "text-status-running",
+    transitional: false,
+  },
   Starting: {
     label: "Starting",
     glyph: "◐",
@@ -36,8 +41,18 @@ export const STATUS: Record<ProcStatus, StatusDisplay> = {
     toneClass: "text-status-transition",
     transitional: true,
   },
-  Stopped: { label: "Stopped", glyph: "○", toneClass: "text-status-stopped", transitional: false },
-  Crashed: { label: "Crashed", glyph: "✕", toneClass: "text-status-crashed", transitional: false },
+  Stopped: {
+    label: "Stopped",
+    glyph: "○",
+    toneClass: "text-status-stopped",
+    transitional: false,
+  },
+  Crashed: {
+    label: "Crashed",
+    glyph: "✕",
+    toneClass: "text-status-crashed",
+    transitional: false,
+  },
   RestartExhausted: {
     label: "Exhausted",
     glyph: "⚠",
@@ -45,11 +60,6 @@ export const STATUS: Record<ProcStatus, StatusDisplay> = {
     transitional: true,
   },
 };
-
-/** The auto-restart rate-limit gate, mirrored from the core: a crashed command is relaunched
- *  at most this many times within a 60-second window before it is held in RestartExhausted.
- *  Surfaced as the "restarting k/N" row affordance. */
-export const RESTART_LIMIT = 10;
 
 /** Whether a process is currently running (the steady green state, not in-flight). */
 export function isRunning(status: ProcStatus): boolean {
@@ -62,27 +72,43 @@ export function isStarting(status: ProcStatus): boolean {
   return status === "Starting" || status === "Restarting";
 }
 
-/** Whether a process currently has a live owning actor (mirrors core `is_active`). */
+// Whether a process in each state has a live owning actor, mirroring core `ProcStatus::is_active`.
+// An exhaustive Record rather than a condition chain for the same reason STATUS is one: a status
+// added to the union stops the build here until it is answered for, instead of silently defaulting
+// to inactive and quietly mis-enabling every control below.
+const ACTIVE: Record<ProcStatus, boolean> = {
+  Starting: true,
+  Running: true,
+  Restarting: true,
+  Stopping: true,
+  Stopped: false,
+  Crashed: false,
+  RestartExhausted: false,
+};
+
+/** Whether a process currently has a live owning actor (mirrors core `ProcStatus::is_active`). */
 export function isActive(status: ProcStatus): boolean {
-  return (
-    status === "Starting" ||
-    status === "Running" ||
-    status === "Restarting" ||
-    status === "Stopping"
-  );
+  return ACTIVE[status];
 }
+
+// What follows is which controls to *offer*, not which calls the core will accept — the two are
+// deliberately different. The core takes a stop whenever a process is active (including one
+// already stopping) and a restart from any state at all. These narrow that to the affordances
+// worth showing, so the row does not offer a control whose effect the user cannot see. Keeping
+// them here keeps presentation policy out of the domain; the core stays the authority on what is
+// legal and refuses anything these let through.
 
 /** Start is offered only from a resting state. */
 export function canStart(status: ProcStatus): boolean {
   return !isActive(status);
 }
 
-/** Stop is offered while live and not already stopping. */
+/** Stop is offered while live and not already stopping — a second stop would read as a no-op. */
 export function canStop(status: ProcStatus): boolean {
   return isActive(status) && status !== "Stopping";
 }
 
-/** Restart (stop + start) is offered for a running process. */
+/** Restart (stop + start) is offered for a running process; a resting one offers Start instead. */
 export function canRestart(status: ProcStatus): boolean {
   return status === "Running";
 }

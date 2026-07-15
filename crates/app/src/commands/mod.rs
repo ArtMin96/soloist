@@ -28,7 +28,7 @@ use std::sync::Arc;
 use soloist_core::{
     AgentTool, DetectedTool, Facade, ProcessId, ProcessView, ProjectId, ProjectLoad, ProjectView,
 };
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, Response};
 use tauri::State;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -45,7 +45,10 @@ pub async fn proc_list(facade: State<'_, Arc<Facade>>) -> Result<Vec<ProcessView
 /// arrives as a `ProjectOpened` event that prompts the UI to re-read this.
 #[tauri::command]
 pub async fn project_list(facade: State<'_, Arc<Facade>>) -> Result<Vec<ProjectView>, String> {
-    facade.projects_snapshot().map_err(|err| err.to_string())
+    facade
+        .blocking(|f| f.projects_snapshot())
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Loads a project from a folder path: auto-creates a `solo.yml` from detected commands
@@ -60,7 +63,8 @@ pub async fn project_load(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectLoad, String> {
     facade
-        .load_project(Path::new(&path))
+        .blocking(move |f| f.load_project(Path::new(&path)))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -86,14 +90,18 @@ pub async fn config_trust(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<(), String> {
     facade
-        .trust_command(ProjectId::from_raw(project), &name)
+        .blocking(move |f| f.trust_command(ProjectId::from_raw(project), &name))
+        .await
         .map_err(|err| err.to_string())
 }
 
 /// Every configured agent tool, for the launch picker to render instantly (no probing).
 #[tauri::command]
 pub async fn agent_list(facade: State<'_, Arc<Facade>>) -> Result<Vec<AgentTool>, String> {
-    facade.agents().list_tools().map_err(|err| err.to_string())
+    facade
+        .blocking(|f| f.agents().list_tools())
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Each configured agent tool paired with whether its CLI appears installed, by probing
@@ -120,7 +128,8 @@ pub async fn agent_launch(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<u64, String> {
     facade
-        .launch_agent(ProjectId::from_raw(project), &tool, extra_args)
+        .blocking(move |f| f.launch_agent(ProjectId::from_raw(project), &tool, extra_args))
+        .await
         .map(|id| id.get())
         .map_err(|err| err.to_string())
 }
@@ -129,8 +138,8 @@ pub async fn agent_launch(
 #[tauri::command]
 pub async fn proc_start(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
     facade
-        .supervisor()
-        .start(ProcessId::from_raw(id))
+        .blocking(move |f| f.supervisor().start(ProcessId::from_raw(id)))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -144,8 +153,8 @@ pub async fn proc_stop(id: u64, facade: State<'_, Arc<Facade>>) -> Result<bool, 
 #[tauri::command]
 pub async fn proc_restart(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
     facade
-        .supervisor()
-        .restart(ProcessId::from_raw(id))
+        .blocking(move |f| f.supervisor().restart(ProcessId::from_raw(id)))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -155,8 +164,8 @@ pub async fn proc_restart(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(),
 #[tauri::command]
 pub async fn agent_resume(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
     facade
-        .supervisor()
-        .resume(ProcessId::from_raw(id))
+        .blocking(move |f| f.supervisor().resume(ProcessId::from_raw(id)))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -164,8 +173,8 @@ pub async fn agent_resume(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(),
 #[tauri::command]
 pub async fn stack_start(project: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
     facade
-        .supervisor()
-        .start_all(ProjectId::from_raw(project))
+        .blocking(move |f| f.supervisor().start_all(ProjectId::from_raw(project)))
+        .await
         .map(|_summary| ())
         .map_err(|err| err.to_string())
 }
@@ -184,8 +193,8 @@ pub async fn stack_restart_running(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<(), String> {
     facade
-        .supervisor()
-        .restart_running(ProjectId::from_raw(project))
+        .blocking(move |f| f.supervisor().restart_running(ProjectId::from_raw(project)))
+        .await
         .map_err(|err| err.to_string())
 }
 
@@ -226,12 +235,14 @@ pub async fn pty_resize(
 const PTY_FRAME_CHUNK: u8 = 0;
 const PTY_FRAME_RESYNC: u8 = 1;
 
-/// Prefixes a payload with its frame tag.
-fn frame(tag: u8, bytes: &[u8]) -> Vec<u8> {
+/// Prefixes a payload with its frame tag and wraps it as a raw-bytes IPC response, so the channel
+/// delivers a binary `ArrayBuffer` to the webview instead of a JSON number array — the full
+/// scrollback replay crosses the boundary as bytes, with no per-byte JSON expansion.
+fn pty_frame(tag: u8, bytes: &[u8]) -> Response {
     let mut framed = Vec::with_capacity(bytes.len() + 1);
     framed.push(tag);
     framed.extend_from_slice(bytes);
-    framed
+    Response::new(framed)
 }
 
 /// Attaches a terminal pane to a process: replays its raw scrollback as the first channel
@@ -241,7 +252,7 @@ fn frame(tag: u8, bytes: &[u8]) -> Vec<u8> {
 #[tauri::command]
 pub async fn pty_attach(
     id: u64,
-    on_chunk: Channel<Vec<u8>>,
+    on_chunk: Channel<Response>,
     facade: State<'_, Arc<Facade>>,
     bridge: State<'_, PtyBridge>,
 ) -> Result<u64, String> {
@@ -254,14 +265,14 @@ pub async fn pty_attach(
     // first message preserves the core's no-gap/no-duplicate guarantee across IPC. It is a
     // resync frame: the emulator resets to it, the same way it recovers from a re-sync below.
     on_chunk
-        .send(frame(PTY_FRAME_RESYNC, &scrollback))
+        .send(pty_frame(PTY_FRAME_RESYNC, &scrollback))
         .map_err(|err| err.to_string())?;
     let facade = Arc::clone(&facade);
     let handle = tauri::async_runtime::spawn(async move {
         loop {
             match live.recv().await {
                 Ok(chunk) => {
-                    if on_chunk.send(frame(PTY_FRAME_CHUNK, &chunk)).is_err() {
+                    if on_chunk.send(pty_frame(PTY_FRAME_CHUNK, &chunk)).is_err() {
                         break;
                     }
                 }
@@ -273,7 +284,10 @@ pub async fn pty_attach(
                     match facade.supervisor().attach_pty(pid) {
                         Some((scrollback, fresh)) => {
                             live = fresh;
-                            if on_chunk.send(frame(PTY_FRAME_RESYNC, &scrollback)).is_err() {
+                            if on_chunk
+                                .send(pty_frame(PTY_FRAME_RESYNC, &scrollback))
+                                .is_err()
+                            {
                                 break;
                             }
                         }
@@ -297,16 +311,32 @@ pub async fn pty_detach(token: u64, bridge: State<'_, PtyBridge>) -> Result<(), 
     Ok(())
 }
 
-/// Resolves surfaced orphans the user chose to reap: SIGKILLs each listed process
-/// group and forgets its runtime-state record. "Leave running" sends an empty list, so
-/// nothing is signalled — the dialog simply dismisses.
+/// Resolves surfaced orphans the user chose to reap: SIGKILLs each listed process group
+/// whose recorded identity still matches, and forgets its runtime-state record. "Leave
+/// running" sends an empty list, so nothing is signalled — the dialog simply dismisses. A
+/// group whose SIGKILL fails is reported so the UI can surface the error and keep its row.
 #[tauri::command]
 pub async fn orphans_resolve(
     pgids: Vec<i32>,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<(), String> {
+    let mut failures = Vec::new();
     for pgid in pgids {
-        facade.supervisor().kill_orphan(pgid);
+        if let Err(err) = facade.supervisor().kill_orphan(pgid) {
+            failures.push(format!("pgid {pgid} ({err})"));
+        }
     }
-    Ok(())
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Could not stop leftover {}: {}",
+            if failures.len() == 1 {
+                "process"
+            } else {
+                "processes"
+            },
+            failures.join(", "),
+        ))
+    }
 }

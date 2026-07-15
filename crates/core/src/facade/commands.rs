@@ -11,7 +11,11 @@
 use std::path::{Path, PathBuf};
 
 use super::Facade;
-use crate::config::{ConfigWriteError, ProcessSpec, SoloYml, TrustReviewCommand, WriteError};
+use crate::config::{
+    check_command, check_command_name, ConfigWriteError, InvalidCommand, ProcessSpec, SoloYml,
+    WriteError,
+};
+use crate::configchange::TrustReviewCommand;
 use crate::events::DomainEvent;
 use crate::ids::ProjectId;
 use crate::ports::StoreError;
@@ -143,6 +147,7 @@ impl Facade {
         name: &str,
         spec: ProcessSpec,
     ) -> Result<Vec<TrustReviewCommand>, ConfigWriteError> {
+        check_command(name, &spec)?;
         if self
             .project_settings
             .get(&project)?
@@ -182,6 +187,7 @@ impl Facade {
         name: &str,
         spec: ProcessSpec,
     ) -> Result<Vec<TrustReviewCommand>, ConfigWriteError> {
+        check_command(name, &spec)?;
         let name = name.to_owned();
         self.write_shared_command(project, move |config| {
             if !config.processes.contains_key(&name) {
@@ -201,6 +207,7 @@ impl Facade {
         from: &str,
         to: &str,
     ) -> Result<Vec<TrustReviewCommand>, ConfigWriteError> {
+        check_command_name(to)?;
         if from != to
             && self
                 .project_settings
@@ -251,6 +258,7 @@ impl Facade {
         name: &str,
         spec: ProcessSpec,
     ) -> Result<ProjectSettings, LocalCommandError> {
+        check_command(name, &spec)?;
         if self.shared_command_exists(project, name) {
             return Err(LocalCommandError::Duplicate(name.to_owned()));
         }
@@ -275,6 +283,7 @@ impl Facade {
         name: &str,
         spec: ProcessSpec,
     ) -> Result<ProjectSettings, LocalCommandError> {
+        check_command(name, &spec)?;
         if !self
             .project_settings
             .get(&project)?
@@ -297,6 +306,7 @@ impl Facade {
         from: &str,
         to: &str,
     ) -> Result<ProjectSettings, LocalCommandError> {
+        check_command_name(to)?;
         let local = self.project_settings.get(&project)?.local_commands;
         if !local.contains_key(from) {
             return Err(LocalCommandError::Unknown);
@@ -402,6 +412,9 @@ pub enum LocalCommandError {
     /// No local command of that name exists.
     #[error("no such local command")]
     Unknown,
+    /// The command the mutation would store has no name or nothing to run.
+    #[error(transparent)]
+    Invalid(#[from] InvalidCommand),
     #[error(transparent)]
     Store(#[from] StoreError),
 }

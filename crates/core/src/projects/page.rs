@@ -7,6 +7,8 @@
 //! carries its [`Visibility`] so the page shows whether the command lives in the shared `solo.yml`
 //! (committed) or the app-local overlay (this machine only).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::config::ProcessSpec;
@@ -37,6 +39,7 @@ pub struct ProjectCommandView {
     pub auto_start: bool,
     pub auto_restart: bool,
     pub restart_when_changed: Vec<String>,
+    pub env: BTreeMap<String, String>,
     pub visibility: Visibility,
     pub terminal_alerts: bool,
     pub status: Option<ProcStatus>,
@@ -62,6 +65,7 @@ impl ProjectCommandView {
             auto_start: spec.auto_start,
             auto_restart: spec.auto_restart,
             restart_when_changed: spec.restart_when_changed.clone(),
+            env: spec.env.clone(),
             visibility,
             terminal_alerts,
             status,

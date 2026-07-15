@@ -12,8 +12,9 @@ use nix::errno::Errno;
 use nix::sys::signal::killpg;
 use nix::unistd::Pid;
 use soloist_core::{
-    CorePorts, DomainEvent, Facade, Hash, OrphanControl, ProcStatus, ProcessSpawner, ProjectId,
-    ProjectRecord, ProjectRepo, PtySize, SpawnSpec, StoreError, TokioClock, TrustRepo,
+    CorePorts, DomainEvent, Facade, Hash, OrphanControl, OrphanRecord, ProcStatus, ProcessIdentity,
+    ProcessSpawner, ProjectId, ProjectRecord, ProjectRepo, PtySize, SpawnSpec, StoreError,
+    TokioClock, TrustRepo,
 };
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use tokio::sync::broadcast::error::RecvError;
@@ -228,22 +229,69 @@ async fn start_stop_fifty_processes_leaves_no_survivors() {
 }
 
 #[tokio::test]
-async fn orphan_control_tracks_a_group_until_it_dies() {
+async fn orphan_control_tracks_a_group_by_identity_until_it_dies() {
     let spawner = PtyProcessSpawner;
     let cwd = std::env::current_dir().expect("cwd");
     let mut spawned = spawner.spawn(&spec("sleep 30", cwd)).await.expect("spawn");
     let pgid = spawned.pid.expect("pid") as i32;
 
-    // The running group is alive; once reaped, it is gone — exactly what reconciliation
-    // checks to decide adopt vs prune.
+    // A record stamped with the live leader's identity reads as the same running group;
+    // a record with a differing identity (a recycled pgid) does not; and once reaped, the
+    // group is gone — exactly what reconciliation checks to decide adopt/surface vs prune.
     let control = PgidOrphanControl;
-    assert!(control.is_alive(pgid), "running group is alive");
+    let identity = control
+        .identify(pgid)
+        .expect("running leader has an identity");
+    let record = OrphanRecord {
+        project_root: PathBuf::from("/p"),
+        name: "sleep".into(),
+        command: "sleep 30".into(),
+        pgid,
+        identity: Some(identity.clone()),
+    };
+    assert!(
+        control.is_recorded_alive(&record),
+        "the running group matches its recorded identity"
+    );
+
+    let recycled = OrphanRecord {
+        identity: Some(ProcessIdentity {
+            boot_id: identity.boot_id.clone(),
+            started_at: identity.started_at + 1,
+        }),
+        ..record.clone()
+    };
+    assert!(
+        !control.is_recorded_alive(&recycled),
+        "a pgid with a different start-time is not the recorded group"
+    );
 
     spawned.control.kill().await.expect("kill group");
     let _ = timeout(Duration::from_secs(5), spawned.exit)
         .await
         .expect("reaped");
-    assert!(!control.is_alive(pgid), "reaped group is no longer alive");
+    assert!(
+        !control.is_recorded_alive(&record),
+        "reaped group is no longer alive"
+    );
+}
+
+#[test]
+fn identify_reads_the_current_process_from_proc() {
+    // Exercises the `/proc/<pid>/stat` and boot-id parsing on a known-live pid (this test
+    // process), and that a pid that cannot exist has no identity.
+    let control = PgidOrphanControl;
+    let me = std::process::id() as i32;
+    let identity = control.identify(me).expect("this process has an identity");
+    assert!(!identity.boot_id.is_empty(), "boot id is read");
+    assert!(
+        identity.started_at > 0,
+        "start-time is a positive jiffy count"
+    );
+    assert!(
+        control.identify(-1).is_none(),
+        "a bogus pgid has no identity"
+    );
 }
 
 #[tokio::test]
@@ -318,13 +366,14 @@ async fn send_input_writes_to_the_pty_and_returns_the_rendered_tail() {
         .expect("a running process has a live group");
     let session = facade.open_session(Some(pgid));
     facade
-        .bind_session_process(session, id)
+        .scoped(session)
+        .bind_session_process(id)
         .expect("scope the session to the running process it shares a group with");
 
     // The wait is generous so the echo is recorded before the snapshot; cat echoes at once.
     let tail = facade
+        .scoped(session)
         .send_input(
-            session,
             id,
             b"marco-polo\r".to_vec(),
             Some(Duration::from_millis(750)),
@@ -536,7 +585,8 @@ async fn spawn_agent_launches_a_worker_in_the_sessions_project() {
     let session = facade.open_session(None);
 
     let id = facade
-        .spawn_agent(session, "Stub", Vec::new())
+        .scoped(session)
+        .spawn_agent("Stub", Vec::new())
         .expect("spawn the worker agent");
 
     let view = facade

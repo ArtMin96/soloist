@@ -51,9 +51,6 @@ describe("formatPausedRemaining", () => {
     expect(formatPausedRemaining(70_000)).toBe("1m 10s remaining");
     expect(formatPausedRemaining(2 * 3600 * 1000 + 15 * 60 * 1000)).toBe("2h 15m remaining");
   });
-  it("does not drift — the same remainder always reads the same", () => {
-    expect(formatPausedRemaining(70_000)).toBe(formatPausedRemaining(70_000));
-  });
 });
 
 describe("bodyPreview", () => {

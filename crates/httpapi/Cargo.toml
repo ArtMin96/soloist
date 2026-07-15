@@ -13,6 +13,8 @@ soloist-core = { path = "../core" }
 soloist-ipc = { path = "../ipc" }
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }
+# Constant-time token comparison, so the auth check leaks nothing through timing.
+subtle = "2"
 tokio = { version = "1", features = ["net", "rt"] }
 tower-http = { version = "0.6", features = ["cors"] }
 
@@ -20,5 +22,5 @@ tower-http = { version = "0.6", features = ["cors"] }
 soloist-core = { path = "../core", features = ["testing"] }
 serde_json = "1"
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "net", "rt", "time"] }
+tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }

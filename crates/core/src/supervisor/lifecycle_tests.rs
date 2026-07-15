@@ -10,6 +10,7 @@ use tokio::sync::broadcast::error::RecvError;
 use crate::events::DomainEvent;
 use crate::ids::ProcessId;
 use crate::process::ProcStatus;
+use crate::supervisor::actor::STOP_GRACE;
 use crate::supervisor::test_support::{harness, next_to, terminal};
 use crate::supervisor::SupervisorError;
 use crate::testing::FakeSpawner;
@@ -110,6 +111,41 @@ async fn close_reaps_a_running_process_before_removing_it() {
 }
 
 #[tokio::test]
+async fn sigkill_fires_at_the_end_of_the_grace_window_not_before() {
+    // The fake child ignores SIGTERM, so only the SIGKILL at the end of the grace window can reap
+    // it. Close must stay pending for the whole window and complete exactly when it elapses —
+    // proving the grace is honored (not skipped) and bounded to STOP_GRACE (not indefinite).
+    let mut h = harness(FakeSpawner::exits_on_kill());
+    let id = terminal(&h.sup, "sleep 60");
+    h.sup.start(id).expect("start");
+    assert_eq!(next_to(&mut h.rx).await, ProcStatus::Starting);
+    assert_eq!(next_to(&mut h.rx).await, ProcStatus::Running);
+
+    let sup = h.sup.clone();
+    let closing = tokio::spawn(async move { sup.close(id).await });
+    assert_eq!(next_to(&mut h.rx).await, ProcStatus::Stopping);
+    // Let the actor reach its SIGTERM + grace-window sleep before advancing the clock.
+    tokio::task::yield_now().await;
+
+    // Just short of the window: SIGKILL has not fired, so close is still awaiting the reap.
+    h.clock.advance(STOP_GRACE - Duration::from_millis(1));
+    tokio::task::yield_now().await;
+    assert!(
+        !closing.is_finished(),
+        "close waits out the full grace window before SIGKILL"
+    );
+
+    // Reaching the window fires SIGKILL, the child exits, and close completes.
+    h.clock.advance(Duration::from_millis(1));
+    closing
+        .await
+        .expect("join the close task")
+        .expect("close succeeds");
+    assert_eq!(id, next_removed(&mut h.rx).await);
+    assert!(h.sup.view(id).is_none(), "the reaped process is gone");
+}
+
+#[tokio::test]
 async fn a_closed_process_cannot_be_relaunched_into_an_orphan() {
     // close removes the entry *before* it awaits the reap, so once a process is closed the
     // shared launch primitive can no longer claim its id. This is what stops a crash arriving
@@ -117,8 +153,9 @@ async fn a_closed_process_cannot_be_relaunched_into_an_orphan() {
     let h = harness(FakeSpawner::exits_on_kill());
     let id = terminal(&h.sup, "sleep 60");
     h.sup.close(id).await.expect("close");
+    let (mailbox, _inbox) = tokio::sync::mpsc::channel(1);
     assert!(
-        h.sup.registry.begin_launch(id).is_none(),
+        h.sup.registry.begin_launch(id, mailbox).is_none(),
         "a closed id is gone, so the crash-restart launch primitive cannot reclaim it"
     );
 }

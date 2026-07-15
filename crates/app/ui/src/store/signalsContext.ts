@@ -1,6 +1,6 @@
 import { createContext, use, useCallback, useRef, useSyncExternalStore } from "react";
 import type { AgentActivity } from "@/domain";
-import type { ProcessMetrics, SignalState } from "@/store/signals";
+import type { ProcessMetrics, RestartProgress, SignalState } from "@/store/signals";
 import { EMPTY_STORE, type SignalStore } from "@/store/signalStore";
 
 // Per-process telemetry is read at the leaves (every sidebar row, the terminal header) but would
@@ -13,24 +13,26 @@ export const SignalsContext = createContext<SignalStore>(EMPTY_STORE);
 
 export interface ProcessSignal {
   metrics?: ProcessMetrics;
-  attempt?: number;
+  restart?: RestartProgress;
   activity?: AgentActivity;
 }
 
-// Two slices are equal when the id's telemetry is unchanged. Metrics compare by value (a fresh
-// object is allocated each tick even when the numbers repeat) so an unchanged reading never
-// re-renders; attempt and activity are primitives compared by identity.
+// Two slices are equal when the id's telemetry is unchanged. The object-valued slices compare by
+// value (a fresh object is allocated per event even when the numbers repeat) so an unchanged
+// reading never re-renders; activity is a primitive compared by identity.
 function sameSignal(a: ProcessSignal, b: ProcessSignal): boolean {
   return (
-    a.attempt === b.attempt &&
+    a.restart?.attempt === b.restart?.attempt &&
+    a.restart?.limit === b.restart?.limit &&
     a.activity === b.activity &&
     a.metrics?.cpu_pct === b.metrics?.cpu_pct &&
     a.metrics?.rss === b.metrics?.rss
   );
 }
 
-/** The telemetry for one process: its latest CPU/memory reading, current auto-restart attempt, and
- *  (for a running agent) its current activity — each `undefined` until one arrives. Re-renders the
+/** The telemetry for one process: its latest CPU/memory reading, the progress of an in-flight
+ *  auto-restart, and (for a running agent) its current activity — each `undefined` until one
+ *  arrives. Re-renders the
  *  caller only when *this* process's slice changes, not on every other process's tick. */
 export function useSignal(id: number): ProcessSignal {
   const store = use(SignalsContext);
@@ -47,7 +49,7 @@ export function useSignal(id: number): ProcessSignal {
     if (cached && cached.state === state && cached.id === id) return cached.slice;
     const slice: ProcessSignal = {
       metrics: state.metrics.get(id),
-      attempt: state.attempts.get(id),
+      restart: state.attempts.get(id),
       activity: state.activity.get(id),
     };
     if (cached && cached.id === id && sameSignal(cached.slice, slice)) {

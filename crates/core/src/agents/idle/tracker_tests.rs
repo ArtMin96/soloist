@@ -31,6 +31,24 @@ fn observe_is_a_noop_for_an_untracked_id() {
 }
 
 #[test]
+fn activity_snapshot_reports_only_classified_agents() {
+    // The snapshot seeds the UI's idle badges: a classified agent appears with its current
+    // activity; a tracked-but-never-observed agent (still starting up) has no activity yet and is
+    // omitted, so the seed never invents a badge the core has not classified.
+    let tracker = IdleTracker::new();
+    let observed = ProcessId::next();
+    let never_observed = ProcessId::next();
+    tracker.track(observed, AgentKind::Claude);
+    tracker.track(never_observed, AgentKind::Claude);
+    tracker.observe(observed, &output(20));
+
+    assert_eq!(
+        tracker.activity_snapshot(),
+        vec![(observed, AgentActivity::Working)]
+    );
+}
+
+#[test]
 fn retain_live_drops_departed_agents() {
     let tracker = IdleTracker::new();
     let kept = ProcessId::next();

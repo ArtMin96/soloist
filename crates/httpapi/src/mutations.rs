@@ -2,8 +2,8 @@
 //!
 //! Each handler maps to **one** core command — the same `Facade`/`Supervisor` method the
 //! desktop UI and the MCP server drive — so an action like "restart" is implemented once in
-//! the core and never per adapter. Every route here sits behind the local-auth gate; the
-//! read routes stay open on loopback.
+//! the core and never per adapter. The token and `Host` guards apply to the whole router
+//! (see [`crate::routes::router`]), so these routes need no gate of their own.
 //!
 //! The two bulk-start scopes are deliberate (see [`soloist_core::Supervisor`]): `start-auto`
 //! starts only `auto_start` commands (the dashboard's launch-the-stack action), while
@@ -11,7 +11,6 @@
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::middleware;
 use axum::routing::{delete, post};
 use axum::{Json, Router};
 
@@ -23,12 +22,11 @@ use soloist_ipc::http::{
     SpawnRequest, SpawnResponse, TransferScratchpadRequest, TransferTodoRequest,
 };
 
-use crate::auth::require_local_auth;
 use crate::state::ApiState;
 
-/// The mutation sub-router, with the local-auth gate applied to every route on it. Using
-/// `route_layer` confines the gate to these routes — the read routes merged alongside stay
-/// open on loopback.
+/// The mutation sub-router. The whole-router token and `Host` guards cover these routes, so
+/// they carry no gate of their own; they are merged with the read routes in
+/// [`crate::routes::router`].
 pub fn router() -> Router<ApiState> {
     Router::new()
         .route("/processes/{id}/start", post(start))
@@ -48,7 +46,6 @@ pub fn router() -> Router<ApiState> {
             post(transfer_scratchpad),
         )
         .route("/focus", post(focus))
-        .route_layer(middleware::from_fn(require_local_auth))
 }
 
 /// Maps a supervisor error to the status the adapter returns: an unknown process is `404`,
@@ -76,19 +73,32 @@ fn outcome(result: Result<impl Sized, SupervisorError>) -> StatusCode {
 
 /// `POST /processes/:id/start` — starts one process; trust-gated in the core.
 async fn start(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
-    outcome(state.facade().supervisor().start(ProcessId::from_raw(id)))
+    outcome(
+        state
+            .facade()
+            .blocking(move |f| f.supervisor().start(ProcessId::from_raw(id)))
+            .await,
+    )
 }
 
 /// `POST /processes/:id/stop` — requests a graceful stop. Idempotent: stopping a process
 /// that is not live is a no-op success.
 async fn stop(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
-    state.facade().supervisor().stop(ProcessId::from_raw(id));
+    state
+        .facade()
+        .blocking(move |f| f.supervisor().stop(ProcessId::from_raw(id)))
+        .await;
     StatusCode::OK
 }
 
 /// `POST /processes/:id/restart` — restarts one process; trust-gated in the core.
 async fn restart(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
-    outcome(state.facade().supervisor().restart(ProcessId::from_raw(id)))
+    outcome(
+        state
+            .facade()
+            .blocking(move |f| f.supervisor().restart(ProcessId::from_raw(id)))
+            .await,
+    )
 }
 
 /// `POST /projects/:id/start-auto` — starts the trusted `auto_start` commands only.
@@ -96,8 +106,8 @@ async fn start_auto(State(state): State<ApiState>, Path(id): Path<u64>) -> Statu
     outcome(
         state
             .facade()
-            .supervisor()
-            .start_all(ProjectId::from_raw(id)),
+            .blocking(move |f| f.supervisor().start_all(ProjectId::from_raw(id)))
+            .await,
     )
 }
 
@@ -106,8 +116,8 @@ async fn start_all(State(state): State<ApiState>, Path(id): Path<u64>) -> Status
     outcome(
         state
             .facade()
-            .supervisor()
-            .start_all_commands(ProjectId::from_raw(id)),
+            .blocking(move |f| f.supervisor().start_all_commands(ProjectId::from_raw(id)))
+            .await,
     )
 }
 
@@ -115,8 +125,8 @@ async fn start_all(State(state): State<ApiState>, Path(id): Path<u64>) -> Status
 async fn stop_all(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
     state
         .facade()
-        .supervisor()
-        .stop_all(ProjectId::from_raw(id));
+        .blocking(move |f| f.supervisor().stop_all(ProjectId::from_raw(id)))
+        .await;
     StatusCode::OK
 }
 
@@ -125,8 +135,8 @@ async fn restart_running(State(state): State<ApiState>, Path(id): Path<u64>) -> 
     outcome(
         state
             .facade()
-            .supervisor()
-            .restart_running(ProjectId::from_raw(id)),
+            .blocking(move |f| f.supervisor().restart_running(ProjectId::from_raw(id)))
+            .await,
     )
 }
 
@@ -136,8 +146,8 @@ async fn restart_all(State(state): State<ApiState>, Path(id): Path<u64>) -> Stat
     outcome(
         state
             .facade()
-            .supervisor()
-            .restart_all_commands(ProjectId::from_raw(id)),
+            .blocking(move |f| f.supervisor().restart_all_commands(ProjectId::from_raw(id)))
+            .await,
     )
 }
 
@@ -147,7 +157,11 @@ async fn restart_all(State(state): State<ApiState>, Path(id): Path<u64>) -> Stat
 /// can share. A byte-identical file is a no-op success; an unknown project is a `404`. The read is
 /// small and bounded (the `solo.yml` cap), like the trust-store reads the other mutations make.
 async fn reload(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
-    match state.facade().reload_project(ProjectId::from_raw(id)) {
+    match state
+        .facade()
+        .blocking(move |f| f.reload_project(ProjectId::from_raw(id)))
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(err) => reload_status(&err),
     }
@@ -191,9 +205,14 @@ async fn spawn_agent(
     Path(id): Path<u64>,
     Json(body): Json<SpawnRequest>,
 ) -> Result<Json<SpawnResponse>, StatusCode> {
+    // Bound a runaway caller before doing any work: past the per-launch cap, refuse with 429.
+    if !state.allow_spawn() {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
     match state
         .facade()
-        .launch_agent(ProjectId::from_raw(id), &body.tool, body.args)
+        .blocking(move |f| f.launch_agent(ProjectId::from_raw(id), &body.tool, body.args))
+        .await
     {
         Ok(process) => Ok(Json(SpawnResponse { id: process.get() })),
         Err(err) => Err(launch_status(&err)),
@@ -221,11 +240,18 @@ async fn transfer_todo(
     Path(id): Path<u64>,
     Json(body): Json<TransferTodoRequest>,
 ) -> StatusCode {
-    transfer_status(state.facade().todo_transfer_in(
-        ProjectId::from_raw(id),
-        ProjectId::from_raw(body.to_project),
-        TodoId::from_raw(body.todo),
-    ))
+    transfer_status(
+        state
+            .facade()
+            .blocking(move |f| {
+                f.todo_transfer_in(
+                    ProjectId::from_raw(id),
+                    ProjectId::from_raw(body.to_project),
+                    TodoId::from_raw(body.todo),
+                )
+            })
+            .await,
+    )
 }
 
 /// `POST /projects/:id/transfer-scratchpad` — moves a scratchpad by name from the path (source)
@@ -237,11 +263,18 @@ async fn transfer_scratchpad(
     Path(id): Path<u64>,
     Json(body): Json<TransferScratchpadRequest>,
 ) -> StatusCode {
-    transfer_status(state.facade().scratchpad_transfer_in(
-        ProjectId::from_raw(id),
-        &body.name,
-        ProjectId::from_raw(body.to_project),
-    ))
+    transfer_status(
+        state
+            .facade()
+            .blocking(move |f| {
+                f.scratchpad_transfer_in(
+                    ProjectId::from_raw(id),
+                    &body.name,
+                    ProjectId::from_raw(body.to_project),
+                )
+            })
+            .await,
+    )
 }
 
 /// Collapses a transfer outcome to a status: `200` on success; an unknown todo, scratchpad, or

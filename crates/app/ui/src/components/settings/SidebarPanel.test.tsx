@@ -35,4 +35,25 @@ describe("Settings — Sidebar", () => {
     fireEvent.click(toggle);
     await waitFor(() => expect(saved?.hide_empty_sections).toBe(true));
   });
+
+  it("shows the process usage thresholds and the filter toggle, and no project-header controls", async () => {
+    mockIPC((cmd) => (cmd === "sidebar_settings" ? DEFAULT_SIDEBAR : undefined));
+
+    render(
+      <SidebarSettingsProvider>
+        <SidebarPanel />
+      </SidebarSettingsProvider>,
+    );
+
+    // The controls that now drive the live sidebar are present.
+    expect(await screen.findByRole("switch", { name: "Show filter input" })).toBeTruthy();
+    expect(screen.getByLabelText("Process CPU usage threshold")).toBeTruthy();
+    expect(screen.getByLabelText("Process memory usage threshold")).toBeTruthy();
+
+    // The removed decorative project-header controls are gone.
+    expect(screen.queryByLabelText("Project CPU usage threshold")).toBeNull();
+    expect(screen.queryByLabelText("Open in editor")).toBeNull();
+    expect(screen.queryByLabelText("Open in terminal")).toBeNull();
+    expect(screen.queryByLabelText("Show in file manager")).toBeNull();
+  });
 });

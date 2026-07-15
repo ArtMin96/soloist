@@ -1,12 +1,19 @@
-//! Read-only terminal-output queries (context C8) — the output surface a remote caller
-//! (MCP today, the HTTP API later) reads a process's logs and ports through.
+//! Read-only terminal-output queries (context C8) — how a process's logs and ports are read.
 //!
-//! These are open reads, like `list_processes`: they expose any process's output unfiltered
-//! rather than scope-gating it, matching the rest of the read surface. Each routes to one C2
-//! accessor (which reads the C3 terminal buffers) and bounds the reply twice — by line/match
-//! *count* and by total *bytes* — so a busy process can never return an unbounded payload. The
-//! one buffer *mutation*, `clear_output`, is a scoped action and lives in `scoped.rs`.
+//! Both authorities live here, side by side. The [`Facade`] accessors are *unscoped*: they read
+//! any process's output by id, for the local UI (the user is not scope-limited) and the
+//! token-authenticated HTTP API (the local user's authority). A remote MCP caller instead goes
+//! through the [`ScopedFacade`] wrappers below, which refuse a process outside the session's
+//! project — so cross-project output never crosses the isolation boundary. That includes the
+//! buffer *mutation* `clear_output` and the no-op `flush_terminal_perf`: both would otherwise
+//! report whether a foreign process exists. The scope rule itself lives once in
+//! [`scoped`](super::scoped); this module only spends it.
+//!
+//! Each accessor routes to one C2 accessor (which reads the C3 terminal buffers) and bounds the
+//! reply twice — by line/match *count* and by total *bytes* — so a busy process can never return
+//! an unbounded payload.
 
+use super::scoped::{ScopedActionError, ScopedFacade};
 use super::Facade;
 use crate::ids::ProcessId;
 
@@ -129,13 +136,84 @@ impl Facade {
     pub fn process_ports(&self, id: ProcessId) -> Option<Vec<u16>> {
         self.process_view(id).map(|view| view.ports)
     }
+}
 
-    /// Acknowledges a terminal-perf flush for a process, returning whether it is registered.
-    /// A no-op in Soloist: the rendered and raw buffers are written synchronously as output
-    /// is read, so a query always sees the latest — the only output coalescing is the
-    /// frontend's per-frame terminal repaint, which never affects what these tools read.
-    pub fn flush_terminal_perf(&self, id: ProcessId) -> bool {
-        self.process_view(id).is_some()
+impl ScopedFacade<'_> {
+    /// Clears one in-scope process's output buffers (rendered and raw) without stopping it
+    /// or touching its PTY. A scoped action — unlike the open output *reads*, clearing
+    /// mutates what every viewer sees, so it is confined to the session's project. Returns
+    /// whether the process had a terminal to clear.
+    pub fn clear_output(&self, process: ProcessId) -> Result<bool, ScopedActionError> {
+        self.require_in_scope(process)?;
+        Ok(self.inner.supervisor().clear_output(process))
+    }
+
+    /// The recent rendered output of one in-scope process — the scoped `get_process_output`,
+    /// bounded exactly as the open [`process_output`](Self::process_output) it delegates to.
+    /// An out-of-scope process is refused, so an agent cannot read another project's logs
+    /// (which can carry secrets).
+    pub fn process_output_scoped(
+        &self,
+        process: ProcessId,
+        lines: Option<usize>,
+    ) -> Result<Vec<String>, ScopedActionError> {
+        self.require_in_scope(process)?;
+        Ok(self
+            .inner
+            .process_output(process, lines)
+            .unwrap_or_default())
+    }
+
+    /// The raw byte output of one in-scope process — the scoped `get_process_raw_output`.
+    pub fn process_raw_output_scoped(
+        &self,
+        process: ProcessId,
+    ) -> Result<Vec<u8>, ScopedActionError> {
+        self.require_in_scope(process)?;
+        Ok(self.inner.process_raw_output(process).unwrap_or_default())
+    }
+
+    /// Rendered output lines of one in-scope process containing `query` — the scoped
+    /// `search_output`.
+    pub fn search_output_scoped(
+        &self,
+        process: ProcessId,
+        query: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<String>, ScopedActionError> {
+        self.require_in_scope(process)?;
+        Ok(self
+            .inner
+            .search_output(process, query, limit)
+            .unwrap_or_default())
+    }
+
+    /// Raw output lines of one in-scope process containing `query` — the scoped
+    /// `search_raw_output`.
+    pub fn search_raw_output_scoped(
+        &self,
+        process: ProcessId,
+        query: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<String>, ScopedActionError> {
+        self.require_in_scope(process)?;
+        Ok(self
+            .inner
+            .search_raw_output(process, query, limit)
+            .unwrap_or_default())
+    }
+
+    /// The listening ports of one in-scope process — the scoped `get_process_ports`.
+    pub fn process_ports_scoped(&self, process: ProcessId) -> Result<Vec<u16>, ScopedActionError> {
+        Ok(self.resolve_in_scope(process)?.ports)
+    }
+
+    /// Acknowledges a terminal-perf flush for one in-scope process — the scoped
+    /// `flush_terminal_perf`. The flush itself is a no-op (the buffers a caller reads are always
+    /// current), so the scope check *is* the whole behaviour: unscoped, the difference between an
+    /// ack and a refusal answers whether a foreign project's process id exists.
+    pub fn flush_terminal_perf_scoped(&self, process: ProcessId) -> Result<(), ScopedActionError> {
+        self.require_in_scope(process)
     }
 }
 

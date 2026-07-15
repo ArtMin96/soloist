@@ -47,7 +47,7 @@ export function TerminalPane({
   const sectionRef = useRef<HTMLElement>(null);
   const { hostRef, state, search } = useTerminal(process, visible);
   const { title, ringing } = useTerminalChrome(process.id);
-  const { metrics, attempt, activity } = useSignal(process.id);
+  const { metrics, restart, activity } = useSignal(process.id);
 
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
@@ -86,7 +86,7 @@ export function TerminalPane({
           ready={process.ready}
           ports={process.ports}
           metrics={metrics}
-          attempt={attempt}
+          restart={restart}
           verbose
         />
         {ringing && (

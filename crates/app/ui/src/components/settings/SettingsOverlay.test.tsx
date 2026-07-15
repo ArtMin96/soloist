@@ -64,7 +64,7 @@ describe("Settings — Appearance", () => {
     mockSettings(DEFAULT_APPEARANCE);
     renderSettings();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Account" }));
 
     expect(screen.getByText(/have not been defined yet/i)).toBeTruthy();
   });

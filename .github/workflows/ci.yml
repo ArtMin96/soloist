@@ -55,6 +55,9 @@ jobs:
       - name: Dependency-direction guard
         run: ./scripts/check-core-deps.sh
 
+      - name: Acyclic-context guard
+        run: ./scripts/check-core-cycles.sh
+
       - name: Supply-chain audit (advisories, licenses, sources)
         uses: EmbarkStudios/cargo-deny-action@v2
         with:

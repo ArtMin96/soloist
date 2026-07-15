@@ -2,12 +2,15 @@
 //! entry and re-trusts; a local command runs in app state and leaves `solo.yml` byte-unchanged; and
 //! the shared⇄local move transfers a command between the stores without duplicating or corrupting it.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::*;
+use crate::composition::CorePorts;
 use crate::config::{config_path, ConfigWriteError, ProcessSpec};
 use crate::ids::ProjectId;
-use crate::ports::{CorePorts, TokioClock};
+use crate::ports::TokioClock;
+use crate::projects::ProjectCommandView;
 use crate::testing::{FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo};
 
 /// A façade over fakes, plus a temp project directory seeded with `solo.yml`, opened in the config
@@ -42,6 +45,31 @@ fn spec(command: &str) -> ProcessSpec {
         restart_when_changed: Vec::new(),
         env: Default::default(),
     }
+}
+
+/// The spec the settings-page editor persists, rebuilt from a command's read-model view — the Rust
+/// mirror of the UI's `specOf`/`buildSpec`. Every `ProcessSpec` field comes from the flattened view,
+/// so a field the view drops is a field the edit silently wipes.
+fn spec_from_view(view: &ProjectCommandView) -> ProcessSpec {
+    ProcessSpec {
+        command: view.command.clone(),
+        working_dir: view.working_dir.clone().map(PathBuf::from),
+        auto_start: view.auto_start,
+        auto_restart: view.auto_restart,
+        restart_when_changed: view.restart_when_changed.clone(),
+        env: view.env.clone(),
+    }
+}
+
+/// One command's view off the assembled settings page, by name.
+fn command_view(facade: &Facade, project: ProjectId, name: &str) -> ProjectCommandView {
+    facade
+        .project_settings_page(project)
+        .expect("settings page")
+        .commands
+        .into_iter()
+        .find(|command| command.name == name)
+        .expect("command on the settings page")
 }
 
 #[test]
@@ -541,5 +569,172 @@ fn renaming_a_shared_command_onto_a_local_name_is_refused() {
         std::fs::read_to_string(config_path(dir.path())).unwrap(),
         before,
         "a refused shared rename leaves solo.yml untouched"
+    );
+}
+
+#[test]
+fn editing_a_field_preserves_a_commands_env_block() {
+    let original = "processes:\n  Web:  # web server\n    command: npm run dev\n    auto_restart: true\n    env:\n      A: '1'\n      B: '2'\n";
+    let (facade, project, dir) = project_with_yaml(original);
+    // The settings page needs a durable project record; the first fake registration reuses id 1.
+    facade
+        .projects()
+        .add(dir.path(), None, None)
+        .expect("register project");
+
+    // The editor reads the command's view and persists a spec rebuilt from it. The view must carry
+    // the env, or the whole-spec replace wipes the committed block on the next unrelated edit.
+    let view = command_view(&facade, project, "Web");
+    assert_eq!(
+        view.env.get("A").map(String::as_str),
+        Some("1"),
+        "the read-model view carries the command's env"
+    );
+    let mut edited = spec_from_view(&view);
+    edited.auto_start = false; // toggle one unrelated field
+
+    facade
+        .edit_shared_command(project, "Web", edited)
+        .expect("edit an unrelated field");
+
+    let text = std::fs::read_to_string(config_path(dir.path())).unwrap();
+    assert!(
+        text.contains("# web server"),
+        "the surgical in-place edit preserved the key-line comment"
+    );
+    let web = &crate::config::parse(&text).unwrap().processes["Web"];
+    assert_eq!(
+        web.env.get("A").map(String::as_str),
+        Some("1"),
+        "env A survived"
+    );
+    assert_eq!(
+        web.env.get("B").map(String::as_str),
+        Some("2"),
+        "env B survived"
+    );
+    assert!(
+        web.auto_restart,
+        "an unrelated field the user did not touch is unchanged"
+    );
+    assert!(!web.auto_start, "the field the user changed took effect");
+    assert_eq!(web.command, "npm run dev", "the command is unchanged");
+}
+
+#[test]
+fn editing_a_command_without_env_adds_no_spurious_env() {
+    let (facade, project, dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    facade
+        .projects()
+        .add(dir.path(), None, None)
+        .expect("register project");
+
+    let view = command_view(&facade, project, "Web");
+    let mut edited = spec_from_view(&view);
+    edited.auto_restart = true;
+    facade
+        .edit_shared_command(project, "Web", edited)
+        .expect("edit");
+
+    let text = std::fs::read_to_string(config_path(dir.path())).unwrap();
+    assert!(
+        !text.contains("env:"),
+        "a command with no env stays env-less after an edit"
+    );
+}
+
+#[test]
+fn renaming_a_command_preserves_its_env_block() {
+    let original = "processes:\n  Web:\n    command: npm run dev\n    env:\n      A: '1'\n";
+    let (facade, project, dir) = project_with_yaml(original);
+
+    facade
+        .rename_shared_command(project, "Web", "WebApp")
+        .expect("rename");
+
+    let parsed =
+        crate::config::parse(&std::fs::read_to_string(config_path(dir.path())).unwrap()).unwrap();
+    assert!(parsed.processes.contains_key("WebApp"));
+    assert_eq!(
+        parsed.processes["WebApp"].env.get("A").map(String::as_str),
+        Some("1"),
+        "a rename keeps the command's env"
+    );
+}
+
+/// The invariant every stored command holds — it has a name to be keyed by and a command line to
+/// run — belongs to the core, not to whichever surface happens to be asking. These drive each write
+/// path directly, the way a non-UI caller (MCP, HTTP, CLI) would, so a disabled button in one
+/// front-end is never the only thing enforcing it.
+#[test]
+fn every_write_path_refuses_a_command_with_no_name_or_nothing_to_run() {
+    let (facade, project, _dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+
+    assert!(
+        matches!(
+            facade.add_shared_command(project, "   ", spec("npm start")),
+            Err(ConfigWriteError::InvalidCommand(InvalidCommand::BlankName))
+        ),
+        "a shared add refuses a blank name"
+    );
+    assert!(
+        matches!(
+            facade.add_shared_command(project, "Api", spec("  ")),
+            Err(ConfigWriteError::InvalidCommand(
+                InvalidCommand::BlankCommand
+            ))
+        ),
+        "a shared add refuses a blank command line"
+    );
+    assert!(
+        matches!(
+            facade.edit_shared_command(project, "Web", spec("")),
+            Err(ConfigWriteError::InvalidCommand(
+                InvalidCommand::BlankCommand
+            ))
+        ),
+        "a shared edit cannot blank an existing command line"
+    );
+    assert!(
+        matches!(
+            facade.rename_shared_command(project, "Web", " "),
+            Err(ConfigWriteError::InvalidCommand(InvalidCommand::BlankName))
+        ),
+        "a shared rename cannot blank a name"
+    );
+    assert!(
+        matches!(
+            facade.add_local_command(project, "", spec("npm start")),
+            Err(LocalCommandError::Invalid(InvalidCommand::BlankName))
+        ),
+        "a local add refuses a blank name"
+    );
+    assert!(
+        matches!(
+            facade.add_local_command(project, "Api", spec("\t")),
+            Err(LocalCommandError::Invalid(InvalidCommand::BlankCommand))
+        ),
+        "a local add refuses a blank command line"
+    );
+}
+
+#[test]
+fn a_refused_command_never_reaches_solo_yml() {
+    let original = "processes:\n  Web:\n    command: npm run dev\n";
+    let (facade, project, dir) = project_with_yaml(original);
+
+    facade
+        .add_shared_command(project, "  ", spec("npm start"))
+        .expect_err("refused");
+    facade
+        .edit_shared_command(project, "Web", spec(""))
+        .expect_err("refused");
+
+    assert_eq!(
+        std::fs::read_to_string(config_path(dir.path())).unwrap(),
+        original,
+        "a refused write leaves the file byte-unchanged"
     );
 }

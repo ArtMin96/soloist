@@ -27,6 +27,412 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Codebase-design audit — all 8 findings landed (2026-07-15; commits `8f6badf`…`8c806d8`).** An
+  owner-requested structural review of quality/architecture/domains, run outside the phase plan. Gate
+  green after every commit: **Rust 983 passed / 0 failed** (baseline was 974; +9 new, incl. 5
+  compile_fail doc tests), UI **315 passed / 63 files**, `cargo clippy -D warnings` exit 0, `cargo fmt --check` exit 0, `tsc --noEmit` exit 0,
+  eslint exit 0, dependency-direction OK. What landed:
+  - **Dead ports removed** (`8f6badf`): `Summarizer` was an empty trait with zero methods, zero impls
+    and zero references; `Store` had no `dyn Store` call site and was not a `CorePorts` field. The
+    metadata capability it fronted survives as inherent `SqliteStore::meta_get`/`meta_set`.
+  - **Skeleton-era comments retired** (`c422181`): `lib.rs` still opened by calling the crate a walking
+    skeleton wiring three ports; `LockReleaser` still said C6 lands "in a later phase" though
+    `LeaseReleaser`/`TodoLockReleaser` have long implemented it. The two `Visibility` doc links pointed
+    at `crate::config`; it lives in `crate::projects`.
+  - **Restart gate wired through the event** (`82f2d31`): `MAX_RESTARTS` was private and never sent, so
+    the UI hand-copied `RESTART_LIMIT = 10` and rendered "restarting k/10" from its own constant.
+    Changing the policy in Rust would have left the UI silently lying. `RestartScheduled` now carries
+    `limit`; the TS constant is gone.
+  - **`is_active` mirror made exhaustive** (`0005fd1`): a new `ProcStatus` variant forced an entry in
+    `STATUS` but let `isActive` silently return false. It now reads a `Record<ProcStatus, boolean>`;
+    verified by adding a variant and confirming tsc fails there. `canStart`/`canStop`/`canRestart`
+    deliberately stay in the UI — they are affordance policy, **not** core mirrors (the core accepts a
+    stop from any active process and a restart from any state).
+  - **Command validation moved into the core** (`aa01119`): "a command needs a name and a command line"
+    was enforced only by a disabled button in `AddCommandModal`, so any other caller could store an
+    unstartable command. `check_command` now guards all six write paths. Deliberately **not** enforced
+    on load, so a hand-authored `solo.yml` still parses as before.
+  - **Composition root extracted + acyclic rule gated** (`49a0641`): `ARCHITECTURE.md` claimed "no
+    cycles between contexts" and nothing checked it, so it was false. `ports/bundle.rs` named a Noop
+    from nine contexts that imported it back; `CorePorts` moved to `core::composition`. Extracting it
+    only moved the ring until `Supervisor::new` stopped taking `&CorePorts` (now `SupervisorPorts`,
+    projected by composition). `PROCESS_ID_ENV` moved to `ids`, closing
+    `identity → projects → supervisor → identity`. `ports/` collapsed to `ports.rs`.
+    **New gate: `scripts/check-core-cycles.sh`** (in `just lint` + CI), verified by reintroducing one
+    import into `ports.rs` → 20 rings, exit 1.
+
+  - **Scope became a type + a real disclosure closed** (`8c806d8`): the Facade handed whole contexts
+    to any caller (`supervisor()`, `projects()`, `trust()`, `agents()`, `config()`), so ~241 methods
+    were reachable through the "single entry point" and scope rested on which method a caller picked.
+    The 77 session-taking methods moved onto a new **`ScopedFacade`**, which exposes no accessor;
+    `Facade` drops **169 → 94** public methods. Binding the session also removes it from every
+    signature: `facade.scoped(session).todo_create(doc)`. Five `compile_fail` doc tests pin it —
+    `scoped.supervisor()` does not compile — and were mutation-checked by swapping one for a call
+    that *should* compile and watching the test go red.
+    **The type immediately found a live bug:** `ipc_server`'s `get_project_status` composed its reply
+    from an unscoped `snapshot()` filtered by an explicit project id with **no scope check**, so a
+    scoped MCP caller naming another project read that project's rows *in full* — bypassing the
+    redaction `snapshot_scoped` enforces. The rule now lives in core as `project_processes_scoped`
+    (foreign rows reduced to identity); mutation-tested by reintroducing the leak. The IPC adapter
+    routes all 77 scoped requests through `ScopedFacade` and reaches no ungated context. HTTP/Tauri
+    still call the supervisor directly — they are the local user's authority, deliberately unscoped.
+
+  **The debt this surfaced is now closed too.** The cycle gate briefly allowed two edges
+  (`events → agents`, `events → config`): `DomainEvent` names the payload types it carries, and the
+  contexts owning them also publish to the bus, so each pair imported the other. Fixed by the
+  precedent the codebase had already set with `process.rs` (which holds `ProcStatus` for both
+  `events` and the supervisor, owning neither): **`AgentActivity` → `core::idle`** — which was an
+  empty one-line placeholder module — and **`ConfigSync`/`Rename`/`TrustReviewCommand` → a new
+  `core::configchange`**. All are pure value types depending only on serde. Only the *types* moved:
+  the idle heuristics stay in `agents/idle/`, `diff()` stays in `config`, and
+  `TrustReviewCommand::from_spec` stays in `config/review.rs` (an inherent impl may live anywhere in
+  the defining crate). **`ALLOWED` is deleted — the gate now reports 129 edges, no cycles, no
+  exceptions.** Re-verified it still fails on a reintroduced edge.
+
+  **Doc corrections made:** `plan/06` §5.2 already said a port belongs with the context that drives it —
+  **CLAUDE.md §16's summary ("traits in `core::ports`") was the inaccurate one** and is now aligned to
+  it. `core::ports::CorePorts` → `core::composition::CorePorts` across `plan/06`, `ARCHITECTURE.md`,
+  `CLAUDE.md`. Stale `Summarizer` references dropped (`plan/04` keeps its design-intent mentions — the
+  feature is still planned; the *port* just must not exist before it has a caller).
+
+- **Stability & security audit — ticket 07 `done` (2026-07-15; branch
+  `fix/stability-audit-2026-07`; impl commit `ccfd29c`, docs/ledger commit follows). This closes
+  the audit backlog — all ten tickets are now `done`.** PRD-07 (P2: finish the reconciliation
+  layer + close the actor launch-window races). Five parts, each landed test-first:
+  - **C4/C5 (launch-window races):** the actor **mailbox** is now installed under the same claim
+    lock that moves a process to `Starting` (`Registry::begin_launch`), so a `stop`/`shutdown` in
+    the window before the actor is scheduled reaches it instead of being dropped while `stop()`
+    reports success. The join is attached after the task spawns (`attach_join`, which `abort()`s a
+    superseded task). The actor drains a pending stop **before spawning** (`stop_is_pending`), so a
+    stop-in-window goes `Starting → Stopping → Stopped` with no child; `shutdown` sees mid-launch
+    entries and reaps them via a **bounded** retry (`MAX_SHUTDOWN_IDLE_PASSES`). `stop`/`restart`/
+    `shutdown` route through one `registry.signal` primitive (removed the old `mailbox()`).
+  - **C3:** `apply_transition`'s illegal-`Err` arm `tracing::warn!`s (added `tracing` to core) rather
+    than dropping silently; captured in a test via a minimal in-test subscriber.
+  - **E7:** `IdleTracker::activity_snapshot` → `Facade::agent_activity` → `agent_activity` command
+    (+ `AgentSignal` DTO). `SignalsProvider` seeds the idle badges on mount and re-seeds on
+    `DOMAIN_RESYNC`/focus (`useReconcile`), reconciling the activity map to the snapshot — fixing
+    the permanently-stale idle badge on a dropped `AgentActivityChanged`. (Metrics/attempts still
+    fold from their own deltas — metrics self-heal via the periodic tick — so the seed touches only
+    the activity map, the ticket's named leak.)
+  - **E8:** `useLineage` and `useOrchestration` now `useReconcile` on resync/focus.
+  - **`/code-review`** (Standards + Spec, parallel sub-agents): Spec axis clean; Standards raised 3
+    (unbounded shutdown retry, a try-send duplication, a speculative-generality read) — **all fixed
+    before commit** (bounded the retry, routed through the one `signal` primitive, which justified
+    its generality). **Gates: `just lint` exit 0**, **`just test` — Rust 974 passed / 0 failed / 3
+    ignored, UI 315 passed / 63 files** (net Rust +6, UI +10), **`just soak` (leak gate) green**:
+    start/stop ×40 → tasks 0→0, fds 4→4, threads 5→5 — no drift from the mailbox/join lifecycle.
+    Fully headless-verified (incl. the real-PTY `orchestration.rs` integration test proving
+    `agent_activity` reflects a live idle classification) → **`done`, not `needs-human-verify`**.
+    **Next frontier ticket: none — the stability & security audit backlog is complete.**
+
+- **Stability & security audit — tickets 02/04/05/08 `done` (2026-07-15, owner-confirmed at
+  runtime).** The owner ran the `just dev` acceptance walks (fixture `~/soloist-verify`) and
+  confirmed all four working, so each flips `needs-human-verify` → `done`: **02** (empty
+  new-agent/process terminal pane no longer races — pane shows output on every launch, relaunch
+  keeps its size), **04** (notification toggles gate real toasts — crash, the new terminal-bell
+  path, and the persisted global master), **05** (no decorative settings — summarizer removed,
+  sidebar filter + process thresholds take effect, project-header controls gone, MCP/HTTP master
+  toggles do live socket/port teardown+respawn), **08** (SQLite off the runtime — project open via
+  picker/CLI stays responsive, coordination panels persist, smooth under a chatty process). This
+  clears the whole audit's human-verify queue. **Consequence: ticket 07 is now unblocked** — its
+  `Blocked by: 02` is satisfied, so **07 (reconciliation + actor launch races) is the sole
+  remaining open ticket and the next `/work-ticket` frontier.** All other audit tickets (01, 03,
+  06, 09, 10 + these four) are `done`.
+
+- **Stability & security audit — ticket 10 `done` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `571af0b`, docs/ledger commit follows).** PRD-10 (P2
+  tests: close the real coverage holes + prune the trivial tautologies). The audit's "most tests are
+  pretend" worry did **not** hold, so the value was *adding* the missing tests, not deleting fakes.
+  **11 holes filled**, each written to fail against a broken version and green on `main`: (1) HTTP
+  trust-gate 403 on untrusted start **and restart** (shared `facade_with_untrusted_command` helper) +
+  a parametrized 401 over all 14 mutation routes + the CLI 403→"not trusted" mapping; (2/3)
+  `Todos`/`Scratchpads::transfer` **success** path at the C6 aggregate (re-key, clear blockers+lock,
+  readable only from the new scope) — the real gap, the façade layer was already covered; (4) a
+  populated hotkey keymap serde round-trip pinning the `"super"` wire literal + a disabled-`null`
+  override (a symmetric round-trip can't catch a rename); (5) config write-side 1 MiB ceiling
+  (`TooLarge`, file byte-unchanged); (6) **two-real-group** sys attribution — a port test where each
+  child holds a distinct listening socket past `exec` (cleared `FD_CLOEXEC`), so the exact port is the
+  cross-attribution discriminator, plus a two-group metrics test; (7) `facade/output` public reads
+  (default/explicit/capped counts, raw, search, ports, `None` for an unknown id); (8) IPC frame
+  truncated-body→`Io` / non-JSON→`Codec`; (9) a populated intermediate-version DB migration preserving
+  rows; (10) peer_cred fail-closed — strengthened the pure uid gate (no root/off-by-one bypass) and,
+  from review, extracted the connection decision into a pure `peer_cred::peer_scope` (used by
+  `handle_connection`), unit-tested Err→drop / `Ok(None)`→unauthenticated / `Ok(Some)`→scoped (the
+  ticket's "None→drop" premise was inaccurate — the code correctly opens an *unauthenticated* session
+  on `None`; no behaviour change, the locked PRD-09 uid-drop stands); (11) boundary ticks —
+  restart-window exactly-`WINDOW` edge still Exhausts, exact 5 s SIGKILL grace (`STOP_GRACE`→`pub(crate)`),
+  list-form `processes:` rejected, feedback char-vs-byte at `MAX_FEEDBACK_LEN`, integration-file
+  symlink→regular atomic replace. **14 trivial tests** deleted (pure tautologies/duplicates:
+  `ids::from_raw`, lineage single-insert, coordination-kv complex-json, store scalar-kv + two
+  round-trip duplicates, cli `Display` echo, UI self-compare) or strengthened (`PortWaitOutcome`
+  literal wire tags; the two `guide` prose smokes → registry-driven structural checks over `topics()`;
+  `EMPTY_STORE` behavioural; todo status labels distinct+non-empty). **Kept** `store/kv` object
+  round-trip: findings §B lumped it with the scalar, but it crosses the real SQLite JSON↔TEXT boundary,
+  so it is a genuine round-trip, not a tautology. **Production changes minimal + behaviour-preserving:**
+  `STOP_GRACE`→`pub(crate)` and the `peer_scope` extraction (both to enable a real test). **Only 1
+  non-test file each carried logic**; the rest are test files. **`/code-review`** (Standards + Spec)
+  cleared items 1–9/11 as faithful and discriminating; acted-on findings folded into `571af0b`: scrubbed
+  audit tags (`B1`) from two `mutations.rs` comments (§8), added the `peer_scope` policy test (item 10
+  was PARTIAL), and re-applied a required `cargo fmt` fix of pre-existing drift in `commands/mod.rs`.
+  **Gates: `just lint` exit 0** (fmt, clippy `-D warnings`, tsc, eslint, prettier, dep-direction;
+  file-size advisory only), **`just test` — Rust 968 passed / 0 failed / 3 ignored, UI 305 passed /
+  61 files** (net Rust +16 / UI −1). Fully headless-verified → **`done`, not `needs-human-verify`**.
+  **Next frontier ticket: none unblocked for an agent** — remaining open tickets are 02/04/05/08
+  (`needs-human-verify`, awaiting a live `just dev` walk) and **07** (`ready-for-agent` but still
+  `Blocked by: 02`, which is not yet `done`). The audit backlog is agent-complete pending the human
+  runtime walks.
+
+- **Stability & security audit — ticket 09 `done` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `aedd202`, docs/ledger commit follows).** PRD-09 (P2/P3
+  defense-in-depth + Solo-fidelity + small correctness). Eight items, each re-verified against the
+  code then fixed test-first (red→green): **H1** `ProcessSpec::resolved_working_dir` now clamps an
+  escaping `working_dir` (absolute, or `..` above root) back to the project root — lexical (holds
+  before the dir exists), infallible (avoids rippling a `Result` through `Registration::command`'s
+  ~30 call sites), defense-in-depth atop the trust variant. **H2** `peer_cred::peer_pgid` reads the
+  socket peer's uid and **drops** the connection when it is not Soloist's own uid (fail-closed over
+  the `0700` dir); pure `peer_uid_permitted` unit-tested. **H3** doc-only — `plan/05` §4 now records
+  the narrow re-trust set (command/working_dir/env) and points at `KNOWN-DIVERGENCES` D-1 (settled;
+  widening the hash would break the CLAUDE.md §3 lock). **H4** the `--version` probe runs through the
+  login shell (`$SHELL -ilc`), so detection resolves a CLI on the same PATH a launch sees
+  (nvm/asdf/volta); the command is a shell **positional** (`$1`), never interpolated — no word-split,
+  no injection — with `exec` for clean reap; timeout raised to 3s (login-shell headroom). **A3**
+  `POST /projects/:id/spawn-agent` is bounded by a fixed-window `SpawnRateLimiter` → **429**. **A4**
+  `Client::from_runtime` **refuses** ("Soloist is not running") when the runtime file is absent
+  instead of probing `DEFAULT_PORT` with an empty token (foreign-server safety). **A5** `/status`
+  routes to `Facade::status_summary` (`StatusSummary`) — the `running` tally is computed once in
+  core; the adapter-local `Status` struct is gone. **A6** `render_table` sanitizes control bytes in
+  the process label so a crafted name cannot inject terminal escapes into `soloist status`.
+  **Tests:** core (`working_dir_is_contained_within_the_root`, `status_summary_*`), sys unit
+  (`probe_command`, positional-not-shell-text) + real-OS integration (deterministic stub `$SHELL`),
+  httpapi unit (rate-limiter cap + rollover) + integration (429 burst, status shape), cli unit
+  (`from_runtime` refuse/use, `render_table` neutralizes control bytes), app (`peer_uid_permitted`).
+  **`/code-review`** (adversarial subagent) cleared H1/H2/A3/A4/A5/A6/H3 and caught an H4
+  command-quoting gap (unquoted interpolation → mis-detection + latent injection for a
+  spaced/metacharacter command) — fixed via the positional-arg design — plus one PRD tag in a test
+  comment (removed). **Gates: `just lint` exit 0** (fmt, clippy `-D warnings`, tsc, eslint, prettier,
+  dep-direction; file-size advisory only), **`just test` — Rust 952 passed / 0 failed, UI 306 passed
+  / 61 files.** Fully headless-verified, so **`done`, not `needs-human-verify`**. **Note:** an
+  unrelated, pre-existing `__DIAG__` terminal-desync instrumentation in `useTerminal.ts` (the owner's
+  live debugging) was present in the tree; it was **left untouched and excluded from the commit**,
+  and the gates were confirmed green against a tree containing only the ticket-09 changes. **Next
+  frontier ticket: 10** (`ready-for-agent`; `Blocked by: 06`, which is `done` → unblocked); **07**
+  stays `Blocked by: 02` (`needs-human-verify`, not `done`).
+
+- **Stability & security audit — ticket 08 `needs-human-verify` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `f15dcad`, docs/ledger commit follows).** PRD-08 (P2:
+  SQLite ran inline on the tokio runtime — a WAL `fsync` on a slow/full disk parked a worker (D4);
+  and coordination writes had no per-value ceiling — a misbehaving agent could grow `soloist.db`
+  through one write (D3)). **Owner decision this session (`AskUserQuestion` → "Comprehensive"):** the
+  durable ports are **synchronous**, so the ticket-recommended DB-thread actor would still block the
+  calling worker on its reply for the `fsync`'s duration — it does not fix the stated problem. The
+  fix is **`spawn_blocking` at the adapter boundary** (the only design that frees the worker),
+  applied across all three in-process adapters: MCP `handle_request` peels the three await-the-core
+  requests and routes every other through one `spawn_blocking(dispatch_blocking)`; HTTP
+  `ApiState::blocking` offloads each sync handler; a Tauri `offload()` helper wraps every sync
+  store-touching command; `open_project::open` loads a handed-in project off the main thread. Added
+  `PRAGMA busy_timeout=5s` (named const). **Bounded writes:** named byte caps per aggregate (kv 64
+  KiB, scratchpad 256 KiB, todo doc 64 KiB, timer body 16 KiB), enforced **before** persistence with
+  a typed request error (`CoordinationError::PayloadTooLarge` for kv/timer; folded into the
+  aggregate's `validate()` for scratchpad/todo, covering the MCP **and** local Tauri paths); new
+  `IpcError::PayloadTooLarge`. **Tests (red-before/green-after):** four cap boundaries (at cap
+  accepted / over cap rejected + persists nothing), busy_timeout read-back, `PayloadTooLarge` wire
+  mapping + request-error classification, and a **non-timing barrier test** proving the blocking
+  helper runs façade ops off the runtime thread (inline would deadlock). **Gates: `just lint` exit
+  0** (fmt, clippy `-D warnings`, tsc, eslint, prettier, dep-direction; file-size advisory only),
+  **`just test` — Rust 941 passed / 0 failed / 3 ignored (pty soak), UI 306 passed.** `/code-review`
+  (independent subagent) clean on the four correctness-critical areas; one acted-on finding (a
+  `plan/05 §7` citation in a comment, removed per §8). **Docs:** `plan/05` §12 records the caps +
+  off-runtime + busy_timeout as clean-room engineering bounds. **`needs-human-verify`** (not `done`)
+  because `load_project` spawns actors and needs a live `just dev` check — the ticket Comments list
+  the exact walk (open a project incl. one with no `solo.yml`; open via file-association/CLI arg;
+  scratchpad/todo/settings still persist; smooth under a chatty process). **Known residual:** async
+  façade methods that touch the store (`remove_project`, `agent_detect`) can't be adapter-wrapped;
+  tracked for a future core-level split. **Next frontier ticket: 09** (`ready-for-agent`, unblocked);
+  07 remains `Blocked by: 02` (needs-human-verify); 10 is unblocked.
+
+- **Stability & security audit — ticket 06 `done` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `4c63170`, docs/ledger commit follows).** PRD-06 (P1
+  security: local read-disclosure — unauthenticated HTTP reads + cross-project MCP reads). **HTTP:**
+  every route (reads + mutations) now requires a **per-launch random token** (`ipc::http::generate_token`
+  — 32 B `getrandom`, hex), compared in constant time (`subtle`) by a whole-router `require_token`
+  middleware; the token rides in the runtime file, now written **owner-only `0600`** inside the `0700`
+  data dir so only the owning UID reads it (the token, not the TCP port, is the per-user boundary). A
+  `require_local_host` middleware rejects a non-loopback `Host` with **403** (DNS-rebinding, A2),
+  sharing one `host::host_is_loopback` rule with CORS. `serve()` fails closed if OS randomness is
+  unavailable; the CLI reads the token and sends it on every request; `LOCAL_AUTH_VALUE` (`"1"`) is
+  removed. **MCP:** `get_process_output`/`_raw`/`search*`/`get_process_status`/`get_process_ports`
+  (and `wait_for_bound_port`) route through scoped wrappers in `core::facade::scoped`
+  (`require_in_scope` → `OutOfScope` for a cross-project process); `list_processes` uses
+  `snapshot_scoped`, redacting out-of-scope rows to identity via `ProcessView::redacted_identity`. The
+  unscoped accessors stay for the local UI + the (now token-authed) HTTP API — the local user is not
+  scope-limited (one behavior in core, many frontends). **Tests (red-before/green-after):** ipc token
+  freshness/length + runtime round-trip + `0600` perms; httpapi read-401-without-token, wrong-token-401,
+  foreign/absent-Host-403, **B1 trust-gate 403**; real `soloist-cli` binary token round-trip
+  (`cli/tests/shell.rs`); core `read_tools_enforce_scope`, `snapshot_scoped_redacts_*`, `redacted_identity_*`;
+  adapter out-of-scope read refusal + list-stays-cross-project + `wait_for_bound_port` refusal.
+  **Gates: `just lint` exit 0** (fmt, clippy `-D warnings`, tsc, eslint, prettier, dep-direction;
+  file-size advisory only), **`just test` — Rust 932 passed / 0 failed, UI 306 passed.** `/code-review`
+  (Standards + Spec) clean; two acted-on findings (scope `wait_for_bound_port`; drop `(D2)`
+  doc-citations) folded into `4c63170`. **Docs:** `plan/05` HTTP row + CLI row rewritten,
+  `KNOWN-DIVERGENCES.md` **D-17** (token scheme, supersedes the constant-header note) + **D-6**
+  (read-tool scoping), `docs/http-api.md` + Integrations-panel copy updated. Fully headless-verified
+  (incl. the real CLI binary), so **`done`, not `needs-human-verify`**. **Next frontier ticket: 08**
+  (`ready-for-agent`, `Blocked by: none`); **07** is now unblocked-by-06 but still `Blocked by: 02`
+  (needs-human-verify), and **10** (`Blocked by: 06`) is now **unblocked**.
+
+- **Stability & security audit — ticket 05 `needs-human-verify` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `a95de69`, docs commit follows).** PRD-05 (P1: a
+  cluster of settings persisted + displayed but had no consumer — a false-affordance surface).
+  **Three clusters, per the recorded owner decisions:** (1) **Summarizer opt-in — removed end to
+  end** (acceptance demands *nothing persisted is ignored*, so hiding the UI alone would leave the
+  persisted doc a false affordance): dropped the `AgentSettings` doc, the `agents` field on
+  `Settings`, the facade getter/setter, both Tauri commands, and the UI/store/api/domain wiring; the
+  Agents tab keeps the read-only tool registry; the empty `Summarizer` later-phase port stub stays
+  (E6 remains `later`/OFF). (2) **Sidebar — implemented filter + process thresholds, removed the 5
+  project-header controls**: the name filter (pure `filterSidebar` helper, gated on
+  `show_filter_input`) and the per-process CPU/memory thresholds (`ProcessMeta` hides a read-out
+  below its mapped floor) now take effect; the two project thresholds + three open-in-external-app
+  toggles gated displays/actions that don't exist and were removed (the "or remove" branch),
+  dropping `Project{Cpu,Mem}Threshold` too. (3) **MCP/HTTP master toggles — LIVE teardown/respawn**:
+  new composition-root `integration_servers` module (`ToggleableServer` + `IntegrationServers`) owns
+  each server's task + `CancellationToken`; the persisted `Integrations` is applied at boot (a
+  disabled server never binds) and on every `set_integration_settings` (live start/stop, no restart)
+  — HTTP drains in-flight via axum graceful shutdown, MCP stops accepting and unlinks its socket
+  while accepted connections drain; server lifecycle lives only in the composition root, the toggle
+  command still routes through the one core setter. **Tests (red-before/green-after):** core
+  settings round-trip minus the removed docs; store fully-populated round-trip; UI AgentsPanel
+  (no summarizer), SidebarPanel (process thresholds + filter present, project controls gone),
+  ProcessMeta floor gating, Sidebar name filter, `filterSidebar`; httpapi `serve_on` graceful
+  shutdown frees the port; app-crate `integration_servers` real-socket lifecycle
+  (disabled-never-binds / enable-disable-frees-port / respawn / idempotent / apply-routing both
+  directions). **Gates: `just lint` exit 0** (clippy `-D warnings`, fmt, tsc, eslint, prettier,
+  dep-direction; file-size advisory only), **`just test` exit 0 — Rust workspace green, UI 306
+  across 61 files.** `/code-review` (Standards + Spec) ran clean after two comment-hygiene fixes
+  (removed two `Phase-7` tags per §8; "header/badge" enum docs → "row/read-out"); Spec confirmed the
+  removals are faithful to "implement OR remove" and no persisted setting is still ignored.
+  **`needs-human-verify`** because the gating *logic* is fully unit-tested but three things need a
+  live `just dev` app: the visual/UX of the new sidebar filter + reworked Sidebar tab; the **MCP**
+  server's real live teardown (the headless test uses a fake TCP server, not the AppHandle-driven
+  `ipc_server::serve`); and the HTTP toggle end to end through the command — the ticket Comments list
+  the exact walk. **Closes the I7g persist-only-sidebar gap** (each remaining sidebar control now has
+  a live, tested consumer; the decorative ones are gone). **Next frontier ticket: 06** (local read
+  authorization; `ready-for-agent`, `Blocked by: none`). PRD-07 remains `Blocked by: 02`.
+
+- **Stability & security audit — ticket 04 `needs-human-verify` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `7e5807c`, docs commit follows).** PRD-04 (P1 wiring:
+  two per-project notification switches were decorative and the promised terminal-bell alert had no
+  backend path). **Root cause:** the reactor gated every toast on one global flag (an ephemeral
+  `AtomicBool` no adapter could reach) and never consulted project settings; `crash_exit_alerts`
+  had no consumer; `TerminalBell` had no notification arm. **Fix:** the reactor now resolves each
+  attention event's process (project + label via `supervisor.view`) and reads the **durable
+  settings live** — a closed `Attention` enum maps each event to the switch that gates it and the
+  toast it shows: crash / exhausted restart → `crash_exit_alerts`; **bell + agent Permission/Error
+  → `terminal_alerts`** (honouring the per-command `terminal_alerts_for` override). The missing
+  `TerminalBell → notification` arm was added. The **global master switch is now real + persisted**:
+  a `Notifications { enabled }` sub-document on global `Settings` (serde-default on),
+  `notification_settings`/`set_notification_settings` façade + Tauri command, and a **Notifications
+  tab** in the global Settings overlay (removed from `UNDEFINED_TABS`) — mirroring the Integrations
+  pattern; the ephemeral `AtomicBool` was removed (single-source: the store is the only truth, read
+  live). **Owner decision (this session):** global flag → *build a real master toggle* (persisted +
+  UI); gating agent Permission/Error under `terminal_alerts` is slightly beyond the literal
+  Fix-approach but matches the switch's copy ("rings the terminal bell **or asks for attention**")
+  and the `DomainEvent` contract — recorded as intended. **Tests (red-before/green-after):** reactor
+  crash/bell/attention gating incl. **second-project scoping** and the per-command override **both
+  directions**; global master silences all; façade round-trip; SQLite round-trip of the new field;
+  UI load/persist of the master toggle. **Gates: `just lint` exit 0; `just test` exit 0 — full Rust
+  workspace green (3 pty soak ignored), UI 296 across 60 files.** `/code-review` (Standards + Spec)
+  ran clean — no hard violations; spec satisfied; two minor review nits folded in (default const
+  moved to `@/lib/notifications`, hook return-type inferred like siblings, override on-beats-off
+  test added). **`needs-human-verify`** because a new user-facing Settings tab was added (§5 wants a
+  live UI pass) and end-to-end real-desktop-toast suppression is adapter/runtime — the gating
+  *logic* is fully unit-verified; the ticket's Comments list the exact `just dev` walk. Unblocks
+  nothing new. **Next frontier ticket: 05** (no decorative settings — summarizer/MCP-HTTP/sidebar;
+  `ready-for-agent`, `Blocked by: none`). PRD-07 remains `Blocked by: 02`.
+
+- **Stability & security audit — ticket 03 done (2026-07-14; branch
+  `fix/stability-audit-2026-07`; impl commit `f2494e5`).** PRD-03 (P1: orphan reconciliation could
+  SIGKILL a PID/PGID the OS recycled to an unrelated same-user group — the class Solo fixed in
+  v0.9.3). Root cause: `OrphanRecord` persisted only `{project_root,name,command,pgid}` and liveness
+  was bare `killpg(pgid, None)`, which cannot tell the original group from a recycled one; both the
+  surface/kill path (`kill_orphan`) and the adopt path could then act on the wrong group. **Fix:**
+  stamp each record with a stable identity captured at record time — kernel `boot_id` +
+  the group leader's `/proc/<pid>/stat` start-time (field 22) — and require it to match before
+  adopting, surfacing, or reaping. The match logic is a **fail-closed default on the `OrphanControl`
+  port** (`is_recorded_alive`): a recycled pgid, a dead group, or a legacy record with no captured
+  identity all read as "not the recorded orphan" → pruned, never killed. Adapters implement only the
+  `/proc` probe (`identify`); `core` stays pure (dep-direction green). Every recorded-orphan signal
+  path is guarded: classify/reconcile, `kill_orphan` (re-checks identity; a failed SIGKILL is
+  returned and the record **kept** for retry, not forgotten), the adopted-group liveness poll, and
+  `GroupSignal::terminate`/`kill`. Legacy runtime-state files migrate via serde default
+  (`identity: None`). **E9 fold-in:** a failed kill surfaces via the error banner and keeps the row;
+  `killAll` fans out over `killOne` so a partial failure drops only the groups actually reaped.
+  Fidelity recorded in `plan/05` (Orphaned processes) + `KNOWN-DIVERGENCES.md` **D-16**. Tests
+  (red-before/green-after): core recycled-boot / recycled-start-time / legacy-fail-closed /
+  kill-doesn't-signal-recycled / failed-signal-keeps-record; adopt-guard signals-match /
+  no-signal-recycled; pty adapter real-`/proc` `identify` + identity-tracked liveness; store
+  legacy-JSON migration; UI `useOrphans.test.ts` (6, incl. partial-fail). **Gates: `just lint`
+  exit 0; `just test` exit 0 — Rust workspace all green (3 pty soak ignored), UI 294 across 59
+  files.** Independent adversarial code-review of the diff: no P0/P1; three P3s resolved (killAll
+  partial-fail fixed; actor panic-path bare SIGKILL is an in-session in-memory pgid, not a persisted
+  recorded orphan, and guarding it risks reintroducing the double-spawn regression the panic-reap
+  fixes → deliberate non-change; leader-gone prune tradeoff disclosed in D-16). No GUI walk needed —
+  reconciliation is fully headless-testable. This **unblocks nothing new** (04 was already
+  unblocked); **next frontier ticket: 04** (notification toggles actually gate + bell path;
+  `ready-for-agent`, `Blocked by: none`). PRD-07 remains `Blocked by: 02` (awaiting 02's
+  human-verify → done).
+
+- **Stability & security audit — ticket 02 `needs-human-verify` (2026-07-14; branch
+  `fix/stability-audit-2026-07`; commit `50e0e64`).** PRD-02 (P1, the owner's #1 daily symptom:
+  "open a new agent, xterm shows nothing"). Root cause was a two-part cross-boundary race:
+  (a) the per-process terminal channel was created **lazily inside the spawned actor task**
+  (`terminals.open` was called only in `actor::run`), so a viewer attaching in the window between
+  `start()` returning and the actor being scheduled hit `attach_pty → None` and the pane stranded
+  on the "Press Start" overlay; (b) the FE retry was keyed only on `process.status` + an optimistic
+  `attachedRef`, so a reject with no later status change never retried. **Fix:** open the channel
+  **synchronously in `Supervisor::launch_actor`** (after the `begin_launch` race gate, before
+  `tokio::spawn`) and pass the actor-facing `ActorTerminal` into `actor::spawn`/`run` — `attach_pty`
+  is now total for a *launched* process, while a never-started resting process still returns `None`
+  so the overlay is preserved (dropped `terminals` from `ActorPorts`). Folded in **C6 (resize
+  race):** set `current_io` **before** announcing `Running`, and a shared
+  `last_size: Arc<Mutex<PtySize>>` (written by the input pump on every `Resize`, even with no live
+  child; read when building each respawn's `SpawnSpec`) makes a within-actor relaunch re-create the
+  PTY at the last requested size instead of the 80×24 default. FE robustness: a short-backoff retry
+  effect (`useTerminal.ts`, keyed on `state`+status) recovers a rejected attach while the process is
+  active. Tests (new, red-before/green-after): core `attach_pty_is_available_synchronously_after_start`,
+  `a_never_started_process_has_no_terminal_channel`, `a_resize_reaches_the_running_pty`,
+  `a_respawn_relaunches_the_pty_at_the_last_resize_size` (new `FakeSpawner::records_resizes` +
+  `ResizeLog`); UI `useTerminal` attach-retry (reject-once-then-succeed; no-retry-while-inactive).
+  **Gates: `just lint` exit 0; `just test` exit 0 — Rust core 557 (+ all workspace crates green, 3
+  pty soak tests ignored), UI 288 across 58 files.** Independent adversarial code-review of the diff
+  found no substantive issues. **`needs-human-verify`:** the "live repro" acceptance (launch a real
+  agent ~10× via `just dev`, confirm the pane shows output every time; and a relaunch keeps the
+  pane's size) is a GUI walk this headless session can't run — implementation + unit tests are
+  complete. PRD-02's synchronous-channel change to `supervisor.rs` is now landed, so **PRD-07**
+  (reconciliation & launch races, `Blocked by: 02`) can build on it — it formally unblocks once 02
+  is human-verified → `done`. Next frontier ticket for a fresh agent session: **03** (orphan
+  PID/PGID-reuse kill safety; `ready-for-agent`, unblocked).
+
+- **Stability & security audit — ticket 01 done (2026-07-14; branch `fix/stability-audit-2026-07`).**
+  PRD-01 (P0 data loss): editing any field of a command that carried a per-command `env:` block in
+  `solo.yml` silently deleted the whole committed `env:` block on save. Root cause: the settings-page
+  read model (`ProjectCommandView`) dropped `env`, so the editor persisted an env-less spec and
+  `edit_shared_command`'s whole-spec replace wrote `env: {}` (which serializes to nothing). Fix
+  (commit `c7a9ec6`): carry `env` through the read model verbatim, mirroring the pre-existing
+  carried-but-not-rendered `working_dir` field — `env: BTreeMap<String,String>` on `ProjectCommandView`
+  (`crates/core/src/projects/page.rs`, populated in the single `::new`) + TS mirror (`domain.ts`),
+  threaded through `CommandFields`/`buildSpec` (`spec.ts`) so `specOf` preserves it; a new command
+  starts env-less, no spurious `env: {}`. Tests (new, red-before/green-after): core
+  `facade::commands` — `editing_a_field_preserves_a_commands_env_block`,
+  `editing_a_command_without_env_adds_no_spurious_env`, `renaming_a_command_preserves_its_env_block`;
+  UI `spec.test.ts` (4). **Gates: `just lint` exit 0; `just test` exit 0 — Rust 789 / 0 failed, UI 286.**
+  Fidelity note: the ticket's literal "byte-for-byte" env block holds only on the **rename** path
+  (verbatim body); an **edited** entry's body is re-rendered from the spec by serde (`config/edit.rs`),
+  so the test asserts env **semantically** (re-parse → values) plus key-line-comment preservation —
+  acceptance met. This **unblocks the Phase-11a "safe `solo.yml` round-tripping (no silent rewrite)"
+  verify.** Next frontier ticket: **02** (empty new-agent pane race) — finishes `needs-human-verify`
+  (needs a live-app GUI walk).
+
 - **Stability-hardening sprint (2026-07-13; owner-requested, branch `fix/stability-hardening`
   stacked on `feat/mcp-progressive-disclosure`).** A five-agent research pass (Solo docs + core +
   adapters + UI + repo history) found the daily-instability root cause was structural, not a pile of
@@ -4336,7 +4742,85 @@ review's one should-fix + the mechanical nits:
 
 ---
 
+## Session 2026-07-15 — `/code-review` fixes on the stability-audit branch (PR #72)
+
+A two-axis `/code-review` (Standards + Spec) of `main..fix/stability-audit-2026-07` returned 7 findings.
+All were verified against the source before fixing, and every fix is mutation-checked or compile-enforced.
+
+**Fixed — the four defects:**
+- **Standards #1 (DRY, hard).** `app/commands/mod.rs::offload` and `httpapi::ApiState::blocking` were
+  byte-identical helpers added in the same commit (`f15dcad`). Single-sourced to `Facade::blocking`
+  (`core/src/facade/blocking.rs`), which delegates to the **pre-existing** `supervision::run_blocking`
+  — so it was a *three-way* duplication. 58 app + 16 httpapi call sites rewritten; the helper carries no
+  `expect` because `core` denies `clippy::expect_used`, so it forwards the panic via `resume_unwind`
+  (preserving the original payload rather than wrapping it in a `JoinError`). The barrier test proving
+  ops run off the runtime worker moved from `httpapi/lib_tests.rs` into `core/facade/blocking_tests.rs`
+  with the code, plus a new panic-propagation test.
+- **Standards #4 (`expect` in a long-running server).** `httpapi/src/state.rs` poisoned-mutex `.expect`
+  → `unwrap_or_else(|e| e.into_inner())`. One panicking spawn handler no longer panics every later spawn
+  request for the life of the process. Test: `the_limiter_keeps_admitting_after_its_window_lock_is_poisoned`
+  — **mutation-verified** (fails with the old `.expect`).
+- **Spec PRD-08 (acceptance not met, ticket said `done`).** `ProjectService::remove` ran two synchronous
+  rusqlite calls on a tokio worker — including the cascading project delete, the app's widest write —
+  against the ticket's unqualified *"No `rusqlite` call runs inline on a runtime worker."* Both now go
+  through `run_blocking`. Test: `remove_runs_its_store_calls_off_the_runtime_worker` observes the actual
+  thread id (`#[tokio::test]` runs the body on the single worker), so it **fails loudly** rather than
+  deadlocking — **mutation-verified** (`left: ThreadId(2), right: ThreadId(2)`).
+- **Spec PRD-06 (implemented wrong).** `ipc_server.rs` called the *unscoped* `flush_terminal_perf` — the
+  sole read arm bypassing `.scoped(session)`, and a cross-project existence oracle. Added
+  `ScopedFacade::flush_terminal_perf_scoped` and **deleted** the unscoped method (its only caller was
+  this arm), so the ungated door no longer exists to be picked. The existing refusal test claimed to
+  cover "every per-process read" but omitted this arm *and* `SearchRawOutput`; both added.
+
+**Fixed — the file-size finding (Standards #2).** See `plan/06 §7 R9` for the detail and the numbers:
+`ipc_server.rs` **707 → 148**, `facade/scoped.rs` **462 → 193**, `supervisor.rs` **599 → under**,
+`registry.rs` **492 → under`. Outliers **15 → 12** (`main` had 14).
+
+**Not done, deliberately — Standards #3 (the 80-arm dispatch `match` → Registry).** The documented
+trigger has not fired: `plan/06 §4` scopes Registry to an **open-ended** set and names the anti-pattern
+as a giant match over *names*; `IpcRequest` is **closed** and `serde` already maps its names to variants.
+Converting would trade the compile-time exhaustiveness §16 asks for — and that `0005fd1` had just
+restored to the `is_active` mirror — for a runtime miss. Decision + reasoning recorded in `plan/06 §7 R9`.
+Residual: `ipc_server/dispatch.rs` stays at **580** (a flat routing table), recorded, not hidden.
+
+**Recorded, not reverted — Spec scope creep.** Eight commits (~2,200 insertions) traced to no ticket and
+no finding. Logged with per-commit rationale in `.scratch/stability-audit-2026-07/00-findings-log.md`
+("Unticketed work this PR carried"), including the lesson: work discovered *while* fixing a ticket still
+needs its own ticket before it lands.
+
+**Verified clean by both axes (independently):** D-17 (HTTP per-launch token on every route, constant-time
+compare, `0600` runtime file, `Host` guard) and D-16 (orphan reaping fails closed) are implemented as the
+PR describes. No acceptance criterion was edited after `23abf26`.
+
+**Found while running the gates — an 8th finding neither review axis caught.** The PR description
+claims *"`just lint` — **exit 0**"*. It was **red**: `crates/app/ui/src/lib/status.ts` and
+`crates/app/ui/src/store/signals.test.ts` fail `prettier --check` at `HEAD`. Both were changed by this
+PR (`0005fd1`, `82f2d31`, `ccfd29c`); **`main`'s versions of the same two files pass**, so the branch
+introduced it. Formatting only, no logic — fixed with `prettier --write`. Both reviewers took the
+claim at face value; only running the gate surfaced it. Worth noting the pattern: two of the three
+culprit commits are from the unticketed set above.
+
+**Gates (run 2026-07-15, after the fixes):**
+- `just lint` — **exit 0**: `cargo fmt --check`, `clippy --workspace --all-targets -D warnings`, `tsc
+  --noEmit`, eslint, `prettier --check`, plus `dependency-direction OK: soloist-core is framework-free`
+  and `core-cycles OK: 131 module edges, no cycles` (the splits added no cycle).
+- `just test` — **exit 0**: Rust **986 passed / 0 failed / 3 ignored** (974 before this session's work);
+  UI **315 passed / 63 files**.
+- `check-file-size.sh` — **12** outliers, down from **15** at `HEAD` (`main` had 14). Every file this
+  audit pushed over is back under; the one addition is the deliberate `ipc_server/dispatch.rs` (580).
+- Not re-run: `just soak` (the leak gate) — unchanged by this session; no supervisor/PTY behaviour was
+  altered, only where code lives and which thread two store calls run on.
+
 ## Next session should start with
+
+**★ NEW (2026-07-15) — the codebase-design audit is complete. All eight findings landed, plus the
+cycle debt they surfaced; nothing is owed from it.** `scripts/check-core-cycles.sh` now reports
+**129 edges, no cycles, no allow-list**, and `Facade` dropped 169 → 94 public methods with the
+session-scoped surface behind `ScopedFacade`. Two gates were added to `just lint` + CI
+(dependency-direction was already there): the acyclic-context guard, and the `compile_fail` doc
+tests pinning that a scoped caller has no accessor onto an ungated context. Gate state: **Rust 983
+passed / 0 failed**, UI 315, clippy/fmt/tsc/eslint clean. Branch `fix/stability-audit-2026-07` —
+the owner opens the PR (no self-merge).
 
 **⊳ NEW (2026-07-03): `feat/project-removal` is complete, gate-green, and real-window-verified (see the Current-state entry) — the owner opens its PR (no self-merge). No follow-up work is owed on it.**
 

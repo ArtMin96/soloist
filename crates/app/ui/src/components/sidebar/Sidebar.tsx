@@ -1,8 +1,15 @@
+import { useState } from "react";
 import { Settings } from "lucide-react";
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
 import { useSidebarHotkeys } from "@/components/sidebar/useSidebarHotkeys";
 import { Button } from "@/components/ui/button";
-import { groupByProject, kindCollapseKey, projectCollapseKey } from "@/store/projects";
+import { Input } from "@/components/ui/input";
+import {
+  filterSidebar,
+  groupByProject,
+  kindCollapseKey,
+  projectCollapseKey,
+} from "@/store/projects";
 import { useCollapseState } from "@/store/useCollapseState";
 import { useSidebarSettings } from "@/store/sidebarSettingsContext";
 import { useToggleSet } from "@/store/useToggleSet";
@@ -54,7 +61,16 @@ export function Sidebar({
   onRemoveProject,
 }: SidebarProps) {
   const { sidebar } = useSidebarSettings();
-  const trees = groupByProject(processes, projects, sidebar.hide_empty_sections, lineage);
+  const [filter, setFilter] = useState("");
+  // The filter only narrows the tree while its input is shown; hiding the input restores the full
+  // list (there is then no way to change the query).
+  const visible = filterSidebar(processes, projects, sidebar.show_filter_input ? filter : "");
+  const trees = groupByProject(
+    visible.processes,
+    visible.projects,
+    sidebar.hide_empty_sections,
+    lineage,
+  );
   const [collapsed, setCollapsed] = useCollapseState();
   const collapsedLeads = useToggleSet();
   const handleNavKeyDown = useSidebarHotkeys({
@@ -67,6 +83,18 @@ export function Sidebar({
 
   return (
     <div className="flex w-64 shrink-0 flex-col border-r bg-sidebar">
+      {sidebar.show_filter_input && (
+        <div className="border-b border-sidebar-border p-2">
+          <Input
+            type="search"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            placeholder="Filter processes…"
+            aria-label="Filter processes"
+            className="h-7 bg-sidebar-accent/40 text-[0.8125rem]"
+          />
+        </div>
+      )}
       <nav
         aria-label="Projects"
         className="min-h-0 flex-1 overflow-y-auto p-2"

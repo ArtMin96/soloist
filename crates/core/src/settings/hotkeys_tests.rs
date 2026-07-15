@@ -140,6 +140,45 @@ fn an_empty_stored_record_reads_as_the_defaults() {
     assert!(hotkeys.view().iter().all(|row| row.is_default));
 }
 
+#[test]
+fn a_populated_keymap_survives_a_serde_round_trip() {
+    // A regression in this serde surface silently resets every user's keybindings on reload, so a
+    // remapped binding, a disabled (`None`) entry, and the `super` wire rename must all survive
+    // to_string → from_str unchanged.
+    let mut hotkeys = Hotkeys::default();
+    let remapped = Binding {
+        ctrl: false,
+        alt: false,
+        shift: false,
+        super_key: true,
+        key: "J".to_string(),
+    };
+    hotkeys.remap(HotkeyAction::QuickJump, remapped.clone());
+    hotkeys.disable(HotkeyAction::OpenTerminalSearch);
+
+    let json = serde_json::to_string(&hotkeys).expect("serialize");
+    // The `#[serde(rename = "super")]` is only observable in the wire form — a symmetric round-trip
+    // would pass even if the rename were dropped, so pin the literal tag.
+    assert!(
+        json.contains("\"super\":true"),
+        "the super modifier serializes under its renamed tag, got {json}"
+    );
+    // A disabled action persists as an explicit null override, distinct from an absent (default) one.
+    assert!(
+        json.contains("null"),
+        "a disabled binding persists as a null override, got {json}"
+    );
+
+    let back: Hotkeys = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back, hotkeys, "the whole populated keymap round-trips");
+    assert_eq!(back.binding(HotkeyAction::QuickJump), Some(remapped));
+    assert_eq!(
+        back.binding(HotkeyAction::OpenTerminalSearch),
+        None,
+        "the disabled binding stays disabled after reload, not reset to its default"
+    );
+}
+
 fn row_for(hotkeys: &Hotkeys, action: HotkeyAction) -> HotkeyBindingView {
     hotkeys
         .view()

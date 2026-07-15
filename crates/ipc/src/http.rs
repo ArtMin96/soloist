@@ -1,13 +1,15 @@
-//! The local HTTP API's shared contract: the loopback port, the mutation auth header,
-//! and the runtime file recording the port the server actually bound.
+//! The local HTTP API's shared contract: the loopback port, the per-launch auth token and
+//! its header, and the runtime file recording both after the server binds.
 //!
 //! Defined here, in the transport crate, so the two halves agree without one telling the
-//! other: the in-app server (`soloist-httpapi`) writes the runtime file after it binds,
-//! and the `soloist` CLI reads it to find the port. The header and its value are the one
-//! definition the server checks and the client sends.
+//! other: the in-app server (`soloist-httpapi`) mints a fresh token, writes it beside the
+//! bound port in the (owner-only) runtime file, and requires it on every request; the
+//! `soloist` CLI reads the file — reachable only within the owning user's `0700` data
+//! directory — and sends the token back. The header name is the one definition the server
+//! checks and the client sends; the value is a secret, per launch.
 
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -17,15 +19,26 @@ use crate::paths::{data_dir, ensure_data_dir, DataDirError};
 /// is taken and records the chosen one in the [runtime file](runtime_file_path).
 pub const DEFAULT_PORT: u16 = 24678;
 
-/// The header a mutating request must carry. Loopback bind plus localhost CORS keep
-/// remote and cross-origin callers out; this header is the deliberate, weak local gate
-/// that stops a drive-by request from a page the user merely happens to be viewing.
-/// Lower-case because HTTP header names are case-insensitive and the `http` crate stores
-/// them lower-cased.
+/// The header every request must carry, holding the running server's [per-launch
+/// token](generate_token). The loopback bind and localhost CORS keep remote and
+/// cross-origin callers out, but the port is TCP and any local user can reach it, so the
+/// token — not the socket — is the boundary between users. Lower-case because HTTP header
+/// names are case-insensitive and the `http` crate stores them lower-cased.
 pub const LOCAL_AUTH_HEADER: &str = "x-soloist-local-auth";
 
-/// The value [`LOCAL_AUTH_HEADER`] must hold on a mutating request.
-pub const LOCAL_AUTH_VALUE: &str = "1";
+/// How many random bytes back a [token](generate_token). 32 bytes (256 bits) is well past
+/// any brute-force reach on a loopback socket, and it hex-encodes to a 64-character
+/// printable header value.
+const TOKEN_BYTES: usize = 32;
+
+/// Mints a fresh per-launch auth token: [`TOKEN_BYTES`] of OS randomness, hex-encoded to a
+/// printable header value. `None` if the OS randomness source is unavailable — the caller
+/// then disables the API rather than fall back to a guessable token (fail closed).
+pub fn generate_token() -> Option<String> {
+    let mut bytes = [0u8; TOKEN_BYTES];
+    getrandom::fill(&mut bytes).ok()?;
+    Some(hex::encode(bytes))
+}
 
 /// The status a mutation gets when the local-auth header is missing or wrong.
 pub const STATUS_UNAUTHORIZED: u16 = 401;
@@ -34,15 +47,26 @@ pub const STATUS_FORBIDDEN: u16 = 403;
 /// The status a mutation gets when the named process or project does not exist.
 pub const STATUS_NOT_FOUND: u16 = 404;
 
-/// The file in the data directory recording the port the running server bound, so the
-/// CLI can reach it even after an auto-fallback.
+/// The file in the data directory recording the port the running server bound and its
+/// per-launch token, so the CLI can reach and authenticate to it even after an
+/// auto-fallback.
 const RUNTIME_FILE: &str = "http-api.json";
 
-/// What the running HTTP server records about itself for the CLI to read.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Owner-only permissions (`rw-------`) for the runtime file. It carries the launch's auth
+/// token, so it is kept unreadable to other local users. The data directory around it is
+/// already `0700`, so this is defence in depth: it also holds even if a looser file were
+/// left by an earlier build.
+#[cfg(unix)]
+const RUNTIME_FILE_MODE: u32 = 0o600;
+
+/// What the running HTTP server records about itself for the CLI to read: where to reach it
+/// and the token to present.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HttpRuntime {
     /// The loopback port the server is listening on.
     pub port: u16,
+    /// The per-launch token every request must carry (see [`LOCAL_AUTH_HEADER`]).
+    pub token: String,
 }
 
 /// The body of `POST /projects/:id/spawn-agent`: which configured agent tool to launch as a
@@ -92,13 +116,39 @@ pub fn runtime_file_path() -> Result<PathBuf, DataDirError> {
     Ok(data_dir()?.join(RUNTIME_FILE))
 }
 
-/// Records the port the server bound, creating the (owner-only) data directory first.
-/// The single writer is the running server.
+/// Records the port the server bound and its per-launch token, creating the (owner-only)
+/// data directory first and writing the file owner-only (it holds the secret). The single
+/// writer is the running server.
 pub fn write_runtime(runtime: HttpRuntime) -> io::Result<()> {
     let path = ensure_data_dir()?.join(RUNTIME_FILE);
     let json = serde_json::to_vec(&runtime)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    std::fs::write(path, json)
+    write_owner_only(&path, &json)
+}
+
+/// Writes `bytes` to `path` restricted to its owner, so the token it carries stays
+/// unreadable to other local users. Creating with the mode closes the window a
+/// write-then-chmod would open; the explicit `set_permissions` then also tightens a file an
+/// earlier build may have left looser (the create mode applies only to a new file).
+#[cfg(unix)]
+fn write_owner_only(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(RUNTIME_FILE_MODE)
+        .open(path)?;
+    file.set_permissions(std::fs::Permissions::from_mode(RUNTIME_FILE_MODE))?;
+    file.write_all(bytes)
+}
+
+/// The non-Unix fallback: a plain write, since the owner-only mode is a Unix concept and the
+/// supported target is Linux.
+#[cfg(not(unix))]
+fn write_owner_only(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    std::fs::write(path, bytes)
 }
 
 /// Reads the running server's recorded runtime, or `None` when the file is absent or
@@ -119,3 +169,7 @@ pub fn remove_runtime() {
         let _ = std::fs::remove_file(path);
     }
 }
+
+#[cfg(test)]
+#[path = "http_tests.rs"]
+mod tests;

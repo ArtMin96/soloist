@@ -55,18 +55,21 @@ pub(crate) enum OrphanFate {
     Prune(OrphanRecord),
 }
 
-/// Classifies each recorded group: dead → prune; alive and matched → adopt; alive and
-/// unmatched → surface. `matcher` returns the resting registered process a record
+/// Classifies each recorded group: not the recorded orphan (dead, or a recycled pgid
+/// whose identity no longer matches, or a legacy record with no captured identity) →
+/// prune; the same live group, matched → adopt; the same live group, unmatched →
+/// surface. `is_recorded_alive` verifies both liveness and identity so a reused pgid is
+/// never adopted or surfaced; `matcher` returns the resting registered process a record
 /// should re-attach to, if any.
 pub(crate) fn classify(
     records: Vec<OrphanRecord>,
-    is_alive: impl Fn(i32) -> bool,
+    is_recorded_alive: impl Fn(&OrphanRecord) -> bool,
     matcher: impl Fn(&OrphanRecord) -> Option<ProcessId>,
 ) -> Vec<OrphanFate> {
     records
         .into_iter()
         .map(|record| {
-            if !is_alive(record.pgid) {
+            if !is_recorded_alive(&record) {
                 OrphanFate::Prune(record)
             } else if let Some(target) = matcher(&record) {
                 OrphanFate::Adopt { record, target }
@@ -88,6 +91,7 @@ mod tests {
             name: name.into(),
             command: format!("run {name}"),
             pgid,
+            identity: None,
         }
     }
 
@@ -98,10 +102,10 @@ mod tests {
         let unmatched = record("stray", 3);
         let target = ProcessId::from_raw(42);
 
-        // Only pgid 1 is dead; only "web" matches a registered command.
+        // Only pgid 1 is not the recorded orphan; only "web" matches a registered command.
         let fates = classify(
             vec![dead, matched, unmatched],
-            |pgid| pgid != 1,
+            |rec| rec.pgid != 1,
             |rec| (rec.name == "web").then_some(target),
         );
 

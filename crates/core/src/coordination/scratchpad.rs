@@ -23,6 +23,12 @@ use super::scratchpad_repo::{
 use crate::ids::{ProjectId, ScratchpadId};
 use crate::ports::StoreError;
 
+/// The most text content a scratchpad may carry, summed across its sections, in bytes. A
+/// scratchpad is a coordination document, not a log store; this bounds the persisted row so a
+/// runaway caller cannot grow the table without limit. Generous for a real plan, far below the
+/// transport frame ceiling.
+pub const MAX_SCRATCHPAD_CONTENT_BYTES: usize = 256 * 1024;
+
 /// The disciplined body every scratchpad carries. The fields are a fixed, ordered structure — what
 /// makes a scratchpad a consistent, informative coordination artifact rather than free-form notes:
 /// the objective it serves, the context behind it, the ordered plan (the path), the acceptance
@@ -82,11 +88,36 @@ impl ScratchpadDoc {
             "risks entries must not be blank",
             &mut problems,
         );
-        if problems.is_empty() {
+        let mut messages: Vec<String> = problems
+            .iter()
+            .map(|problem| (*problem).to_owned())
+            .collect();
+        if self.content_bytes() > MAX_SCRATCHPAD_CONTENT_BYTES {
+            messages.push(format!(
+                "the content exceeds the {} KiB cap",
+                MAX_SCRATCHPAD_CONTENT_BYTES / 1024
+            ));
+        }
+        if messages.is_empty() {
             Ok(())
         } else {
-            Err(problems.join("; "))
+            Err(messages.join("; "))
         }
+    }
+
+    /// The total bytes of the document's text across every section — what a size cap bounds.
+    fn content_bytes(&self) -> usize {
+        self.objective.len()
+            + self.context.len()
+            + self.status.len()
+            + self.notes.as_deref().map_or(0, str::len)
+            + self.plan.iter().map(String::len).sum::<usize>()
+            + self
+                .acceptance_criteria
+                .iter()
+                .map(String::len)
+                .sum::<usize>()
+            + self.risks.iter().map(String::len).sum::<usize>()
     }
 
     /// Renders the document to its one canonical Markdown layout, titled by the scratchpad's `name`

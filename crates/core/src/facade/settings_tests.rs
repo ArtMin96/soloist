@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::ports::{CorePorts, TokioClock};
+use crate::composition::CorePorts;
+use crate::ports::TokioClock;
 use crate::settings::{
-    AgentSettings, Appearance, Binding, HotkeyAction, Integrations, McpFeatureGroup,
+    Appearance, Binding, HotkeyAction, Integrations, McpFeatureGroup, Notifications,
     ProcessCpuThreshold, Sidebar, TerminalAppearance, Theme, ToolDefaults,
 };
 use crate::testing::{FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo};
@@ -57,6 +58,24 @@ fn disabling_a_default_on_group_is_honored() {
         .set_mcp_tool_group(McpFeatureGroup::Scratchpads, false)
         .unwrap();
     assert!(!facade.mcp_tool_groups().unwrap().scratchpads);
+}
+
+#[test]
+fn notification_settings_default_on_and_round_trip_through_the_facade() {
+    let facade = facade_with_settings();
+    // The master switch is on until the user turns it off.
+    assert_eq!(
+        facade.notification_settings().unwrap(),
+        Notifications::default()
+    );
+    assert!(facade.notification_settings().unwrap().enabled);
+
+    let off = Notifications { enabled: false };
+    assert_eq!(facade.set_notification_settings(off).unwrap(), off);
+    assert!(
+        !facade.notification_settings().unwrap().enabled,
+        "a re-read sees the persisted master switch",
+    );
 }
 
 #[test]
@@ -144,15 +163,6 @@ fn each_tab_round_trips_through_the_facade_independently() {
     );
     assert_eq!(facade.sidebar_settings().unwrap(), sidebar);
 
-    // Agents (summarization opt-in; off by default).
-    assert_eq!(facade.agent_settings().unwrap(), AgentSettings::default());
-    let agents = AgentSettings {
-        summarizer_tool: Some("claude".into()),
-        summarizer_model: Some("haiku".into()),
-    };
-    assert_eq!(facade.set_agent_settings(agents.clone()).unwrap(), agents);
-    assert_eq!(facade.agent_settings().unwrap(), agents);
-
     // Tools.
     let tools = ToolDefaults {
         default_editor: Some("zed".into()),
@@ -176,7 +186,19 @@ fn each_tab_round_trips_through_the_facade_independently() {
     );
     assert_eq!(facade.integration_settings().unwrap(), integrations);
 
+    // Notifications (master switch defaults on).
+    assert_eq!(
+        facade.notification_settings().unwrap(),
+        Notifications::default()
+    );
+    let notifications = Notifications { enabled: false };
+    assert_eq!(
+        facade.set_notification_settings(notifications).unwrap(),
+        notifications
+    );
+    assert_eq!(facade.notification_settings().unwrap(), notifications);
+
     // Every earlier tab survived the later writes (independent sub-documents, one record).
     assert_eq!(facade.sidebar_settings().unwrap(), sidebar);
-    assert_eq!(facade.agent_settings().unwrap(), agents);
+    assert_eq!(facade.integration_settings().unwrap(), integrations);
 }
