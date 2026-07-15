@@ -208,8 +208,19 @@ impl<'a> ProjectService<'a> {
         self.bus
             .publish(DomainEvent::ProjectOpened { id: record.id });
         for (name, spec) in &config.processes {
-            self.supervisor
-                .register(Registration::command(record.id, &record.root, name, spec));
+            let registration = Registration::command(record.id, &record.root, name, spec);
+            // Opening is idempotent per command: re-opening an already-open project (the folder
+            // picker on the same folder, a second `soloist <path>` forwarded by single-instance)
+            // reconciles each command in place — the reload rule — rather than minting a second
+            // registration under the same name.
+            match self.supervisor.command_id_by_name(record.id, name) {
+                Some(id) => {
+                    self.supervisor.update_command(id, registration);
+                }
+                None => {
+                    self.supervisor.register(registration);
+                }
+            }
         }
         Ok((record, config, created))
     }
