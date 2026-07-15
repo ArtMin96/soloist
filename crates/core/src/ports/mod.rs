@@ -191,16 +191,6 @@ pub enum StoreError {
     Backend(String),
 }
 
-/// Durable key/value metadata — the walking-skeleton seed of the repository surface
-/// (trust, projects, todos, scratchpads, …) that later phases grow on top of the
-/// SQLite adapter. Kept synchronous: backing reads/writes are tiny and local.
-pub trait Store: Send + Sync {
-    /// Reads a metadata value by key, `None` if absent.
-    fn meta_get(&self, key: &str) -> Result<Option<String>, StoreError>;
-    /// Inserts or replaces a metadata value.
-    fn meta_set(&self, key: &str, value: &str) -> Result<(), StoreError>;
-}
-
 /// A persisted project: a workspace root plus optional display metadata. `id` is
 /// the durable [`ProjectId`] (stable across runs), assigned by the store from the
 /// project's canonical root path.
@@ -395,10 +385,3 @@ impl OrphanControl for NoopOrphanControl {
         Ok(())
     }
 }
-
-// ───────────── Ports realized in later phases (contracts only) ──────────────
-
-/// Produces an idle summary for an agent from a rendered-text snapshot. Optional by
-/// design: when absent, idle detection degrades to the heuristic-only signal.
-/// Methods are added when the agent-summary feature lands.
-pub trait Summarizer: Send + Sync {}

@@ -88,8 +88,8 @@ pub use ports::{
     Clock, CompositeLockReleaser, CorePorts, CorePortsBuilder, ExitFuture, ExitStatus,
     LockReleaser, NoopLockReleaser, NoopOrphanControl, NoopRuntimeState, OrphanControl,
     OrphanRecord, ProcessControl, ProcessIdentity, ProcessSpawner, ProjectRecord, ProjectRepo,
-    PtyIo, PtySize, RuntimeState, RuntimeStateError, SpawnError, SpawnSpec, Spawned, Store,
-    StoreError, TokioClock, TrustRepo,
+    PtyIo, PtySize, RuntimeState, RuntimeStateError, SpawnError, SpawnSpec, Spawned, StoreError,
+    TokioClock, TrustRepo,
 };
 pub use portscan::{wait_for_port, NoopPortProbe, PortProbe, PortScanner, WaitForPortError};
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView, Readiness};

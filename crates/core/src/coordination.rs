@@ -1,7 +1,7 @@
 //! Coordination primitives (context C6): scratchpads, todos, timers, leases, and key-value.
 //!
-//! Durable, project-scoped state agents share to orchestrate each other — persisted via the
-//! [`Store`](crate::ports::Store) ports and kept separate from ephemeral process state, so it
+//! Durable, project-scoped state agents share to orchestrate each other — persisted via this
+//! context's repository ports and kept separate from ephemeral process state, so it
 //! outlives any one process or chat. Five aggregates live here: **leases** — project-scoped,
 //! process-owned signal locks with an explicit TTL, auto-released on expiry or owner close —
 //! **timers** — process-owned timers that, when they fire (at a deadline, or when the agents they

@@ -1,11 +1,14 @@
-//! The metadata key/value repository — the core [`Store`] port.
+//! Durable key/value metadata on the SQLite store: small, launch-time facts the app records
+//! about itself. Not a core port — the core holds no metadata concept, so these stay inherent
+//! to the adapter and the composition root reads them directly.
 
-use soloist_core::{Store, StoreError};
+use soloist_core::StoreError;
 
 use crate::{sql_err, SqliteStore};
 
-impl Store for SqliteStore {
-    fn meta_get(&self, key: &str) -> Result<Option<String>, StoreError> {
+impl SqliteStore {
+    /// Reads a metadata value by key, `None` if absent.
+    pub fn meta_get(&self, key: &str) -> Result<Option<String>, StoreError> {
         let conn = self.lock();
         let mut stmt = conn
             .prepare("SELECT value FROM meta WHERE key = ?1")
@@ -17,7 +20,8 @@ impl Store for SqliteStore {
         }
     }
 
-    fn meta_set(&self, key: &str, value: &str) -> Result<(), StoreError> {
+    /// Inserts or replaces a metadata value.
+    pub fn meta_set(&self, key: &str, value: &str) -> Result<(), StoreError> {
         self.lock()
             .execute(
                 "INSERT INTO meta (key, value) VALUES (?1, ?2)
@@ -31,7 +35,6 @@ impl Store for SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::SqliteStore;
     use tempfile::tempdir;
 

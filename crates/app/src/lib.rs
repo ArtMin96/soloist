@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use soloist_core::{
-    CompositeLockReleaser, CorePorts, Facade, LeaseReleaser, NoopRuntimeState, RuntimeState, Store,
+    CompositeLockReleaser, CorePorts, Facade, LeaseReleaser, NoopRuntimeState, RuntimeState,
     TodoLockReleaser, TokioClock,
 };
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
@@ -47,6 +47,9 @@ const DOMAIN_EVENT: &str = "domain-event";
 /// The webview event that tells the UI its delta stream fell behind and it must re-read its
 /// snapshots. Carries no payload — it is a "you may have missed something, reconcile" signal.
 const DOMAIN_RESYNC: &str = "domain-resync";
+
+/// Store-metadata key holding the version of the build that last opened the durable store.
+const LAST_LAUNCH_VERSION_KEY: &str = "last_launch_version";
 
 #[derive(Serialize)]
 struct AppInfo {
@@ -73,8 +76,9 @@ fn build_facade(app: AppHandle) -> Facade {
             SqliteStore::open_in_memory().expect("open in-memory store")
         }
     });
-    // Exercise the storage thread in the real binary: record the launching version.
-    let _ = store.meta_set("last_launch_version", env!("CARGO_PKG_VERSION"));
+    // A breadcrumb for diagnosing a store opened by an older build; best-effort, so a write
+    // failure here must never keep the app from launching.
+    let _ = store.meta_set(LAST_LAUNCH_VERSION_KEY, env!("CARGO_PKG_VERSION"));
 
     // Running process groups are recorded to a small file (not SQLite) so a leftover
     // from a crash can be reconciled on the next launch; degrade to a no-op if the data
