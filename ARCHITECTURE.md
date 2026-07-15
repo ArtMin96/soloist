@@ -58,8 +58,22 @@ adapter. Adapters hold **no** business state and make **no** domain decisions.
 ## 2. Domain separation — 8 bounded contexts
 
 ```
-  adapters ──► C8 Facade ──► C1…C7      (adapters touch C8 ONLY; no cycles between contexts)
+  adapters ──► C8 Facade ──► C1…C7      (adapters touch C8 ONLY)
+  composition ──► every context         (one-way: the only module that may name them all)
 ```
+
+Contexts do not import each other in a ring, and `scripts/check-core-cycles.sh` enforces it on
+every build rather than leaving it to be asserted here. It allows two known edges, listed in the
+script: `DomainEvent` names the payload types it carries, and the `agents`/`config` contexts that
+own those types also publish to the bus. Removing those needs the payload vocabulary to move to a
+shared kernel — the way `process` already holds `ProcStatus` for both `events` and the supervisor
+— which is an open decision.
+
+A port trait lives with the context that drives it (`TodoRepo` in `coordination`, `MetricsProbe`
+in `metrics`); `ports` holds only what no single context owns (`Clock`, `ProcessSpawner`, `PtyIo`,
+the shared stores). The port *set* — `CorePorts` and its builder — is the composition root's
+parameter object and lives in `composition`, because a bundle naming every context cannot sit in
+the layer those contexts import.
 
 | Ctx | Modules in `core` | Owns | Status |
 |-----|-------------------|------|--------|

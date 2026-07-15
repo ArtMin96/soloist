@@ -16,6 +16,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, Notify};
 
 use crate::agents::{AgentLineage, Agents, IdleTracker};
+use crate::composition::CorePorts;
 use crate::config::{ConfigEngine, ConfigSync};
 use crate::coordination::{Kv, Leases, PromptTemplates, Scratchpads, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
@@ -24,7 +25,7 @@ use crate::identity::Identity;
 use crate::ids::{ProcessId, ProjectId};
 use crate::metrics::MetricsProbe;
 use crate::notify::Notifier;
-use crate::ports::{Clock, CorePorts, PtySize, SpawnSpec, StoreError};
+use crate::ports::{Clock, PtySize, SpawnSpec, StoreError};
 use crate::portscan::{self, PortProbe, WaitForPortError};
 use crate::process::{ProcStatus, ProcessKind, ProcessView};
 use crate::projects::{
@@ -109,7 +110,7 @@ impl Facade {
     /// store, and the config sync engine, so all three agree on what is trusted.
     pub fn new(ports: CorePorts) -> Self {
         let bus = EventBus::new(EVENT_BUFFER);
-        let supervisor = Arc::new(Supervisor::new(&ports, bus.clone()));
+        let supervisor = Arc::new(Supervisor::new(ports.supervisor_ports(), bus.clone()));
         let CorePorts {
             clock,
             metrics,

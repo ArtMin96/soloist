@@ -56,6 +56,16 @@ id_newtype!(
     /// Identifies a managed process within a run.
     ProcessId
 );
+
+/// The environment variable Soloist injects into every managed process, carrying that
+/// process's own [`ProcessId`] as a decimal string. An agent that launches the MCP
+/// server reads it and calls `bind_session_process`, so its tool calls are attributed
+/// to — and scoped by — the process it runs in.
+///
+/// It lives beside [`ProcessId`] rather than with the identity context that reads it: the
+/// supervisor writes the variable and identity reads it, so it is shared vocabulary between
+/// the two. Owned by either one, it would be a dependency the other has to reach across.
+pub const PROCESS_ID_ENV: &str = "SOLOIST_PROCESS_ID";
 id_newtype!(
     /// Identifies one MCP client session — one connection to the IPC server — within a
     /// run. Minted per connection; the bound process and selected project that scope a

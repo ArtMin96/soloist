@@ -55,8 +55,9 @@ pub fn facade_with_agent_tool() -> (crate::facade::Facade, ProjectId) {
     use std::sync::Arc;
 
     use crate::agents::{AgentKind, AgentTool, PromptMode};
+    use crate::composition::CorePorts;
     use crate::facade::Facade;
-    use crate::ports::{CorePorts, ProjectRepo};
+    use crate::ports::ProjectRepo;
     use crate::testing::{
         FakeAgentToolRepo, FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock,
     };

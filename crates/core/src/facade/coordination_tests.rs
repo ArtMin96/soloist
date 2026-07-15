@@ -3,9 +3,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::*;
+use crate::composition::CorePorts;
 use crate::coordination::{AcquireOutcome, IdleMode, TimerStatus, MAX_TIMER_BODY_BYTES};
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::{CorePorts, ProjectRepo, TokioClock};
+use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{
     authentic_session, terminal_registration, FakeLockRepo, FakeProjectRepo, FakeSpawner,
     FakeTimerRepo, FakeTrustRepo, TEST_PEER_PGID,

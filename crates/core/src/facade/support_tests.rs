@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::ports::{CorePorts, ProjectRepo, TokioClock};
+use crate::composition::CorePorts;
+use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{FakeFeedbackRepo, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
 
 /// A façade over in-memory fakes, with the given project repo and the feedback store wired.

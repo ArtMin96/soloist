@@ -5,9 +5,10 @@
 use std::sync::Arc;
 
 use super::*;
+use crate::composition::CorePorts;
 use crate::config::{config_path, ProcessSpec};
 use crate::ids::ProjectId;
-use crate::ports::{CorePorts, TokioClock};
+use crate::ports::TokioClock;
 use crate::settings::ToolDefaults;
 use crate::testing::{FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo};
 

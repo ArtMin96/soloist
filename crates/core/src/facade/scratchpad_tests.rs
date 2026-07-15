@@ -2,7 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::*;
-use crate::ports::{CorePorts, ProjectRepo, TokioClock};
+use crate::composition::CorePorts;
+use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{
     authentic_session, terminal_registration, FakeProjectRepo, FakeScratchpadRepo, FakeSpawner,
     FakeTrustRepo, TEST_PEER_PGID,

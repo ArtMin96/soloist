@@ -18,6 +18,7 @@
 )]
 
 pub mod agents;
+pub mod composition;
 pub mod config;
 pub mod coordination;
 pub mod debounce;
@@ -54,9 +55,10 @@ pub use agents::{
     AgentActivity, AgentKind, AgentTool, AgentToolRepo, Agents, DetectedTool, NoopAgentToolRepo,
     NoopVersionProbe, PromptMode, VersionProbe,
 };
+pub use composition::{CorePorts, CorePortsBuilder};
 pub use config::{
-    ConfigEngine, ConfigError, ConfigSync, ConfigWriteError, ProcessSpec, Rename, SoloYml,
-    SyncError, TrustReviewCommand,
+    check_command, check_command_name, ConfigEngine, ConfigError, ConfigSync, ConfigWriteError,
+    InvalidCommand, ProcessSpec, Rename, SoloYml, SyncError, TrustReviewCommand,
 };
 pub use coordination::{
     is_link, placeholders, AcquireOutcome, Comment, CommentAuthor, CommentEdit, CommentOutcome,
@@ -78,18 +80,20 @@ pub use facade::{
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
-pub use identity::{Identity, IdentityError, Origin, Whoami, PROCESS_ID_ENV};
-pub use ids::{ProcessId, ProjectId, PromptTemplateId, ScratchpadId, SessionId, TimerId, TodoId};
+pub use identity::{Identity, IdentityError, Origin, Whoami};
+pub use ids::{
+    ProcessId, ProjectId, PromptTemplateId, ScratchpadId, SessionId, TimerId, TodoId,
+    PROCESS_ID_ENV,
+};
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use notify::{NoopNotifier, Notification, NotificationReactor, Notifier};
 pub use orchestration::{AgentNode, AgentSignal, LineageEdge, OrchestrationSnapshot};
 pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{
-    Clock, CompositeLockReleaser, CorePorts, CorePortsBuilder, ExitFuture, ExitStatus,
-    LockReleaser, NoopLockReleaser, NoopOrphanControl, NoopRuntimeState, OrphanControl,
-    OrphanRecord, ProcessControl, ProcessIdentity, ProcessSpawner, ProjectRecord, ProjectRepo,
-    PtyIo, PtySize, RuntimeState, RuntimeStateError, SpawnError, SpawnSpec, Spawned, StoreError,
-    TokioClock, TrustRepo,
+    Clock, CompositeLockReleaser, ExitFuture, ExitStatus, LockReleaser, NoopLockReleaser,
+    NoopOrphanControl, NoopRuntimeState, OrphanControl, OrphanRecord, ProcessControl,
+    ProcessIdentity, ProcessSpawner, ProjectRecord, ProjectRepo, PtyIo, PtySize, RuntimeState,
+    RuntimeStateError, SpawnError, SpawnSpec, Spawned, StoreError, TokioClock, TrustRepo,
 };
 pub use portscan::{wait_for_port, NoopPortProbe, PortProbe, PortScanner, WaitForPortError};
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView, Readiness};
@@ -105,7 +109,7 @@ pub use settings::{
     Settings, SettingsRepo, SettingsStore, Sidebar, TerminalAppearance, Theme, ToolDefaults,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
-pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError};
+pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError, SupervisorPorts};
 pub use support::{
     agent_guide, help_overview, help_topic, onboarding_hint, Feedback, FeedbackEntry,
     FeedbackError, FeedbackRepo, IntegrationFile, IntegrationWrite, IntegrationWriteError,

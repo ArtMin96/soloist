@@ -28,15 +28,17 @@ use std::sync::Arc;
 
 use tokio::task::JoinHandle;
 
+use std::collections::BTreeMap;
+
 use crate::events::{DomainEvent, EventBus};
 use crate::hash::Hash;
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{
-    Clock, CorePorts, LockReleaser, OrphanControl, ProcessSpawner, RuntimeState, SpawnSpec,
-    Spawned, StoreError, TrustRepo,
+    Clock, LockReleaser, OrphanControl, ProcessSpawner, RuntimeState, SpawnSpec, Spawned,
+    StoreError, TrustRepo,
 };
 use crate::process::{ProcStatus, ProcessView, Readiness};
-use crate::shellenv::ShellEnv;
+use crate::shellenv::{ShellEnv, ShellEnvProbe};
 use crate::terminal::Terminals;
 
 use actor::{ActorMsg, ActorPorts, OrphanIdentity};
@@ -89,28 +91,45 @@ pub struct Supervisor {
     shell_env: Arc<ShellEnv>,
 }
 
+/// Exactly the ports process supervision drives. Named here, by the context that uses them, so
+/// the supervisor never has to know the shape of the whole-core port set — the composition root
+/// projects this out of it. Without that split a context would depend on the assembler that
+/// depends on every context, which is a cycle.
+pub struct SupervisorPorts {
+    pub spawner: Arc<dyn ProcessSpawner>,
+    pub clock: Arc<dyn Clock>,
+    pub trust: Arc<dyn TrustRepo>,
+    pub locks: Arc<dyn LockReleaser>,
+    pub runtime: Arc<dyn RuntimeState>,
+    pub orphan_control: Arc<dyn OrphanControl>,
+    pub shell_env_probe: Arc<dyn ShellEnvProbe>,
+    /// The app's own environment, captured at the composition root, that the login-shell
+    /// resolver layers under each process's `env`.
+    pub app_env: BTreeMap<String, String>,
+}
+
 impl Supervisor {
-    /// Builds a supervisor from the core port set, reading the ports it owns. The bus is
-    /// shared with the façade so adapters see process events alongside config events;
-    /// `runtime` persists running process groups and `orphan_control` operates on them
-    /// for orphan adoption.
-    pub fn new(ports: &CorePorts, bus: EventBus) -> Self {
+    /// Builds a supervisor over the ports it drives. The bus is shared with the façade so
+    /// adapters see process events alongside config events; `runtime` persists running process
+    /// groups and `orphan_control` operates on them for orphan adoption.
+    pub fn new(ports: SupervisorPorts, bus: EventBus) -> Self {
+        let shell_env = Arc::new(ShellEnv::new(
+            ports.shell_env_probe,
+            ports.clock.clone(),
+            ports.app_env,
+        ));
         Self {
-            spawner: ports.spawner.clone(),
-            clock: ports.clock.clone(),
-            trust: ports.trust.clone(),
-            locks: ports.locks.clone(),
-            runtime: ports.runtime.clone(),
-            orphan_control: ports.orphan_control.clone(),
+            spawner: ports.spawner,
+            clock: ports.clock,
+            trust: ports.trust,
+            locks: ports.locks,
+            runtime: ports.runtime,
+            orphan_control: ports.orphan_control,
             bus,
             registry: Registry::default(),
             terminals: Terminals::default(),
             restart_policy: RestartPolicy::default(),
-            shell_env: Arc::new(ShellEnv::new(
-                ports.shell_env_probe.clone(),
-                ports.clock.clone(),
-                ports.app_env.clone(),
-            )),
+            shell_env,
         }
     }
 
@@ -590,7 +609,7 @@ mod resume_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::identity::PROCESS_ID_ENV;
+    use crate::ids::PROCESS_ID_ENV;
     use crate::ports::PtySize;
     use crate::process::ProcessKind;
     use crate::supervisor::test_support::{

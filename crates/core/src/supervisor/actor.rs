@@ -16,8 +16,8 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::events::{DomainEvent, EventBus};
-use crate::identity::PROCESS_ID_ENV;
 use crate::ids::ProcessId;
+use crate::ids::PROCESS_ID_ENV;
 use crate::ports::{
     Clock, ExitFuture, ExitStatus, LockReleaser, OrphanControl, OrphanRecord, ProcessControl,
     ProcessSpawner, PtyIo, PtySize, RuntimeState, SpawnSpec, Spawned,

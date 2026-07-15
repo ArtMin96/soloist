@@ -1,6 +1,11 @@
-//! The core port set: a parameter object bundling the port adapters the core is
-//! constructed over, kept separate from the port *traits* (`super`) so each file has
-//! one purpose.
+//! The composition root's parameter object: the set of port adapters the core is constructed
+//! over, assembled by a builder that defaults every optional subsystem to its `Noop`.
+//!
+//! This is the one place in the core that names concrete adapters, so it is the one place that
+//! may depend on every context at once. It deliberately does **not** live under
+//! [`ports`](crate::ports): a context owns the port traits it drives, so a bundle that reaches
+//! into all of them would make the port layer depend on the contexts it exists to decouple —
+//! a cycle. Composition depends inward on everything; nothing depends on composition.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -17,9 +22,10 @@ use crate::notify::{NoopNotifier, Notifier};
 use crate::portscan::{NoopPortProbe, PortProbe};
 use crate::settings::{NoopSettingsRepo, ProjectSettings, Settings, SettingsRepo};
 use crate::shellenv::{NoopShellEnvProbe, ShellEnvProbe};
+use crate::supervisor::SupervisorPorts;
 use crate::support::{FeedbackRepo, NoopFeedbackRepo};
 
-use super::{
+use crate::ports::{
     Clock, LockReleaser, NoopLockReleaser, NoopOrphanControl, NoopRuntimeState, OrphanControl,
     ProcessSpawner, ProjectRepo, RuntimeState, TrustRepo,
 };
@@ -65,6 +71,22 @@ pub struct CorePorts {
 }
 
 impl CorePorts {
+    /// The subset process supervision drives, cloned out for [`Supervisor::new`]. The projection
+    /// lives here, not in the supervisor: composition knows every context, so it can hand each one
+    /// exactly what it needs without that context ever naming this type.
+    pub fn supervisor_ports(&self) -> SupervisorPorts {
+        SupervisorPorts {
+            spawner: self.spawner.clone(),
+            clock: self.clock.clone(),
+            trust: self.trust.clone(),
+            locks: self.locks.clone(),
+            runtime: self.runtime.clone(),
+            orphan_control: self.orphan_control.clone(),
+            shell_env_probe: self.shell_env_probe.clone(),
+            app_env: self.app_env.clone(),
+        }
+    }
+
     /// Begins a port set with the required adapters; the optional driven subsystems
     /// default to their `Noop` port until overridden on the returned builder.
     pub fn builder(

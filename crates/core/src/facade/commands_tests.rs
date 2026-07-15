@@ -6,9 +6,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::*;
+use crate::composition::CorePorts;
 use crate::config::{config_path, ConfigWriteError, ProcessSpec};
 use crate::ids::ProjectId;
-use crate::ports::{CorePorts, TokioClock};
+use crate::ports::TokioClock;
 use crate::projects::ProjectCommandView;
 use crate::testing::{FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo};
 

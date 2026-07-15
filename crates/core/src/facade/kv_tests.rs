@@ -4,9 +4,10 @@ use std::sync::Arc;
 use serde_json::json;
 
 use super::*;
+use crate::composition::CorePorts;
 use crate::coordination::MAX_KV_VALUE_BYTES;
 use crate::ids::SessionId;
-use crate::ports::{CorePorts, ProjectRepo, TokioClock};
+use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{FakeKvRepo, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
 
 fn facade_with_kv(projects: Arc<FakeProjectRepo>) -> Facade {

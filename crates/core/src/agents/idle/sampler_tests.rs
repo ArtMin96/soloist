@@ -12,9 +12,10 @@ use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::agents::{AgentActivity, AgentKind, AgentLineage, IdleSampler, IdleTracker};
+use crate::composition::CorePorts;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::{CorePorts, PtySize, SpawnSpec};
+use crate::ports::{PtySize, SpawnSpec};
 use crate::process::ProcStatus;
 use crate::process::ProcessKind;
 use crate::supervisor::{Registration, Supervisor};
@@ -49,7 +50,7 @@ fn setup(spawner: FakeSpawner) -> Setup {
         Arc::new(FakeProjectRepo::new()),
     )
     .build();
-    let sup = Arc::new(Supervisor::new(&ports, bus.clone()));
+    let sup = Arc::new(Supervisor::new(ports.supervisor_ports(), bus.clone()));
     Setup {
         sup,
         tracker: Arc::new(IdleTracker::new()),

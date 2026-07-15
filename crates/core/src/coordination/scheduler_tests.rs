@@ -14,10 +14,11 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::Notify;
 
 use crate::agents::AgentActivity;
+use crate::composition::CorePorts;
 use crate::coordination::{FireCond, IdleMode, StoredTimer, TimerRepo, TimerStatus, Timers};
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId, TimerId};
-use crate::ports::{CorePorts, PtySize, SpawnSpec};
+use crate::ports::{PtySize, SpawnSpec};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, Supervisor};
 use crate::sync::lock;
@@ -48,7 +49,7 @@ fn harness(spawner: FakeSpawner) -> Harness {
         Arc::new(FakeProjectRepo::new()),
     )
     .build();
-    let sup = Arc::new(Supervisor::new(&ports, bus.clone()));
+    let sup = Arc::new(Supervisor::new(ports.supervisor_ports(), bus.clone()));
     let timers = Timers::new(
         repo.clone(),
         Arc::new(clock.clone()),

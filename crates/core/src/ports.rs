@@ -1,4 +1,12 @@
-//! Hexagonal ports: the traits the pure core defines and adapters implement.
+//! The cross-cutting hexagonal ports: the traits no single context owns, because the whole core
+//! drives them — spawning and signalling OS processes, telling the time, and the durable stores
+//! and runtime state the contexts share.
+//!
+//! A port belonging to exactly one context lives *with* that context instead ([`TodoRepo`] in
+//! [`coordination`](crate::coordination), [`MetricsProbe`] in [`metrics`](crate::metrics), and so
+//! on), so a context's contract and its behaviour stay together and this module never becomes a
+//! registry that depends on everything. The set the composition root assembles is
+//! [`CorePorts`](crate::CorePorts).
 //!
 //! The core depends only on these abstractions, never on a concrete OS, UI,
 //! transport, or storage technology. Each port states its contract in doc comments;
@@ -19,10 +27,6 @@ use tokio::sync::mpsc;
 
 use crate::hash::Hash;
 use crate::ids::{ProcessId, ProjectId};
-
-mod bundle;
-
-pub use bundle::{CorePorts, CorePortsBuilder};
 
 // ───────────────────────────── ProcessSpawner ──────────────────────────────
 

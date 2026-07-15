@@ -1,8 +1,9 @@
 use super::*;
 
+use crate::composition::CorePorts;
 use crate::events::DomainEvent;
 use crate::ids::ProjectId;
-use crate::ports::{CorePorts, TokioClock};
+use crate::ports::TokioClock;
 use crate::process::ProcStatus;
 use crate::testing::{terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
 use std::sync::Arc;

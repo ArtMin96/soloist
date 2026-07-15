@@ -30,7 +30,7 @@ impl Facade {
     }
 
     /// Binds a session to the supervised process it runs in — the process whose
-    /// [`PROCESS_ID_ENV`](crate::identity::PROCESS_ID_ENV) the agent's MCP client read.
+    /// [`PROCESS_ID_ENV`](crate::ids::PROCESS_ID_ENV) the agent's MCP client read.
     /// Fails [`UnknownProcess`](IdentityError::UnknownProcess) if no such process is
     /// registered, or [`ForeignProcess`](IdentityError::ForeignProcess) if the binding is not
     /// authentic — the caller's connecting peer does not run in that process's group. The

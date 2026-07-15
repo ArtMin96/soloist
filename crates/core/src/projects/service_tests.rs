@@ -1,6 +1,7 @@
 use super::*;
+use crate::composition::CorePorts;
 use crate::ids::ProcessId;
-use crate::ports::{CorePorts, TokioClock, TrustRepo};
+use crate::ports::{TokioClock, TrustRepo};
 use crate::process::ProcStatus;
 use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTrustRepo};
 use std::sync::Arc;
@@ -34,7 +35,7 @@ fn parts(spawner: FakeSpawner) -> Parts {
         repo.clone(),
     )
     .build();
-    let supervisor = Supervisor::new(&ports, bus.clone());
+    let supervisor = Supervisor::new(ports.supervisor_ports(), bus.clone());
     let config = ConfigEngine::new(trust.clone(), bus.clone());
     let projects = Projects::new(repo);
     Parts {

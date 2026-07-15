@@ -2,9 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::*;
+use crate::composition::CorePorts;
 use crate::coordination::{Link, LinkContent, ScratchpadDoc, TodoDoc, TodoStatus};
 use crate::ids::{ProjectId, ScratchpadId};
-use crate::ports::{CorePorts, ProjectRepo, TokioClock};
+use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{
     FakeProjectRepo, FakeScratchpadRepo, FakeSpawner, FakeTodoRepo, FakeTrustRepo,
 };

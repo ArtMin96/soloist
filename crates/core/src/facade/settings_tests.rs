@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::ports::{CorePorts, TokioClock};
+use crate::composition::CorePorts;
+use crate::ports::TokioClock;
 use crate::settings::{
     Appearance, Binding, HotkeyAction, Integrations, McpFeatureGroup, Notifications,
     ProcessCpuThreshold, Sidebar, TerminalAppearance, Theme, ToolDefaults,

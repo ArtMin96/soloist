@@ -9,10 +9,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::agents::AgentActivity;
+use crate::composition::CorePorts;
 use crate::config::ProcessSpec;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::CorePorts;
 use crate::process::ProcStatus;
 use crate::settings::{ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor};
@@ -43,7 +43,7 @@ fn setup() -> Setup {
         Arc::new(FakeProjectRepo::new()),
     )
     .build();
-    let sup = Arc::new(Supervisor::new(&ports, bus.clone()));
+    let sup = Arc::new(Supervisor::new(ports.supervisor_ports(), bus.clone()));
     Setup {
         sup,
         bus,

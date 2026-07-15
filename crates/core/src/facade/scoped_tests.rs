@@ -1,8 +1,9 @@
 use super::*;
+use crate::composition::CorePorts;
 use crate::config::parse;
 use crate::events::DomainEvent;
 use crate::ids::ProjectId;
-use crate::ports::{Clock, CorePorts, TokioClock, TrustRepo};
+use crate::ports::{Clock, TokioClock, TrustRepo};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::Registration;
 use crate::sync::lock;

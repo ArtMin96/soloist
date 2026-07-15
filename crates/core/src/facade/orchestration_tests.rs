@@ -9,10 +9,10 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 
 use super::*;
+use crate::composition::CorePorts;
 use crate::coordination::{IdleMode, ScratchpadDoc, TodoDoc, TodoStatus};
 use crate::events::DomainEvent;
 use crate::ids::{ProcessId, ProjectId, SessionId};
-use crate::ports::CorePorts;
 use crate::process::ProcessKind;
 use crate::testing::{
     agent_registration, authentic_session, facade_with_agent_tool, terminal_registration,

@@ -2,7 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::*;
-use crate::ports::{CorePorts, ProjectRepo, TokioClock};
+use crate::composition::CorePorts;
+use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{FakeProjectRepo, FakePromptTemplateRepo, FakeSpawner, FakeTrustRepo};
 
 /// A façade over in-memory fakes with one project loaded and the template store wired. The
