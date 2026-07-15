@@ -194,11 +194,15 @@ pub fn run() {
     {
         builder = builder.plugin(tauri_plugin_mcp_bridge::init());
     }
-    // E2e-only: the in-app WebDriver server the WebdriverIO harness attaches to. Compiled in only
-    // under the `wdio` feature; release and default builds never link a WebDriver server.
+    // E2e-only: the in-app WebDriver server the WebdriverIO harness attaches to, plus the plugin
+    // backing the harness's window and eval bridge — without it every driver command pays a
+    // five-second timeout. Compiled in only under the `wdio` feature; release and default builds
+    // never link a WebDriver server.
     #[cfg(feature = "wdio")]
     {
-        builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+        builder = builder
+            .plugin(tauri_plugin_wdio::init())
+            .plugin(tauri_plugin_wdio_webdriver::init());
     }
 
     builder

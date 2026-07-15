@@ -12,6 +12,7 @@
             "main"
           ],
           "permissions": [
+            "wdio:default",
             "wdio-webdriver:default"
           ]
         }

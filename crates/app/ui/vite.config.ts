@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
+import { defineConfig, type Plugin } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { visualizer } from "rollup-plugin-visualizer";
@@ -20,8 +20,28 @@ const bundleReport = process.env.ANALYZE
     ]
   : [];
 
+// Set VITE_E2E=1 (see `just e2e`) to prepend the WebdriverIO frontend plugin to the entry module.
+// The e2e harness drives the app through it — it installs the globals the wdio Tauri service's
+// eval bridge looks for, and without it every driver command waits five seconds and gives up. It
+// must never reach a shipped bundle, so it is injected here rather than imported by `main.tsx`:
+// empty by default, which leaves a normal build byte-identical and never even resolves the
+// dependency. A static prepended import also runs the plugin before React mounts without forcing
+// top-level await into the entry (the `safari13` build target below has none).
+const entryModule = path.resolve(dir, "./src/main.tsx");
+const e2ePlugin: Plugin[] = process.env.VITE_E2E
+  ? [
+      {
+        name: "wdio-tauri-plugin",
+        enforce: "pre",
+        transform(code, id) {
+          return id.split("?")[0] === entryModule ? `import "@wdio/tauri-plugin";\n${code}` : null;
+        },
+      },
+    ]
+  : [];
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), ...bundleReport],
+  plugins: [react(), tailwindcss(), ...e2ePlugin, ...bundleReport],
   resolve: {
     alias: { "@": path.resolve(dir, "./src") },
   },
