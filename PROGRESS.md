@@ -27,6 +27,54 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Codebase-design audit — 6 of 8 findings landed (2026-07-15; commits `8f6badf`…`49a0641`).** An
+  owner-requested structural review of quality/architecture/domains, run outside the phase plan. Gate
+  green after every commit: **Rust 976 passed / 0 failed** (baseline was 974; +2 new), UI **315 passed
+  / 63 files**, `cargo clippy -D warnings` exit 0, `cargo fmt --check` exit 0, `tsc --noEmit` exit 0,
+  eslint exit 0, dependency-direction OK. What landed:
+  - **Dead ports removed** (`8f6badf`): `Summarizer` was an empty trait with zero methods, zero impls
+    and zero references; `Store` had no `dyn Store` call site and was not a `CorePorts` field. The
+    metadata capability it fronted survives as inherent `SqliteStore::meta_get`/`meta_set`.
+  - **Skeleton-era comments retired** (`c422181`): `lib.rs` still opened by calling the crate a walking
+    skeleton wiring three ports; `LockReleaser` still said C6 lands "in a later phase" though
+    `LeaseReleaser`/`TodoLockReleaser` have long implemented it. The two `Visibility` doc links pointed
+    at `crate::config`; it lives in `crate::projects`.
+  - **Restart gate wired through the event** (`82f2d31`): `MAX_RESTARTS` was private and never sent, so
+    the UI hand-copied `RESTART_LIMIT = 10` and rendered "restarting k/10" from its own constant.
+    Changing the policy in Rust would have left the UI silently lying. `RestartScheduled` now carries
+    `limit`; the TS constant is gone.
+  - **`is_active` mirror made exhaustive** (`0005fd1`): a new `ProcStatus` variant forced an entry in
+    `STATUS` but let `isActive` silently return false. It now reads a `Record<ProcStatus, boolean>`;
+    verified by adding a variant and confirming tsc fails there. `canStart`/`canStop`/`canRestart`
+    deliberately stay in the UI — they are affordance policy, **not** core mirrors (the core accepts a
+    stop from any active process and a restart from any state).
+  - **Command validation moved into the core** (`aa01119`): "a command needs a name and a command line"
+    was enforced only by a disabled button in `AddCommandModal`, so any other caller could store an
+    unstartable command. `check_command` now guards all six write paths. Deliberately **not** enforced
+    on load, so a hand-authored `solo.yml` still parses as before.
+  - **Composition root extracted + acyclic rule gated** (`49a0641`): `ARCHITECTURE.md` claimed "no
+    cycles between contexts" and nothing checked it, so it was false. `ports/bundle.rs` named a Noop
+    from nine contexts that imported it back; `CorePorts` moved to `core::composition`. Extracting it
+    only moved the ring until `Supervisor::new` stopped taking `&CorePorts` (now `SupervisorPorts`,
+    projected by composition). `PROCESS_ID_ENV` moved to `ids`, closing
+    `identity → projects → supervisor → identity`. `ports/` collapsed to `ports.rs`.
+    **New gate: `scripts/check-core-cycles.sh`** (in `just lint` + CI), verified by reintroducing one
+    import into `ports.rs` → 20 rings, exit 1.
+
+  **Known debt this surfaced (not fixed, decision owed):** the cycle gate allows exactly **two** edges —
+  `events → agents` and `events → config`. `DomainEvent` names the payload types it carries
+  (`AgentActivity`, `ConfigSync`, `TrustReviewCommand`) and those contexts also publish to the bus.
+  Removing them needs the payload vocabulary to move to a shared kernel, the way `process` already holds
+  `ProcStatus` for both `events` and the supervisor. That is a design decision, so the gate holds the
+  line at today's debt rather than pretending it is gone. Both edges are listed with rationale in the
+  script's `ALLOWED` array.
+
+  **Doc corrections made:** `plan/06` §5.2 already said a port belongs with the context that drives it —
+  **CLAUDE.md §16's summary ("traits in `core::ports`") was the inaccurate one** and is now aligned to
+  it. `core::ports::CorePorts` → `core::composition::CorePorts` across `plan/06`, `ARCHITECTURE.md`,
+  `CLAUDE.md`. Stale `Summarizer` references dropped (`plan/04` keeps its design-intent mentions — the
+  feature is still planned; the *port* just must not exist before it has a caller).
+
 - **Stability & security audit — ticket 07 `done` (2026-07-15; branch
   `fix/stability-audit-2026-07`; impl commit `ccfd29c`, docs/ledger commit follows). This closes
   the audit backlog — all ten tickets are now `done`.** PRD-07 (P2: finish the reconciliation
@@ -4675,6 +4723,30 @@ review's one should-fix + the mechanical nits:
 ---
 
 ## Next session should start with
+
+**★ NEW (2026-07-15) — the codebase-design audit left exactly two things open. Both are decisions, not
+typing:**
+
+  1. **ScopedFacade (audit finding #3) — owner picked "yes", then the measurement changed the case.**
+     The `Facade` hands out whole contexts by reference (`supervisor()`, `projects()`, `trust()`,
+     `agents()`, `config()`), so ~241 methods are reachable through the "single entry point" and scope
+     enforcement rests on *which method a caller happens to pick* rather than on a type. Today's code is
+     correct — MCP is out-of-process and physically cannot reach the ungated door; the in-process
+     bypassers (Tauri, HTTP) are deliberately local-user authority. The plan was a `ScopedFacade`
+     exposing only session-scoped actions. **Measured before building: the scoped surface is 77 methods**
+     (`session: SessionId` is its first parameter), against **5** accessors that are the actual problem.
+     A 77-method delegating wrapper is a shallow module — a large interface over no implementation —
+     which trades one design smell for another. **The cheaper and strictly stronger option is to seal the
+     5 accessors** (`pub(crate)`) and add ~13 named `Facade` methods for what `app`/`httpapi` legitimately
+     need (start/stop/restart/resume/start_all/stop_all/restart_running/restart_all_commands/attach_pty/
+     kill_orphan/shutdown/rename): then **no** adapter has an ungated door, because the door stops
+     existing publicly. Not done — it reverses an explicit owner choice, so it needs their call.
+     Evidence for the numbers: `grep` for `pub fn` taking `session: SessionId` across `facade.rs` +
+     `facade/*.rs`.
+  2. **The two allowed cycle edges** (`events → agents`, `events → config`) — see the Current-state entry.
+     Fixing them means deciding where `DomainEvent`'s payload vocabulary lives. `process.rs` is the
+     precedent: it holds `ProcStatus` for both `events` and the supervisor without either owning it.
+     Until decided, `scripts/check-core-cycles.sh` blocks any *new* cycle.
 
 **⊳ NEW (2026-07-03): `feat/project-removal` is complete, gate-green, and real-window-verified (see the Current-state entry) — the owner opens its PR (no self-merge). No follow-up work is owed on it.**
 

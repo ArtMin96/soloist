@@ -21,7 +21,7 @@ CQRS-lite, SQLite for durable state.
   │  Tauri UI ── crates/app            │                   │  ProcessSpawner / PtyIo ── crates/pty│
   │  MCP      ── crates/mcp     [→P8]  │                   │  Store / repos          ── crates/store│
   │  HTTP     ── crates/httpapi [→P10] │                   │  Clock                  ── core (tokio)│
-  │  CLI      ── crates/cli     [→P10] │                   │  FileWatcher/Notifier/Summarizer [→Pn]│
+  │  CLI      ── crates/cli     [→P10] │                   │  MetricsProbe/PortProbe/FileWatcher ── crates/sys│
   └─────────────────┬─────────────────┘                   └───────────────────┬────────────────┘
                     │ one Facade call                                          ▲ trait (port)
                     ▼                                                          │
@@ -86,7 +86,8 @@ the layer those contexts import.
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
 | **C8** Integration façade | `facade` `identity` | the public command/query API; MCP identity & effective scope | live (`facade`) |
 
-Cross-cutting in `core`: `events` (the `DomainEvent` bus), `ports` (every trait + its `Noop` default),
+Cross-cutting in `core`: `events` (the `DomainEvent` bus), `composition` (the `CorePorts` set the root
+assembles), `ports` (the traits no single context owns, each with its `Noop` default),
 `ids` (newtype IDs), `sync` (poison-safe lock helper), `cache` (Clock-driven read-through memo),
 `testing` (shared fakes).
 
@@ -158,7 +159,7 @@ Reach for a pattern when its **trigger** fires — not preemptively (YAGNI).
 | **Newtype + closed enum** | `ids.rs`, `process.rs` | a domain id/state → never a bare `String`/`int` |
 | **Null Object** | `Noop{LockReleaser,RuntimeState,OrphanControl}` | a **driven** subsystem is optional → ship a `Noop` so core runs without the real adapter |
 | **Read-through cache (TTL memo)** | `cache::ReadCache` (shell-env capture, agent `--version` detection) | an expensive, repeatable off-runtime read a burst of callers would each redo → one `Clock`-driven, single-flighted TTL memo, not a re-rolled mutex |
-| **Parameter Object / Builder** | `core::ports::CorePorts` (+ `CorePortsBuilder`) — the port set for `Facade::new`/`Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) |
+| **Parameter Object / Builder** | `core::composition::CorePorts` (+ `CorePortsBuilder`) — the port set for `Facade::new`; projects `SupervisorPorts` for `Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) |
 | **Registry** | `config::detect::DETECTORS` (C1); the MCP tool router composed from per-category sub-routers (`crates/mcp/src/tools/`, R8); *to add* — agent-tool defs (P7) | a growing set of "one of many" handlers → register, don't extend a giant `match` |
 | **Strategy** | `config::detect::Detector` — one impl per ecosystem (C1); *to add* — per-provider idle heuristics (P7), per-agent launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
 | **Optimistic concurrency** | `coordination::{Scratchpads, Todos}` over their repos (P9: scratchpads + todos done) | concurrent writers to one durable record → revision guard |
