@@ -54,7 +54,7 @@ export function ProcessRow({
   expanded = true,
   onToggleExpand,
 }: ProcessRowProps) {
-  const { metrics, attempt, activity } = useSignal(process.id);
+  const { metrics, restart, activity } = useSignal(process.id);
   const { sidebar } = useSidebarSettings();
   // Controls are always present for the selected row and for an untrusted command (so its
   // trust affordance stays visible); otherwise they reveal on hover/focus, replacing the
@@ -134,7 +134,7 @@ export function ProcessRow({
             ready={process.ready}
             ports={process.ports}
             metrics={metrics}
-            attempt={attempt}
+            restart={restart}
             cpuFloor={PROCESS_CPU_FLOOR[sidebar.process_cpu_threshold]}
             memFloor={PROCESS_MEM_FLOOR[sidebar.process_mem_threshold]}
           />

@@ -14,8 +14,8 @@ describe("applySignal", () => {
   });
 
   it("tracks the auto-restart attempt and clears it once the command settles", () => {
-    let state = applySignal(EMPTY_SIGNALS, { type: "RestartScheduled", id: 1, attempt: 3 });
-    expect(state.attempts.get(1)).toBe(3);
+    let state = applySignal(EMPTY_SIGNALS, { type: "RestartScheduled", id: 1, attempt: 3, limit: 10 });
+    expect(state.attempts.get(1)).toEqual({ attempt: 3, limit: 10 });
 
     state = applySignal(state, {
       type: "ProcessStatusChanged",
@@ -28,13 +28,13 @@ describe("applySignal", () => {
   });
 
   it("clears the attempt when the command is held exhausted", () => {
-    let state = applySignal(EMPTY_SIGNALS, { type: "RestartScheduled", id: 1, attempt: 10 });
+    let state = applySignal(EMPTY_SIGNALS, { type: "RestartScheduled", id: 1, attempt: 10, limit: 10 });
     state = applySignal(state, { type: "RestartExhausted", id: 1 });
     expect(state.attempts.has(1)).toBe(false);
   });
 
   it("keeps the attempt through the restart cycle's transient states", () => {
-    let state = applySignal(EMPTY_SIGNALS, { type: "RestartScheduled", id: 1, attempt: 2 });
+    let state = applySignal(EMPTY_SIGNALS, { type: "RestartScheduled", id: 1, attempt: 2, limit: 10 });
     state = applySignal(state, {
       type: "ProcessStatusChanged",
       id: 1,
@@ -42,7 +42,7 @@ describe("applySignal", () => {
       to: "Starting",
       exit_code: null,
     });
-    expect(state.attempts.get(1)).toBe(2);
+    expect(state.attempts.get(1)).toEqual({ attempt: 2, limit: 10 });
   });
 
   it("records the latest agent activity, keeping it while the agent stays Running", () => {
@@ -88,7 +88,7 @@ describe("applySignal", () => {
       cpu_pct: 5,
       rss: 1024,
     });
-    state = applySignal(state, { type: "RestartScheduled", id: 1, attempt: 1 });
+    state = applySignal(state, { type: "RestartScheduled", id: 1, attempt: 1, limit: 10 });
     state = applySignal(state, { type: "AgentActivityChanged", id: 1, state: "Working" });
     state = applySignal(state, { type: "ProcessRemoved", id: 1 });
     expect(state.metrics.has(1)).toBe(false);
@@ -121,11 +121,11 @@ describe("seedActivity", () => {
 
   it("leaves metrics and attempts untouched — it reconciles only the idle badges", () => {
     let state = applySignal(EMPTY_SIGNALS, { type: "MetricsTick", id: 1, cpu_pct: 5, rss: 1024 });
-    state = applySignal(state, { type: "RestartScheduled", id: 1, attempt: 2 });
+    state = applySignal(state, { type: "RestartScheduled", id: 1, attempt: 2, limit: 10 });
 
     const seeded = seedActivity(state, [{ id: 9, activity: "Idle" }]);
     expect(seeded.metrics.get(1)).toEqual({ cpu_pct: 5, rss: 1024 });
-    expect(seeded.attempts.get(1)).toBe(2);
+    expect(seeded.attempts.get(1)).toEqual({ attempt: 2, limit: 10 });
     expect(seeded.activity.get(9)).toBe("Idle");
   });
 

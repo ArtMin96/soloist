@@ -1,5 +1,5 @@
 import { formatCpu, formatPorts, formatRss } from "@/lib/format";
-import { isStarting, RESTART_LIMIT } from "@/lib/status";
+import { isStarting } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { ProcessView } from "@/domain";
 import type { ProcessSignal } from "@/store/signalsContext";
@@ -27,12 +27,12 @@ export function ProcessMeta({
   ready,
   ports,
   metrics,
-  attempt,
+  restart,
   verbose = false,
   cpuFloor = 0,
   memFloor = 0,
 }: ProcessMetaProps) {
-  const resolved = resolve({ status, ready, ports, metrics, attempt, verbose, cpuFloor, memFloor });
+  const resolved = resolve({ status, ready, ports, metrics, restart, verbose, cpuFloor, memFloor });
   if (!resolved) return null;
   return (
     <span
@@ -52,7 +52,7 @@ function resolve({
   ready,
   ports,
   metrics,
-  attempt,
+  restart,
   verbose,
   cpuFloor,
   memFloor,
@@ -63,9 +63,9 @@ function resolve({
   text: string;
   title?: string;
 } | null {
-  // An auto-restart in flight: show its position in the rate-limit window.
-  if (attempt != null && isStarting(status)) {
-    return { text: `restarting ${attempt}/${RESTART_LIMIT}` };
+  // An auto-restart in flight: show its position in the core's rate-limit window.
+  if (restart != null && isStarting(status)) {
+    return { text: `restarting ${restart.attempt}/${restart.limit}` };
   }
   // Only a running process reports live telemetry.
   if (status !== "Running") return null;

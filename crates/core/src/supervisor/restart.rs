@@ -158,8 +158,11 @@ impl Supervisor {
         }
         match self.restart_policy.on_crash(id, self.clock.now()) {
             RestartDecision::Restart { attempt } => {
-                self.bus
-                    .publish(DomainEvent::RestartScheduled { id, attempt });
+                self.bus.publish(DomainEvent::RestartScheduled {
+                    id,
+                    attempt,
+                    limit: MAX_RESTARTS,
+                });
                 // Relaunch through the shared launch primitive (the one place a process is
                 // spawned) rather than the public `restart`, which would clear the window.
                 self.launch_actor(id, info.launch, None);
@@ -363,9 +366,16 @@ mod tests {
         let mut scheduled = 0u32;
         loop {
             match h.rx.recv().await {
-                Ok(DomainEvent::RestartScheduled { id: got, attempt }) if got == id => {
+                Ok(DomainEvent::RestartScheduled {
+                    id: got,
+                    attempt,
+                    limit,
+                }) if got == id => {
                     scheduled += 1;
                     assert_eq!(attempt, scheduled, "attempts are sequential");
+                    // Every attempt reports the gate it is counting towards, so a display never
+                    // has to know the policy to render "attempt of limit".
+                    assert_eq!(limit, MAX_RESTARTS, "the event carries the live gate");
                 }
                 Ok(DomainEvent::RestartExhausted { id: got }) if got == id => break,
                 Ok(_) | Err(RecvError::Lagged(_)) => {}
@@ -396,7 +406,9 @@ mod tests {
         // banner — without racing the per-run output drains.
         loop {
             match h.rx.recv().await {
-                Ok(DomainEvent::RestartScheduled { id: got, attempt }) if got == id => {
+                Ok(DomainEvent::RestartScheduled {
+                    id: got, attempt, ..
+                }) if got == id => {
                     if attempt >= 2 {
                         break;
                     }

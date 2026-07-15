@@ -5,14 +5,23 @@ import type { AgentActivity, AgentSignal, DomainEvent } from "@/domain";
 // rss is the group's memory in bytes (shared pages counted once).
 export type ProcessMetrics = Pick<Extract<DomainEvent, { type: "MetricsTick" }>, "cpu_pct" | "rss">;
 
+// How far an in-flight auto-restart has got through the core's rate-limit window, derived from
+// the RestartScheduled payload so both numbers have a single source. The core owns the gate and
+// reports the limit with every attempt, so the UI renders `attempt/limit` without knowing what
+// the policy is.
+export type RestartProgress = Pick<
+  Extract<DomainEvent, { type: "RestartScheduled" }>,
+  "attempt" | "limit"
+>;
+
 // The event-derived signals the process list reads but the core does not keep on
 // ProcessView: the latest CPU/memory reading per process (from MetricsTick, ~1 Hz per running
-// group), the current auto-restart attempt within the rate-limit window (from
+// group), the progress of an in-flight auto-restart through the rate-limit window (from
 // RestartScheduled), and the current agent activity (from AgentActivityChanged). Kept apart
 // from the read-model list so a ~1 Hz signal never churns the list projection.
 export interface SignalState {
   metrics: Map<number, ProcessMetrics>;
-  attempts: Map<number, number>;
+  attempts: Map<number, RestartProgress>;
   activity: Map<number, AgentActivity>;
 }
 
@@ -34,7 +43,7 @@ export function applySignal(state: SignalState, event: DomainEvent): SignalState
     }
     case "RestartScheduled": {
       const attempts = new Map(state.attempts);
-      attempts.set(event.id, event.attempt);
+      attempts.set(event.id, { attempt: event.attempt, limit: event.limit });
       return { ...state, attempts };
     }
     case "AgentActivityChanged": {

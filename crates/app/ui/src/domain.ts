@@ -183,8 +183,9 @@ export type DomainEvent =
   // awaited port has not bound yet, true = it bound. Reflected on ProcessView.ready.
   | { type: "ReadyStateChanged"; id: number; ready: boolean }
   // The restart policy is relaunching a crashed auto_restart command; `attempt` is its
-  // position in the rate-limit window (the status also moves Crashed -> Starting).
-  | { type: "RestartScheduled"; id: number; attempt: number }
+  // position in the rate-limit window and `limit` is what that window allows before the
+  // command is held exhausted (the status also moves Crashed -> Starting).
+  | { type: "RestartScheduled"; id: number; attempt: number; limit: number }
   // The restart policy gave up after too many restarts in the window; the command is held
   // in RestartExhausted until the user restarts it.
   | { type: "RestartExhausted"; id: number }

@@ -78,13 +78,22 @@ pub enum DomainEvent {
     /// fired while a readiness gate is active; reflected on [`ProcessView::ready`].
     ReadyStateChanged { id: ProcessId, ready: bool },
     /// The restart policy is relaunching a crashed `auto_restart` command. `attempt` is
-    /// its position in the current rate-limit window (1 = the first restart). The status
-    /// also moves `Crashed -> Starting`; this delta additionally carries the attempt
-    /// count for the "restarting (k/N)" affordance and crash notifications.
-    RestartScheduled { id: ProcessId, attempt: u32 },
-    /// The restart policy gave up on a command that crashed too fast, too often (the
-    /// 10-restarts-in-60s gate): it is held in [`ProcStatus::RestartExhausted`] until the
-    /// user restarts it. Distinct from the status delta so notifications can fire on it.
+    /// its position in the current rate-limit window (1 = the first restart), and `limit`
+    /// is how many that window allows before the command is held exhausted. The status
+    /// also moves `Crashed -> Starting`; this delta additionally carries both numbers for
+    /// the "restarting (k/N)" affordance and crash notifications.
+    ///
+    /// `limit` rides along with every event so the policy stays the core's alone: a
+    /// display that renders `attempt/limit` never has to know the gate's value to
+    /// describe it, and cannot fall out of step with it.
+    RestartScheduled {
+        id: ProcessId,
+        attempt: u32,
+        limit: u32,
+    },
+    /// The restart policy gave up on a command that crashed too fast, too often: it is
+    /// held in [`ProcStatus::RestartExhausted`] until the user restarts it. Distinct from
+    /// the status delta so notifications can fire on it.
     RestartExhausted { id: ProcessId },
     /// A command was restarted because a watched file changed (the file-watch policy). The
     /// status also cycles through the usual restart deltas; this discrete signal lets the UI

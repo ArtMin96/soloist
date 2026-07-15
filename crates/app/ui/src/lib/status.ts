@@ -46,10 +46,6 @@ export const STATUS: Record<ProcStatus, StatusDisplay> = {
   },
 };
 
-/** The auto-restart rate-limit gate, mirrored from the core: a crashed command is relaunched
- *  at most this many times within a 60-second window before it is held in RestartExhausted.
- *  Surfaced as the "restarting k/N" row affordance. */
-export const RESTART_LIMIT = 10;
 
 /** Whether a process is currently running (the steady green state, not in-flight). */
 export function isRunning(status: ProcStatus): boolean {
