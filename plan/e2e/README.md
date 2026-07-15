@@ -167,8 +167,8 @@ e2e/                              # top-level workspace, its own package.json
 │   └── harness/                  # app lifecycle, data dir, fixtures, waits
 │
 └── fixtures/
-    ├── projects/<name>/solo.yml  # hermetic projects the specs control
-    └── bin/                      # deterministic stub processes
+    ├── projects/<name>/          # hermetic projects the specs control (solo.yml + stub processes)
+    └── bin/                      # stub agent CLIs, prepended to PATH to shadow real ones
 ```
 
 **The layer rule:** `specs → flows → screens → harness`. A spec never contains a selector. A screen never
@@ -195,9 +195,11 @@ behavior, many frontends" invariant (CLAUDE.md §8).
 1. **A fresh `SOLOIST_APP_DATA_DIR` per session** (the documented data-dir override). The service also
    sets a per-instance `XDG_DATA_HOME` on Linux, and Soloist's default data dir is XDG-based, so
    isolation is available from either side. Never the developer's real state.
-2. **Hermetic fixture projects** — a `solo.yml` plus deterministic stub binaries the spec controls (a
-   `crasher` that exits on cue is how the 10/60s restart cap is provable). Never the developer's live
-   stack.
+2. **Hermetic fixture projects and stub agents** — a `solo.yml` plus deterministic stub binaries the
+   spec controls (a `crasher` that exits on cue is how the 10/60s restart cap is provable), and stub
+   agent CLIs in `fixtures/bin/` that the runner prepends to `PATH`, shadowing any real ones — a
+   launch never opens a real agent session, and detection behaves identically on a developer's box
+   and in CI. Never the developer's live stack.
 3. **No magic strings.** `e2e/tsconfig.json` aliases the UI's `domain.ts`, so a spec imports `ProcStatus`
    rather than typing `"Running"`. The Rust enum stays the single source across Rust → TS → e2e (§15).
 
@@ -220,8 +222,9 @@ where spec → parity-row traceability lives.
 
 | Walk | Domain | Feature(s) | What the spec asserts | Recorded in | Status |
 |------|--------|-----------|-----------------------|-------------|--------|
-| Launch an agent | `agents` | Phase 7 (E-UI) | The picker targets the open project and offers Claude with the command it spawns; launching renders it in the sidebar, labelled and selected under Agents; the app really starts it (the status leaves `Stopped`); a terminal opens for it, mounted and measured non-zero | e2e-01 | ✅ **covered** |
-| Dashboard core | `supervision` | Phase 5 (C-UI) | Tree groups by project/kind; select a process; Start/Stop/Restart reach the core and the status glyph updates; trust dialog gates an untrusted command | `phase-05` | ⬜ not built |
+| Launch an agent | `agents` | Phase 7 (E-UI) | The picker targets the open project and offers Claude with the command it spawns; launching renders it in the sidebar, labelled and selected under Agents; the app really starts it (the status settles `Running` against the stub agent); a terminal opens for it, mounted and measured non-zero | e2e-01 | ✅ **covered** |
+| Dashboard core | `supervision` | Phase 5 (C-UI) | Tree groups by project/kind; select a process; Start/Stop/Restart reach the core and the status glyph updates; trust gates an untrusted command | `phase-05` | ✅ **covered** — `specs/supervision/` drives select → trust (the row control) → start → `Running`, stop → `Stopped`, a nonzero exit → `Crashed`, and restart proven by the reborn process's *changed* discovered port. Grouping is asserted incidentally (the Agents group on launch); a per-kind grouping pin is not owed |
+| Trust review on `solo.yml` change | `projects` | A9 / CLAUDE.md §3 ("synced via hash-diff + debounce") | Editing the open project's `solo.yml` externally raises the review dialog; trusting from it is what lets the changed command start | this charter | ⛔ **blocked on the product**: nothing watches `solo.yml` for external edits — `ProjectService::reload` exists, reconciles, and emits `ConfigChanged{requires_trust}`, but **no adapter calls `reload_project`** and no watcher targets the file, so the dialog can only arise from the app's own settings-pane edits. The walk was built, proved the gap (dialog never opens), and was pulled until the product wires the watcher |
 | **Resume last session** | `supervision` | **B9** | A stopped resumable agent shows **Resume last session** beside Start (sidebar row + terminal header); click → it relaunches continuing the prior session; a non-resumable target (Amp, Generic, command, terminal) shows **only** Start; the resumed terminal fits the pane (no right/bottom gaps) | `plan/05 §12`, `KNOWN-DIVERGENCES.md` D-9, `PROGRESS.md` | ⬜ not built |
 | Agent lineage tree | `orchestration` | orch-01 (O3/O4) | A bound lead's spawned worker nests under it; a manual launch is a root; a worker's glyph flips on an activity event; a closed lead re-roots its workers | `plan/orchestrator/orch-01` | ⬜ not built |
 | Scratchpad & to-do panels | `coordination` | orch-02 (O5/O6/O12/O14) | Edit + save a scratchpad and force a revision conflict; a blocker chain refuses complete then allows it; a comment renders its author; "Copy link" puts the `solo://` URL on the clipboard | `plan/orchestrator/orch-02` | ⬜ not built |

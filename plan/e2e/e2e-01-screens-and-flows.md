@@ -62,24 +62,25 @@ row it implements.
 4. **The launch-an-agent journey (`specs/agents/`)** — open a project, and:
    - the picker targets that project and offers Claude with the command it would spawn;
    - launching renders the agent in the sidebar, labelled and selected, under Agents;
-   - the app **actually starts it** — the status leaves `Stopped`;
+   - the app **actually starts it** — the status settles `Running`;
    - a terminal opens for it, mounted and measured non-zero.
 
    Assert on `ProcStatus` imported from the UI's `domain.ts` via the `@domain` alias — never a literal.
 
 5. **Traceability** lives in charter §4 and `PROGRESS.md` — **not** in a code comment (CLAUDE.md §8).
 
-## Two things the journey deliberately does not assert
+## The journey never runs a real agent
 
-Both are environment-dependent, so asserting them would make the spec pass or fail for reasons that
-have nothing to do with the app. Named here rather than buried in a comment:
+What launches is a **stub `claude`** (`fixtures/bin/claude`) the harness prepends to `PATH` in
+`wdio.conf.ts`: it answers the `--version` detection probe and otherwise stays alive like a real
+agent. That is charter §3.1's hermeticity lever applied to agents — the journey behaves identically
+on a developer's box (where a real Claude would otherwise launch with a real session) and in CI
+(where none exists), which is also what lets the spec assert the launch **settles `Running`**
+rather than the weaker "left `Stopped`" an environment-dependent agent forced.
 
-- **That the agent reaches `Running`.** That needs Claude Code installed — true on a developer's box,
-  false in CI. The spec asserts the app *tried*: the status leaves `Stopped`, which holds either way
-  and is what the mutation table below proves is load-bearing.
-- **The terminal header's exact text.** The header shows the process's label only until the process
-  sets its own title over OSC — a real Claude Code renames it to `✳ Claude Code` within a second.
-  Pinning the string would assert Claude Code's branding, not this app's behavior.
+One thing the journey still deliberately does not assert: **the terminal header's exact text**. The
+header shows the process's label until the process retitles itself over OSC; the assertion is
+containment, identifying the process without pinning the header's surrounding layout.
 
 ## Interfaces
 
@@ -89,17 +90,20 @@ e2e/
 │   ├── harness/
 │   │   ├── fixtureProject.ts # fixture name → a clean scratch copy's path
 │   │   ├── tauri.ts          # the app's own IPC — arrange steps only
-│   │   └── waits.ts          # the two named timeouts; no sleeps
+│   │   └── waits.ts          # the named timeouts; no sleeps
 │   ├── screens/              # the only place selectors live
-│   │   ├── Sidebar.ts        # rows: label, status, selection
+│   │   ├── Sidebar.ts        # rows: label, status, selection, discovered port;
+│   │   │                     #   select/trust/start/stop/restart, stopIfRunning cleanup
 │   │   ├── AgentPicker.ts    # target project, tools, choose
-│   │   ├── Titlebar.ts       # launch agent, open project
+│   │   ├── Titlebar.ts       # launch agent, open-project affordance
 │   │   └── TerminalPane.ts   # title, mounted, measured size
 │   └── flows/
 │       ├── openProject.ts    # materialize fixture → load → shown
 │       └── launchAgent.ts    # picker → choose → row appears
+├── fixtures/bin/             # stub agent CLIs, shadowing real ones on PATH
 └── specs/
-    └── agents/               # the launch-an-agent journey
+    ├── agents/               # the launch-an-agent journey
+    └── supervision/          # trust → start → crash/stop, via the row's own controls
 ```
 
 Later phases add screens as their walk needs them (`ProcessControls`, `TrustDialog`, `OrphanDialog`,
@@ -138,6 +142,12 @@ Both assertions were confirmed by mutating the **product** and watching the righ
 
 Repeat this whenever a walk lands. The first mutation is the one that matters: without it, "renders the
 agent in the sidebar" passes against a row that was merely painted.
+
+The supervision walk's product-mutation pass is **owed** — its landing session verified the specs can
+fail for real reasons the harder way instead: they caught a real defect (`ProjectService::open`
+duplicated command registrations on re-open; fixed with a unit test) and a real product gap (no
+`solo.yml` watcher — charter §4). The restart spec is structurally mutation-resistant: it asserts the
+reborn process's *changed* ephemeral port, which no repaint can fake.
 
 ## Risks & mitigations
 

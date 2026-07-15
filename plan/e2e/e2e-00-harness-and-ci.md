@@ -18,7 +18,9 @@ e2e/
 ├── tsconfig.json           # types + the @domain path alias onto the UI's domain.ts
 ├── wdio.conf.ts            # the only file that knows the service exists; builds the app in onPrepare
 ├── fixtures/
-│   └── projects/basic/     # solo.yml + bin/echo-loop.sh + bin/crasher.sh (self-contained)
+│   ├── projects/basic/     # solo.yml + stub processes under bin/ (self-contained)
+│   ├── configs/            # prepared solo.yml variants, written over an open project
+│   └── bin/                # stub agent CLIs + the stand-in $SHELL, first on PATH
 └── specs/
     └── smoke.spec.ts       # app launches + shell renders
 ```
@@ -34,13 +36,29 @@ Plus, outside `e2e/`: the `wdio` cargo feature and its gated plugin registration
   `webkit2gtk-driver`, no `sudo`. `browserName: "tauri"` (not `"wry"` — that is the tauri-driver
   convention this track does not use).
 - **Build:** `onPrepare` runs `cargo tauri build --debug --no-bundle --features wdio --config
-  tauri.e2e.conf.json` from `crates/app`. `-c/--config` merges the overlay over `tauri.conf.json`;
-  no other build path sets either flag, so no ordinary build can produce this binary by accident.
-- **Hermetic:** `wdio.conf.ts` wipes `e2e/.tmp/app-data` and points `SOLOIST_APP_DATA_DIR` at it.
-  The env is set on `process.env` rather than as a capability because the published Tauri capability
-  type has no `env` field even though the launcher honours one — setting it directly avoids depending
-  on an untyped field. Verified: a run writes `soloist.db` there and leaves
-  `~/.local/share/soloist/` untouched.
+  tauri.e2e.conf.json` from `crates/app`, into its **own `target/e2e/`** (`CARGO_TARGET_DIR`) — the
+  `wdio` feature links a WebDriver server into the binary, and it must never land where `just dev`
+  puts the ordinary one (nor force a feature-flip rebuild between dev and e2e). `-c/--config` merges
+  the overlay over `tauri.conf.json`; no other build path sets any of these, so no ordinary build
+  can produce this binary by accident.
+- **Hermetic, per session:** each spec file gets its own app instance *and its own data dir* —
+  `beforeSession` points `SOLOIST_APP_DATA_DIR` at `e2e/.tmp/app-data/<cid>` — so no session boots
+  into a previous session's durable state (restored projects, orphan bookkeeping, trust). A
+  persistence walk will share a dir deliberately; nothing inherits one by accident. The env is set
+  on `process.env` rather than as a capability because the published Tauri capability type has no
+  `env` field even though the launcher honours one. Verified: a run writes `soloist.db` there and
+  leaves `~/.local/share/soloist/` untouched.
+- **Stub agents and a stub shell:** `fixtures/bin/` is prepended to `PATH`, so agent CLIs resolve to
+  deterministic stand-ins; and `SHELL` points at a profile-free stand-in shell, because the app
+  captures a launch environment from `$SHELL -ilc env` and that capture outranks the app's own env —
+  a real login shell would put a real `claude` straight back ahead of the stubs (observed: the
+  first harness revision really launched the developer's Claude, session and all).
+- **Every spec file leaves nothing running.** An agent or command that outlives its app session is
+  a leftover the *next* session's app rightly raises its orphan dialog over — modal, so it blocks
+  every click-driven spec after it (observed). Spec files stop what they started in `after`
+  (`sidebar.stopIfRunning`).
+- **Failure evidence:** `afterTest` saves a screenshot + page source per failed test into
+  `e2e/logs/`, which the CI job uploads as an artifact — a red run shows the actual window.
 - **Wayland:** the config sets `GDK_BACKEND=x11`; the developer does not have to know.
 - **Display:** a desktop session works as-is; CI wraps in `xvfb-run`.
 

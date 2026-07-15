@@ -27,6 +27,53 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **E2e track — review fixes + the Dashboard-core walk landed (2026-07-16, PR #73 follow-up): 11
+  specs / 3 session-isolated files / ~16 s green locally.** A `/code-review` of PR #73 surfaced 5
+  standards violations + 3 spec gaps; all fixed, and finishing the Dashboard-core walk surfaced **two
+  real product findings**:
+  - **Product defect FIXED: `ProjectService::open` duplicated command registrations on re-open**
+    (folder picker on an open project, or a forwarded second `soloist <path>` launch → two sidebar
+    rows per command; one screenshot showed 9 rows from a 3-process `solo.yml`). `open_and_register`
+    now reconciles per name via `command_id_by_name`/`update_command` — the `reload` rule — with unit
+    test `reopening_a_project_reconciles_commands_instead_of_duplicating` (fails against the old
+    code: 4 rows for 2 commands). Full workspace suite green after.
+  - **Product gap OPEN: nothing watches `solo.yml` for external edits.** `ProjectService::reload`
+    exists, reconciles, and emits `ConfigChanged{requires_trust}` (the TrustDialog's trigger), but
+    **no adapter calls `reload_project`** — the "synced via hash-diff + debounce" invariant
+    (CLAUDE.md §3) is unwired for edits made outside the app. A trust-review e2e journey was built,
+    proved the dialog never opens, and was pulled; recorded as ⛔ blocked in `plan/e2e/README.md` §4.
+  - **The Dashboard-core walk (charter §4 row 2) is covered:** `specs/supervision/` drives select →
+    trust (row control) → start → `Running`, stop → `Stopped`, nonzero exit → `Crashed`, and
+    **restart proven by the reborn process's changed ephemeral port** (`fixtures/.../listener.sh`
+    binds a fresh port per spawn — a repaint cannot fake it; ports read from the row's
+    `data-testid="process-meta"` telemetry).
+  - **The launch journey is now hermetic and asserts `Running` deterministically:** a stub `claude`
+    (`e2e/fixtures/bin/`) shadows any real one, and a stand-in `SHELL` defeats the login-shell env
+    capture that outranks the app env (the previous harness launched the developer's **real** Claude
+    Code, real session included — caught by the new failure screenshots). This supersedes the older
+    entry's "CI-safe without a stub `claude`" claim and its "deliberately not asserted: Running".
+  - **Harness isolation hardened after a real escape:** setting `SOLOIST_APP_DATA_DIR` in a
+    `beforeSession` hook is too late (the service has already spawned the app) — one run listed the
+    developer's real projects and wrote an `e2e-basic` row into the real `soloist.db` (removed;
+    verified no other tables touched). Env now set at `wdio.conf.ts` module load per worker
+    (`WDIO_WORKER_ID`); each spec file gets a fresh data dir; `afterSession` reaps the app by its
+    `target/e2e` binary path (DELETE /session doesn't quit it; a survivor welds sessions together
+    via single-instance and leaks orphans); `openProject` carries an isolation tripwire that aborts
+    on any non-scratch project; `afterTest` saves screenshot + page source to `e2e/logs/` (CI
+    uploads them). E2e builds now use their own `target/e2e` so the wdio-serving binary never lands
+    where `just dev` puts the ordinary one.
+  - **Review fixes:** strict row-status reads (`data-status`/`data-activity` resolved explicitly; a
+    row with neither fails the read instead of defaulting `"Running"` — the launch spec's key assert
+    was vacuously passable); smoke spec rewritten on screens + named waits with a real title assert;
+    all runner timeouts named in `waits.ts`; picker footer read via `data-testid="palette-target"`
+    (the `▸` glyph selector rotted on copy); Node ceiling read from `e2e/package.json` `engines`;
+    D-11 doc citation removed from CI; dead tsconfig include dropped; fixture comments no longer
+    overpromise; spec files leave nothing running (`stopIfRunning` cleanup).
+  - **Gates:** e2e 11/11 green locally (three isolated app sessions); `cargo test --workspace` green
+    (21 suites incl. the new core test); UI vitest green; `just lint` green. **Owed:** the headless
+    `xvfb-run` leg (no Xvfb on this box — CI proves it; per owner, CI is not being watched this
+    session) and the supervision walk's product-mutation pass (noted in e2e-01).
+
 - **E2e track — e2e-01 BUILT and green (2026-07-16): the first real journey.** `just e2e` opens a
   fixture project, launches **Claude** into it from the picker, and asserts the app really starts it
   and renders it. **7 specs / ~18 s** on a live WebKitGTK 605.1.15 session.
