@@ -13,13 +13,12 @@
 //! never auto-acts, because the signal is a heuristic ("a quiet terminal is not always
 //! completed work").
 
-mod activity;
 mod classifier;
 mod permission;
 mod sampler;
 mod strategy;
 mod tracker;
 
-pub use activity::AgentActivity;
+pub use crate::idle::AgentActivity;
 pub use sampler::IdleSampler;
 pub use tracker::IdleTracker;

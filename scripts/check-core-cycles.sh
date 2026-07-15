@@ -6,6 +6,10 @@
 # cycles between contexts" while the port layer imported concrete Noop adapters back from nine
 # contexts that imported it in turn. Nothing checked the claim, so it quietly stopped being true.
 #
+# There is no allow-list. A value type shared by several contexts belongs in a shared-kernel module
+# that depends on nothing (`process`, `idle`, `configchange`, `ids`), not in whichever context feels
+# closest to it — that is what keeps the graph acyclic without exceptions.
+#
 # Edges come from `use crate::<module>` in production code only — a file's inline `#[cfg(test)]`
 # module is cut first (as check-file-size.sh does), and dedicated test files are skipped, because
 # a test reaching across the core is not a design cycle.
@@ -17,20 +21,6 @@ mapfile -t files < <(git ls-files 'crates/core/src/*.rs' \
   | grep -vE '_tests\.rs$' \
   | grep -vE '(^|/)test_support\.rs$' \
   | grep -vE '(^|/)testing/')
-
-# Known-accepted edges, ignored when detecting cycles. This is a ratchet, not an amnesty: it
-# holds the line at today's debt so a *new* cycle fails the build, and every entry is a decision
-# still owed.
-#
-# `DomainEvent` names the payload types it carries, and the contexts owning those types also
-# publish to the bus, so events and those contexts import each other. Removing this needs the
-# payload vocabulary to move to a shared kernel — the way `process` already holds ProcStatus for
-# both events and the supervisor — which is a design decision, not a rename. Until then these two
-# edges are the only cycles the core is allowed to have.
-ALLOWED=(
-  "events agents"   # DomainEvent carries AgentActivity; agents/idle/sampler publishes
-  "events config"   # DomainEvent carries ConfigSync + TrustReviewCommand; config/sync publishes
-)
 
 # "module -> module" edges, deduped. A file's module is its first path component under src/
 # (`coordination/todo.rs` -> `coordination`, `ports.rs` -> `ports`); an import of a module's own
@@ -51,18 +41,7 @@ edges() {
   done | sort -u
 }
 
-is_allowed() {
-  local e
-  for e in "${ALLOWED[@]}"; do [ "$e" = "$1" ] && return 0; done
-  return 1
-}
-
-mapfile -t all_edges < <(edges)
-graph=()
-skipped=0
-for e in "${all_edges[@]}"; do
-  if is_allowed "$e"; then skipped=$((skipped + 1)); else graph+=("$e"); fi
-done
+mapfile -t graph < <(edges)
 
 # Report every cycle by walking each edge back to its source (depth-first over the edge list).
 cycles="$(printf '%s\n' "${graph[@]}" | awk '
@@ -88,7 +67,7 @@ cycles="$(printf '%s\n' "${graph[@]}" | awk '
 ' | sort -u)"
 
 if [ -z "$cycles" ]; then
-  echo "core-cycles OK: ${#graph[@]} module edges, no cycles (${skipped} known edges allowed)"
+  echo "core-cycles OK: ${#graph[@]} module edges, no cycles"
   exit 0
 fi
 

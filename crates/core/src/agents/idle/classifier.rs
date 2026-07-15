@@ -5,8 +5,8 @@
 use crate::agents::AgentKind;
 use crate::terminal::TerminalActivity;
 
-use super::activity::AgentActivity;
 use super::strategy::{strategy_for, AgentMemory, IdleStrategy};
+use crate::idle::AgentActivity;
 
 /// Tracks one agent's activity over successive terminal samples. Holds the provider's
 /// heuristic, its rolling memory, and the last activity reported, so it can emit only on a

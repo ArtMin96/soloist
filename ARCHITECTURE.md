@@ -70,11 +70,15 @@ there is no accessor to reach an ungated context with, so it cannot route around
 `compile_fail` doc tests on the type keep that true.
 
 Contexts do not import each other in a ring, and `scripts/check-core-cycles.sh` enforces it on
-every build rather than leaving it to be asserted here. It allows two known edges, listed in the
-script: `DomainEvent` names the payload types it carries, and the `agents`/`config` contexts that
-own those types also publish to the bus. Removing those needs the payload vocabulary to move to a
-shared kernel — the way `process` already holds `ProcStatus` for both `events` and the supervisor
-— which is an open decision.
+every build rather than leaving it to be asserted here. There is no allow-list.
+
+That holds because a value type shared by several contexts lives in a **shared-kernel module that
+depends on nothing** — `ids`, `process` (`ProcStatus`), `idle` (`AgentActivity`), `configchange`
+(`ConfigSync`, `TrustReviewCommand`), `orphans` — rather than in whichever context feels closest.
+`DomainEvent` names the payloads it carries, and the contexts that produce them also publish to the
+bus; if either owned the type, the two would import each other. Only the types live there — the
+heuristics that decide an `AgentActivity`, and the `diff` that builds a `ConfigSync`, stay in their
+contexts.
 
 A port trait lives with the context that drives it (`TodoRepo` in `coordination`, `MetricsProbe`
 in `metrics`); `ports` holds only what no single context owns (`Clock`, `ProcessSpawner`, `PtyIo`,
@@ -87,7 +91,7 @@ the layer those contexts import.
 | **C1** Projects & Config | `config/` `projects` `trust` `hash` `debounce` | `solo.yml` load/validate/sync, project registry, trust gate, hashing, debounce | live (P2) |
 | **C2** Process Supervision | `supervisor/` `process` `orphans` | registry, `ProcStatus` FSM, start/stop/restart, bulk ops, orphan reconcile | live (P3) |
 | **C3** Terminal I/O | `terminal/` | PTY read loop, rendered+raw buffers, OSC parse, attach replay | live (P4) |
-| **C4** Agents & Idle | `agents` `idle` | agent-tool defs, launch, 5-state idle FSM, optional summary | placeholder → P7 |
+| **C4** Agents & Idle | `agents` (incl. `agents/idle/`) | agent-tool defs, launch, the 5-state idle FSM that decides `idle::AgentActivity` | live (P7) |
 | **C5** Monitoring | `metrics/` `portscan/` | CPU/mem sampling, `/proc` port discovery, readiness | live (P6: D1/D2/D3) |
 | **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos + key-value); end-to-end orchestration (E7) proven |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
@@ -96,7 +100,9 @@ the layer those contexts import.
 Cross-cutting in `core`: `events` (the `DomainEvent` bus), `composition` (the `CorePorts` set the root
 assembles), `ports` (the traits no single context owns, each with its `Noop` default),
 `ids` (newtype IDs), `sync` (poison-safe lock helper), `cache` (Clock-driven read-through memo),
-`testing` (shared fakes).
+`testing` (shared fakes). Shared-kernel value types — owned by no context, depending on nothing:
+`process` (`ProcStatus`/`ProcessKind`/`ProcessView`), `idle` (`AgentActivity`), `configchange`
+(`ConfigSync`/`Rename`/`TrustReviewCommand`), `orphans` (`OrphanInfo`).
 
 **Isolation guarantees.** A bug in summarization (C4) cannot corrupt the process registry (C2);
 coordination state (C6) persists in SQLite independently of live processes (C2), so todos/scratchpads

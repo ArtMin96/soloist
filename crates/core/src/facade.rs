@@ -17,7 +17,8 @@ use tokio::sync::{broadcast, Notify};
 
 use crate::agents::{AgentLineage, Agents, IdleTracker};
 use crate::composition::CorePorts;
-use crate::config::{ConfigEngine, ConfigSync};
+use crate::config::ConfigEngine;
+use crate::configchange::ConfigSync;
 use crate::coordination::{Kv, Leases, PromptTemplates, Scratchpads, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::FileWatcher;

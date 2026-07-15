@@ -12,8 +12,8 @@
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-use crate::agents::AgentActivity;
-use crate::config::{ConfigSync, TrustReviewCommand};
+use crate::configchange::{ConfigSync, TrustReviewCommand};
+use crate::idle::AgentActivity;
 use crate::ids::{ProcessId, ProjectId, TimerId, TodoId};
 use crate::orphans::OrphanInfo;
 use crate::process::{ProcStatus, ProcessKind};

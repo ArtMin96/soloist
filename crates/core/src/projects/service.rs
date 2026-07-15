@@ -11,7 +11,8 @@
 
 use std::path::Path;
 
-use crate::config::{ConfigEngine, ConfigError, ConfigSync, SoloYml, SyncError, WriteError};
+use crate::config::{ConfigEngine, ConfigError, SoloYml, SyncError, WriteError};
+use crate::configchange::ConfigSync;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProjectId;
 use crate::ports::{ProjectRecord, StoreError};

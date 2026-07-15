@@ -13,8 +13,8 @@ use crate::ids::ProcessId;
 use crate::sync::lock;
 use crate::terminal::TerminalActivity;
 
-use super::activity::AgentActivity;
 use super::classifier::Classifier;
+use crate::idle::AgentActivity;
 
 /// Tracks the activity classifier of every launched agent, keyed by process. Cloneable state
 /// is unnecessary — it is shared behind an `Arc`; the launch path calls [`Self::track`] and

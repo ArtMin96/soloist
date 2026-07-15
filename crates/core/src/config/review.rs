@@ -1,22 +1,8 @@
-//! The per-command detail a trust review presents.
-
-use std::collections::BTreeMap;
-
-use serde::Serialize;
+//! Building the per-command detail a trust review presents. The type itself is shared
+//! vocabulary ([`crate::configchange`]); this is the config context's constructor for it.
 
 use super::model::ProcessSpec;
-
-/// One command a [`crate::events::DomainEvent::ConfigChanged`] surfaces for trust
-/// review: enough of the spec for the UI to show *what will run* — command, working
-/// directory, and environment — before the user trusts it. `working_dir` is the raw
-/// `solo.yml` value (relative to the project root, or `None` for the root).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct TrustReviewCommand {
-    pub name: String,
-    pub command: String,
-    pub working_dir: Option<String>,
-    pub env: BTreeMap<String, String>,
-}
+use crate::configchange::TrustReviewCommand;
 
 impl TrustReviewCommand {
     /// Builds the review detail for a named command from its spec.

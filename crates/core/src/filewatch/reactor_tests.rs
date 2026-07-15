@@ -13,7 +13,8 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 
 use crate::composition::CorePorts;
-use crate::config::{ConfigSync, ProcessSpec};
+use crate::config::ProcessSpec;
+use crate::configchange::ConfigSync;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{PtySize, SpawnSpec, TrustRepo};

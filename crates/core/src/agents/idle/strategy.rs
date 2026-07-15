@@ -8,8 +8,8 @@
 use crate::agents::AgentKind;
 use crate::terminal::TerminalActivity;
 
-use super::activity::AgentActivity;
 use super::permission::looks_like_permission_prompt;
+use crate::idle::AgentActivity;
 
 /// Consecutive unchanged samples before an agent is treated as idle. At the sampler's ~1 Hz
 /// cadence this is a few seconds of quiet — long enough not to flap mid-turn, short enough to

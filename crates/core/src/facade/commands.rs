@@ -13,8 +13,9 @@ use std::path::{Path, PathBuf};
 use super::Facade;
 use crate::config::{
     check_command, check_command_name, ConfigWriteError, InvalidCommand, ProcessSpec, SoloYml,
-    TrustReviewCommand, WriteError,
+    WriteError,
 };
+use crate::configchange::TrustReviewCommand;
 use crate::events::DomainEvent;
 use crate::ids::ProjectId;
 use crate::ports::StoreError;

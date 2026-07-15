@@ -11,12 +11,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use super::diff::{diff, ConfigSync};
+use super::diff::diff;
 use super::edit;
 use super::load::{config_path, load_or_empty, ConfigError, MAX_CONFIG_BYTES};
 use super::model::{ProcessSpec, SoloYml};
-use super::review::TrustReviewCommand;
 use super::write::WriteError;
+use crate::configchange::ConfigSync;
+use crate::configchange::TrustReviewCommand;
 use crate::events::{DomainEvent, EventBus};
 use crate::hash::{content_hash, Hash};
 use crate::ids::ProjectId;

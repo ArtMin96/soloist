@@ -77,13 +77,17 @@
     routes all 77 scoped requests through `ScopedFacade` and reaches no ungated context. HTTP/Tauri
     still call the supervisor directly — they are the local user's authority, deliberately unscoped.
 
-  **Known debt this surfaced (not fixed, decision owed):** the cycle gate allows exactly **two** edges —
-  `events → agents` and `events → config`. `DomainEvent` names the payload types it carries
-  (`AgentActivity`, `ConfigSync`, `TrustReviewCommand`) and those contexts also publish to the bus.
-  Removing them needs the payload vocabulary to move to a shared kernel, the way `process` already holds
-  `ProcStatus` for both `events` and the supervisor. That is a design decision, so the gate holds the
-  line at today's debt rather than pretending it is gone. Both edges are listed with rationale in the
-  script's `ALLOWED` array.
+  **The debt this surfaced is now closed too.** The cycle gate briefly allowed two edges
+  (`events → agents`, `events → config`): `DomainEvent` names the payload types it carries, and the
+  contexts owning them also publish to the bus, so each pair imported the other. Fixed by the
+  precedent the codebase had already set with `process.rs` (which holds `ProcStatus` for both
+  `events` and the supervisor, owning neither): **`AgentActivity` → `core::idle`** — which was an
+  empty one-line placeholder module — and **`ConfigSync`/`Rename`/`TrustReviewCommand` → a new
+  `core::configchange`**. All are pure value types depending only on serde. Only the *types* moved:
+  the idle heuristics stay in `agents/idle/`, `diff()` stays in `config`, and
+  `TrustReviewCommand::from_spec` stays in `config/review.rs` (an inherent impl may live anywhere in
+  the defining crate). **`ALLOWED` is deleted — the gate now reports 129 edges, no cycles, no
+  exceptions.** Re-verified it still fails on a reintroduced edge.
 
   **Doc corrections made:** `plan/06` §5.2 already said a port belongs with the context that drives it —
   **CLAUDE.md §16's summary ("traits in `core::ports`") was the inaccurate one** and is now aligned to
@@ -4740,14 +4744,14 @@ review's one should-fix + the mechanical nits:
 
 ## Next session should start with
 
-**★ NEW (2026-07-15) — the codebase-design audit is complete: all eight findings landed. One
-decision is still owed:**
-
-  1. **The two allowed cycle edges** (`events → agents`, `events → config`) — see the Current-state
-     entry. Fixing them means deciding where `DomainEvent`'s payload vocabulary lives. `process.rs`
-     is the precedent: it holds `ProcStatus` for both `events` and the supervisor without either
-     owning it. Until decided, `scripts/check-core-cycles.sh` blocks any *new* cycle, and the two
-     known edges are listed with rationale in its `ALLOWED` array.
+**★ NEW (2026-07-15) — the codebase-design audit is complete. All eight findings landed, plus the
+cycle debt they surfaced; nothing is owed from it.** `scripts/check-core-cycles.sh` now reports
+**129 edges, no cycles, no allow-list**, and `Facade` dropped 169 → 94 public methods with the
+session-scoped surface behind `ScopedFacade`. Two gates were added to `just lint` + CI
+(dependency-direction was already there): the acyclic-context guard, and the `compile_fail` doc
+tests pinning that a scoped caller has no accessor onto an ungated context. Gate state: **Rust 983
+passed / 0 failed**, UI 315, clippy/fmt/tsc/eslint clean. Branch `fix/stability-audit-2026-07` —
+the owner opens the PR (no self-merge).
 
 **⊳ NEW (2026-07-03): `feat/project-removal` is complete, gate-green, and real-window-verified (see the Current-state entry) — the owner opens its PR (no self-merge). No follow-up work is owed on it.**
 

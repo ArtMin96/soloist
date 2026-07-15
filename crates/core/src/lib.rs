@@ -20,6 +20,7 @@
 pub mod agents;
 pub mod composition;
 pub mod config;
+pub mod configchange;
 pub mod coordination;
 pub mod debounce;
 pub mod events;
@@ -57,9 +58,10 @@ pub use agents::{
 };
 pub use composition::{CorePorts, CorePortsBuilder};
 pub use config::{
-    check_command, check_command_name, ConfigEngine, ConfigError, ConfigSync, ConfigWriteError,
-    InvalidCommand, ProcessSpec, Rename, SoloYml, SyncError, TrustReviewCommand,
+    check_command, check_command_name, ConfigEngine, ConfigError, ConfigWriteError, InvalidCommand,
+    ProcessSpec, SoloYml, SyncError,
 };
+pub use configchange::{ConfigSync, Rename, TrustReviewCommand};
 pub use coordination::{
     is_link, placeholders, AcquireOutcome, Comment, CommentAuthor, CommentEdit, CommentOutcome,
     ExportedPromptTemplate, FireCond, IdleMode, Kv, KvEntry, KvRepo, LeaseReleaser, LeaseView,
