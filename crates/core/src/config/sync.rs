@@ -51,6 +51,9 @@ pub enum ConfigWriteError {
     /// The icon path uses an unsupported image format (only png, jpg, gif, ico, webp are allowed).
     #[error("unsupported icon format {0:?} (use png, jpg, gif, ico, or webp)")]
     UnsupportedIcon(String),
+    /// The command the mutation would store has no name or nothing to run.
+    #[error(transparent)]
+    InvalidCommand(#[from] crate::config::InvalidCommand),
     #[error(transparent)]
     Config(#[from] ConfigError),
     #[error(transparent)]

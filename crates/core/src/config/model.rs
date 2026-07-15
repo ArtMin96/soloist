@@ -75,6 +75,42 @@ pub struct ProcessSpec {
     pub env: BTreeMap<String, String>,
 }
 
+/// Why a command an app surface asked to store is not admissible.
+///
+/// Enforced on the mutation paths that add, edit, or rename a command — never on
+/// [`load`](super::load): a hand-authored `solo.yml` is the user's file and still parses as it
+/// always did, so this refuses writing a malformed command without refusing to open a project
+/// that already contains one.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidCommand {
+    /// The name was empty or only whitespace; it is the command's key and its display label.
+    #[error("a command needs a name")]
+    BlankName,
+    /// The command line was empty or only whitespace, so there would be nothing to run.
+    #[error("a command needs a command line to run")]
+    BlankCommand,
+}
+
+/// Checks the invariant every stored command holds: it has a name to be keyed and shown by, and
+/// a command line to run. The one place the rule lives, so every write path — shared or local,
+/// add or edit or rename — refuses the same things, and no caller can define a command that
+/// cannot start.
+pub fn check_command(name: &str, spec: &ProcessSpec) -> Result<(), InvalidCommand> {
+    check_command_name(name)?;
+    if spec.command.trim().is_empty() {
+        return Err(InvalidCommand::BlankCommand);
+    }
+    Ok(())
+}
+
+/// The name half of [`check_command`], for a rename — which sets a name without touching the spec.
+pub fn check_command_name(name: &str) -> Result<(), InvalidCommand> {
+    if name.trim().is_empty() {
+        return Err(InvalidCommand::BlankName);
+    }
+    Ok(())
+}
+
 fn default_true() -> bool {
     true
 }

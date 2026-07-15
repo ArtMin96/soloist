@@ -661,3 +661,79 @@ fn renaming_a_command_preserves_its_env_block() {
         "a rename keeps the command's env"
     );
 }
+
+/// The invariant every stored command holds — it has a name to be keyed by and a command line to
+/// run — belongs to the core, not to whichever surface happens to be asking. These drive each write
+/// path directly, the way a non-UI caller (MCP, HTTP, CLI) would, so a disabled button in one
+/// front-end is never the only thing enforcing it.
+#[test]
+fn every_write_path_refuses_a_command_with_no_name_or_nothing_to_run() {
+    let (facade, project, _dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+
+    assert!(
+        matches!(
+            facade.add_shared_command(project, "   ", spec("npm start")),
+            Err(ConfigWriteError::InvalidCommand(InvalidCommand::BlankName))
+        ),
+        "a shared add refuses a blank name"
+    );
+    assert!(
+        matches!(
+            facade.add_shared_command(project, "Api", spec("  ")),
+            Err(ConfigWriteError::InvalidCommand(
+                InvalidCommand::BlankCommand
+            ))
+        ),
+        "a shared add refuses a blank command line"
+    );
+    assert!(
+        matches!(
+            facade.edit_shared_command(project, "Web", spec("")),
+            Err(ConfigWriteError::InvalidCommand(
+                InvalidCommand::BlankCommand
+            ))
+        ),
+        "a shared edit cannot blank an existing command line"
+    );
+    assert!(
+        matches!(
+            facade.rename_shared_command(project, "Web", " "),
+            Err(ConfigWriteError::InvalidCommand(InvalidCommand::BlankName))
+        ),
+        "a shared rename cannot blank a name"
+    );
+    assert!(
+        matches!(
+            facade.add_local_command(project, "", spec("npm start")),
+            Err(LocalCommandError::Invalid(InvalidCommand::BlankName))
+        ),
+        "a local add refuses a blank name"
+    );
+    assert!(
+        matches!(
+            facade.add_local_command(project, "Api", spec("\t")),
+            Err(LocalCommandError::Invalid(InvalidCommand::BlankCommand))
+        ),
+        "a local add refuses a blank command line"
+    );
+}
+
+#[test]
+fn a_refused_command_never_reaches_solo_yml() {
+    let original = "processes:\n  Web:\n    command: npm run dev\n";
+    let (facade, project, dir) = project_with_yaml(original);
+
+    facade
+        .add_shared_command(project, "  ", spec("npm start"))
+        .expect_err("refused");
+    facade
+        .edit_shared_command(project, "Web", spec(""))
+        .expect_err("refused");
+
+    assert_eq!(
+        std::fs::read_to_string(config_path(dir.path())).unwrap(),
+        original,
+        "a refused write leaves the file byte-unchanged"
+    );
+}

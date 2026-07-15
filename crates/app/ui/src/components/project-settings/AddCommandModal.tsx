@@ -70,6 +70,9 @@ export function AddCommandModal({
       .catch((e) => setError(String(e)));
   };
 
+  // Keeps the button from inviting a submit that cannot succeed. It does not enforce the "a command
+  // needs a name and a command line" rule — that is the core's single source of truth, surfaced as
+  // an InvalidCommand on write and shown in `error` above.
   const canSubmit = name.trim().length > 0 && command.trim().length > 0;
 
   return (
