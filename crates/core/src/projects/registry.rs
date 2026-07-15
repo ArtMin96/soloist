@@ -56,6 +56,13 @@ impl Projects {
     pub fn remove(&self, id: ProjectId) -> Result<(), StoreError> {
         self.repo.remove(id)
     }
+
+    /// The durable repository behind the registry, for a caller in this context that must run a
+    /// store call from async. The handle is cheap to clone and `'static`, so it can move into a
+    /// blocking task instead of parking a runtime worker on the call.
+    pub(super) fn repo(&self) -> Arc<dyn ProjectRepo> {
+        Arc::clone(&self.repo)
+    }
 }
 
 /// Why adding a project failed.

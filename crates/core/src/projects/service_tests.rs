@@ -1,10 +1,11 @@
 use super::*;
 use crate::composition::CorePorts;
 use crate::ids::ProcessId;
-use crate::ports::{TokioClock, TrustRepo};
+use crate::ports::{ProjectRepo, TokioClock, TrustRepo};
 use crate::process::ProcStatus;
 use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTrustRepo};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::thread::{self, ThreadId};
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -25,9 +26,12 @@ impl Parts {
 }
 
 fn parts(spawner: FakeSpawner) -> Parts {
+    parts_with_repo(spawner, Arc::new(FakeProjectRepo::new()))
+}
+
+fn parts_with_repo(spawner: FakeSpawner, repo: Arc<dyn ProjectRepo>) -> Parts {
     let bus = EventBus::new(1024);
     let trust = Arc::new(FakeTrustRepo::new());
-    let repo = Arc::new(FakeProjectRepo::new());
     let ports = CorePorts::builder(
         Arc::new(spawner),
         Arc::new(TokioClock),
@@ -553,6 +557,82 @@ async fn remove_drops_resting_registrations_and_evicts_sync_state() {
     assert!(parts.config.sync(load.id).expect("sync").is_none());
     // Removal never touches disk — the user's solo.yml remains.
     assert!(crate::config::config_path(dir.path()).exists());
+}
+
+/// A project repo that records which thread each durable call ran on, so a test can prove a call
+/// did not run on a runtime worker. Every call otherwise passes straight through.
+#[derive(Default)]
+struct ThreadRecordingRepo {
+    inner: FakeProjectRepo,
+    read_thread: Mutex<Option<ThreadId>>,
+    delete_thread: Mutex<Option<ThreadId>>,
+}
+
+impl ThreadRecordingRepo {
+    fn read_thread(&self) -> Option<ThreadId> {
+        *self.read_thread.lock().expect("uncontended")
+    }
+
+    fn delete_thread(&self) -> Option<ThreadId> {
+        *self.delete_thread.lock().expect("uncontended")
+    }
+}
+
+impl ProjectRepo for ThreadRecordingRepo {
+    fn upsert(
+        &self,
+        root: &Path,
+        name: Option<&str>,
+        icon: Option<&Path>,
+    ) -> Result<ProjectRecord, StoreError> {
+        self.inner.upsert(root, name, icon)
+    }
+
+    fn list(&self) -> Result<Vec<ProjectRecord>, StoreError> {
+        self.inner.list()
+    }
+
+    fn get(&self, id: ProjectId) -> Result<Option<ProjectRecord>, StoreError> {
+        *self.read_thread.lock().expect("uncontended") = Some(thread::current().id());
+        self.inner.get(id)
+    }
+
+    fn remove(&self, id: ProjectId) -> Result<(), StoreError> {
+        *self.delete_thread.lock().expect("uncontended") = Some(thread::current().id());
+        self.inner.remove(id)
+    }
+}
+
+/// Removal is an async path, and both of its store calls are synchronous — so each must run off the
+/// runtime worker. The cascading delete matters most: it is the widest durable write the app makes,
+/// and running it inline would park a worker for the length of its `fsync` on a slow or full disk.
+/// The single-threaded test runtime runs this body on its one worker, so that thread's id is the
+/// worker's: a store call recording it is a call that ran on the runtime.
+#[tokio::test]
+async fn remove_runs_its_store_calls_off_the_runtime_worker() {
+    let runtime_worker = thread::current().id();
+    let repo = Arc::new(ThreadRecordingRepo::default());
+    let parts = parts_with_repo(FakeSpawner::exits_on_terminate(), repo.clone());
+    let dir = tempfile::tempdir().expect("temp dir");
+    write_yml(
+        dir.path(),
+        "processes:\n  Web:\n    command: npm run dev\n    auto_start: false\n",
+    );
+    let load = parts.service().open(dir.path()).expect("open");
+
+    parts.service().remove(load.id).await.expect("remove");
+
+    assert_ne!(
+        repo.read_thread().expect("the existence read ran"),
+        runtime_worker,
+        "the existence read must run off the runtime worker"
+    );
+    assert_ne!(
+        repo.delete_thread().expect("the cascading delete ran"),
+        runtime_worker,
+        "the cascading delete must run off the runtime worker"
+    );
+    assert!(parts.projects.get(load.id).expect("get").is_none());
 }
 
 #[tokio::test]

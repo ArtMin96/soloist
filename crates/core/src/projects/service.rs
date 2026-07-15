@@ -17,6 +17,7 @@ use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProjectId;
 use crate::ports::{ProjectRecord, StoreError};
 use crate::projects::{ProjectError, Projects};
+use crate::supervision::run_blocking;
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 
 /// The project lifecycle service. Borrows the contexts a project open spans — assembled
@@ -167,12 +168,17 @@ impl<'a> ProjectService<'a> {
     /// (and untrusted). Must run within a `tokio` runtime (closing awaits each actor's
     /// exit).
     pub async fn remove(&self, project: ProjectId) -> Result<(), RemoveProjectError> {
-        if self.projects.get(project)?.is_none() {
+        // Both store calls are synchronous, so each runs off the runtime worker: this is an async
+        // path, and the delete is the widest write the app makes — the record cascades to every
+        // project-scoped table — so a slow or full disk must not park a worker on its `fsync`.
+        let repo = self.projects.repo();
+        if run_blocking(move || repo.get(project)).await?.is_none() {
             return Err(RemoveProjectError::UnknownProject);
         }
         self.supervisor.close_all(project).await;
         self.config.forget(project);
-        self.projects.remove(project)?;
+        let repo = self.projects.repo();
+        run_blocking(move || repo.remove(project)).await?;
         self.bus
             .publish(DomainEvent::ProjectRemoved { id: project });
         Ok(())
