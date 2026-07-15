@@ -451,10 +451,43 @@ are **R-phases** (refactor), orthogonal to the build phases.
   fails CI instead of shipping (mcp 31 → 32; proven by a mutation test). `just lint && just test` green;
   `mcp/src/server.rs` no longer an outlier (only the pre-existing `core/src/supervisor.rs` 401 remains).
 
+### R9 — Re-split the files the stability audit grew (done)
+- **The drift (resolved):** the 2026-07 stability/security audit pushed four files over the smell —
+  `app/src/ipc_server.rs` 584 → 707, `core/src/facade/scoped.rs` 283 → **462** (a new outlier),
+  `core/src/supervisor.rs` 511 → 599, and `core/src/supervisor/registry.rs` 459 → 492. Only `scoped.rs`
+  crossed the line on this work; the other three were already over and were pushed further. An
+  **internal structure drift, not a Solo-behavior divergence** (no `KNOWN-DIVERGENCES.md` entry).
+- **What was done (2026-07-15):** each file was split along the concern it had grown a second of.
+  `ipc_server.rs` **707 → 148** — it was doing socket transport *and* request routing; the routing
+  moved to `ipc_server/dispatch.rs` and its 1024-line test file moved with it (R2's rule: tests move
+  with their code). `scoped.rs` **462 → 193** — it kept the seam (the type, the refusal taxonomy, and
+  the scope guard) and handed each domain's scoped methods to that domain's module, which is what the
+  eight other `facade/*.rs` modules carrying `impl ScopedFacade` already did; its module doc claimed
+  to hold "everything a scoped caller may do", which had not been true for some time. `supervisor.rs`
+  **599 → under** (lifecycle commands → `supervisor/lifecycle.rs`) and `registry.rs` **492 → under**
+  (actor launch/handle lifecycle → `registry/actors.rs`). Outliers overall: **15 → 12** (`main` had 14).
+- **The deliberate residual — `ipc_server/dispatch.rs` (580):** left as one flat `match`, and **not**
+  converted to a Registry. §4's rule scopes that pattern to a set that is **open-ended**, and names the
+  anti-pattern as a giant match over *names*; `IpcRequest` is a **closed** enum whose names `serde`
+  already maps to variants (`#[serde(tag = "op")]`), so serde *is* the registry and the trigger has not
+  fired. Matching the variants is what makes a new request a **compile error** until it is routed —
+  the guarantee §16 asks for, and the one `0005fd1` had just restored to the `is_active` mirror. A
+  lookup table would trade it for a runtime miss, and per-family sub-matches would reintroduce the
+  `_ =>` default that commit removed. The file reads long because it is **wide** — one flat arm per
+  request, none interacting — not because it is complex, which is the case where the ~400-line smell
+  does not indicate a design problem. Revisit only if `IpcRequest` ever stops being closed.
+- **Also fixed in the same pass:** `Facade::blocking` now single-sources the `spawn_blocking` helper
+  that `app/commands/mod.rs::offload` and `httpapi::ApiState::blocking` had each copied, delegating to
+  the `supervision::run_blocking` that already existed — a **three-way** duplication, which is also why
+  the helper no longer carries an `expect` (`core` denies `clippy::expect_used`).
+- **Done when:** no file this audit pushed over the smell remains over; the `dispatch.rs` decision is
+  recorded here rather than left as an oversight; `just lint && just test` green.
+
 **Sequencing rationale:** R0 sets the bar and the file-size signal; R1 makes the later phases' tests cheap
 to keep honest; R2/R3/R4 are the structural edits (smallest blast radius first: split, then the constructor,
 then scaffolding removal); R5 is best done after the structure settles; R6 closes the ledger. R7 (pending)
-finishes the port-ownership migration the newer domains established. R8 (done) split the MCP tool router by
+finishes the port-ownership migration the newer domains established. R9 (done) re-split what the
+2026-07 stability audit grew, and records why the IPC dispatch stays one exhaustive match. R8 (done) split the MCP tool router by
 category once the tool set had stabilised (deferred from Phase-8 session 5 by the user, to keep that slice
 small; executed before Phase 9 so its ~50 coordination tools land in category sub-routers, not a flat block).
 Each is a single reviewable commit.

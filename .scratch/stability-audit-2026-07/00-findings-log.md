@@ -451,3 +451,28 @@ comparisons type-checked, `RESTART_LIMIT` a named const; scoped hotkeys really d
   credential injection) but means **no `SOLOIST_PROCESS_ID`**; MCP identity must therefore rely
   entirely on peer-pgid over the socket. Verify the 2nd-batch MCP agent confirms binding works
   for a launched agent whose only identity is its process group.
+
+---
+
+## Unticketed work this PR carried (recorded 2026-07-15, after review)
+
+A `/code-review` spec pass against this backlog found eight commits that trace to **no ticket and no
+finding above**. Nothing here is reverted — each is defensible, and PRD-06's fix depends on the
+`ScopedFacade` seam — but the audit trail should say what actually shipped rather than imply the
+branch was only ticket-traced stability work. Roughly 2,200 insertions across ~110 file-changes:
+
+| Commit | What | Why it rode along |
+|--------|------|-------------------|
+| `8c806d8` | `ScopedFacade` — scope becomes a type | Emerged from PRD-06: the read-scoping fix needed one place a scope-limited caller cannot reach past, rather than a per-adapter check. The largest single change (1455+/1053−). |
+| `49a0641` | `CorePorts` composition root + acyclic gate | `plan/06 §7 R3`, previously pending; PRD-08's port work made the constructor's collaborator count untenable first. |
+| `a2d825f` | Shared event payloads moved to a shared kernel; cycle allow-list deleted | Fallout of `49a0641`: the acyclic gate could not go allow-list-free until the `DomainEvent` payload types stopped tying the bus to a context. |
+| `8f6badf` | Dead `Summarizer`/`Store` ports dropped | Noticed while auditing the port set for `49a0641`. The findings log mentions the Summarizer stub only at `:389` (E4/PRD-05), which explicitly *left* it. |
+| `aa01119` | `InvalidCommand`/`check_command` validation in the core | Correctness gap found while fixing PRD-01's `env` round-trip; not itself a logged finding. |
+| `82f2d31` | Restart gate reported with the attempt | Removed a duplicated `RESTART_LIMIT` the UI held (single-source, §15). Not a logged finding. |
+| `0005fd1` | `is_active` mirror made exhaustive | Same sweep as `82f2d31`; makes a new `ProcStatus` a build error instead of a silent default. |
+| `c422181` | Skeleton-era comments retired | Comment discipline (§8); found while reading the above. |
+
+**The lesson for the next audit:** work discovered *while* fixing a ticket still deserves its own
+ticket before it lands, or the backlog stops describing the branch. The architectural items above
+(`8c806d8`, `49a0641`, `a2d825f`) were roadmap-sized and should have been filed as such rather than
+carried by a stability PR.

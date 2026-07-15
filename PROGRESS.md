@@ -4742,6 +4742,75 @@ review's one should-fix + the mechanical nits:
 
 ---
 
+## Session 2026-07-15 — `/code-review` fixes on the stability-audit branch (PR #72)
+
+A two-axis `/code-review` (Standards + Spec) of `main..fix/stability-audit-2026-07` returned 7 findings.
+All were verified against the source before fixing, and every fix is mutation-checked or compile-enforced.
+
+**Fixed — the four defects:**
+- **Standards #1 (DRY, hard).** `app/commands/mod.rs::offload` and `httpapi::ApiState::blocking` were
+  byte-identical helpers added in the same commit (`f15dcad`). Single-sourced to `Facade::blocking`
+  (`core/src/facade/blocking.rs`), which delegates to the **pre-existing** `supervision::run_blocking`
+  — so it was a *three-way* duplication. 58 app + 16 httpapi call sites rewritten; the helper carries no
+  `expect` because `core` denies `clippy::expect_used`, so it forwards the panic via `resume_unwind`
+  (preserving the original payload rather than wrapping it in a `JoinError`). The barrier test proving
+  ops run off the runtime worker moved from `httpapi/lib_tests.rs` into `core/facade/blocking_tests.rs`
+  with the code, plus a new panic-propagation test.
+- **Standards #4 (`expect` in a long-running server).** `httpapi/src/state.rs` poisoned-mutex `.expect`
+  → `unwrap_or_else(|e| e.into_inner())`. One panicking spawn handler no longer panics every later spawn
+  request for the life of the process. Test: `the_limiter_keeps_admitting_after_its_window_lock_is_poisoned`
+  — **mutation-verified** (fails with the old `.expect`).
+- **Spec PRD-08 (acceptance not met, ticket said `done`).** `ProjectService::remove` ran two synchronous
+  rusqlite calls on a tokio worker — including the cascading project delete, the app's widest write —
+  against the ticket's unqualified *"No `rusqlite` call runs inline on a runtime worker."* Both now go
+  through `run_blocking`. Test: `remove_runs_its_store_calls_off_the_runtime_worker` observes the actual
+  thread id (`#[tokio::test]` runs the body on the single worker), so it **fails loudly** rather than
+  deadlocking — **mutation-verified** (`left: ThreadId(2), right: ThreadId(2)`).
+- **Spec PRD-06 (implemented wrong).** `ipc_server.rs` called the *unscoped* `flush_terminal_perf` — the
+  sole read arm bypassing `.scoped(session)`, and a cross-project existence oracle. Added
+  `ScopedFacade::flush_terminal_perf_scoped` and **deleted** the unscoped method (its only caller was
+  this arm), so the ungated door no longer exists to be picked. The existing refusal test claimed to
+  cover "every per-process read" but omitted this arm *and* `SearchRawOutput`; both added.
+
+**Fixed — the file-size finding (Standards #2).** See `plan/06 §7 R9` for the detail and the numbers:
+`ipc_server.rs` **707 → 148**, `facade/scoped.rs` **462 → 193**, `supervisor.rs` **599 → under**,
+`registry.rs` **492 → under`. Outliers **15 → 12** (`main` had 14).
+
+**Not done, deliberately — Standards #3 (the 80-arm dispatch `match` → Registry).** The documented
+trigger has not fired: `plan/06 §4` scopes Registry to an **open-ended** set and names the anti-pattern
+as a giant match over *names*; `IpcRequest` is **closed** and `serde` already maps its names to variants.
+Converting would trade the compile-time exhaustiveness §16 asks for — and that `0005fd1` had just
+restored to the `is_active` mirror — for a runtime miss. Decision + reasoning recorded in `plan/06 §7 R9`.
+Residual: `ipc_server/dispatch.rs` stays at **580** (a flat routing table), recorded, not hidden.
+
+**Recorded, not reverted — Spec scope creep.** Eight commits (~2,200 insertions) traced to no ticket and
+no finding. Logged with per-commit rationale in `.scratch/stability-audit-2026-07/00-findings-log.md`
+("Unticketed work this PR carried"), including the lesson: work discovered *while* fixing a ticket still
+needs its own ticket before it lands.
+
+**Verified clean by both axes (independently):** D-17 (HTTP per-launch token on every route, constant-time
+compare, `0600` runtime file, `Host` guard) and D-16 (orphan reaping fails closed) are implemented as the
+PR describes. No acceptance criterion was edited after `23abf26`.
+
+**Found while running the gates — an 8th finding neither review axis caught.** The PR description
+claims *"`just lint` — **exit 0**"*. It was **red**: `crates/app/ui/src/lib/status.ts` and
+`crates/app/ui/src/store/signals.test.ts` fail `prettier --check` at `HEAD`. Both were changed by this
+PR (`0005fd1`, `82f2d31`, `ccfd29c`); **`main`'s versions of the same two files pass**, so the branch
+introduced it. Formatting only, no logic — fixed with `prettier --write`. Both reviewers took the
+claim at face value; only running the gate surfaced it. Worth noting the pattern: two of the three
+culprit commits are from the unticketed set above.
+
+**Gates (run 2026-07-15, after the fixes):**
+- `just lint` — **exit 0**: `cargo fmt --check`, `clippy --workspace --all-targets -D warnings`, `tsc
+  --noEmit`, eslint, `prettier --check`, plus `dependency-direction OK: soloist-core is framework-free`
+  and `core-cycles OK: 131 module edges, no cycles` (the splits added no cycle).
+- `just test` — **exit 0**: Rust **986 passed / 0 failed / 3 ignored** (974 before this session's work);
+  UI **315 passed / 63 files**.
+- `check-file-size.sh` — **12** outliers, down from **15** at `HEAD` (`main` had 14). Every file this
+  audit pushed over is back under; the one addition is the deliberate `ipc_server/dispatch.rs` (580).
+- Not re-run: `just soak` (the leak gate) — unchanged by this session; no supervisor/PTY behaviour was
+  altered, only where code lives and which thread two store calls run on.
+
 ## Next session should start with
 
 **★ NEW (2026-07-15) — the codebase-design audit is complete. All eight findings landed, plus the
