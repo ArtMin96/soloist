@@ -53,6 +53,7 @@ pub struct StatusSummary {
     pub running: usize,
 }
 
+mod blocking;
 mod commands;
 mod coordination;
 mod kv;

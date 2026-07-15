@@ -62,6 +62,7 @@ struct Health {
 /// in the core ([`Facade::status_summary`]), so the route only projects it to JSON.
 async fn status(State(state): State<ApiState>) -> Result<Json<StatusSummary>, StatusCode> {
     state
+        .facade()
         .blocking(|facade| {
             facade
                 .status_summary()
@@ -114,6 +115,7 @@ struct OutputQuery {
 /// `GET /projects` — every opened project's display identity.
 async fn projects(State(state): State<ApiState>) -> Result<Json<Vec<ProjectView>>, StatusCode> {
     state
+        .facade()
         .blocking(|facade| {
             facade
                 .projects_snapshot()
@@ -127,6 +129,7 @@ async fn projects(State(state): State<ApiState>) -> Result<Json<Vec<ProjectView>
 /// what agents leave via the `submit_solo_feedback` MCP tool (nothing is ever transmitted).
 async fn feedback(State(state): State<ApiState>) -> Result<Json<Vec<FeedbackEntry>>, StatusCode> {
     state
+        .facade()
         .blocking(|facade| {
             facade
                 .feedback_list()

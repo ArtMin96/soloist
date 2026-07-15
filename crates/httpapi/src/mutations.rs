@@ -75,6 +75,7 @@ fn outcome(result: Result<impl Sized, SupervisorError>) -> StatusCode {
 async fn start(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
     outcome(
         state
+            .facade()
             .blocking(move |f| f.supervisor().start(ProcessId::from_raw(id)))
             .await,
     )
@@ -84,6 +85,7 @@ async fn start(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode
 /// that is not live is a no-op success.
 async fn stop(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
     state
+        .facade()
         .blocking(move |f| f.supervisor().stop(ProcessId::from_raw(id)))
         .await;
     StatusCode::OK
@@ -93,6 +95,7 @@ async fn stop(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode 
 async fn restart(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
     outcome(
         state
+            .facade()
             .blocking(move |f| f.supervisor().restart(ProcessId::from_raw(id)))
             .await,
     )
@@ -102,6 +105,7 @@ async fn restart(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCo
 async fn start_auto(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
     outcome(
         state
+            .facade()
             .blocking(move |f| f.supervisor().start_all(ProjectId::from_raw(id)))
             .await,
     )
@@ -111,6 +115,7 @@ async fn start_auto(State(state): State<ApiState>, Path(id): Path<u64>) -> Statu
 async fn start_all(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
     outcome(
         state
+            .facade()
             .blocking(move |f| f.supervisor().start_all_commands(ProjectId::from_raw(id)))
             .await,
     )
@@ -119,6 +124,7 @@ async fn start_all(State(state): State<ApiState>, Path(id): Path<u64>) -> Status
 /// `POST /projects/:id/stop-all` — stops every live process in the project.
 async fn stop_all(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
     state
+        .facade()
         .blocking(move |f| f.supervisor().stop_all(ProjectId::from_raw(id)))
         .await;
     StatusCode::OK
@@ -128,6 +134,7 @@ async fn stop_all(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusC
 async fn restart_running(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
     outcome(
         state
+            .facade()
             .blocking(move |f| f.supervisor().restart_running(ProjectId::from_raw(id)))
             .await,
     )
@@ -138,6 +145,7 @@ async fn restart_running(State(state): State<ApiState>, Path(id): Path<u64>) -> 
 async fn restart_all(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
     outcome(
         state
+            .facade()
             .blocking(move |f| f.supervisor().restart_all_commands(ProjectId::from_raw(id)))
             .await,
     )
@@ -150,6 +158,7 @@ async fn restart_all(State(state): State<ApiState>, Path(id): Path<u64>) -> Stat
 /// small and bounded (the `solo.yml` cap), like the trust-store reads the other mutations make.
 async fn reload(State(state): State<ApiState>, Path(id): Path<u64>) -> StatusCode {
     match state
+        .facade()
         .blocking(move |f| f.reload_project(ProjectId::from_raw(id)))
         .await
     {
@@ -201,6 +210,7 @@ async fn spawn_agent(
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
     match state
+        .facade()
         .blocking(move |f| f.launch_agent(ProjectId::from_raw(id), &body.tool, body.args))
         .await
     {
@@ -232,6 +242,7 @@ async fn transfer_todo(
 ) -> StatusCode {
     transfer_status(
         state
+            .facade()
             .blocking(move |f| {
                 f.todo_transfer_in(
                     ProjectId::from_raw(id),
@@ -254,6 +265,7 @@ async fn transfer_scratchpad(
 ) -> StatusCode {
     transfer_status(
         state
+            .facade()
             .blocking(move |f| {
                 f.scratchpad_transfer_in(
                     ProjectId::from_raw(id),

@@ -11,8 +11,6 @@ use std::sync::Arc;
 use soloist_core::{Facade, ProcessId, TimerId};
 use tauri::State;
 
-use super::offload;
-
 /// Cancels a timer owned by `owner`. Returns `true` if the timer existed and was removed;
 /// `false` if it was already gone or `owner` does not hold it (another process's timer).
 #[tauri::command]
@@ -21,11 +19,10 @@ pub async fn timer_cancel(
     timer: u64,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<bool, String> {
-    offload(facade.inner(), move |f| {
-        f.timer_cancel_for(ProcessId::from_raw(owner), TimerId::from_raw(timer))
-    })
-    .await
-    .map_err(|err| err.to_string())
+    facade
+        .blocking(move |f| f.timer_cancel_for(ProcessId::from_raw(owner), TimerId::from_raw(timer)))
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Pauses a timer owned by `owner` (freezes the remaining time). Returns `true` if the timer
@@ -36,11 +33,10 @@ pub async fn timer_pause(
     timer: u64,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<bool, String> {
-    offload(facade.inner(), move |f| {
-        f.timer_pause_for(ProcessId::from_raw(owner), TimerId::from_raw(timer))
-    })
-    .await
-    .map_err(|err| err.to_string())
+    facade
+        .blocking(move |f| f.timer_pause_for(ProcessId::from_raw(owner), TimerId::from_raw(timer)))
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Resumes a paused timer owned by `owner` (re-arms it with the time that remained). Returns
@@ -51,9 +47,8 @@ pub async fn timer_resume(
     timer: u64,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<bool, String> {
-    offload(facade.inner(), move |f| {
-        f.timer_resume_for(ProcessId::from_raw(owner), TimerId::from_raw(timer))
-    })
-    .await
-    .map_err(|err| err.to_string())
+    facade
+        .blocking(move |f| f.timer_resume_for(ProcessId::from_raw(owner), TimerId::from_raw(timer)))
+        .await
+        .map_err(|err| err.to_string())
 }

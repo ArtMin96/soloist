@@ -52,24 +52,10 @@ impl ApiState {
         self
     }
 
-    /// The core façade every read and mutation routes through.
-    pub fn facade(&self) -> &Facade {
+    /// The core façade every read and mutation routes through. Handed out as the shared `Arc` so a
+    /// synchronous call can run off the runtime via [`Facade::blocking`].
+    pub fn facade(&self) -> &Arc<Facade> {
         &self.facade
-    }
-
-    /// Runs a synchronous façade `op` on tokio's blocking pool and awaits it, so a durable-store
-    /// `fsync` (slow or full disk) can never park a runtime worker — no blocking call runs on the
-    /// runtime. The cloned `Arc` keeps the façade alive for the task. Every synchronous read and
-    /// mutation routes through here; the handful that await the core stay on the runtime.
-    pub async fn blocking<T, F>(&self, op: F) -> T
-    where
-        F: FnOnce(&Facade) -> T + Send + 'static,
-        T: Send + 'static,
-    {
-        let facade = Arc::clone(&self.facade);
-        tokio::task::spawn_blocking(move || op(&facade))
-            .await
-            .expect("a façade call must not panic on the blocking pool")
     }
 
     /// The per-launch token every request must present, matched by the auth gate.
@@ -116,10 +102,10 @@ impl SpawnRateLimiter {
     /// Whether a spawn at `now` is admitted, counting it against the current window and rolling
     /// the window over first when `now` is past it.
     fn check(&self, now: Instant) -> bool {
-        let mut window = self
-            .window
-            .lock()
-            .expect("spawn rate limiter mutex poisoned");
+        // A caller that panicked mid-check poisons the lock. The window is a plain start-and-count
+        // pair with no invariant a panic can leave broken, so take it back rather than let one
+        // poisoning panic every later spawn request for the life of the process.
+        let mut window = self.window.lock().unwrap_or_else(|err| err.into_inner());
         if now.saturating_duration_since(window.start) >= SPAWN_WINDOW {
             window.start = now;
             window.count = 0;

@@ -5,7 +5,7 @@
 //! auto-save (the core persists the document on every change) and return the stored value, so
 //! the frontend reflects exactly what was written. No policy lives here — the settings store
 //! is the single source, driven identically by every front. Each store call runs on the blocking
-//! pool via [`offload`](super::offload), so a settings write's `fsync` never parks a runtime worker.
+//! pool via [`Facade::blocking`], so a settings write's `fsync` never parks a runtime worker.
 
 use std::sync::Arc;
 
@@ -15,14 +15,14 @@ use soloist_core::{
 };
 use tauri::State;
 
-use super::offload;
 use crate::companion_bins::{self, is_executable_file, MCP_HELPER_BIN};
 use crate::integration_servers::IntegrationServers;
 
 /// The Appearance settings — theme and terminal typography.
 #[tauri::command]
 pub async fn appearance(facade: State<'_, Arc<Facade>>) -> Result<Appearance, String> {
-    offload(facade.inner(), |f| f.appearance())
+    facade
+        .blocking(|f| f.appearance())
         .await
         .map_err(|err| err.to_string())
 }
@@ -33,7 +33,8 @@ pub async fn set_appearance(
     appearance: Appearance,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Appearance, String> {
-    offload(facade.inner(), move |f| f.set_appearance(appearance))
+    facade
+        .blocking(move |f| f.set_appearance(appearance))
         .await
         .map_err(|err| err.to_string())
 }
@@ -41,7 +42,8 @@ pub async fn set_appearance(
 /// The Sidebar settings — what the process-tree sidebar shows.
 #[tauri::command]
 pub async fn sidebar_settings(facade: State<'_, Arc<Facade>>) -> Result<Sidebar, String> {
-    offload(facade.inner(), |f| f.sidebar_settings())
+    facade
+        .blocking(|f| f.sidebar_settings())
         .await
         .map_err(|err| err.to_string())
 }
@@ -52,7 +54,8 @@ pub async fn set_sidebar_settings(
     sidebar: Sidebar,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Sidebar, String> {
-    offload(facade.inner(), move |f| f.set_sidebar_settings(sidebar))
+    facade
+        .blocking(move |f| f.set_sidebar_settings(sidebar))
         .await
         .map_err(|err| err.to_string())
 }
@@ -61,7 +64,8 @@ pub async fn set_sidebar_settings(
 /// it is still the code default.
 #[tauri::command]
 pub async fn hotkeys(facade: State<'_, Arc<Facade>>) -> Result<Vec<HotkeyBindingView>, String> {
-    offload(facade.inner(), |f| f.hotkeys())
+    facade
+        .blocking(|f| f.hotkeys())
         .await
         .map_err(|err| err.to_string())
 }
@@ -73,7 +77,8 @@ pub async fn remap_hotkey(
     binding: Binding,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Vec<HotkeyBindingView>, String> {
-    offload(facade.inner(), move |f| f.remap_hotkey(action, binding))
+    facade
+        .blocking(move |f| f.remap_hotkey(action, binding))
         .await
         .map_err(|err| err.to_string())
 }
@@ -84,7 +89,8 @@ pub async fn disable_hotkey(
     action: HotkeyAction,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Vec<HotkeyBindingView>, String> {
-    offload(facade.inner(), move |f| f.disable_hotkey(action))
+    facade
+        .blocking(move |f| f.disable_hotkey(action))
         .await
         .map_err(|err| err.to_string())
 }
@@ -95,7 +101,8 @@ pub async fn reset_hotkey(
     action: HotkeyAction,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Vec<HotkeyBindingView>, String> {
-    offload(facade.inner(), move |f| f.reset_hotkey(action))
+    facade
+        .blocking(move |f| f.reset_hotkey(action))
         .await
         .map_err(|err| err.to_string())
 }
@@ -105,7 +112,8 @@ pub async fn reset_hotkey(
 pub async fn reset_all_hotkeys(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Vec<HotkeyBindingView>, String> {
-    offload(facade.inner(), |f| f.reset_all_hotkeys())
+    facade
+        .blocking(|f| f.reset_all_hotkeys())
         .await
         .map_err(|err| err.to_string())
 }
@@ -113,7 +121,8 @@ pub async fn reset_all_hotkeys(
 /// The Tools settings — the default editor and terminal.
 #[tauri::command]
 pub async fn tool_defaults(facade: State<'_, Arc<Facade>>) -> Result<ToolDefaults, String> {
-    offload(facade.inner(), |f| f.tool_defaults())
+    facade
+        .blocking(|f| f.tool_defaults())
         .await
         .map_err(|err| err.to_string())
 }
@@ -124,7 +133,8 @@ pub async fn set_tool_defaults(
     tools: ToolDefaults,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ToolDefaults, String> {
-    offload(facade.inner(), move |f| f.set_tool_defaults(tools))
+    facade
+        .blocking(move |f| f.set_tool_defaults(tools))
         .await
         .map_err(|err| err.to_string())
 }
@@ -132,7 +142,8 @@ pub async fn set_tool_defaults(
 /// The Integrations settings — the MCP and HTTP-API master toggles.
 #[tauri::command]
 pub async fn integration_settings(facade: State<'_, Arc<Facade>>) -> Result<Integrations, String> {
-    offload(facade.inner(), |f| f.integration_settings())
+    facade
+        .blocking(|f| f.integration_settings())
         .await
         .map_err(|err| err.to_string())
 }
@@ -146,11 +157,10 @@ pub async fn set_integration_settings(
     facade: State<'_, Arc<Facade>>,
     servers: State<'_, Arc<IntegrationServers>>,
 ) -> Result<Integrations, String> {
-    let stored = offload(facade.inner(), move |f| {
-        f.set_integration_settings(integrations)
-    })
-    .await
-    .map_err(|err| err.to_string())?;
+    let stored = facade
+        .blocking(move |f| f.set_integration_settings(integrations))
+        .await
+        .map_err(|err| err.to_string())?;
     servers.apply(stored).await;
     Ok(stored)
 }
@@ -160,7 +170,8 @@ pub async fn set_integration_settings(
 pub async fn notification_settings(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Notifications, String> {
-    offload(facade.inner(), |f| f.notification_settings())
+    facade
+        .blocking(|f| f.notification_settings())
         .await
         .map_err(|err| err.to_string())
 }
@@ -171,17 +182,17 @@ pub async fn set_notification_settings(
     notifications: Notifications,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<Notifications, String> {
-    offload(facade.inner(), move |f| {
-        f.set_notification_settings(notifications)
-    })
-    .await
-    .map_err(|err| err.to_string())
+    facade
+        .blocking(move |f| f.set_notification_settings(notifications))
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// The MCP feature-group enablement — which feature-tool groups the server serves.
 #[tauri::command]
 pub async fn mcp_tool_groups(facade: State<'_, Arc<Facade>>) -> Result<McpToolGroups, String> {
-    offload(facade.inner(), |f| f.mcp_tool_groups())
+    facade
+        .blocking(|f| f.mcp_tool_groups())
         .await
         .map_err(|err| err.to_string())
 }
@@ -193,11 +204,10 @@ pub async fn set_mcp_tool_group(
     enabled: bool,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<McpToolGroups, String> {
-    offload(facade.inner(), move |f| {
-        f.set_mcp_tool_group(group, enabled)
-    })
-    .await
-    .map_err(|err| err.to_string())
+    facade
+        .blocking(move |f| f.set_mcp_tool_group(group, enabled))
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// What a generated MCP client snippet needs: the helper command and the data-directory

@@ -1,4 +1,4 @@
-use std::sync::{Arc, Barrier};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::net::{TcpListener, TcpStream};
@@ -21,33 +21,6 @@ fn fake_facade() -> Arc<Facade> {
         )
         .build(),
     ))
-}
-
-/// Store-touching handlers must run their façade call **off** the runtime worker, so a durable
-/// write's `fsync` never parks a worker thread. This proves it without timing: on the single-thread
-/// test runtime, launch several `blocking` ops that each wait on a shared barrier. If the ops ran
-/// inline on the runtime thread, the first would block it forever and the barrier could never be
-/// reached — deadlock. They pass the barrier only because each runs on the blocking pool, off the
-/// runtime thread.
-#[tokio::test]
-async fn blocking_runs_facade_ops_off_the_runtime_worker() {
-    const OPS: usize = 4;
-    let state = ApiState::new(fake_facade(), "test-token");
-    let barrier = Arc::new(Barrier::new(OPS));
-    let mut handles = Vec::with_capacity(OPS);
-    for _ in 0..OPS {
-        let state = state.clone();
-        let barrier = Arc::clone(&barrier);
-        handles.push(tokio::spawn(async move {
-            state.blocking(move |_facade| barrier.wait()).await;
-        }));
-    }
-    for handle in handles {
-        timeout(Duration::from_secs(5), handle)
-            .await
-            .expect("no deadlock: the blocking ops ran concurrently off the single worker")
-            .expect("the op task did not panic");
-    }
 }
 
 /// The live-teardown contract for the HTTP surface: while the server runs its port accepts; when

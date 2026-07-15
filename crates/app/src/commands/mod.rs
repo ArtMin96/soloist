@@ -34,22 +34,6 @@ use tokio::sync::broadcast::error::RecvError;
 
 use crate::pty_bridge::PtyBridge;
 
-/// Runs a synchronous [`Facade`] operation on tokio's blocking pool and awaits it, so a
-/// durable-store write's `fsync` (slow or full disk) can never park a runtime worker — no blocking
-/// call runs on the runtime. The cloned `Arc` keeps the façade alive for the task; the closure
-/// returns the command's own result. Commands whose bodies instead await the core (PTY writes,
-/// process removal, agent detection) stay on the runtime and do not route through here.
-pub(crate) async fn offload<T, F>(facade: &Arc<Facade>, op: F) -> T
-where
-    F: FnOnce(&Facade) -> T + Send + 'static,
-    T: Send + 'static,
-{
-    let facade = Arc::clone(facade);
-    tokio::task::spawn_blocking(move || op(&facade))
-        .await
-        .expect("a façade call must not panic on the blocking pool")
-}
-
 /// The current process read model — the snapshot half of snapshot-then-deltas.
 #[tauri::command]
 pub async fn proc_list(facade: State<'_, Arc<Facade>>) -> Result<Vec<ProcessView>, String> {
@@ -61,7 +45,8 @@ pub async fn proc_list(facade: State<'_, Arc<Facade>>) -> Result<Vec<ProcessView
 /// arrives as a `ProjectOpened` event that prompts the UI to re-read this.
 #[tauri::command]
 pub async fn project_list(facade: State<'_, Arc<Facade>>) -> Result<Vec<ProjectView>, String> {
-    offload(facade.inner(), |f| f.projects_snapshot())
+    facade
+        .blocking(|f| f.projects_snapshot())
         .await
         .map_err(|err| err.to_string())
 }
@@ -77,7 +62,8 @@ pub async fn project_load(
     path: String,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectLoad, String> {
-    offload(facade.inner(), move |f| f.load_project(Path::new(&path)))
+    facade
+        .blocking(move |f| f.load_project(Path::new(&path)))
         .await
         .map_err(|err| err.to_string())
 }
@@ -103,17 +89,17 @@ pub async fn config_trust(
     name: String,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<(), String> {
-    offload(facade.inner(), move |f| {
-        f.trust_command(ProjectId::from_raw(project), &name)
-    })
-    .await
-    .map_err(|err| err.to_string())
+    facade
+        .blocking(move |f| f.trust_command(ProjectId::from_raw(project), &name))
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Every configured agent tool, for the launch picker to render instantly (no probing).
 #[tauri::command]
 pub async fn agent_list(facade: State<'_, Arc<Facade>>) -> Result<Vec<AgentTool>, String> {
-    offload(facade.inner(), |f| f.agents().list_tools())
+    facade
+        .blocking(|f| f.agents().list_tools())
         .await
         .map_err(|err| err.to_string())
 }
@@ -141,22 +127,20 @@ pub async fn agent_launch(
     extra_args: Vec<String>,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<u64, String> {
-    offload(facade.inner(), move |f| {
-        f.launch_agent(ProjectId::from_raw(project), &tool, extra_args)
-    })
-    .await
-    .map(|id| id.get())
-    .map_err(|err| err.to_string())
+    facade
+        .blocking(move |f| f.launch_agent(ProjectId::from_raw(project), &tool, extra_args))
+        .await
+        .map(|id| id.get())
+        .map_err(|err| err.to_string())
 }
 
 /// Starts one process; refused by the core trust gate if its command is untrusted.
 #[tauri::command]
 pub async fn proc_start(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
-    offload(facade.inner(), move |f| {
-        f.supervisor().start(ProcessId::from_raw(id))
-    })
-    .await
-    .map_err(|err| err.to_string())
+    facade
+        .blocking(move |f| f.supervisor().start(ProcessId::from_raw(id)))
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Requests a graceful stop of one process; reports whether it was found live.
@@ -168,11 +152,10 @@ pub async fn proc_stop(id: u64, facade: State<'_, Arc<Facade>>) -> Result<bool, 
 /// Restarts one process (stop then start with its saved config); trust-gated.
 #[tauri::command]
 pub async fn proc_restart(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
-    offload(facade.inner(), move |f| {
-        f.supervisor().restart(ProcessId::from_raw(id))
-    })
-    .await
-    .map_err(|err| err.to_string())
+    facade
+        .blocking(move |f| f.supervisor().restart(ProcessId::from_raw(id)))
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Resumes a stopped agent's last session ("Resume last session"): relaunches it with its
@@ -180,22 +163,20 @@ pub async fn proc_restart(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(),
 /// session to resume (a command, terminal, or unsupported-provider agent).
 #[tauri::command]
 pub async fn agent_resume(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
-    offload(facade.inner(), move |f| {
-        f.supervisor().resume(ProcessId::from_raw(id))
-    })
-    .await
-    .map_err(|err| err.to_string())
+    facade
+        .blocking(move |f| f.supervisor().resume(ProcessId::from_raw(id)))
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Starts every trusted auto-start command in a project (untrusted ones are skipped).
 #[tauri::command]
 pub async fn stack_start(project: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
-    offload(facade.inner(), move |f| {
-        f.supervisor().start_all(ProjectId::from_raw(project))
-    })
-    .await
-    .map(|_summary| ())
-    .map_err(|err| err.to_string())
+    facade
+        .blocking(move |f| f.supervisor().start_all(ProjectId::from_raw(project)))
+        .await
+        .map(|_summary| ())
+        .map_err(|err| err.to_string())
 }
 
 /// Stops every live process in a project.
@@ -211,11 +192,10 @@ pub async fn stack_restart_running(
     project: u64,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<(), String> {
-    offload(facade.inner(), move |f| {
-        f.supervisor().restart_running(ProjectId::from_raw(project))
-    })
-    .await
-    .map_err(|err| err.to_string())
+    facade
+        .blocking(move |f| f.supervisor().restart_running(ProjectId::from_raw(project)))
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Writes typed text or raw control bytes to a running process's PTY.

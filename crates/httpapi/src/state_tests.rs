@@ -1,3 +1,4 @@
+use std::panic::{self, AssertUnwindSafe};
 use std::time::Duration;
 
 use super::{SpawnRateLimiter, SPAWN_MAX_PER_WINDOW, SPAWN_WINDOW};
@@ -29,5 +30,37 @@ fn the_limiter_rolls_the_window_over_and_admits_again() {
     assert!(
         limiter.check(next_window),
         "a spawn after the window resets the count"
+    );
+}
+
+/// A caller that panics while holding the window lock poisons it. The limiter serves a long-running
+/// server, so it must take the window back and keep deciding — a poisoning that refused every later
+/// spawn for the life of the process would turn one panic into a permanent outage.
+#[test]
+fn the_limiter_keeps_admitting_after_its_window_lock_is_poisoned() {
+    let base = std::time::Instant::now();
+    let limiter = SpawnRateLimiter::new(base);
+
+    // Poison the lock the way a panicking caller would: unwind while holding the guard. The hook is
+    // silenced first so the deliberate panic does not print a scary trace in a passing run.
+    let hook = panic::take_hook();
+    panic::set_hook(Box::new(|_| {}));
+    let panicked = panic::catch_unwind(AssertUnwindSafe(|| {
+        let _guard = limiter
+            .window
+            .lock()
+            .expect("the fresh lock is uncontended");
+        panic!("a caller panicked while holding the window");
+    }));
+    panic::set_hook(hook);
+
+    assert!(panicked.is_err(), "the deliberate panic unwound");
+    assert!(
+        limiter.window.is_poisoned(),
+        "the panic left the window lock poisoned"
+    );
+    assert!(
+        limiter.check(base),
+        "the limiter recovers the poisoned window and still admits"
     );
 }
