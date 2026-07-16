@@ -40,9 +40,19 @@ The only observable difference is that an `auto_start`-only edit does not re-pro
 
 ---
 
-## D-2 — `solo.yml` live OS watcher lands in Phase 6, not Phase 2 🟡
+## D-2 — `solo.yml` live OS watcher lands in Phase 6, not Phase 2 🟢
 
 **Introduced:** Phase 2 (Config & Projects); resolves in Phase 6 (Monitoring & self-healing).
+**Resolved (2026-07-16):** Phase 6 shipped the `notify` adapter but wired it only to
+`restart_when_changed`; the config-sync trigger stayed unwired (no adapter called
+`reload_project` for external edits) until the e2e trust-review walk exposed the gap. The
+`ConfigWatchReactor` (projects C1) now holds a **non-recursive** watch per open project root
+via a `FileWatcher::watch_dir` port method (one inotify descriptor per project, whatever the
+tree's size), debounces a save burst, and drives `ProjectService::reload` — the same
+reconcile the HTTP endpoint uses. An invalid mid-edit save fails the reload quietly (the
+config keeps its last good state; the next valid save syncs), and a `solo.yml` deletion is
+not a sync (the adapter forwards create/modify only) — the loaded config outlives the file,
+matching "files on disk are never touched" on removal.
 
 **Plan wording:** the Phase 2 scope lists "the file-watcher + hash-diff + debounced sync."
 

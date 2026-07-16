@@ -41,12 +41,19 @@ Plus, outside `e2e/`: the `wdio` cargo feature and its gated plugin registration
   puts the ordinary one (nor force a feature-flip rebuild between dev and e2e). `-c/--config` merges
   the overlay over `tauri.conf.json`; no other build path sets any of these, so no ordinary build
   can produce this binary by accident.
-- **Hermetic, per session:** each spec file gets its own app instance *and its own data dir* —
-  `beforeSession` points `SOLOIST_APP_DATA_DIR` at `e2e/.tmp/app-data/<cid>` — so no session boots
-  into a previous session's durable state (restored projects, orphan bookkeeping, trust). A
-  persistence walk will share a dir deliberately; nothing inherits one by accident. The env is set
-  on `process.env` rather than as a capability because the published Tauri capability type has no
-  `env` field even though the launcher honours one. Verified: a run writes `soloist.db` there and
+- **Hermetic, fresh per session:** the app's data dir lives under `e2e/.tmp/app-data/` — never the
+  developer's real `~/.local/share/soloist/`. The env is set on `process.env` at `wdio.conf.ts`
+  module load (not a lifecycle hook, which is too late — the app is already up) because the
+  published Tauri capability type has no `env` field even though the launcher honours one. One
+  wrinkle the trust-review walk exposed: the embedded provider spawns the app with an environment
+  the service captured *before* this worker's `WDIO_WORKER_ID` is set, so `SOLOIST_APP_DATA_DIR`
+  resolves to a single shared subdir (`app-data/launcher`) for the whole run rather than the
+  per-worker one the module also computes. Wiping only the per-worker subdir therefore left the
+  shared one accumulating across specs — a command one spec trusted came up already-trusted in the
+  next, and a re-materialized fixture's config watch went stale on the old inode. The module now
+  **wipes the whole `app-data` tree at each worker's load**, so whichever subdir the app picks
+  starts empty; safe because specs run one at a time (`maxInstances` 1) and each session's app is
+  reaped before the next worker loads. Verified: a run writes `soloist.db` under `app-data` and
   leaves `~/.local/share/soloist/` untouched.
 - **Stub agents and a stub shell:** `fixtures/bin/` is prepended to `PATH`, so agent CLIs resolve to
   deterministic stand-ins; and `SHELL` points at a profile-free stand-in shell, because the app

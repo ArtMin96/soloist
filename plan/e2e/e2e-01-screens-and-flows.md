@@ -149,6 +149,17 @@ duplicated command registrations on re-open; fixed with a unit test) and a real 
 `solo.yml` watcher — charter §4). The restart spec is structurally mutation-resistant: it asserts the
 reborn process's *changed* ephemeral port, which no repaint can fake.
 
+The trust-review walk (`specs/projects/config-trust.ts`) earned its keep the same way: building it caught
+a second real defect. Every e2e session shares one durable data dir (the embedded provider spawns the app
+with an environment captured before the per-worker `WDIO_WORKER_ID` is known, so `SOLOIST_APP_DATA_DIR`
+resolves to one path for the run), so `basic` was already registered — and its root already watched — when
+`materializeProject` deleted and recreated the fixture directory for this spec, giving it a new inode. The
+config watcher held its now-dead watch on the vanished inode and never saw the edit. The fix is a genuine
+robustness improvement, not a test accommodation: **`ConfigWatchReactor` now re-establishes a project's
+watch on every `ProjectOpened`**, since re-opening a path is exactly when its directory may have been
+replaced (unit test `reopening_a_project_re_establishes_its_watch`). The spec proved it end to end only in
+the real window — the headless suites never re-open a project whose directory was swapped underneath it.
+
 ## Risks & mitigations
 
 - **Screens drifting into logic** → a screen returns state and performs intent; it never asserts and never
