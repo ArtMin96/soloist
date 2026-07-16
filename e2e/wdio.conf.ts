@@ -44,12 +44,20 @@ process.env.PATH = `${path.join(dir, "fixtures", "bin")}${path.delimiter}${proce
 process.env.SHELL = path.join(dir, "fixtures", "bin", "shell");
 // Each spec file's worker re-imports this config, so this runs in every worker before the service
 // spawns the app — a lifecycle hook is too late, the app is already up (observed: it launched
-// against the developer's real data dir and listed their real projects). Every session gets its
-// own data dir, so no session boots into another's durable state (restored projects, orphan
-// bookkeeping, trust); the launcher's value is never used to spawn anything. A journey that needs
-// persistence across launches will share a dir deliberately; nothing inherits one by accident.
-const sessionDataDir = path.join(scratchDir, "app-data", process.env.WDIO_WORKER_ID ?? "launcher");
-rmSync(sessionDataDir, { recursive: true, force: true });
+// against the developer's real data dir and listed their real projects).
+//
+// The embedded provider spawns the app with an environment the service captured before this
+// worker's `WDIO_WORKER_ID` was set, so `SOLOIST_APP_DATA_DIR` resolves to one shared path for the
+// whole run (`app-data/launcher`) — a per-worker subdir is set here but the app ignores it. So
+// wiping only this worker's subdir would leave the dir the app actually uses accumulating across
+// specs: one spec's trust grants, opened projects, and orphan bookkeeping would leak into the
+// next (observed — a command another spec trusted came up already-trusted, and a re-materialized
+// project's config watch went stale on the old inode). Wipe the whole `app-data` tree instead, so
+// whichever subdir the app picks starts empty. Safe because specs run one at a time (maxInstances
+// 1) and each session's app is reaped (afterSession) before the next worker loads this module.
+const appDataRoot = path.join(scratchDir, "app-data");
+rmSync(appDataRoot, { recursive: true, force: true });
+const sessionDataDir = path.join(appDataRoot, process.env.WDIO_WORKER_ID ?? "launcher");
 mkdirSync(sessionDataDir, { recursive: true });
 process.env.SOLOIST_APP_DATA_DIR = sessionDataDir;
 
