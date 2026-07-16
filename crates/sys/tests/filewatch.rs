@@ -129,10 +129,18 @@ fn a_dir_watch_reports_direct_children_but_not_nested_ones() {
         "expected the direct child, got {change:?}",
     );
 
-    while rx.try_recv().is_ok() {}
+    // Assert on the nested file's identity, not on silence: the direct-child write above
+    // delivers its events asynchronously, so a late one can still be draining into the channel
+    // when the nested write lands. A stray `solo.yml` event is fine — a `deep.rs` event is not.
     fs::write(nested.join("deep.rs"), b"//").expect("write nested file");
-    assert!(
-        change_within(&mut rx, QUIET).is_none(),
-        "a nested change is not reported by a non-recursive watch",
-    );
+    let deadline = Instant::now() + QUIET;
+    while Instant::now() < deadline {
+        if let Ok(path) = rx.try_recv() {
+            assert!(
+                !path.ends_with("deep.rs"),
+                "a non-recursive watch reported a nested change: {path:?}",
+            );
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
