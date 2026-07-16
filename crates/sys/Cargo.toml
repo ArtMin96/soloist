@@ -26,5 +26,7 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [dev-dependencies]
 tempfile = "3"
-# The integration test constructs the change channel the file-watch port forwards on.
-tokio = { version = "1", default-features = false, features = ["sync"] }
+# The integration tests construct the change channel the file-watch port forwards on, and
+# the config-watch test drives the real reactor over this crate's real watcher.
+tokio = { version = "1", default-features = false, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+soloist-core = { path = "../core", features = ["testing"] }

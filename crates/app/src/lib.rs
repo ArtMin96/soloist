@@ -301,6 +301,10 @@ pub fn run() {
             // open. It reloads a running watched command when a matching file changes via the
             // notify watcher wired in `build_facade` (weakly held, ends when the bus closes).
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().file_watch_loop());
+            // The config-watch reactor watches each restored project's root for external
+            // `solo.yml` edits, so it starts after restore for the same reason; a debounced
+            // edit reloads the project and raises the trust review when needed.
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().config_watch_loop());
             // Assemble the toggleable integration servers, each present only when its adapter is
             // compiled in. The composition root owns each server's task + cancellation handle so a
             // runtime toggle of the Integrations setting starts or stops it live, no app restart —

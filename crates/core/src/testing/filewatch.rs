@@ -63,10 +63,8 @@ impl FakeFileWatcher {
     pub async fn released(&self) {
         self.released.notified().await;
     }
-}
 
-impl FileWatcher for FakeFileWatcher {
-    fn watch(&self, root: PathBuf, changes: mpsc::Sender<PathBuf>) -> Box<dyn WatchHandle> {
+    fn record(&self, root: PathBuf, changes: mpsc::Sender<PathBuf>) -> Box<dyn WatchHandle> {
         lock(&self.roots).push(root.clone());
         lock(&self.live).push(root.clone());
         *lock(&self.sink) = Some(changes);
@@ -76,6 +74,18 @@ impl FileWatcher for FakeFileWatcher {
             live: self.live.clone(),
             released: self.released.clone(),
         })
+    }
+}
+
+impl FileWatcher for FakeFileWatcher {
+    fn watch(&self, root: PathBuf, changes: mpsc::Sender<PathBuf>) -> Box<dyn WatchHandle> {
+        self.record(root, changes)
+    }
+
+    // Recursion depth is the real adapter's concern; the fake records both the same way, so
+    // a reactor's watch bookkeeping is asserted identically whichever method it drives.
+    fn watch_dir(&self, dir: PathBuf, changes: mpsc::Sender<PathBuf>) -> Box<dyn WatchHandle> {
+        self.record(dir, changes)
     }
 }
 

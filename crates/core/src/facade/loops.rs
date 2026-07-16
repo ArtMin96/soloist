@@ -15,6 +15,7 @@ use crate::filewatch::WatchReactor;
 use crate::metrics::MetricsSampler;
 use crate::notify::NotificationReactor;
 use crate::portscan::PortScanner;
+use crate::projects::ConfigWatchReactor;
 
 impl Facade {
     /// The self-healing reactor loop (crash auto-restart, C2), returned for the
@@ -101,6 +102,26 @@ impl Facade {
             self.file_watcher.clone(),
             &self.bus,
             Arc::downgrade(&self.supervisor),
+        )
+        .run()
+    }
+
+    /// The config-watch reactor loop (projects C1), returned for the composition root to spawn
+    /// once on its runtime. It holds a non-recursive watch on each open project's root and,
+    /// on an external `solo.yml` edit, reloads that project (debounced) via the projects
+    /// domain — the same reconcile an explicit reload drives, announcing
+    /// [`crate::events::DomainEvent::ConfigChanged`] with its trust review. Watches the
+    /// supervisor weakly and ends when the bus closes (app shutdown). With the default
+    /// [`crate::filewatch::NoopFileWatcher`] it watches nothing, so the real `notify`
+    /// adapter is chosen in the composition root.
+    pub fn config_watch_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        ConfigWatchReactor::new(
+            self.clock.clone(),
+            self.file_watcher.clone(),
+            &self.bus,
+            Arc::downgrade(&self.supervisor),
+            self.projects.clone(),
+            self.config.clone(),
         )
         .run()
     }
