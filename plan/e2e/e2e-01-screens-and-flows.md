@@ -143,13 +143,24 @@ Both assertions were confirmed by mutating the **product** and watching the righ
 Repeat this whenever a walk lands. The first mutation is the one that matters: without it, "renders the
 agent in the sidebar" passes against a row that was merely painted.
 
-The supervision walk's product-mutation pass is **owed** — its landing session verified the specs can
-fail for real reasons the harder way instead: they caught a real defect (`ProjectService::open`
-duplicated command registrations on re-open; fixed with a unit test) and a real product gap (no
-`solo.yml` watcher — charter §4). The restart spec is structurally mutation-resistant: it asserts the
-reborn process's *changed* ephemeral port, which no repaint can fake.
+The supervision walk's product-mutation pass is done. It caught real defects the harder way at
+landing too (`ProjectService::open` duplicated command registrations on re-open — fixed with a unit
+test — and a real product gap: no `solo.yml` watcher, charter §4). Choosing the mutation matters
+here: every spec's cleanup after-hook stops its process (`sidebar.stopIfRunning` waits for
+`Stopped`) and three of the four tests start one, so breaking `Supervisor::start` or
+`Supervisor::stop` is *not* surgical — it cascades into other walks' cleanup and no single walk
+fails alone. The restart signal is surgical: it drives exactly one assertion and no cleanup, and
+that assertion is the walk's most deliberately-robust one — the reborn process's *changed* ephemeral
+port, which no repaint can fake.
 
-The trust-review walk (`specs/projects/config-trust.ts`) earned its keep the same way: building it caught
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Comment out the `ActorMsg::Restart` signal in `Supervisor::restart` — a running restart no-ops | only "restart replaces the process, not just the row" fails | exactly that: `Listener never showed a port other than :41723`; the walk's other three (start→Running, stop→Stopped, crash→Crashed) and all three other spec files passed |
+
+(start→Running needs no separate supervision mutation — the agents walk's `supervisor.start(id)`
+mutation above already proves it load-bearing.)
+
+The trust-review walk (`specs/projects/config-trust.spec.ts`) earned its keep the same way: building it caught
 a second real defect. Every e2e session shares one durable data dir (the embedded provider spawns the app
 with an environment captured before the per-worker `WDIO_WORKER_ID` is known, so `SOLOIST_APP_DATA_DIR`
 resolves to one path for the run), so `basic` was already registered — and its root already watched — when
@@ -157,8 +168,19 @@ resolves to one path for the run), so `basic` was already registered — and its
 config watcher held its now-dead watch on the vanished inode and never saw the edit. The fix is a genuine
 robustness improvement, not a test accommodation: **`ConfigWatchReactor` now re-establishes a project's
 watch on every `ProjectOpened`**, since re-opening a path is exactly when its directory may have been
-replaced (unit test `reopening_a_project_re_establishes_its_watch`). The spec proved it end to end only in
-the real window — the headless suites never re-open a project whose directory was swapped underneath it.
+replaced (unit test `reopening_a_project_re_establishes_its_watch`). When that defect was found the
+harness still shared one durable data dir, so the walk re-opened an already-watched `basic` and exercised
+the re-watch end to end. That is no longer how the suite runs: `wdio.conf.ts` now wipes the whole app-data
+tree per worker, so each spec boots a clean app and config-trust opens `basic` for the first time — it
+never re-opens a swapped-inode project. So the re-watch's load-bearing proof today is its *unit test*, not
+the e2e (the second mutation below shows exactly this).
+
+Its product-mutation pass is done:
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Comment out the `config_watch_loop()` spawn in `crates/app/src/lib.rs` — the watcher never runs | the walk's assertions fail; the other walks hold | exactly that: "the trust review dialog never opened" (test 1) and Trust-Echo-not-clickable (test 2, its consequence); agents, smoke, and supervision all passed — nothing else raises that dialog. Proves the whole watcher → debounce → reload → `ConfigChanged{requires_trust}` → dialog chain load-bearing |
+| Drop the `ProjectOpened` re-watch (`watches.remove(&id)`) in `ConfigWatchReactor` | (at landing) the walk regresses; (now) the unit test regresses | the e2e stayed green — the per-worker app-data wipe isolates each spec's app, so nothing re-opens a watched project — while the unit test `reopening_a_project_re_establishes_its_watch` deadlocks (the re-open never re-establishes the watch), passing again once restored. The proof moved from the e2e to the unit test; the fix stayed load-bearing |
 
 ## Risks & mitigations
 
