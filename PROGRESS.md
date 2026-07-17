@@ -27,6 +27,48 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **E2e cross-surface walk landed + two harness isolation defects found and fixed (2026-07-17).**
+  `specs/cross-surface/cli-restart.spec.ts` drives the **real `soloist-cli`** against the running app
+  (a separate binary, over its loopback HTTP API) and proves the window shows the reborn process's
+  **changed** ephemeral port — covering the one v1 assembly seam no headless test reaches
+  (`serve()`'s runtime-file write, the CLI's discovery + token handshake, the composition root's HTTP
+  wiring), and the direct gate on CLAUDE.md §8's "one behavior, many frontends". Reuses `Sidebar` +
+  `flows/openProject.ts`; one new harness file (`src/harness/cli.ts`, which asks the app its own
+  resolved data dir via `mcp_setup_info` and carries an isolation tripwire), plus a
+  `cargo build -p soloist-cli` in `onPrepare`. **Mutation-verified:** the HTTP `restart` handler
+  returning `200 OK` without calling the core fails **only** that walk (`Listener never showed a port
+  other than :37583`) while the other four spec files hold — surgical because no other spec drives
+  HTTP and no cleanup path uses it. Suite **5 files / 14 specs green** locally (`just e2e` on Node 24,
+  ~37 s); `just lint` exit 0; e2e `tsc --noEmit` clean.
+  - **Defect 1 (harness) — the per-worker `app-data` wipe raced the app it isolated.** It ran ~3 s
+    *after* each app booted, deleting the live `soloist.db`, IPC socket, and `http-api.json`;
+    invisible for three walks and a CI run because an open SQLite handle keeps working on an unlinked
+    inode (durable state was silently non-durable). **Fixed:** a data dir per session assigned in
+    `onWorkerStart` (launcher-side, before the app spawns — the app inherits the *launcher's* env, so
+    that is the only place that reaches it); the sole remaining wipe is `onPrepare`'s, before any app
+    exists. Found by the walker; verified this session.
+  - **Defect 2 (harness) — the webview's storage was never isolated.** `SOLOIST_APP_DATA_DIR` moves
+    the Rust state only; WebKitGTK keys `localStorage`/caches under the app identifier in
+    `XDG_DATA_HOME`, which the harness did not set, so it fell through to the developer's real
+    `~/.local/share/dev.soloist.app/` — **the suite read and wrote real UI state**, and a persisted
+    collapsed-sidebar entry once booted later runs with no visible rows, reddening three spec files
+    with harness and product both innocent. (This also disproved a charter claim that the service
+    sets a per-instance `XDG_DATA_HOME` — it does not.) **Fixed:** `XDG_DATA_HOME` assigned per
+    session in `onWorkerStart`, same seam as the data dir. **Verified empirically:** across a full
+    run the real dir's mtimes stayed frozen while per-session webview storage materialised under
+    `e2e/.tmp/xdg-data/<worker>/`.
+  - **Also this session:** corrected a misleading runtime-file comment in `crates/ipc/src/http.rs`
+    (the CLI does *not* fall back to the default port on a missing file — it reports "not running", a
+    deliberate fail-closed against addressing a foreign server); removed a false "app process is
+    shared across spec files" comment in `smoke.spec.ts`; reconciled the three e2e plan docs (the two
+    isolation postmortems, the cross-surface coverage + mutation rows, the now-cleared headless-CI
+    claim, and the phantom `fixtures/configs/`). **Uncommitted, pending the user's review** at the
+    time of writing.
+  - **Open (tracked, not blocking):** `plan/02`'s per-feature detail tables were pruned in `78dce4c`,
+    so the scope contract can no longer answer "is a row v1 or later" without git archaeology (the
+    walker recovered B9's `later` designation from `e967a0a`). Decide whether to restore them. The
+    B9 resume-last-session walk stays deferred (it is a `later` row and mostly covered headlessly).
+
 - **Product-mutation passes done + PR #74 CI confirmed green (2026-07-16, session close).** The two
   owed e2e mutation passes are complete — each e2e walk is now proven able to fail for a real reason
   by breaking the **product** one line at a time, watching exactly the right assertion go red, and

@@ -140,7 +140,7 @@ Both are recorded because they are the two things most likely to waste a future 
 
 ## 2. Scope — user journeys, not a second copy of the pyramid
 
-Soloist already has **974 Rust + 315 UI tests** covering logic. This track does **not** re-assert that
+Soloist already has **998 Rust + 315 UI tests** covering logic. This track does **not** re-assert that
 logic through a window. It owns the **user journeys** per domain — what an end user actually does — and
 the headless suites keep owning pure logic. e2e is an **additional gate, never a replacement**.
 
@@ -201,9 +201,15 @@ behavior, many frontends" invariant (CLAUDE.md §8).
 
 ### 3.1 Determinism — the three levers
 
-1. **A fresh `SOLOIST_APP_DATA_DIR` per session** (the documented data-dir override). The service also
-   sets a per-instance `XDG_DATA_HOME` on Linux, and Soloist's default data dir is XDG-based, so
-   isolation is available from either side. Never the developer's real state.
+1. **A fresh data dir per session, for both sides**, assigned in `onWorkerStart` — the app inherits
+   the launcher's environment, so that is the only place that reaches it. `SOLOIST_APP_DATA_DIR`
+   (the documented data-dir override) covers the **Rust** side: the database, the IPC socket, the
+   HTTP runtime file. `XDG_DATA_HOME` covers the **webview** side: WebKitGTK keys the webview's
+   `localStorage` and caches under the app identifier there, and the service does **not** set it on
+   its own (an earlier revision claimed a per-instance `XDG_DATA_HOME` — dumping the app's env as the
+   service spawns it shows `XDG_DATA_DIRS` and no `XDG_DATA_HOME`), so without this the webview fell
+   through to the developer's real `~/.local/share/dev.soloist.app/` and bit once. Both are now set
+   the same way; see e2e-00's two postmortems.
 2. **Hermetic fixture projects and stub agents** — a `solo.yml` plus deterministic stub binaries the
    spec controls (a `crasher` that exits on cue is how the 10/60s restart cap is provable), and stub
    agent CLIs in `fixtures/bin/` that the runner prepends to `PATH`, shadowing any real ones — a
@@ -240,7 +246,7 @@ where spec → parity-row traceability lives.
 | Timers & wake-cycle | `orchestration` | orch-03 (O7/O8) | A `timer_fire_when_idle` arm shows a countdown + waiting-on chips; driving workers idle removes the timer and delivers its body (with the wake-reason prefix) to the lead's terminal | `plan/orchestrator/orch-03` | ⬜ not built |
 | Settings surfaces | `shell` | Phase 11a/11b | Each shown tab renders and auto-saves; a per-project override resolves through to behavior | `phase-11a`, `phase-11b` | ⬜ not built |
 | Desktop notification | `monitoring` | Phase 6 (D8) | A crash raises a libnotify desktop toast; clicking it focuses the terminal (needs a real notification daemon) | `phase-06` | ⬜ not built |
-| Cross-surface parity | `cross-surface` | H1–H4 | A CLI/MCP `restart` moves the window's status glyph — one core command, many frontends | `phase-10`, CLAUDE.md §8 | ⬜ not built |
+| Cross-surface parity | `cross-surface` | H1–H4 | A CLI/MCP `restart` moves the window's status glyph — one core command, many frontends | `phase-10`, CLAUDE.md §8 | ✅ **covered** (CLI) — `specs/cross-surface/cli-restart.spec.ts` starts a trusted command through the window, restarts it with the **real `soloist` binary** as a separate process, and proves the window shows the reborn process's *changed* ephemeral port. Covers the assembly no headless test reaches: `serve()`'s runtime-file write (its own tests drive `serve_on` on a hand-made listener), the CLI's discovery + token handshake (its tests are in-crate), and the composition root's HTTP wiring. Building it exposed a harness defect that had been deleting every app's on-disk state mid-run (e2e-00). The MCP half of the row is not owed by this spec |
 
 `later` / out of scope for this track: load/soak testing (that is the Phase-13 nightly soak, a different
 gate), backend command mocking (§1.2), and any cross-platform matrix (D2 — Linux x86_64 only).
@@ -249,7 +255,7 @@ gate), backend command mocking (§1.2), and any cross-platform matrix (D2 — Li
 
 | Phase | Title | Delivers | Status |
 |-------|-------|----------|--------|
-| [e2e-00](e2e-00-harness-and-ci.md) | Harness, plugin wiring, fixture & CI | The `e2e/` workspace, the feature-gated in-app WebDriver server, `just e2e`, a CI job, and **one smoke spec** (app launches, window renders) | ✅ **Built & green** (2026-07-15); the CI job's headless run is owed |
+| [e2e-00](e2e-00-harness-and-ci.md) | Harness, plugin wiring, fixture & CI | The `e2e/` workspace, the feature-gated in-app WebDriver server, `just e2e`, a CI job, and **one smoke spec** (app launches, window renders) | ✅ **Built & green** (2026-07-15); the CI job's headless `xvfb-run` run passed on PR #74 |
 | [e2e-01](e2e-01-screens-and-flows.md) | Screens, flows & the first journey | The `screens/` + `flows/` layer and the **launch an agent** journey — the first real walk, proving the architecture carries behavior | ✅ **Built & green** (2026-07-16) |
 
 Subsequent phases (`e2e-02`+) each implement one catalog row as specs under its domain directory; they

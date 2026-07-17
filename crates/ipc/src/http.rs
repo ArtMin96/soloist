@@ -152,9 +152,10 @@ fn write_owner_only(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 /// Reads the running server's recorded runtime, or `None` when the file is absent or
-/// unreadable — the CLI treats a missing file as "try the default port" and a refused
-/// connection as "Soloist is not running". The server rewrites the file on every bind, so
-/// a present file always names the current port.
+/// unreadable — the app is not running, or is running as another user whose `0600` file we
+/// cannot read. Either way there is no token, and the CLI reports "Soloist is not running"
+/// rather than probe the default port, which could address a *foreign* server. The server
+/// rewrites the file on every bind, so a present file always names the current port.
 pub fn read_runtime() -> Option<HttpRuntime> {
     let path = runtime_file_path().ok()?;
     let bytes = std::fs::read(path).ok()?;

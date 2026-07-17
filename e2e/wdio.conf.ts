@@ -4,6 +4,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { browser } from "@wdio/globals";
+import { soloistCli } from "./src/harness/cli.js";
 import { WAIT } from "./src/harness/waits.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -42,24 +43,24 @@ process.env.PATH = `${path.join(dir, "fixtures", "bin")}${path.delimiter}${proce
 // back ahead of the stubs. The stand-in shell skips profiles, so the capture returns this exact
 // environment.
 process.env.SHELL = path.join(dir, "fixtures", "bin", "shell");
-// Each spec file's worker re-imports this config, so this runs in every worker before the service
-// spawns the app — a lifecycle hook is too late, the app is already up (observed: it launched
-// against the developer's real data dir and listed their real projects).
-//
-// The embedded provider spawns the app with an environment the service captured before this
-// worker's `WDIO_WORKER_ID` was set, so `SOLOIST_APP_DATA_DIR` resolves to one shared path for the
-// whole run (`app-data/launcher`) — a per-worker subdir is set here but the app ignores it. So
-// wiping only this worker's subdir would leave the dir the app actually uses accumulating across
-// specs: one spec's trust grants, opened projects, and orphan bookkeeping would leak into the
-// next (observed — a command another spec trusted came up already-trusted, and a re-materialized
-// project's config watch went stale on the old inode). Wipe the whole `app-data` tree instead, so
-// whichever subdir the app picks starts empty. Safe because specs run one at a time (maxInstances
-// 1) and each session's app is reaped (afterSession) before the next worker loads this module.
+// Every app data dir a run uses lives under here; `onWorkerStart` gives each session its own.
 const appDataRoot = path.join(scratchDir, "app-data");
-rmSync(appDataRoot, { recursive: true, force: true });
-const sessionDataDir = path.join(appDataRoot, process.env.WDIO_WORKER_ID ?? "launcher");
-mkdirSync(sessionDataDir, { recursive: true });
-process.env.SOLOIST_APP_DATA_DIR = sessionDataDir;
+
+// The webview's own storage — `localStorage`, caches — which WebKitGTK keys by the bundle
+// identifier under `XDG_DATA_HOME`, reaching none of it through `SOLOIST_APP_DATA_DIR`: that
+// override moves the app's state, not its webview's. Unset, this resolves to the developer's real
+// `~/.local/share/dev.soloist.app`, which the suite then reads and writes (observed: a run
+// persisted a collapsed sidebar there, so every later run booted with no visible rows and failed
+// three spec files with the harness and the product both innocent). `onWorkerStart` gives each
+// session its own, so the webview starts at its defaults exactly like the app does.
+const xdgDataRoot = path.join(scratchDir, "xdg-data");
+
+// Set here, at module load, only so the variables are never unset: an app that resolved either
+// would otherwise fall through to the developer's real `~/.local/share` (observed once, when the
+// override stopped reaching the app — it listed their real projects). `onWorkerStart` replaces
+// these with the session's real directories before any app is spawned.
+process.env.SOLOIST_APP_DATA_DIR = path.join(appDataRoot, "unassigned");
+process.env.XDG_DATA_HOME = path.join(xdgDataRoot, "unassigned");
 
 // The app's own SIGTERM→SIGKILL grace for its children, mirrored for the app itself.
 const APP_EXIT_GRACE_MS = 5_000;
@@ -89,6 +90,8 @@ export const config: WebdriverIO.Config = {
   mochaOpts: { ui: "bdd", timeout: WAIT.spec },
 
   onPrepare: () => {
+    // Everything a previous run left, app data included. The only wipe: it runs once, before any
+    // app exists, so it can never delete a running app's files.
     rmSync(scratchDir, { recursive: true, force: true });
     mkdirSync(scratchDir, { recursive: true });
 
@@ -120,6 +123,37 @@ export const config: WebdriverIO.Config = {
     if (!existsSync(appBinary)) {
       throw new Error(`Built app binary not found at ${appBinary}`);
     }
+
+    // The `soloist` CLI the cross-surface walk drives the app from. A separate binary that
+    // `cargo tauri build` does not produce, built into the same target dir so it shares the
+    // workspace artifacts the app build just produced.
+    const cli = spawnSync("cargo", ["build", "-p", "soloist-cli"], {
+      cwd: repoRoot,
+      env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+      stdio: "inherit",
+    });
+    if (cli.status !== 0) {
+      throw new Error(`Failed to build the soloist CLI for e2e (exit ${cli.status})`);
+    }
+    if (!existsSync(soloistCli)) {
+      throw new Error(`Built CLI binary not found at ${soloistCli}`);
+    }
+  },
+
+  // Point the next session's app at its own fresh directories, named for the worker that will
+  // drive it — its state, and its webview's. This is the only place that can: the app inherits the
+  // *launcher's* environment, not its worker's, and this hook runs in the launcher before either is
+  // spawned — a worker-side module or hook is too late, the app is already up.
+  //
+  // A directory per session is what keeps sessions independent, and it replaces a wipe that could
+  // not be made safe. Wiping one shared dir raced the app it was isolating: the app boots ~3 s
+  // before its worker loads this config, so the wipe deleted the running app's database, socket,
+  // and HTTP runtime file out from under it. The app survived (an open SQLite handle keeps working
+  // on an unlinked inode), which is why the walks stayed green while durable state was silently
+  // non-durable and every on-disk artifact was invisible to anything looking for one.
+  onWorkerStart: (cid) => {
+    process.env.SOLOIST_APP_DATA_DIR = path.join(appDataRoot, cid);
+    process.env.XDG_DATA_HOME = path.join(xdgDataRoot, cid);
   },
 
   // The embedded server's DELETE /session does not reliably quit the app. Left alive, the next

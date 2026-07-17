@@ -2,8 +2,8 @@
 
 **Status: built and green (2026-07-16).** The three-layer architecture exists and carries its first
 journey: opening a project, launching Claude into it, and asserting the app really starts it and
-renders it. 4 specs, ~6 s. What follows describes what exists; the remaining catalog walks (charter
-§4) are e2e-02+.
+renders it. That journey is 4 specs; the suite it seeded is **14 specs / 5 files / ~44 s** as of
+2026-07-17. What follows describes what exists; the remaining catalog walks (charter §4) are e2e-02+.
 
 **Goal:** Turn the proven harness into a **reusable architecture**, and prove it carries real behavior by
 landing a real journey. This is the phase that decides what every later spec looks like, so its output is
@@ -121,7 +121,7 @@ re-render and dies on a stale element reference — a flake for a reason unrelat
 
 ## Acceptance criteria
 
-- ✅ The journey passes locally (`just e2e`); the headless `xvfb-run` path is owed with e2e-00's CI job.
+- ✅ The journey passes locally (`just e2e`) and headless in CI (PR #74's `e2e` job under `xvfb-run`).
 - ✅ **No selector appears in a spec** — they live only in `src/screens/`.
 - ✅ **No `sleep`** anywhere in `e2e/`.
 - ✅ No status literal in a spec: `ProcStatus` is imported from the UI's `domain.ts` via the `@domain`
@@ -160,27 +160,40 @@ port, which no repaint can fake.
 (start→Running needs no separate supervision mutation — the agents walk's `supervisor.start(id)`
 mutation above already proves it load-bearing.)
 
+The cross-surface walk (`specs/cross-surface/cli-restart.spec.ts`) is proven the same way, with the
+mutation chosen so that a *successful* CLI call is not enough to pass:
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Make the HTTP `restart` handler in `crates/httpapi/src/mutations.rs` return `200 OK` without calling the core | only the CLI-restart walk fails; the CLI still reports success | exactly that: `sidebar row "Listener" never showed a port other than :37583`, and the other four spec files passed. Surgical because no other spec drives HTTP and no cleanup path uses it — unlike `Supervisor::restart`, which the supervision walk shares |
+
+It earned its keep beyond the assertion: building it exposed a harness defect that had been deleting
+every app's database, socket, and HTTP runtime file ~3 s after boot, in every run since the wipe
+landed (e2e-00). Three walks and a CI run had stayed green over it, because an open SQLite handle
+survives an unlinked inode — nothing had needed a real file on disk until a second binary had to
+find the app.
+
 The trust-review walk (`specs/projects/config-trust.spec.ts`) earned its keep the same way: building it caught
-a second real defect. Every e2e session shares one durable data dir (the embedded provider spawns the app
-with an environment captured before the per-worker `WDIO_WORKER_ID` is known, so `SOLOIST_APP_DATA_DIR`
-resolves to one path for the run), so `basic` was already registered — and its root already watched — when
+a second real defect. At the time, every e2e session shared one durable data dir (the app inherits the
+*launcher's* environment, whose `SOLOIST_APP_DATA_DIR` was the module-load default, so every session
+resolved to that one path for the run), so `basic` was already registered — and its root already watched — when
 `materializeProject` deleted and recreated the fixture directory for this spec, giving it a new inode. The
 config watcher held its now-dead watch on the vanished inode and never saw the edit. The fix is a genuine
 robustness improvement, not a test accommodation: **`ConfigWatchReactor` now re-establishes a project's
 watch on every `ProjectOpened`**, since re-opening a path is exactly when its directory may have been
 replaced (unit test `reopening_a_project_re_establishes_its_watch`). When that defect was found the
 harness still shared one durable data dir, so the walk re-opened an already-watched `basic` and exercised
-the re-watch end to end. That is no longer how the suite runs: `wdio.conf.ts` now wipes the whole app-data
-tree per worker, so each spec boots a clean app and config-trust opens `basic` for the first time — it
-never re-opens a swapped-inode project. So the re-watch's load-bearing proof today is its *unit test*, not
-the e2e (the second mutation below shows exactly this).
+the re-watch end to end. That is no longer how the suite runs: `wdio.conf.ts` now gives each session its
+own data dir (`onWorkerStart`), so each spec boots a clean app and config-trust opens `basic` for the first
+time — it never re-opens a swapped-inode project. So the re-watch's load-bearing proof today is its *unit
+test*, not the e2e (the second mutation below shows exactly this).
 
 Its product-mutation pass is done:
 
 | Mutation | Expected | Observed |
 |----------|----------|----------|
 | Comment out the `config_watch_loop()` spawn in `crates/app/src/lib.rs` — the watcher never runs | the walk's assertions fail; the other walks hold | exactly that: "the trust review dialog never opened" (test 1) and Trust-Echo-not-clickable (test 2, its consequence); agents, smoke, and supervision all passed — nothing else raises that dialog. Proves the whole watcher → debounce → reload → `ConfigChanged{requires_trust}` → dialog chain load-bearing |
-| Drop the `ProjectOpened` re-watch (`watches.remove(&id)`) in `ConfigWatchReactor` | (at landing) the walk regresses; (now) the unit test regresses | the e2e stayed green — the per-worker app-data wipe isolates each spec's app, so nothing re-opens a watched project — while the unit test `reopening_a_project_re_establishes_its_watch` deadlocks (the re-open never re-establishes the watch), passing again once restored. The proof moved from the e2e to the unit test; the fix stayed load-bearing |
+| Drop the `ProjectOpened` re-watch (`watches.remove(&id)`) in `ConfigWatchReactor` | (at landing) the walk regresses; (now) the unit test regresses | the e2e stayed green — the per-session data dir isolates each spec's app, so nothing re-opens a watched project — while the unit test `reopening_a_project_re_establishes_its_watch` deadlocks (the re-open never re-establishes the watch), passing again once restored. The proof moved from the e2e to the unit test; the fix stayed load-bearing |
 
 ## Risks & mitigations
 

@@ -19,7 +19,6 @@ e2e/
 ├── wdio.conf.ts            # the only file that knows the service exists; builds the app in onPrepare
 ├── fixtures/
 │   ├── projects/basic/     # solo.yml + stub processes under bin/ (self-contained)
-│   ├── configs/            # prepared solo.yml variants, written over an open project
 │   └── bin/                # stub agent CLIs + the stand-in $SHELL, first on PATH
 └── specs/
     └── smoke.spec.ts       # app launches + shell renders
@@ -41,20 +40,17 @@ Plus, outside `e2e/`: the `wdio` cargo feature and its gated plugin registration
   puts the ordinary one (nor force a feature-flip rebuild between dev and e2e). `-c/--config` merges
   the overlay over `tauri.conf.json`; no other build path sets any of these, so no ordinary build
   can produce this binary by accident.
-- **Hermetic, fresh per session:** the app's data dir lives under `e2e/.tmp/app-data/` — never the
-  developer's real `~/.local/share/soloist/`. The env is set on `process.env` at `wdio.conf.ts`
-  module load (not a lifecycle hook, which is too late — the app is already up) because the
-  published Tauri capability type has no `env` field even though the launcher honours one. One
-  wrinkle the trust-review walk exposed: the embedded provider spawns the app with an environment
-  the service captured *before* this worker's `WDIO_WORKER_ID` is set, so `SOLOIST_APP_DATA_DIR`
-  resolves to a single shared subdir (`app-data/launcher`) for the whole run rather than the
-  per-worker one the module also computes. Wiping only the per-worker subdir therefore left the
-  shared one accumulating across specs — a command one spec trusted came up already-trusted in the
-  next, and a re-materialized fixture's config watch went stale on the old inode. The module now
-  **wipes the whole `app-data` tree at each worker's load**, so whichever subdir the app picks
-  starts empty; safe because specs run one at a time (`maxInstances` 1) and each session's app is
-  reaped before the next worker loads. Verified: a run writes `soloist.db` under `app-data` and
-  leaves `~/.local/share/soloist/` untouched.
+- **Hermetic, fresh per session:** each session's app gets its **own** directories under
+  `e2e/.tmp/` — its Rust state (`SOLOIST_APP_DATA_DIR` → `app-data/<worker>/`) and its webview
+  storage (`XDG_DATA_HOME` → `xdg-data/<worker>/`) — never the developer's real
+  `~/.local/share/`. Both are assigned in **`onWorkerStart`**, the launcher-side hook that runs
+  before the worker's app is spawned; a module-load or lifecycle hook is too late (the app is
+  already up) and the app inherits the *launcher's* environment, not its worker's. They are also set
+  once at `wdio.conf.ts` module load, to a dead `unassigned/` subdir, only so the variables are
+  never unset — an unset override falls through to the real path. The single wipe is `onPrepare`'s,
+  before any app exists. Two earlier accounts this supersedes — a whole-tree wipe at each worker's
+  load, and a per-instance `XDG_DATA_HOME` the service was believed to set — were both wrong; see
+  the two postmortems below.
 - **Stub agents and a stub shell:** `fixtures/bin/` is prepended to `PATH`, so agent CLIs resolve to
   deterministic stand-ins; and `SHELL` points at a profile-free stand-in shell, because the app
   captures a launch environment from `$SHELL -ilc env` and that capture outranks the app's own env —
@@ -78,9 +74,8 @@ Plus, outside `e2e/`: the `wdio` cargo feature and its gated plugin registration
 - ✅ `just lint` exit 0; `just test` exit 0 (315 UI tests + the Rust suite); `cargo check -p
   soloist-app` (default features) builds.
 - ✅ `CONTRIBUTING.md` documents the steps; the one-time cost is `pnpm -C e2e install` and a Node LTS.
-- ⬜ **Owed:** the CI job has not run yet — it lands with the first PR that touches `crates/app/**` or
-  `e2e/**`. The headless `xvfb-run` path is therefore unproven; treat the first CI run as the
-  acceptance check for it.
+- ✅ **The CI job runs headless under `xvfb-run`** — proven by PR #74, whose `e2e` job passed on HEAD
+  `f149cc2` alongside `check`, `bundle`, and `smoke`.
 
 ## Findings worth keeping
 
@@ -105,8 +100,64 @@ Three things cost real time and are recorded so they cost nobody else any:
   decision — do not quietly add a provider fallback.
 - **Flaky app-init timing** → wait on a concrete rendered element, never a fixed delay;
   `maxInstances: 1` (the app is single-instance — a second launch forwards to the first).
-- **State bleed** → a wiped `SOLOIST_APP_DATA_DIR` per run; never the developer's projects.
+- **State bleed** → a fresh `SOLOIST_APP_DATA_DIR` (and `XDG_DATA_HOME`) per session; never the developer's projects or UI state.
 - **Slow CI** → e2e is a separate, path/dispatch-gated job, not part of the per-push gate.
+
+## The wipe raced the app it isolated — found and fixed
+
+**Found 2026-07-17 by the cross-surface walk, which it blocked; fixed the same session.** The
+per-worker `app-data` wipe ran *after* the app it was meant to isolate had already booted. Measured
+by instrumenting both wipes and polling the data dir once a second through a run:
+
+```
+10:19:24.848  MODULE WIPE worker=launcher            (the launcher's own config load)
+10:19:24.962  ONPREPARE WIPE
+10:19:54      app boots → bin/ http-api.json soloist-ipc.sock soloist.db soloist.db-{shm,wal}
+10:19:57.061  MODULE WIPE worker=0-0                 ← ~3 s AFTER the app booted
+10:19:57      data dir empty — the running app's files are gone
+10:19:59      runtime-state.json  (the app rewrites only this, during the spec)
+```
+
+**Two corrections to the older account this replaces.** The app inherits the **launcher's**
+environment — it is spawned before its worker ever loads the config, so this is not "an environment
+the service captured before `WDIO_WORKER_ID` was set". And each worker's wipe deleted **its own
+app's** files, not a previous spec's.
+
+**Why every walk stayed green anyway.** An open SQLite handle keeps working on an unlinked inode, so
+the app ran on a database that no longer existed on disk. Isolation was achieved by destroying each
+app's durable state mid-run rather than by starting clean: durable state was silently non-durable,
+and every on-disk artifact (`http-api.json`, the IPC socket, the exported companion binaries) was
+invisible to anything that looked for one. Nothing asserted any of that until a walk needed a real
+file on disk, which is why it survived three walks and a CI run.
+
+**The fix:** a data dir per session, assigned in **`onWorkerStart`** — the launcher-side hook that
+runs before the worker, and so before its app, is spawned. The only wipe left is `onPrepare`'s,
+before any app exists, so nothing is ever deleted from under a running app. Sessions are independent
+by construction rather than by a wipe that had to be timed correctly.
+
+## The webview's storage escaped isolation too — found and fixed
+
+**Found 2026-07-17 alongside the raced wipe; fixed the same session.** `SOLOIST_APP_DATA_DIR`
+isolates the Rust side only. WebKitGTK keeps the webview's own state — including everything the UI
+puts in `localStorage` — under the app identifier in `XDG_DATA_HOME`, which the harness did not set,
+so it fell through to `~/.local/share/dev.soloist.app/localstorage/`: **the developer's real, shared
+location**, which no wipe here touched.
+
+This was not theoretical. A run left `soloist.sidebar.collapsed = {"project:1":true}` there
+(`useCollapseState.ts` writes it), and every subsequent run booted with the project node collapsed,
+so no process rows rendered and three spec files went red — with the harness and the product both
+innocent. The `e2e/logs/` screenshot is what showed it; the page source alone did not. This also
+disproves an earlier charter claim that the service set a per-instance `XDG_DATA_HOME`: the env the
+service spawns the app with shows `XDG_DATA_DIRS` but **no `XDG_DATA_HOME`**.
+
+**The fix:** `XDG_DATA_HOME` is now assigned per session in `onWorkerStart`, the same seam and for
+the same reason as `SOLOIST_APP_DATA_DIR` — so the webview starts at its defaults each session and
+the real location is never read or written. Verified by freezing the real dir's mtimes across a full
+run while the per-session webview storage materialised under `e2e/.tmp/xdg-data/<worker>/`.
+
+One habit the episode still earns, now that a red run can no longer be *this* particular leak: when
+rows or panels are mysteriously missing, a screenshot from `e2e/logs/` distinguishes empty state
+from a real regression faster than the page source does.
 
 ## A benign warning you will see
 
