@@ -60,7 +60,42 @@ just lint     # rustfmt, clippy, eslint, prettier, tsc, and the dependency-direc
 just fmt      # auto-format Rust and UI sources
 just deb      # build only the .deb bundle (fastest; mirrors the per-PR CI gate)
 just bundle   # build the .deb + .AppImage bundles
+just e2e      # real-window end-to-end tests (see below; slower — builds and launches the app)
 ```
+
+## Running e2e tests
+
+`just e2e` drives the **actual Soloist window** through WebdriverIO, using the Tauri service's
+embedded WebDriver provider. There is deliberately **no `sudo` driver install**: the WebDriver server
+is compiled into the app under the opt-in `wdio` cargo feature, so there is no `tauri-driver` and no
+`webkit2gtk-driver` to set up. Release builds link neither plugin.
+
+One-time setup:
+
+```bash
+pnpm -C e2e install
+```
+
+Two requirements the harness cannot paper over:
+
+- **Node must be older than 26.** `e2e/.nvmrc` pins the LTS; run `fnm use` (or `nvm use`) inside
+  `e2e/`. WebdriverIO 9.29.1 sets `Content-Length`/`Connection` headers that Node 26's undici
+  rejects, so no WebDriver session can start ([webdriverio#15265] — fixed upstream, unreleased).
+  `just e2e` checks this and tells you rather than failing obscurely.
+- **A display.** A normal desktop session works as-is. On a headless box, install `xvfb` and run
+  under `xvfb-run -a` (what CI does). Under Wayland the harness sets `GDK_BACKEND=x11` for you.
+
+Each run is hermetic: it builds the app, points `SOLOIST_APP_DATA_DIR` at a scratch directory it
+wipes first, and drives a fixture project — it never reads or writes your real Soloist state. Stub
+agent CLIs (`e2e/fixtures/bin/`) are prepended to `PATH`, shadowing any real ones, so a launched
+"Claude" is the stub and no real agent session is ever opened. The e2e binary builds into its own
+`target/e2e/` (the `wdio` feature links a WebDriver server into it), so it never overwrites the
+ordinary `target/debug/soloist` and alternating `just dev` / `just e2e` never thrashes a rebuild —
+at the cost of a second debug build's disk.
+
+The track's charter and phase plan live in [`plan/e2e/`](plan/e2e/README.md).
+
+[webdriverio#15265]: https://github.com/webdriverio/webdriverio/issues/15265
 
 ## Packaging & releases
 

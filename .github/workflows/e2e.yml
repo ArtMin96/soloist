@@ -1,0 +1,81 @@
+name: E2E
+
+# The slow gate: this compiles the app and drives a real window, so it does not run on every push.
+# It runs on pull requests that touch the app, the UI, or the harness itself, and on demand via the
+# `e2e` label or a manual dispatch.
+on:
+  pull_request:
+    paths:
+      - "crates/app/**"
+      - "e2e/**"
+      - ".github/workflows/e2e.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  e2e:
+    # Matches the CI floor and the supported runtime target, Ubuntu 22.04+.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Tauri build deps, plus xvfb for the display. Deliberately NOT webkit2gtk-driver and NOT
+      # `cargo install tauri-driver`: the embedded provider runs the WebDriver server inside the app,
+      # so no external driver exists to install.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev \
+            xvfb dbus-x11
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      # e2e/.nvmrc pins the exact Node CI runs; the supported range is e2e/package.json's
+      # `engines.node`, which caps below 26: WebdriverIO 9.29.1 sets Content-Length/Connection
+      # headers that Node 26's undici rejects, so no session can start
+      # (webdriverio/webdriverio#15265 — fixed upstream, not yet released).
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: e2e/.nvmrc
+          cache: pnpm
+          cache-dependency-path: |
+            crates/app/ui/pnpm-lock.yaml
+            e2e/pnpm-lock.yaml
+
+      - name: Install UI dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: crates/app/ui
+
+      - name: Install e2e dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: e2e
+
+      - name: Typecheck the harness
+        run: pnpm typecheck
+        working-directory: e2e
+
+      # wdio.conf.ts builds the app itself (`cargo tauri build --features wdio`) in onPrepare, so
+      # there is no separate build step. xvfb-run supplies the display the real window needs.
+      - name: Run e2e
+        run: xvfb-run -a -s "-screen 0 1280x800x24" pnpm test
+        working-directory: e2e
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: e2e/logs/
+          if-no-files-found: ignore

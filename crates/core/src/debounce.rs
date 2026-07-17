@@ -7,7 +7,19 @@
 //! instants, so it is fully deterministic under the mock clock and adds no timers
 //! of its own; the caller decides when to poll it.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use crate::ports::Clock;
+
+/// Sleeps until `deadline`, or forever when nothing is pending — so a debounce-driven
+/// reactor idles without arming a timer whenever no quiet window is in flight.
+pub(crate) async fn sleep_until(clock: &Arc<dyn Clock>, deadline: Option<Instant>) {
+    match deadline {
+        Some(at) => clock.sleep(at.saturating_duration_since(clock.now())).await,
+        None => std::future::pending::<()>().await,
+    }
+}
 
 /// Coalesces triggers within a `quiet` window. Construct one per watched source.
 pub struct Debouncer {

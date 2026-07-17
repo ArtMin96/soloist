@@ -109,3 +109,38 @@ fn an_unwatchable_root_yields_no_events_rather_than_failing() {
         "an unwatchable root reports nothing"
     );
 }
+
+#[test]
+fn a_dir_watch_reports_direct_children_but_not_nested_ones() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().to_path_buf();
+    let nested = root.join("src");
+    fs::create_dir_all(&nested).expect("nested dir");
+    let (tx, mut rx) = mpsc::channel(64);
+
+    // Non-recursive: exactly the depth a project root's `solo.yml` needs, at the cost of
+    // one watch descriptor however large the tree is.
+    let _handle = NotifyFileWatcher::new().watch_dir(root.clone(), tx);
+
+    fs::write(root.join("solo.yml"), b"processes: {}").expect("write direct child");
+    let change = change_within(&mut rx, BUDGET).expect("a direct child change is reported");
+    assert!(
+        change.ends_with("solo.yml"),
+        "expected the direct child, got {change:?}",
+    );
+
+    // Assert on the nested file's identity, not on silence: the direct-child write above
+    // delivers its events asynchronously, so a late one can still be draining into the channel
+    // when the nested write lands. A stray `solo.yml` event is fine — a `deep.rs` event is not.
+    fs::write(nested.join("deep.rs"), b"//").expect("write nested file");
+    let deadline = Instant::now() + QUIET;
+    while Instant::now() < deadline {
+        if let Ok(path) = rx.try_recv() {
+            assert!(
+                !path.ends_with("deep.rs"),
+                "a non-recursive watch reported a nested change: {path:?}",
+            );
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}

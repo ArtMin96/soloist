@@ -27,6 +27,327 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **E2e cross-surface walk landed + two harness isolation defects found and fixed (2026-07-17).**
+  `specs/cross-surface/cli-restart.spec.ts` drives the **real `soloist-cli`** against the running app
+  (a separate binary, over its loopback HTTP API) and proves the window shows the reborn process's
+  **changed** ephemeral port — covering the one v1 assembly seam no headless test reaches
+  (`serve()`'s runtime-file write, the CLI's discovery + token handshake, the composition root's HTTP
+  wiring), and the direct gate on CLAUDE.md §8's "one behavior, many frontends". Reuses `Sidebar` +
+  `flows/openProject.ts`; one new harness file (`src/harness/cli.ts`, which asks the app its own
+  resolved data dir via `mcp_setup_info` and carries an isolation tripwire), plus a
+  `cargo build -p soloist-cli` in `onPrepare`. **Mutation-verified:** the HTTP `restart` handler
+  returning `200 OK` without calling the core fails **only** that walk (`Listener never showed a port
+  other than :37583`) while the other four spec files hold — surgical because no other spec drives
+  HTTP and no cleanup path uses it. Suite **5 files / 14 specs green** locally (`just e2e` on Node 24,
+  ~37 s); `just lint` exit 0; e2e `tsc --noEmit` clean.
+  - **Defect 1 (harness) — the per-worker `app-data` wipe raced the app it isolated.** It ran ~3 s
+    *after* each app booted, deleting the live `soloist.db`, IPC socket, and `http-api.json`;
+    invisible for three walks and a CI run because an open SQLite handle keeps working on an unlinked
+    inode (durable state was silently non-durable). **Fixed:** a data dir per session assigned in
+    `onWorkerStart` (launcher-side, before the app spawns — the app inherits the *launcher's* env, so
+    that is the only place that reaches it); the sole remaining wipe is `onPrepare`'s, before any app
+    exists. Found by the walker; verified this session.
+  - **Defect 2 (harness) — the webview's storage was never isolated.** `SOLOIST_APP_DATA_DIR` moves
+    the Rust state only; WebKitGTK keys `localStorage`/caches under the app identifier in
+    `XDG_DATA_HOME`, which the harness did not set, so it fell through to the developer's real
+    `~/.local/share/dev.soloist.app/` — **the suite read and wrote real UI state**, and a persisted
+    collapsed-sidebar entry once booted later runs with no visible rows, reddening three spec files
+    with harness and product both innocent. (This also disproved a charter claim that the service
+    sets a per-instance `XDG_DATA_HOME` — it does not.) **Fixed:** `XDG_DATA_HOME` assigned per
+    session in `onWorkerStart`, same seam as the data dir. **Verified empirically:** across a full
+    run the real dir's mtimes stayed frozen while per-session webview storage materialised under
+    `e2e/.tmp/xdg-data/<worker>/`.
+  - **Also this session:** corrected a misleading runtime-file comment in `crates/ipc/src/http.rs`
+    (the CLI does *not* fall back to the default port on a missing file — it reports "not running", a
+    deliberate fail-closed against addressing a foreign server); removed a false "app process is
+    shared across spec files" comment in `smoke.spec.ts`; reconciled the three e2e plan docs (the two
+    isolation postmortems, the cross-surface coverage + mutation rows, the now-cleared headless-CI
+    claim, and the phantom `fixtures/configs/`). **Uncommitted, pending the user's review** at the
+    time of writing.
+  - **Parity matrix restored (`af84ee5`).** `plan/02`'s 120 A–K feature rows + 14 I7 sub-rows had
+    been pruned in `78dce4c` as a side-bullet of an unrelated `docs(diagnose)` commit, silently
+    gutting the per-feature scope/verify contract that the file's own intro, CLAUDE.md §2, and
+    `phase-13`'s definition of done all still depend on. Reverted to the pre-prune state (`78dce4c^`)
+    after confirming it a faithful, complete restore: the prune was the file's last edit, the pruned
+    file was a strict subset of pre-prune (cosmetic whitespace only), and no parity row was
+    retargeted since. The B9 resume-last-session walk stays deferred (it is a `later` row and mostly
+    covered headlessly).
+
+- **Product-mutation passes done + PR #74 CI confirmed green (2026-07-16, session close).** The two
+  owed e2e mutation passes are complete — each e2e walk is now proven able to fail for a real reason
+  by breaking the **product** one line at a time, watching exactly the right assertion go red, and
+  restoring the product **byte-clean** (final full-suite run on committed code: **4 files / 4
+  passed**; `git status` clean; the only change this session is a doc).
+  - **Trust-review walk** (`specs/projects/config-trust.spec.ts`): (1) commenting out the
+    `config_watch_loop()` spawn in `crates/app/src/lib.rs` fails **only** config-trust's two
+    assertions — "the trust review dialog never opened" and its consequent Trust-Echo-not-clickable —
+    while agents/smoke/supervision hold, proving the watcher → debounce → reload →
+    `ConfigChanged{requires_trust}` → dialog chain load-bearing. (2) Dropping the `ProjectOpened`
+    re-watch (`watches.remove(&id)`) leaves the **e2e green** — the per-worker app-data wipe now
+    isolates each spec's app, so config-trust opens `basic` fresh and never re-opens a swapped-inode
+    project — so the re-watch's proof is its **unit test**: with the line dropped
+    `reopening_a_project_re_establishes_its_watch` deadlocks (`timeout` exit 124), and passes in
+    0.00 s once restored. This corrected a stale e2e-01 claim (the e2e no longer exercises the
+    re-watch; the unit test does).
+  - **Supervision walk** (`specs/supervision/process-lifecycle.spec.ts`): breaking `Supervisor::start`
+    or `Supervisor::stop` is **not** surgical — start is shared by 3 tests + the agents launch, and
+    every spec's cleanup after-hook stops its process (`sidebar.stopIfRunning` waits for `Stopped`),
+    so a broken stop cascades into other walks' cleanup. The restart signal is surgical: commenting
+    out `ActorMsg::Restart` in `Supervisor::restart` fails **only** "restart replaces the process, not
+    just the row" (Listener kept port `:41723`) while the other three supervision assertions and all
+    three other spec files hold. (start→Running is already proven by the agents walk's
+    `supervisor.start(id)` mutation.)
+  - **CI:** PR #74 (`feat/solo-yml-watch` → base `test/e2e-harness`) is **all-green** on HEAD
+    `f149cc2` — `check`, `e2e` (this clears the previously-owed headless/xvfb leg), `bundle`, `smoke`
+    all SUCCESS. **No product code changed this session**; the sole diff is
+    `plan/e2e/e2e-01-screens-and-flows.md` (both mutation tables + the re-watch-proof correction) and
+    this ledger.
+  - **Open decision awaiting the user:** merge order. #74 is stacked on **PR #73**
+    (base `test/e2e-harness`). Either merge #73 then #74, or retarget #74 to `main` (it would then
+    also carry #73's commits). **Nothing merged.**
+  - **Next session should start with:** the user's merge-order decision (above) — then merge per that
+    choice. No further engineering is owed on the config-watch/e2e track. (Unrelated future work: the
+    Resume-last-session B9 e2e walk — separate task, not started.)
+
+- **Config-watch (`solo.yml` external-edit sync) wired + the trust-review walk landed (2026-07-16):
+  the "synced via hash-diff + debounce" invariant (CLAUDE.md §3) is now live for edits made outside
+  the app — closing the product gap the prior session recorded.** Full workspace **998 Rust green**;
+  e2e **13 specs / 4 files / ~52 s** green locally (the trust-review walk restored from ⛔ blocked to
+  ✅ covered); `just lint` exit 0.
+  - **New: `ConfigWatchReactor` (projects C1)** — a `Clock`-driven reactor holding a **non-recursive**
+    OS watch per open project root (one inotify descriptor per project via a new
+    `FileWatcher::watch_dir` port method), debouncing a save burst on the shared `Debouncer` and
+    driving `ProjectService::reload` — the **same reconcile** the HTTP `reload` endpoint uses (one
+    behavior, many triggers). The sync engine underneath hash-diffs (byte-identical = no-op),
+    refreshes its hash on the app's own writes (self-write never re-syncs), and announces
+    `ConfigChanged{requires_trust}` — the TrustDialog's existing trigger, so **no UI change**. Spawned
+    in the composition root after `restore_projects` (like the file-watch reactor); `Facade.projects`
+    and `.config` became `Arc`s so the reactor shares them. 9 reactor unit tests (mock clock + fake
+    watcher + real engine over a tempdir) + 1 `sys` live-chain integration test (real notify + real
+    file + real `ConfigChanged`). Edges decided ours (recorded plan/05 A9, `KNOWN-DIVERGENCES.md` D-2
+    → 🟢): invalid mid-edit save fails the reload quietly (last good state kept, next save re-syncs);
+    a deleted `solo.yml` is not a sync (create/modify only).
+  - **Product robustness bug found + fixed via the e2e walk: a re-opened project whose root
+    directory was replaced (new inode) kept a dead config watch.** `resync`'s `or_insert_with` only
+    watched a first-seen project id, so a delete+recreate at the same path left the OS watch on the
+    vanished inode. `ConfigWatchReactor` now **re-establishes a project's watch on every
+    `ProjectOpened`** (re-opening a path is exactly when its directory may have been swapped); unit
+    test `reopening_a_project_re_establishes_its_watch`. Real trigger: a git clean+checkout or a
+    folder restore while the project is open.
+  - **E2e harness isolation bug found + fixed: every session shared one durable data dir.** The
+    embedded provider spawns the app with an env captured before the per-worker `WDIO_WORKER_ID` is
+    set, so `SOLOIST_APP_DATA_DIR` resolved to one shared `app-data/launcher` for the whole run (the
+    per-worker subdir the module computed was created but unused — its `soloist.db` was empty; the
+    real DB was always in `launcher`). One spec's trust grants / opened projects leaked into the next
+    (config-trust needed the re-open fix; then supervision inherited a trusted Echo and its Trust
+    button vanished). `wdio.conf.ts` now **wipes the whole `app-data` tree at each worker's module
+    load** (safe under `maxInstances` 1 + the afterSession reaper), so each spec's app boots clean.
+    This supersedes the prior session's "each session gets its own data dir" claim — it did not.
+  - **New e2e walk `specs/projects/config-trust.spec.ts`**: writes the open project's `solo.yml` from
+    outside the app (`flows/editConfigExternally.ts`), waits for the review dialog (proving
+    watcher → debounce → reload → `ConfigChanged{requires_trust}` end to end via `screens/TrustDialog.ts`),
+    reads the row's **disabled** Start control while untrusted (`sidebar.startEnabled`), trusts from
+    the dialog, and proves the same command then starts to `Running`. Diagnosed the two bugs above by
+    capturing the live frontend event stream (agent-bridge + tauri-mcp confirmed the product wiring
+    fires `ConfigChanged` and opens the dialog; the wdio failure was pure isolation).
+  - **Owed items now cleared (2026-07-16, see the session entry above):** the config-trust *and*
+    supervision walks' product-mutation passes are done, and the headless CI leg is green (PR #74's
+    `e2e` job passed). Landed on branch `feat/solo-yml-watch` (off `test/e2e-harness`), pushed as
+    **PR #74**.
+
+- **E2e track — review fixes + the Dashboard-core walk landed (2026-07-16, PR #73 follow-up): 11
+  specs / 3 session-isolated files / ~16 s green locally.** A `/code-review` of PR #73 surfaced 5
+  standards violations + 3 spec gaps; all fixed, and finishing the Dashboard-core walk surfaced **two
+  real product findings**:
+  - **Product defect FIXED: `ProjectService::open` duplicated command registrations on re-open**
+    (folder picker on an open project, or a forwarded second `soloist <path>` launch → two sidebar
+    rows per command; one screenshot showed 9 rows from a 3-process `solo.yml`). `open_and_register`
+    now reconciles per name via `command_id_by_name`/`update_command` — the `reload` rule — with unit
+    test `reopening_a_project_reconciles_commands_instead_of_duplicating` (fails against the old
+    code: 4 rows for 2 commands). Full workspace suite green after.
+  - **Product gap OPEN: nothing watches `solo.yml` for external edits.** `ProjectService::reload`
+    exists, reconciles, and emits `ConfigChanged{requires_trust}` (the TrustDialog's trigger), but
+    **no adapter calls `reload_project`** — the "synced via hash-diff + debounce" invariant
+    (CLAUDE.md §3) is unwired for edits made outside the app. A trust-review e2e journey was built,
+    proved the dialog never opens, and was pulled; recorded as ⛔ blocked in `plan/e2e/README.md` §4.
+  - **The Dashboard-core walk (charter §4 row 2) is covered:** `specs/supervision/` drives select →
+    trust (row control) → start → `Running`, stop → `Stopped`, nonzero exit → `Crashed`, and
+    **restart proven by the reborn process's changed ephemeral port** (`fixtures/.../listener.sh`
+    binds a fresh port per spawn — a repaint cannot fake it; ports read from the row's
+    `data-testid="process-meta"` telemetry).
+  - **The launch journey is now hermetic and asserts `Running` deterministically:** a stub `claude`
+    (`e2e/fixtures/bin/`) shadows any real one, and a stand-in `SHELL` defeats the login-shell env
+    capture that outranks the app env (the previous harness launched the developer's **real** Claude
+    Code, real session included — caught by the new failure screenshots). This supersedes the older
+    entry's "CI-safe without a stub `claude`" claim and its "deliberately not asserted: Running".
+  - **Harness isolation hardened after a real escape:** setting `SOLOIST_APP_DATA_DIR` in a
+    `beforeSession` hook is too late (the service has already spawned the app) — one run listed the
+    developer's real projects and wrote an `e2e-basic` row into the real `soloist.db` (removed;
+    verified no other tables touched). Env now set at `wdio.conf.ts` module load per worker
+    (`WDIO_WORKER_ID`); each spec file gets a fresh data dir; `afterSession` reaps the app by its
+    `target/e2e` binary path (DELETE /session doesn't quit it; a survivor welds sessions together
+    via single-instance and leaks orphans); `openProject` carries an isolation tripwire that aborts
+    on any non-scratch project; `afterTest` saves screenshot + page source to `e2e/logs/` (CI
+    uploads them). E2e builds now use their own `target/e2e` so the wdio-serving binary never lands
+    where `just dev` puts the ordinary one.
+  - **Review fixes:** strict row-status reads (`data-status`/`data-activity` resolved explicitly; a
+    row with neither fails the read instead of defaulting `"Running"` — the launch spec's key assert
+    was vacuously passable); smoke spec rewritten on screens + named waits with a real title assert;
+    all runner timeouts named in `waits.ts`; picker footer read via `data-testid="palette-target"`
+    (the `▸` glyph selector rotted on copy); Node ceiling read from `e2e/package.json` `engines`;
+    D-11 doc citation removed from CI; dead tsconfig include dropped; fixture comments no longer
+    overpromise; spec files leave nothing running (`stopIfRunning` cleanup).
+  - **Gates:** e2e 11/11 green locally (three isolated app sessions); `cargo test --workspace` green
+    (21 suites incl. the new core test); UI vitest green; `just lint` green. **Owed:** the headless
+    `xvfb-run` leg (no Xvfb on this box — CI proves it; per owner, CI is not being watched this
+    session) and the supervision walk's product-mutation pass (noted in e2e-01).
+
+- **E2e track — e2e-01 BUILT and green (2026-07-16): the first real journey.** `just e2e` opens a
+  fixture project, launches **Claude** into it from the picker, and asserts the app really starts it
+  and renders it. **7 specs / ~18 s** on a live WebKitGTK 605.1.15 session.
+  - **The layers landed as chartered:** `specs → flows → screens → harness`. Specs hold no selectors;
+    `src/screens/` (`Sidebar`, `AgentPicker`, `Titlebar`, `TerminalPane`) is the single source per
+    surface; `src/flows/` (`openProject`, `launchAgent`) are the reusable journeys; `src/harness/`
+    owns the fixture copy, the two named timeouts, and the IPC used **for arrange only**. `ProcStatus`
+    is imported from the UI's `domain.ts` via the `@domain` alias, so no spec types a status literal.
+  - **Three findings the code now encodes:**
+    1. **Opening a project cannot be clicked** — it goes through the OS folder dialog, which WebDriver
+       cannot drive. `harness/tauri.ts` calls the same core command the dialog's handler calls; it is
+       arrange-only and every assertion stays on the window. Agents are **not** trust-gated
+       (`Registration::launched` sets `trust_variant: None`), so the journey needs no trust step.
+    2. **The picker lists uninstalled tools** (`installed` only picks a badge), so the journey is
+       CI-safe without a stub `claude`, and detection's `$SHELL -ilc` probe never has to be fought.
+    3. **The terminal header shows the process's OSC title once it sets one** — a live Claude Code
+       renames it to `✳ Claude Code`. Caught by tightening an assertion to an exact match; the spec
+       now asserts identity, not Claude Code's branding.
+  - **Mutation-verified, because a green e2e is where a pretend test hides.** Mutating the **product**
+    and watching the right test go red: dropping `supervisor.start(id)` in `facade.rs` failed **only**
+    "actually starts the agent's process" (`Expected: not "Stopped"`) while the other three correctly
+    passed — the row *is* still drawn; rendering `{process.label + "X"}` in `ProcessRow` failed the
+    label assertions, naming the rendered rows. Product code restored byte-clean after each.
+  - **Two of my own defects the mutation runs exposed:** the spec initially asserted only that a row
+    was *drawn* (added "actually starts the agent's process", which the mutation proves is
+    load-bearing), and `waitUntil`'s `timeoutMsg` is interpolated when the options object is built —
+    before a single poll — so it could only ever report the initial state (`rows: []` while three rows
+    existed). It now reports lazily.
+  - **Deliberately not asserted, and said out loud rather than buried:** that the agent reaches
+    `Running` (needs Claude Code installed — true here, false in CI), and the header's exact text.
+    Both are environment-dependent; the spec asserts the app *tried*.
+  - **Gates:** `just lint` exit 0, `just test` exit 0 (315 UI / 63 files + the Rust suite), release
+    gating re-verified **in both directions** (a production bundle contains no wdio; the `VITE_E2E`
+    build does, proving the gate is not simply always-off) and `cargo tree` shows no wdio crate by
+    default.
+
+- **E2e track — e2e-00 BUILT and green (2026-07-15). `just e2e` compiles the app and drives the real
+  window; the smoke spec passes on a live WebKitGTK 605.1.15 session (3 passing).** Owner asked for
+  the foundation to be scaffolded this session so a later session writes only journeys. **Superseded
+  in one respect by the entry above: the claim "the frontend needs zero changes" was wrong** — see
+  the correction below.
+  - **What landed:** the `e2e/` workspace (`wdio.conf.ts`, `.nvmrc`, `tsconfig.json` with a `@domain`
+    alias onto the UI's `domain.ts`, `pnpm-workspace.yaml`, a self-contained `fixtures/projects/basic`,
+    `specs/smoke.spec.ts`); the **`wdio` cargo feature** + one gated plugin registration in
+    `crates/app`; `crates/app/tauri.e2e.conf.json`; `just e2e`; `.github/workflows/e2e.yml`; a
+    `CONTRIBUTING.md` "Running e2e tests" section; `.gitignore` entries.
+  - **Gates green:** `just lint` exit 0, `just test` exit 0 (315 UI / 63 files + the Rust suite),
+    `cargo check -p soloist-app` (default) builds. **Release-gating verified, not assumed:**
+    `cargo tree -p soloist-app -e normal` contains no `wdio` (control: `--features wdio` shows
+    `tauri-plugin-wdio-webdriver v1.2.0`), and the frontend carries nothing because **it was never
+    modified**. Hermeticity verified: a run writes `soloist.db` into `e2e/.tmp/app-data` and leaves
+    `~/.local/share/soloist/` untouched.
+  - **Three plan corrections reality forced — the docs now describe what is, not what I expected:**
+    1. **`browserName` is `"tauri"`, not `"wry"`.** `"wry"` is the `tauri-driver` convention the old
+       charter inherited; the service uses `"tauri"`. Found by reading the maintainers' own
+       `wdio.tauri-embedded.conf.ts`, not by guessing.
+    2. **~~The frontend needs *zero* changes.~~ WRONG — corrected 2026-07-16.** I removed
+       `tauri-plugin-wdio` + npm `@wdio/tauri-plugin`, saw the smoke spec still pass, and reported
+       them unnecessary. They passed at **45.7 s instead of 434 ms**: the service's eval bridge polls
+       for `window.__wdio_original_core__`, a global the npm plugin installs, and **every driver
+       command then waits five seconds and gives up**. I verified correctness and never measured
+       cost, then wrote it up as verified. Both plugins are restored, the frontend import is
+       `VITE_E2E`-gated in `vite.config.ts`, and the gate is checked in both directions.
+    3. **Adding the npm plugin to the UI package broke the product build** — it pulled `esbuild` with
+       an unapproved install script into `crates/app/ui`, so `pnpm install`/`pnpm build` failed.
+       Caught by the release-gating check. Now resolved deliberately rather than by removal: the UI's
+       `pnpm-workspace.yaml` allows the `esbuild` script (already the compiler under Vite, so it
+       grants nothing the build did not run), and the plugin stays a UI **dev** dependency — the one
+       place Vite can resolve it — gated out of every production bundle.
+  - **Two upstream defects worked around, both recorded with sources (charter §1.3):**
+    - **Node 26 breaks WebdriverIO.** WDIO 9.29.1 sets `Content-Length`/`Connection` headers that
+      Node 26's undici rejects → an opaque `UND_ERR_INVALID_ARG` on `POST /session` that reads like a
+      config error (webdriverio/webdriverio#15265 — merged 2026-06-27, *unreleased*: latest
+      `webdriver` 9.29.1 predates it and still sets the header). This box defaults to **Node 26.3.0**.
+      Fix: `e2e/.nvmrc` pins 24 (LTS, already installed), `engines: node >=20 <26`, and `just e2e`
+      guards it with an explanatory error instead of failing obscurely. CI reads `.nvmrc`.
+    - **`@wdio/tauri-service@1.2.0` cannot initialise on a clean install** — it imports
+      `installMockSyncOverride` from `@wdio/native-utils` but pins that dep to 2.4.0, which lacks the
+      export. Upstream release drift the maintainer fixed by publishing native-utils 2.5.0 and
+      re-releasing the *electron* service (desktop-mobile#506, "changes to my release tooling so we
+      don't get this drift again"); the tauri service has had no such follow-up. Fix: a documented
+      `overrides` pin to 2.5.0 in `e2e/pnpm-workspace.yaml`, to be dropped when a tauri-service
+      release corrects its own pin.
+  - **Also hardened:** `e2e/pnpm-workspace.yaml` mirrors the UI's `minimumReleaseAge: 10080` and
+    **denies the `edgedriver`/`geckodriver` install scripts** (`@wdio/cli` carries them; they fetch
+    browser binaries we never drive), allowing only `esbuild`.
+  - **Owed:** the **CI job has not run** — it triggers on the first PR touching `crates/app/**` or
+    `e2e/**`, so the headless `xvfb-run` path is unproven; treat that first run as its acceptance
+    check. **Next: e2e-01** (`plan/e2e/e2e-01-screens-and-flows.md`) — the `screens/`/`flows/` layer
+    and the Dashboard-core journey.
+
+- **E2e track — charter reconciled to the official Tauri path; phase files written (2026-07-15).
+  Research + plan only; no `e2e/` code, no product code, nothing built.** Owner-requested research
+  of [v2.tauri.app/develop/tests](https://v2.tauri.app/develop/tests/) →
+  [.../webdriver](https://v2.tauri.app/develop/tests/webdriver/) ahead of writing real e2e in a
+  separate session.
+  - **Decision/change — `plan/e2e/README.md` §1 rewritten.** The charter's "WebdriverIO +
+    `tauri-driver`" is **superseded by WebdriverIO + `@wdio/tauri-service` (embedded provider)**. The
+    WebdriverIO half was and remains right (WebKitGTK exposes no CDP → Playwright cannot attach); what
+    changed is the mechanism. The live Tauri docs present the service as the recommended setup and the
+    hand-rolled `tauri-driver` spawn as legacy ("most projects should use `@wdio/tauri-service`
+    instead"), and the service's `platform-support.md` states **`'embedded'` is the default on every
+    platform when `driverProvider` is unset**. **Owner directive: one clean official path, no fallback
+    and no provider knob** — external/`tauri-driver` and CrabNebula are not carried.
+  - **Consequence — the charter's "owner must run `sudo`" blocker is gone.** The embedded server runs
+    *inside* the app; `webkit2gtk-driver` is required only by the `'external'` provider we are not
+    using, and `cargo install tauri-driver` is not needed at all. Only `xvfb` (headless CI) remains,
+    and `ci.yml` already installs it for the packaging smoke.
+  - **Consequence — e2e-00 now touches product code, narrowly.** The embedded provider requires
+    `tauri-plugin-wdio` (the service errors without it) + `tauri-plugin-wdio-webdriver`, the npm
+    `@wdio/tauri-plugin` frontend half, `wdio:default`/`wdio-webdriver:default` permissions, and
+    `withGlobalTauri`. All gated behind a new **`wdio` cargo feature absent from `default`** (mirroring
+    `agent-bridge`, the existing dev-only webview-driving plugin) + a **separate
+    `tauri.e2e.conf.json`** (the dev config can't be reused — it declares the `mcp-bridge` capability,
+    which only resolves when `agent-bridge` links that plugin) + a Vite-flag-gated frontend import.
+    Verified-absent-from-release is an e2e-00 acceptance criterion, not an assumption.
+  - **Scope decided (owner):** e2e owns **user journeys per domain**; the 974 Rust / 315 UI tests keep
+    owning logic. e2e is an additional gate, never a replacement. **Backend command mocking
+    (`browser.tauri.mock()`) is explicitly out of scope** — it would reintroduce the `mockIPC` stubbing
+    this track exists to remove.
+  - **Architecture recorded (charter §3):** `specs → flows → screens → harness`; specs hold no
+    selectors, screens are the single source per UI surface (mirroring `components/`), only
+    `wdio.conf.ts` knows the service exists. Specs partition by **domain named for what it is** — no
+    parity letters or phase numbers in directories/filenames/test titles (§8); traceability lives in the
+    charter §4 catalog + this ledger. `F` (MCP) and `H` (HTTP/CLI) have no window and stay headless; a
+    new **`cross-surface/`** domain drives CLI/MCP and asserts the window updates — the "one behavior,
+    many frontends" invariant, currently unproven by any test. Determinism: fresh
+    `SOLOIST_APP_DATA_DIR` + hermetic fixture + `domain.ts` imported via a tsconfig alias so no spec
+    types `"Running"`. Selectors are **accessible-name-first** (`$('aria/Start')`, WDIO-native) — the app
+    has exactly one `data-testid` and queries by role/label everywhere, so e2e inherits that convention
+    instead of forcing a testid rollout across ~80 components.
+  - **Verified, not assumed:** `@wdio/tauri-service` 1.2.0 + `tauri-plugin-wdio` 1.2.0 +
+    `tauri-plugin-wdio-webdriver` 1.2.0 (all published 2026-06-25, repo `webdriverio/desktop-mobile`);
+    `tauri-driver` 2.0.6. `$('aria/…')` confirmed against the WebdriverIO selector docs. **Local box has
+    no `WebKitWebDriver`/`xvfb-run`/`tauri-driver`, and is Wayland** (`WAYLAND_DISPLAY=wayland-0`) → the
+    runner must set `GDK_BACKEND=x11` per the service docs, matching the recorded Wayland focus gotcha.
+  - **Open risk, recorded not hidden:** `tauri-plugin-wdio-webdriver` is young (first published
+    2026-05-03, ~5.8k downloads) vs `tauri-driver`'s 229k. It is the officially documented default, and
+    e2e-00's smoke spec is the cheap proof before any journey depends on it. If it fails, revisit
+    charter §1 as a decision — do not quietly add a fallback.
+  - **Files:** `plan/e2e/README.md` (rewritten §1–§3, §5–§6; catalog gained a `cross-surface` row),
+    `plan/e2e/e2e-00-harness-and-ci.md` (rewritten), `plan/e2e/e2e-01-screens-and-flows.md` (new).
+    Stale "Playwright" wording in `CLAUDE.md` §5/§14, `plan/04` §286, `phase-01`/`phase-05`/`phase-11*`/
+    `phase-13`, and `plan/orchestrator/*` is **not** reconciled — per the charter's standing rule, each
+    defers to this track and is fixed when that doc is next touched.
+
 - **Codebase-design audit — all 8 findings landed (2026-07-15; commits `8f6badf`…`8c806d8`).** An
   owner-requested structural review of quality/architecture/domains, run outside the phase plan. Gate
   green after every commit: **Rust 983 passed / 0 failed** (baseline was 974; +9 new, incl. 5
@@ -4812,6 +5133,26 @@ culprit commits are from the unticketed set above.
   altered, only where code lives and which thread two store calls run on.
 
 ## Next session should start with
+
+**◆ NEW (2026-07-16) — E2E: the harness AND the first journey are built and green.** `just e2e` opens
+a fixture project, launches Claude into it, and asserts the app really starts it (7 specs, ~18 s).
+The pattern to copy is `e2e/specs/agents/launch-agent.spec.ts` + `e2e/src/` — **not** the smoke spec,
+which is deliberately direct. Next walk: pick a row from `plan/e2e/README.md` §4 (Dashboard core and
+Resume-last-session are the highest-value); read §2 (scope) and §3 (architecture) first. Before
+touching anything:
+  1. **Use Node < 26 or nothing works.** This box defaults to 26.3.0; `e2e/.nvmrc` pins 24 (already
+     installed) — run `fnm use` in `e2e/`. `just e2e` refuses on 26 with an explanation. The
+     underlying defect and the `@wdio/native-utils` 2.5.0 pin are charter §1.3.
+  2. **One-time:** `pnpm -C e2e install`. There is **no** `sudo`, no `tauri-driver`, no
+     `webkit2gtk-driver` — the embedded provider puts the WebDriver server inside the app.
+  3. **Don't "simplify" the wdio plugins away.** Dropping them looks like sound YAGNI and the specs
+     stay green — at **45.7 s instead of 434 ms** (charter §1.1). **No `browser.tauri.mock()`** —
+     specs drive the real core (§1.2).
+  4. **Mutate the product to prove a new walk can fail** before calling it done — e2e-01's test plan
+     records the two that are checked. A green e2e is exactly where a pretend test hides.
+  5. **Owed from e2e-00:** the CI job (`.github/workflows/e2e.yml`) has never run; it fires on the
+     first PR touching `crates/app/**` or `e2e/**`. Treat that run as the acceptance check for the
+     headless `xvfb-run` path.
 
 **★ NEW (2026-07-15) — the codebase-design audit is complete. All eight findings landed, plus the
 cycle debt they surfaced; nothing is owed from it.** `scripts/check-core-cycles.sh` now reports

@@ -87,6 +87,28 @@ async fn open_registers_each_declared_command() {
 }
 
 #[tokio::test]
+async fn reopening_a_project_reconciles_commands_instead_of_duplicating() {
+    let parts = parts(FakeSpawner::exits_on_terminate());
+    let dir = tempfile::tempdir().expect("temp dir");
+    write_yml(
+        dir.path(),
+        "processes:\n  Web:\n    command: npm run dev\n  Api:\n    command: cargo run\n",
+    );
+
+    let first = parts.service().open(dir.path()).expect("first open");
+    let second = parts.service().open(dir.path()).expect("second open");
+
+    // Re-opening the same folder (the picker on an open project, a forwarded second launch)
+    // keeps the durable id and reconciles each command in place — never a second row per name.
+    assert_eq!(first.id, second.id);
+    let snapshot = parts.supervisor.snapshot();
+    assert_eq!(snapshot.len(), 2);
+    let mut labels: Vec<_> = snapshot.iter().map(|p| p.label.clone()).collect();
+    labels.sort();
+    assert_eq!(labels, vec!["Api".to_string(), "Web".to_string()]);
+}
+
+#[tokio::test]
 async fn open_starts_a_trusted_auto_start_command() {
     let parts = parts(FakeSpawner::exits_on_terminate());
     let mut rx = parts.bus.subscribe();

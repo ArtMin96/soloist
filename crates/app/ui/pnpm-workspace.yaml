@@ -3,6 +3,14 @@
 # release has time to be caught and unpublished before it can be installed; 10080 = 7 days. It
 # only gates *future* resolutions, so the current locked install is unaffected.
 minimumReleaseAge: 10080
+
+# Install scripts are denied unless named here. esbuild's postinstall links the platform binary it
+# ships; it is already the compiler under Vite, so this grants nothing the build did not already
+# run. It became explicit when @wdio/tauri-plugin (the e2e frontend plugin, dev-only and gated out
+# of production bundles) pulled a second esbuild version into the tree.
+allowBuilds:
+  esbuild: true
+
 #
 # `trustPolicy: no-downgrade` is intentionally NOT enabled yet: the current pnpm-lock.yaml has a
 # flagged entry (semver@6.3.1, a provenance/trust downgrade on a transitive dep) that makes every

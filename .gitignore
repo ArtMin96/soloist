@@ -13,6 +13,11 @@ dist-ssr/
 # build output lives in src-tauri/target → covered by **/target/
 **/gen/schemas/
 
+# ---- e2e (WebdriverIO) ----
+# Per-run app data dir and driver logs; the harness wipes and recreates them each run.
+/e2e/.tmp/
+/e2e/logs/
+
 # ---- impeccable (design skill) runtime / generated ----
 .impeccable/
 

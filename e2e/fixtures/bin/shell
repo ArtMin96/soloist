@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Stands in for the user's login shell: the app captures a launch environment by running
+# `$SHELL -ilc env`, and that captured environment outranks the app's own when a process spawns.
+# Skipping profiles and rc files makes the capture return exactly the environment the harness
+# launched the app with — so the stub agent CLIs stay first on PATH on any machine, and a spec
+# never inherits whatever a developer's real shell exports.
+exec /bin/bash --noprofile --norc "$@"

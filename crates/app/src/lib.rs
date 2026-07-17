@@ -169,7 +169,7 @@ pub fn run() {
     let devtools = tauri_plugin_devtools::init();
 
     #[cfg_attr(
-        not(any(feature = "devtools", feature = "agent-bridge")),
+        not(any(feature = "devtools", feature = "agent-bridge", feature = "wdio")),
         allow(unused_mut)
     )]
     // The single-instance plugin must be registered first: a second `soloist` launch (for
@@ -193,6 +193,16 @@ pub fn run() {
     #[cfg(feature = "agent-bridge")]
     {
         builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+    // E2e-only: the in-app WebDriver server the WebdriverIO harness attaches to, plus the plugin
+    // backing the harness's window and eval bridge — without it every driver command pays a
+    // five-second timeout. Compiled in only under the `wdio` feature; release and default builds
+    // never link a WebDriver server.
+    #[cfg(feature = "wdio")]
+    {
+        builder = builder
+            .plugin(tauri_plugin_wdio::init())
+            .plugin(tauri_plugin_wdio_webdriver::init());
     }
 
     builder
@@ -291,6 +301,10 @@ pub fn run() {
             // open. It reloads a running watched command when a matching file changes via the
             // notify watcher wired in `build_facade` (weakly held, ends when the bus closes).
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().file_watch_loop());
+            // The config-watch reactor watches each restored project's root for external
+            // `solo.yml` edits, so it starts after restore for the same reason; a debounced
+            // edit reloads the project and raises the trust review when needed.
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().config_watch_loop());
             // Assemble the toggleable integration servers, each present only when its adapter is
             // compiled in. The composition root owns each server's task + cancellation handle so a
             // runtime toggle of the Integrations setting starts or stops it live, no app restart —

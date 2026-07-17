@@ -1,0 +1,25 @@
+{
+  "name": "soloist-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Real-window end-to-end tests: WebdriverIO drives the built Soloist desktop app.",
+  "scripts": {
+    "test": "wdio run wdio.conf.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20 <26"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@wdio/cli": "^9",
+    "@wdio/globals": "^9",
+    "@wdio/local-runner": "^9",
+    "@wdio/mocha-framework": "^9",
+    "@wdio/spec-reporter": "^9",
+    "@wdio/tauri-service": "^1",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

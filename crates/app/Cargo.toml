@@ -37,6 +37,11 @@ tokio-console = ["dep:console-subscriber", "tokio/tracing"]
 # absent from `default`, so release builds never link it. Needs the dev config override that
 # enables withGlobalTauri and the bridge capability; run with `just agent-bridge`.
 agent-bridge = ["dep:tauri-plugin-mcp-bridge"]
+# The in-app W3C WebDriver server the WebdriverIO harness attaches to (replacing the external
+# tauri-driver), plus the plugin backing the harness's window/eval bridge. Opt-in and absent from
+# `default`, so release builds never link a WebDriver server into the app. Needs the e2e config
+# override that enables withGlobalTauri and the wdio capabilities; run with `just e2e`.
+wdio = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
 
 [dependencies]
 console-subscriber = { version = "0.5", optional = true }
@@ -58,6 +63,8 @@ tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-store = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-wdio = { version = "1.2", optional = true }
+tauri-plugin-wdio-webdriver = { version = "1.2", optional = true }
 tauri-plugin-window-state = "2"
 tokio = { version = "1", features = ["sync", "rt"] }
 tokio-util = "0.7"

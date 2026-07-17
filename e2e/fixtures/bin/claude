@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# The stand-in Claude Code the harness puts first on PATH (wdio.conf.ts). Detection probes
+# agent CLIs with `--version`, so answering it is what makes the picker offer the tool as
+# launchable on a machine with no real Claude installed; anything else runs the long-lived
+# body a real agent has, so a launch settles Running everywhere and never opens a real session.
+set -euo pipefail
+
+if [ "${1:-}" = "--version" ]; then
+  echo "0.0.0 (soloist e2e stub)"
+  exit 0
+fi
+
+echo "stub agent ready"
+exec sleep infinity

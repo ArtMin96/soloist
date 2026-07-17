@@ -26,7 +26,11 @@ export function PaletteFooter({ hints, target }: { hints: PaletteHintData[]; tar
       {hints.map((hint) => (
         <PaletteHint {...hint} key={hint.label} />
       ))}
-      {target && <span className="ml-auto min-w-0 truncate">▸ {target}</span>}
+      {target && (
+        <span className="ml-auto min-w-0 truncate">
+          ▸ <span data-testid="palette-target">{target}</span>
+        </span>
+      )}
     </div>
   );
 }
