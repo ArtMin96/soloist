@@ -64,10 +64,14 @@
     isolation postmortems, the cross-surface coverage + mutation rows, the now-cleared headless-CI
     claim, and the phantom `fixtures/configs/`). **Uncommitted, pending the user's review** at the
     time of writing.
-  - **Open (tracked, not blocking):** `plan/02`'s per-feature detail tables were pruned in `78dce4c`,
-    so the scope contract can no longer answer "is a row v1 or later" without git archaeology (the
-    walker recovered B9's `later` designation from `e967a0a`). Decide whether to restore them. The
-    B9 resume-last-session walk stays deferred (it is a `later` row and mostly covered headlessly).
+  - **Parity matrix restored (`af84ee5`).** `plan/02`'s 120 A–K feature rows + 14 I7 sub-rows had
+    been pruned in `78dce4c` as a side-bullet of an unrelated `docs(diagnose)` commit, silently
+    gutting the per-feature scope/verify contract that the file's own intro, CLAUDE.md §2, and
+    `phase-13`'s definition of done all still depend on. Reverted to the pre-prune state (`78dce4c^`)
+    after confirming it a faithful, complete restore: the prune was the file's last edit, the pruned
+    file was a strict subset of pre-prune (cosmetic whitespace only), and no parity row was
+    retargeted since. The B9 resume-last-session walk stays deferred (it is a `later` row and mostly
+    covered headlessly).
 
 - **Product-mutation passes done + PR #74 CI confirmed green (2026-07-16, session close).** The two
   owed e2e mutation passes are complete — each e2e walk is now proven able to fail for a real reason
