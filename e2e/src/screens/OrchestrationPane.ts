@@ -14,6 +14,19 @@ const TREE = '[role="tree"][aria-label="Agent lineage"]';
 const NODE = '[role="treeitem"]';
 const GROUP = '[role="group"]';
 
+// The pane's view switch (a segmented control), and the label each view segment renders. Named for
+// what the user reads, so a spec asks for a view and never a label string.
+const VIEW_SWITCH = '[aria-label="Orchestration views"]';
+const VIEW_LABEL = {
+  agents: "Agents",
+  todos: "To-dos",
+  scratchpads: "Scratchpads",
+  timers: "Timers",
+} as const;
+
+/** The views the orchestration pane switches between. */
+export type OrchestrationView = keyof typeof VIEW_LABEL;
+
 /** One node of the orchestration tree, read from its real ARIA semantics. */
 export interface TreeNode {
   /** The ephemeral process id the node carries — stable within a run, unique across nodes. */
@@ -44,6 +57,18 @@ export const orchestrationPane = {
   /** Waits for the tree to render — the pane has switched to the agents view and has agents. */
   async waitForTree(): Promise<void> {
     await $(TREE).waitForDisplayed({ timeout: WAIT.core });
+  },
+
+  /**
+   * Switches the pane to `view` by clicking its segment, the way a user does. The segments are a
+   * Radix ToggleGroup (each a real button that toggles on click, unlike the DropdownMenu the pane
+   * is opened from), so a classic-WebDriver click selects one. The body swaps to the chosen view;
+   * the caller waits on that view's own landmark.
+   */
+  async showView(view: OrchestrationView): Promise<void> {
+    const segment = await $(VIEW_SWITCH).$(`button=${VIEW_LABEL[view]}`);
+    await segment.waitForClickable({ timeout: WAIT.render });
+    await segment.click();
   },
 
   /**

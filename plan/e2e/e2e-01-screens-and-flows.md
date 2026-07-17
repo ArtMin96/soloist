@@ -217,6 +217,28 @@ nested), and HTTP/CLI expose only start/stop/restart + whole-project removal. Th
 close cross-surface (the lead stub closes itself), mirroring the CLI-restart precedent, rather than inventing a
 UI affordance the e2e track does not build.
 
+The coordination-panels walk (`specs/coordination/coordination-panels.spec.ts`) drives the scratchpad and to-do
+panels against a bound lead that writes the shared documents over the real MCP/IPC wire. It **reuses the lead
+fixture** (`fixtures/lead-agent/`) via a second arm the spec selects with a dropped plan file: the lead seeds a
+scratchpad, a blocker chain, and a comment as a genuinely bound agent, then re-writes the scratchpad on a
+trigger to bump its revision under the window's stale editor — the concurrent writer the conflict needs. New
+screens `ScratchpadPanel` and `TodoBoard` mirror the panels; `OrchestrationPane` gained a `showView` for the
+pane's segmented view switch. The `solo://` copy-link is covered **partially** — reading the system clipboard
+under WebKitGTK/WebDriver would need a test-only hack (no first-class WebdriverIO clipboard API; clipboard-read
+denied under automation), so the URL construction stays headless (the core `link` tests plus new Vitest for the
+UI `copyLink → writeText` wiring, `useTodoActions.test.ts` / `useScratchpadEditor.test.ts`) and only the
+OS-clipboard hop is left unproven. Its product-mutation pass is done, each mutation reverted byte-clean:
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Drop the `revision == expected` guard in `SqliteStore::write` (`crates/store/src/scratchpads.rs`) — a stale scratchpad write is applied instead of refused | only "refuses a stale scratchpad save…" fails | exactly that: the conflict banner never appeared (`[role="alert"]` not displayed after 30 s); the walk's other two assertions and all six other spec files passed |
+| Remove `self.guard_blockers(project, id)?` from `Todos::complete` (`crates/core/src/coordination/todo.rs`) — a blocked todo completes | only "refuses to complete a blocked todo…" fails | exactly that: the refusal alert never appeared; the other two and all six other files passed |
+| Force the comment author to `None` in `todo_comment_create` (`crates/core/src/facade/todo.rs`) — the bound author is not stamped | only "shows the bound author of a comment" fails | exactly that: the board read "unattributed" where "Codex" was expected (the item's full text carried no "Codex" at all); the other two and all six other files passed |
+
+Surgical because no other spec writes a scratchpad, completes a todo, or creates a comment — the mutated code
+paths are coordination-only. Each mutation reddened exactly one assertion; `git diff --stat crates/` showed
+none of the three files after restore.
+
 ## Risks & mitigations
 
 - **Screens drifting into logic** → a screen returns state and performs intent; it never asserts and never
