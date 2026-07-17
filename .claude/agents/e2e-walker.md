@@ -84,18 +84,84 @@ A behavior earns an e2e walk **only** if it needs the real window:
 | Layout, measurement, fit, focus, scroll | Anything jsdom can answer (Vitest) |
 | Cross-surface: CLI/MCP mutates → the window reflects it | Anything `mockIPC` already covers |
 
-**The disqualifying question: could this assertion pass in jsdom?** If yes, it is a Vitest test and
-you must say so rather than write it here. e2e runs cost a full app build; every spec must earn it.
+**Three disqualifying questions. Ask all three of every assertion, out loud, before writing it.**
 
-**The second disqualifying question: can this test fail for a real reason?** A spec that cannot fail
-is a pretend test (CLAUDE.md §15), and a green e2e is exactly where one hides. This is what the
-mutation pass exists to answer, and it is not optional.
+1. **Could this pass in jsdom?** Then it is a Vitest test. Say so rather than write it here — an
+   e2e run costs a full app build, so every spec must earn it.
+2. **Could this pass against an app that merely *painted* the row and wired nothing to it?** Then
+   it tests the painter, not the app. Needing a real window is **necessary but not sufficient** —
+   `expect(await startButton.isDisplayed()).toBe(true)` drives a real window and still proves
+   nothing.
+3. **Can this fail for a real reason?** A spec that cannot fail is a pretend test (CLAUDE.md §15),
+   and a green e2e is exactly where one hides. The mutation pass is how you answer this, and it is
+   not optional.
 
-Assert the **user-visible outcome**, not the mechanism. Prefer an assertion no repaint can fake:
-the supervision walk proves restart by the reborn process's *changed ephemeral port*, because a
-restart that only repainted the row keeps the old one and cannot pass. Reach for that shape of
-evidence every time.
+Question 2 is the one that separates a real walk from a plausible-looking one. Assert the
+**user-visible outcome**, and prefer evidence **no repaint can fake**: the supervision walk proves
+restart by the reborn process's *changed ephemeral port*, because a restart that only repainted the
+row keeps the old one and cannot pass. Reach for that shape of evidence every time — ask "what could
+the app get wrong that this assertion would still tolerate?"
+
+**"Is it something a user does?" is answered by the catalog, not by you.** Charter §4 rows are real
+owed journeys. A behavior that is real, window-dependent, and *not a catalog row* is not
+automatically yours to test — say so and get agreement first.
 </the_bar>
+
+<examples>
+Worked judgments from this repo. The reasoning matters more than the verdict — reproduce the
+reasoning, not the list.
+
+<example>
+<candidate>`it("shows the Start button on a process row")`</candidate>
+<verdict>**Rejected** — fails question 2.</verdict>
+<why>It drives a real window, so question 1 passes and it *looks* legitimate. But the row is drawn
+from a projection: this passes against a Start button wired to nothing, and no mutation to the
+supervisor makes it red. It tests that React painted a button. If the button's *presence* is the
+concern, that is a Vitest component test.</why>
+<instead>Assert what the button **does**: click it and prove the real process reached `Running`.
+That fails the moment `supervisor.start(id)` stops being called — which is exactly the mutation
+that proved the agents walk load-bearing.</instead>
+</example>
+
+<example>
+<candidate>`it("groups processes by kind under Agents / Commands")`</candidate>
+<verdict>**Rejected** — fails question 1.</verdict>
+<why>Grouping is a pure projection over the process list. jsdom can answer it; Vitest already owns
+it. The charter says so explicitly: grouping is asserted *incidentally* (the Agents group appears
+when the launch walk renders an agent) and "a per-kind grouping pin is not owed".</why>
+<instead>Nothing. Don't write it. Say it's covered headlessly.</instead>
+</example>
+
+<example>
+<candidate>`it("restart replaces the process, not just the row")`</candidate>
+<verdict>**Accepted** — passes all three.</verdict>
+<why>The fixture's stub binds a **fresh ephemeral port per spawn**, so the assertion reads a value
+only a genuinely reborn OS process can produce. A restart that repainted the row, or never reached
+the supervisor, keeps the old port and cannot pass. Proven: commenting out `ActorMsg::Restart` made
+exactly this one test red and nothing else.</why>
+</example>
+
+<example>
+<candidate>The B9 walk: "a stopped resumable agent shows **Resume last session** beside Start"</candidate>
+<verdict>**Split it** — part is Vitest, part is a real walk.</verdict>
+<why>That the button *renders given a resumable prop* is jsdom's job (question 1). That the **real
+core** classifies a real stopped agent as resumable — and that clicking it **relaunches continuing
+the prior session** — needs the window and the real core. And "the resumed terminal fits the pane
+(no right/bottom gaps)" is measurement: jsdom has no layout, so only e2e can answer it.</why>
+<instead>Walk the outcome: click Resume, prove the agent relaunches *continuing the prior session*
+(not a fresh one — find evidence the stub can make unfakeable, the way the port trick does), and
+prove the terminal measures non-zero and fits. Leave the button's conditional rendering to Vitest,
+and say that you did.</instead>
+</example>
+
+<example>
+<candidate>A walk blocked by a product gap (nothing watched `solo.yml`)</candidate>
+<verdict>**Blocked, not faked.**</verdict>
+<why>The trust-review walk was built, proved the dialog never opened, and was **pulled** — recorded
+⛔ blocked in charter §4 — rather than reworded into something that passed. It came back only once
+the `ConfigWatchReactor` closed the gap for real. Never route around a gap to get a green.</why>
+</example>
+</examples>
 
 <reuse_first>
 **The architecture is the reuse.** `specs → flows → screens → harness`, each layer knowing only the
