@@ -159,6 +159,25 @@ One habit the episode still earns, now that a red run can no longer be *this* pa
 rows or panels are mysteriously missing, a screenshot from `e2e/logs/` distinguishes empty state
 from a real regression faster than the page source does.
 
+## The single-instance lock escaped isolation too — found and fixed
+
+**Found 2026-07-18 while running the coordination-panels walk.** The e2e app shared its bundle
+identifier (`dev.soloist.app`) with the developer's installed app, and `tauri-plugin-single-instance`
+keys its lock on that identifier (`app.config().identifier` on Linux, `linux.rs`). So whenever the
+developer's Soloist was already running, the e2e app forwarded its launch to it and exited cleanly —
+`onPrepare` then failed with *"Tauri app exited before the embedded WebDriver server became ready
+(code=0)"*, which reads like an app crash and is not. The data-dir and `XDG_DATA_HOME` overrides
+isolate state but never touched this lock, so the suite silently required the installed app to be
+closed.
+
+**The fix:** `tauri.e2e.conf.json` now sets its own `identifier` (`dev.soloist.app.e2e`), so the e2e
+build's single-instance lock is a separate D-Bus name and it never defers to a running installed/dev
+app. The identifier does **not** affect the Rust data dir (keyed on `SOLOIST_APP_DATA_DIR`, default
+"soloist") or the per-session `XDG_DATA_HOME` (which only gains a differently-named subdir under the
+same scratch tree), so it isolates the lock and nothing else. This is the third isolation leg
+alongside the per-session data dir and webview storage. Verified: the suite now runs green with the
+developer's installed Soloist open at the same time.
+
 ## A benign warning you will see
 
 `WARN tauri-service:service: Failed to clear mock store: A sessionId is required` on teardown. It is
