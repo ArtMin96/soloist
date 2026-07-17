@@ -17,13 +17,13 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 
-use crate::debounce::Debouncer;
+use crate::debounce::{sleep_until, Debouncer};
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProcessId;
 use crate::ports::Clock;
@@ -177,15 +177,6 @@ impl WatchReactor {
             rules.push(WatchRule::new(target.id, target.project_root, set));
         }
         watches.retain(|root, _| desired.contains(root));
-    }
-}
-
-/// Sleeps until `deadline`, or forever when nothing is pending — so the reactor idles without
-/// arming a timer whenever no debounce is in flight.
-async fn sleep_until(clock: &Arc<dyn Clock>, deadline: Option<Instant>) {
-    match deadline {
-        Some(at) => clock.sleep(at.saturating_duration_since(clock.now())).await,
-        None => std::future::pending::<()>().await,
     }
 }
 

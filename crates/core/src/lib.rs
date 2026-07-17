@@ -101,9 +101,9 @@ pub use ports::{
 pub use portscan::{wait_for_port, NoopPortProbe, PortProbe, PortScanner, WaitForPortError};
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView, Readiness};
 pub use projects::{
-    ConfigStatus, LoadProjectError, ProjectCommandView, ProjectError, ProjectLoad, ProjectRef,
-    ProjectService, ProjectSettingsPage, ProjectView, Projects, ReloadError, RemoveProjectError,
-    Visibility,
+    ConfigStatus, ConfigWatchReactor, LoadProjectError, ProjectCommandView, ProjectError,
+    ProjectLoad, ProjectRef, ProjectService, ProjectSettingsPage, ProjectView, Projects,
+    ReloadError, RemoveProjectError, Visibility,
 };
 pub use settings::{
     Appearance, Binding, FontScale, FontWeight, HotkeyAction, HotkeyBindingView, HotkeyScope,

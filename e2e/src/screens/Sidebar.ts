@@ -22,6 +22,9 @@ const META = '[data-testid="process-meta"]';
 const RUNNING: ProcStatus = "Running";
 const STOPPED: ProcStatus = "Stopped";
 
+/** The per-row control cluster's actions, by their accessible names. */
+type RowControl = "Trust" | "Start" | "Stop" | "Restart";
+
 /** One process row as the sidebar renders it. */
 export interface RowHandle {
   label: string;
@@ -238,9 +241,23 @@ export const sidebar = {
     return $(NAV).$(`.//*[@role="treeitem"][./span[normalize-space(text())="${label}"]]`);
   },
 
-  async clickControl(label: string, action: "Trust" | "Start" | "Stop" | "Restart"): Promise<void> {
-    const control = await this.rowElement(label).$(`.//button[@aria-label="${action}"]`);
+  /**
+   * Whether the row's Start control is currently enabled — the trust gate as the user sees
+   * it: an untrusted command renders Start disabled until its variant is trusted.
+   */
+  async startEnabled(label: string): Promise<boolean> {
+    const control = await this.control(label, "Start");
+    await control.waitForExist({ timeout: WAIT.render });
+    return control.isEnabled();
+  },
+
+  async clickControl(label: string, action: RowControl): Promise<void> {
+    const control = await this.control(label, action);
     await control.waitForClickable({ timeout: WAIT.render });
     await control.click();
+  },
+
+  control(label: string, action: RowControl) {
+    return this.rowElement(label).$(`.//button[@aria-label="${action}"]`);
   },
 };

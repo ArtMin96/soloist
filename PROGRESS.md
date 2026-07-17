@@ -27,6 +27,88 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **Product-mutation passes done + PR #74 CI confirmed green (2026-07-16, session close).** The two
+  owed e2e mutation passes are complete — each e2e walk is now proven able to fail for a real reason
+  by breaking the **product** one line at a time, watching exactly the right assertion go red, and
+  restoring the product **byte-clean** (final full-suite run on committed code: **4 files / 4
+  passed**; `git status` clean; the only change this session is a doc).
+  - **Trust-review walk** (`specs/projects/config-trust.spec.ts`): (1) commenting out the
+    `config_watch_loop()` spawn in `crates/app/src/lib.rs` fails **only** config-trust's two
+    assertions — "the trust review dialog never opened" and its consequent Trust-Echo-not-clickable —
+    while agents/smoke/supervision hold, proving the watcher → debounce → reload →
+    `ConfigChanged{requires_trust}` → dialog chain load-bearing. (2) Dropping the `ProjectOpened`
+    re-watch (`watches.remove(&id)`) leaves the **e2e green** — the per-worker app-data wipe now
+    isolates each spec's app, so config-trust opens `basic` fresh and never re-opens a swapped-inode
+    project — so the re-watch's proof is its **unit test**: with the line dropped
+    `reopening_a_project_re_establishes_its_watch` deadlocks (`timeout` exit 124), and passes in
+    0.00 s once restored. This corrected a stale e2e-01 claim (the e2e no longer exercises the
+    re-watch; the unit test does).
+  - **Supervision walk** (`specs/supervision/process-lifecycle.spec.ts`): breaking `Supervisor::start`
+    or `Supervisor::stop` is **not** surgical — start is shared by 3 tests + the agents launch, and
+    every spec's cleanup after-hook stops its process (`sidebar.stopIfRunning` waits for `Stopped`),
+    so a broken stop cascades into other walks' cleanup. The restart signal is surgical: commenting
+    out `ActorMsg::Restart` in `Supervisor::restart` fails **only** "restart replaces the process, not
+    just the row" (Listener kept port `:41723`) while the other three supervision assertions and all
+    three other spec files hold. (start→Running is already proven by the agents walk's
+    `supervisor.start(id)` mutation.)
+  - **CI:** PR #74 (`feat/solo-yml-watch` → base `test/e2e-harness`) is **all-green** on HEAD
+    `f149cc2` — `check`, `e2e` (this clears the previously-owed headless/xvfb leg), `bundle`, `smoke`
+    all SUCCESS. **No product code changed this session**; the sole diff is
+    `plan/e2e/e2e-01-screens-and-flows.md` (both mutation tables + the re-watch-proof correction) and
+    this ledger.
+  - **Open decision awaiting the user:** merge order. #74 is stacked on **PR #73**
+    (base `test/e2e-harness`). Either merge #73 then #74, or retarget #74 to `main` (it would then
+    also carry #73's commits). **Nothing merged.**
+  - **Next session should start with:** the user's merge-order decision (above) — then merge per that
+    choice. No further engineering is owed on the config-watch/e2e track. (Unrelated future work: the
+    Resume-last-session B9 e2e walk — separate task, not started.)
+
+- **Config-watch (`solo.yml` external-edit sync) wired + the trust-review walk landed (2026-07-16):
+  the "synced via hash-diff + debounce" invariant (CLAUDE.md §3) is now live for edits made outside
+  the app — closing the product gap the prior session recorded.** Full workspace **998 Rust green**;
+  e2e **13 specs / 4 files / ~52 s** green locally (the trust-review walk restored from ⛔ blocked to
+  ✅ covered); `just lint` exit 0.
+  - **New: `ConfigWatchReactor` (projects C1)** — a `Clock`-driven reactor holding a **non-recursive**
+    OS watch per open project root (one inotify descriptor per project via a new
+    `FileWatcher::watch_dir` port method), debouncing a save burst on the shared `Debouncer` and
+    driving `ProjectService::reload` — the **same reconcile** the HTTP `reload` endpoint uses (one
+    behavior, many triggers). The sync engine underneath hash-diffs (byte-identical = no-op),
+    refreshes its hash on the app's own writes (self-write never re-syncs), and announces
+    `ConfigChanged{requires_trust}` — the TrustDialog's existing trigger, so **no UI change**. Spawned
+    in the composition root after `restore_projects` (like the file-watch reactor); `Facade.projects`
+    and `.config` became `Arc`s so the reactor shares them. 9 reactor unit tests (mock clock + fake
+    watcher + real engine over a tempdir) + 1 `sys` live-chain integration test (real notify + real
+    file + real `ConfigChanged`). Edges decided ours (recorded plan/05 A9, `KNOWN-DIVERGENCES.md` D-2
+    → 🟢): invalid mid-edit save fails the reload quietly (last good state kept, next save re-syncs);
+    a deleted `solo.yml` is not a sync (create/modify only).
+  - **Product robustness bug found + fixed via the e2e walk: a re-opened project whose root
+    directory was replaced (new inode) kept a dead config watch.** `resync`'s `or_insert_with` only
+    watched a first-seen project id, so a delete+recreate at the same path left the OS watch on the
+    vanished inode. `ConfigWatchReactor` now **re-establishes a project's watch on every
+    `ProjectOpened`** (re-opening a path is exactly when its directory may have been swapped); unit
+    test `reopening_a_project_re_establishes_its_watch`. Real trigger: a git clean+checkout or a
+    folder restore while the project is open.
+  - **E2e harness isolation bug found + fixed: every session shared one durable data dir.** The
+    embedded provider spawns the app with an env captured before the per-worker `WDIO_WORKER_ID` is
+    set, so `SOLOIST_APP_DATA_DIR` resolved to one shared `app-data/launcher` for the whole run (the
+    per-worker subdir the module computed was created but unused — its `soloist.db` was empty; the
+    real DB was always in `launcher`). One spec's trust grants / opened projects leaked into the next
+    (config-trust needed the re-open fix; then supervision inherited a trusted Echo and its Trust
+    button vanished). `wdio.conf.ts` now **wipes the whole `app-data` tree at each worker's module
+    load** (safe under `maxInstances` 1 + the afterSession reaper), so each spec's app boots clean.
+    This supersedes the prior session's "each session gets its own data dir" claim — it did not.
+  - **New e2e walk `specs/projects/config-trust.spec.ts`**: writes the open project's `solo.yml` from
+    outside the app (`flows/editConfigExternally.ts`), waits for the review dialog (proving
+    watcher → debounce → reload → `ConfigChanged{requires_trust}` end to end via `screens/TrustDialog.ts`),
+    reads the row's **disabled** Start control while untrusted (`sidebar.startEnabled`), trusts from
+    the dialog, and proves the same command then starts to `Running`. Diagnosed the two bugs above by
+    capturing the live frontend event stream (agent-bridge + tauri-mcp confirmed the product wiring
+    fires `ConfigChanged` and opens the dialog; the wdio failure was pure isolation).
+  - **Owed items now cleared (2026-07-16, see the session entry above):** the config-trust *and*
+    supervision walks' product-mutation passes are done, and the headless CI leg is green (PR #74's
+    `e2e` job passed). Landed on branch `feat/solo-yml-watch` (off `test/e2e-harness`), pushed as
+    **PR #74**.
+
 - **E2e track — review fixes + the Dashboard-core walk landed (2026-07-16, PR #73 follow-up): 11
   specs / 3 session-isolated files / ~16 s green locally.** A `/code-review` of PR #73 surfaced 5
   standards violations + 3 spec gaps; all fixed, and finishing the Dashboard-core walk surfaced **two

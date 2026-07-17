@@ -42,9 +42,11 @@ alternative ("most projects should use `@wdio/tauri-service` instead"). The serv
 [platform-support doc](https://github.com/webdriverio/desktop-mobile/blob/main/packages/tauri-service/docs/platform-support.md)
 states that **`'embedded'` is the default on every platform when `driverProvider` is unset**.
 
-There is **one path and no fallback**: embedded. We do not configure `driverProvider`, do not install
-`tauri-driver`, and do not carry a provider knob. If the embedded provider ever fails us, that is a
-decision to revisit here — not a branch to pre-build (CLAUDE.md §15, YAGNI).
+There is **one path and no fallback**: embedded. We name `driverProvider: 'embedded'` explicitly, as
+the official sample does — it is also the default when unset, so this states the choice rather than
+leaving it to be inferred — and we do not install `tauri-driver` or carry a provider knob. If the
+embedded provider ever fails us, that is a decision to revisit here — not a branch to pre-build
+(CLAUDE.md §15, YAGNI).
 
 **What this replaces.** An earlier revision of this charter specified a hand-rolled harness that spawned
 `tauri-driver` from `beforeSession` and required `sudo apt install webkit2gtk-driver`. The service
@@ -87,10 +89,11 @@ normal build never resolves the dependency at all. That gate is checked in both 
 a production build must not contain it, and the e2e build must.
 
 **Gating — the load-bearing rule.** None of this may reach a shipped build (CLAUDE.md §6 size budget,
-and a WebDriver server is an open door). The official docs show `#[cfg(debug_assertions)]`, but that is
-too coarse here: `just dev` is a debug build, and it would stand up a WebDriver server on every ordinary
-dev session. This repo already has the right pattern for *exactly* this shape of thing — a dev-only
-plugin that drives the webview — in the **`agent-bridge`** feature (`tauri-plugin-mcp-bridge`, whose own
+and a WebDriver server is an open door). The plugins' own setup doc shows `#[cfg(debug_assertions)]`,
+but that is too coarse here: `just dev` is a debug build, and it would stand up a WebDriver server on
+every ordinary dev session. This repo already has the right pattern for *exactly* this shape of thing
+— a dev-only plugin that drives the webview — in the **`agent-bridge`** feature
+(`tauri-plugin-mcp-bridge`, whose own
 comment reads "Grants the agent broad webview access — run only in a trusted session"). Same threat,
 same gate:
 
@@ -102,8 +105,14 @@ same gate:
   wdio capability. It must be its own file, **not** the dev config: `tauri.dev.conf.json` declares the
   `mcp-bridge` capability, whose permissions only resolve when `agent-bridge` links that plugin.
 
-This is not a divergence from the docs. The docs' requirement is "don't ship it";
-`#[cfg(debug_assertions)]` is one example of meeting it, and a cargo feature meets it more precisely.
+This is not a divergence from the docs — it is one of the two shapes they document, and it is worth
+being precise about *which* docs, because Tauri's are not the ones that say it. Tauri's WebDriver page
+delegates all setup detail to the service and is **silent on gating** (it even points `appBinaryPath` at
+a release binary). The requirement lives in
+[webdriver.io's Tauri plugin setup](https://webdriver.io/docs/desktop-testing/tauri/plugin-setup), which
+answers "Should I Include the Plugin in Production?" with *"No, the plugin is test-only"* and then shows
+**both** `#[cfg(debug_assertions)]` **and** a cargo feature (`wdio = ["dep:tauri-plugin-wdio"]`) as ways
+to meet it. We take the feature — the more precise of the two here, for the `just dev` reason above.
 "Release links nothing" is an acceptance check that is actually run, not an assumption.
 
 ### 1.2 Mocking is out of scope — deliberately
@@ -224,7 +233,7 @@ where spec → parity-row traceability lives.
 |------|--------|-----------|-----------------------|-------------|--------|
 | Launch an agent | `agents` | Phase 7 (E-UI) | The picker targets the open project and offers Claude with the command it spawns; launching renders it in the sidebar, labelled and selected under Agents; the app really starts it (the status settles `Running` against the stub agent); a terminal opens for it, mounted and measured non-zero | e2e-01 | ✅ **covered** |
 | Dashboard core | `supervision` | Phase 5 (C-UI) | Tree groups by project/kind; select a process; Start/Stop/Restart reach the core and the status glyph updates; trust gates an untrusted command | `phase-05` | ✅ **covered** — `specs/supervision/` drives select → trust (the row control) → start → `Running`, stop → `Stopped`, a nonzero exit → `Crashed`, and restart proven by the reborn process's *changed* discovered port. Grouping is asserted incidentally (the Agents group on launch); a per-kind grouping pin is not owed |
-| Trust review on `solo.yml` change | `projects` | A9 / CLAUDE.md §3 ("synced via hash-diff + debounce") | Editing the open project's `solo.yml` externally raises the review dialog; trusting from it is what lets the changed command start | this charter | ⛔ **blocked on the product**: nothing watches `solo.yml` for external edits — `ProjectService::reload` exists, reconciles, and emits `ConfigChanged{requires_trust}`, but **no adapter calls `reload_project`** and no watcher targets the file, so the dialog can only arise from the app's own settings-pane edits. The walk was built, proved the gap (dialog never opens), and was pulled until the product wires the watcher |
+| Trust review on `solo.yml` change | `projects` | A9 / CLAUDE.md §3 ("synced via hash-diff + debounce") | Editing the open project's `solo.yml` externally raises the review dialog; trusting from it is what lets the changed command start | this charter | ✅ **covered** — the blocking product gap (nothing watched `solo.yml`; `reload_project` had no caller for external edits) was closed by the `ConfigWatchReactor` (2026-07-16, `KNOWN-DIVERGENCES.md` D-2). `specs/projects/config-trust.spec.ts` writes the open project's `solo.yml` from outside the app, waits for the review dialog (the watcher → debounce → reload → `ConfigChanged{requires_trust}` chain, end to end), reads the row's **disabled** Start control while untrusted, trusts from the dialog, and proves the same command then starts to `Running` |
 | **Resume last session** | `supervision` | **B9** | A stopped resumable agent shows **Resume last session** beside Start (sidebar row + terminal header); click → it relaunches continuing the prior session; a non-resumable target (Amp, Generic, command, terminal) shows **only** Start; the resumed terminal fits the pane (no right/bottom gaps) | `plan/05 §12`, `KNOWN-DIVERGENCES.md` D-9, `PROGRESS.md` | ⬜ not built |
 | Agent lineage tree | `orchestration` | orch-01 (O3/O4) | A bound lead's spawned worker nests under it; a manual launch is a root; a worker's glyph flips on an activity event; a closed lead re-roots its workers | `plan/orchestrator/orch-01` | ⬜ not built |
 | Scratchpad & to-do panels | `coordination` | orch-02 (O5/O6/O12/O14) | Edit + save a scratchpad and force a revision conflict; a blocker chain refuses complete then allows it; a comment renders its author; "Copy link" puts the `solo://` URL on the clipboard | `plan/orchestrator/orch-02` | ⬜ not built |
