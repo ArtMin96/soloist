@@ -2,7 +2,7 @@
 
 **Status: built and green (2026-07-16).** The three-layer architecture exists and carries its first
 journey: opening a project, launching Claude into it, and asserting the app really starts it and
-renders it. That journey is 4 specs; the suite it seeded is **14 specs / 5 files / ~44 s** as of
+renders it. That journey is 4 specs; the suite it seeded is **18 specs / 6 files / ~57 s** as of
 2026-07-17. What follows describes what exists; the remaining catalog walks (charter §4) are e2e-02+.
 
 **Goal:** Turn the proven harness into a **reusable architecture**, and prove it carries real behavior by
@@ -194,6 +194,28 @@ Its product-mutation pass is done:
 |----------|----------|----------|
 | Comment out the `config_watch_loop()` spawn in `crates/app/src/lib.rs` — the watcher never runs | the walk's assertions fail; the other walks hold | exactly that: "the trust review dialog never opened" (test 1) and Trust-Echo-not-clickable (test 2, its consequence); agents, smoke, and supervision all passed — nothing else raises that dialog. Proves the whole watcher → debounce → reload → `ConfigChanged{requires_trust}` → dialog chain load-bearing |
 | Drop the `ProjectOpened` re-watch (`watches.remove(&id)`) in `ConfigWatchReactor` | (at landing) the walk regresses; (now) the unit test regresses | the e2e stayed green — the per-session data dir isolates each spec's app, so nothing re-opens a watched project — while the unit test `reopening_a_project_re_establishes_its_watch` deadlocks (the re-open never re-establishes the watch), passing again once restored. The proof moved from the e2e to the unit test; the fix stayed load-bearing |
+
+The agent-lineage walk (`specs/orchestration/agent-lineage.spec.ts`) drives the orchestration tree against a
+genuine lead→worker lineage. A new fixture is the foundation: a stand-in **lead** agent (`fixtures/lead-agent/`,
+its own workspace, built by `onPrepare`) that, launched by the app as an agent, reaches the app's real IPC
+socket, binds its session to its own process (authenticated by its process group, exactly as `soloist-mcp`
+does), and `spawn_agent`s a worker over the same wire — so lineage is recorded by the real core, not staged. A
+stub **worker** (`fixtures/bin/opencode`, OutputDelta idle heuristic) cycles output then quiet so the idle
+sampler drives a deterministic Working→Idle flip. Single-agent removal is reachable only through a bound
+MCP/IPC session (never the local UI, HTTP, or CLI — a product finding, below), so the re-root is triggered
+cross-surface: the lead stub closes its own bound process on a trigger file, and the window reflects the
+re-root. Its product-mutation pass is done:
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Comment out `self.inner.lineage.record(worker, lead)` in `crates/core/src/facade/scoped_process.rs` — a bound-lead spawn records no parent | only the walk's nesting assertions fail; the other walks hold | exactly that: "nests a spawned worker under the lead" failed (`worker.parent` expected `1`, got `null` — the worker read back as a root) and "re-roots a closed lead's workers" failed at its pre-close nesting guard; the walk's lineage-independent assertions (manual-root, the Working→Idle glyph flip) held, and all five other spec files (agents, cross-surface, config-trust, smoke, supervision) stayed green. Surgical: no other spec depends on lineage recording |
+
+**Product finding (recorded, not fixed here):** removing a *single* agent from the registry — the action that
+re-roots its workers — is reachable only via a bound MCP/IPC session's `close_process`. The local Tauri UI has
+no per-agent close/remove affordance (stopping leaves the agent resting in the registry, so its workers stay
+nested), and HTTP/CLI expose only start/stop/restart + whole-project removal. The walk therefore drives the
+close cross-surface (the lead stub closes itself), mirroring the CLI-restart precedent, rather than inventing a
+UI affordance the e2e track does not build.
 
 ## Risks & mitigations
 

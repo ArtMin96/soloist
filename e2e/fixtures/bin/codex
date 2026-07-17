@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# The stand-in "lead" agent the walk launches manually. Answers the detection probe so the picker
+# offers it as launchable, and otherwise hands off to the compiled lead stub the harness built —
+# which binds its MCP session to this process and spawns a worker over the real IPC path. Kept a thin
+# wrapper so the detection probe never starts the real stub, and the stub itself stays a pure IPC
+# client with no argument parsing of its own.
+set -euo pipefail
+
+if [ "${1:-}" = "--version" ]; then
+  echo "0.0.0 (soloist e2e lead stub)"
+  exit 0
+fi
+
+exec "${SOLOIST_E2E_LEAD_BIN:?the e2e harness must set SOLOIST_E2E_LEAD_BIN}" "$@"

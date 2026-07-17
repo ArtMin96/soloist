@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# A stand-in worker agent for the orchestration walk, spawned by the lead over the real
+# `spawn_agent` path. Its provider's idle heuristic is visible-output (OutputDelta), so its activity
+# is driven deterministically: it cycles between a burst of output (each ~1 Hz sample sees output
+# flowing → Working) and a quiet spell (no output past the quiet window → Idle), staying alive like a
+# real agent at an idle prompt. The tree's activity glyph flips Working↔Idle off this, end to end
+# through the real idle sampler — so a walk can observe both states whenever it looks.
+set -euo pipefail
+
+if [ "${1:-}" = "--version" ]; then
+  echo "0.0.0 (soloist e2e worker stub)"
+  exit 0
+fi
+
+echo "worker starting"
+while true; do
+  # Active spell: ~4 s of output so several consecutive samples see it flowing (Working).
+  for _ in $(seq 1 8); do
+    echo "worker working"
+    sleep 0.5
+  done
+  # Quiet spell: ~6 s silent, comfortably past the idle FSM's quiet window — which is
+  # IDLE_AFTER_QUIET_SAMPLES (crates/core/src/agents/idle/strategy.rs) consecutive quiet samples
+  # at the sampler's ~1 Hz cadence, ~3 s today. If that tunable ever outgrows this sleep, the
+  # Working→Idle flip spec goes flaky: lengthen this spell with it.
+  sleep 6
+done
