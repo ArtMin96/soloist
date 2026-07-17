@@ -3,14 +3,10 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browser } from "@wdio/globals";
-import { invoke } from "./tauri.js";
+import { appDataDir } from "./appData.js";
 import { WAIT } from "./waits.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
-
-// Everything a run writes lives under here. The app under test is confined to it, so a data
-// directory outside it means the sandboxing failed (see `appDataDir`).
-const scratch = path.resolve(dir, "../../.tmp");
 
 /**
  * The real `soloist` CLI, built by `onPrepare` into the e2e run's own cargo target dir. A separate
@@ -23,35 +19,6 @@ export const soloistCli = path.resolve(dir, "../../../target/e2e/debug/soloist-c
 // inside the app's data directory. The one definition on this side of the boundary; the app's own
 // is `RUNTIME_FILE` in `crates/ipc/src/http.rs`.
 const RUNTIME_FILE = "http-api.json";
-
-/** What the app reports about where it resolved its data directory to. */
-interface DataDirReport {
-  data_dir: string;
-}
-
-/**
- * The data directory the app under test **actually** resolved to, as the app itself reports it.
- *
- * Asking the app is the only reliable answer. Reading the harness's own `SOLOIST_APP_DATA_DIR`
- * would report whatever this process last set, which is not necessarily what the app was spawned
- * with — the app inherits the launcher's environment, not its worker's. The app's own report is
- * correct however that is wired.
- */
-async function appDataDir(): Promise<string> {
-  const { data_dir: dataDir } = await invoke<DataDirReport>("mcp_setup_info");
-
-  // The isolation tripwire, mirroring `openProject`'s. The CLI resolves the app it drives from
-  // this directory alone, so handing it a real one would restart the developer's real processes
-  // rather than fail — a silent mutation of real state, not an error. Abort first.
-  if (!dataDir.startsWith(scratch + path.sep)) {
-    throw new Error(
-      `harness isolation broken: the app reports its data directory as ${dataDir}, outside the ` +
-        `e2e scratch tree — pointing the CLI at it would drive the developer's real Soloist; ` +
-        `aborting before the CLI touches real state`,
-    );
-  }
-  return dataDir;
-}
 
 /**
  * Runs the real `soloist` CLI against the app under test and returns what it printed.

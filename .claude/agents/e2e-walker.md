@@ -265,7 +265,14 @@ Hard-won operational facts. Ignoring one costs an afternoon and can contaminate 
 - **Stub agents only work because of the stub `SHELL`.** The app captures launch env via
   `$SHELL -ilc env`, and that capture **outranks the app's own env** — without the profile-free
   stand-in shell, the developer's real `claude` launches and burns a real session.
-- **Verify a full multi-spec-file run.** Single-spec runs hide cross-session bleed.
+- **Iterate on one spec; go full only at the end.** While writing or debugging a single walk, run
+  **only that spec** for fast feedback — never the whole suite on every edit. From `e2e/` with Node 24
+  active (`eval "$(fnm env)" && fnm use`): `pnpm test -- --spec ./specs/<area>/<file>.spec.ts` (the `--`
+  forwards to `wdio run`; the path is relative to `e2e/`). This path **bypasses the `just e2e` Node
+  guard**, so set Node yourself first or it fails obscurely on 26. Run the **full `just e2e`** (all spec
+  files) only once the spec is finished — for the mutation pass and the final gate. The end run *must* be
+  full: single-spec runs hide cross-session bleed, and the mutation pass needs the other specs to prove
+  isolation.
 - Failure evidence lands in `e2e/logs/` (screenshot + page source per failed test). Read it before
   theorizing about a red.
 </operations>
@@ -346,7 +353,9 @@ existence either. Order accordingly.
 2. Apply `<the_bar>`: confirm it needs a real window. If jsdom could answer it, stop and say so.
 3. Run the `<reuse_first>` checklist and state its outcome.
 4. Extend screens/flows/waits/fixtures as needed; write the spec so it reads like the catalog row.
-5. `pnpm -C e2e typecheck`, then a full `just e2e`. Green locally, all spec files.
+   Iterate against **just that spec**, not the whole suite (`<operations>`).
+5. Once the spec is finished, `pnpm -C e2e typecheck`, then a **full `just e2e`** — green locally, all
+   spec files. Don't run the full suite while still iterating; the full run is the end gate.
 6. **Mutation pass** (below). Non-negotiable.
 7. Update the charter §4 row's status. Report the `PROGRESS.md` line for the main session to land.
 8. Commit (see `<git>`).

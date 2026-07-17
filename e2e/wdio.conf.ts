@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { browser } from "@wdio/globals";
 import { soloistCli } from "./src/harness/cli.js";
+import { LEAD_AGENT } from "./src/harness/leadAgent.js";
 import { WAIT } from "./src/harness/waits.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -19,6 +20,12 @@ const targetDir = path.join(repoRoot, "target", "e2e");
 // The app under test: the debug binary built by `onPrepare` with the `wdio` feature, which links the
 // in-app WebDriver server the embedded provider attaches to. Release builds link neither plugin.
 const appBinary = path.join(targetDir, "debug", "soloist");
+
+// The stand-in lead agent (its own workspace under fixtures), built by `onPrepare`. The `codex`
+// PATH stub execs it: launched by the app as an agent, it binds its MCP session and spawns a worker
+// over the real IPC path, so the orchestration walk gets a genuine lead→worker lineage.
+const leadAgentManifest = path.join(dir, "fixtures", "lead-agent", "Cargo.toml");
+const leadAgentBin = path.join(targetDir, "debug", "lead-agent");
 
 // Everything a run scribbles lives under here — per-session app data dirs and fixture scratch
 // copies — wiped whole before every run, so a spec never reads or writes the developer's real
@@ -43,6 +50,12 @@ process.env.PATH = `${path.join(dir, "fixtures", "bin")}${path.delimiter}${proce
 // back ahead of the stubs. The stand-in shell skips profiles, so the capture returns this exact
 // environment.
 process.env.SHELL = path.join(dir, "fixtures", "bin", "shell");
+// The lead stub reads these from the app-inherited (and shell-captured) environment: where its
+// compiled binary is, and which worker tool to spawn. The `codex` PATH stub execs the binary; the
+// stub itself spawns the worker over MCP. One TS source (`leadAgent.ts`), shared with the spec
+// that asserts the rendered labels.
+process.env.SOLOIST_E2E_LEAD_BIN = leadAgentBin;
+process.env.SOLOIST_E2E_WORKER_TOOL = LEAD_AGENT.worker;
 // Every app data dir a run uses lives under here; `onWorkerStart` gives each session its own.
 const appDataRoot = path.join(scratchDir, "app-data");
 
@@ -64,6 +77,25 @@ process.env.XDG_DATA_HOME = path.join(xdgDataRoot, "unassigned");
 
 // The app's own SIGTERM→SIGKILL grace for its children, mirrored for the app itself.
 const APP_EXIT_GRACE_MS = 5_000;
+
+/**
+ * Runs one cargo build the suite depends on, failing the whole run loudly if the build errors or
+ * the binary it was meant to produce did not appear where the harness will look for it.
+ */
+function buildBinary(
+  what: string,
+  args: string[],
+  options: { cwd?: string; env: NodeJS.ProcessEnv },
+  binary: string,
+): void {
+  const build = spawnSync("cargo", args, { stdio: "inherit", ...options });
+  if (build.status !== 0) {
+    throw new Error(`Failed to build ${what} for e2e (exit ${build.status})`);
+  }
+  if (!existsSync(binary)) {
+    throw new Error(`Built ${what} not found at ${binary}`);
+  }
+}
 
 export const config: WebdriverIO.Config = {
   runner: "local",
@@ -99,45 +131,35 @@ export const config: WebdriverIO.Config = {
     // this binary by accident: `--features wdio` links the in-app WebDriver server, `--config`
     // merges the e2e overlay (withGlobalTauri + the wdio capabilities), and `VITE_E2E` makes the
     // frontend build inject the wdio plugin the harness drives the app through.
-    const build = spawnSync(
-      "cargo",
-      [
-        "tauri",
-        "build",
-        "--debug",
-        "--no-bundle",
-        "--features",
-        "wdio",
-        "--config",
-        "tauri.e2e.conf.json",
-      ],
+    buildBinary(
+      "the Soloist app",
+      ["tauri", "build", "--debug", "--no-bundle", "--features", "wdio", "--config", "tauri.e2e.conf.json"],
       {
         cwd: path.join(repoRoot, "crates", "app"),
         env: { ...process.env, VITE_E2E: "1", CARGO_TARGET_DIR: targetDir },
-        stdio: "inherit",
       },
+      appBinary,
     );
-    if (build.status !== 0) {
-      throw new Error(`Failed to build the Soloist app for e2e (exit ${build.status})`);
-    }
-    if (!existsSync(appBinary)) {
-      throw new Error(`Built app binary not found at ${appBinary}`);
-    }
 
     // The `soloist` CLI the cross-surface walk drives the app from. A separate binary that
     // `cargo tauri build` does not produce, built into the same target dir so it shares the
     // workspace artifacts the app build just produced.
-    const cli = spawnSync("cargo", ["build", "-p", "soloist-cli"], {
-      cwd: repoRoot,
-      env: { ...process.env, CARGO_TARGET_DIR: targetDir },
-      stdio: "inherit",
-    });
-    if (cli.status !== 0) {
-      throw new Error(`Failed to build the soloist CLI for e2e (exit ${cli.status})`);
-    }
-    if (!existsSync(soloistCli)) {
-      throw new Error(`Built CLI binary not found at ${soloistCli}`);
-    }
+    buildBinary(
+      "the soloist CLI",
+      ["build", "-p", "soloist-cli"],
+      { cwd: repoRoot, env: { ...process.env, CARGO_TARGET_DIR: targetDir } },
+      soloistCli,
+    );
+
+    // The stand-in lead agent the orchestration walk launches. Its own workspace (kept out of the
+    // product one), built by manifest path into the same target dir so it shares the workspace
+    // artifacts the builds above just produced.
+    buildBinary(
+      "the lead-agent stub",
+      ["build", "--manifest-path", leadAgentManifest],
+      { env: { ...process.env, CARGO_TARGET_DIR: targetDir } },
+      leadAgentBin,
+    );
   },
 
   // Point the next session's app at its own fresh directories, named for the worker that will

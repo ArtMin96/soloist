@@ -1,0 +1,24 @@
+[package]
+name = "lead-agent"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Its own workspace root. This stub lives under the e2e fixtures and must never be built by the
+# product workspace (`cargo build --workspace`), face the dependency-direction guard, or count
+# against the file-size gate — it is test scaffolding, not product code. An empty `[workspace]`
+# table makes this manifest its own root; the product crates it path-depends on still resolve their
+# own (repo-root) workspace for inherited metadata, so the real wire types are single-sourced.
+[workspace]
+
+[[bin]]
+name = "lead-agent"
+path = "src/main.rs"
+
+[dependencies]
+# The real IPC wire — request/response types and framing — so the stub speaks exactly what the MCP
+# server does and the format is never redefined here.
+soloist-ipc = { path = "../../../crates/ipc" }
+# Only for `ProcessId` / the process-id env var name, which the IPC request types are built from.
+soloist-core = { path = "../../../crates/core" }
+tokio = { version = "1", features = ["rt", "net", "time", "macros"] }

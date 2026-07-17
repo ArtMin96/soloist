@@ -27,6 +27,66 @@
 > "defaults OFF"). G10's gating Verify ("JSON state round-trips") is met, so it does not block Phase 9. See "Next
 > session should start with" → A.
 
+- **E2e agent-lineage walk landed — the orchestration tree's real-window verification (2026-07-17).**
+  `specs/orchestration/agent-lineage.spec.ts` (charter §4 `orchestration` / orch-01 O3/O4, flipped ⬜ → ✅)
+  drives the live orchestration tree against a **genuine** lead→worker lineage recorded by the real core.
+  Suite now **6 files / 18 specs green** locally (`just e2e`, Node 24: ~57 s baseline, ~92 s on the
+  restored-code re-confirm); **`just lint` exit 0**; e2e `tsc --noEmit` clean.
+  - **The four assertions, each keyed on evidence a repaint/dropped-event cannot fake:** a bound lead's
+    spawned worker **nests** under it (the worker's `parent` resolves to the lead's `data-process-id` via
+    ARIA `role="group"`/`aria-level` — non-null only because the core ran `lineage.record` in the bound
+    session); a second manual agent is a **root** (the contrast that excludes "nests everything"); the
+    worker's `data-activity` **flips Working→Idle** off the real idle sampler reading its PTY output; and
+    **closing the lead re-roots** its worker to level 1 (lead node gone, worker not stranded).
+  - **The foundation fixture (reusable for orch-02/03):** a stand-in **lead** — `fixtures/lead-agent/`, a
+    workspace-**excluded** crate (own `[workspace]` table; never faces `cargo build --workspace`, the
+    dep-guard, or the size gate), path-depending the real `crates/ipc`+`crates/core` so the wire format is
+    single-sourced — is launched by the app as an agent, reaches the real IPC socket, binds its session to
+    its own process (authenticated by its process group, exactly as `soloist-mcp` does), and `spawn_agent`s
+    a worker over the same wire. Its request dispatch is a clean match wired for **only** Bind/Spawn/Close
+    now (orch-02/03 add Todo/Scratchpad/Timer arms later). A stub **worker** (`fixtures/bin/opencode`,
+    OutputDelta idle heuristic) cycles output↔quiet so the flip is deterministic; `fixtures/bin/codex` is a
+    thin PATH wrapper that answers `--version` for detection then execs the lead binary. Built in
+    `onPrepare` beside the app + CLI.
+  - **Mutation-verified (surgical):** commenting `self.inner.lineage.record(worker, lead)` in
+    `crates/core/src/facade/scoped_process.rs` reddens **only** the walk's nesting assertions ("nests…"
+    with `worker.parent` `null` instead of the lead id; "re-roots…" at its pre-close nesting guard) — the
+    walk's lineage-independent assertions (manual-root, glyph flip) held and **all five other spec files
+    stayed green**. Restored byte-clean (`git diff --stat crates/` empty).
+  - **Product finding (recorded, NOT fixed in this walk — out of the e2e track's remit):** removing a
+    *single* agent from the registry (the action that re-roots its workers) is reachable **only** via a
+    bound MCP/IPC session's `close_process`. The local Tauri UI has **no** per-agent close/remove affordance
+    (the `close_agent_or_terminal` hotkey maps to *stop*, which leaves the agent resting in the registry, so
+    its workers stay nested; a natural exit likewise rests it), and HTTP/CLI expose only
+    start/stop/restart + whole-project removal. So the walk closes the lead **cross-surface** (the lead stub
+    closes its own bound process on a spec-dropped trigger file), and the window is asserted to reflect the
+    re-root — the CLI-restart precedent, not a new UI feature. If a UI "close agent" affordance is wanted,
+    that's a product task for the owner to scope, outside orch-01 (which explicitly scoped UI-driven actions
+    out: "the tree observes; actions route to existing `Facade` methods").
+  - **O3/O4 (orch-01):** remain code-complete & gate-green (headless); this walk closes their deferred
+    **user-only real-window leg** — live nesting, the root/nested contrast, the live glyph flip, and the
+    live re-root are now proven in a real WebKitGTK window. Left as-is rather than force-flipped to
+    `Verified` here; the real-window evidence now exists on the record.
+  - **One harness note:** opening the orchestration pane goes through the project header's ••• menu, whose
+    Radix `DropdownMenu` opens on `pointerdown` — which WebKitGTK's classic-WebDriver element click does not
+    emit (confirmed by dumping the DOM: the menu never opened on `.click()`). The `Sidebar.openOrchestration`
+    screen focuses the button (its row's `:focus-within` reveals the `opacity-0` control) and opens the menu
+    with **Enter** — the genuine keyboard path — then clicks the view item (items select on click, which the
+    existing launch-agent spec already relies on). Uncommitted, pending review.
+  - **Riding along in this change:** `.claude/agents/e2e-walker.md` gained the single-spec-iteration
+    workflow (iterate one spec for fast feedback; the **full** suite run is the end gate only) — operational
+    guidance learned while building this walk.
+  - **Post-review fix pass (two-axis /code-review, same session):** the lead stub now **requires**
+    `SOLOIST_E2E_WORKER_TOOL` (named error instead of silently spawning nothing) and spawns exactly one
+    worker — the `SOLOIST_E2E_WORKER_COUNT` knob was YAGNI and is gone; the shared row-markup selectors are
+    single-sourced in `e2e/src/screens/indicatorRow.ts` (Sidebar + OrchestrationPane import them); the three
+    `onPrepare` cargo builds share one `buildBinary` helper; `Sidebar.openOrchestration` resolves the menu
+    item **inside the open `[role="menu"]`** by exact text (a global name lookup could mis-target the pane's
+    "Orchestration views" label on a re-open); `fixtures/bin/opencode` names the core tunable
+    (`IDLE_AFTER_QUIET_SAMPLES`, `crates/core/src/agents/idle/strategy.rs`) its 6 s quiet spell must outlast.
+    Re-verified after the fixes: full suite **6 files / 18 specs green in 1:24** (Node 24), e2e
+    `tsc --noEmit` clean, fixture crate builds clean.
+
 - **E2e cross-surface walk landed + two harness isolation defects found and fixed (2026-07-17).**
   `specs/cross-surface/cli-restart.spec.ts` drives the **real `soloist-cli`** against the running app
   (a separate binary, over its loopback HTTP API) and proves the window shows the reborn process's

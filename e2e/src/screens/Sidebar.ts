@@ -1,18 +1,10 @@
 import type { ProcStatus } from "@domain";
 import { $, browser } from "@wdio/globals";
 import { WAIT } from "../harness/waits.js";
+import { ROW_ACTIVITY, ROW_STATUS, ROW_TEXT } from "./indicatorRow.js";
 
 const NAV = 'nav[aria-label="Projects"]';
 const ROW = '[role="treeitem"]';
-
-// A row lays out an optional spacer or chevron, the status indicator, the label, then its
-// telemetry. The indicator carries `data-status` — or `data-activity` instead, once a running agent
-// reports what it is doing — so the label is the only direct child span carrying none of those
-// markers. That is a structural handle rather than a styling one: it survives a restyle and breaks
-// only if the row genuinely stops rendering a label.
-const LABEL = ":scope > span:not([aria-hidden]):not([data-status]):not([data-activity])";
-const STATUS = ":scope > span[data-status]";
-const ACTIVITY = ":scope > span[data-activity]";
 const META = '[data-testid="process-meta"]';
 
 // The indicator only ever swaps `data-status` out for `data-activity` while the process is
@@ -87,9 +79,9 @@ export const sidebar = {
       },
       NAV,
       ROW,
-      LABEL,
-      STATUS,
-      ACTIVITY,
+      ROW_TEXT,
+      ROW_STATUS,
+      ROW_ACTIVITY,
       META,
     );
     return snapshots.map(({ label, status, hasActivity, selected, meta }) => {
@@ -230,6 +222,33 @@ export const sidebar = {
   /** Whether a subtype group header (Agents / Terminals / Commands) is rendered. */
   async hasGroup(name: string): Promise<boolean> {
     return $(NAV).$(`span*=${name}`).isDisplayed();
+  },
+
+  /**
+   * Opens a project's orchestration pane the way a keyboard user does — reveal the project row's
+   * ••• actions button, open its menu, and choose the Orchestration view.
+   *
+   * Two WebKitGTK-under-classic-WebDriver realities shape this: the button is `opacity-0` until the
+   * row is hovered or focused, and the synthetic pointer neither reliably triggers `:hover` nor
+   * fires the `pointerdown` the menu opens on. So the button is focused (the row's `:focus-within`
+   * reveals it) and its menu opened with Enter — the genuine keyboard path — then the view's menu
+   * item is chosen inside the open menu.
+   */
+  async openOrchestration(project: string): Promise<void> {
+    const actions = await $(`aria/${project} actions`);
+    await actions.waitForExist({ timeout: WAIT.render });
+    await browser.execute((element: HTMLElement) => element.focus(), actions);
+    await browser.keys("Enter");
+
+    // Scoped to the open menu rather than looked up globally: the pane this opens also carries an
+    // accessible "Orchestration views" name once rendered, so a global name lookup could mis-target
+    // on a re-open. Exact text keeps the match on the one menu item — the menu's wrapper holds
+    // every label's text, so it can never match exactly.
+    const menu = await $('[role="menu"]');
+    await menu.waitForDisplayed({ timeout: WAIT.render });
+    const item = await menu.$("div=Orchestration");
+    await item.waitForClickable({ timeout: WAIT.render });
+    await item.click();
   },
 
   /**
