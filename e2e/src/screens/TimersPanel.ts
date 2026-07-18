@@ -1,5 +1,6 @@
-import { $, browser } from "@wdio/globals";
+import { $ } from "@wdio/globals";
 import { WAIT } from "../harness/waits.js";
+import { waitUntilOr } from "../harness/waitUntilOr.js";
 
 // The orchestration pane's Timers view: the armed timers a project's leads hold, each rendered with
 // a fire-condition badge, a live countdown to the max-wait deadline, and — for a fire-when-idle timer
@@ -41,12 +42,9 @@ export const timersPanel = {
    * timer fired and left, not merely that a repaint hid it.
    */
   async waitForNoTimers(): Promise<void> {
-    try {
-      await browser.waitUntil(async () => !(await $(COUNTDOWN).isExisting()), {
-        timeout: WAIT.core,
-      });
-    } catch {
-      throw new Error("an armed timer never left the panel — it did not fire");
-    }
+    await waitUntilOr(
+      async () => !(await $(COUNTDOWN).isExisting()),
+      () => "an armed timer never left the panel — it did not fire",
+    );
   },
 };

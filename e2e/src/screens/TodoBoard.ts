@@ -1,6 +1,7 @@
 import { $, browser } from "@wdio/globals";
 import type { TodoStatus } from "@domain";
 import { WAIT } from "../harness/waits.js";
+import { waitUntilOr } from "../harness/waitUntilOr.js";
 
 // The to-do board: the project's shared work items, each a Collapsible row expanding to its
 // document, blockers, comments, and actions. Selectors live only here. State (the declared status
@@ -64,15 +65,11 @@ export const todoBoard = {
 
   /** Waits until a row titled `title` is rendered. */
   async waitForTodo(title: string): Promise<void> {
-    let seen: string[] = [];
-    try {
-      await browser.waitUntil(async () => (await this.read(title)) !== null, {
-        timeout: WAIT.core,
-      });
-    } catch {
-      seen = await this.titles();
-      throw new Error(`no todo titled "${title}" appeared; rendered todos: ${JSON.stringify(seen)}`);
-    }
+    await waitUntilOr(
+      async () => (await this.read(title)) !== null,
+      async () =>
+        `no todo titled "${title}" appeared; rendered todos: ${JSON.stringify(await this.titles())}`,
+    );
   },
 
   /** Every rendered todo title, for reporting a miss. */
@@ -94,37 +91,25 @@ export const todoBoard = {
   async waitForStatus(title: string, status: TodoStatus): Promise<void> {
     const want = STATUS_LABEL[status];
     let last: string | undefined;
-    try {
-      await browser.waitUntil(
-        async () => {
-          last = (await this.read(title))?.status;
-          return last === want;
-        },
-        { timeout: WAIT.core },
-      );
-    } catch {
-      throw new Error(
-        `todo "${title}" never reported status "${want}"; last seen: ${last ?? "no such todo"}`,
-      );
-    }
+    await waitUntilOr(
+      async () => {
+        last = (await this.read(title))?.status;
+        return last === want;
+      },
+      () => `todo "${title}" never reported status "${want}"; last seen: ${last ?? "no such todo"}`,
+    );
   },
 
   /** Waits until the row titled `title` shows its blocked gate as `blocked`. */
   async waitForBlocked(title: string, blocked: boolean): Promise<void> {
     let last: boolean | undefined;
-    try {
-      await browser.waitUntil(
-        async () => {
-          last = (await this.read(title))?.blocked;
-          return last === blocked;
-        },
-        { timeout: WAIT.core },
-      );
-    } catch {
-      throw new Error(
-        `todo "${title}" never showed blocked=${blocked}; last seen: ${last ?? "no such todo"}`,
-      );
-    }
+    await waitUntilOr(
+      async () => {
+        last = (await this.read(title))?.blocked;
+        return last === blocked;
+      },
+      () => `todo "${title}" never showed blocked=${blocked}; last seen: ${last ?? "no such todo"}`,
+    );
   },
 
   /** Expands the row titled `title` so its content (actions, alert, comments) is present. */

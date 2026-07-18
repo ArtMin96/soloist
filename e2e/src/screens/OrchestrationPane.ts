@@ -1,6 +1,7 @@
 import type { AgentActivity, ProcessKind } from "@domain";
 import { $, browser } from "@wdio/globals";
 import { WAIT } from "../harness/waits.js";
+import { waitUntilOr } from "../harness/waitUntilOr.js";
 import { ROW_ACTIVITY, ROW_TEXT } from "./indicatorRow.js";
 
 // The agent lineage tree the orchestration pane renders: a `role="tree"` of `role="treeitem"`
@@ -124,43 +125,33 @@ export const orchestrationPane = {
   async waitForNodes(label: string): Promise<TreeNode[]> {
     let found: TreeNode[] = [];
     let seen: string[] = [];
-    try {
-      await browser.waitUntil(
-        async () => {
-          const nodes = await this.nodes();
-          seen = nodes.map((node) => node.label);
-          found = nodes.filter((node) => node.label === label);
-          return found.length > 0;
-        },
-        { timeout: WAIT.core },
-      );
-    } catch {
-      throw new Error(
+    await waitUntilOr(
+      async () => {
+        const nodes = await this.nodes();
+        seen = nodes.map((node) => node.label);
+        found = nodes.filter((node) => node.label === label);
+        return found.length > 0;
+      },
+      () =>
         `no orchestration node labelled "${label}" appeared; rendered nodes: ${JSON.stringify(seen)}`,
-      );
-    }
+    );
     return found;
   },
 
   /** Waits until the node labelled `label` reports `activity` — a real idle-FSM transition. */
   async waitForActivity(label: string, activity: AgentActivity): Promise<void> {
     let last: AgentActivity | null | undefined;
-    try {
-      await browser.waitUntil(
-        async () => {
-          const node = (await this.nodes()).find((candidate) => candidate.label === label);
-          last = node?.activity;
-          return last === activity;
-        },
-        { timeout: WAIT.core },
-      );
-    } catch {
-      throw new Error(
+    await waitUntilOr(
+      async () => {
+        const node = (await this.nodes()).find((candidate) => candidate.label === label);
+        last = node?.activity;
+        return last === activity;
+      },
+      () =>
         `orchestration node "${label}" never reported activity "${activity}"; last seen: ${
           last ?? "no such node / no activity"
         }`,
-      );
-    }
+    );
   },
 
   /**
@@ -170,33 +161,24 @@ export const orchestrationPane = {
    */
   async waitForParent(label: string, parent: number | null): Promise<TreeNode> {
     let node: TreeNode | undefined;
-    try {
-      await browser.waitUntil(
-        async () => {
-          node = (await this.nodes()).find((candidate) => candidate.label === label);
-          return node !== undefined && node.parent === parent;
-        },
-        { timeout: WAIT.core },
-      );
-    } catch {
-      throw new Error(
+    await waitUntilOr(
+      async () => {
+        node = (await this.nodes()).find((candidate) => candidate.label === label);
+        return node !== undefined && node.parent === parent;
+      },
+      () =>
         `orchestration node "${label}" never reported parent ${parent ?? "null"}; last seen: ${
           node === undefined ? "no such node" : String(node.parent)
         }`,
-      );
-    }
+    );
     return node as TreeNode;
   },
 
   /** Waits until no node labelled `label` remains — the process left the registry. */
   async waitForGone(label: string): Promise<void> {
-    try {
-      await browser.waitUntil(
-        async () => (await this.nodes()).every((node) => node.label !== label),
-        { timeout: WAIT.core },
-      );
-    } catch {
-      throw new Error(`orchestration node "${label}" never disappeared from the tree`);
-    }
+    await waitUntilOr(
+      async () => (await this.nodes()).every((node) => node.label !== label),
+      () => `orchestration node "${label}" never disappeared from the tree`,
+    );
   },
 };

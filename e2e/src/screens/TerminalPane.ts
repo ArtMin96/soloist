@@ -1,5 +1,6 @@
 import { $, browser } from "@wdio/globals";
 import { WAIT } from "../harness/waits.js";
+import { waitUntilOr } from "../harness/waitUntilOr.js";
 
 // The pane keeps every opened process mounted and hides all but the selected one, so a query for
 // "the terminal" must mean the visible one rather than any that exists.
@@ -72,19 +73,13 @@ export const terminalPane = {
    */
   async waitForText(substring: string): Promise<string> {
     let last = "";
-    try {
-      await browser.waitUntil(
-        async () => {
-          last = await this.text();
-          return last.includes(substring);
-        },
-        { timeout: WAIT.core },
-      );
-    } catch {
-      throw new Error(
-        `the visible terminal never showed ${JSON.stringify(substring)}; last read:\n${last}`,
-      );
-    }
+    await waitUntilOr(
+      async () => {
+        last = await this.text();
+        return last.includes(substring);
+      },
+      () => `the visible terminal never showed ${JSON.stringify(substring)}; last read:\n${last}`,
+    );
     return last;
   },
 };

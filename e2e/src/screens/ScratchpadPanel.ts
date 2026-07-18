@@ -1,5 +1,6 @@
 import { $, browser } from "@wdio/globals";
 import { WAIT } from "../harness/waits.js";
+import { waitUntilOr } from "../harness/waitUntilOr.js";
 
 // The scratchpad surface: a roster listbox on the left, and a structured editor on the right for the
 // open document. Every handle reads what the user reads — the roster's accessible listbox, the
@@ -76,21 +77,15 @@ export const scratchpadPanel = {
   async waitForRow(name: string): Promise<number> {
     let row: RosterRow | undefined;
     let seen: string[] = [];
-    try {
-      await browser.waitUntil(
-        async () => {
-          const rows = await this.rows();
-          seen = rows.map((candidate) => candidate.name);
-          row = rows.find((candidate) => candidate.name === name);
-          return row !== undefined;
-        },
-        { timeout: WAIT.core },
-      );
-    } catch {
-      throw new Error(
-        `no scratchpad row named "${name}" appeared; rendered rows: ${JSON.stringify(seen)}`,
-      );
-    }
+    await waitUntilOr(
+      async () => {
+        const rows = await this.rows();
+        seen = rows.map((candidate) => candidate.name);
+        row = rows.find((candidate) => candidate.name === name);
+        return row !== undefined;
+      },
+      () => `no scratchpad row named "${name}" appeared; rendered rows: ${JSON.stringify(seen)}`,
+    );
     return (row as RosterRow).revision;
   },
 
@@ -101,20 +96,14 @@ export const scratchpadPanel = {
    */
   async waitForRevisionChange(name: string, previous: number): Promise<number> {
     let revision = previous;
-    try {
-      await browser.waitUntil(
-        async () => {
-          const row = (await this.rows()).find((candidate) => candidate.name === name);
-          revision = row?.revision ?? previous;
-          return revision !== previous && !Number.isNaN(revision);
-        },
-        { timeout: WAIT.core },
-      );
-    } catch {
-      throw new Error(
-        `scratchpad "${name}" never moved off revision ${previous}; last seen: r${revision}`,
-      );
-    }
+    await waitUntilOr(
+      async () => {
+        const row = (await this.rows()).find((candidate) => candidate.name === name);
+        revision = row?.revision ?? previous;
+        return revision !== previous && !Number.isNaN(revision);
+      },
+      () => `scratchpad "${name}" never moved off revision ${previous}; last seen: r${revision}`,
+    );
     return revision;
   },
 
@@ -147,17 +136,13 @@ export const scratchpadPanel = {
    */
   async waitForObjective(expected: string): Promise<void> {
     let last = "";
-    try {
-      await browser.waitUntil(
-        async () => {
-          last = await this.objectiveValue();
-          return last === expected;
-        },
-        { timeout: WAIT.core },
-      );
-    } catch {
-      throw new Error(`the objective never settled on "${expected}"; last seen: "${last}"`);
-    }
+    await waitUntilOr(
+      async () => {
+        last = await this.objectiveValue();
+        return last === expected;
+      },
+      () => `the objective never settled on "${expected}"; last seen: "${last}"`,
+    );
   },
 
   /** Clicks Save on the open editor. */
