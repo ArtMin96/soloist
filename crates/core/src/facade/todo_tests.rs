@@ -238,6 +238,36 @@ fn an_unbound_callers_comment_is_unattributed() {
 }
 
 #[test]
+fn the_local_comment_path_creates_an_unattributed_comment() {
+    // The local UI drives no session, so `todo_comment_create_in` posts through the core with no
+    // author — the honest in-model behavior for the unbound local user (never a forged label).
+    let projects = Arc::new(FakeProjectRepo::new());
+    let project = projects
+        .upsert(Path::new("/tmp/soloist-local-comment"), Some("p"), None)
+        .expect("seed one project")
+        .id;
+    let facade = facade_with(projects);
+    let session = facade.open_session(None);
+    let todo = facade
+        .scoped(session)
+        .todo_create(doc("x", TodoStatus::Open))
+        .expect("create")
+        .view;
+
+    let view = facade
+        .todo_comment_create_in(project, todo.id, "local note")
+        .expect("local comment");
+    assert_eq!(view.comments.len(), 1);
+    assert_eq!(view.comments[0].body, "local note");
+    assert_eq!(view.comments[0].author, None);
+
+    assert!(matches!(
+        facade.todo_comment_create_in(project, crate::ids::TodoId::from_raw(404), "x"),
+        Err(CoordinationError::UnknownTodo)
+    ));
+}
+
+#[test]
 fn a_bound_process_stamps_its_actor_on_a_comment() {
     let facade = facade_with(Arc::new(FakeProjectRepo::new()));
     let project = ProjectId::from_raw(1);

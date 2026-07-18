@@ -126,6 +126,22 @@ pub async fn todo_remove_blocker(
         .map_err(|err| err.to_string())
 }
 
+/// Adds a comment `body` to todo `id` in `project` (local-UI path). The local user drives no bound
+/// session, so the core leaves the comment unattributed — authorship is the core's call, never the
+/// caller's, so a to-do board comment can never carry a forged author.
+#[tauri::command]
+pub async fn todo_comment_create(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+    id: TodoId,
+    body: String,
+) -> Result<TodoView, String> {
+    facade
+        .blocking(move |f| f.todo_comment_create_in(project, id, &body))
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// The `solo://` link to scratchpad `id` in `project` — for the panel's "Copy link" affordance.
 #[tauri::command]
 pub async fn scratchpad_link(

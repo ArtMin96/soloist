@@ -130,6 +130,12 @@ export function todoRemoveBlocker(project: number, id: number, blocker: number):
   return invoke<TodoView>("todo_remove_blocker", { project, id, blocker });
 }
 
+// Add a comment to a todo (local-UI path). The local user drives no bound session, so the core
+// stamps no author — a local comment reads as unattributed, never a forged label.
+export function todoCommentCreate(project: number, id: number, body: string): Promise<TodoView> {
+  return invoke<TodoView>("todo_comment_create", { project, id, body });
+}
+
 // The solo:// link to a scratchpad / todo, for the "Copy link" affordance.
 export function scratchpadLink(project: number, scratchpad: number): Promise<string> {
   return invoke<string>("scratchpad_link", { project, scratchpad });

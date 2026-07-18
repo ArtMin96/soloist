@@ -1,11 +1,8 @@
-import { Suspense, lazy, useRef } from "react";
+import { useRef } from "react";
 import { Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LazyRichTextEditor } from "@/components/editor/LazyRichTextEditor";
 import { useAutosave } from "@/components/editor/useAutosave";
-
-// The rich editor is loaded lazily so the whole @tiptap dependency graph lands in its own chunk and
-// never touches the initial bundle — opening a scratchpad is what pulls it in.
-const RichTextEditor = lazy(() => import("@/components/editor/RichTextEditor"));
 
 interface ScratchpadBodyProps {
   /** The Markdown to seed the editor with — this component is remounted per document, so it is read once. */
@@ -35,19 +32,17 @@ export function ScratchpadBody({ initialBody, name, onSave, paused }: Scratchpad
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
-      <Suspense fallback={<div className="min-h-0 flex-1 rounded-md border bg-background" />}>
-        <RichTextEditor
-          initialMarkdown={initialBody}
-          ariaLabel="Scratchpad body"
-          outline
-          onChange={(markdown) => {
-            latestMarkdown.current = markdown;
-            autosave.push(markdown);
-          }}
-          onSaveShortcut={autosave.flush}
-          onBlur={autosave.flush}
-        />
-      </Suspense>
+      <LazyRichTextEditor
+        initialMarkdown={initialBody}
+        ariaLabel="Scratchpad body"
+        outline
+        onChange={(markdown) => {
+          latestMarkdown.current = markdown;
+          autosave.push(markdown);
+        }}
+        onSaveShortcut={autosave.flush}
+        onBlur={autosave.flush}
+      />
 
       <footer className="flex shrink-0 items-center gap-3">
         <span

@@ -439,6 +439,7 @@ pub fn run() {
             commands::todo_set_blockers,
             commands::todo_add_blocker,
             commands::todo_remove_blocker,
+            commands::todo_comment_create,
             commands::scratchpad_link,
             commands::todo_link,
             commands::timer_cancel,

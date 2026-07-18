@@ -140,6 +140,24 @@ impl Facade {
         )
     }
 
+    /// Adds a comment `body` to todo `id` in `project` (local-UI path). The local user drives no
+    /// bound session, so the comment is left **unattributed** — authorship is the core's call from
+    /// the caller's identity, never the caller's to supply, so it can never be forged (an agent's
+    /// bound comment carries its label; see [`ScopedFacade::todo_comment_create`]).
+    pub fn todo_comment_create_in(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        body: &str,
+    ) -> Result<TodoView, CoordinationError> {
+        let created = self
+            .todos
+            .comment_create(project, id, body, None)?
+            .map(|(view, _)| view)
+            .ok_or(CoordinationError::UnknownTodo);
+        self.emit_todo(project, created)
+    }
+
     /// [`todo_transfer`](Self::todo_transfer) scoped to `from`/`to` directly (local-UI path — never
     /// takes a project from an untrusted surface). Moves todo `id` from `from` to `to`, keeping its
     /// comments and completion and clearing its blockers (which referenced source-project ids) and

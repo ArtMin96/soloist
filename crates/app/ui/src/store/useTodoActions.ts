@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { todoComplete, todoLink } from "@/api";
+import { todoCommentCreate, todoComplete, todoLink } from "@/api";
 
 export interface TodoActionsStore {
   /** The todo a write is in flight for, or null. */
@@ -8,6 +8,12 @@ export interface TodoActionsStore {
   errorById: Record<number, string>;
   complete: (id: number) => void;
   copyLink: (id: number) => void;
+  /**
+   * Posts a comment on the todo (local-UI path — the core stamps no author). Resolves on success so
+   * the composer clears its draft, rejects on failure and surfaces the reason in the todo's error
+   * slot so the draft survives. Carries no board-level busy state — the composer owns its own.
+   */
+  comment: (id: number, body: string) => Promise<void>;
   clearError: (id: number) => void;
 }
 
@@ -52,7 +58,21 @@ export function useTodoActions(project: number): TodoActionsStore {
     [project, setError],
   );
 
+  const comment = useCallback(
+    (id: number, body: string) => {
+      setError(id, null);
+      return todoCommentCreate(project, id, body).then(
+        () => undefined,
+        (reason) => {
+          setError(id, String(reason));
+          throw reason;
+        },
+      );
+    },
+    [project, setError],
+  );
+
   const clearError = useCallback((id: number) => setError(id, null), [setError]);
 
-  return { busyId, errorById, complete, copyLink, clearError };
+  return { busyId, errorById, complete, copyLink, comment, clearError };
 }
