@@ -31,6 +31,10 @@ import type {
   ProjectView,
   ScratchpadView,
   Sidebar,
+  TemplateDefaults,
+  TemplateKind,
+  TemplateSummary,
+  TemplateView,
   TodoDoc,
   TodoView,
   ToolDefaults,
@@ -366,6 +370,66 @@ export function setMcpToolGroup(group: McpFeatureGroup, enabled: boolean): Promi
 
 export function mcpSetupInfo(): Promise<McpSetupInfo> {
   return invoke<McpSetupInfo>("mcp_setup_info");
+}
+
+// ── Templates ─────────────────────────────────────────────────────────────────
+// The global template library the Settings manager edits, plus the default-per-kind selection.
+// Every write emits `TemplateChanged`, so the manager re-reads through its load-once hook. Kind
+// grouping, name uniqueness, the revision guard, and clearing a deleted default all live in the core.
+
+// Every global template of `kind`, ordered by name.
+export function templates(kind: TemplateKind): Promise<TemplateSummary[]> {
+  return invoke<TemplateSummary[]>("templates", { kind });
+}
+
+// The full global template to open and edit (its Markdown body, description, and revision).
+export function templateRead(kind: TemplateKind, name: string): Promise<TemplateView> {
+  return invoke<TemplateView>("template_read", { kind, name });
+}
+
+// Create a global template. Rejects a taken name or a blank name/body.
+export function templateCreate(
+  kind: TemplateKind,
+  name: string,
+  description: string | null,
+  body: string,
+): Promise<TemplateView> {
+  return invoke<TemplateView>("template_create", { kind, name, description, body });
+}
+
+// Replace a global template's body and description, revision-guarded by `expectedRevision`.
+export function templateUpdate(
+  kind: TemplateKind,
+  name: string,
+  description: string | null,
+  body: string,
+  expectedRevision: number,
+): Promise<TemplateView> {
+  return invoke<TemplateView>("template_update", {
+    kind,
+    name,
+    description,
+    body,
+    expectedRevision,
+  });
+}
+
+// Delete a global template; the core clears a default that pointed at it. Resolves to whether one existed.
+export function templateDelete(kind: TemplateKind, name: string): Promise<boolean> {
+  return invoke<boolean>("template_delete", { kind, name });
+}
+
+// The default-template selection per kind (global-only).
+export function templateDefaults(): Promise<TemplateDefaults> {
+  return invoke<TemplateDefaults>("template_defaults");
+}
+
+// Select (or clear, with null) the default template for `kind`. Prompt has no seed default.
+export function setDefaultTemplate(
+  kind: TemplateKind,
+  template: number | null,
+): Promise<TemplateDefaults> {
+  return invoke<TemplateDefaults>("set_default_template", { kind, template });
 }
 
 // ── Per-project settings ──────────────────────────────────────────────────────

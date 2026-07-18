@@ -9,6 +9,7 @@ import { NotificationsPanel } from "@/components/settings/NotificationsPanel";
 import { PlaceholderPanel } from "@/components/settings/PlaceholderPanel";
 import { SettingsTabRail } from "@/components/settings/SettingsTabRail";
 import { SidebarPanel } from "@/components/settings/SidebarPanel";
+import { TemplatesPanel } from "@/components/settings/TemplatesPanel";
 import { ToolsPanel } from "@/components/settings/ToolsPanel";
 import {
   SETTINGS_TABS,
@@ -30,6 +31,7 @@ const PANELS: Partial<Record<SettingsTabId, ComponentType>> = {
   integrations: IntegrationsPanel,
   notifications: NotificationsPanel,
   sidebar: SidebarPanel,
+  templates: TemplatesPanel,
   tools: ToolsPanel,
 };
 

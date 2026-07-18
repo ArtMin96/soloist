@@ -23,6 +23,41 @@ export type Readiness = "Ungated" | "Waiting" | "Ready";
 // unified template aggregate serves all three.
 export type TemplateKind = "prompt" | "scratchpad" | "todo";
 
+// Which scope a template lives in (mirrors core::TemplateScope). The Settings manager edits the
+// global library; the project scope is reached over MCP.
+export type TemplateScope = "global" | "project";
+
+// A template in a listing: identity, kind, handle, one-line description, the {{placeholders}} the
+// core derives from the body, scope, and revision (the guard the next edit carries).
+export interface TemplateSummary {
+  id: number;
+  kind: TemplateKind;
+  name: string;
+  description: string | null;
+  placeholders: string[];
+  scope: TemplateScope;
+  revision: number;
+}
+
+// A template as the manager reads it to edit: the full Markdown body plus everything in a summary.
+export interface TemplateView {
+  id: number;
+  kind: TemplateKind;
+  name: string;
+  description: string | null;
+  body: string;
+  placeholders: string[];
+  scope: TemplateScope;
+  revision: number;
+}
+
+// The selected default template per seedable kind (mirrors core::settings::TemplateDefaults).
+// Global-only in v1; `null` means "seed an empty document". Prompt has no seed default.
+export interface TemplateDefaults {
+  scratchpad: number | null;
+  todo: number | null;
+}
+
 export interface ProcessView {
   id: number;
   project: number;

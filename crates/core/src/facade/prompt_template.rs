@@ -12,7 +12,8 @@
 //! templates surface refreshes.
 
 use super::scoped::ScopedFacade;
-use crate::coordination::{ExportedTemplate, TemplateSummary, TemplateView, TemplateWriteError};
+use super::template::{create_error, update_error};
+use crate::coordination::{ExportedTemplate, TemplateSummary, TemplateView};
 use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
 use crate::ids::ProjectId;
@@ -138,28 +139,6 @@ impl ScopedFacade<'_> {
             .templates
             .export(KIND, project, name)?
             .ok_or(CoordinationError::UnknownTemplate)
-    }
-}
-
-/// A create's conflict means the name is taken — the actionable message for a caller that did not
-/// expect the template to exist.
-fn create_error(err: TemplateWriteError) -> CoordinationError {
-    match err {
-        TemplateWriteError::Conflict { .. } => CoordinationError::TemplateNameTaken,
-        other => update_error(other),
-    }
-}
-
-fn update_error(err: TemplateWriteError) -> CoordinationError {
-    match err {
-        TemplateWriteError::Invalid(message) => CoordinationError::InvalidTemplate(message),
-        // No revision on record means no template — "re-read and retry" would mislead a caller
-        // whose target was deleted.
-        TemplateWriteError::Conflict { actual: None, .. } => CoordinationError::UnknownTemplate,
-        TemplateWriteError::Conflict { expected, actual } => {
-            CoordinationError::TemplateRevisionConflict { expected, actual }
-        }
-        TemplateWriteError::Store(err) => CoordinationError::Store(err),
     }
 }
 

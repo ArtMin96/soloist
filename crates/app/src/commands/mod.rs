@@ -15,11 +15,13 @@ mod coordination;
 mod orchestration;
 mod project_settings;
 mod settings;
+mod templates;
 mod timers;
 pub use coordination::*;
 pub use orchestration::*;
 pub use project_settings::*;
 pub use settings::*;
+pub use templates::*;
 pub use timers::*;
 
 use std::path::Path;

@@ -165,6 +165,115 @@ fn a_deleted_default_template_falls_back_to_an_empty_body() {
 }
 
 #[test]
+fn the_manager_creates_reads_lists_and_updates_a_global_template() {
+    let (facade, _session) = facade();
+
+    let created = facade
+        .template_create(
+            TemplateKind::Scratchpad,
+            "daily",
+            Some("a daily note"),
+            "## Plan",
+        )
+        .expect("create");
+    assert_eq!(created.scope, crate::template::TemplateScope::Global);
+
+    // The listing surfaces the new template for its kind, and reading returns the full body.
+    let listed = facade.templates(TemplateKind::Scratchpad).expect("list");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "daily");
+    let read = facade
+        .template_read(TemplateKind::Scratchpad, "daily")
+        .expect("read");
+    assert_eq!(read.body, "## Plan");
+
+    // A revision-guarded update replaces the body and bumps the revision.
+    let updated = facade
+        .template_update(
+            TemplateKind::Scratchpad,
+            "daily",
+            Some("a daily note"),
+            "## Plan\n\n- [ ] first",
+            created.revision,
+        )
+        .expect("update");
+    assert_eq!(updated.body, "## Plan\n\n- [ ] first");
+    assert!(updated.revision > created.revision);
+}
+
+#[test]
+fn a_taken_template_name_and_a_stale_update_are_refused() {
+    let (facade, _session) = facade();
+    let created = facade
+        .template_create(TemplateKind::Todo, "chore", None, "body")
+        .expect("create");
+
+    assert!(matches!(
+        facade.template_create(TemplateKind::Todo, "chore", None, "other"),
+        Err(CoordinationError::TemplateNameTaken)
+    ));
+    assert!(matches!(
+        facade.template_update(
+            TemplateKind::Todo,
+            "chore",
+            None,
+            "body2",
+            created.revision + 9
+        ),
+        Err(CoordinationError::TemplateRevisionConflict { .. })
+    ));
+}
+
+#[test]
+fn deleting_a_template_that_is_the_selected_default_clears_the_selection() {
+    let (facade, _session) = facade();
+    let created = facade
+        .template_create(TemplateKind::Scratchpad, "daily", None, "seed body")
+        .expect("create");
+    facade
+        .set_default_template(TemplateKind::Scratchpad, Some(created.id))
+        .expect("select the default");
+
+    // Deleting the selected default through the manager path clears the dangling selection in core,
+    // so the settings surface reflects the removal at once (not just at resolve time).
+    assert!(facade
+        .template_delete(TemplateKind::Scratchpad, "daily")
+        .expect("delete"));
+    assert_eq!(
+        facade
+            .template_defaults()
+            .expect("read defaults")
+            .get(TemplateKind::Scratchpad),
+        None,
+    );
+    assert!(facade
+        .templates(TemplateKind::Scratchpad)
+        .expect("list")
+        .is_empty());
+}
+
+#[test]
+fn deleting_a_non_default_template_leaves_another_kinds_default_untouched() {
+    let (facade, _session) = facade();
+    let scratch_default = default_template(&facade, TemplateKind::Scratchpad, "daily", "seed body");
+    facade
+        .template_create(TemplateKind::Todo, "chore", None, "chore body")
+        .expect("create a todo template");
+
+    // Deleting the todo template must not clear the unrelated scratchpad default.
+    assert!(facade
+        .template_delete(TemplateKind::Todo, "chore")
+        .expect("delete"));
+    assert_eq!(
+        facade
+            .template_defaults()
+            .expect("read defaults")
+            .get(TemplateKind::Scratchpad),
+        Some(scratch_default),
+    );
+}
+
+#[test]
 fn the_default_selection_round_trips_and_prompt_has_no_seed_default() {
     let (facade, _session) = facade();
     let id = TemplateId::from_raw(7);
