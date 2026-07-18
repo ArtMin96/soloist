@@ -55,8 +55,11 @@ vi.mock("@xterm/addon-search", () => ({
     clearDecorations() {}
   },
 }));
+// A controllable renderer activation so a test can hold it pending and resolve it deliberately —
+// the async cell re-measure the hook must re-fit against once it lands.
+const { activateRenderer } = vi.hoisted(() => ({ activateRenderer: vi.fn() }));
 vi.mock("@/lib/terminalRenderer", () => ({
-  activateTerminalRenderer: () => Promise.resolve({ renderer: "dom", dispose() {} }),
+  activateTerminalRenderer: activateRenderer,
 }));
 vi.mock("@/store/appearanceContext", async () => {
   const { DEFAULT_APPEARANCE } =
@@ -107,6 +110,8 @@ interface AttachCall {
 
 let attaches: AttachCall[];
 let detached: number[];
+// Every winsize the hook pushed to the PTY, so a test can tell that a re-fit fired.
+let resizes: Array<{ cols: number; rows: number }>;
 
 async function settle(ms = 50) {
   await act(async () => {
@@ -137,6 +142,9 @@ beforeEach(() => {
   FakeTerminal.instances = [];
   attaches = [];
   detached = [];
+  resizes = [];
+  activateRenderer.mockReset();
+  activateRenderer.mockResolvedValue({ renderer: "dom", dispose() {} });
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -162,6 +170,10 @@ beforeEach(() => {
     }
     if (cmd === "pty_detach") {
       detached.push((args as { token: number }).token);
+    }
+    if (cmd === "pty_resize") {
+      const { cols, rows } = args as { cols: number; rows: number };
+      resizes.push({ cols, rows });
     }
     return null;
   });
@@ -245,6 +257,36 @@ describe("useTerminal attach lifecycle", () => {
 
     expect(attaches).toHaveLength(1);
     expect(detached).toEqual([attaches[0].token]);
+  });
+});
+
+describe("useTerminal deferred re-fit", () => {
+  // The GPU renderer (and the monospace web font) resolve *after* the first synchronous fit and
+  // shift the measured cell. A ResizeObserver can't see that — the host's own size never changed —
+  // so without an explicit re-fit the pane is left a fraction narrow (a right/bottom gap) until the
+  // next resize or tab-switch. Assert the renderer activation drives a fresh fit once it lands.
+  it("re-fits the pane after the async renderer activates", async () => {
+    let activate!: () => void;
+    activateRenderer.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          activate = () => resolve({ renderer: "webgl", dispose() {} });
+        }),
+    );
+
+    render(<Probe process={PROCESS} />);
+    await settle();
+    // The synchronous mount-time fits have run; the renderer promise is still pending.
+    const beforeActivation = resizes.length;
+    expect(beforeActivation).toBeGreaterThan(0);
+
+    await act(async () => {
+      activate();
+    });
+    await settle();
+
+    // Activation resolved, so the hook re-fit — at least one more winsize reached the PTY.
+    expect(resizes.length).toBeGreaterThan(beforeActivation);
   });
 });
 

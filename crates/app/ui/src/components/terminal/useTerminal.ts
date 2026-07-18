@@ -238,9 +238,26 @@ export function useTerminal(process: ProcessView, visible = true) {
     let renderer: RendererHandle | null = null;
     let tornDown = false;
     void activateTerminalRenderer(term).then((handle) => {
-      if (tornDown) handle.dispose();
-      else renderer = handle;
+      if (tornDown) {
+        handle.dispose();
+        return;
+      }
+      renderer = handle;
+      // The GPU renderer re-measures the cell on activation; the first fit below ran against the
+      // DOM renderer's estimate. Re-fit so cols/rows track the final cell size — a ResizeObserver
+      // can't catch this because the host's size never changed, only the cell metrics did, so
+      // without this the pane is left a fraction narrow (a right/bottom gap) until the next resize.
+      syncSize();
     });
+
+    // The monospace web font can resolve after the first fit, shifting the cell width; re-fit once
+    // it's ready (same blind spot as the renderer swap above). Resolves immediately once loaded, so
+    // later mounts just re-fit on the next microtask. Guarded so it can't touch a torn-down pane.
+    if (typeof document !== "undefined" && document.fonts) {
+      void document.fonts.ready.then(() => {
+        if (!tornDown) syncSize();
+      });
+    }
 
     const onData = term.onData((input) => void ptyWrite(id, input).catch(() => {}));
     const observer = new ResizeObserver(() => syncSize());
