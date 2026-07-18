@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import { ScratchpadEditor } from "@/components/orchestration/ScratchpadEditor";
-import { ScratchpadList } from "@/components/orchestration/ScratchpadList";
+import { ScratchpadRoster } from "@/components/orchestration/ScratchpadRoster";
 import { useScratchpadEditor } from "@/store/useScratchpadEditor";
 import type { ScratchpadSummary } from "@/domain";
 
-// The scratchpad surface: the roster on the left, the open document's Markdown editor on the right.
+// The scratchpad surface: the roster on the left, the open document's rich-text editor on the right.
 // The roster is the live snapshot's summaries (refreshed by the parent on ScratchpadChanged);
 // opening one reads its full body through the editor hook, the only place here that reaches IPC.
 export function ScratchpadPanel({
@@ -19,23 +19,22 @@ export function ScratchpadPanel({
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="w-60 shrink-0 overflow-auto border-r">
-        <ScratchpadList scratchpads={scratchpads} selected={editor.name} onSelect={editor.open} />
+      <div className="w-60 shrink-0 border-r">
+        <ScratchpadRoster scratchpads={scratchpads} selected={editor.name} onSelect={editor.open} />
       </div>
       <div className="min-w-0 flex-1">
         {editor.name == null ? (
           <Placeholder>Select a scratchpad to read or edit it.</Placeholder>
-        ) : editor.body == null ? (
+        ) : editor.initialBody == null ? (
           <Placeholder>{editor.loading ? "Loading…" : (editor.error ?? "Not found.")}</Placeholder>
         ) : (
           <ScratchpadEditor
             name={editor.name}
-            body={editor.body}
+            initialBody={editor.initialBody}
             revision={editor.baseRevision}
-            saving={editor.saving}
+            mountKey={editor.mountKey}
             conflict={editor.conflict}
             error={editor.error}
-            onChange={editor.setBody}
             onSave={editor.save}
             onReload={editor.reload}
             onCopyLink={() => {

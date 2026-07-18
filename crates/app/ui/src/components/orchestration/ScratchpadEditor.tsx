@@ -1,40 +1,38 @@
-import { useId } from "react";
 import { Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { ScratchpadBody } from "@/components/orchestration/ScratchpadBody";
 import type { ScratchpadConflict } from "@/store/useScratchpadEditor";
 
 interface ScratchpadEditorProps {
   name: string;
-  body: string;
+  initialBody: string;
   revision: number | null;
-  saving: boolean;
+  /** Bumped on open/reload so the editor body remounts with fresh content and undo history. */
+  mountKey: number;
   conflict: ScratchpadConflict | null;
   error: string | null;
-  onChange: (body: string) => void;
-  onSave: () => void;
+  onSave: (markdown: string) => Promise<void>;
   onReload: () => void;
   onCopyLink: () => void;
 }
 
-// The scratchpad's free-form Markdown body in a single editable field. Presentational: the body and
-// every callback arrive as props; the parent owns the read/write and revision guard. A stale save
-// surfaces the conflict banner (the core already refused it, nothing was clobbered) with a reload to
-// the other edit; validity is the core's call, surfaced as the error line.
+// The scratchpad's editing surface: a persistent header (name, revision, actions), the conflict
+// banner, and the remounting editor body. Presentational — the body, the revision guard, and every
+// callback arrive as props; the parent owns the read/write. A stale save surfaces the conflict banner
+// (the core already refused it, so nothing was clobbered) with a Reload to the other edit; while it
+// shows, autosave is paused (`paused`) so the rejected edit is never retried behind the user's back.
+// Validity is the core's call, surfaced as the error line.
 export function ScratchpadEditor({
   name,
-  body,
+  initialBody,
   revision,
-  saving,
+  mountKey,
   conflict,
   error,
-  onChange,
   onSave,
   onReload,
   onCopyLink,
 }: ScratchpadEditorProps) {
-  const fieldId = useId();
-
   return (
     <div className="flex h-full min-w-0 flex-col">
       <header className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
@@ -66,27 +64,19 @@ export function ScratchpadEditor({
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col p-3">
-        <label htmlFor={`${fieldId}-body`} className="sr-only">
-          Scratchpad body
-        </label>
-        <Textarea
-          id={`${fieldId}-body`}
-          value={body}
-          placeholder="Write in Markdown…"
-          onChange={(event) => onChange(event.target.value)}
-          className="min-h-0 flex-1 resize-none font-mono text-[0.8125rem] leading-relaxed"
-        />
-      </div>
+      {error && (
+        <p className="mx-3 mt-3 text-[0.8125rem] text-destructive" aria-live="polite">
+          {error}
+        </p>
+      )}
 
-      <footer className="flex h-11 shrink-0 items-center justify-end gap-3 border-t px-3">
-        {error && (
-          <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-destructive">{error}</span>
-        )}
-        <Button size="sm" onClick={onSave} disabled={saving}>
-          {saving ? "Saving…" : "Save"}
-        </Button>
-      </footer>
+      <ScratchpadBody
+        key={`${name}:${mountKey}`}
+        initialBody={initialBody}
+        name={name}
+        onSave={onSave}
+        paused={conflict != null}
+      />
     </div>
   );
 }

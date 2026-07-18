@@ -1,0 +1,252 @@
+/*
+ * Rich-text editor styling, scoped to the editor's own class names so it cannot leak into the rest
+ * of the app. It draws entirely from the design tokens defined in index.css (foreground, muted,
+ * border, primary, radius) — monochrome chrome with the one azure accent reserved for focus, and a
+ * reduced-motion fallback — so the editor reads as the same native surface as everything around it.
+ */
+
+.tiptap-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  transition: border-color var(--dur-ring) var(--ease-out-quint);
+}
+
+.tiptap-shell:focus-within {
+  border-color: var(--ring);
+}
+
+.tiptap-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.25rem 0.375rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tiptap-main {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.tiptap-scroll {
+  min-width: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* The editable region. Prose measure is capped for readability; dense notes still scroll. */
+.tiptap-body {
+  min-height: 100%;
+  padding: 0.75rem 0.875rem;
+  outline: none;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--foreground);
+}
+
+.tiptap-body :first-child {
+  margin-top: 0;
+}
+
+.tiptap-body p {
+  margin: 0.5rem 0;
+  max-width: 72ch;
+}
+
+.tiptap-body h1,
+.tiptap-body h2,
+.tiptap-body h3 {
+  margin: 1.1em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.tiptap-body h1 {
+  font-size: 1.125rem;
+}
+.tiptap-body h2 {
+  font-size: 1rem;
+}
+.tiptap-body h3 {
+  font-size: 0.9375rem;
+}
+
+.tiptap-body ul,
+.tiptap-body ol {
+  margin: 0.5rem 0;
+  padding-inline-start: 1.4rem;
+}
+
+.tiptap-body ul {
+  list-style: disc;
+}
+.tiptap-body ol {
+  list-style: decimal;
+}
+
+.tiptap-body li {
+  margin: 0.15rem 0;
+}
+
+.tiptap-body li p {
+  margin: 0;
+}
+
+.tiptap-body blockquote {
+  margin: 0.6rem 0;
+  padding-inline-start: 0.85rem;
+  border-inline-start: 2px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.tiptap-body code {
+  padding: 0.1em 0.35em;
+  border-radius: calc(var(--radius) - 3px);
+  background: var(--muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+}
+
+.tiptap-body pre {
+  margin: 0.6rem 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--radius);
+  background: var(--muted);
+  overflow-x: auto;
+}
+
+.tiptap-body pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.tiptap-body a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.tiptap-body hr {
+  margin: 1rem 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+.tiptap-body table {
+  margin: 0.6rem 0;
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.tiptap-body th,
+.tiptap-body td {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  text-align: start;
+}
+
+.tiptap-body th {
+  background: var(--muted);
+  font-weight: 550;
+}
+
+/* Task lists: the checkbox rides inline with its text, no list bullet. */
+.tiptap-body ul[data-type="taskList"] {
+  list-style: none;
+  padding-inline-start: 0.25rem;
+}
+
+.tiptap-body ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.tiptap-body ul[data-type="taskList"] li > label {
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.tiptap-body ul[data-type="taskList"] li > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.tiptap-body ul[data-type="taskList"] input[type="checkbox"] {
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+/* The empty-note prompt: the Placeholder extension marks the first empty block and carries the text. */
+.tiptap-body .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+
+/* The "/" command menu, mounted at the document body by the suggestion plugin. */
+.slash-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 14rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--popover);
+  box-shadow: var(--shadow-overlay);
+  z-index: 50;
+}
+
+.slash-menu--empty {
+  padding: 0.5rem 0.625rem;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.slash-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: calc(var(--radius) - 2px);
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out-quint);
+}
+
+.slash-item--active {
+  background: var(--accent);
+}
+
+.slash-item-title {
+  font-size: 0.8125rem;
+  color: var(--foreground);
+}
+
+.slash-item-hint {
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tiptap-shell,
+  .slash-item {
+    transition: none;
+  }
+}

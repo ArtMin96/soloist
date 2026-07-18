@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Deserialize;
-use soloist_core::{ProcessId, ScratchpadDoc, TodoDoc, TodoId, TodoStatus, PROCESS_ID_ENV};
+use soloist_core::{ProcessId, TodoDoc, TodoId, TodoStatus, PROCESS_ID_ENV};
 use soloist_ipc::{read_frame, socket_path, write_frame, IpcRequest, IpcResponse, IpcResult};
 use tokio::net::UnixStream;
 
@@ -81,10 +81,10 @@ struct TimerPlan {
 struct CoordinationPlan {
     /// The scratchpad name the window opens and the lead re-writes.
     scratchpad: String,
-    /// The scratchpad objective the lead first creates (the window opens this revision).
-    objective_v1: String,
-    /// The scratchpad objective the lead re-writes on the trigger (the concurrent edit that survives).
-    objective_v2: String,
+    /// The Markdown body the lead first creates (the window opens this revision).
+    body_v1: String,
+    /// The Markdown body the lead re-writes on the trigger (the concurrent edit that survives).
+    body_v2: String,
     /// The blocker todo's title — completing the blocked todo is refused until this one is done.
     blocker: String,
     /// The blocked todo's title — gated by the blocker.
@@ -229,7 +229,7 @@ async fn coordinate(
             stream,
             IpcRequest::ScratchpadWrite {
                 name: plan.scratchpad.clone(),
-                doc: scratchpad_doc(&plan.objective_v1),
+                body: plan.body_v1.clone(),
                 expected_revision: None,
             },
         )
@@ -300,7 +300,7 @@ async fn coordinate(
         stream,
         IpcRequest::ScratchpadWrite {
             name: plan.scratchpad.clone(),
-            doc: scratchpad_doc(&plan.objective_v2),
+            body: plan.body_v2.clone(),
             expected_revision: Some(base_revision),
         },
     )
@@ -309,28 +309,12 @@ async fn coordinate(
     Ok(())
 }
 
-/// A disciplined scratchpad document with the given objective and fixed valid boilerplate for the
-/// rest — only the objective is asserted, but every required field must be present for the core to
-/// accept the write.
-fn scratchpad_doc(objective: &str) -> ScratchpadDoc {
-    ScratchpadDoc {
-        objective: objective.to_owned(),
-        context: "Seeded by the e2e lead stub.".to_owned(),
-        plan: vec!["Draft the change.".to_owned()],
-        acceptance_criteria: vec!["The change is reviewed.".to_owned()],
-        risks: vec!["none identified".to_owned()],
-        status: "in progress".to_owned(),
-        notes: None,
-    }
-}
-
-/// A disciplined todo document with the given title and fixed valid boilerplate for the rest.
+/// A free-form todo document with the given title and a fixed valid Markdown body — only the title
+/// is asserted, but a real bound agent always writes a body a worker can act on.
 fn todo_doc(title: &str) -> TodoDoc {
     TodoDoc {
         title: title.to_owned(),
-        description: "Seeded by the e2e lead stub.".to_owned(),
-        acceptance_criteria: vec!["The work is reviewed.".to_owned()],
-        risks: vec!["none identified".to_owned()],
+        body: "Seeded by the e2e lead stub.".to_owned(),
         status: TodoStatus::Open,
     }
 }
@@ -346,16 +330,16 @@ fn spawned_process(reply: IpcResponse) -> Result<ProcessId, Box<dyn std::error::
 /// The revision a scratchpad write reply reports, or a typed error if the reply was some other shape.
 fn scratchpad_revision(reply: IpcResponse) -> Result<u64, Box<dyn std::error::Error>> {
     match reply {
-        IpcResponse::Scratchpad(view) => Ok(view.revision),
-        other => Err(format!("expected a scratchpad reply, got {other:?}").into()),
+        IpcResponse::ScratchpadWritten { scratchpad, .. } => Ok(scratchpad.revision),
+        other => Err(format!("expected a scratchpad-written reply, got {other:?}").into()),
     }
 }
 
-/// The id a todo reply reports, or a typed error if the reply was some other shape.
+/// The id a todo-create reply reports, or a typed error if the reply was some other shape.
 fn todo_id(reply: IpcResponse) -> Result<TodoId, Box<dyn std::error::Error>> {
     match reply {
-        IpcResponse::Todo(view) => Ok(view.id),
-        other => Err(format!("expected a todo reply, got {other:?}").into()),
+        IpcResponse::TodoCreated { todo, .. } => Ok(todo.id),
+        other => Err(format!("expected a todo-created reply, got {other:?}").into()),
     }
 }
 

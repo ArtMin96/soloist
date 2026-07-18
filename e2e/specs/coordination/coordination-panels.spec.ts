@@ -61,13 +61,13 @@ describe("the coordination panels", () => {
     // Our edit, saved against the now-stale revision, is refused by the core — and the conflict
     // banner names the revision the scratchpad actually moved to, which only the concurrent writer
     // produced. A guard that had been dropped would let this save through with no conflict at all.
-    await scratchpadPanel.setObjective("window edit that must be rejected");
+    await scratchpadPanel.edit();
     await scratchpadPanel.save();
     expect(await scratchpadPanel.waitForConflictRevision()).toBe(bumped);
 
     // Nothing was clobbered: reloading shows the concurrent writer's content, not our rejected edit.
     await scratchpadPanel.reload();
-    await scratchpadPanel.waitForObjective(COORDINATION.objectiveV2);
+    await scratchpadPanel.waitForBody(COORDINATION.bodyV2);
   });
 
   it("refuses to complete a blocked todo until its blocker is done", async () => {

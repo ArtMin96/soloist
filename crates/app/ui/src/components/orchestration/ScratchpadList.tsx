@@ -1,4 +1,4 @@
-import { useId, useState, type KeyboardEvent } from "react";
+import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { ScratchpadSummary } from "@/domain";
 
@@ -6,6 +6,10 @@ interface ScratchpadListProps {
   scratchpads: ScratchpadSummary[];
   selected: string | null;
   onSelect: (name: string) => void;
+  /** The listbox's accessible name — lets a grouped roster label the active vs archived lists apart. */
+  label?: string;
+  /** Shown in place of the list when it is empty; defaults to the first-run guidance. */
+  emptyHint?: ReactNode;
 }
 
 // The scratchpad roster: a single-select ARIA listbox, one row per shared document (its name over a
@@ -16,7 +20,13 @@ interface ScratchpadListProps {
 // so no list element's semantics are overridden. Presentational — selection and the choice arrive as
 // props. The tint-in-place selection is the shared macOS source-list language, identical to the
 // sidebar ProcessRow.
-export function ScratchpadList({ scratchpads, selected, onSelect }: ScratchpadListProps) {
+export function ScratchpadList({
+  scratchpads,
+  selected,
+  onSelect,
+  label = "Scratchpads",
+  emptyHint,
+}: ScratchpadListProps) {
   const baseId = useId();
   // Track the roving cursor by the pad's name, not its index, so a scratchpad added or removed live
   // keeps the cursor on the same document instead of sliding onto a neighbour.
@@ -25,8 +35,12 @@ export function ScratchpadList({ scratchpads, selected, onSelect }: ScratchpadLi
   if (scratchpads.length === 0) {
     return (
       <p className="px-3 py-6 text-[0.8125rem] leading-relaxed text-muted-foreground">
-        No scratchpads yet. Agents create them to share a plan or research as they work — they will
-        appear here live.
+        {emptyHint ?? (
+          <>
+            No scratchpads yet. Agents create them to share a plan or research as they work — they
+            will appear here live.
+          </>
+        )}
       </p>
     );
   }
@@ -67,7 +81,7 @@ export function ScratchpadList({ scratchpads, selected, onSelect }: ScratchpadLi
   return (
     <div
       role="listbox"
-      aria-label="Scratchpads"
+      aria-label={label}
       tabIndex={-1}
       onKeyDown={onKeyDown}
       className="flex flex-col gap-px p-1 outline-none"

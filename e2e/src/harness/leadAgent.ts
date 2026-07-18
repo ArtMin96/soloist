@@ -30,10 +30,10 @@ const CLOSE_SIGNAL_FILE = "lead-close-signal";
 export const COORDINATION = {
   /** The scratchpad the window opens and the lead re-writes to force the revision conflict. */
   scratchpad: "release-readiness",
-  /** The objective the lead first creates — the revision the window opens at. */
-  objectiveV1: "confirm the release is ready to cut",
-  /** The objective the lead re-writes on the trigger — the concurrent edit that must survive. */
-  objectiveV2: "release is ready; ship it once CI is green",
+  /** The Markdown body the lead first creates — the revision the window opens at. */
+  bodyV1: "confirm the release is ready to cut",
+  /** The Markdown body the lead re-writes on the trigger — the concurrent edit that must survive. */
+  bodyV2: "release is ready; ship it once CI is green",
   /** The blocker todo's title — the blocked todo cannot complete until this is done. */
   blocker: "Tag the release commit",
   /** The blocked todo's title — gated by the blocker. */
