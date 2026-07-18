@@ -59,9 +59,6 @@ const SCRATCHPAD_REWRITE_FILE: &str = "lead-scratchpad-rewrite";
 /// How often a trigger file is polled — the lead is otherwise idle, so a relaxed poll suffices.
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
-/// The fixture data the coordination walk asserts. Single-sourced in the spec (TS) and handed to
-/// the lead as JSON, so the values the panels check live in exactly one place; the lead fills the
-/// rest of each disciplined document with fixed boilerplate the spec never inspects.
 /// The timers-walk fixture data, single-sourced in the spec and handed to the lead as JSON. The
 /// worker tool is supplied through the environment (shared with the lineage arm), so only the
 /// body and backstop live here.
@@ -76,6 +73,9 @@ struct TimerPlan {
     max_wait_ms: u64,
 }
 
+/// The fixture data the coordination walk asserts. Single-sourced in the spec (TS) and handed to
+/// the lead as JSON, so the values the panels check live in exactly one place; the lead fills the
+/// rest of each disciplined document with fixed boilerplate the spec never inspects.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CoordinationPlan {
