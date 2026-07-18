@@ -34,8 +34,8 @@ pub enum CoordinationError {
     /// or auto-release a lease on close).
     #[error("not bound to a process; bind a session before owning a timer or lease")]
     NoBoundProcess,
-    /// A scratchpad write carried a malformed document — the disciplined-structure check failed; the
-    /// message names every problem so the caller can fix the document in one revision.
+    /// A scratchpad write was malformed — a blank name or an over-cap body; the message names every
+    /// problem so the caller can fix it in one revision.
     #[error("scratchpad is not well-formed: {0}")]
     InvalidScratchpad(String),
     /// A scratchpad write expected a different revision than the one on record — a concurrent edit
@@ -52,8 +52,8 @@ pub enum CoordinationError {
     /// A scratchpad rename targeted a name already used by another scratchpad in the project.
     #[error("a scratchpad with that name already exists")]
     ScratchpadNameTaken,
-    /// A todo write carried a malformed document — the disciplined-structure check failed; the
-    /// message names every problem so the caller can fix the document in one revision.
+    /// A todo write was malformed — a blank title or an over-cap body; the message names every
+    /// problem so the caller can fix it in one revision.
     #[error("todo is not well-formed: {0}")]
     InvalidTodo(String),
     /// A todo update expected a different revision than the one on record — a concurrent edit landed

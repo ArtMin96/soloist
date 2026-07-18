@@ -6,9 +6,9 @@
 //! process-owned signal locks with an explicit TTL, auto-released on expiry or owner close —
 //! **timers** — process-owned timers that, when they fire (at a deadline, or when the agents they
 //! watch go idle), deliver a body to their owner as a fresh turn, the token-free orchestration
-//! primitive — **scratchpads** — durable, project-scoped shared documents with a disciplined, typed
-//! body and revision-guarded writes — **todos** — durable, project-scoped work items with a
-//! disciplined document, blockers that gate completion, comments, and a process-owned lock — and
+//! primitive — **scratchpads** — durable, project-scoped shared free-form Markdown documents with
+//! revision-guarded writes — **todos** — durable, project-scoped work items with a title, a
+//! free-form Markdown body, blockers that gate completion, comments, and a process-owned lock — and
 //! **kv** — a simple project-scoped JSON key-value store for small structured state, without
 //! revision guarding or process ownership. Leases and timers are process-owned, so launch
 //! reconciliation clears them (a per-run process id is recycled, so neither can be matched safely
@@ -49,7 +49,7 @@ pub use releaser::LeaseReleaser;
 pub use repo::{LockRepo, NoopLockRepo, StoredLease};
 pub use scheduler::TimerScheduler;
 pub use scratchpad::{
-    RenameError, ScratchpadDoc, ScratchpadSummary, ScratchpadView, Scratchpads, WriteError,
+    RenameError, ScratchpadSummary, ScratchpadView, Scratchpads, WriteError,
     MAX_SCRATCHPAD_CONTENT_BYTES,
 };
 pub use scratchpad_repo::{

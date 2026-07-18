@@ -183,9 +183,10 @@ not forcibly block a write."
             key: "scratchpads",
             aliases: &["scratchpad", "notes", "docs"],
             title: "Shared scratchpads",
-            body: "- Scratchpads are durable, project-scoped shared documents with a disciplined \
-structure (objective, context, plan, acceptance criteria, risks, status, notes).\n\
-- `scratchpad_read` returns the document *and* its revision; pass that revision back to \
+            body: "- Scratchpads are durable, project-scoped shared documents — a free-form \
+Markdown note addressed by its name. Write whatever structure the work needs; a project template \
+can seed a starting shape.\n\
+- `scratchpad_read` returns the body *and* its revision; pass that revision back to \
 `scratchpad_write` to update it. A revision mismatch means someone edited first — re-read and \
 retry, never clobber."
                 .to_string(),

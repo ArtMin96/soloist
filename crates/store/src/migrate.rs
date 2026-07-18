@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 12;
+pub(crate) const SCHEMA_VERSION: i64 = 13;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -228,6 +228,14 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
                  ON prompt_templates (COALESCE(project_id, 0), name);",
         )
         .map_err(sql_err)?;
+    }
+
+    if version < 13 {
+        // Scratchpad and todo documents go free-form: a scratchpad `doc` becomes its raw Markdown
+        // body and a todo `doc` becomes `{title, body, status}`. The former structured JSON is
+        // converted in place, laid out as Markdown sections so no field is lost. Idempotent (a body
+        // already converted is left untouched), like every step here.
+        crate::doc_to_markdown::convert(conn)?;
     }
 
     if version < SCHEMA_VERSION {

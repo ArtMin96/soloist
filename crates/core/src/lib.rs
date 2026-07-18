@@ -68,11 +68,11 @@ pub use coordination::{
     Leases, Link, LinkContent, LinkError, LinkTarget, LockRepo, NewTimer, NoopKvRepo, NoopLockRepo,
     NoopPromptTemplateRepo, NoopScratchpadRepo, NoopTimerRepo, NoopTodoRepo, PromptScope,
     PromptTemplateRepo, PromptTemplateSummary, PromptTemplateView, PromptTemplateWriteResult,
-    PromptTemplates, RenameError, RenameResult, ScratchpadDoc, ScratchpadRepo, ScratchpadSummary,
-    ScratchpadView, Scratchpads, SetWhenIdleOutcome, StoredLease, StoredPromptTemplate,
-    StoredScratchpad, StoredTimer, StoredTodo, TimerRepo, TimerScheduler, TimerStatus, TimerView,
-    Timers, TodoDoc, TodoError, TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView,
-    TodoWriteResult, Todos, TransferResult, WriteError, WriteResult,
+    PromptTemplates, RenameError, RenameResult, ScratchpadRepo, ScratchpadSummary, ScratchpadView,
+    Scratchpads, SetWhenIdleOutcome, StoredLease, StoredPromptTemplate, StoredScratchpad,
+    StoredTimer, StoredTodo, TimerRepo, TimerScheduler, TimerStatus, TimerView, Timers, TodoDoc,
+    TodoError, TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView, TodoWriteResult,
+    Todos, TransferResult, WriteError, WriteResult,
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};

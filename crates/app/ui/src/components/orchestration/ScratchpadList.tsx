@@ -9,7 +9,7 @@ interface ScratchpadListProps {
 }
 
 // The scratchpad roster: a single-select ARIA listbox, one row per shared document (its name over a
-// one-line objective gist with its revision in mono). Arrow keys / Home / End move the roving focus
+// one-line body gist with its revision in mono). Arrow keys / Home / End move the roving focus
 // between options; Enter, Space, or a click opens the focused document. Activation is explicit
 // (opening reads the full document) — scan with the arrows, commit with Enter. The option roles ride
 // native <button>s so each is focusable and keyboard-operable, and the listbox rides a generic <div>
@@ -103,10 +103,8 @@ export function ScratchpadList({ scratchpads, selected, onSelect }: ScratchpadLi
                 r{pad.revision}
               </span>
             </span>
-            {pad.objective && (
-              <span className="truncate text-[0.6875rem] text-muted-foreground">
-                {pad.objective}
-              </span>
+            {pad.gist && (
+              <span className="truncate text-[0.6875rem] text-muted-foreground">{pad.gist}</span>
             )}
           </button>
         );

@@ -5,9 +5,9 @@ use rmcp::ServerHandler;
 use soloist_core::{
     AcquireOutcome, AgentKind, AgentTool, Comment, FireCond, LeaseView, LinkContent, McpToolGroups,
     Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, PromptMode,
-    Readiness, ScratchpadDoc, ScratchpadId, ScratchpadSummary, ScratchpadView, SessionId,
-    SetWhenIdleOutcome, StartSummary, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus,
-    TodoSummary, TodoView, Whoami,
+    Readiness, ScratchpadId, ScratchpadSummary, ScratchpadView, SessionId, SetWhenIdleOutcome,
+    StartSummary, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary,
+    TodoView, Whoami,
 };
 use soloist_core::{
     FeedbackEntry, IntegrationFile, IntegrationWrite, PromptScope, PromptTemplateId,
@@ -1356,46 +1356,38 @@ async fn timer_list_projects_the_timers() {
     assert_eq!(back, vec![timer]);
 }
 
-/// A sample disciplined document for the scratchpad response-projection tests.
-fn sample_doc() -> ScratchpadDoc {
-    ScratchpadDoc {
-        objective: "Ship v1".into(),
-        context: "RC cut".into(),
-        plan: vec!["Cut RC".into()],
-        acceptance_criteria: vec!["soak green".into()],
-        risks: vec!["none identified".into()],
-        status: "in progress".into(),
-        notes: None,
-    }
+/// A sample Markdown body for the scratchpad response-projection tests.
+fn sample_body() -> String {
+    "## Objective\nShip v1\n\n## Status\nin progress".to_owned()
 }
 
 /// A sample scratchpad view for the response-projection tests.
 fn sample_scratchpad(name: &str) -> ScratchpadView {
-    let doc = sample_doc();
-    let rendered = doc.render(name);
+    let body = sample_body();
+    let rendered = format!("# {name}\n\n{body}\n");
     ScratchpadView {
         id: ScratchpadId::from_raw(1),
         name: name.into(),
         tags: vec!["release".into()],
         archived: false,
         revision: 1,
-        doc,
+        body,
         rendered,
     }
 }
 
 #[tokio::test]
-async fn scratchpad_write_builds_the_disciplined_document_and_projects_the_view() {
+async fn scratchpad_write_forwards_the_content_and_projects_the_view() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
-    // The handler assembles the document from the flat tool fields and forwards an omitted revision
-    // as a create — the request matches only if it did exactly that.
+    // The handler forwards the content as the body and an omitted revision as a create — the request
+    // matches only if it did exactly that.
     spawn_fake_app(socket.clone(), |request| match request {
         IpcRequest::ScratchpadWrite {
             name,
-            doc,
+            body,
             expected_revision: None,
-        } if name == "plan" && doc == sample_doc() => {
+        } if name == "plan" && body == sample_body() => {
             Ok(IpcResponse::Scratchpad(sample_scratchpad("plan")))
         }
         _ => Err(IpcError::Internal("unexpected write".into())),
@@ -1404,13 +1396,7 @@ async fn scratchpad_write_builds_the_disciplined_document_and_projects_the_view(
     let result = handler(socket)
         .scratchpad_write(Parameters(ScratchpadWriteArg {
             name: "plan".into(),
-            objective: "Ship v1".into(),
-            context: "RC cut".into(),
-            plan: vec!["Cut RC".into()],
-            acceptance_criteria: vec!["soak green".into()],
-            risks: vec!["none identified".into()],
-            status: "in progress".into(),
-            notes: None,
+            content: sample_body(),
             expected_revision: None,
         }))
         .await
@@ -1439,7 +1425,7 @@ async fn scratchpad_read_projects_the_view() {
         .await
         .expect("scratchpad_read succeeds");
     let back: ScratchpadView = serde_json::from_value(structured_of(result)).expect("decode view");
-    assert_eq!(back.doc, sample_doc());
+    assert_eq!(back.body, sample_body());
 }
 
 #[tokio::test]
@@ -1518,7 +1504,7 @@ async fn scratchpad_list_projects_the_summaries() {
         tags: vec!["release".into()],
         archived: false,
         revision: 2,
-        objective: "Ship v1".into(),
+        gist: "Ship v1".into(),
     };
     let canned = summary.clone();
     spawn_fake_app(socket.clone(), move |request| match request {
@@ -1601,13 +1587,11 @@ async fn scratchpad_delete_reports_whether_it_was_removed() {
     );
 }
 
-/// A sample disciplined document for the todo response-projection tests.
+/// A sample todo document for the todo response-projection tests.
 fn sample_todo_doc() -> TodoDoc {
     TodoDoc {
         title: "ship".into(),
-        description: "cut the release".into(),
-        acceptance_criteria: vec!["soak green".into()],
-        risks: vec!["none identified".into()],
+        body: "cut the release".into(),
         status: TodoStatus::Open,
     }
 }
@@ -1628,10 +1612,10 @@ fn sample_todo(id: u64) -> TodoView {
 }
 
 #[tokio::test]
-async fn todo_create_builds_the_disciplined_document_and_projects_the_view() {
+async fn todo_create_builds_the_document_and_projects_the_view() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
-    // The handler assembles the document from the flat tool fields and maps the wire status.
+    // The handler assembles the document from the tool fields and maps the wire status.
     spawn_fake_app(socket.clone(), |request| match request {
         IpcRequest::TodoCreate { doc } if doc == sample_todo_doc() => {
             Ok(IpcResponse::Todo(sample_todo(5)))
@@ -1642,10 +1626,8 @@ async fn todo_create_builds_the_disciplined_document_and_projects_the_view() {
     let result = handler(socket)
         .todo_create(Parameters(TodoCreateArg {
             title: "ship".into(),
-            description: "cut the release".into(),
-            acceptance_criteria: vec!["soak green".into()],
-            risks: vec!["none identified".into()],
-            status: TodoStatusArg::Open,
+            body: Some("cut the release".into()),
+            status: Some(TodoStatusArg::Open),
         }))
         .await
         .expect("todo_create succeeds");

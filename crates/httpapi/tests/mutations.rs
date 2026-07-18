@@ -19,7 +19,7 @@ use soloist_core::testing::{
 };
 use soloist_core::{
     AgentTool, CorePorts, DomainEvent, Facade, ProcStatus, ProcessId, ProcessKind, ProjectId,
-    ScratchpadDoc, TokioClock,
+    TokioClock,
 };
 use soloist_httpapi::{router, ApiState, FocusFn};
 use soloist_ipc::http::{
@@ -593,24 +593,16 @@ fn facade_with_two_projects() -> (
     (facade, a, b, a_dir, b_dir)
 }
 
-/// A well-formed disciplined scratchpad document to seed a transfer test with.
-fn scratchpad_doc() -> ScratchpadDoc {
-    ScratchpadDoc {
-        objective: "Ship v1".into(),
-        context: "RC cut".into(),
-        plan: vec!["Cut RC".into()],
-        acceptance_criteria: vec!["soak green".into()],
-        risks: vec!["none identified".into()],
-        status: "in progress".into(),
-        notes: None,
-    }
+/// A representative scratchpad Markdown body to seed a transfer test with.
+fn scratchpad_body() -> String {
+    "## Objective\nShip v1\n\n## Status\nin progress".to_owned()
 }
 
 #[tokio::test]
 async fn transfer_scratchpad_moves_it_to_the_target_project() {
     let (facade, a, b, _a_dir, _b_dir) = facade_with_two_projects();
     facade
-        .scratchpad_write_in(a, "plan", scratchpad_doc(), None)
+        .scratchpad_write_in(a, "plan", scratchpad_body(), None)
         .expect("seed in A");
     let app = router(ApiState::new(Arc::clone(&facade), TEST_TOKEN));
     let response = app
@@ -630,7 +622,7 @@ async fn transfer_scratchpad_moves_it_to_the_target_project() {
 async fn transfer_scratchpad_to_an_unknown_target_is_404_and_does_not_orphan() {
     let (facade, a, _b, _a_dir, _b_dir) = facade_with_two_projects();
     facade
-        .scratchpad_write_in(a, "plan", scratchpad_doc(), None)
+        .scratchpad_write_in(a, "plan", scratchpad_body(), None)
         .expect("seed in A");
     let app = router(ApiState::new(Arc::clone(&facade), TEST_TOKEN));
     let response = app

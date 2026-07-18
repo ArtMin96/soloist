@@ -1,9 +1,7 @@
 //! The request half of the wire protocol: every operation an IPC client can ask of the app.
 
 use serde::{Deserialize, Serialize};
-use soloist_core::{
-    IntegrationFile, ProcessId, ProjectId, PromptScope, ScratchpadDoc, TimerId, TodoDoc, TodoId,
-};
+use soloist_core::{IntegrationFile, ProcessId, ProjectId, PromptScope, TimerId, TodoDoc, TodoId};
 
 /// A request from an IPC client to the running app. The server resolves identity and
 /// scope from the connection's session, so requests carry no session of their own.
@@ -124,12 +122,12 @@ pub enum IpcRequest {
     TimerResume { timer: TimerId },
     /// Every timer the session's bound process owns.
     TimerList,
-    /// Create or replace the scratchpad `name` in the session's effective project with the
-    /// disciplined `doc`, revision-guarded: `expected_revision` is omitted to create or the current
-    /// revision to update.
+    /// Create or replace the scratchpad `name` in the session's effective project with the Markdown
+    /// `body`, revision-guarded: `expected_revision` is omitted to create or the current revision to
+    /// update.
     ScratchpadWrite {
         name: String,
-        doc: ScratchpadDoc,
+        body: String,
         expected_revision: Option<u64>,
     },
     /// The scratchpad `name` in the session's effective project.

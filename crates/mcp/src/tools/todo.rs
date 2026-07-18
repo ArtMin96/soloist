@@ -1,18 +1,18 @@
 //! Coordination todo tools: the durable, project-scoped work items agents hand off and coordinate
 //! around.
 //!
-//! A todo carries a **disciplined, typed document** — a title, a description, the acceptance criteria
-//! that define it done, the risks to watch, and a lifecycle status — so every agent records the same
-//! informative structure; the create and update tools' parameters present exactly those fields.
-//! Updates are **revision-guarded** (read, then write back the revision you read). A todo cannot be
-//! completed while it has unmet **blockers** (the gate). The **lock** signals cooperative intent and
-//! auto-releases when the owning process closes. Todos survive an app restart; scope, ownership, and
-//! the gate are all resolved in the core, not here.
+//! A todo carries a small document — a title, a free-form Markdown body, and a lifecycle status. The
+//! body is unconstrained (a project template can seed a shape, but nothing is enforced); the create
+//! and update tools take exactly those fields. Updates are **revision-guarded** (read, then write
+//! back the revision you read). A todo cannot be completed while it has unmet **blockers** (the
+//! gate). The **lock** signals cooperative intent and auto-releases when the owning process closes.
+//! Todos survive an app restart; scope, ownership, and the gate are all resolved in the core, not
+//! here.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
-use soloist_core::{LinkContent, ProjectId, TodoDoc, TodoId};
+use soloist_core::{LinkContent, ProjectId, TodoDoc, TodoId, TodoStatus};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
@@ -37,7 +37,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Read one todo by its id or a solo:// link to it. Returns its disciplined document (title, description, acceptance_criteria, risks, status), tags, blockers, which blockers are still unmet, comments, lock, and the revision — pass that revision back to todo_update to update it safely."
+        description = "Read one todo by its id or a solo:// link to it. Returns its document (title, Markdown body, status), tags, blockers, which blockers are still unmet, comments, lock, and the revision — pass that revision back to todo_update to update it safely."
     )]
     pub(crate) async fn todo_get(
         &self,
@@ -55,48 +55,40 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Create a todo's disciplined document. Provide the full structure: a title, a description, acceptance_criteria, risks (state \"none identified\" if none), and an initial status (usually open). Returns the new todo with its id."
+        description = "Create a todo: a title, an optional free-form Markdown body (what needs doing and any detail), and an initial status (defaults to open). Returns the new todo with its id."
     )]
     pub(crate) async fn todo_create(
         &self,
         Parameters(TodoCreateArg {
             title,
-            description,
-            acceptance_criteria,
-            risks,
+            body,
             status,
         }): Parameters<TodoCreateArg>,
     ) -> Result<CallToolResult, ErrorData> {
         let doc = TodoDoc {
             title,
-            description,
-            acceptance_criteria,
-            risks,
-            status: status.into(),
+            body: body.unwrap_or_default(),
+            status: status.map_or(TodoStatus::Open, Into::into),
         };
         self.todo_view(IpcRequest::TodoCreate { doc }).await
     }
 
     #[tool(
-        description = "Update a todo's document, revision-guarded. Provide the full structure again and the revision you read from todo_get; a mismatch means someone edited it first. Set status to done only when its blockers are all complete (otherwise use todo_complete, which enforces the gate)."
+        description = "Update a todo, revision-guarded — the whole document is replaced. Provide the title and status you want and the revision you read from todo_get (a mismatch means someone edited it first); the Markdown body is optional. Set status to done only when its blockers are all complete (otherwise use todo_complete, which enforces the gate)."
     )]
     pub(crate) async fn todo_update(
         &self,
         Parameters(TodoUpdateArg {
             todo,
             title,
-            description,
-            acceptance_criteria,
-            risks,
+            body,
             status,
             expected_revision,
         }): Parameters<TodoUpdateArg>,
     ) -> Result<CallToolResult, ErrorData> {
         let doc = TodoDoc {
             title,
-            description,
-            acceptance_criteria,
-            risks,
+            body: body.unwrap_or_default(),
             status: status.into(),
         };
         self.todo_view(IpcRequest::TodoUpdate {

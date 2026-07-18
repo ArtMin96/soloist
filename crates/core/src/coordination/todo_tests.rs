@@ -13,9 +13,7 @@ fn todos() -> Todos {
 fn doc(title: &str, status: TodoStatus) -> TodoDoc {
     TodoDoc {
         title: title.into(),
-        description: "do the thing".into(),
-        acceptance_criteria: vec!["it works".into()],
-        risks: vec!["none identified".into()],
+        body: "do the thing".into(),
         status,
     }
 }
@@ -38,32 +36,40 @@ fn create_then_get_round_trips_the_document() {
 }
 
 #[test]
-fn a_blank_required_field_is_rejected_naming_every_problem() {
+fn a_blank_title_is_rejected_but_a_blank_body_is_valid() {
     let todos = todos();
     let bad = TodoDoc {
         title: "  ".into(),
-        description: String::new(),
-        acceptance_criteria: vec!["  ".into()],
-        risks: Vec::new(),
+        body: "detail".into(),
         status: TodoStatus::Open,
     };
     let err = todos
         .create(PROJECT, bad)
-        .expect_err("a blank doc is refused");
+        .expect_err("a blank title is refused");
     let TodoError::Invalid(message) = err else {
         panic!("expected an Invalid error, got {err:?}");
     };
     assert!(message.contains("title"), "{message}");
-    assert!(message.contains("description"), "{message}");
-    assert!(message.contains("acceptance_criteria"), "{message}");
-    assert!(message.contains("risks"), "{message}");
+
+    // A blank body is valid — only the title and the size cap are enforced.
+    let created = todos
+        .create(
+            PROJECT,
+            TodoDoc {
+                title: "ship".into(),
+                body: String::new(),
+                status: TodoStatus::Open,
+            },
+        )
+        .expect("a blank body is accepted");
+    assert_eq!(created.doc.body, "");
 }
 
 #[test]
 fn a_document_over_the_byte_cap_is_rejected() {
     let todos = todos();
     let mut oversized = doc("ship", TodoStatus::Open);
-    oversized.description = "x".repeat(MAX_TODO_DOC_BYTES + 1);
+    oversized.body = "x".repeat(MAX_TODO_DOC_BYTES + 1);
     let err = todos
         .create(PROJECT, oversized)
         .expect_err("a document past the cap is refused");

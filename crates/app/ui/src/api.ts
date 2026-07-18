@@ -29,7 +29,6 @@ import type {
   ProjectSettings,
   ProjectSettingsPage,
   ProjectView,
-  ScratchpadDoc,
   ScratchpadView,
   Sidebar,
   TodoDoc,
@@ -71,23 +70,23 @@ export function agentActivity(): Promise<AgentSignal[]> {
 // --- Coordination panels: the scratchpad panel and the to-do board read/write through these.
 // Each routes to the project-scoped core method; writes emit the domain event the panel re-reads on.
 
-// The full scratchpad to open and edit (its disciplined document, rendering, and revision).
+// The full scratchpad to open and edit (its Markdown body, rendering, and revision).
 export function scratchpadRead(project: number, name: string): Promise<ScratchpadView> {
   return invoke<ScratchpadView>("scratchpad_read", { project, name });
 }
 
-// Save the scratchpad, revision-guarded by `expectedRevision` (null to create). A stale write
-// rejects with the conflict message for the panel to surface.
+// Save the scratchpad's Markdown body, revision-guarded by `expectedRevision` (null to create). A
+// stale write rejects with the conflict message for the panel to surface.
 export function scratchpadWrite(
   project: number,
   name: string,
-  doc: ScratchpadDoc,
+  body: string,
   expectedRevision: number | null,
 ): Promise<ScratchpadView> {
   return invoke<ScratchpadView>("scratchpad_write", {
     project,
     name,
-    doc,
+    body,
     expectedRevision,
   });
 }

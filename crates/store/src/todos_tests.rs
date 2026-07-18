@@ -20,9 +20,7 @@ fn project(store: &SqliteStore, root: &str) -> ProjectId {
 fn doc(title: &str, status: TodoStatus) -> TodoDoc {
     TodoDoc {
         title: title.into(),
-        description: "do it".into(),
-        acceptance_criteria: vec!["works".into()],
-        risks: vec!["none".into()],
+        body: "do it".into(),
         status,
     }
 }

@@ -304,11 +304,11 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .map_err(IpcError::from),
         IpcRequest::ScratchpadWrite {
             name,
-            doc,
+            body,
             expected_revision,
         } => facade
             .scoped(session)
-            .scratchpad_write(&name, doc, expected_revision)
+            .scratchpad_write(&name, body, expected_revision)
             .map(IpcResponse::Scratchpad)
             .map_err(IpcError::from),
         IpcRequest::ScratchpadRead { name } => facade

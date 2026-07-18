@@ -16,9 +16,7 @@ use crate::testing::{
 fn doc(title: &str, status: TodoStatus) -> TodoDoc {
     TodoDoc {
         title: title.into(),
-        description: "do it".into(),
-        acceptance_criteria: vec!["done".into()],
-        risks: vec!["none identified".into()],
+        body: "do it".into(),
         status,
     }
 }
@@ -107,7 +105,7 @@ fn a_stale_update_surfaces_a_todo_revision_conflict() {
 fn a_malformed_create_surfaces_an_invalid_todo() {
     let (facade, session) = scoped_facade();
     let mut bad = doc("x", TodoStatus::Open);
-    bad.description = "  ".into();
+    bad.title = "  ".into();
     assert!(matches!(
         facade.scoped(session).todo_create(bad),
         Err(CoordinationError::InvalidTodo(_))

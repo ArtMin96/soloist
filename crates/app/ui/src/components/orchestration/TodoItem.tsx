@@ -20,7 +20,7 @@ interface TodoItemProps {
 }
 
 // One todo on the board: a row with its declared status, the derived blocked gate, and its lock
-// owner, expanding to the disciplined document, its blockers (the unmet ones stand out — the gate),
+// owner, expanding to the Markdown body, its blockers (the unmet ones stand out — the gate),
 // its comments with their authors, and the actions. Presentational: completing routes to the
 // core, which refuses a blocked todo with a message surfaced below — the UI never pre-empts the gate.
 export function TodoItem({
@@ -72,12 +72,7 @@ export function TodoItem({
       </Collapsible.Trigger>
 
       <Collapsible.Content className="flex flex-col gap-3 px-6 pb-3 text-[0.8125rem]">
-        {todo.doc.description && (
-          <p className="whitespace-pre-wrap text-foreground">{todo.doc.description}</p>
-        )}
-
-        <DetailList label="Acceptance criteria" items={todo.doc.acceptance_criteria} />
-        <DetailList label="Risks" items={todo.doc.risks} />
+        {todo.doc.body && <p className="whitespace-pre-wrap text-foreground">{todo.doc.body}</p>}
 
         {todo.blockers.length > 0 && (
           <div className="flex flex-col gap-1">
@@ -122,20 +117,5 @@ export function TodoItem({
         </div>
       </Collapsible.Content>
     </Collapsible.Root>
-  );
-}
-
-function DetailList({ label, items }: { label: string; items: string[] }) {
-  if (items.length === 0) return null;
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[0.6875rem] font-[550] text-muted-foreground">{label}</span>
-      <ul className="flex list-disc flex-col gap-0.5 pl-4 text-foreground marker:text-muted-foreground">
-        {items.map((item, index) => (
-          // Read-only display of the disciplined document's lists; index is a stable key here.
-          <li key={index}>{item}</li>
-        ))}
-      </ul>
-    </div>
   );
 }

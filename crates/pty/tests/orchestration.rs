@@ -193,14 +193,14 @@ async fn a_lead_spawns_a_worker_assigns_a_locked_todo_and_is_woken_when_the_work
     }
 }
 
-/// A well-formed work item for the worker: the disciplined fields the todo aggregate validates on
-/// write (a non-blank title and description, and at least one acceptance criterion and risk).
+/// A well-formed work item for the worker: a non-blank title and a Markdown body — the fields the
+/// todo aggregate validates on write.
 fn worker_todo() -> TodoDoc {
     TodoDoc {
         title: "Add the CSV export endpoint".into(),
-        description: "Add GET /export and wire it to the report service.".into(),
-        acceptance_criteria: vec!["GET /export returns 200 with a CSV body".into()],
-        risks: vec!["none identified".into()],
+        body: "Add GET /export and wire it to the report service.\n\n\
+               ## Acceptance criteria\n- [ ] GET /export returns 200 with a CSV body"
+            .into(),
         status: TodoStatus::InProgress,
     }
 }

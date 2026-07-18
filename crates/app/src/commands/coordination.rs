@@ -9,13 +9,11 @@
 
 use std::sync::Arc;
 
-use soloist_core::{
-    Facade, ProjectId, ScratchpadDoc, ScratchpadId, ScratchpadView, TodoDoc, TodoId, TodoView,
-};
+use soloist_core::{Facade, ProjectId, ScratchpadId, ScratchpadView, TodoDoc, TodoId, TodoView};
 use tauri::State;
 
-/// The full scratchpad `name` in `project` — its disciplined document, rendering, and revision —
-/// for the panel to open and edit.
+/// The full scratchpad `name` in `project` — its Markdown body, rendering, and revision — for the
+/// panel to open and edit.
 #[tauri::command]
 pub async fn scratchpad_read(
     facade: State<'_, Arc<Facade>>,
@@ -28,18 +26,19 @@ pub async fn scratchpad_read(
         .map_err(|err| err.to_string())
 }
 
-/// Saves the scratchpad `name` in `project`, revision-guarded by `expected_revision` (omit to
-/// create). A stale revision returns the conflict as an error string for the panel to surface.
+/// Saves the scratchpad `name` in `project` with the Markdown `body`, revision-guarded by
+/// `expected_revision` (omit to create). A stale revision returns the conflict as an error string
+/// for the panel to surface.
 #[tauri::command]
 pub async fn scratchpad_write(
     facade: State<'_, Arc<Facade>>,
     project: ProjectId,
     name: String,
-    doc: ScratchpadDoc,
+    body: String,
     expected_revision: Option<u64>,
 ) -> Result<ScratchpadView, String> {
     facade
-        .blocking(move |f| f.scratchpad_write_in(project, &name, doc, expected_revision))
+        .blocking(move |f| f.scratchpad_write_in(project, &name, body, expected_revision))
         .await
         .map_err(|err| err.to_string())
 }

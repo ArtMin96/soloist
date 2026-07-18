@@ -4,9 +4,9 @@ import { ScratchpadList } from "@/components/orchestration/ScratchpadList";
 import { useScratchpadEditor } from "@/store/useScratchpadEditor";
 import type { ScratchpadSummary } from "@/domain";
 
-// The scratchpad surface: the roster on the left, the open document's structured editor on the
-// right. The roster is the live snapshot's summaries (refreshed by the parent on ScratchpadChanged);
-// opening one reads its full document through the editor hook, the only place here that reaches IPC.
+// The scratchpad surface: the roster on the left, the open document's Markdown editor on the right.
+// The roster is the live snapshot's summaries (refreshed by the parent on ScratchpadChanged);
+// opening one reads its full body through the editor hook, the only place here that reaches IPC.
 export function ScratchpadPanel({
   project,
   scratchpads,
@@ -25,17 +25,17 @@ export function ScratchpadPanel({
       <div className="min-w-0 flex-1">
         {editor.name == null ? (
           <Placeholder>Select a scratchpad to read or edit it.</Placeholder>
-        ) : editor.form == null ? (
+        ) : editor.body == null ? (
           <Placeholder>{editor.loading ? "Loading…" : (editor.error ?? "Not found.")}</Placeholder>
         ) : (
           <ScratchpadEditor
             name={editor.name}
-            form={editor.form}
+            body={editor.body}
             revision={editor.baseRevision}
             saving={editor.saving}
             conflict={editor.conflict}
             error={editor.error}
-            onChange={editor.setForm}
+            onChange={editor.setBody}
             onSave={editor.save}
             onReload={editor.reload}
             onCopyLink={() => {

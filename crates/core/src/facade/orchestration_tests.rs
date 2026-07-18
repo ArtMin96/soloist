@@ -10,7 +10,7 @@ use tokio::sync::broadcast;
 
 use super::*;
 use crate::composition::CorePorts;
-use crate::coordination::{IdleMode, ScratchpadDoc, TodoDoc, TodoStatus};
+use crate::coordination::{IdleMode, TodoDoc, TodoStatus};
 use crate::events::DomainEvent;
 use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::process::ProcessKind;
@@ -62,28 +62,18 @@ fn agent(facade: &Facade, project: ProjectId, name: &str) -> ProcessId {
         .register(agent_registration(project, name))
 }
 
-/// A well-formed disciplined todo document.
+/// A representative todo document.
 fn todo_doc(title: &str) -> TodoDoc {
     TodoDoc {
         title: title.into(),
-        description: format!("do {title}"),
-        acceptance_criteria: vec!["it works".into()],
-        risks: vec!["none identified".into()],
+        body: format!("do {title}"),
         status: TodoStatus::Open,
     }
 }
 
-/// A well-formed disciplined scratchpad document.
-fn scratchpad_doc() -> ScratchpadDoc {
-    ScratchpadDoc {
-        objective: "ship it".into(),
-        context: "the plan".into(),
-        plan: vec!["step one".into()],
-        acceptance_criteria: vec!["it ships".into()],
-        risks: vec!["none identified".into()],
-        status: "active".into(),
-        notes: None,
-    }
+/// A representative scratchpad Markdown body.
+fn scratchpad_body() -> String {
+    "## Objective\nship it\n\n## Status\nactive".to_owned()
 }
 
 /// Every event currently buffered for `rx`, drained synchronously — the events emitted by the one
@@ -139,7 +129,7 @@ fn the_snapshot_projects_the_tree_todos_timers_leases_scratchpads_and_kv_for_a_p
         .expect("acquire the lease");
     facade
         .scoped(session)
-        .scratchpad_write("plan", scratchpad_doc(), None)
+        .scratchpad_write("plan", scratchpad_body(), None)
         .expect("write the scratchpad");
     facade
         .scoped(session)
@@ -343,7 +333,7 @@ fn writing_a_scratchpad_emits_one_scratchpad_changed() {
 
     facade
         .scoped(session)
-        .scratchpad_write("plan", scratchpad_doc(), None)
+        .scratchpad_write("plan", scratchpad_body(), None)
         .expect("write");
 
     let events = drain(&mut rx);

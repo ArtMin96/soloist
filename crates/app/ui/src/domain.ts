@@ -238,12 +238,10 @@ export interface AppInfo {
 
 export type TodoStatus = "open" | "blocked" | "in_progress" | "done";
 
-// The disciplined, revision-guarded specification a todo carries.
+// The revision-guarded document a todo carries: a title, a free-form Markdown body, and status.
 export interface TodoDoc {
   title: string;
-  description: string;
-  acceptance_criteria: string[];
-  risks: string[];
+  body: string;
   status: TodoStatus;
 }
 
@@ -314,37 +312,26 @@ export interface LeaseView {
   expires_unix_millis: number;
 }
 
-// A scratchpad in a listing (identity, handle, tags, archived flag, revision, objective gist).
+// A scratchpad in a listing (identity, handle, tags, archived flag, revision, and a one-line gist of
+// the body — its first non-heading line).
 export interface ScratchpadSummary {
   id: number;
   name: string;
   tags: string[];
   archived: boolean;
   revision: number;
-  objective: string;
+  gist: string;
 }
 
-// A scratchpad's disciplined, typed document — the fields ARE the required structure (each list
-// needs at least one non-blank entry); `status` is a free label and `notes` optional Markdown.
-export interface ScratchpadDoc {
-  objective: string;
-  context: string;
-  plan: string[];
-  acceptance_criteria: string[];
-  risks: string[];
-  status: string;
-  notes: string | null;
-}
-
-// A scratchpad as the panel reads it: the disciplined document plus its tags, revision (to guard the
-// next write), and the canonical Markdown rendering the core derives.
+// A scratchpad as the panel reads it: the free-form Markdown body plus its tags, revision (to guard
+// the next write), and the canonical Markdown rendering the core derives (the body under its name).
 export interface ScratchpadView {
   id: number;
   name: string;
   tags: string[];
   archived: boolean;
   revision: number;
-  doc: ScratchpadDoc;
+  body: string;
   rendered: string;
 }
 

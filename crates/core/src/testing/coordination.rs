@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use crate::coordination::{
-    LockRepo, NewTimer, RenameResult, ScratchpadDoc, ScratchpadRepo, StoredLease, StoredScratchpad,
-    StoredTimer, TimerRepo, TimerStatus, TransferResult, WriteResult,
+    LockRepo, NewTimer, RenameResult, ScratchpadRepo, StoredLease, StoredScratchpad, StoredTimer,
+    TimerRepo, TimerStatus, TransferResult, WriteResult,
 };
 use crate::ids::{ProcessId, ProjectId, ScratchpadId, TimerId};
 use crate::ports::StoreError;
@@ -126,7 +126,7 @@ impl ScratchpadRepo for FakeScratchpadRepo {
         &self,
         project: ProjectId,
         name: &str,
-        doc: &ScratchpadDoc,
+        body: &str,
         expected: Option<u64>,
     ) -> Result<WriteResult, StoreError> {
         let mut rows = lock(&self.rows);
@@ -135,7 +135,7 @@ impl ScratchpadRepo for FakeScratchpadRepo {
             Some(existing) => match expected {
                 Some(rev) if rev == existing.revision => {
                     let mut updated = existing.clone();
-                    updated.doc = doc.clone();
+                    updated.body = body.to_owned();
                     updated.revision = existing.revision + 1;
                     rows.insert(slot, updated.clone());
                     Ok(WriteResult::Written(Box::new(updated)))
@@ -152,7 +152,7 @@ impl ScratchpadRepo for FakeScratchpadRepo {
                         id,
                         project,
                         name: name.to_owned(),
-                        doc: doc.clone(),
+                        body: body.to_owned(),
                         tags: Vec::new(),
                         archived: false,
                         revision: 1,
@@ -210,7 +210,7 @@ impl ScratchpadRepo for FakeScratchpadRepo {
         }
         match rows.remove(&(from.get(), name.to_owned())) {
             Some(mut stored) => {
-                // Re-key the project only; the durable id, name, doc, tags, archived, revision stay.
+                // Re-key the project only; the durable id, name, body, tags, archived, revision stay.
                 stored.project = to;
                 rows.insert(to_slot, stored.clone());
                 Ok(TransferResult::Transferred(Box::new(stored)))

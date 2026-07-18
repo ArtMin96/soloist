@@ -6,7 +6,7 @@
 //! indivisible method the adapter performs under a single guard, never a read the aggregate then acts
 //! on, so two agents touching one project's todos cannot interleave to clobber an edit or double-grant
 //! a lock. The revision *guard* (a doc write applies only at the expected revision) is part of this
-//! contract; the disciplined-document and blocker-gate policy lives in the [`Todos`](super::Todos)
+//! contract; the document and blocker-gate policy lives in the [`Todos`](super::Todos)
 //! aggregate. The bounded context owns its own port (with a [`NoopTodoRepo`] default). A todo is
 //! durable and survives an app restart (no launch-reconcile clear), but its **lock** is process-owned
 //! and per-run, so [`clear_locks`](TodoRepo::clear_locks) drops every lock on launch while keeping the
@@ -17,7 +17,7 @@ use crate::ids::{ProcessId, ProjectId, TodoId};
 use crate::ports::StoreError;
 
 /// A persisted todo: its store-assigned [`TodoId`] (durable, stable across runs), the project it
-/// belongs to, the disciplined document (including its lifecycle status), its tags, the ids of the
+/// belongs to, its document (including its lifecycle status), its tags, the ids of the
 /// todos that gate it, its comments, the process currently holding its lock (if any), and the
 /// `revision` the next doc write must match.
 #[derive(Clone, Debug, PartialEq, Eq)]

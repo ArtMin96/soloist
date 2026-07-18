@@ -166,8 +166,8 @@ impl Facade {
 }
 
 impl ScopedFacade<'_> {
-    /// Creates a todo from the disciplined `doc` in the session's effective project. A malformed
-    /// document is [`CoordinationError::InvalidTodo`].
+    /// Creates a todo from `doc` in the session's effective project. A malformed document is
+    /// [`CoordinationError::InvalidTodo`].
     pub fn todo_create(&self, doc: TodoDoc) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
         self.inner.todo_create_in(project, doc)

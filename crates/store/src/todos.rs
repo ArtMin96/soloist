@@ -1,8 +1,8 @@
 //! The coordination todo repository — the core [`TodoRepo`] port.
 //!
-//! One row per todo in the `todos` table, identified durably by the `AUTOINCREMENT` id. The
-//! disciplined document is stored as its JSON in `doc`, and the tag set, blocker ids, and comments as
-//! JSON arrays, so the persisted shapes are exactly the domain types and cannot drift. Each
+//! One row per todo in the `todos` table, identified durably by the `AUTOINCREMENT` id. The document
+//! (title, Markdown body, status) is stored as its JSON in `doc`, and the tag set, blocker ids, and
+//! comments as JSON arrays, so the persisted shapes are exactly the domain types and cannot drift. Each
 //! state-dependent method holds the single connection guard for its whole operation, so the
 //! revision-guarded document write, the tag/blocker/comment read-modify-write, and the conditional
 //! lock are atomic — two agents touching one project's todos cannot interleave to clobber an edit or

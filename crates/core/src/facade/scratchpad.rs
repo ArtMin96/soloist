@@ -7,14 +7,12 @@
 //! [`Scratchpads`](crate::coordination::Scratchpads) aggregate. Scope is resolved here, in the core,
 //! so every remote surface inherits the identical rules; an external single-project caller can use
 //! scratchpads without binding a process, since there is no owner to attribute. The aggregate owns
-//! the disciplined-document validation and the revision guard; this surface maps its typed outcomes
-//! to the shared [`CoordinationError`].
+//! the body validation and the revision guard; this surface maps its typed outcomes to the shared
+//! [`CoordinationError`].
 
 use super::scoped::ScopedFacade;
 use super::Facade;
-use crate::coordination::{
-    RenameError, ScratchpadDoc, ScratchpadSummary, ScratchpadView, WriteError,
-};
+use crate::coordination::{RenameError, ScratchpadSummary, ScratchpadView, WriteError};
 use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
 use crate::ids::ProjectId;
@@ -27,13 +25,13 @@ impl Facade {
         &self,
         project: ProjectId,
         name: &str,
-        doc: ScratchpadDoc,
+        body: String,
         expected: Option<u64>,
     ) -> Result<ScratchpadView, CoordinationError> {
         self.emit_scratchpad(
             project,
             self.scratchpads
-                .write(project, name, doc, expected)
+                .write(project, name, body, expected)
                 .map_err(|err| match err {
                     WriteError::Invalid(message) => CoordinationError::InvalidScratchpad(message),
                     WriteError::Conflict { expected, actual } => {
@@ -113,18 +111,19 @@ impl Facade {
 
 impl ScopedFacade<'_> {
     /// Creates or replaces the scratchpad `name` in the session's effective project with the
-    /// disciplined `doc`, **revision-guarded**: `expected` is `None` to create or the current
-    /// revision to update. Returns the written scratchpad at its new revision; a malformed document
+    /// Markdown `body`, **revision-guarded**: `expected` is `None` to create or the current
+    /// revision to update. Returns the written scratchpad at its new revision; a malformed write
     /// is [`CoordinationError::InvalidScratchpad`] and a stale revision
     /// [`CoordinationError::RevisionConflict`], neither of which changes anything.
     pub fn scratchpad_write(
         &self,
         name: &str,
-        doc: ScratchpadDoc,
+        body: String,
         expected: Option<u64>,
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.scratchpad_write_in(project, name, doc, expected)
+        self.inner
+            .scratchpad_write_in(project, name, body, expected)
     }
 
     /// The scratchpad `name` in the session's effective project, or

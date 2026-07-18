@@ -11,17 +11,9 @@ use crate::testing::{
     FakeTrustRepo, TEST_PEER_PGID,
 };
 
-/// A well-formed disciplined document.
-fn doc() -> ScratchpadDoc {
-    ScratchpadDoc {
-        objective: "Ship v1".into(),
-        context: "RC cut".into(),
-        plan: vec!["Cut RC".into()],
-        acceptance_criteria: vec!["soak green".into()],
-        risks: vec!["none identified".into()],
-        status: "in progress".into(),
-        notes: None,
-    }
+/// A representative Markdown body; its first non-heading line is the summary gist.
+fn body() -> String {
+    "## Objective\nShip v1\n\n## Status\nin progress".to_owned()
 }
 
 /// A façade over in-memory fakes with one project loaded and the scratchpad store wired. The single
@@ -62,7 +54,9 @@ fn writing_with_no_project_in_scope_is_refused() {
     let session = facade.open_session(None);
 
     assert!(matches!(
-        facade.scoped(session).scratchpad_write("plan", doc(), None),
+        facade
+            .scoped(session)
+            .scratchpad_write("plan", body(), None),
         Err(CoordinationError::NoProjectScope)
     ));
 }
@@ -73,7 +67,7 @@ fn a_scoped_session_writes_reads_and_lists_without_binding_a_process() {
 
     let created = facade
         .scoped(session)
-        .scratchpad_write("release-plan", doc(), None)
+        .scratchpad_write("release-plan", body(), None)
         .expect("create succeeds with only project scope");
     assert_eq!(created.revision, 1);
 
@@ -89,7 +83,7 @@ fn a_scoped_session_writes_reads_and_lists_without_binding_a_process() {
         .expect("list succeeds");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].name, "release-plan");
-    assert_eq!(listed[0].objective, "Ship v1");
+    assert_eq!(listed[0].gist, "Ship v1");
 }
 
 #[test]
@@ -97,17 +91,17 @@ fn a_stale_write_surfaces_a_revision_conflict() {
     let (facade, session) = scoped_facade();
     facade
         .scoped(session)
-        .scratchpad_write("plan", doc(), None)
+        .scratchpad_write("plan", body(), None)
         .expect("create");
     facade
         .scoped(session)
-        .scratchpad_write("plan", doc(), Some(1))
+        .scratchpad_write("plan", body(), Some(1))
         .expect("first update");
 
     assert!(matches!(
         facade
             .scoped(session)
-            .scratchpad_write("plan", doc(), Some(1)),
+            .scratchpad_write("plan", body(), Some(1)),
         Err(CoordinationError::RevisionConflict {
             expected: Some(1),
             actual: Some(2)
@@ -118,11 +112,9 @@ fn a_stale_write_surfaces_a_revision_conflict() {
 #[test]
 fn a_malformed_write_surfaces_an_invalid_scratchpad() {
     let (facade, session) = scoped_facade();
-    let mut bad = doc();
-    bad.acceptance_criteria = Vec::new();
-
+    // A blank name handle is malformed — the body itself is unconstrained.
     assert!(matches!(
-        facade.scoped(session).scratchpad_write("plan", bad, None),
+        facade.scoped(session).scratchpad_write("   ", body(), None),
         Err(CoordinationError::InvalidScratchpad(_))
     ));
 }
@@ -141,11 +133,11 @@ fn renaming_onto_a_taken_name_is_refused() {
     let (facade, session) = scoped_facade();
     facade
         .scoped(session)
-        .scratchpad_write("a", doc(), None)
+        .scratchpad_write("a", body(), None)
         .expect("create a");
     facade
         .scoped(session)
-        .scratchpad_write("b", doc(), None)
+        .scratchpad_write("b", body(), None)
         .expect("create b");
 
     assert!(matches!(
@@ -169,7 +161,7 @@ fn tags_and_archive_round_trip_through_the_facade() {
     let (facade, session) = scoped_facade();
     facade
         .scoped(session)
-        .scratchpad_write("a", doc(), None)
+        .scratchpad_write("a", body(), None)
         .expect("create");
 
     let tagged = facade
@@ -238,7 +230,7 @@ fn two_projects() -> (Facade, ProjectId, ProjectId) {
 fn scratchpad_transfer_in_moves_the_document_keeping_its_identity_and_revision() {
     let (facade, a, b) = two_projects();
     let created = facade
-        .scratchpad_write_in(a, "plan", doc(), None)
+        .scratchpad_write_in(a, "plan", body(), None)
         .expect("create in A");
 
     let moved = facade
@@ -250,7 +242,7 @@ fn scratchpad_transfer_in_moves_the_document_keeping_its_identity_and_revision()
         moved.revision, created.revision,
         "the revision is preserved"
     );
-    assert_eq!(moved.doc, created.doc, "the document is preserved");
+    assert_eq!(moved.body, created.body, "the body is preserved");
 
     // It now reads from B and is gone from A.
     assert!(facade.scratchpad_read_in(b, "plan").is_ok());
@@ -264,10 +256,10 @@ fn scratchpad_transfer_in_moves_the_document_keeping_its_identity_and_revision()
 fn scratchpad_transfer_in_refuses_a_name_already_used_in_the_target() {
     let (facade, a, b) = two_projects();
     facade
-        .scratchpad_write_in(a, "plan", doc(), None)
+        .scratchpad_write_in(a, "plan", body(), None)
         .expect("create in A");
     facade
-        .scratchpad_write_in(b, "plan", doc(), None)
+        .scratchpad_write_in(b, "plan", body(), None)
         .expect("a scratchpad already named plan in B");
 
     assert!(matches!(
@@ -289,7 +281,7 @@ fn scratchpad_transfer_refuses_a_target_outside_the_callers_authenticated_scope(
         .bind_session_process(owner)
         .expect("bind the session to its process in A");
     facade
-        .scratchpad_write_in(a, "plan", doc(), None)
+        .scratchpad_write_in(a, "plan", body(), None)
         .expect("create in A");
 
     assert!(matches!(
@@ -302,7 +294,7 @@ fn scratchpad_transfer_refuses_a_target_outside_the_callers_authenticated_scope(
 fn scratchpad_transfer_in_refuses_an_unknown_target_project() {
     let (facade, a, _b) = two_projects();
     facade
-        .scratchpad_write_in(a, "plan", doc(), None)
+        .scratchpad_write_in(a, "plan", body(), None)
         .expect("create in A");
 
     // A target project that is not loaded is refused before any move, so a bad id never orphans

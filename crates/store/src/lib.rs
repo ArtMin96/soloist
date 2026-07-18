@@ -8,6 +8,7 @@
 //! no system `libsqlite3`.
 
 mod agents;
+mod doc_to_markdown;
 mod feedback;
 mod kv;
 mod leases;

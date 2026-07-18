@@ -4,17 +4,9 @@ use super::*;
 use crate::ids::ProjectId;
 use crate::testing::FakeScratchpadRepo;
 
-/// A well-formed disciplined document the validation accepts.
-fn doc() -> ScratchpadDoc {
-    ScratchpadDoc {
-        objective: "Ship v1 to the .deb channel".into(),
-        context: "RC is cut; soak is pending".into(),
-        plan: vec!["Cut RC".into(), "Soak 6h".into(), "Tag + bundle".into()],
-        acceptance_criteria: vec!["soak green".into(), "installs on 22.04".into()],
-        risks: vec!["glibc mismatch on 20.04".into()],
-        status: "soak running".into(),
-        notes: None,
-    }
+/// A representative Markdown body — a couple of headings over a line of prose.
+fn body() -> String {
+    "## Objective\nShip v1 to the .deb channel\n\n## Status\nsoak running".to_owned()
 }
 
 fn scratchpads() -> Scratchpads {
@@ -24,112 +16,17 @@ fn scratchpads() -> Scratchpads {
 const PROJECT: ProjectId = ProjectId::from_raw(1);
 
 #[test]
-fn validate_accepts_a_well_formed_document() {
-    assert!(doc().validate().is_ok());
-}
-
-#[test]
-fn validate_names_every_missing_section_at_once() {
-    let empty = ScratchpadDoc {
-        objective: "  ".into(),
-        context: String::new(),
-        plan: Vec::new(),
-        acceptance_criteria: Vec::new(),
-        risks: Vec::new(),
-        status: String::new(),
-        notes: None,
-    };
-    let message = empty.validate().expect_err("a blank document is rejected");
-    for fragment in [
-        "objective",
-        "context",
-        "status",
-        "plan",
-        "acceptance_criteria",
-        "risks",
-    ] {
-        assert!(
-            message.contains(fragment),
-            "the message should name `{fragment}`: {message}"
-        );
-    }
-}
-
-#[test]
-fn validate_rejects_a_blank_list_entry() {
-    let mut doc = doc();
-    doc.plan = vec!["Cut RC".into(), "   ".into()];
-    assert!(doc
-        .validate()
-        .expect_err("a blank plan step is rejected")
-        .contains("plan steps must not be blank"));
-}
-
-#[test]
-fn validate_rejects_content_over_the_byte_cap() {
-    let mut doc = doc();
-    // One oversized section pushes total content just past the cap.
-    doc.notes = Some("x".repeat(MAX_SCRATCHPAD_CONTENT_BYTES + 1));
-    let message = doc
-        .validate()
-        .expect_err("content past the cap is rejected");
-    assert!(
-        message.contains("exceeds"),
-        "the message should explain the size cap: {message}"
-    );
-}
-
-#[test]
-fn validate_accepts_content_exactly_at_the_byte_cap() {
-    let mut doc = doc();
-    // Grow notes so the summed content lands exactly on the cap.
-    let headroom = MAX_SCRATCHPAD_CONTENT_BYTES - doc.content_bytes();
-    doc.notes = Some("x".repeat(headroom));
-    assert_eq!(doc.content_bytes(), MAX_SCRATCHPAD_CONTENT_BYTES);
-    assert!(
-        doc.validate().is_ok(),
-        "content exactly at the cap is accepted"
-    );
-}
-
-#[test]
-fn render_lays_out_the_canonical_sections_titled_by_name() {
-    let rendered = doc().render("release-plan");
-    assert!(rendered.starts_with("# release-plan"));
-    for heading in [
-        "## Objective",
-        "## Context",
-        "## Plan",
-        "## Acceptance criteria",
-        "## Risks",
-        "## Status",
-    ] {
-        assert!(rendered.contains(heading), "missing {heading}:\n{rendered}");
-    }
-    // The plan is an ordered (numbered) path; criteria are checkbox items.
-    assert!(rendered.contains("1. Cut RC"));
-    assert!(rendered.contains("- [ ] soak green"));
-    // Notes is omitted when absent.
-    assert!(!rendered.contains("## Notes"));
-}
-
-#[test]
-fn render_includes_notes_only_when_present() {
-    let mut doc = doc();
-    doc.notes = Some("blocked on the CI runner".into());
-    let rendered = doc.render("release-plan");
-    assert!(rendered.contains("## Notes\nblocked on the CI runner"));
-}
-
-#[test]
 fn write_creates_at_revision_one_then_read_renders_it() {
     let pads = scratchpads();
     let created = pads
-        .write(PROJECT, "release-plan", doc(), None)
+        .write(PROJECT, "release-plan", body(), None)
         .expect("create succeeds");
     assert_eq!(created.revision, 1);
     assert_eq!(created.name, "release-plan");
-    assert!(created.rendered.starts_with("# release-plan"));
+    assert_eq!(created.body, body());
+    // The rendering titles the body by the scratchpad's name (its handle), not embedded in the body.
+    assert!(created.rendered.starts_with("# release-plan\n\n"));
+    assert!(created.rendered.contains("## Objective"));
 
     let read = pads
         .read(PROJECT, "release-plan")
@@ -139,29 +36,74 @@ fn write_creates_at_revision_one_then_read_renders_it() {
 }
 
 #[test]
+fn a_blank_body_is_valid() {
+    // A blank document is valid — only the name handle and the size cap are enforced.
+    let pads = scratchpads();
+    let created = pads
+        .write(PROJECT, "empty", String::new(), None)
+        .expect("a blank body writes");
+    assert_eq!(created.body, "");
+    assert_eq!(created.revision, 1);
+}
+
+#[test]
+fn a_blank_name_is_rejected_before_it_persists() {
+    let pads = scratchpads();
+    assert!(matches!(
+        pads.write(PROJECT, "   ", body(), None),
+        Err(WriteError::Invalid(message)) if message.contains("name")
+    ));
+    assert!(
+        pads.read(PROJECT, "   ").unwrap().is_none(),
+        "a rejected write must not create the scratchpad"
+    );
+}
+
+#[test]
+fn a_body_over_the_byte_cap_is_rejected_but_one_at_the_cap_is_accepted() {
+    let pads = scratchpads();
+    assert!(matches!(
+        pads.write(PROJECT, "big", "x".repeat(MAX_SCRATCHPAD_CONTENT_BYTES + 1), None),
+        Err(WriteError::Invalid(message)) if message.contains("exceeds")
+    ));
+    assert!(
+        pads.read(PROJECT, "big").unwrap().is_none(),
+        "an over-cap write must not persist"
+    );
+
+    let at_cap = pads
+        .write(
+            PROJECT,
+            "big",
+            "x".repeat(MAX_SCRATCHPAD_CONTENT_BYTES),
+            None,
+        )
+        .expect("a body exactly at the cap is accepted");
+    assert_eq!(at_cap.body.len(), MAX_SCRATCHPAD_CONTENT_BYTES);
+}
+
+#[test]
 fn write_at_the_current_revision_updates_and_bumps_it() {
     let pads = scratchpads();
-    pads.write(PROJECT, "plan", doc(), None).expect("create");
-    let mut next = doc();
-    next.status = "tagged".into();
+    pads.write(PROJECT, "plan", body(), None).expect("create");
 
     let updated = pads
-        .write(PROJECT, "plan", next, Some(1))
+        .write(PROJECT, "plan", "## Status\ntagged".to_owned(), Some(1))
         .expect("update at the current revision succeeds");
     assert_eq!(updated.revision, 2);
-    assert_eq!(updated.doc.status, "tagged");
+    assert_eq!(updated.body, "## Status\ntagged");
 }
 
 #[test]
 fn a_stale_write_is_a_conflict_and_changes_nothing() {
     let pads = scratchpads();
-    pads.write(PROJECT, "plan", doc(), None).expect("create");
-    pads.write(PROJECT, "plan", doc(), Some(1))
+    pads.write(PROJECT, "plan", body(), None).expect("create");
+    pads.write(PROJECT, "plan", body(), Some(1))
         .expect("first update");
 
     // The document is now at revision 2; a writer still holding revision 1 is refused.
     let conflict = pads
-        .write(PROJECT, "plan", doc(), Some(1))
+        .write(PROJECT, "plan", body(), Some(1))
         .expect_err("a stale revision conflicts");
     assert!(matches!(
         conflict,
@@ -181,9 +123,9 @@ fn a_stale_write_is_a_conflict_and_changes_nothing() {
 #[test]
 fn creating_over_an_existing_name_conflicts() {
     let pads = scratchpads();
-    pads.write(PROJECT, "plan", doc(), None).expect("create");
+    pads.write(PROJECT, "plan", body(), None).expect("create");
     let conflict = pads
-        .write(PROJECT, "plan", doc(), None)
+        .write(PROJECT, "plan", body(), None)
         .expect_err("a second create conflicts");
     assert!(matches!(
         conflict,
@@ -198,7 +140,7 @@ fn creating_over_an_existing_name_conflicts() {
 fn updating_a_missing_scratchpad_conflicts_with_no_record() {
     let pads = scratchpads();
     let conflict = pads
-        .write(PROJECT, "absent", doc(), Some(3))
+        .write(PROJECT, "absent", body(), Some(3))
         .expect_err("updating a missing scratchpad conflicts");
     assert!(matches!(
         conflict,
@@ -210,24 +152,22 @@ fn updating_a_missing_scratchpad_conflicts_with_no_record() {
 }
 
 #[test]
-fn a_malformed_write_is_rejected_before_it_persists() {
+fn a_summary_gist_is_the_first_non_heading_body_line() {
     let pads = scratchpads();
-    let mut bad = doc();
-    bad.objective = "   ".into();
-    assert!(matches!(
-        pads.write(PROJECT, "plan", bad, None),
-        Err(WriteError::Invalid(_))
-    ));
-    assert!(
-        pads.read(PROJECT, "plan").unwrap().is_none(),
-        "a rejected write must not create the scratchpad"
-    );
+    pads.write(PROJECT, "plan", body(), None).expect("create");
+    let summary = pads
+        .list(PROJECT)
+        .expect("list")
+        .into_iter()
+        .next()
+        .expect("one summary");
+    assert_eq!(summary.gist, "Ship v1 to the .deb channel");
 }
 
 #[test]
 fn rename_moves_the_handle_and_keeps_the_durable_id() {
     let pads = scratchpads();
-    let created = pads.write(PROJECT, "old", doc(), None).expect("create");
+    let created = pads.write(PROJECT, "old", body(), None).expect("create");
 
     let renamed = pads.rename(PROJECT, "old", "new").expect("rename succeeds");
     assert_eq!(renamed.name, "new");
@@ -242,8 +182,8 @@ fn rename_moves_the_handle_and_keeps_the_durable_id() {
 #[test]
 fn rename_reports_missing_and_taken() {
     let pads = scratchpads();
-    pads.write(PROJECT, "a", doc(), None).expect("create a");
-    pads.write(PROJECT, "b", doc(), None).expect("create b");
+    pads.write(PROJECT, "a", body(), None).expect("create a");
+    pads.write(PROJECT, "b", body(), None).expect("create b");
 
     assert!(matches!(
         pads.rename(PROJECT, "missing", "x"),
@@ -258,8 +198,8 @@ fn rename_reports_missing_and_taken() {
 #[test]
 fn tags_add_dedupe_remove_and_list_distinct() {
     let pads = scratchpads();
-    pads.write(PROJECT, "a", doc(), None).expect("create a");
-    pads.write(PROJECT, "b", doc(), None).expect("create b");
+    pads.write(PROJECT, "a", body(), None).expect("create a");
+    pads.write(PROJECT, "b", body(), None).expect("create b");
 
     let tagged = pads
         .add_tags(
@@ -285,7 +225,7 @@ fn tags_add_dedupe_remove_and_list_distinct() {
 #[test]
 fn archive_is_a_flag_not_a_delete() {
     let pads = scratchpads();
-    pads.write(PROJECT, "a", doc(), None).expect("create");
+    pads.write(PROJECT, "a", body(), None).expect("create");
 
     let archived = pads
         .set_archived(PROJECT, "a", true)
@@ -305,7 +245,7 @@ fn archive_is_a_flag_not_a_delete() {
 #[test]
 fn delete_removes_the_scratchpad() {
     let pads = scratchpads();
-    pads.write(PROJECT, "a", doc(), None).expect("create");
+    pads.write(PROJECT, "a", body(), None).expect("create");
     assert!(pads.delete(PROJECT, "a").expect("delete"));
     assert!(!pads.delete(PROJECT, "a").expect("second delete is a no-op"));
     assert!(pads.read(PROJECT, "a").unwrap().is_none());
@@ -314,9 +254,9 @@ fn delete_removes_the_scratchpad() {
 #[test]
 fn list_is_scoped_to_the_project_and_ordered_by_name() {
     let pads = scratchpads();
-    pads.write(PROJECT, "zebra", doc(), None).expect("create");
-    pads.write(PROJECT, "alpha", doc(), None).expect("create");
-    pads.write(ProjectId::from_raw(2), "other", doc(), None)
+    pads.write(PROJECT, "zebra", body(), None).expect("create");
+    pads.write(PROJECT, "alpha", body(), None).expect("create");
+    pads.write(ProjectId::from_raw(2), "other", body(), None)
         .expect("create in another project");
 
     let names: Vec<String> = pads
@@ -334,7 +274,7 @@ fn transfer_moves_a_scratchpad_to_the_new_scope_keeping_its_identity() {
     let pads = scratchpads();
 
     let written = pads
-        .write(PROJECT, "release-plan", doc(), None)
+        .write(PROJECT, "release-plan", body(), None)
         .expect("write a scratchpad in the source project");
     pads.add_tags(PROJECT, "release-plan", &["v1".to_string()])
         .expect("tag it");
@@ -347,11 +287,11 @@ fn transfer_moves_a_scratchpad_to_the_new_scope_keeping_its_identity() {
         .transfer(PROJECT, "release-plan", OTHER)
         .expect("transfer succeeds");
 
-    // The durable id, name, tags, document, and revision survive the relocation.
+    // The durable id, name, tags, body, and revision survive the relocation.
     assert_eq!(after.id, written.id);
     assert_eq!(after.name, "release-plan");
     assert_eq!(after.tags, before.tags);
-    assert_eq!(after.doc, before.doc);
+    assert_eq!(after.body, before.body);
     assert_eq!(after.revision, before.revision);
 
     // The scratchpad is now readable only from the new scope.
@@ -372,8 +312,8 @@ fn transfer_moves_a_scratchpad_to_the_new_scope_keeping_its_identity() {
 fn transfer_refuses_when_the_target_name_is_taken() {
     const OTHER: ProjectId = ProjectId::from_raw(2);
     let pads = scratchpads();
-    pads.write(PROJECT, "plan", doc(), None).expect("source");
-    pads.write(OTHER, "plan", doc(), None)
+    pads.write(PROJECT, "plan", body(), None).expect("source");
+    pads.write(OTHER, "plan", body(), None)
         .expect("a same-named scratchpad already in the target");
 
     assert!(matches!(

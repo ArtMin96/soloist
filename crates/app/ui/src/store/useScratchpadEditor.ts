@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
 import { scratchpadLink, scratchpadRead, scratchpadWrite } from "@/api";
-import { docToForm, formToDoc, type ScratchpadForm } from "@/store/scratchpadForm";
 
 // A revision conflict surfaced to the panel: a write was refused because the scratchpad moved on
 // since it was opened. `actual` is the revision it now sits at, so the banner can name it.
@@ -11,9 +10,9 @@ export interface ScratchpadConflict {
 export interface ScratchpadEditorStore {
   /** The open scratchpad's name, or null when none is open. */
   name: string | null;
-  /** The editable form, or null while none is open or it is still loading. */
-  form: ScratchpadForm | null;
-  /** The revision the open form was loaded at — the guard the next write carries. */
+  /** The editable Markdown body, or null while none is open or it is still loading. */
+  body: string | null;
+  /** The revision the open body was loaded at — the guard the next write carries. */
   baseRevision: number | null;
   loading: boolean;
   saving: boolean;
@@ -23,7 +22,7 @@ export interface ScratchpadEditorStore {
   error: string | null;
   open: (name: string) => void;
   close: () => void;
-  setForm: (form: ScratchpadForm) => void;
+  setBody: (body: string) => void;
   save: () => void;
   /** Reload the open scratchpad fresh, discarding local edits — the conflict resolution. */
   reload: () => void;
@@ -31,15 +30,15 @@ export interface ScratchpadEditorStore {
   copyLink: (id: number) => void;
 }
 
-// Drives the scratchpad panel's edit lifecycle: open one (read its full document), edit its form,
-// and save revision-guarded. A stale write is refused by the core — this hook then re-reads to learn
-// whether the revision moved (a real conflict, surfaced for the user to reload) or the write failed
-// for another reason (an invalid document, surfaced as an error). It never re-decides validity or
+// Drives the scratchpad panel's edit lifecycle: open one (read its Markdown body), edit it, and save
+// revision-guarded. A stale write is refused by the core — this hook then re-reads to learn whether
+// the revision moved (a real conflict, surfaced for the user to reload) or the write failed for
+// another reason (an invalid document, surfaced as an error). It never re-decides validity or
 // clobbers a concurrent edit; the core is the single source of truth. The `project` is the local-UI
 // scope (the trusted surface). Live snapshot refresh lives in the parent's `useOrchestration`.
 export function useScratchpadEditor(project: number): ScratchpadEditorStore {
   const [name, setName] = useState<string | null>(null);
-  const [form, setForm] = useState<ScratchpadForm | null>(null);
+  const [body, setBody] = useState<string | null>(null);
   const [baseRevision, setBaseRevision] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -53,7 +52,7 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
       setError(null);
       scratchpadRead(project, target)
         .then((view) => {
-          setForm(docToForm(view.doc));
+          setBody(view.body);
           setBaseRevision(view.revision);
         })
         .catch((reason) => setError(String(reason)))
@@ -65,7 +64,7 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
   const open = useCallback(
     (target: string) => {
       setName(target);
-      setForm(null);
+      setBody(null);
       setBaseRevision(null);
       load(target);
     },
@@ -74,7 +73,7 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
 
   const close = useCallback(() => {
     setName(null);
-    setForm(null);
+    setBody(null);
     setBaseRevision(null);
     setConflict(null);
     setError(null);
@@ -85,13 +84,13 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
   }, [name, load]);
 
   const save = useCallback(() => {
-    if (name == null || form == null) return;
+    if (name == null || body == null) return;
     setSaving(true);
     setConflict(null);
     setError(null);
-    scratchpadWrite(project, name, formToDoc(form), baseRevision)
+    scratchpadWrite(project, name, body, baseRevision)
       .then((view) => {
-        setForm(docToForm(view.doc));
+        setBody(view.body);
         setBaseRevision(view.revision);
       })
       .catch((reason) => {
@@ -109,7 +108,7 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
           .catch((readReason) => setError(String(readReason)));
       })
       .finally(() => setSaving(false));
-  }, [project, name, form, baseRevision]);
+  }, [project, name, body, baseRevision]);
 
   const copyLink = useCallback(
     (id: number) => {
@@ -122,7 +121,7 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
 
   return {
     name,
-    form,
+    body,
     baseRevision,
     loading,
     saving,
@@ -130,7 +129,7 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
     error,
     open,
     close,
-    setForm,
+    setBody,
     save,
     reload,
     copyLink,
