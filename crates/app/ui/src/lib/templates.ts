@@ -20,15 +20,3 @@ export const TEMPLATE_KIND_DESCRIPTION: Record<TemplateKind, string> = {
     "A starting shape for new scratchpads. Choose a default and empty scratchpads are seeded from it.",
   todo: "A starting shape for new todos. Choose a default and empty todos are seeded from it.",
 };
-
-// Whether a kind seeds new documents from a selected default. Prompts are applied by name, never
-// seeded, so they have no default selector. Exhaustive over the closed kind set.
-export function isSeedableKind(kind: TemplateKind): boolean {
-  switch (kind) {
-    case "scratchpad":
-    case "todo":
-      return true;
-    case "prompt":
-      return false;
-  }
-}

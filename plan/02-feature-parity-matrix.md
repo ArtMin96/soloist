@@ -106,9 +106,9 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 
 | ID | Feature | Src | Phase | Target | Verify |
 |----|---------|-----|------:|--------|--------|
-| G1 | Scratchpads CRUD + tags/archive/transfer (disciplined doc — free-form/file-io diverged, D-7) | ✅ | 9 | v1 | Read/write a scratchpad |
+| G1 | Scratchpads CRUD + tags/archive/transfer (free-form Markdown `body`; D-7 enforced-structure divergence **superseded** 2026-07-18, rich TipTap editor + templates) | ✅ | 9 | v1 | Read/write a scratchpad |
 | G2 | Scratchpad **revision-guarded** writes | ✅ | 9 | v1 | Stale write → conflict |
-| G3 | Todos: create/list/get/update/complete/delete | ✅ | 9 | v1 | CRUD a todo |
+| G3 | Todos: create/list/get/update/complete/delete (free-form Markdown `body` + `TodoStatus`; D-8 enforced-structure divergence **superseded** 2026-07-18) | ✅ | 9 | v1 | CRUD a todo |
 | G4 | Todo tags, **blockers**, comments, transfer | ✅ | 9 | v1 | Blocker gates a todo |
 | G5 | Todo locks (process-owned, auto-release on close) | ✅ | 9 | v1 | Lock frees when process closes |
 | G6 | Lease locks (`lock_acquire/status/release`, TTL+owner) | ✅❓ | 9 | v1 | Lock auto-expires/releases |
@@ -117,6 +117,23 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | G9 | Timer mgmt (`cancel`/`pause`/`resume`/`list`) | ✅ | 9 | v1 | Manage timers |
 | G10 | Key-value (`kv_set/get/delete/list`, default off) | ✅ | 9 | v1 | JSON state round-trips |
 | G11 | Coordination state persists across app restart (SQLite) | ❓ | 9 | v1 | Todos survive relaunch |
+
+### Free-form follow-up backlog (unlocked by the D-7/D-8 reversal — planned, non-gating)
+
+> These slices become straightforward once scratchpads/todos hold a free-form Markdown body (owner
+> decision 2026-07-18, `KNOWN-DIVERGENCES` D-7/D-8 superseded). **None is built by the rich-editor-design
+> phases A–F** — each is a `later` planned row in the owner-approved order (resolved decision 6) and needs
+> its own session before build (§7, no gold-plating). `Phase` is unscheduled (`—`) until a slice is picked
+> up. The MCP file-io tools stay gated behind the still-deferred project-root FS sandbox (`plan/05` §12).
+
+| ID | Feature | Src | Phase | Target | Verify |
+|----|---------|-----|:----:|--------|--------|
+| G12 | `scratchpad_append` + `scratchpad_append_section` (append text, or append under a heading, to the body) | ✅ | — | later | Append extends the body without a full rewrite; revision-guarded |
+| G13 | `scratchpad_find` + `scratchpad_tail` (search within a body; read the trailing N lines) | ✅ | — | later | `find` returns matching spans; `tail` returns the last N lines |
+| G14 | Scratchpad import/export — MCP `scratchpad_save_to_file`/`_load_from_file` (behind the deferred project-root FS sandbox) + UI Export `.md` / Import | ✅ | — | later | Round-trip a scratchpad to/from a file inside the project root |
+| G15 | Create scratchpad from a terminal selection (capture selected PTY output into a new note) | 🟡 | — | later | Selecting terminal output offers "New scratchpad from selection" |
+| G16 | Inline images in scratchpad / todo bodies | 🟡 | — | later | A pasted/attached image renders in the editor and persists |
+| G17 | Todo **priority** field (High/Medium/Low) + bulk actions | 🟡 | — | later | A todo carries a priority; a bulk action applies to a selection |
 
 ## H. HTTP API & CLI (Phase 10)
 
@@ -143,7 +160,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | I10 | Env capture via `$SHELL -ilc env`, cached 10 min | ✅ | 11 | v1 | Version-manager PATH visible |
 | I11 | First-launch guided demo project | 🟡 | 11 | later | Demo appears on first run |
 | I12 | Activity Monitor view (cross-project; flat/tree; project/type/status/ports filters; sortable CPU/mem/port columns; subprocess actions) | 🟡 | 11 | later | Monitor lists processes + descendants; filter/sort works |
-| I13 | Prompt templates UI (create/edit/search/duplicate; global+project scope; placeholder fill-in) | 🟡 | 11 | later | Template saved, filled, and applied to an agent |
+| I13 | Templates UI in Settings (create/edit/delete/duplicate; grouped by `TemplateKind` Prompt/Scratchpad/Todo; global default-per-kind selector) — the Prompt section **is** the reserved prompt-templates view | ✅ | 11 | later | **Delivered 2026-07-18** (rich-editor-design Phase E, commit `156af8b`): a Settings → **Templates** tab manages the unified `Template` aggregate over the shared rich editor with revision-guarded autosave + conflict banner; the Prompt section lists/edits global prompt templates (satisfies this reserved I13 view); Scratchpad/Todo sections carry a default-template `NullableSelect` that seeds new empty documents through the one core seam. Per-project default selection stays deferred (global-only in v1, resolved decision 3); placeholder fill-in stays report-only. |
 | I14 | Nested child-agent display (agent-spawned agents nested under their parent in the sidebar) | 🟡 | 5,11 | v1 ✅ | A spawned worker renders nested (collapsible) under its lead's row in the sidebar Agents group; re-roots flat when the lead closes; flat again next run (lineage is per-run). Delivered 2026-07-02 alongside O3's orchestration-pane tree |
 
 ### I7 decomposed — Settings detail (Phase 11a per-project · 11b global)
@@ -192,7 +209,7 @@ charter, dependencies, and per-phase definition of done: [`orchestrator/README.m
 | O2 | Coordination `DomainEvent`s (todo / timer / lease / scratchpad / kv changed) for a live UI | ❓ | orch-00 | v1 | A mutation emits its event; UI updates without polling |
 | O3 | Agent lineage: parent `ProcessId` recorded on `spawn_agent`; nested lead→worker tree (promotes `later` row I14) | 🟡 | orch-01 | v1 | A spawned worker nests under its lead |
 | O4 | Live orchestration tree UI with per-agent activity (Working/Thinking/Idle/Permission/Error) | 🟡 | orch-01 | v1 | Tree renders lead + workers with live glyphs |
-| O5 | Scratchpad panel — disciplined `ScratchpadDoc`, revision-guarded edit, living-doc view | ❓ | orch-02 | v1 | Read/edit a scratchpad; stale edit → conflict |
+| O5 | Scratchpad panel — free-form Markdown `body` in a rich TipTap editor (slash commands, autosave, undo/redo, outline), revision-guarded edit, living-doc view (D-7 superseded 2026-07-18) | ❓ | orch-02 | v1 | Read/edit a scratchpad; stale edit → conflict |
 | O6 | To-do board UI — blockers / locks / comments / status, blocker-gate visible | ❓ | orch-02 | v1 | Blocker gating + lock owner shown; complete refused when blocked |
 | O7 | Timers & fire-when-idle panel — armed timers, `waiting_on`, max-wait countdown, injected-turn `body` preview | 🟡 | orch-03 | v1 | A `fire_when_idle` arm shows `waiting_on` + countdown |
 | O8 | Wake-cycle visibility — timer fires → `body` delivered as a fresh turn (named with *why* it woke), surfaced on the lead | 🟡 | orch-03 | v1 | Fired timer's body appears on the lead; timer leaves the panel |
@@ -203,8 +220,9 @@ charter, dependencies, and per-phase definition of done: [`orchestrator/README.m
 | O13 | **Spawn orchestration-context preamble** — `spawn_agent`/`spawn_process` deliver a first-turn `[SOLO ORCHESTRATION CONTEXT]` preamble (the worker's identity + the coordination tools), mirroring the demo's `include_agent_instructions` | 🟡 | orch-04 | v1 | A spawned worker receives the preamble as its first turn and can use the primitives with no skills loaded; applies to the built `spawn_agent` (not gated on the O9 arbitrary-spawn trust work) |
 | O14 | **`solo://` copy-link handoff** — a stable `solo://proj/<id>/scratchpad\|todo/<id>` link + a "Copy link" affordance + a core resolver so a receiving agent reads the target; promotes the orchestrator slice of I4 to v1 | 🟡 name (`05` §10) / ❓ shape | orch-02 | v1 | Copy a scratchpad's link; a bound agent given the link reads it; a malformed / foreign-scope link is refused |
 
-> `later` (tracked, non-gating — do **not** gold-plate): a deep cross-project "Activity Monitor" (I12),
-> prompt-template UI (I13), and LLM auto-summarization of worker output (E6, OFF by default).
+> `later` (tracked, non-gating — do **not** gold-plate): a deep cross-project "Activity Monitor" (I12)
+> and LLM auto-summarization of worker output (E6, OFF by default). (The prompt-template UI, I13, was
+> delivered 2026-07-18 as the Templates Settings tab.)
 
 ## J. Packaging (Phase 12)
 
