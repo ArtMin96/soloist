@@ -54,7 +54,8 @@ fn a_scratchpad_link_resolves_within_scope() {
     let pad = facade
         .scoped(session)
         .scratchpad_write("release-plan", scratchpad_body(), None)
-        .expect("create");
+        .expect("create")
+        .view;
     let link = Link::scratchpad(project, pad.id).to_link();
 
     let content = facade
@@ -70,7 +71,8 @@ fn a_todo_link_resolves_within_scope() {
     let todo = facade
         .scoped(session)
         .todo_create(todo_doc())
-        .expect("create");
+        .expect("create")
+        .view;
     let link = Link::todo(project, todo.id).to_link();
 
     let content = facade
@@ -86,7 +88,8 @@ fn a_foreign_scope_link_is_refused_not_resolved() {
     let pad = facade
         .scoped(session)
         .scratchpad_write("release-plan", scratchpad_body(), None)
-        .expect("create");
+        .expect("create")
+        .view;
     // The same id but a different project must be refused, never resolved to our content.
     let foreign = Link::scratchpad(ProjectId::from_raw(project.get() + 1), pad.id).to_link();
 

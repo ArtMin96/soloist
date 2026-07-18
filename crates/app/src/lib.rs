@@ -126,7 +126,7 @@ fn build_facade(app: AppHandle) -> Facade {
         .scratchpad_repo(store.clone())
         .todo_repo(store.clone())
         .kv_repo(store.clone())
-        .prompt_template_repo(store.clone())
+        .template_repo(store.clone())
         .settings_repo(store.clone())
         .feedback_repo(store.clone())
         .project_settings_repo(store)

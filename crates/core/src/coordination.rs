@@ -20,13 +20,13 @@ mod kv;
 mod kv_repo;
 mod lease;
 mod link;
-mod prompt_template;
-mod prompt_template_repo;
 mod releaser;
 mod repo;
 mod scheduler;
 mod scratchpad;
 mod scratchpad_repo;
+mod template;
+mod template_repo;
 mod timer;
 mod timer_repo;
 mod todo;
@@ -37,14 +37,6 @@ pub use kv::{Kv, MAX_KV_VALUE_BYTES};
 pub use kv_repo::{KvEntry, KvRepo, NoopKvRepo};
 pub use lease::{AcquireOutcome, LeaseView, Leases};
 pub use link::{is_link, Link, LinkContent, LinkError, LinkTarget};
-pub use prompt_template::{
-    placeholders, ExportedPromptTemplate, PromptScope, PromptTemplateSummary, PromptTemplateView,
-    PromptTemplateWriteError, PromptTemplates, MAX_PROMPT_TEMPLATE_BODY,
-    MAX_PROMPT_TEMPLATE_DESCRIPTION, MAX_PROMPT_TEMPLATE_NAME, PROMPT_TEMPLATE_EXPORT_FORMAT,
-};
-pub use prompt_template_repo::{
-    NoopPromptTemplateRepo, PromptTemplateRepo, PromptTemplateWriteResult, StoredPromptTemplate,
-};
 pub use releaser::LeaseReleaser;
 pub use repo::{LockRepo, NoopLockRepo, StoredLease};
 pub use scheduler::TimerScheduler;
@@ -55,6 +47,11 @@ pub use scratchpad::{
 pub use scratchpad_repo::{
     NoopScratchpadRepo, RenameResult, ScratchpadRepo, StoredScratchpad, TransferResult, WriteResult,
 };
+pub use template::{
+    placeholders, ExportedTemplate, TemplateSummary, TemplateView, TemplateWriteError, Templates,
+    MAX_TEMPLATE_BODY, MAX_TEMPLATE_DESCRIPTION, MAX_TEMPLATE_NAME,
+};
+pub use template_repo::{NoopTemplateRepo, StoredTemplate, TemplateRepo, TemplateWriteResult};
 pub(crate) use timer::watched_is_idle;
 pub use timer::{
     FireCond, IdleMode, SetWhenIdleOutcome, TimerStatus, TimerView, Timers, MAX_TIMER_BODY_BYTES,

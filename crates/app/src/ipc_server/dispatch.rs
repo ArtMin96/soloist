@@ -309,7 +309,10 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
         } => facade
             .scoped(session)
             .scratchpad_write(&name, body, expected_revision)
-            .map(IpcResponse::Scratchpad)
+            .map(|written| IpcResponse::ScratchpadWritten {
+                scratchpad: written.view,
+                seeded_from: written.seeded_from,
+            })
             .map_err(IpcError::from),
         IpcRequest::ScratchpadRead { name } => facade
             .scoped(session)
@@ -359,7 +362,10 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
         IpcRequest::TodoCreate { doc } => facade
             .scoped(session)
             .todo_create(doc)
-            .map(IpcResponse::Todo)
+            .map(|created| IpcResponse::TodoCreated {
+                todo: created.view,
+                seeded_from: created.seeded_from,
+            })
             .map_err(IpcError::from),
         IpcRequest::TodoList => facade
             .scoped(session)

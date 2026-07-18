@@ -79,23 +79,23 @@ pub enum CoordinationError {
     /// A comment action named one that does not exist on the todo.
     #[error("no comment under that id on that todo")]
     UnknownComment,
-    /// A prompt-template write carried malformed content; the message names every problem so the
-    /// caller can fix it in one revision.
-    #[error("prompt template is not well-formed: {0}")]
-    InvalidPromptTemplate(String),
-    /// A prompt-template update expected a different revision than the one on record — a
-    /// concurrent edit landed first, so the write was refused rather than clobbering it.
-    #[error("prompt template revision conflict (expected {expected:?}, found {actual:?})")]
-    PromptTemplateRevisionConflict {
+    /// A template write carried malformed content; the message names every problem so the caller
+    /// can fix it in one revision.
+    #[error("template is not well-formed: {0}")]
+    InvalidTemplate(String),
+    /// A template update expected a different revision than the one on record — a concurrent edit
+    /// landed first, so the write was refused rather than clobbering it.
+    #[error("template revision conflict (expected {expected:?}, found {actual:?})")]
+    TemplateRevisionConflict {
         expected: Option<u64>,
         actual: Option<u64>,
     },
-    /// A prompt-template action named one that does not exist in the addressed scope.
-    #[error("no prompt template under that name")]
-    UnknownPromptTemplate,
-    /// A prompt-template create named a template that already exists in the addressed scope.
-    #[error("a prompt template with that name already exists")]
-    PromptTemplateNameTaken,
+    /// A template action named one that does not exist in the addressed scope.
+    #[error("no template under that name")]
+    UnknownTemplate,
+    /// A template create named one that already exists in the addressed scope and kind.
+    #[error("a template with that name already exists")]
+    TemplateNameTaken,
     /// A `solo://` link could not be parsed — it is not in the
     /// `solo://proj/<project>/scratchpad|todo/<id>` shape.
     #[error("not a valid solo:// link")]

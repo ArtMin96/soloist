@@ -84,21 +84,21 @@ pub enum IpcError {
     /// A comment action named one that does not exist on the todo.
     #[error("no comment under that id on that todo")]
     UnknownComment,
-    /// A prompt-template write carried malformed content; the detail names every problem.
-    #[error("prompt template is not well-formed: {0}")]
-    InvalidPromptTemplate(String),
-    /// A prompt-template update expected a revision other than the one on record — re-read and retry.
-    #[error("prompt template revision conflict (expected {expected:?}, found {actual:?})")]
-    PromptTemplateRevisionConflict {
+    /// A template write carried malformed content; the detail names every problem.
+    #[error("template is not well-formed: {0}")]
+    InvalidTemplate(String),
+    /// A template update expected a revision other than the one on record — re-read and retry.
+    #[error("template revision conflict (expected {expected:?}, found {actual:?})")]
+    TemplateRevisionConflict {
         expected: Option<u64>,
         actual: Option<u64>,
     },
-    /// A prompt-template action named one that does not exist in the addressed scope.
-    #[error("no prompt template under that name")]
-    UnknownPromptTemplate,
-    /// A prompt-template create named a template that already exists in the addressed scope.
-    #[error("a prompt template with that name already exists")]
-    PromptTemplateNameTaken,
+    /// A template action named one that does not exist in the addressed scope.
+    #[error("no template under that name")]
+    UnknownTemplate,
+    /// A template create named one that already exists in the addressed scope and kind.
+    #[error("a template with that name already exists")]
+    TemplateNameTaken,
     /// A `solo://` link could not be parsed.
     #[error("not a valid solo:// link")]
     MalformedLink,
@@ -159,10 +159,10 @@ impl IpcError {
             | IpcError::UnknownBlocker
             | IpcError::SelfBlocker
             | IpcError::UnknownComment
-            | IpcError::InvalidPromptTemplate(_)
-            | IpcError::PromptTemplateRevisionConflict { .. }
-            | IpcError::UnknownPromptTemplate
-            | IpcError::PromptTemplateNameTaken
+            | IpcError::InvalidTemplate(_)
+            | IpcError::TemplateRevisionConflict { .. }
+            | IpcError::UnknownTemplate
+            | IpcError::TemplateNameTaken
             | IpcError::MalformedLink
             | IpcError::ForeignScopeLink
             | IpcError::OutOfScope
@@ -266,14 +266,12 @@ impl From<CoordinationError> for IpcError {
             CoordinationError::UnknownBlocker => IpcError::UnknownBlocker,
             CoordinationError::SelfBlocker => IpcError::SelfBlocker,
             CoordinationError::UnknownComment => IpcError::UnknownComment,
-            CoordinationError::InvalidPromptTemplate(message) => {
-                IpcError::InvalidPromptTemplate(message)
+            CoordinationError::InvalidTemplate(message) => IpcError::InvalidTemplate(message),
+            CoordinationError::TemplateRevisionConflict { expected, actual } => {
+                IpcError::TemplateRevisionConflict { expected, actual }
             }
-            CoordinationError::PromptTemplateRevisionConflict { expected, actual } => {
-                IpcError::PromptTemplateRevisionConflict { expected, actual }
-            }
-            CoordinationError::UnknownPromptTemplate => IpcError::UnknownPromptTemplate,
-            CoordinationError::PromptTemplateNameTaken => IpcError::PromptTemplateNameTaken,
+            CoordinationError::UnknownTemplate => IpcError::UnknownTemplate,
+            CoordinationError::TemplateNameTaken => IpcError::TemplateNameTaken,
             CoordinationError::MalformedLink => IpcError::MalformedLink,
             CoordinationError::ForeignScopeLink => IpcError::ForeignScopeLink,
             CoordinationError::ForeignProject => IpcError::ForeignProject,

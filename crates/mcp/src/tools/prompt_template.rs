@@ -9,7 +9,7 @@
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
-use soloist_core::PromptScope;
+use soloist_core::TemplateScope;
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
@@ -20,8 +20,10 @@ use crate::tools::reply::{app_error, structured, unexpected};
 
 /// The scope a tool acts in when the caller names none: the effective project, consistent
 /// with every other project-scoped tool.
-fn scope_or_default(scope: Option<crate::args::PromptScopeArg>) -> PromptScope {
-    scope.map(PromptScope::from).unwrap_or(PromptScope::Project)
+fn scope_or_default(scope: Option<crate::args::PromptScopeArg>) -> TemplateScope {
+    scope
+        .map(TemplateScope::from)
+        .unwrap_or(TemplateScope::Project)
 }
 
 #[tool_router(router = prompt_template_router, vis = "pub(crate)")]
@@ -33,7 +35,7 @@ impl SoloistMcp {
         &self,
         Parameters(PromptTemplateListArg { scope }): Parameters<PromptTemplateListArg>,
     ) -> Result<CallToolResult, ErrorData> {
-        let scope = scope.map(PromptScope::from);
+        let scope = scope.map(TemplateScope::from);
         match self
             .client
             .request(IpcRequest::PromptTemplateList { scope })

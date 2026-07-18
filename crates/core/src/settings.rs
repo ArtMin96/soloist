@@ -27,6 +27,7 @@ mod integrations;
 mod notifications;
 mod project;
 mod sidebar;
+mod templates;
 mod tools;
 
 pub use appearance::{
@@ -37,6 +38,7 @@ pub use integrations::Integrations;
 pub use notifications::Notifications;
 pub use project::ProjectSettings;
 pub use sidebar::{ProcessCpuThreshold, ProcessMemThreshold, Sidebar};
+pub use templates::TemplateDefaults;
 pub use tools::ToolDefaults;
 
 /// A toggleable MCP feature-tool group. The core groups (Project, Process, Output, Bulk,
@@ -139,6 +141,7 @@ pub struct Settings {
     pub integrations: Integrations,
     pub notifications: Notifications,
     pub mcp_tool_groups: McpToolGroups,
+    pub template_defaults: TemplateDefaults,
 }
 
 /// Durable settings repository: loads and saves a document `D` keyed by `K`. `load` returns `None`

@@ -19,6 +19,10 @@ export type ProcStatus =
 // "Ready" = the awaited port bound.
 export type Readiness = "Ungated" | "Waiting" | "Ready";
 
+// The kind of document a template seeds (mirrors core::TemplateKind, serde snake_case). One
+// unified template aggregate serves all three.
+export type TemplateKind = "prompt" | "scratchpad" | "todo";
+
 export interface ProcessView {
   id: number;
   project: number;
@@ -225,7 +229,10 @@ export type DomainEvent =
   | { type: "LeaseChanged"; project: number; key: string }
   // Keyed by the scratchpad's `name` handle (the addressing key its surface uses).
   | { type: "ScratchpadChanged"; project: number; name: string }
-  | { type: "KvChanged"; project: number; key: string };
+  | { type: "KvChanged"; project: number; key: string }
+  // A template of `kind` was created, updated, or deleted; a templates surface re-reads that
+  // kind's list (coalesced). Carries no project — the selected default is read separately.
+  | { type: "TemplateChanged"; kind: TemplateKind };
 
 export interface AppInfo {
   name: string;

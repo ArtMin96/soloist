@@ -68,7 +68,8 @@ fn a_scoped_session_writes_reads_and_lists_without_binding_a_process() {
     let created = facade
         .scoped(session)
         .scratchpad_write("release-plan", body(), None)
-        .expect("create succeeds with only project scope");
+        .expect("create succeeds with only project scope")
+        .view;
     assert_eq!(created.revision, 1);
 
     let read = facade

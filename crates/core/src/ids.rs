@@ -89,12 +89,12 @@ id_newtype!(
     ScratchpadId
 );
 id_newtype!(
-    /// Identifies a prompt template (context C6) — a durable reusable prompt, global or
-    /// project-scoped. The store assigns it on creation and reconstructs it via
-    /// [`from_raw`](PromptTemplateId::from_raw) when reading a row back. Like a scratchpad, a
-    /// template is durable content addressed by its per-scope-unique name; this id is the
-    /// stable identity behind that handle.
-    PromptTemplateId
+    /// Identifies a template (context C6) — a durable reusable document (a prompt, or a starting
+    /// shape for a scratchpad or todo), global or project-scoped. The store assigns it on creation
+    /// and reconstructs it via [`from_raw`](TemplateId::from_raw) when reading a row back. Like a
+    /// scratchpad, a template is durable content addressed by its per-scope-unique name within its
+    /// kind; this id is the stable identity behind that handle.
+    TemplateId
 );
 id_newtype!(
     /// Identifies a coordination todo (context C6) — a durable, project-scoped shared work item.

@@ -58,7 +58,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Create or update a scratchpad from its Markdown content — the whole body, free-form. Do not repeat the name as a heading; it is the handle. Omit expected_revision to create; to update, read first and pass the revision you read — a mismatch means someone edited it first."
+        description = "Create or update a scratchpad from its Markdown content — the whole body, free-form. Do not repeat the name as a heading; it is the handle. Omit expected_revision to create; to update, read first and pass the revision you read — a mismatch means someone edited it first. On a create, leaving content empty seeds the body from the project's default scratchpad template (if one is selected); the reply's `seeded_from` names it."
     )]
     pub(crate) async fn scratchpad_write(
         &self,
@@ -74,7 +74,13 @@ impl SoloistMcp {
             expected_revision,
         };
         match self.client.request(request).await {
-            Ok(IpcResponse::Scratchpad(view)) => structured(&view),
+            Ok(IpcResponse::ScratchpadWritten {
+                scratchpad,
+                seeded_from,
+            }) => structured(&serde_json::json!({
+                "scratchpad": scratchpad,
+                "seeded_from": seeded_from,
+            })),
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }

@@ -55,7 +55,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Create a todo: a title, an optional free-form Markdown body (what needs doing and any detail), and an initial status (defaults to open). Returns the new todo with its id."
+        description = "Create a todo: a title, an optional free-form Markdown body (what needs doing and any detail), and an initial status (defaults to open). Leaving the body empty seeds it from the project's default todo template (if one is selected); the reply's `seeded_from` names it. Returns the new todo with its id."
     )]
     pub(crate) async fn todo_create(
         &self,
@@ -70,7 +70,13 @@ impl SoloistMcp {
             body: body.unwrap_or_default(),
             status: status.map_or(TodoStatus::Open, Into::into),
         };
-        self.todo_view(IpcRequest::TodoCreate { doc }).await
+        match self.client.request(IpcRequest::TodoCreate { doc }).await {
+            Ok(IpcResponse::TodoCreated { todo, seeded_from }) => {
+                structured(&serde_json::json!({ "todo": todo, "seeded_from": seeded_from }))
+            }
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
     }
 
     #[tool(

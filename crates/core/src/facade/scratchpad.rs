@@ -11,11 +11,20 @@
 //! [`CoordinationError`].
 
 use super::scoped::ScopedFacade;
+use super::template::Seeded;
 use super::Facade;
 use crate::coordination::{RenameError, ScratchpadSummary, ScratchpadView, WriteError};
 use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
 use crate::ids::ProjectId;
+use crate::template::TemplateKind;
+
+/// The outcome of a scratchpad write: the written view, plus the name of the template that seeded
+/// its body when a create started from an empty body (`None` on an update, or when nothing seeded).
+pub struct ScratchpadWrite {
+    pub view: ScratchpadView,
+    pub seeded_from: Option<String>,
+}
 
 impl Facade {
     /// [`scratchpad_write`](Self::scratchpad_write) scoped to `project` directly — the local-UI path
@@ -28,7 +37,27 @@ impl Facade {
         body: String,
         expected: Option<u64>,
     ) -> Result<ScratchpadView, CoordinationError> {
-        self.emit_scratchpad(
+        Ok(self.write_scratchpad(project, name, body, expected)?.view)
+    }
+
+    /// The one create/write seam both the local UI and MCP route through: on a create (no expected
+    /// revision) an empty body is seeded from the default scratchpad template, then the write is
+    /// applied and its event emitted. Returns the view plus the seeding template's name, so the MCP
+    /// create response can report it; the local-UI [`scratchpad_write_in`](Self::scratchpad_write_in)
+    /// keeps just the view.
+    pub(crate) fn write_scratchpad(
+        &self,
+        project: ProjectId,
+        name: &str,
+        body: String,
+        expected: Option<u64>,
+    ) -> Result<ScratchpadWrite, CoordinationError> {
+        let Seeded { body, from } = if expected.is_none() {
+            self.seed_body(TemplateKind::Scratchpad, body)?
+        } else {
+            Seeded { body, from: None }
+        };
+        let view = self.emit_scratchpad(
             project,
             self.scratchpads
                 .write(project, name, body, expected)
@@ -39,7 +68,11 @@ impl Facade {
                     }
                     WriteError::Store(err) => CoordinationError::Store(err),
                 }),
-        )
+        )?;
+        Ok(ScratchpadWrite {
+            view,
+            seeded_from: from,
+        })
     }
 
     /// [`scratchpad_read`](Self::scratchpad_read) scoped to `project` directly — the local-UI path
@@ -112,18 +145,18 @@ impl Facade {
 impl ScopedFacade<'_> {
     /// Creates or replaces the scratchpad `name` in the session's effective project with the
     /// Markdown `body`, **revision-guarded**: `expected` is `None` to create or the current
-    /// revision to update. Returns the written scratchpad at its new revision; a malformed write
-    /// is [`CoordinationError::InvalidScratchpad`] and a stale revision
+    /// revision to update. On a create with an empty body, the default scratchpad template seeds
+    /// it; the returned [`ScratchpadWrite`] carries the written view and that template's name. A
+    /// malformed write is [`CoordinationError::InvalidScratchpad`] and a stale revision
     /// [`CoordinationError::RevisionConflict`], neither of which changes anything.
     pub fn scratchpad_write(
         &self,
         name: &str,
         body: String,
         expected: Option<u64>,
-    ) -> Result<ScratchpadView, CoordinationError> {
+    ) -> Result<ScratchpadWrite, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner
-            .scratchpad_write_in(project, name, body, expected)
+        self.inner.write_scratchpad(project, name, body, expected)
     }
 
     /// The scratchpad `name` in the session's effective project, or

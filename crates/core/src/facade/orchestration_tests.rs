@@ -100,11 +100,13 @@ fn the_snapshot_projects_the_tree_todos_timers_leases_scratchpads_and_kv_for_a_p
     let build = facade
         .scoped(session)
         .todo_create(todo_doc("build"))
-        .expect("create build");
+        .expect("create build")
+        .view;
     let ship = facade
         .scoped(session)
         .todo_create(todo_doc("ship"))
-        .expect("create ship");
+        .expect("create ship")
+        .view;
     let ship = facade
         .scoped(session)
         .todo_set_blockers(ship.id, vec![build.id])
@@ -220,7 +222,8 @@ fn creating_a_todo_emits_one_todo_changed() {
     let todo = facade
         .scoped(session)
         .todo_create(todo_doc("build"))
-        .expect("create");
+        .expect("create")
+        .view;
 
     let events = drain(&mut rx);
     assert_eq!(events.len(), 1, "exactly one event: {events:?}");
@@ -237,7 +240,8 @@ fn completing_a_todo_emits_one_todo_changed() {
     let todo = facade
         .scoped(session)
         .todo_create(todo_doc("build"))
-        .expect("create");
+        .expect("create")
+        .view;
     let mut rx = facade.subscribe();
 
     facade

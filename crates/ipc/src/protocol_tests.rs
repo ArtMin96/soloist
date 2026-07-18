@@ -2,13 +2,46 @@ use super::*;
 
 use crate::error::IpcError;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, ExportedPromptTemplate, FeedbackEntry, FireCond,
+    AcquireOutcome, AgentKind, AgentTool, ExportedTemplate, FeedbackEntry, FireCond,
     IntegrationFile, IntegrationWrite, LeaseView, Origin, ProcStatus, ProcessId, ProcessKind,
-    ProcessView, ProjectId, ProjectRef, ProjectView, PromptMode, PromptScope, PromptTemplateId,
-    PromptTemplateSummary, PromptTemplateView, Readiness, SessionId, SetWhenIdleOutcome,
-    StartSummary, TimerId, TimerStatus, TimerView, Whoami,
+    ProcessView, ProjectId, ProjectRef, ProjectView, PromptMode, Readiness, ScratchpadId,
+    ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary, TemplateId, TemplateKind,
+    TemplateScope, TemplateSummary, TemplateView, TimerId, TimerStatus, TimerView, TodoDoc, TodoId,
+    TodoStatus, TodoView, Whoami,
 };
 use std::path::PathBuf;
+
+/// A sample scratchpad view for the create-with-seed response round-trip.
+fn sample_scratchpad() -> ScratchpadView {
+    ScratchpadView {
+        id: ScratchpadId::from_raw(1),
+        name: "today".into(),
+        tags: vec!["release".into()],
+        archived: false,
+        revision: 1,
+        body: "## Plan".into(),
+        rendered: "# today\n\n## Plan\n".into(),
+    }
+}
+
+/// A sample todo view for the create-with-seed response round-trip.
+fn sample_todo() -> TodoView {
+    TodoView {
+        id: TodoId::from_raw(1),
+        doc: TodoDoc {
+            title: "sweep".into(),
+            body: "## Steps".into(),
+            status: TodoStatus::Open,
+        },
+        tags: Vec::new(),
+        blockers: Vec::new(),
+        blocked_by: Vec::new(),
+        blocked: false,
+        comments: Vec::new(),
+        locked_by: None,
+        revision: 1,
+    }
+}
 
 #[test]
 fn requests_round_trip_through_json() {
@@ -159,31 +192,31 @@ fn requests_round_trip_through_json() {
         },
         IpcRequest::PromptTemplateList { scope: None },
         IpcRequest::PromptTemplateList {
-            scope: Some(PromptScope::Global),
+            scope: Some(TemplateScope::Global),
         },
         IpcRequest::PromptTemplateRead {
-            scope: PromptScope::Project,
+            scope: TemplateScope::Project,
             name: "review".into(),
         },
         IpcRequest::PromptTemplateCreate {
-            scope: PromptScope::Global,
+            scope: TemplateScope::Global,
             name: "review".into(),
             description: Some("PR review".into()),
             body: "Review {{diff}}".into(),
         },
         IpcRequest::PromptTemplateUpdate {
-            scope: PromptScope::Project,
+            scope: TemplateScope::Project,
             name: "review".into(),
             description: None,
             body: "Review {{diff}} for {{focus}}".into(),
             expected_revision: 2,
         },
         IpcRequest::PromptTemplateDelete {
-            scope: PromptScope::Project,
+            scope: TemplateScope::Project,
             name: "review".into(),
         },
         IpcRequest::PromptTemplateExport {
-            scope: PromptScope::Global,
+            scope: TemplateScope::Global,
             name: "review".into(),
         },
     ];
@@ -323,30 +356,40 @@ fn every_response_variant_round_trips_through_json() {
             path: PathBuf::from("/projects/storefront/CLAUDE.md"),
             created: true,
         }),
-        IpcResponse::PromptTemplate(PromptTemplateView {
-            id: PromptTemplateId::from_raw(4),
+        IpcResponse::PromptTemplate(TemplateView {
+            id: TemplateId::from_raw(4),
+            kind: TemplateKind::Prompt,
             name: "review".into(),
             description: Some("PR review".into()),
             body: "Review {{diff}}".into(),
             placeholders: vec!["diff".into()],
-            scope: PromptScope::Project,
+            scope: TemplateScope::Project,
             revision: 1,
         }),
-        IpcResponse::PromptTemplates(vec![PromptTemplateSummary {
-            id: PromptTemplateId::from_raw(4),
+        IpcResponse::PromptTemplates(vec![TemplateSummary {
+            id: TemplateId::from_raw(4),
+            kind: TemplateKind::Prompt,
             name: "review".into(),
             description: None,
             placeholders: vec!["diff".into()],
-            scope: PromptScope::Global,
+            scope: TemplateScope::Global,
             revision: 3,
         }]),
         IpcResponse::PromptTemplateDeleted(true),
-        IpcResponse::PromptTemplateExport(ExportedPromptTemplate {
+        IpcResponse::PromptTemplateExport(ExportedTemplate {
             format: "soloist.prompt-template/v1".into(),
             name: "review".into(),
             description: None,
             body: "Review {{diff}}".into(),
         }),
+        IpcResponse::ScratchpadWritten {
+            scratchpad: sample_scratchpad(),
+            seeded_from: Some("daily".into()),
+        },
+        IpcResponse::TodoCreated {
+            todo: sample_todo(),
+            seeded_from: None,
+        },
     ];
     for response in responses {
         let json = serde_json::to_string(&response).expect("serialize");

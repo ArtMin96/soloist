@@ -8,11 +8,13 @@
 //! aggregate, so the façade method is a thin pass-through.
 
 use super::Facade;
+use crate::ids::TemplateId;
 use crate::ports::StoreError;
 use crate::settings::{
     Appearance, Binding, HotkeyAction, HotkeyBindingView, Integrations, McpFeatureGroup,
-    McpToolGroups, Notifications, Sidebar, ToolDefaults,
+    McpToolGroups, Notifications, Sidebar, TemplateDefaults, ToolDefaults,
 };
+use crate::template::TemplateKind;
 
 impl Facade {
     /// The Appearance settings — theme + terminal typography. Absent settings read as the
@@ -157,6 +159,27 @@ impl Facade {
             .settings
             .update(&(), |s| s.mcp_tool_groups.set(group, enabled))?
             .mcp_tool_groups)
+    }
+
+    /// The default-template selection per kind — which template each free-form kind seeds a new
+    /// document from. Read per call (never cached alongside the template list), so a change takes
+    /// effect on the next creation. Absent settings read as the documented defaults (none selected).
+    pub fn template_defaults(&self) -> Result<TemplateDefaults, StoreError> {
+        Ok(self.settings.get(&())?.template_defaults)
+    }
+
+    /// Selects (or clears, with `None`) the default template for `kind` and persists it, returning
+    /// the updated selection. One method behind the façade, so the Settings UI and any other front
+    /// set the same durable record; [`TemplateKind::Prompt`] has no seed default and is a no-op.
+    pub fn set_default_template(
+        &self,
+        kind: TemplateKind,
+        template: Option<TemplateId>,
+    ) -> Result<TemplateDefaults, StoreError> {
+        Ok(self
+            .settings
+            .update(&(), |s| s.template_defaults.set(kind, template))?
+            .template_defaults)
     }
 }
 

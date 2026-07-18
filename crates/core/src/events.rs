@@ -17,6 +17,7 @@ use crate::idle::AgentActivity;
 use crate::ids::{ProcessId, ProjectId, TimerId, TodoId};
 use crate::orphans::OrphanInfo;
 use crate::process::{ProcStatus, ProcessKind};
+use crate::template::TemplateKind;
 
 /// A change in domain state, serialized to adapters verbatim. `#[serde(tag = "type")]`
 /// gives each variant a discriminator field so a JS/TS consumer can switch on it.
@@ -159,6 +160,10 @@ pub enum DomainEvent {
     ScratchpadChanged { project: ProjectId, name: String },
     /// A coordination key-value entry `key` in `project` changed (set or deleted).
     KvChanged { project: ProjectId, key: String },
+    /// A template of `kind` was created, updated, or deleted. Carries the kind only — a
+    /// low-frequency change-notification the templates surface re-reads that kind's list on
+    /// (coalesced), rather than trusting a payload; the selected default is read separately.
+    TemplateChanged { kind: TemplateKind },
 }
 
 /// The outbound event port: anything the core publishes domain events through.

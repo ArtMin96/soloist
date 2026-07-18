@@ -74,6 +74,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "LeaseChanged":
     case "ScratchpadChanged":
     case "KvChanged":
+    case "TemplateChanged":
       return processes;
   }
 }

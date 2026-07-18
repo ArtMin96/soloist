@@ -1,12 +1,12 @@
 //! Versioned, idempotent SQLite migrations for the durable store.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use soloist_core::{AgentTool, StoreError};
 
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 13;
+pub(crate) const SCHEMA_VERSION: i64 = 14;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -238,11 +238,42 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         crate::doc_to_markdown::convert(conn)?;
     }
 
+    if version < 14 {
+        // Generalize `prompt_templates` into the unified `templates` table: add a `kind` column
+        // (existing rows are prompts — the DEFAULT backfills them), and re-key uniqueness on
+        // (kind, scope, name) so the same name may exist as a prompt, a scratchpad shape, and a
+        // todo shape. Guarded so a re-run after a partial failure is a no-op, like every step here:
+        // the rename runs only while the old table exists and the new one does not.
+        if table_exists(conn, "prompt_templates")? && !table_exists(conn, "templates")? {
+            conn.execute_batch(
+                "ALTER TABLE prompt_templates RENAME TO templates;
+                 ALTER TABLE templates ADD COLUMN kind TEXT NOT NULL DEFAULT 'prompt';
+                 DROP INDEX IF EXISTS prompt_templates_scope_name;
+                 CREATE UNIQUE INDEX IF NOT EXISTS templates_kind_scope_name
+                     ON templates (kind, COALESCE(project_id, 0), name);",
+            )
+            .map_err(sql_err)?;
+        }
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
     }
     Ok(())
+}
+
+/// Whether a table of `name` exists — used by the guarded rename in the v14 step so it stays a
+/// no-op on a re-run.
+fn table_exists(conn: &Connection, name: &str) -> Result<bool, StoreError> {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [name],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|found| found.is_some())
+    .map_err(sql_err)
 }
 
 /// Seeds the built-in agent providers into a fresh `agent_tools` table, preserving their
@@ -293,7 +324,7 @@ mod tests {
             "settings",
             "project_settings",
             "feedback",
-            "prompt_templates",
+            "templates",
         ] {
             let exists = conn
                 .query_row(
@@ -363,17 +394,15 @@ mod tests {
             "the upgrade advances a populated database to the current schema"
         );
 
-        // A table added after v6 now exists...
-        let has_prompt_templates = conn
-            .query_row(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prompt_templates'",
-                [],
-                |_| Ok(()),
-            )
-            .is_ok();
+        // A table added after v6 now exists — the unified `templates` table (the prompt-templates
+        // table generalized by v14), and the pre-v14 `prompt_templates` name is gone.
         assert!(
-            has_prompt_templates,
+            table_exists(&conn, "templates").expect("check templates"),
             "the upgrade creates tables added after the intermediate version"
+        );
+        assert!(
+            !table_exists(&conn, "prompt_templates").expect("check prompt_templates"),
+            "v14 renames prompt_templates away"
         );
 
         // ...and the pre-existing rows survive it.

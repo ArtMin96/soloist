@@ -66,7 +66,8 @@ fn a_scoped_session_creates_lists_and_completes_without_binding_a_process() {
     let created = facade
         .scoped(session)
         .todo_create(doc("ship", TodoStatus::Open))
-        .expect("create with only project scope");
+        .expect("create with only project scope")
+        .view;
     let listed = facade.scoped(session).todo_list().expect("list");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, created.id);
@@ -84,7 +85,8 @@ fn a_stale_update_surfaces_a_todo_revision_conflict() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("v1", TodoStatus::Open))
-        .expect("create");
+        .expect("create")
+        .view;
     facade
         .scoped(session)
         .todo_update(todo.id, doc("v2", TodoStatus::InProgress), 1)
@@ -118,11 +120,13 @@ fn completing_a_blocked_todo_surfaces_todo_blocked() {
     let blocker = facade
         .scoped(session)
         .todo_create(doc("dep", TodoStatus::Open))
-        .expect("create blocker");
+        .expect("create blocker")
+        .view;
     let gated = facade
         .scoped(session)
         .todo_create(doc("main", TodoStatus::Open))
-        .expect("create dependent");
+        .expect("create dependent")
+        .view;
     facade
         .scoped(session)
         .todo_set_blockers(gated.id, vec![blocker.id])
@@ -153,7 +157,8 @@ fn locking_a_todo_without_a_bound_process_is_refused() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("x", TodoStatus::Open))
-        .expect("create");
+        .expect("create")
+        .view;
     assert!(matches!(
         facade.scoped(session).todo_lock(todo.id),
         Err(CoordinationError::NoBoundProcess)
@@ -176,7 +181,8 @@ fn a_bound_session_locks_and_unlocks_a_todo() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("x", TodoStatus::Open))
-        .expect("create");
+        .expect("create")
+        .view;
     let locked = facade.scoped(session).todo_lock(todo.id).expect("lock");
     assert_eq!(locked.locked_by, Some(owner));
 
@@ -190,7 +196,8 @@ fn comments_round_trip_and_report_unknown_targets() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("x", TodoStatus::Open))
-        .expect("create");
+        .expect("create")
+        .view;
 
     let (_, comment) = facade
         .scoped(session)
@@ -221,7 +228,8 @@ fn an_unbound_callers_comment_is_unattributed() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("x", TodoStatus::Open))
-        .expect("create");
+        .expect("create")
+        .view;
     let (view, _) = facade
         .scoped(session)
         .todo_comment_create(todo.id, "drive-by note")
@@ -245,7 +253,8 @@ fn a_bound_process_stamps_its_actor_on_a_comment() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("x", TodoStatus::Open))
-        .expect("create");
+        .expect("create")
+        .view;
     let (view, _) = facade
         .scoped(session)
         .todo_comment_create(todo.id, "reviewed")
@@ -286,11 +295,13 @@ fn todo_transfer_in_preserves_the_document_comments_and_clears_blockers_and_lock
     let todo = facade
         .scoped(session)
         .todo_create(doc("ship", TodoStatus::InProgress))
-        .expect("create");
+        .expect("create")
+        .view;
     let blocker = facade
         .scoped(session)
         .todo_create(doc("dep", TodoStatus::Open))
-        .expect("blocker");
+        .expect("blocker")
+        .view;
     facade
         .scoped(session)
         .todo_add_blocker(todo.id, blocker.id)
@@ -343,7 +354,8 @@ fn todo_transfer_refuses_a_target_outside_the_callers_authenticated_scope() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("ship", TodoStatus::Open))
-        .expect("create in A");
+        .expect("create in A")
+        .view;
 
     // Transferring to B — which the caller does not run in — is refused (the cross-scope guard).
     assert!(matches!(
@@ -364,7 +376,8 @@ fn todo_transfer_in_refuses_an_unknown_target_project() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("ship", TodoStatus::Open))
-        .expect("create in A");
+        .expect("create in A")
+        .view;
 
     // A target project that is not loaded is refused before any move, so a bad id never orphans
     // the todo — it stays readable in A.
