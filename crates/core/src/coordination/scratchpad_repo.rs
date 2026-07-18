@@ -27,6 +27,9 @@ pub struct StoredScratchpad {
     pub tags: Vec<String>,
     pub archived: bool,
     pub revision: u64,
+    /// Unix millis of the last body write (0 for a row that predates the field). The recency key the
+    /// listing sorts on; unaffected by archive/rename/tag changes, which are not body edits.
+    pub updated_at: u64,
 }
 
 /// The outcome of a revision-guarded [`write`](ScratchpadRepo::write): either the write applied and
@@ -69,13 +72,16 @@ pub trait ScratchpadRepo: Send + Sync {
     /// to update (applies only if it still matches). On success returns
     /// [`WriteResult::Written`] with the stored row at its new revision (1 on create, otherwise
     /// `expected + 1`); on a mismatch returns [`WriteResult::Conflict`] with the revision on record
-    /// and changes nothing.
+    /// and changes nothing. `now` is the wall-clock (unix millis) the applied write stamps
+    /// `updated_at` with — supplied by the aggregate's [`Clock`](crate::ports::Clock) so the store
+    /// stays deterministic under test.
     fn write(
         &self,
         project: ProjectId,
         name: &str,
         body: &str,
         expected: Option<u64>,
+        now: u64,
     ) -> Result<WriteResult, StoreError>;
 
     /// The scratchpad `(project, name)`, or `None` if there is none.
@@ -145,6 +151,7 @@ impl ScratchpadRepo for NoopScratchpadRepo {
         name: &str,
         body: &str,
         _expected: Option<u64>,
+        now: u64,
     ) -> Result<WriteResult, StoreError> {
         Ok(WriteResult::Written(Box::new(StoredScratchpad {
             id: ScratchpadId::from_raw(0),
@@ -154,6 +161,7 @@ impl ScratchpadRepo for NoopScratchpadRepo {
             tags: Vec::new(),
             archived: false,
             revision: 1,
+            updated_at: now,
         })))
     }
     fn read(

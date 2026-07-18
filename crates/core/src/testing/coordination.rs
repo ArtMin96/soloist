@@ -128,6 +128,7 @@ impl ScratchpadRepo for FakeScratchpadRepo {
         name: &str,
         body: &str,
         expected: Option<u64>,
+        now: u64,
     ) -> Result<WriteResult, StoreError> {
         let mut rows = lock(&self.rows);
         let slot = (project.get(), name.to_owned());
@@ -137,6 +138,7 @@ impl ScratchpadRepo for FakeScratchpadRepo {
                     let mut updated = existing.clone();
                     updated.body = body.to_owned();
                     updated.revision = existing.revision + 1;
+                    updated.updated_at = now;
                     rows.insert(slot, updated.clone());
                     Ok(WriteResult::Written(Box::new(updated)))
                 }
@@ -156,6 +158,7 @@ impl ScratchpadRepo for FakeScratchpadRepo {
                         tags: Vec::new(),
                         archived: false,
                         revision: 1,
+                        updated_at: now,
                     };
                     rows.insert(slot, stored.clone());
                     Ok(WriteResult::Written(Box::new(stored)))

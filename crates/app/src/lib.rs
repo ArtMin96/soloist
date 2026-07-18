@@ -440,6 +440,8 @@ pub fn run() {
             commands::agent_activity,
             commands::scratchpad_read,
             commands::scratchpad_write,
+            commands::scratchpad_archive,
+            commands::export_markdown,
             commands::todo_create,
             commands::todo_update,
             commands::todo_complete,

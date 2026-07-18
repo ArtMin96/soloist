@@ -1,4 +1,4 @@
-import { Link2 } from "lucide-react";
+import { Archive, ArchiveRestore, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScratchpadBody } from "@/components/orchestration/ScratchpadBody";
 import type { ScratchpadConflict } from "@/store/useScratchpadEditor";
@@ -11,9 +11,13 @@ interface ScratchpadEditorProps {
   mountKey: number;
   conflict: ScratchpadConflict | null;
   error: string | null;
+  /** Whether the open scratchpad is archived — flips the header control between Archive and Restore. */
+  archived: boolean;
   onSave: (markdown: string) => Promise<void>;
   onReload: () => void;
   onCopyLink: () => void;
+  /** Archives the open scratchpad, or restores it when already archived (also bound to Ctrl+Shift+W). */
+  onArchive: () => void;
 }
 
 // The scratchpad's editing surface: a persistent header (name, revision, actions), the conflict
@@ -29,9 +33,11 @@ export function ScratchpadEditor({
   mountKey,
   conflict,
   error,
+  archived,
   onSave,
   onReload,
   onCopyLink,
+  onArchive,
 }: ScratchpadEditorProps) {
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -44,6 +50,17 @@ export function ScratchpadEditor({
             revision {revision}
           </span>
         )}
+        <Button variant="ghost" size="sm" onClick={onArchive}>
+          {archived ? (
+            <>
+              <ArchiveRestore aria-hidden /> Restore
+            </>
+          ) : (
+            <>
+              <Archive aria-hidden /> Archive
+            </>
+          )}
+        </Button>
         <Button variant="ghost" size="sm" onClick={onCopyLink}>
           <Link2 aria-hidden /> Copy link
         </Button>

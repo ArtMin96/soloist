@@ -19,7 +19,7 @@ use soloist_core::{
 use crate::{sql_err, SqliteStore};
 
 /// The columns every read selects, in order, so [`row_to_scratchpad`] decodes one shape.
-const SCRATCHPAD_COLUMNS: &str = "id, project_id, name, doc, tags, archived, revision";
+const SCRATCHPAD_COLUMNS: &str = "id, project_id, name, doc, tags, archived, revision, updated_at";
 
 impl ScratchpadRepo for SqliteStore {
     fn write(
@@ -28,18 +28,25 @@ impl ScratchpadRepo for SqliteStore {
         name: &str,
         body: &str,
         expected: Option<u64>,
+        now: u64,
     ) -> Result<WriteResult, StoreError> {
         let conn = self.lock();
         // Read the current revision and update-or-insert under one guard, so the guard check and the
         // write cannot interleave with a concurrent writer.
         let current = current_revision(&conn, project, name)?;
         match (current, expected) {
-            // Update the existing row at the expected revision, bumping it.
+            // Update the existing row at the expected revision, bumping it and stamping the write.
             (Some(revision), Some(expected)) if revision == expected => {
                 conn.execute(
-                    "UPDATE scratchpads SET doc = ?3, revision = ?4
+                    "UPDATE scratchpads SET doc = ?3, revision = ?4, updated_at = ?5
                      WHERE project_id = ?1 AND name = ?2",
-                    (project.get() as i64, name, body, (revision + 1) as i64),
+                    (
+                        project.get() as i64,
+                        name,
+                        body,
+                        (revision + 1) as i64,
+                        now as i64,
+                    ),
                 )
                 .map_err(sql_err)?;
                 read_one(&conn, project, name)?
@@ -49,9 +56,9 @@ impl ScratchpadRepo for SqliteStore {
             // Create a fresh row only when none exists and the caller expected absence.
             (None, None) => {
                 conn.execute(
-                    "INSERT INTO scratchpads (project_id, name, doc, tags, archived, revision)
-                     VALUES (?1, ?2, ?3, '[]', 0, 1)",
-                    (project.get() as i64, name, body),
+                    "INSERT INTO scratchpads (project_id, name, doc, tags, archived, revision, updated_at)
+                     VALUES (?1, ?2, ?3, '[]', 0, 1, ?4)",
+                    (project.get() as i64, name, body, now as i64),
                 )
                 .map_err(sql_err)?;
                 read_one(&conn, project, name)?
@@ -278,6 +285,7 @@ fn row_to_scratchpad(row: &Row<'_>) -> rusqlite::Result<Result<StoredScratchpad,
     let tags_json: String = row.get(4)?;
     let archived: i64 = row.get(5)?;
     let revision: i64 = row.get(6)?;
+    let updated_at: i64 = row.get(7)?;
     Ok(decode_tags(&tags_json).map(|tags| StoredScratchpad {
         id: ScratchpadId::from_raw(id as u64),
         project: ProjectId::from_raw(project as u64),
@@ -286,6 +294,7 @@ fn row_to_scratchpad(row: &Row<'_>) -> rusqlite::Result<Result<StoredScratchpad,
         tags,
         archived: archived != 0,
         revision: revision as u64,
+        updated_at: updated_at as u64,
     }))
 }
 

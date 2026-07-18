@@ -7,13 +7,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { LazyRichTextEditor } from "@/components/editor/LazyRichTextEditor";
-import { TODO_STATUS } from "@/lib/todo";
+import { TODO_STATUS, TODO_STATUS_ORDER } from "@/lib/todo";
 import type { TodoStatus } from "@/domain";
-
-// The order the status options are offered in — the natural workflow progression, not the enum's
-// declaration order. Exhaustive over the closed `TodoStatus`, so a new state would fail to compile
-// here until it is placed deliberately.
-const STATUS_ORDER: TodoStatus[] = ["open", "in_progress", "blocked", "done"];
 
 interface TodoDocFieldsProps {
   title: string;
@@ -63,7 +58,7 @@ export function TodoDocFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {STATUS_ORDER.map((option) => (
+            {TODO_STATUS_ORDER.map((option) => (
               <SelectItem key={option} value={option}>
                 {TODO_STATUS[option]}
               </SelectItem>

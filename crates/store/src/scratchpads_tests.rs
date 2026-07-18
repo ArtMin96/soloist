@@ -2,12 +2,40 @@ use std::path::Path;
 use std::sync::{Arc, Barrier};
 
 use soloist_core::{
-    ProjectId, ProjectRepo, RenameResult, ScratchpadRepo, StoredScratchpad, TransferResult,
-    WriteResult,
+    ProjectId, ProjectRepo, RenameResult, ScratchpadRepo, StoreError, StoredScratchpad,
+    TransferResult, WriteResult,
 };
 use tempfile::tempdir;
 
 use super::*;
+
+/// A fixed wall clock for the writes whose recency is not under test — these exercise revision,
+/// rename, tag, archive, and cascade semantics, and `updated_at` is verified on its own below.
+const FIXED_NOW: u64 = 1_700_000_000_000;
+
+/// Writes at [`FIXED_NOW`], so the semantics tests read the same as before `updated_at` existed. The
+/// recency-stamping behaviour has its own test that drives real timestamps.
+trait WriteAt {
+    fn write_at(
+        &self,
+        project: ProjectId,
+        name: &str,
+        body: &str,
+        expected: Option<u64>,
+    ) -> Result<WriteResult, StoreError>;
+}
+
+impl WriteAt for SqliteStore {
+    fn write_at(
+        &self,
+        project: ProjectId,
+        name: &str,
+        body: &str,
+        expected: Option<u64>,
+    ) -> Result<WriteResult, StoreError> {
+        self.write(project, name, body, expected, FIXED_NOW)
+    }
+}
 
 fn project(store: &SqliteStore, root: &str) -> ProjectId {
     store
@@ -37,7 +65,7 @@ fn create_then_read_round_trips_the_body() {
 
     let created = written(
         store
-            .write(project, "plan", &body("started"), None)
+            .write_at(project, "plan", &body("started"), None)
             .expect("create"),
     );
     assert_eq!(created.revision, 1);
@@ -54,13 +82,13 @@ fn a_write_is_revision_guarded() {
     let store = SqliteStore::open_in_memory().expect("open");
     let project = project(&store, "/p/app");
     store
-        .write(project, "plan", &body("a"), None)
+        .write_at(project, "plan", &body("a"), None)
         .expect("create");
 
     // Update at the current revision bumps it.
     let updated = written(
         store
-            .write(project, "plan", &body("b"), Some(1))
+            .write_at(project, "plan", &body("b"), Some(1))
             .expect("update"),
     );
     assert_eq!(updated.revision, 2);
@@ -69,7 +97,7 @@ fn a_write_is_revision_guarded() {
     // A stale revision conflicts and changes nothing.
     assert_eq!(
         store
-            .write(project, "plan", &body("c"), Some(1))
+            .write_at(project, "plan", &body("c"), Some(1))
             .expect("stale"),
         WriteResult::Conflict { actual: Some(2) }
     );
@@ -81,7 +109,7 @@ fn a_write_is_revision_guarded() {
     // Creating over an existing name conflicts.
     assert_eq!(
         store
-            .write(project, "plan", &body("d"), None)
+            .write_at(project, "plan", &body("d"), None)
             .expect("recreate"),
         WriteResult::Conflict { actual: Some(2) }
     );
@@ -89,7 +117,7 @@ fn a_write_is_revision_guarded() {
     // Updating a missing scratchpad conflicts with no record.
     assert_eq!(
         store
-            .write(project, "absent", &body("e"), Some(5))
+            .write_at(project, "absent", &body("e"), Some(5))
             .expect("update missing"),
         WriteResult::Conflict { actual: None }
     );
@@ -101,11 +129,11 @@ fn rename_keeps_the_id_and_enforces_uniqueness() {
     let project = project(&store, "/p/app");
     let created = written(
         store
-            .write(project, "old", &body("a"), None)
+            .write_at(project, "old", &body("a"), None)
             .expect("create"),
     );
     store
-        .write(project, "taken", &body("a"), None)
+        .write_at(project, "taken", &body("a"), None)
         .expect("create taken");
 
     let renamed = match store.rename(project, "old", "new").expect("rename") {
@@ -137,10 +165,10 @@ fn tags_add_dedupe_remove_and_list_distinct() {
     let store = SqliteStore::open_in_memory().expect("open");
     let project = project(&store, "/p/app");
     store
-        .write(project, "a", &body("a"), None)
+        .write_at(project, "a", &body("a"), None)
         .expect("create a");
     store
-        .write(project, "b", &body("a"), None)
+        .write_at(project, "b", &body("a"), None)
         .expect("create b");
 
     let tagged = store
@@ -175,7 +203,9 @@ fn tags_add_dedupe_remove_and_list_distinct() {
 fn archive_is_a_flag_and_delete_removes() {
     let store = SqliteStore::open_in_memory().expect("open");
     let project = project(&store, "/p/app");
-    store.write(project, "a", &body("a"), None).expect("create");
+    store
+        .write_at(project, "a", &body("a"), None)
+        .expect("create");
 
     let archived = store
         .set_archived(project, "a", true)
@@ -197,9 +227,15 @@ fn list_is_scoped_and_ordered_by_name() {
     let store = SqliteStore::open_in_memory().expect("open");
     let one = project(&store, "/p/one");
     let two = project(&store, "/p/two");
-    store.write(one, "zebra", &body("a"), None).expect("create");
-    store.write(one, "alpha", &body("a"), None).expect("create");
-    store.write(two, "other", &body("a"), None).expect("create");
+    store
+        .write_at(one, "zebra", &body("a"), None)
+        .expect("create");
+    store
+        .write_at(one, "alpha", &body("a"), None)
+        .expect("create");
+    store
+        .write_at(two, "other", &body("a"), None)
+        .expect("create");
 
     let names: Vec<String> = ScratchpadRepo::list(&store, one)
         .expect("list")
@@ -220,7 +256,7 @@ fn scratchpads_survive_a_store_reopen() {
         let project = project(&store, "/p/app");
         let created = written(
             store
-                .write(project, "plan", &body("started"), None)
+                .write_at(project, "plan", &body("started"), None)
                 .expect("create"),
         );
         store
@@ -246,7 +282,7 @@ fn deleting_a_project_cascades_to_its_scratchpads() {
     let store = SqliteStore::open_in_memory().expect("open");
     let project = project(&store, "/p/app");
     store
-        .write(project, "plan", &body("a"), None)
+        .write_at(project, "plan", &body("a"), None)
         .expect("create");
 
     store.remove(project).expect("remove project");
@@ -265,7 +301,7 @@ fn concurrent_writes_at_one_revision_apply_exactly_one() {
     let store = Arc::new(SqliteStore::open(&dir.path().join("soloist.db")).expect("open"));
     let project = project(&store, "/p/race");
     store
-        .write(project, "plan", &body("base"), None)
+        .write_at(project, "plan", &body("base"), None)
         .expect("create at revision 1");
     const CONTENDERS: u64 = 16;
 
@@ -278,7 +314,7 @@ fn concurrent_writes_at_one_revision_apply_exactly_one() {
                 scope.spawn(move || {
                     barrier.wait();
                     store
-                        .write(project, "plan", &body(&format!("edit-{n}")), Some(1))
+                        .write_at(project, "plan", &body(&format!("edit-{n}")), Some(1))
                         .expect("write")
                 })
             })
@@ -313,7 +349,7 @@ fn transfer_moves_the_scratchpad_keeping_identity_and_refuses_a_taken_name() {
     let a = project(&store, "/p/a");
     let b = project(&store, "/p/b");
     let created = match store
-        .write(a, "plan", &body("draft"), None)
+        .write_at(a, "plan", &body("draft"), None)
         .expect("create")
     {
         WriteResult::Written(stored) => *stored,
@@ -322,7 +358,7 @@ fn transfer_moves_the_scratchpad_keeping_identity_and_refuses_a_taken_name() {
 
     // A name already used in the target is refused.
     store
-        .write(b, "plan", &body("draft"), None)
+        .write_at(b, "plan", &body("draft"), None)
         .expect("create in B");
     assert!(matches!(
         store.transfer(a, "plan", b).expect("transfer"),
@@ -341,5 +377,48 @@ fn transfer_moves_the_scratchpad_keeping_identity_and_refuses_a_taken_name() {
     assert!(
         store.read(a, "plan").expect("read a").is_none(),
         "gone from A"
+    );
+}
+
+#[test]
+fn updated_at_stamps_the_last_body_write_and_survives_metadata_changes() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let project = project(&store, "/p/app");
+
+    // Create stamps the create time.
+    let created = written(
+        store
+            .write(project, "plan", &body("a"), None, 1_000)
+            .expect("create"),
+    );
+    assert_eq!(created.updated_at, 1_000, "a create stamps updated_at");
+
+    // A body write advances it to the write's clock.
+    let updated = written(
+        store
+            .write(project, "plan", &body("b"), Some(1), 5_000)
+            .expect("update"),
+    );
+    assert_eq!(
+        updated.updated_at, 5_000,
+        "a body write re-stamps updated_at"
+    );
+
+    // Archiving and tagging are not body edits — they leave updated_at where the last write put it.
+    let archived = store
+        .set_archived(project, "plan", true)
+        .expect("archive")
+        .expect("exists");
+    assert_eq!(
+        archived.updated_at, 5_000,
+        "archiving is not a body edit and does not re-stamp updated_at"
+    );
+    let tagged = store
+        .add_tags(project, "plan", &["release".into()])
+        .expect("tag")
+        .expect("exists");
+    assert_eq!(
+        tagged.updated_at, 5_000,
+        "a tag change does not re-stamp updated_at"
     );
 }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::ids::ProjectId;
-use crate::testing::FakeScratchpadRepo;
+use crate::testing::{FakeScratchpadRepo, MockClock};
 
 /// A representative Markdown body — a couple of headings over a line of prose.
 fn body() -> String {
@@ -10,7 +10,10 @@ fn body() -> String {
 }
 
 fn scratchpads() -> Scratchpads {
-    Scratchpads::new(Arc::new(FakeScratchpadRepo::new()))
+    Scratchpads::new(
+        Arc::new(FakeScratchpadRepo::new()),
+        Arc::new(MockClock::new()),
+    )
 }
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);

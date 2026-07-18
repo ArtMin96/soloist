@@ -51,6 +51,8 @@ impl TemplateKind {
     /// export carries so a re-create can recognise it.
     pub fn export_format(self) -> &'static str {
         match self {
+            // Repeated as a literal in the `prompt_template_export` MCP tool description, which a
+            // `#[tool(description = …)]` string cannot reference — update both together.
             TemplateKind::Prompt => "soloist.prompt-template/v1",
             TemplateKind::Scratchpad => "soloist.scratchpad-template/v1",
             TemplateKind::Todo => "soloist.todo-template/v1",

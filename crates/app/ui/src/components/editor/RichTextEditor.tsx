@@ -1,8 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { buildEditorExtensions } from "./editorExtensions";
 import { EditorOutline } from "./EditorOutline";
 import { EditorToolbar } from "./EditorToolbar";
+import { EditorFindBar } from "./EditorFindBar";
+import { clearSearch } from "./search/searchPlugin";
 import "./editor.css";
 
 export interface RichTextEditorProps {
@@ -56,6 +58,8 @@ export default function RichTextEditor({
   onSaveRef.current = onSaveShortcut;
   onBlurRef.current = onBlur;
 
+  const [findOpen, setFindOpen] = useState(false);
+
   const editor = useEditor({
     editable,
     extensions: buildEditorExtensions({ placeholder, slash }),
@@ -73,9 +77,15 @@ export default function RichTextEditor({
         ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
       },
       handleKeyDown: (_view, event) => {
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        const mod = event.metaKey || event.ctrlKey;
+        if (mod && event.key.toLowerCase() === "s") {
           event.preventDefault();
           onSaveRef.current?.();
+          return true;
+        }
+        if (mod && event.key.toLowerCase() === "f") {
+          event.preventDefault();
+          setFindOpen(true);
           return true;
         }
         return false;
@@ -105,6 +115,16 @@ export default function RichTextEditor({
       <div className="tiptap-main">
         <EditorContent editor={editor} className="tiptap-scroll" />
         {outline && editor && <EditorOutline editor={editor} />}
+        {findOpen && editor && (
+          <EditorFindBar
+            editor={editor}
+            onClose={() => {
+              clearSearch(editor.view);
+              setFindOpen(false);
+              editor.commands.focus();
+            }}
+          />
+        )}
       </div>
     </div>
   );

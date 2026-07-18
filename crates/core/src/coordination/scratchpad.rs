@@ -18,7 +18,7 @@ use super::scratchpad_repo::{
     RenameResult, ScratchpadRepo, StoredScratchpad, TransferResult, WriteResult,
 };
 use crate::ids::{ProjectId, ScratchpadId};
-use crate::ports::StoreError;
+use crate::ports::{Clock, StoreError};
 
 /// The most Markdown a scratchpad's body may carry, in bytes. A scratchpad is a coordination
 /// document, not a log store; this bounds the persisted row so a runaway caller cannot grow the
@@ -110,6 +110,9 @@ pub struct ScratchpadSummary {
     pub archived: bool,
     pub revision: u64,
     pub gist: String,
+    /// Unix millis of the last body write (0 for a document that predates the field), so a listing
+    /// can be sorted by recency as well as by name.
+    pub updated_at: u64,
 }
 
 impl ScratchpadSummary {
@@ -121,6 +124,7 @@ impl ScratchpadSummary {
             tags: stored.tags,
             archived: stored.archived,
             revision: stored.revision,
+            updated_at: stored.updated_at,
         }
     }
 }
@@ -151,12 +155,14 @@ pub enum WriteError {
 /// policy. Cheap to clone-share via the `Arc` it holds.
 pub struct Scratchpads {
     repo: Arc<dyn ScratchpadRepo>,
+    clock: Arc<dyn Clock>,
 }
 
 impl Scratchpads {
-    /// Builds the aggregate over its durable store.
-    pub fn new(repo: Arc<dyn ScratchpadRepo>) -> Self {
-        Self { repo }
+    /// Builds the aggregate over its durable store and clock (the clock stamps each write's
+    /// `updated_at`).
+    pub fn new(repo: Arc<dyn ScratchpadRepo>, clock: Arc<dyn Clock>) -> Self {
+        Self { repo, clock }
     }
 
     /// Creates or replaces the scratchpad `name` in `project` with the Markdown `body`,
@@ -172,7 +178,8 @@ impl Scratchpads {
         expected: Option<u64>,
     ) -> Result<ScratchpadView, WriteError> {
         validate(name, &body).map_err(WriteError::Invalid)?;
-        match self.repo.write(project, name, &body, expected)? {
+        let now = self.clock.now_unix_millis();
+        match self.repo.write(project, name, &body, expected, now)? {
             WriteResult::Written(stored) => Ok(ScratchpadView::of(*stored)),
             WriteResult::Conflict { actual } => Err(WriteError::Conflict { expected, actual }),
         }

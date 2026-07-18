@@ -1510,6 +1510,7 @@ async fn scratchpad_list_projects_the_summaries() {
         archived: false,
         revision: 2,
         gist: "Ship v1".into(),
+        updated_at: 1_700_000_000_000,
     };
     let canned = summary.clone();
     spawn_fake_app(socket.clone(), move |request| match request {

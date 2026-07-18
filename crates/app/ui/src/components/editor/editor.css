@@ -29,6 +29,7 @@
 }
 
 .tiptap-main {
+  position: relative;
   display: flex;
   min-height: 0;
   flex: 1;
@@ -197,6 +198,80 @@
   pointer-events: none;
 }
 
+/*
+ * The in-note find bar: a popover overlaying the top-right of the content so opening it shifts no
+ * layout. It mirrors the slash-menu popover chrome (popover surface, border, overlay shadow) and
+ * springs in from just above on open.
+ */
+.tiptap-find {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.25rem 0.375rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--popover);
+  box-shadow: var(--shadow-overlay);
+  animation: tiptap-find-in var(--dur-select) var(--ease-out-quint);
+}
+
+@keyframes tiptap-find-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tiptap-find-icon {
+  flex-shrink: 0;
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-inline: 0.25rem 0.125rem;
+  color: var(--muted-foreground);
+}
+
+/* Slim the shared Input into the popover: no frame of its own, the popover supplies it. The doubled
+ * class out-specifies the primitive's own border and focus-ring utilities. */
+.tiptap-find-input.tiptap-find-input {
+  height: 1.75rem;
+  width: 10rem;
+  border: none;
+  background: transparent;
+  padding-inline: 0.25rem;
+  box-shadow: none;
+  font-size: 0.8125rem;
+}
+
+.tiptap-find-count {
+  min-width: 3.25rem;
+  padding-inline: 0.375rem;
+  text-align: right;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+/* Match highlights: a calm neutral wash on every hit, the azure accent on the current one. Both draw
+ * from theme tokens via color-mix, so they adapt to light and dark without a hardcoded color. */
+.search-match {
+  background: color-mix(in oklch, var(--foreground) 14%, transparent);
+  border-radius: 2px;
+}
+
+.search-match--current {
+  background: color-mix(in oklch, var(--primary) 32%, transparent);
+}
+
 /* The "/" command menu, mounted at the document body by the suggestion plugin. */
 .slash-menu {
   display: flex;
@@ -248,5 +323,8 @@
   .tiptap-shell,
   .slash-item {
     transition: none;
+  }
+  .tiptap-find {
+    animation: none;
   }
 }

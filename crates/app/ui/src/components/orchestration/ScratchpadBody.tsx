@@ -1,5 +1,6 @@
-import { useRef } from "react";
-import { Check, Copy } from "lucide-react";
+import { useRef, useState } from "react";
+import { Check, Copy, Download } from "lucide-react";
+import { exportMarkdown } from "@/api";
 import { Button } from "@/components/ui/button";
 import { LazyRichTextEditor } from "@/components/editor/LazyRichTextEditor";
 import { useAutosave } from "@/components/editor/useAutosave";
@@ -20,12 +21,23 @@ interface ScratchpadBodyProps {
 // starts clean. Edits stream out of the editor as Markdown, are debounced by `useAutosave`, and flush
 // immediately on blur or Cmd/Ctrl+S — never echoed back into the editor, so the caret never jumps.
 export function ScratchpadBody({ initialBody, name, onSave, paused }: ScratchpadBodyProps) {
-  // The editor's latest Markdown, tracked for "Copy Markdown" without making the editor controlled.
+  // The editor's latest Markdown, tracked for "Copy Markdown" / "Export .md" without making the
+  // editor controlled.
   const latestMarkdown = useRef(initialBody);
   const autosave = useAutosave({ onSave, paused });
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  // The document as canonical Markdown — its name as the leading H1 over the body — shared by copy
+  // and export so both hand off the identical text.
+  const asDocument = () => `# ${name}\n\n${latestMarkdown.current}`;
 
   const copyMarkdown = () => {
-    void navigator.clipboard?.writeText(`# ${name}\n\n${latestMarkdown.current}`);
+    void navigator.clipboard?.writeText(asDocument());
+  };
+
+  const exportFile = () => {
+    setExportError(null);
+    exportMarkdown(name, asDocument()).catch((reason) => setExportError(String(reason)));
   };
 
   const status = autosave.saving ? "Saving…" : autosave.dirty ? "Unsaved changes" : "Saved";
@@ -52,7 +64,15 @@ export function ScratchpadBody({ initialBody, name, onSave, paused }: Scratchpad
         >
           {status}
         </span>
+        {exportError && (
+          <span className="text-[0.6875rem] text-destructive" aria-live="polite">
+            {exportError}
+          </span>
+        )}
         <div className="flex-1" />
+        <Button variant="ghost" size="sm" onClick={exportFile}>
+          <Download aria-hidden /> Export .md
+        </Button>
         <Button variant="ghost" size="sm" onClick={copyMarkdown}>
           <Copy aria-hidden /> Copy Markdown
         </Button>

@@ -43,6 +43,22 @@ pub async fn scratchpad_write(
         .map_err(|err| err.to_string())
 }
 
+/// Archives or restores the scratchpad `name` in `project` — a listing flag, not a delete. Routes to
+/// the one core archive behaviour the MCP surface also drives; the panel re-reads on the emitted
+/// `ScratchpadChanged`.
+#[tauri::command]
+pub async fn scratchpad_archive(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+    name: String,
+    archived: bool,
+) -> Result<ScratchpadView, String> {
+    facade
+        .blocking(move |f| f.scratchpad_archive_in(project, &name, archived))
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Creates a todo from the disciplined `doc` in `project`.
 #[tauri::command]
 pub async fn todo_create(

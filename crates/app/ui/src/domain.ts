@@ -363,6 +363,8 @@ export interface ScratchpadSummary {
   archived: boolean;
   revision: number;
   gist: string;
+  /** Unix millis of the last body write (0 for a document predating the field) — the recency sort key. */
+  updated_at: number;
 }
 
 // A scratchpad as the panel reads it: the free-form Markdown body plus its tags, revision (to guard
@@ -481,7 +483,7 @@ export interface Sidebar {
 
 // The context a hotkey is active in (mirrors core::HotkeyScope). Bindings only conflict within
 // the same scope.
-export type HotkeyScope = "general" | "sidebar" | "terminal";
+export type HotkeyScope = "general" | "sidebar" | "terminal" | "scratchpad";
 
 // A named, remappable action (mirrors core::HotkeyAction). The closed set is the single source
 // the settings panel and the keyboard handler iterate.
@@ -507,7 +509,8 @@ export type HotkeyAction =
   | "previous_process"
   | "next_process"
   | "increase_terminal_font_size"
-  | "decrease_terminal_font_size";
+  | "decrease_terminal_font_size"
+  | "archive_scratchpad";
 
 // A key chord (mirrors core::Binding): the modifier flags plus the main key (a
 // `KeyboardEvent.key` token, e.g. "K", "ArrowDown", "="). `super` is the core's `super_key`.

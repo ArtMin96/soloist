@@ -396,6 +396,7 @@ const AUDIT_PADS: ScratchpadSummary[] = [
     gist: "Survey the auth options",
     tags: [],
     archived: false,
+    updated_at: 3_000,
   },
   {
     id: 2,
@@ -404,8 +405,9 @@ const AUDIT_PADS: ScratchpadSummary[] = [
     gist: "Migration steps and order",
     tags: [],
     archived: false,
+    updated_at: 2_000,
   },
-  { id: 3, name: "risks", revision: 1, gist: "", tags: [], archived: false },
+  { id: 3, name: "risks", revision: 1, gist: "", tags: [], archived: false, updated_at: 1_000 },
 ];
 
 function AuditView() {

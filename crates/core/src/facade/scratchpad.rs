@@ -87,6 +87,25 @@ impl Facade {
             .ok_or(CoordinationError::UnknownScratchpad)
     }
 
+    /// [`scratchpad_archive`](ScopedFacade::scratchpad_archive) scoped to `project` directly — the
+    /// local-UI path (trusts the caller to be entitled to `project`; see
+    /// [`scratchpad_write_in`](Self::scratchpad_write_in)). Archives or restores the scratchpad
+    /// `name`, emitting `ScratchpadChanged`, or [`CoordinationError::UnknownScratchpad`] if there is
+    /// none. Archiving keeps the document — it is a listing flag, not a delete.
+    pub fn scratchpad_archive_in(
+        &self,
+        project: ProjectId,
+        name: &str,
+        archived: bool,
+    ) -> Result<ScratchpadView, CoordinationError> {
+        self.emit_scratchpad(
+            project,
+            self.scratchpads
+                .set_archived(project, name, archived)?
+                .ok_or(CoordinationError::UnknownScratchpad),
+        )
+    }
+
     /// [`scratchpad_transfer`](Self::scratchpad_transfer) scoped to `from`/`to` directly (local-UI
     /// path — never takes a project from an untrusted surface). Moves the scratchpad `name` from
     /// `from` to `to`, keeping its document, revision, tags, archived flag, and id. Emits

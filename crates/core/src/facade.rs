@@ -148,7 +148,7 @@ impl Facade {
             // or resuming a timer re-evaluates the schedule at once.
             timers: Timers::new(timer_repo, clock.clone(), Arc::new(Notify::new())),
             agents: Agents::new(agent_tools, version_probe, clock.clone()),
-            scratchpads: Scratchpads::new(scratchpad_repo),
+            scratchpads: Scratchpads::new(scratchpad_repo, clock.clone()),
             todos: Todos::new(todo_repo),
             templates: Templates::new(template_repo),
             settings: Arc::new(SettingsStore::new(settings_repo)),

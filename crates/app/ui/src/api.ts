@@ -4,7 +4,7 @@
 // into React.
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AgentSignal,
   AgentTool,
@@ -93,6 +93,29 @@ export function scratchpadWrite(
     body,
     expectedRevision,
   });
+}
+
+// Archive or restore a scratchpad (a listing flag, not a delete). Emits the domain event the roster
+// re-reads on.
+export function scratchpadArchive(
+  project: number,
+  name: string,
+  archived: boolean,
+): Promise<ScratchpadView> {
+  return invoke<ScratchpadView>("scratchpad_archive", { project, name, archived });
+}
+
+// Save a scratchpad's Markdown to a user-chosen `.md` file: the native save dialog picks the path,
+// then the backend writes the bytes there. Returns false when the user dismisses the dialog.
+export async function exportMarkdown(defaultName: string, contents: string): Promise<boolean> {
+  const path = await save({
+    title: "Export scratchpad",
+    defaultPath: `${defaultName}.md`,
+    filters: [{ name: "Markdown", extensions: ["md"] }],
+  });
+  if (path == null) return false;
+  await invoke("export_markdown", { path, contents });
+  return true;
 }
 
 // Create a todo from its disciplined document.

@@ -23,6 +23,7 @@ pub enum HotkeyScope {
     General,
     Sidebar,
     Terminal,
+    Scratchpad,
 }
 
 /// A named, remappable action. The closed set is the single source the settings document and the
@@ -55,6 +56,8 @@ pub enum HotkeyAction {
     NextProcess,
     IncreaseTerminalFontSize,
     DecreaseTerminalFontSize,
+    // Scratchpad — active while the scratchpad panel is focused.
+    ArchiveScratchpad,
 }
 
 /// A key chord: the modifier flags plus the main key (a `KeyboardEvent.key` token, e.g. `K`,
@@ -92,6 +95,17 @@ impl Binding {
         }
     }
 
+    /// A `Ctrl`+`Shift`-modified chord.
+    fn ctrl_shift(key: &str) -> Self {
+        Self {
+            ctrl: true,
+            alt: false,
+            shift: true,
+            super_key: false,
+            key: key.to_string(),
+        }
+    }
+
     /// An unmodified key (e.g. a single-letter sidebar shortcut).
     fn plain(key: &str) -> Self {
         Self {
@@ -106,7 +120,7 @@ impl Binding {
 
 impl HotkeyAction {
     /// Every action, in display order — the single list the document and UI iterate.
-    pub const ALL: [HotkeyAction; 22] = [
+    pub const ALL: [HotkeyAction; 23] = [
         HotkeyAction::OpenCommandPalette,
         HotkeyAction::QuickActions,
         HotkeyAction::QuickJump,
@@ -129,6 +143,7 @@ impl HotkeyAction {
         HotkeyAction::NextProcess,
         HotkeyAction::IncreaseTerminalFontSize,
         HotkeyAction::DecreaseTerminalFontSize,
+        HotkeyAction::ArchiveScratchpad,
     ];
 
     /// The scope this action is active in.
@@ -145,6 +160,7 @@ impl HotkeyAction {
             | NextProcess
             | IncreaseTerminalFontSize
             | DecreaseTerminalFontSize => HotkeyScope::Terminal,
+            ArchiveScratchpad => HotkeyScope::Scratchpad,
         }
     }
 
@@ -174,6 +190,7 @@ impl HotkeyAction {
             NextProcess => Binding::ctrl("ArrowDown"),
             IncreaseTerminalFontSize => Binding::ctrl("="),
             DecreaseTerminalFontSize => Binding::ctrl("-"),
+            ArchiveScratchpad => Binding::ctrl_shift("W"),
         }
     }
 }

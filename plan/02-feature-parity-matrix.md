@@ -130,7 +130,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 |----|---------|-----|:----:|--------|--------|
 | G12 | `scratchpad_append` + `scratchpad_append_section` (append text, or append under a heading, to the body) | ✅ | — | later | Append extends the body without a full rewrite; revision-guarded |
 | G13 | `scratchpad_find` + `scratchpad_tail` (search within a body; read the trailing N lines) | ✅ | — | later | `find` returns matching spans; `tail` returns the last N lines |
-| G14 | Scratchpad import/export — MCP `scratchpad_save_to_file`/`_load_from_file` (behind the deferred project-root FS sandbox) + UI Export `.md` / Import | ✅ | — | later | Round-trip a scratchpad to/from a file inside the project root |
+| G14 | Scratchpad import + file round-trip — MCP `scratchpad_save_to_file`/`_load_from_file` (behind the deferred project-root FS sandbox) + UI Import (UI **Export `.md`** shipped in the panel, O5) | ✅ | — | later | Round-trip a scratchpad to/from a file inside the project root |
 | G15 | Create scratchpad from a terminal selection (capture selected PTY output into a new note) | 🟡 | — | later | Selecting terminal output offers "New scratchpad from selection" |
 | G16 | Inline images in scratchpad / todo bodies | 🟡 | — | later | A pasted/attached image renders in the editor and persists |
 | G17 | Todo **priority** field (High/Medium/Low) + bulk actions | 🟡 | — | later | A todo carries a priority; a bulk action applies to a selection |
@@ -209,7 +209,7 @@ charter, dependencies, and per-phase definition of done: [`orchestrator/README.m
 | O2 | Coordination `DomainEvent`s (todo / timer / lease / scratchpad / kv changed) for a live UI | ❓ | orch-00 | v1 | A mutation emits its event; UI updates without polling |
 | O3 | Agent lineage: parent `ProcessId` recorded on `spawn_agent`; nested lead→worker tree (promotes `later` row I14) | 🟡 | orch-01 | v1 | A spawned worker nests under its lead |
 | O4 | Live orchestration tree UI with per-agent activity (Working/Thinking/Idle/Permission/Error) | 🟡 | orch-01 | v1 | Tree renders lead + workers with live glyphs |
-| O5 | Scratchpad panel — free-form Markdown `body` in a rich TipTap editor (slash commands, autosave, undo/redo, outline), revision-guarded edit, living-doc view (D-7 superseded 2026-07-18) | ❓ | orch-02 | v1 | Read/edit a scratchpad; stale edit → conflict |
+| O5 | Scratchpad panel — free-form Markdown `body` in a rich TipTap editor (slash commands, autosave, undo/redo, outline, in-note find with wrap-around, list sort recent/name, archive control + Ctrl+Shift+W, Copy Markdown, Export `.md` via the native save dialog), revision-guarded edit, living-doc view (D-7 superseded 2026-07-18) | ❓ | orch-02 | v1 | Read/edit a scratchpad; stale edit → conflict |
 | O6 | To-do board UI — blockers / locks / comments / status, blocker-gate visible | ❓ | orch-02 | v1 | Blocker gating + lock owner shown; complete refused when blocked |
 | O7 | Timers & fire-when-idle panel — armed timers, `waiting_on`, max-wait countdown, injected-turn `body` preview | 🟡 | orch-03 | v1 | A `fire_when_idle` arm shows `waiting_on` + countdown |
 | O8 | Wake-cycle visibility — timer fires → `body` delivered as a fresh turn (named with *why* it woke), surfaced on the lead | 🟡 | orch-03 | v1 | Fired timer's body appears on the lead; timer leaves the panel |

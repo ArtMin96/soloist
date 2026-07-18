@@ -8,14 +8,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { TODO_STATUS } from "@/lib/todo";
+import { TODO_STATUS, TODO_STATUS_ORDER } from "@/lib/todo";
 import { cn } from "@/lib/utils";
 import type { StatusFilter, TodoFilter } from "@/store/todoFilter";
-import type { TodoStatus } from "@/domain";
-
-// The status facet's options, "All" plus the closed set of declared statuses. Exhaustive over
-// `TodoStatus`, kept in the same workflow order the editor offers.
-const STATUS_OPTIONS: TodoStatus[] = ["open", "in_progress", "blocked", "done"];
 
 interface TodoFiltersProps {
   filter: TodoFilter;
@@ -55,7 +50,7 @@ export function TodoFilters({ filter, tags, onChange, trailing }: TodoFiltersPro
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All statuses</SelectItem>
-            {STATUS_OPTIONS.map((status) => (
+            {TODO_STATUS_ORDER.map((status) => (
               <SelectItem key={status} value={status}>
                 {TODO_STATUS[status]}
               </SelectItem>

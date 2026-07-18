@@ -6,6 +6,7 @@ import { TaskList } from "@tiptap/extension-task-list";
 import { TaskItem } from "@tiptap/extension-task-item";
 import { TableKit } from "@tiptap/extension-table";
 import { slashCommand } from "./extensions/slashCommand";
+import { searchExtension } from "./search/searchExtension";
 
 // The heading depth a note reaches for — three levels are enough structure for a scratchpad; more
 // would invite an over-deep outline. Named so the toolbar, the outline, and the parser agree.
@@ -39,6 +40,8 @@ export function buildEditorExtensions(options: EditorExtensionOptions): Extensio
     // tables, so the body must carry the node to round-trip them.
     TableKit,
     Placeholder.configure({ placeholder: options.placeholder }),
+    // Always present but idle until a query arrives — it powers the in-note find bar (Ctrl/Cmd+F).
+    searchExtension,
   ];
   if (options.slash !== false) extensions.push(slashCommand);
   return extensions;

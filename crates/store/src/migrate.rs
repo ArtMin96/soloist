@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 14;
+pub(crate) const SCHEMA_VERSION: i64 = 15;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -256,6 +256,21 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         }
     }
 
+    if version < 15 {
+        // A scratchpad gains an `updated_at` wall clock (unix millis of its last body write), so the
+        // list can be ordered by recency, not only by name. Existing rows backfill to 0 — their last
+        // edit time is unknown, so a recency sort lists them oldest — and are stamped on the next
+        // write. Guarded on the table existing (created at v6, so always present in a real chain) and
+        // the column's absence, so a re-run after a partial failure is a no-op.
+        if table_exists(conn, "scratchpads")? && !column_exists(conn, "scratchpads", "updated_at")?
+        {
+            conn.execute_batch(
+                "ALTER TABLE scratchpads ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;",
+            )
+            .map_err(sql_err)?;
+        }
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
@@ -274,6 +289,21 @@ fn table_exists(conn: &Connection, name: &str) -> Result<bool, StoreError> {
     .optional()
     .map(|found| found.is_some())
     .map_err(sql_err)
+}
+
+/// Whether `table` has a column named `column` — used by the guarded `ADD COLUMN` in the v15 step
+/// (SQLite has no `ADD COLUMN IF NOT EXISTS`) so it stays a no-op on a re-run. `table` is a code
+/// literal here, never caller input, so interpolating it into the `PRAGMA` is safe.
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, StoreError> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(sql_err)?;
+    let mut names = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(sql_err)?;
+    names
+        .try_fold(false, |found, name| Ok(found || name? == column))
+        .map_err(sql_err)
 }
 
 /// Seeds the built-in agent providers into a fresh `agent_tools` table, preserving their
@@ -416,6 +446,20 @@ mod tests {
         assert_eq!(
             scratchpads, 1,
             "rows in an intermediate-version database survive the upgrade"
+        );
+
+        // v15 adds `updated_at`; a pre-existing row backfills to 0 (its last-write time is unknown)
+        // rather than failing the NOT NULL column or being dropped.
+        let updated_at: i64 = conn
+            .query_row(
+                "SELECT updated_at FROM scratchpads WHERE name = 'note'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read the backfilled updated_at");
+        assert_eq!(
+            updated_at, 0,
+            "an intermediate-version scratchpad backfills updated_at to 0"
         );
     }
 

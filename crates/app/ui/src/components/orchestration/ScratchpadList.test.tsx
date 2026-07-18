@@ -13,6 +13,7 @@ const pad = (id: number, name: string, gist = ""): ScratchpadSummary => ({
   archived: false,
   revision: 1,
   gist,
+  updated_at: 0,
 });
 
 const pads = [pad(1, "plan", "the plan"), pad(2, "research"), pad(3, "risks")];
