@@ -186,6 +186,8 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 name = "lead-agent"
 version = "0.0.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "soloist-core",
  "soloist-ipc",
  "tokio",
@@ -358,7 +360,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-core"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -377,7 +379,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-ipc"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "getrandom",
  "hex",

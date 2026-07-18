@@ -237,6 +237,11 @@ export function terminalOptions(appearance: Appearance, dark: boolean) {
     lineHeight: lineHeightValue(t.line_height),
     letterSpacing: letterSpacingPx(t.letter_spacing),
     theme: terminalColors(dark),
+    // The end-to-end build turns on xterm's screen-reader mode so the WebDriver harness can read the
+    // terminal's content: the default GPU (WebGL) renderer draws to a canvas the DOM cannot read, and
+    // screen-reader mode mirrors the live viewport into the accessibility DOM. Gated to the e2e build,
+    // so a shipped build keeps the GPU renderer with no accessibility-tree overhead.
+    screenReaderMode: Boolean(import.meta.env.VITE_E2E),
   };
 }
 

@@ -19,6 +19,10 @@ path = "src/main.rs"
 # The real IPC wire — request/response types and framing — so the stub speaks exactly what the MCP
 # server does and the format is never redefined here.
 soloist-ipc = { path = "../../../crates/ipc" }
-# Only for `ProcessId` / the process-id env var name, which the IPC request types are built from.
+# For `ProcessId` / the process-id env var name and the disciplined coordination documents
+# (`ScratchpadDoc`, `TodoDoc`) the coordination arm writes over the wire.
 soloist-core = { path = "../../../crates/core" }
-tokio = { version = "1", features = ["rt", "net", "time", "macros"] }
+tokio = { version = "1", features = ["rt", "net", "time", "macros", "io-std", "io-util"] }
+# The coordination arm reads its fixture data (single-sourced in the spec) as JSON.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

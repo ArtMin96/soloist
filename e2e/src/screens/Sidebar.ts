@@ -233,19 +233,32 @@ export const sidebar = {
    * fires the `pointerdown` the menu opens on. So the button is focused (the row's `:focus-within`
    * reveals it) and its menu opened with Enter — the genuine keyboard path — then the view's menu
    * item is chosen inside the open menu.
+   *
+   * Both the synthetic focus and the Enter are racy on a slow runner: an Enter dispatched before the
+   * focus settles on the button is dropped, and the menu never opens. Pressing once and waiting would
+   * then fail the whole spec — the suite runs with no retries — so the focus+Enter is repeated until
+   * the menu is actually displayed. The re-press is skipped once the menu is open, so a menu that has
+   * opened is never toggled shut.
    */
   async openOrchestration(project: string): Promise<void> {
     const actions = await $(`aria/${project} actions`);
     await actions.waitForExist({ timeout: WAIT.render });
-    await browser.execute((element: HTMLElement) => element.focus(), actions);
-    await browser.keys("Enter");
+
+    const menu = $('[role="menu"]');
+    await browser.waitUntil(
+      async () => {
+        if (await menu.isDisplayed()) return true;
+        await browser.execute((element: HTMLElement) => element.focus(), actions);
+        await browser.keys("Enter");
+        return menu.isDisplayed();
+      },
+      { timeout: WAIT.render, timeoutMsg: `the "${project}" actions menu never opened` },
+    );
 
     // Scoped to the open menu rather than looked up globally: the pane this opens also carries an
     // accessible "Orchestration views" name once rendered, so a global name lookup could mis-target
     // on a re-open. Exact text keeps the match on the one menu item — the menu's wrapper holds
     // every label's text, so it can never match exactly.
-    const menu = await $('[role="menu"]');
-    await menu.waitForDisplayed({ timeout: WAIT.render });
     const item = await menu.$("div=Orchestration");
     await item.waitForClickable({ timeout: WAIT.render });
     await item.click();

@@ -7,6 +7,8 @@ import { FindBar } from "@/components/terminal/FindBar";
 import { useTerminal } from "@/components/terminal/useTerminal";
 import { useTerminalChrome } from "@/components/terminal/useTerminalChrome";
 import { useTerminalHotkeys } from "@/components/terminal/useTerminalHotkeys";
+import { terminalColors } from "@/lib/appearance";
+import { useAppearance } from "@/store/appearanceContext";
 import { useSignal } from "@/store/signalsContext";
 import { cn } from "@/lib/utils";
 import type { ProcessView } from "@/domain";
@@ -48,6 +50,10 @@ export function TerminalPane({
   const { hostRef, state, search } = useTerminal(process, visible);
   const { title, ringing } = useTerminalChrome(process.id);
   const { metrics, restart, activity } = useSignal(process.id);
+  const { dark } = useAppearance();
+  // The emulator's own surface color, so the host bleeds it to every edge — the sub-cell
+  // remainder and scrollbar gutter read as terminal margin, not an app-colored frame.
+  const surface = terminalColors(dark).background;
 
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
@@ -119,7 +125,12 @@ export function TerminalPane({
             onClose={closeFind}
           />
         )}
-        <div ref={hostRef} className="absolute inset-2" data-testid="terminal-host" />
+        <div
+          ref={hostRef}
+          className="absolute inset-0 pt-1.5 pl-2"
+          style={{ backgroundColor: surface }}
+          data-testid="terminal-host"
+        />
         {state === "not-started" && (
           <div className="pointer-events-none absolute inset-0 flex animate-in items-center justify-center px-6 text-center fade-in-0 duration-[var(--dur-sheet)]">
             <p className="max-w-sm text-sm text-pretty text-muted-foreground">
