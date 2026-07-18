@@ -183,6 +183,9 @@ afterEach(() => {
   cleanup();
   clearMocks();
   vi.unstubAllGlobals();
+  // The font-load re-fit test defines `document.fonts` (jsdom has none); drop it so a later test
+  // does not inherit a resolved font promise that fires an extra re-fit.
+  delete (document as unknown as { fonts?: unknown }).fonts;
 });
 
 describe("useTerminal attach lifecycle", () => {
@@ -287,6 +290,33 @@ describe("useTerminal deferred re-fit", () => {
 
     // Activation resolved, so the hook re-fit — at least one more winsize reached the PTY.
     expect(resizes.length).toBeGreaterThan(beforeActivation);
+  });
+
+  // The monospace web font can resolve *after* the first fit and shift the measured cell — the same
+  // host-size-invariant blind spot as the renderer swap. jsdom has no FontFaceSet, so the hook's
+  // `document.fonts.ready` branch is dormant by default; supply a controllable one and assert its
+  // resolution drives a fresh fit.
+  it("re-fits the pane after the web font finishes loading", async () => {
+    let fontsLoaded!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      fontsLoaded = resolve;
+    });
+    Object.defineProperty(document, "fonts", { value: { ready }, configurable: true });
+
+    render(<Probe process={PROCESS} />);
+    await settle();
+    // The synchronous mount-time fits and the immediately-resolved renderer have run; the font
+    // promise is still pending.
+    const beforeFontLoad = resizes.length;
+    expect(beforeFontLoad).toBeGreaterThan(0);
+
+    await act(async () => {
+      fontsLoaded();
+    });
+    await settle();
+
+    // The font resolved, so the hook re-fit — at least one more winsize reached the PTY.
+    expect(resizes.length).toBeGreaterThan(beforeFontLoad);
   });
 });
 
