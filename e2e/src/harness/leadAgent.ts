@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { appDataDir } from "./appData.js";
 
@@ -44,9 +44,31 @@ export const COORDINATION = {
   comment: "Looks ready to ship from my side.",
 } as const;
 
+// The timers-walk fixture data, single-sourced here and handed to the lead stub as the contents of
+// the timer plan file below. The lead arms a fire-when-idle-all timer with this body over the real
+// MCP/IPC wire; the scheduler delivers it (with a wake-reason prefix) to the lead's terminal on fire.
+// camelCase keys match the lead's serde struct — the values live only here.
+export const TIMER = {
+  /** The body the lead's fire-when-idle timer delivers on wake — asserted verbatim in the lead's
+   *  terminal. ASCII and single-line so it renders on one terminal row for a stable substring read. */
+  body: "wake up: resume the release cut",
+  /** The max-wait backstop the lead sets — far longer than the walk's bounded waits, so only the
+   *  worker going idle (never the backstop) fires the timer within the walk. */
+  maxWaitMs: 10 * 60 * 1000,
+} as const;
+
 // Present in the data dir → the lead runs its coordination arm; its JSON is `COORDINATION`. One
 // named const per side (the Rust stub names it `COORDINATION_PLAN_FILE`).
 const COORDINATION_PLAN_FILE = "lead-coordination-plan";
+
+// Present in the data dir → the lead runs its timers arm; its JSON is `TIMER`. One named const per
+// side (the Rust stub names it `TIMER_PLAN_FILE`).
+const TIMER_PLAN_FILE = "lead-timer-plan";
+
+// While this file exists in the data dir, the spawned worker outputs (staying Working) so the timer
+// holds its waiting state; deleting it drives the worker Idle, firing the timer. The worker stub
+// (`fixtures/bin/opencode`) polls for it under SOLOIST_APP_DATA_DIR. One named const per side.
+const WORKER_HOLD_FILE = "worker-holds-working";
 
 // The trigger the running lead polls for to re-write the scratchpad, bumping its revision under the
 // window's stale editor. One named const per side (the Rust stub names it `SCRATCHPAD_REWRITE_FILE`).
@@ -61,6 +83,28 @@ const SCRATCHPAD_REWRITE_FILE = "lead-scratchpad-rewrite";
 export async function requestLeadCoordination(): Promise<void> {
   const dataDir = await appDataDir();
   writeFileSync(path.join(dataDir, COORDINATION_PLAN_FILE), JSON.stringify(COORDINATION));
+}
+
+/**
+ * Puts the lead stub into its timers arm and holds its worker Working, both before it launches: the
+ * lead spawns the worker and arms a fire-when-idle-all timer over it, and the dropped hold file keeps
+ * the worker outputting so the timer stays in its waiting state until `releaseWorkerToIdle` drives it
+ * idle. Must be called before `launchAgent(LEAD)` so both files are on disk when the lead binds.
+ */
+export async function requestLeadTimer(): Promise<void> {
+  const dataDir = await appDataDir();
+  writeFileSync(path.join(dataDir, TIMER_PLAN_FILE), JSON.stringify(TIMER));
+  writeFileSync(path.join(dataDir, WORKER_HOLD_FILE), "");
+}
+
+/**
+ * Drives the held worker idle by deleting the hold file it polls: the worker stops outputting, the
+ * real idle sampler classifies its settled terminal Idle, and the lead's fire-when-idle-all quorum is
+ * met — firing the timer. Idempotent, so the cleanup hook can call it after a test already did.
+ */
+export async function releaseWorkerToIdle(): Promise<void> {
+  const dataDir = await appDataDir();
+  rmSync(path.join(dataDir, WORKER_HOLD_FILE), { force: true });
 }
 
 /**

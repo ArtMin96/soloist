@@ -239,6 +239,28 @@ Surgical because no other spec writes a scratchpad, completes a todo, or creates
 paths are coordination-only. Each mutation reddened exactly one assertion; `git diff --stat crates/` showed
 none of the three files after restore.
 
+The timers-and-wake-cycle walk (`specs/orchestration/timers-wake-cycle.spec.ts`) drives orch-03's headline
+behavior — token-free waiting — against the real scheduler. It **reuses the lead fixture** via a third arm
+(a dropped timer plan): the bound lead spawns a worker and arms a `fire_when_idle_all` timer over it across the
+real IPC wire, then echoes its own PTY stdin so the delivered wake turn shows in its terminal (as the headless
+`crates/pty/tests/orchestration.rs` `cat` lead does). The `opencode` worker gains a file-gated hold mode so the
+walk drives its idle transition on cue rather than racing the natural cycle: while a hold file exists it stays
+Working (the timer holds its waiting state for the panel assertion); deleting it settles the worker Idle,
+firing the timer. A new `TimersPanel` screen reads the panel's accessible names (waiting-on chips, "Time
+remaining" countdown); `TerminalPane` gained a viewport text read. **A product change unblocked the terminal
+read:** the WebKitGTK webview runs xterm's WebGL renderer, which draws to a canvas the DOM cannot read, so the
+e2e build turns on xterm's screen-reader mode (`terminalOptions`, gated on `VITE_E2E`), mirroring the live
+viewport into the accessibility DOM — the real renderer stays, the shipped default stays off (guarded by
+`appearance.test.ts`). Its product-mutation pass is done, both mutations in `crates/core/src/coordination/scheduler.rs`,
+each reverted byte-clean:
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Drop the PTY delivery write in `deliver` (`try_write_stdin`) — a fired timer's body is not delivered | only "…delivers its body with the wake-reason prefix…" fails | exactly that: the timer still fired and left the panel (`TimerFired` still published), then the terminal read failed (`never showed "wake up: resume the release cut"`); the walk's waiting assertion and all seven other spec files passed |
+| Force the idle quorum unmet in `is_due` (`Some(_) => false`) — a fire-when-idle timer fires only on its backstop | only the panel-clear fails, under its bounded wait | exactly that: "an armed timer never left the panel — it did not fire" (the 10-min backstop is beyond the 30 s wait), never reaching the delivery read; the waiting assertion and all seven other spec files passed |
+
+Surgical because no other spec arms a timer or observes a wake delivery — the mutated paths are scheduler-only.
+
 ## Risks & mitigations
 
 - **Screens drifting into logic** → a screen returns state and performs intent; it never asserts and never

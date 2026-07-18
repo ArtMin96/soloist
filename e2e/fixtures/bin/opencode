@@ -13,6 +13,21 @@ if [ "${1:-}" = "--version" ]; then
 fi
 
 echo "worker starting"
+
+# Controlled mode (the timers walk): while a hold file dropped in the app data directory — which a
+# spawned agent inherits via SOLOIST_APP_DATA_DIR — exists, output so the idle sampler keeps the
+# worker Working, holding the lead's fire-when-idle timer in its waiting state for the assertion.
+# When the walk deletes the file, go — and stay — silent, so the worker settles Idle a few quiet
+# samples later, firing the timer on cue. Absent (the lineage walk), the cycle below runs unchanged.
+hold="${SOLOIST_APP_DATA_DIR:-}/worker-holds-working"
+if [ -n "${SOLOIST_APP_DATA_DIR:-}" ] && [ -e "$hold" ]; then
+  while [ -e "$hold" ]; do
+    echo "worker working"
+    sleep 0.5
+  done
+  while true; do sleep 3600; done
+fi
+
 while true; do
   # Active spell: ~4 s of output so several consecutive samples see it flowing (Working).
   for _ in $(seq 1 8); do
