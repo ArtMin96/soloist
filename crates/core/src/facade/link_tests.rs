@@ -70,7 +70,7 @@ fn a_todo_link_resolves_within_scope() {
     let (facade, session, project) = facade();
     let todo = facade
         .scoped(session)
-        .todo_create(todo_doc())
+        .todo_create(todo_doc(), None)
         .expect("create")
         .view;
     let link = Link::todo(project, todo.id).to_link();

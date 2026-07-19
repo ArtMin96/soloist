@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::scratchpad_repo::{
     RenameResult, ScratchpadRepo, StoredScratchpad, TransferResult, WriteResult,
 };
-use crate::ids::{ProjectId, ScratchpadId};
+use crate::ids::{ProjectId, ScratchpadId, TodoId};
 use crate::ports::{Clock, StoreError};
 
 /// The most Markdown a scratchpad's body may carry, in bytes. A scratchpad is a coordination
@@ -68,6 +68,16 @@ fn gist(body: &str) -> String {
         .find(|line| !line.is_empty() && !line.starts_with('#'))
         .unwrap_or("")
         .to_owned()
+}
+
+/// A reference to one scratchpad: the durable `id` that is stored and the `name` handle resolved
+/// when it is read. Something that points *at* a scratchpad — a todo's association — persists only
+/// the id, so a rename never breaks the link; the handle is projected on read so a reader names the
+/// document instead of echoing a bare number.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScratchpadRef {
+    pub id: ScratchpadId,
+    pub name: String,
 }
 
 /// A scratchpad as a caller reads it: its durable identity and handle, its tags and archived flag,
@@ -204,6 +214,12 @@ impl Scratchpads {
             .collect())
     }
 
+    /// Whether `project` owns the scratchpad `id` — what a caller stating an association by durable
+    /// id is checked against, since an id names a row without naming a project.
+    pub fn contains(&self, project: ProjectId, id: ScratchpadId) -> Result<bool, StoreError> {
+        self.repo.contains(project, id)
+    }
+
     /// Renames the scratchpad `from` to `to` in `project` (the durable id is unchanged), returning
     /// the renamed scratchpad. [`RenameError::NotFound`] if there is none, [`RenameError::NameTaken`]
     /// if `to` is already used in the project.
@@ -221,17 +237,22 @@ impl Scratchpads {
     }
 
     /// Moves the scratchpad `name` from `from` to `to`, keeping its name, body, tags, archived
-    /// flag, revision, and durable id. [`RenameError::NotFound`] if `from` has no such scratchpad,
-    /// [`RenameError::NameTaken`] if `to` already has one under that name (reusing the rename error
-    /// taxonomy — a transfer is a cross-project relocation with the same two failure modes).
+    /// flag, revision, and durable id, and **taking the todos derived from it along** with their
+    /// association intact (see [`ScratchpadRepo::transfer`] for the full move contract).
+    /// [`RenameError::NotFound`] if `from` has no such scratchpad, [`RenameError::NameTaken`] if
+    /// `to` already has one under that name (reusing the rename error taxonomy — a transfer is a
+    /// cross-project relocation with the same two failure modes).
     pub fn transfer(
         &self,
         from: ProjectId,
         name: &str,
         to: ProjectId,
-    ) -> Result<ScratchpadView, RenameError> {
+    ) -> Result<ScratchpadTransfer, RenameError> {
         match self.repo.transfer(from, name, to)? {
-            TransferResult::Transferred(stored) => Ok(ScratchpadView::of(*stored)),
+            TransferResult::Transferred(moved) => Ok(ScratchpadTransfer {
+                scratchpad: ScratchpadView::of(moved.scratchpad),
+                todos: moved.todos,
+            }),
             TransferResult::NotFound => Err(RenameError::NotFound),
             TransferResult::NameTaken => Err(RenameError::NameTaken),
         }
@@ -288,6 +309,14 @@ impl Scratchpads {
     pub fn delete(&self, project: ProjectId, name: &str) -> Result<bool, StoreError> {
         self.repo.delete(project, name)
     }
+}
+
+/// A completed [`transfer`](Scratchpads::transfer): the scratchpad as it now reads in the target
+/// project, and the todos that derived from it and moved with it. The caller announces the move on
+/// both boards from these two, so a to-do board never keeps showing work that has left.
+pub struct ScratchpadTransfer {
+    pub scratchpad: ScratchpadView,
+    pub todos: Vec<TodoId>,
 }
 
 /// Why a [`rename`](Scratchpads::rename) failed — both the caller's to fix.

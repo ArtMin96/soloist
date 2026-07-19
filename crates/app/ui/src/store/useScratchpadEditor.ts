@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { scratchpadLink, scratchpadRead, scratchpadWrite } from "@/api";
+import { scratchpadLink, scratchpadRead, scratchpadRename, scratchpadWrite } from "@/api";
 
 // A revision conflict surfaced to the panel: a write was refused because the scratchpad moved on
 // since it was opened. `actual` is the revision it now sits at, so the banner can name it.
@@ -31,6 +31,11 @@ export interface ScratchpadEditorStore {
   save: (markdown: string) => Promise<void>;
   /** Reload the open scratchpad fresh, discarding local edits — the conflict resolution. */
   reload: () => void;
+  /**
+   * Rename the open scratchpad, re-pointing the editor at the new handle. Rejects with the core's
+   * refusal (a taken name, an invalid one) so the caller can keep the user's text and show why.
+   */
+  rename: (to: string) => Promise<void>;
   /** Copy the scratchpad's `solo://` link to the clipboard, by its durable id. */
   copyLink: (id: number) => void;
 }
@@ -127,6 +132,18 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
     [project, name],
   );
 
+  // A rename keeps the document's durable id, body, and revision, so the open editor only has to
+  // follow the new handle — no remount, no re-read, no interruption to an edit in progress. The
+  // refusal is rethrown rather than parked in `error`, so the header's field keeps the typed name.
+  const rename = useCallback(
+    async (to: string) => {
+      if (name == null) return;
+      const view = await scratchpadRename(project, name, to);
+      setName(view.name);
+    },
+    [project, name],
+  );
+
   const copyLink = useCallback(
     (id: number) => {
       scratchpadLink(project, id)
@@ -148,6 +165,7 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
     close,
     save,
     reload,
+    rename,
     copyLink,
   };
 }

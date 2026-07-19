@@ -50,7 +50,7 @@ export function OrchestrationNode({ node, depth, isCollapsed, onToggle }: Orches
         showLabel={false}
       />
       <span className="min-w-0 flex-1 truncate text-foreground">{node.label}</span>
-      <span className="shrink-0 text-[0.6875rem] text-muted-foreground/70">{node.kind}</span>
+      <span className="shrink-0 text-[0.6875rem] text-muted-foreground">{node.kind}</span>
     </div>
   );
 

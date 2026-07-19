@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 
 use soloist_core::{
-    CommentAuthor, ProcessId, ProjectId, ProjectRepo, StoredTodo, TodoDoc, TodoRepo, TodoStatus,
-    TodoWriteResult,
+    CommentAuthor, ProcessId, ProjectId, ProjectRepo, ScratchpadId, ScratchpadLink, StoredTodo,
+    TodoDoc, TodoRepo, TodoStatus, TodoWriteResult, WriteResult,
 };
 use tempfile::tempdir;
 
@@ -38,7 +38,7 @@ fn create_then_read_round_trips_every_column_through_json() {
     let project = project(&store, "/p/app");
 
     let created = store
-        .create(project, &doc("ship", TodoStatus::Open))
+        .create(project, &doc("ship", TodoStatus::Open), None)
         .expect("create");
     assert_eq!(created.revision, 1);
     assert!(created.id.get() > 0, "the store assigns a durable id");
@@ -46,7 +46,7 @@ fn create_then_read_round_trips_every_column_through_json() {
     // Exercise every live column, then prove it all survives the JSON round-trip.
     store.add_tag(project, created.id, "ui").expect("tag");
     let blocker = store
-        .create(project, &doc("dep", TodoStatus::Open))
+        .create(project, &doc("dep", TodoStatus::Open), None)
         .unwrap();
     store
         .set_blockers(project, created.id, &[blocker.id])
@@ -81,7 +81,9 @@ fn create_then_read_round_trips_every_column_through_json() {
 fn write_doc_is_revision_guarded() {
     let store = SqliteStore::open_in_memory().expect("open");
     let project = project(&store, "/p/app");
-    let todo = store.create(project, &doc("v1", TodoStatus::Open)).unwrap();
+    let todo = store
+        .create(project, &doc("v1", TodoStatus::Open), None)
+        .unwrap();
 
     // Current revision applies and bumps.
     let updated = written(
@@ -90,6 +92,7 @@ fn write_doc_is_revision_guarded() {
                 project,
                 todo.id,
                 &doc("v2", TodoStatus::InProgress),
+                ScratchpadLink::Unchanged,
                 Some(1),
             )
             .expect("update"),
@@ -98,7 +101,13 @@ fn write_doc_is_revision_guarded() {
 
     // Stale revision is refused, nothing changes.
     assert!(matches!(
-        store.write_doc(project, todo.id, &doc("v3", TodoStatus::Done), Some(1)),
+        store.write_doc(
+            project,
+            todo.id,
+            &doc("v3", TodoStatus::Done),
+            ScratchpadLink::Unchanged,
+            Some(1)
+        ),
         Ok(TodoWriteResult::Conflict { actual: 2 })
     ));
 
@@ -108,6 +117,7 @@ fn write_doc_is_revision_guarded() {
             project,
             TodoId::from_raw(9999),
             &doc("x", TodoStatus::Open),
+            ScratchpadLink::Unchanged,
             None
         ),
         Ok(TodoWriteResult::NotFound)
@@ -119,13 +129,13 @@ fn unmet_blockers_skips_done_and_deleted_blockers() {
     let store = SqliteStore::open_in_memory().expect("open");
     let project = project(&store, "/p/app");
     let open = store
-        .create(project, &doc("open", TodoStatus::Open))
+        .create(project, &doc("open", TodoStatus::Open), None)
         .unwrap();
     let done = store
-        .create(project, &doc("done", TodoStatus::Done))
+        .create(project, &doc("done", TodoStatus::Done), None)
         .unwrap();
     let gone = store
-        .create(project, &doc("gone", TodoStatus::Open))
+        .create(project, &doc("gone", TodoStatus::Open), None)
         .unwrap();
     assert!(store.delete(project, gone.id).unwrap());
 
@@ -140,7 +150,9 @@ fn unmet_blockers_skips_done_and_deleted_blockers() {
 fn a_lock_is_a_signal_and_releases_by_owner_and_on_reconcile() {
     let store = SqliteStore::open_in_memory().expect("open");
     let project = project(&store, "/p/app");
-    let todo = store.create(project, &doc("x", TodoStatus::Open)).unwrap();
+    let todo = store
+        .create(project, &doc("x", TodoStatus::Open), None)
+        .unwrap();
     let alice = ProcessId::from_raw(10);
     let bob = ProcessId::from_raw(20);
 
@@ -180,7 +192,9 @@ fn a_lock_is_a_signal_and_releases_by_owner_and_on_reconcile() {
 fn deleting_a_project_cascades_to_its_todos() {
     let store = SqliteStore::open_in_memory().expect("open");
     let project = project(&store, "/p/app");
-    let todo = store.create(project, &doc("x", TodoStatus::Open)).unwrap();
+    let todo = store
+        .create(project, &doc("x", TodoStatus::Open), None)
+        .unwrap();
 
     store.remove(project).expect("remove project");
     assert!(
@@ -193,7 +207,9 @@ fn deleting_a_project_cascades_to_its_todos() {
 fn concurrent_doc_writes_at_one_revision_apply_exactly_one() {
     let store = Arc::new(SqliteStore::open_in_memory().expect("open"));
     let project = project(&store, "/p/app");
-    let todo = store.create(project, &doc("v1", TodoStatus::Open)).unwrap();
+    let todo = store
+        .create(project, &doc("v1", TodoStatus::Open), None)
+        .unwrap();
 
     const WRITERS: usize = 16;
     let barrier = Arc::new(Barrier::new(WRITERS));
@@ -209,7 +225,13 @@ fn concurrent_doc_writes_at_one_revision_apply_exactly_one() {
             let id = todo.id;
             std::thread::spawn(move || {
                 barrier.wait();
-                match store.write_doc(project, id, &doc("v2", TodoStatus::InProgress), Some(1)) {
+                match store.write_doc(
+                    project,
+                    id,
+                    &doc("v2", TodoStatus::InProgress),
+                    ScratchpadLink::Unchanged,
+                    Some(1),
+                ) {
                     Ok(TodoWriteResult::Written(_)) => wins.fetch_add(1, Ordering::Relaxed),
                     Ok(TodoWriteResult::Conflict { .. }) => {
                         conflicts.fetch_add(1, Ordering::Relaxed)
@@ -237,7 +259,7 @@ fn durable_todos_survive_a_reopen() {
         let store = SqliteStore::open(&db).expect("open");
         let project = project(&store, "/p/app");
         store
-            .create(project, &doc("persist", TodoStatus::Open))
+            .create(project, &doc("persist", TodoStatus::Open), None)
             .unwrap()
             .id
     };
@@ -259,10 +281,10 @@ fn transfer_moves_the_todo_clearing_blockers_and_lock_but_keeping_comments_and_d
     let a = project(&store, "/p/a");
     let b = project(&store, "/p/b");
     let todo = store
-        .create(a, &doc("ship", TodoStatus::InProgress))
+        .create(a, &doc("ship", TodoStatus::InProgress), None)
         .expect("create");
     let blocker = store
-        .create(a, &doc("dep", TodoStatus::Open))
+        .create(a, &doc("dep", TodoStatus::Open), None)
         .expect("blocker");
     store.add_blocker(a, todo.id, blocker.id).expect("block");
     store
@@ -294,4 +316,186 @@ fn transfer_moves_the_todo_clearing_blockers_and_lock_but_keeping_comments_and_d
         store.read(b, todo.id).expect("read b").is_some(),
         "present in B"
     );
+}
+
+// The scratchpad port is reached through fully qualified calls rather than a `use`, because
+// `SqliteStore` implements both repositories and their `read`/`delete` names would collide.
+/// Writes a scratchpad in `project` and returns its durable id — the handle a todo associates with.
+fn scratchpad(store: &SqliteStore, project: ProjectId, name: &str) -> ScratchpadId {
+    match <SqliteStore as soloist_core::ScratchpadRepo>::write(
+        store, project, name, "the plan", None, 0,
+    )
+    .expect("write a scratchpad")
+    {
+        WriteResult::Written(stored) => stored.id,
+        other => panic!("expected a write, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_association_round_trips_with_the_scratchpads_current_handle() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let project = project(&store, "/p/app");
+    let pad = scratchpad(&store, project, "release-plan");
+
+    let created = store
+        .create(project, &doc("ship", TodoStatus::Open), Some(pad))
+        .expect("create linked");
+    let read = store
+        .read(project, created.id)
+        .expect("read")
+        .expect("the todo exists");
+
+    let link = read
+        .scratchpad
+        .expect("the association survives the round trip");
+    assert_eq!(link.id, pad);
+    assert_eq!(link.name, "release-plan");
+    // Only the id is persisted, so a rename follows through to the projected handle.
+    <SqliteStore as soloist_core::ScratchpadRepo>::rename(
+        &store,
+        project,
+        "release-plan",
+        "rollout-plan",
+    )
+    .expect("rename the scratchpad");
+    let renamed = store
+        .read(project, created.id)
+        .expect("read")
+        .expect("the todo exists")
+        .scratchpad
+        .expect("still linked");
+    assert_eq!(renamed.id, pad);
+    assert_eq!(renamed.name, "rollout-plan");
+}
+
+#[test]
+fn an_unlinked_todo_round_trips_with_a_null_column() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let project = project(&store, "/p/app");
+
+    let created = store
+        .create(project, &doc("ship", TodoStatus::Open), None)
+        .expect("create unlinked");
+    assert_eq!(created.scratchpad, None);
+
+    let raw: Option<i64> = store
+        .lock()
+        .query_row(
+            "SELECT scratchpad_id FROM todos WHERE id = ?1",
+            [created.id.get() as i64],
+            |row| row.get(0),
+        )
+        .expect("read the raw column");
+    assert_eq!(raw, None, "an unlinked todo stores NULL, not a sentinel");
+
+    let listed = TodoRepo::list(&store, project).expect("list");
+    assert_eq!(
+        listed.len(),
+        1,
+        "the outer join keeps an unlinked todo visible"
+    );
+    assert_eq!(listed[0].scratchpad, None);
+}
+
+#[test]
+fn a_doc_write_applies_the_stated_link_and_leaves_an_unchanged_one_alone() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let project = project(&store, "/p/app");
+    let pad = scratchpad(&store, project, "release-plan");
+    let other = scratchpad(&store, project, "rollout-plan");
+    let created = store
+        .create(project, &doc("ship", TodoStatus::Open), Some(pad))
+        .expect("create linked");
+
+    let untouched = written(
+        store
+            .write_doc(
+                project,
+                created.id,
+                &doc("ship it", TodoStatus::InProgress),
+                ScratchpadLink::Unchanged,
+                Some(created.revision),
+            )
+            .expect("write saying nothing about the link"),
+    );
+    assert_eq!(untouched.scratchpad.map(|link| link.id), Some(pad));
+
+    let relinked = written(
+        store
+            .write_doc(
+                project,
+                created.id,
+                &doc("ship it", TodoStatus::InProgress),
+                ScratchpadLink::Linked(other),
+                Some(untouched.revision),
+            )
+            .expect("write relinking"),
+    );
+    assert_eq!(relinked.scratchpad.map(|link| link.id), Some(other));
+
+    let cleared = written(
+        store
+            .write_doc(
+                project,
+                created.id,
+                &doc("ship it", TodoStatus::InProgress),
+                ScratchpadLink::Cleared,
+                Some(relinked.revision),
+            )
+            .expect("write clearing"),
+    );
+    assert_eq!(cleared.scratchpad, None);
+}
+
+#[test]
+fn deleting_a_scratchpad_unlinks_the_todos_that_referenced_it() {
+    // The foreign key carries this, so a todo can never be left pointing at a document that is
+    // gone — not even by a writer that never learns about the delete.
+    let store = SqliteStore::open_in_memory().expect("open");
+    let project = project(&store, "/p/app");
+    let pad = scratchpad(&store, project, "release-plan");
+    let created = store
+        .create(project, &doc("ship", TodoStatus::Open), Some(pad))
+        .expect("create linked");
+
+    assert!(
+        <SqliteStore as soloist_core::ScratchpadRepo>::delete(&store, project, "release-plan")
+            .expect("delete the scratchpad")
+    );
+
+    let after = store
+        .read(project, created.id)
+        .expect("read")
+        .expect("the todo itself survives its scratchpad");
+    assert_eq!(after.scratchpad, None);
+    assert_eq!(after.doc, created.doc);
+    let raw: Option<i64> = store
+        .lock()
+        .query_row(
+            "SELECT scratchpad_id FROM todos WHERE id = ?1",
+            [created.id.get() as i64],
+            |row| row.get(0),
+        )
+        .expect("read the raw column");
+    assert_eq!(raw, None, "the column is nulled, not left dangling");
+}
+
+#[test]
+fn transferring_a_todo_clears_its_scratchpad_association() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let from = project(&store, "/p/app");
+    let to = project(&store, "/p/other");
+    let pad = scratchpad(&store, from, "release-plan");
+    let created = store
+        .create(from, &doc("ship", TodoStatus::Open), Some(pad))
+        .expect("create linked");
+
+    let moved = store
+        .transfer(from, to, created.id)
+        .expect("transfer")
+        .expect("the todo moved");
+
+    assert_eq!(moved.scratchpad, None);
+    assert_eq!(moved.doc, created.doc);
 }

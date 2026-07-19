@@ -19,6 +19,7 @@ function todo(
     blocked: false,
     comments: [],
     locked_by: null,
+    scratchpad: null,
     revision: 1,
   };
 }

@@ -24,12 +24,16 @@ mod releaser;
 mod repo;
 mod scheduler;
 mod scratchpad;
+mod scratchpad_link;
 mod scratchpad_repo;
 mod template;
 mod template_repo;
 mod timer;
 mod timer_repo;
 mod todo;
+mod todo_blocker;
+mod todo_comment;
+mod todo_doc;
 mod todo_releaser;
 mod todo_repo;
 
@@ -41,11 +45,13 @@ pub use releaser::LeaseReleaser;
 pub use repo::{LockRepo, NoopLockRepo, StoredLease};
 pub use scheduler::TimerScheduler;
 pub use scratchpad::{
-    RenameError, ScratchpadSummary, ScratchpadView, Scratchpads, WriteError,
-    MAX_SCRATCHPAD_CONTENT_BYTES,
+    RenameError, ScratchpadRef, ScratchpadSummary, ScratchpadTransfer, ScratchpadView, Scratchpads,
+    WriteError, MAX_SCRATCHPAD_CONTENT_BYTES,
 };
+pub use scratchpad_link::ScratchpadLink;
 pub use scratchpad_repo::{
-    NoopScratchpadRepo, RenameResult, ScratchpadRepo, StoredScratchpad, TransferResult, WriteResult,
+    NoopScratchpadRepo, RenameResult, ScratchpadRepo, StoredScratchpad, TransferResult,
+    TransferredScratchpad, WriteResult,
 };
 pub use template::{
     placeholders, ExportedTemplate, TemplateSummary, TemplateView, TemplateWriteError, Templates,
@@ -57,9 +63,8 @@ pub use timer::{
     FireCond, IdleMode, SetWhenIdleOutcome, TimerStatus, TimerView, Timers, MAX_TIMER_BODY_BYTES,
 };
 pub use timer_repo::{NewTimer, NoopTimerRepo, StoredTimer, TimerRepo};
-pub use todo::{
-    Comment, CommentAuthor, CommentOutcome, TodoDoc, TodoError, TodoStatus, TodoSummary, TodoView,
-    Todos, MAX_TODO_DOC_BYTES,
-};
+pub use todo::{TodoError, TodoSummary, TodoView, Todos};
+pub use todo_comment::{Comment, CommentAuthor, CommentOutcome};
+pub use todo_doc::{TodoDoc, TodoStatus, MAX_TODO_DOC_BYTES};
 pub use todo_releaser::TodoLockReleaser;
 pub use todo_repo::{CommentEdit, NoopTodoRepo, StoredTodo, TodoRepo, TodoWriteResult};

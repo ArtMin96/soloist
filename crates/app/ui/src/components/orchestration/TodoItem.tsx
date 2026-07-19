@@ -1,23 +1,26 @@
 import { ChevronRight, Link2, Lock, Pencil } from "lucide-react";
 import { Collapsible } from "radix-ui";
+import { MarkdownView } from "@/components/editor/MarkdownView";
 import { CommentComposer } from "@/components/orchestration/CommentComposer";
 import { CommentList } from "@/components/orchestration/CommentList";
 import { TodoEditor, type TodoConflict } from "@/components/orchestration/TodoEditor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { humanizeName } from "@/lib/humanize";
 import { TODO_STATUS } from "@/lib/todo";
 import { cn } from "@/lib/utils";
-import type { TodoDoc, TodoView } from "@/domain";
+import type { ScratchpadSummary, TodoDoc, TodoView } from "@/domain";
 
 // The edit surface's state for this row, present only while it is being edited. The board owns the
 // single edit session (one todo at a time) and hands it here so the expanded row swaps its read
 // view for the editor.
 export interface TodoEditState {
   initial: TodoDoc;
+  initialScratchpad: number | null;
   mountKey: number;
   conflict: TodoConflict | null;
   error: string | null;
-  onSave: (doc: TodoDoc) => Promise<void>;
+  onSave: (doc: TodoDoc, scratchpad: number | null) => Promise<void>;
   onReload: () => void;
   onDone: () => void;
 }
@@ -34,6 +37,14 @@ interface TodoItemProps {
   onCopyLink: () => void;
   onComment: (body: string) => Promise<void>;
   onStartEdit: () => void;
+  /**
+   * Whether the row names the scratchpad it derives from. False while the board groups by
+   * scratchpad, where the group header already says it and repeating it on every row would be
+   * noise; true in the flat view and whenever a filter has flattened the grouping.
+   */
+  showScratchpad: boolean;
+  /** The project's scratchpads, offered in the edit surface's picker. */
+  scratchpads: ScratchpadSummary[];
   /** Non-null only while this row is the one being edited. */
   edit: TodoEditState | null;
 }
@@ -56,29 +67,42 @@ export function TodoItem({
   onCopyLink,
   onComment,
   onStartEdit,
+  showScratchpad,
+  scratchpads,
   edit,
 }: TodoItemProps) {
   const done = todo.doc.status === "done";
   const unmet = new Set(todo.blocked_by);
 
   return (
-    <Collapsible.Root open={open} onOpenChange={onToggle} className="border-b last:border-b-0">
-      <Collapsible.Trigger className="flex w-full items-center gap-2 py-2 pr-2 pl-1 text-left outline-none hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+    // No separator between rows: a native list draws its structure with the rows themselves, and
+    // the open row is marked by a quiet tonal fill instead of a rule.
+    <Collapsible.Root
+      open={open}
+      onOpenChange={onToggle}
+      className="rounded-md data-[state=open]:bg-muted/40"
+    >
+      <Collapsible.Trigger className="flex min-h-7 w-full items-center gap-2 rounded-md px-2 py-1 text-left outline-none hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
         <ChevronRight
           aria-hidden
           className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform",
+            "size-3.5 shrink-0 text-muted-foreground transition-transform duration-[var(--dur-control)] ease-spring-settle",
             open && "rotate-90",
           )}
         />
         <span
           className={cn(
-            "min-w-0 flex-1 truncate text-[0.8125rem]",
+            "min-w-0 flex-1 truncate text-[0.8125rem] leading-4",
             done ? "text-muted-foreground line-through" : "text-foreground",
           )}
         >
           {todo.doc.title}
         </span>
+        {showScratchpad && todo.scratchpad && (
+          <span className="type-label min-w-0 shrink truncate text-muted-foreground">
+            {humanizeName(todo.scratchpad.name)}
+          </span>
+        )}
         {todo.blocked && (
           <Badge variant="outline" className="shrink-0">
             Blocked
@@ -90,16 +114,19 @@ export function TodoItem({
             {lockOwnerLabel ?? `#${todo.locked_by}`}
           </Badge>
         )}
-        <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
+        <span className="type-label shrink-0 text-muted-foreground">
           {TODO_STATUS[todo.doc.status]}
         </span>
       </Collapsible.Trigger>
 
-      <Collapsible.Content className="flex flex-col gap-3 px-6 pb-3 text-[0.8125rem]">
+      {/* Indented to the row's title, so the document reads as belonging to the row above it. */}
+      <Collapsible.Content className="flex flex-col gap-3 pt-1 pr-2 pb-3 pl-8 text-[0.8125rem]">
         {edit ? (
           <TodoEditor
             key={edit.mountKey}
             initial={edit.initial}
+            initialScratchpad={edit.initialScratchpad}
+            scratchpads={scratchpads}
             conflict={edit.conflict}
             error={edit.error}
             onSave={edit.onSave}
@@ -109,12 +136,12 @@ export function TodoItem({
         ) : (
           <>
             {todo.doc.body && (
-              <p className="whitespace-pre-wrap text-foreground">{todo.doc.body}</p>
+              <MarkdownView markdown={todo.doc.body} ariaLabel={`${todo.doc.title} body`} />
             )}
 
             {todo.blockers.length > 0 && (
               <div className="flex flex-col gap-1">
-                <span className="text-[0.6875rem] font-[550] text-muted-foreground">Blockers</span>
+                <span className="type-label font-[550] text-muted-foreground">Blockers</span>
                 <ul className="flex flex-col gap-0.5">
                   {todo.blockers.map((id) => (
                     <li key={id} className="flex items-center gap-2">

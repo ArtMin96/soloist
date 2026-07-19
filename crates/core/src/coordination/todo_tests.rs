@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
+use crate::coordination::{CommentAuthor, CommentOutcome, MAX_TODO_DOC_BYTES};
 use crate::ids::{ProcessId, ProjectId};
 use crate::testing::FakeTodoRepo;
 
@@ -22,7 +23,7 @@ fn doc(title: &str, status: TodoStatus) -> TodoDoc {
 fn create_then_get_round_trips_the_document() {
     let todos = todos();
     let created = todos
-        .create(PROJECT, doc("ship", TodoStatus::Open))
+        .create(PROJECT, doc("ship", TodoStatus::Open), None)
         .expect("create succeeds");
     assert_eq!(created.revision, 1);
     assert_eq!(created.doc.title, "ship");
@@ -44,7 +45,7 @@ fn a_blank_title_is_rejected_but_a_blank_body_is_valid() {
         status: TodoStatus::Open,
     };
     let err = todos
-        .create(PROJECT, bad)
+        .create(PROJECT, bad, None)
         .expect_err("a blank title is refused");
     let TodoError::Invalid(message) = err else {
         panic!("expected an Invalid error, got {err:?}");
@@ -60,6 +61,7 @@ fn a_blank_title_is_rejected_but_a_blank_body_is_valid() {
                 body: String::new(),
                 status: TodoStatus::Open,
             },
+            None,
         )
         .expect("a blank body is accepted");
     assert_eq!(created.doc.body, "");
@@ -71,7 +73,7 @@ fn a_document_over_the_byte_cap_is_rejected() {
     let mut oversized = doc("ship", TodoStatus::Open);
     oversized.body = "x".repeat(MAX_TODO_DOC_BYTES + 1);
     let err = todos
-        .create(PROJECT, oversized)
+        .create(PROJECT, oversized, None)
         .expect_err("a document past the cap is refused");
     let TodoError::Invalid(message) = err else {
         panic!("expected an Invalid error, got {err:?}");
@@ -88,10 +90,10 @@ fn transfer_moves_a_todo_to_the_new_scope_clearing_its_blockers_and_lock() {
     // A source-project todo with a tag, a comment, a blocker, and a lock. The blocker and lock
     // reference the source project, so they must not follow the todo into its new scope.
     let moved = todos
-        .create(PROJECT, doc("ship", TodoStatus::Open))
+        .create(PROJECT, doc("ship", TodoStatus::Open), None)
         .expect("create the todo to move");
     let blocker = todos
-        .create(PROJECT, doc("prereq", TodoStatus::Open))
+        .create(PROJECT, doc("prereq", TodoStatus::Open), None)
         .expect("create a blocker in the source project");
     todos.add_tag(PROJECT, moved.id, "release").expect("tag it");
     todos
@@ -147,12 +149,18 @@ fn transfer_moves_a_todo_to_the_new_scope_clearing_its_blockers_and_lock() {
 fn update_is_revision_guarded() {
     let todos = todos();
     let todo = todos
-        .create(PROJECT, doc("v1", TodoStatus::Open))
+        .create(PROJECT, doc("v1", TodoStatus::Open), None)
         .expect("create");
 
     // A stale revision is refused and changes nothing.
     let stale = todos
-        .update(PROJECT, todo.id, doc("v2", TodoStatus::InProgress), 99)
+        .update(
+            PROJECT,
+            todo.id,
+            doc("v2", TodoStatus::InProgress),
+            ScratchpadLink::Unchanged,
+            99,
+        )
         .expect_err("a stale update is refused");
     assert!(matches!(
         stale,
@@ -164,7 +172,13 @@ fn update_is_revision_guarded() {
 
     // The current revision applies and bumps.
     let updated = todos
-        .update(PROJECT, todo.id, doc("v2", TodoStatus::InProgress), 1)
+        .update(
+            PROJECT,
+            todo.id,
+            doc("v2", TodoStatus::InProgress),
+            ScratchpadLink::Unchanged,
+            1,
+        )
         .expect("a current-revision update applies");
     assert_eq!(updated.revision, 2);
     assert_eq!(updated.doc.title, "v2");
@@ -174,10 +188,10 @@ fn update_is_revision_guarded() {
 fn a_todo_stays_gated_until_its_blocker_completes() {
     let todos = todos();
     let blocker = todos
-        .create(PROJECT, doc("dependency", TodoStatus::Open))
+        .create(PROJECT, doc("dependency", TodoStatus::Open), None)
         .expect("create blocker");
     let gated = todos
-        .create(PROJECT, doc("dependent", TodoStatus::Open))
+        .create(PROJECT, doc("dependent", TodoStatus::Open), None)
         .expect("create dependent");
     todos
         .set_blockers(PROJECT, gated.id, vec![blocker.id])
@@ -208,10 +222,10 @@ fn a_todo_stays_gated_until_its_blocker_completes() {
 fn a_deleted_blocker_does_not_deadlock_a_todo() {
     let todos = todos();
     let blocker = todos
-        .create(PROJECT, doc("gone", TodoStatus::Open))
+        .create(PROJECT, doc("gone", TodoStatus::Open), None)
         .unwrap();
     let gated = todos
-        .create(PROJECT, doc("free", TodoStatus::Open))
+        .create(PROJECT, doc("free", TodoStatus::Open), None)
         .unwrap();
     todos
         .set_blockers(PROJECT, gated.id, vec![blocker.id])
@@ -231,7 +245,7 @@ fn a_deleted_blocker_does_not_deadlock_a_todo() {
 fn a_blocker_must_exist_and_not_be_the_todo_itself() {
     let todos = todos();
     let todo = todos
-        .create(PROJECT, doc("self", TodoStatus::Open))
+        .create(PROJECT, doc("self", TodoStatus::Open), None)
         .unwrap();
 
     let self_block = todos
@@ -249,7 +263,7 @@ fn a_blocker_must_exist_and_not_be_the_todo_itself() {
 fn tags_are_idempotent_and_listed_distinct() {
     let todos = todos();
     let todo = todos
-        .create(PROJECT, doc("tagged", TodoStatus::Open))
+        .create(PROJECT, doc("tagged", TodoStatus::Open), None)
         .unwrap();
     todos.add_tag(PROJECT, todo.id, "p1").unwrap();
     todos.add_tag(PROJECT, todo.id, "p1").unwrap();
@@ -269,7 +283,7 @@ fn tags_are_idempotent_and_listed_distinct() {
 fn a_lock_is_a_signal_and_releases_when_the_owner_closes() {
     let todos = todos();
     let todo = todos
-        .create(PROJECT, doc("locked", TodoStatus::Open))
+        .create(PROJECT, doc("locked", TodoStatus::Open), None)
         .unwrap();
     let alice = ProcessId::from_raw(10);
     let bob = ProcessId::from_raw(20);
@@ -291,7 +305,7 @@ fn a_lock_is_a_signal_and_releases_when_the_owner_closes() {
 fn reconcile_clears_locks_but_keeps_the_todos() {
     let todos = todos();
     let todo = todos
-        .create(PROJECT, doc("survivor", TodoStatus::Open))
+        .create(PROJECT, doc("survivor", TodoStatus::Open), None)
         .unwrap();
     todos
         .lock(PROJECT, todo.id, ProcessId::from_raw(7))
@@ -309,7 +323,7 @@ fn reconcile_clears_locks_but_keeps_the_todos() {
 fn comments_create_update_delete_and_list() {
     let todos = todos();
     let todo = todos
-        .create(PROJECT, doc("discuss", TodoStatus::Open))
+        .create(PROJECT, doc("discuss", TodoStatus::Open), None)
         .unwrap();
 
     let (_, first) = todos
@@ -345,7 +359,7 @@ fn comments_create_update_delete_and_list() {
 fn a_comment_carries_the_author_it_was_stamped_with() {
     let todos = todos();
     let todo = todos
-        .create(PROJECT, doc("discuss", TodoStatus::Open))
+        .create(PROJECT, doc("discuss", TodoStatus::Open), None)
         .unwrap();
     let author = CommentAuthor::Process {
         id: ProcessId::from_raw(2),

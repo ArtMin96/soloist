@@ -1,6 +1,8 @@
 import { Archive, ArchiveRestore, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScratchpadBody } from "@/components/orchestration/ScratchpadBody";
+import { ScratchpadTitle } from "@/components/orchestration/ScratchpadTitle";
+import { humanizeName } from "@/lib/humanize";
 import type { ScratchpadConflict } from "@/store/useScratchpadEditor";
 
 interface ScratchpadEditorProps {
@@ -18,11 +20,14 @@ interface ScratchpadEditorProps {
   onCopyLink: () => void;
   /** Archives the open scratchpad, or restores it when already archived (also bound to Ctrl+Shift+W). */
   onArchive: () => void;
+  /** Renames the open scratchpad; rejects with the core's refusal so the field can surface it. */
+  onRename: (to: string) => Promise<void>;
 }
 
-// The scratchpad's editing surface: a persistent header (name, revision, actions), the conflict
-// banner, and the remounting editor body. Presentational — the body, the revision guard, and every
-// callback arrive as props; the parent owns the read/write. A stale save surfaces the conflict banner
+// The scratchpad's editing surface: a persistent header (the renamable title, the raw handle when it
+// reads differently, revision, actions), the conflict banner, and the remounting editor body.
+// Presentational — the body, the revision guard, and every callback arrive as props; the parent owns
+// the read/write. A stale save surfaces the conflict banner
 // (the core already refused it, so nothing was clobbered) with a Reload to the other edit; while it
 // shows, autosave is paused (`paused`) so the rejected edit is never retried behind the user's back.
 // Validity is the core's call, surfaced as the error line.
@@ -38,15 +43,25 @@ export function ScratchpadEditor({
   onReload,
   onCopyLink,
   onArchive,
+  onRename,
 }: ScratchpadEditorProps) {
+  // The handle earns its place only when the title no longer reads as it — a name the user already
+  // wrote is its own handle, and printing it twice would be noise.
+  const handle = humanizeName(name) === name ? null : name;
   return (
     <div className="flex h-full min-w-0 flex-col">
       <header className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
-        <h2 className="min-w-0 flex-1 truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">
-          {name}
-        </h2>
+        <ScratchpadTitle name={name} onRename={onRename} />
+        {handle && (
+          <span
+            className="type-label max-w-[12rem] shrink-0 truncate font-mono text-muted-foreground"
+            title={`Handle: ${handle}`}
+          >
+            {handle}
+          </span>
+        )}
         {revision != null && (
-          <span className="shrink-0 font-mono text-[0.6875rem] text-muted-foreground/70">
+          <span className="type-label shrink-0 font-mono tabular-nums text-muted-foreground">
             revision {revision}
           </span>
         )}

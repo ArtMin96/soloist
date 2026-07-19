@@ -1,11 +1,13 @@
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { TodoDocFields } from "@/components/orchestration/TodoDocFields";
-import type { TodoDoc, TodoStatus } from "@/domain";
+import type { ScratchpadSummary, TodoDoc, TodoStatus } from "@/domain";
 
 interface TodoCreateFormProps {
-  /** Posts the new document — the board routes it to the core, which closes the form on success. */
-  onCreate: (doc: TodoDoc) => Promise<void>;
+  /** Posts the new document and its association — the board routes it to the core. */
+  onCreate: (doc: TodoDoc, scratchpad: number | null) => Promise<void>;
+  /** The project's scratchpads, offered as the documents this todo may derive from. */
+  scratchpads: ScratchpadSummary[];
   /** Dismiss the form without creating. */
   onCancel: () => void;
   /** The core's rejection (e.g. a blank title), or null. */
@@ -16,11 +18,12 @@ interface TodoCreateFormProps {
 // authors a whole document with the shared fields and posts it explicitly on Create — creation has
 // no prior revision to guard, so unlike editing it is a single deliberate write, not autosave. The
 // title is required (the core refuses a blank one); the body is optional and may be seeded from the
-// default todo template server-side. On success the board closes the form; a rejection stays open
+// default todo template server-side; the scratchpad starts at None and is the author's to opt into. On success the board closes the form; a rejection stays open
 // with the reason so the draft survives.
-export function TodoCreateForm({ onCreate, onCancel, error }: TodoCreateFormProps) {
+export function TodoCreateForm({ onCreate, scratchpads, onCancel, error }: TodoCreateFormProps) {
   const [title, setTitle] = useState("");
   const [status, setStatus] = useState<TodoStatus>("open");
+  const [scratchpad, setScratchpad] = useState<number | null>(null);
   const bodyRef = useRef("");
   const [busy, setBusy] = useState(false);
 
@@ -29,7 +32,9 @@ export function TodoCreateForm({ onCreate, onCancel, error }: TodoCreateFormProp
   const create = () => {
     if (!canCreate) return;
     setBusy(true);
-    void onCreate({ title, body: bodyRef.current, status }).finally(() => setBusy(false));
+    void onCreate({ title, body: bodyRef.current, status }, scratchpad).finally(() =>
+      setBusy(false),
+    );
   };
 
   return (
@@ -45,8 +50,11 @@ export function TodoCreateForm({ onCreate, onCancel, error }: TodoCreateFormProp
         status={status}
         initialBody=""
         titleId="todo-create-title"
+        scratchpads={scratchpads}
+        scratchpad={scratchpad}
         onTitleChange={setTitle}
         onStatusChange={setStatus}
+        onScratchpadChange={setScratchpad}
         onBodyChange={(markdown) => {
           bodyRef.current = markdown;
         }}

@@ -2,8 +2,9 @@ use std::path::Path;
 use std::sync::{Arc, Barrier};
 
 use soloist_core::{
-    ProjectId, ProjectRepo, RenameResult, ScratchpadRepo, StoreError, StoredScratchpad,
-    TransferResult, WriteResult,
+    ProcessId, ProjectId, ProjectRepo, RenameResult, ScratchpadId, ScratchpadRepo, StoreError,
+    StoredScratchpad, StoredTodo, TodoDoc, TodoId, TodoStatus, TransferResult,
+    TransferredScratchpad, WriteResult,
 };
 use tempfile::tempdir;
 
@@ -58,6 +59,13 @@ fn written(result: WriteResult) -> StoredScratchpad {
     }
 }
 
+fn transferred(result: TransferResult) -> TransferredScratchpad {
+    match result {
+        TransferResult::Transferred(moved) => *moved,
+        other => panic!("expected a transfer, got {other:?}"),
+    }
+}
+
 #[test]
 fn create_then_read_round_trips_the_body() {
     let store = SqliteStore::open_in_memory().expect("open");
@@ -75,6 +83,33 @@ fn create_then_read_round_trips_the_body() {
     // The Markdown body survives the store round-trip verbatim.
     assert_eq!(read.body, body("started"));
     assert_eq!(read, created);
+}
+
+#[test]
+fn contains_answers_membership_per_project_not_per_id() {
+    // The membership question the core asks before writing an association stated by durable id: an
+    // id names a row without naming a project, so "this row exists" is not the same answer as "this
+    // project owns it".
+    let store = SqliteStore::open_in_memory().expect("open");
+    let mine = project(&store, "/p/mine");
+    let theirs = project(&store, "/p/theirs");
+    let pad = written(
+        store
+            .write_at(theirs, "their-plan", &body("theirs"), None)
+            .expect("create in the other project"),
+    );
+
+    assert!(store.contains(theirs, pad.id).expect("own project"));
+    assert!(
+        !store.contains(mine, pad.id).expect("other project"),
+        "a real row must not count as a member of a project that does not own it"
+    );
+    assert!(
+        !store
+            .contains(mine, ScratchpadId::from_raw(pad.id.get() + 1))
+            .expect("unknown id"),
+        "an id no row carries is not a member of anything"
+    );
 }
 
 #[test]
@@ -343,6 +378,168 @@ fn concurrent_writes_at_one_revision_apply_exactly_one() {
     assert_eq!(store.read(project, "plan").unwrap().unwrap().revision, 2);
 }
 
+/// A minimal valid todo document.
+fn todo_doc(title: &str) -> TodoDoc {
+    TodoDoc {
+        title: title.into(),
+        body: "do it".into(),
+        status: TodoStatus::Open,
+    }
+}
+
+/// Creates a todo in `project` derived from `scratchpad`, returning its id.
+fn derived(
+    store: &SqliteStore,
+    project: ProjectId,
+    title: &str,
+    scratchpad: ScratchpadId,
+) -> TodoId {
+    soloist_core::TodoRepo::create(store, project, &todo_doc(title), Some(scratchpad))
+        .expect("create a derived todo")
+        .id
+}
+
+/// The todo `id` as `project` reads it, or `None` when it is not in that project.
+fn todo_in(store: &SqliteStore, project: ProjectId, id: TodoId) -> Option<StoredTodo> {
+    soloist_core::TodoRepo::read(store, project, id).expect("read a todo")
+}
+
+#[test]
+fn transfer_takes_the_derived_todos_along_and_keeps_their_association() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let a = project(&store, "/p/a");
+    let b = project(&store, "/p/b");
+    let plan = written(
+        store
+            .write_at(a, "plan", &body("draft"), None)
+            .expect("plan"),
+    );
+    let notes = written(
+        store
+            .write_at(a, "notes", &body("aside"), None)
+            .expect("notes"),
+    );
+    let ship = derived(&store, a, "ship", plan.id);
+    let test = derived(&store, a, "test", plan.id);
+    // Neither of these derives from `plan`, so neither may move.
+    let tidy = derived(&store, a, "tidy", notes.id);
+    let loose = soloist_core::TodoRepo::create(&store, a, &todo_doc("triage"), None)
+        .expect("an unlinked todo")
+        .id;
+
+    let moved = transferred(store.transfer(a, "plan", b).expect("transfer"));
+
+    assert_eq!(moved.todos, vec![ship, test], "both derived todos moved");
+    for id in [ship, test] {
+        let after = todo_in(&store, b, id).expect("now reads from the target project");
+        let link = after
+            .scratchpad
+            .expect("the association is kept — both ends moved, so it still resolves");
+        assert_eq!(link.id, plan.id, "still derived from the same document");
+        assert_eq!(link.name, "plan", "and the handle still resolves");
+        assert!(todo_in(&store, a, id).is_none(), "gone from the source");
+    }
+    for (id, pad) in [(tidy, Some(notes.id)), (loose, None)] {
+        let after = todo_in(&store, a, id).expect("untouched in the source project");
+        assert_eq!(after.scratchpad.map(|link| link.id), pad);
+    }
+}
+
+#[test]
+fn transfer_clears_blockers_naming_todos_left_behind_and_keeps_those_that_move() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let a = project(&store, "/p/a");
+    let b = project(&store, "/p/b");
+    let plan = written(
+        store
+            .write_at(a, "plan", &body("draft"), None)
+            .expect("plan"),
+    );
+    let ship = derived(&store, a, "ship", plan.id);
+    let test = derived(&store, a, "test", plan.id);
+    let stays = soloist_core::TodoRepo::create(&store, a, &todo_doc("unrelated"), None)
+        .expect("a todo that stays behind")
+        .id;
+    // `ship` waits on one todo that moves with it and one that does not.
+    soloist_core::TodoRepo::set_blockers(&store, a, ship, &[test, stays]).expect("set blockers");
+
+    store.transfer(a, "plan", b).expect("transfer");
+
+    let after = todo_in(&store, b, ship).expect("moved");
+    assert_eq!(
+        after.blockers,
+        vec![test],
+        "the blocker that moved too survives; the one left behind names another project's row"
+    );
+}
+
+#[test]
+fn transfer_drops_the_process_owned_locks_on_the_todos_it_moves() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let a = project(&store, "/p/a");
+    let b = project(&store, "/p/b");
+    let plan = written(
+        store
+            .write_at(a, "plan", &body("draft"), None)
+            .expect("plan"),
+    );
+    let ship = derived(&store, a, "ship", plan.id);
+    soloist_core::TodoRepo::lock(&store, a, ship, ProcessId::from_raw(7)).expect("lock it");
+
+    store.transfer(a, "plan", b).expect("transfer");
+
+    assert_eq!(
+        todo_in(&store, b, ship).expect("moved").locked_by,
+        None,
+        "a per-run process-owned lock does not follow the todo across projects"
+    );
+}
+
+#[test]
+fn a_cascade_that_fails_part_way_leaves_the_scratchpad_and_every_todo_where_they_were() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let a = project(&store, "/p/a");
+    let b = project(&store, "/p/b");
+    let plan = written(
+        store
+            .write_at(a, "plan", &body("draft"), None)
+            .expect("plan"),
+    );
+    let first = derived(&store, a, "ship", plan.id);
+    let second = derived(&store, a, "test", plan.id);
+    // Corrupt the *second* todo's blockers, so the cascade fails only after the scratchpad and the
+    // first todo have already been written inside the transaction.
+    store
+        .lock()
+        .execute(
+            "UPDATE todos SET blockers = 'not json' WHERE id = ?1",
+            [second.get() as i64],
+        )
+        .expect("corrupt one row");
+
+    assert!(
+        store.transfer(a, "plan", b).is_err(),
+        "the undecodable row fails the cascade"
+    );
+
+    assert!(
+        store.read(b, "plan").expect("read b").is_none(),
+        "the scratchpad's move was rolled back"
+    );
+    assert!(
+        store.read(a, "plan").expect("read a").is_some(),
+        "it is still in the project it started in"
+    );
+    assert!(
+        todo_in(&store, b, first).is_none(),
+        "the todo that had already moved was rolled back with it"
+    );
+    assert!(
+        todo_in(&store, a, first).is_some(),
+        "and still reads from the source project"
+    );
+}
+
 #[test]
 fn transfer_moves_the_scratchpad_keeping_identity_and_refuses_a_taken_name() {
     let store = SqliteStore::open_in_memory().expect("open");
@@ -367,10 +564,7 @@ fn transfer_moves_the_scratchpad_keeping_identity_and_refuses_a_taken_name() {
 
     // Clear the collision, then the move keeps the durable id and revision.
     store.delete(b, "plan").expect("delete B copy");
-    let moved = match store.transfer(a, "plan", b).expect("transfer") {
-        TransferResult::Transferred(stored) => *stored,
-        other => panic!("expected a transfer, got {other:?}"),
-    };
+    let moved = transferred(store.transfer(a, "plan", b).expect("transfer")).scratchpad;
     assert_eq!(moved.id, created.id, "durable id kept");
     assert_eq!(moved.project, b, "now under the target project");
     assert_eq!(moved.revision, created.revision, "revision kept");

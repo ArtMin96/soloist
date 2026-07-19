@@ -87,7 +87,7 @@ function StatusDot({ status }: { status: ProcStatus | null }) {
   if (!status) {
     return (
       <span
-        className="inline-flex items-center leading-none text-muted-foreground/60"
+        className="inline-flex items-center leading-none text-muted-foreground"
         title="No process"
       >
         <span aria-hidden className="text-[0.7rem] leading-none">

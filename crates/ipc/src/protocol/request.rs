@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    IntegrationFile, ProcessId, ProjectId, TemplateScope, TimerId, TodoDoc, TodoId,
+    IntegrationFile, ProcessId, ProjectId, ScratchpadLink, TemplateScope, TimerId, TodoDoc, TodoId,
 };
 
 /// A request from an IPC client to the running app. The server resolves identity and
@@ -151,17 +151,26 @@ pub enum IpcRequest {
     /// Move the scratchpad `name` from the session's effective project to `to_project` — authorized
     /// only when the caller is authenticated to both (O10).
     ScratchpadTransfer { name: String, to_project: ProjectId },
-    /// Create a todo from the disciplined `doc` in the session's effective project.
-    TodoCreate { doc: TodoDoc },
+    /// Create a todo from the disciplined `doc` in the session's effective project, optionally
+    /// associated with the scratchpad `scratchpad` names — the document it was derived from.
+    TodoCreate {
+        doc: TodoDoc,
+        #[serde(default)]
+        scratchpad: Option<String>,
+    },
     /// Every todo in the session's effective project, as one-line summaries.
     TodoList,
     /// One todo by id in the session's effective project.
     TodoGet { todo: TodoId },
     /// Replace the document of `todo` in the session's effective project, revision-guarded by
-    /// `expected_revision`.
+    /// `expected_revision`, and apply `scratchpad` to its association. Defaulted to
+    /// [`ScratchpadLink::Unchanged`], so a caller that says nothing about the association leaves it
+    /// standing rather than dropping it along with the replaced document.
     TodoUpdate {
         todo: TodoId,
         doc: TodoDoc,
+        #[serde(default)]
+        scratchpad: ScratchpadLink<String>,
         expected_revision: u64,
     },
     /// Mark `todo` done in the session's effective project (gated on its blockers).

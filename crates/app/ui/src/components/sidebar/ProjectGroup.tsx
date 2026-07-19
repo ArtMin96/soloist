@@ -104,7 +104,7 @@ export function ProjectGroup({
               </span>
             </Collapsible.Trigger>
             <span
-              className="shrink-0 font-mono text-[0.6875rem] tabular-nums text-muted-foreground/70"
+              className="shrink-0 font-mono text-[0.6875rem] tabular-nums text-muted-foreground"
               aria-label={`${count.running} of ${count.total} running`}
             >
               {count.running}/{count.total}
@@ -178,7 +178,7 @@ export function ProjectGroup({
       <Collapsible.Content className="overflow-hidden data-[state=open]:animate-disclose-down data-[state=closed]:animate-disclose-up">
         <div className="mt-0.5 flex flex-col gap-0.5 pb-0.5 pl-3">
           {count.total === 0 ? (
-            <p className="px-1 py-1 text-[0.6875rem] text-muted-foreground/70">No commands yet</p>
+            <p className="px-1 py-1 text-[0.6875rem] text-muted-foreground">No commands yet</p>
           ) : (
             kinds.map((group) => (
               <ProcessGroup

@@ -1,18 +1,27 @@
 //! In-memory [`TodoRepo`] fake for headless coordination tests, mirroring the SQLite store's todo
 //! semantics (atomic revision-guarded doc write, tag/blocker/comment read-modify-write, conditional
-//! lock, owner-close and launch lock clearing) — no real database. Kept beside the other coordination
+//! lock, owner-close and launch lock clearing, and the scratchpad association resolved on read) —
+//! no real database. Kept beside the other coordination
 //! fakes ([`super::coordination`]) but in its own file to stay within the file-size smell.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+use super::coordination_scratchpad::FakeScratchpadRepo;
 
 use crate::coordination::{
-    Comment, CommentAuthor, CommentEdit, StoredTodo, TodoDoc, TodoRepo, TodoStatus, TodoWriteResult,
+    Comment, CommentAuthor, CommentEdit, ScratchpadLink, ScratchpadRef, StoredTodo, TodoDoc,
+    TodoRepo, TodoStatus, TodoWriteResult,
 };
-use crate::ids::{ProcessId, ProjectId, TodoId};
+use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
 use crate::ports::StoreError;
 use crate::sync::lock;
+
+/// The todo rows a [`FakeTodoRepo`] reads and writes. Shared with the [`FakeScratchpadRepo`] it is
+/// joined to, so that repo's transfer cascades into the very same todos — standing in for the two
+/// tables the durable adapter moves inside one transaction.
+pub type FakeTodoRows = Arc<Mutex<HashMap<u64, StoredTodo>>>;
 
 /// An in-memory [`TodoRepo`] for headless coordination tests. Keyed by todo id like the durable
 /// table, assigns durable ids from a counter (never reused), and mirrors the store's atomic
@@ -20,18 +29,60 @@ use crate::sync::lock;
 /// owner-close/launch lock clearing under one lock.
 #[derive(Default)]
 pub struct FakeTodoRepo {
-    rows: Mutex<HashMap<u64, StoredTodo>>,
+    rows: FakeTodoRows,
     next_id: AtomicU64,
+    scratchpads: Option<Arc<FakeScratchpadRepo>>,
 }
 
 impl FakeTodoRepo {
+    /// A repo with no scratchpads to resolve against — every association reads back unlinked, which
+    /// is all a test that never links one needs.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A repo that resolves associations against `scratchpads` and shares its row set with them,
+    /// standing in for the durable adapter's two joined tables: a todo linked to a scratchpad in
+    /// that store reads its current handle back (so a rename follows), one whose scratchpad has
+    /// since been deleted reads back unlinked, and transferring that scratchpad moves the todos
+    /// derived from it here too.
+    pub fn joined(scratchpads: Arc<FakeScratchpadRepo>) -> Self {
+        Self {
+            rows: scratchpads.todo_rows(),
+            scratchpads: Some(scratchpads),
+            next_id: AtomicU64::default(),
+        }
+    }
+
+    /// Re-resolves a row's association at read time, exactly where the adapter's outer join does.
+    /// Only the id is really persisted, so the handle is always current and a scratchpad that is
+    /// gone leaves the todo unlinked.
+    fn projected(&self, mut todo: StoredTodo) -> StoredTodo {
+        todo.scratchpad = todo.scratchpad.and_then(|link| {
+            self.scratchpads
+                .as_ref()?
+                .name_of(link.id)
+                .map(|name| ScratchpadRef { id: link.id, name })
+        });
+        todo
+    }
+
+    /// The stored form of a stated association: the id alone, with the handle filled in on read.
+    fn stored_link(scratchpad: Option<ScratchpadId>) -> Option<ScratchpadRef> {
+        scratchpad.map(|id| ScratchpadRef {
+            id,
+            name: String::new(),
+        })
     }
 }
 
 impl TodoRepo for FakeTodoRepo {
-    fn create(&self, project: ProjectId, doc: &TodoDoc) -> Result<StoredTodo, StoreError> {
+    fn create(
+        &self,
+        project: ProjectId,
+        doc: &TodoDoc,
+        scratchpad: Option<ScratchpadId>,
+    ) -> Result<StoredTodo, StoreError> {
         let id = TodoId::from_raw(self.next_id.fetch_add(1, Ordering::Relaxed) + 1);
         let stored = StoredTodo {
             id,
@@ -41,17 +92,19 @@ impl TodoRepo for FakeTodoRepo {
             blockers: Vec::new(),
             comments: Vec::new(),
             locked_by: None,
+            scratchpad: Self::stored_link(scratchpad),
             revision: 1,
         };
         lock(&self.rows).insert(id.get(), stored.clone());
-        Ok(stored)
+        Ok(self.projected(stored))
     }
 
     fn read(&self, project: ProjectId, id: TodoId) -> Result<Option<StoredTodo>, StoreError> {
-        Ok(lock(&self.rows)
+        let found = lock(&self.rows)
             .get(&id.get())
             .filter(|todo| todo.project == project)
-            .cloned())
+            .cloned();
+        Ok(found.map(|todo| self.projected(todo)))
     }
 
     fn list(&self, project: ProjectId) -> Result<Vec<StoredTodo>, StoreError> {
@@ -61,7 +114,7 @@ impl TodoRepo for FakeTodoRepo {
             .cloned()
             .collect();
         found.sort_by_key(|todo| todo.id.get());
-        Ok(found)
+        Ok(found.into_iter().map(|todo| self.projected(todo)).collect())
     }
 
     fn write_doc(
@@ -69,8 +122,14 @@ impl TodoRepo for FakeTodoRepo {
         project: ProjectId,
         id: TodoId,
         doc: &TodoDoc,
+        scratchpad: ScratchpadLink<ScratchpadId>,
         expected: Option<u64>,
     ) -> Result<TodoWriteResult, StoreError> {
+        let stated = match scratchpad {
+            ScratchpadLink::Unchanged => None,
+            ScratchpadLink::Cleared => Some(None),
+            ScratchpadLink::Linked(id) => Some(Self::stored_link(Some(id))),
+        };
         let mut rows = lock(&self.rows);
         match rows
             .get_mut(&id.get())
@@ -82,8 +141,13 @@ impl TodoRepo for FakeTodoRepo {
                 }),
                 _ => {
                     todo.doc = doc.clone();
+                    if let Some(link) = stated {
+                        todo.scratchpad = link;
+                    }
                     todo.revision += 1;
-                    Ok(TodoWriteResult::Written(Box::new(todo.clone())))
+                    Ok(TodoWriteResult::Written(Box::new(
+                        self.projected(todo.clone()),
+                    )))
                 }
             },
             None => Ok(TodoWriteResult::NotFound),
@@ -231,7 +295,7 @@ impl TodoRepo for FakeTodoRepo {
             body: body.to_owned(),
             author,
         });
-        Ok(Some((todo.clone(), comment)))
+        Ok(Some((self.projected(todo.clone()), comment)))
     }
 
     fn comment_update(
@@ -293,12 +357,14 @@ impl TodoRepo for FakeTodoRepo {
         let mut rows = lock(&self.rows);
         match rows.get_mut(&id.get()).filter(|todo| todo.project == from) {
             Some(todo) => {
-                // Re-key the project; blockers reference source-project ids and the lock is
-                // per-run/process-owned, so both are cleared. Doc, tags, comments, revision, id stay.
+                // Re-key the project; blockers and the scratchpad association reference
+                // source-project rows and the lock is per-run/process-owned, so all three are
+                // cleared. Doc, tags, comments, revision, id stay.
                 todo.project = to;
                 todo.blockers.clear();
                 todo.locked_by = None;
-                Ok(Some(todo.clone()))
+                todo.scratchpad = None;
+                Ok(Some(self.projected(todo.clone())))
             }
             None => Ok(None),
         }
@@ -321,7 +387,7 @@ impl FakeTodoRepo {
         {
             Some(todo) => {
                 change(todo);
-                Ok(Some(todo.clone()))
+                Ok(Some(self.projected(todo.clone())))
             }
             None => Ok(None),
         }
@@ -343,7 +409,7 @@ impl FakeTodoRepo {
             return Ok(CommentEdit::NoTodo);
         };
         match edit(&mut todo.comments) {
-            Some(()) => Ok(CommentEdit::Edited(Box::new(todo.clone()))),
+            Some(()) => Ok(CommentEdit::Edited(Box::new(self.projected(todo.clone())))),
             None => Ok(CommentEdit::NoComment),
         }
     }

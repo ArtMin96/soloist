@@ -68,11 +68,12 @@ pub use coordination::{
     ExportedTemplate, FireCond, IdleMode, Kv, KvEntry, KvRepo, LeaseReleaser, LeaseView, Leases,
     Link, LinkContent, LinkError, LinkTarget, LockRepo, NewTimer, NoopKvRepo, NoopLockRepo,
     NoopScratchpadRepo, NoopTemplateRepo, NoopTimerRepo, NoopTodoRepo, RenameError, RenameResult,
-    ScratchpadRepo, ScratchpadSummary, ScratchpadView, Scratchpads, SetWhenIdleOutcome,
-    StoredLease, StoredScratchpad, StoredTemplate, StoredTimer, StoredTodo, TemplateRepo,
-    TemplateSummary, TemplateView, TemplateWriteResult, Templates, TimerRepo, TimerScheduler,
-    TimerStatus, TimerView, Timers, TodoDoc, TodoError, TodoLockReleaser, TodoRepo, TodoStatus,
-    TodoSummary, TodoView, TodoWriteResult, Todos, TransferResult, WriteError, WriteResult,
+    ScratchpadLink, ScratchpadRef, ScratchpadRepo, ScratchpadSummary, ScratchpadTransfer,
+    ScratchpadView, Scratchpads, SetWhenIdleOutcome, StoredLease, StoredScratchpad, StoredTemplate,
+    StoredTimer, StoredTodo, TemplateRepo, TemplateSummary, TemplateView, TemplateWriteResult,
+    Templates, TimerRepo, TimerScheduler, TimerStatus, TimerView, Timers, TodoDoc, TodoError,
+    TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView, TodoWriteResult, Todos,
+    TransferResult, TransferredScratchpad, WriteError, WriteResult,
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};

@@ -21,6 +21,8 @@ mod scratchpads;
 mod settings;
 mod templates;
 mod timers;
+mod todo_json;
+mod todo_rows;
 mod todos;
 mod trust;
 

@@ -5,9 +5,9 @@ use rmcp::ServerHandler;
 use soloist_core::{
     AcquireOutcome, AgentKind, AgentTool, Comment, FireCond, LeaseView, LinkContent, McpToolGroups,
     Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, PromptMode,
-    Readiness, ScratchpadId, ScratchpadSummary, ScratchpadView, SessionId, SetWhenIdleOutcome,
-    StartSummary, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary,
-    TodoView, Whoami,
+    Readiness, ScratchpadId, ScratchpadLink, ScratchpadRef, ScratchpadSummary, ScratchpadView,
+    SessionId, SetWhenIdleOutcome, StartSummary, TimerId, TimerStatus, TimerView, TodoDoc, TodoId,
+    TodoStatus, TodoSummary, TodoView, Whoami,
 };
 use soloist_core::{
     FeedbackEntry, IntegrationFile, IntegrationWrite, TemplateId, TemplateKind, TemplateScope,
@@ -27,7 +27,7 @@ use crate::args::{
     ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg, SelectProjectArg,
     SendInputArg, SetupAgentIntegrationArg, SpawnAgentArg, SubmitFeedbackArg, TimerArg,
     TimerFireWhenIdleArg, TimerSetArg, TodoArg, TodoCommentCreateArg, TodoCreateArg, TodoGetArg,
-    TodoRef, TodoStatusArg, WaitForPortArg,
+    TodoRef, TodoStatusArg, TodoUpdateArg, WaitForPortArg,
 };
 
 /// Spawns a fake app on `socket` that answers each request via `respond` until the client
@@ -1613,6 +1613,7 @@ fn sample_todo(id: u64) -> TodoView {
         blocked: false,
         comments: Vec::new(),
         locked_by: None,
+        scratchpad: None,
         revision: 1,
     }
 }
@@ -1623,7 +1624,7 @@ async fn todo_create_builds_the_document_and_projects_the_view() {
     let socket = dir.path().join("soloist-ipc.sock");
     // The handler assembles the document from the tool fields and maps the wire status.
     spawn_fake_app(socket.clone(), |request| match request {
-        IpcRequest::TodoCreate { doc } if doc == sample_todo_doc() => {
+        IpcRequest::TodoCreate { doc, .. } if doc == sample_todo_doc() => {
             Ok(IpcResponse::TodoCreated {
                 todo: sample_todo(5),
                 seeded_from: None,
@@ -1637,6 +1638,7 @@ async fn todo_create_builds_the_document_and_projects_the_view() {
             title: "ship".into(),
             body: Some("cut the release".into()),
             status: Some(TodoStatusArg::Open),
+            scratchpad: None,
         }))
         .await
         .expect("todo_create succeeds");
@@ -1659,6 +1661,7 @@ async fn todo_list_projects_the_summaries() {
         tags: vec!["release".into()],
         blocked: true,
         locked_by: Some(ProcessId::from_raw(9)),
+        scratchpad: None,
         revision: 2,
     };
     let canned = summary.clone();
@@ -2115,4 +2118,131 @@ async fn a_stale_prompt_template_update_becomes_a_tool_execution_error() {
         .await
         .expect("a request error is a tool result, not a protocol error");
     assert_eq!(result.is_error, Some(true));
+}
+
+/// The scratchpad the association tests link to, and the todo view a fake app answers with.
+fn linked_todo(name: &str) -> TodoView {
+    let mut view = sample_todo(5);
+    view.scratchpad = Some(ScratchpadRef {
+        id: ScratchpadId::from_raw(7),
+        name: name.into(),
+    });
+    view
+}
+
+#[tokio::test]
+async fn todo_create_forwards_the_scratchpad_the_todo_derives_from() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // The handler passes the name through untouched; the core resolves it to a durable id.
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TodoCreate {
+            scratchpad: Some(name),
+            ..
+        } if name == "release-plan" => Ok(IpcResponse::TodoCreated {
+            todo: linked_todo("release-plan"),
+            seeded_from: None,
+        }),
+        _ => Err(IpcError::Internal("unexpected create".into())),
+    });
+
+    let result = handler(socket)
+        .todo_create(Parameters(TodoCreateArg {
+            title: "ship".into(),
+            body: Some("cut the release".into()),
+            status: Some(TodoStatusArg::Open),
+            scratchpad: Some("release-plan".into()),
+        }))
+        .await
+        .expect("todo_create succeeds");
+
+    let back: TodoView =
+        serde_json::from_value(structured_of(result)["todo"].clone()).expect("decode view");
+    assert_eq!(
+        back.scratchpad.map(|link| link.name),
+        Some("release-plan".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn an_omitted_scratchpad_leaves_the_link_unchanged_and_an_explicit_null_clears_it() {
+    // The distinction agents depend on: a routine title/status edit must not destroy a link the
+    // caller never mentioned, so unlinking has to be said out loud.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TodoUpdate { scratchpad, .. } => match scratchpad {
+            ScratchpadLink::Unchanged => Ok(IpcResponse::Todo(linked_todo("release-plan"))),
+            ScratchpadLink::Cleared => Ok(IpcResponse::Todo(sample_todo(5))),
+            ScratchpadLink::Linked(_) => Err(IpcError::Internal("unexpected relink".into())),
+        },
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let base = serde_json::json!({
+        "todo": 5,
+        "title": "ship",
+        "body": "cut the release",
+        "status": "open",
+        "expected_revision": 1,
+    });
+
+    // One handler for both calls: the fake app serves many requests over a single connection.
+    let mcp = handler(socket);
+
+    let omitted: TodoUpdateArg =
+        serde_json::from_value(base.clone()).expect("decode an update that omits the scratchpad");
+    let kept: TodoView = serde_json::from_value(structured_of(
+        mcp.todo_update(Parameters(omitted))
+            .await
+            .expect("update succeeds"),
+    ))
+    .expect("decode view");
+    assert!(
+        kept.scratchpad.is_some(),
+        "omitting the scratchpad must leave an existing link standing"
+    );
+
+    let mut nulled = base;
+    nulled["scratchpad"] = serde_json::Value::Null;
+    let stated: TodoUpdateArg =
+        serde_json::from_value(nulled).expect("decode an update that nulls the scratchpad");
+    let unlinked: TodoView = serde_json::from_value(structured_of(
+        mcp.todo_update(Parameters(stated))
+            .await
+            .expect("update succeeds"),
+    ))
+    .expect("decode view");
+    assert_eq!(
+        unlinked.scratchpad, None,
+        "an explicit null must unlink the todo"
+    );
+}
+
+#[tokio::test]
+async fn a_todo_naming_an_unknown_scratchpad_is_refused() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // The core resolves the name within the session's scope and refuses one it cannot find, before
+    // anything is written; the tool surfaces that refusal rather than creating an unlinked todo.
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::TodoCreate { .. } => Err(IpcError::UnknownScratchpad),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let refused = handler(socket)
+        .todo_create(Parameters(TodoCreateArg {
+            title: "ship".into(),
+            body: None,
+            status: None,
+            scratchpad: Some("no-such-plan".into()),
+        }))
+        .await
+        .expect("a request-caused refusal is a tool error, not a protocol failure");
+
+    assert_eq!(
+        refused.is_error,
+        Some(true),
+        "an unknown scratchpad name is refused as an actionable tool error"
+    );
 }

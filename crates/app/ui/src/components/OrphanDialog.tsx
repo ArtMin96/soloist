@@ -47,7 +47,7 @@ export function OrphanDialog({ orphans, onKillOne, onKillAll, onLeave }: OrphanD
                 <p className="truncate text-[0.8125rem] font-medium">{orphan.name}</p>
                 <p className="truncate font-mono text-xs text-muted-foreground">{orphan.command}</p>
               </div>
-              <span className="shrink-0 font-mono text-xs text-muted-foreground/70">
+              <span className="shrink-0 font-mono text-xs text-muted-foreground">
                 pgid {orphan.pgid}
               </span>
               <Button

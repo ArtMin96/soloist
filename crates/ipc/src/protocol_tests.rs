@@ -39,6 +39,7 @@ fn sample_todo() -> TodoView {
         blocked: false,
         comments: Vec::new(),
         locked_by: None,
+        scratchpad: None,
         revision: 1,
     }
 }

@@ -9,25 +9,37 @@
 //! double-grant a lock. A todo is durable and survives an app restart; only its process-owned
 //! `locked_by` is cleared on launch ([`clear_locks`](TodoRepo::clear_locks)). The `project_id`
 //! foreign key cascades, so removing a project drops its todos.
+//!
+//! A todo's optional association with the scratchpad it was derived from is the `scratchpad_id`
+//! column: only the durable id is stored, so a rename never breaks the link, and its foreign key
+//! sets the column NULL when that scratchpad is deleted, so a todo can never point at a document
+//! that is gone. Reads resolve the current handle through an outer join, which is why a caller gets
+//! a named reference rather than a bare id.
 
-use rusqlite::{Connection, OptionalExtension, Row};
 use soloist_core::{
-    Comment, CommentAuthor, CommentEdit, ProcessId, ProjectId, StoreError, StoredTodo, TodoDoc,
-    TodoId, TodoRepo, TodoWriteResult,
+    Comment, CommentAuthor, CommentEdit, ProcessId, ProjectId, ScratchpadId, ScratchpadLink,
+    StoreError, StoredTodo, TodoDoc, TodoId, TodoRepo, TodoWriteResult,
 };
 
+use crate::todo_json::{decode_strings, serialize_doc};
+use crate::todo_rows::{
+    current_revision, raw_id, read_one, row_to_todo, stated_link, write_comments, write_live,
+    TODO_COLUMNS, TODO_SOURCE,
+};
 use crate::{sql_err, SqliteStore};
 
-/// The columns every read selects, in order, so [`row_to_todo`] decodes one shape.
-const TODO_COLUMNS: &str = "id, project_id, doc, tags, blockers, comments, locked_by, revision";
-
 impl TodoRepo for SqliteStore {
-    fn create(&self, project: ProjectId, doc: &TodoDoc) -> Result<StoredTodo, StoreError> {
+    fn create(
+        &self,
+        project: ProjectId,
+        doc: &TodoDoc,
+        scratchpad: Option<ScratchpadId>,
+    ) -> Result<StoredTodo, StoreError> {
         let doc_json = serialize_doc(doc)?;
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO todos (project_id, doc, revision) VALUES (?1, ?2, 1)",
-            (project.get() as i64, &doc_json),
+            "INSERT INTO todos (project_id, doc, revision, scratchpad_id) VALUES (?1, ?2, 1, ?3)",
+            (project.get() as i64, &doc_json, raw_id(scratchpad)),
         )
         .map_err(sql_err)?;
         let id = TodoId::from_raw(conn.last_insert_rowid() as u64);
@@ -43,7 +55,7 @@ impl TodoRepo for SqliteStore {
         let conn = self.lock();
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT {TODO_COLUMNS} FROM todos WHERE project_id = ?1 ORDER BY id"
+                "SELECT {TODO_COLUMNS} FROM {TODO_SOURCE} WHERE t.project_id = ?1 ORDER BY t.id"
             ))
             .map_err(sql_err)?;
         let rows = stmt
@@ -61,6 +73,7 @@ impl TodoRepo for SqliteStore {
         project: ProjectId,
         id: TodoId,
         doc: &TodoDoc,
+        scratchpad: ScratchpadLink<ScratchpadId>,
         expected: Option<u64>,
     ) -> Result<TodoWriteResult, StoreError> {
         let doc_json = serialize_doc(doc)?;
@@ -75,15 +88,25 @@ impl TodoRepo for SqliteStore {
                 return Ok(TodoWriteResult::Conflict { actual: revision });
             }
         }
-        conn.execute(
-            "UPDATE todos SET doc = ?3, revision = ?4 WHERE project_id = ?1 AND id = ?2",
-            (
-                project.get() as i64,
-                id.get() as i64,
-                &doc_json,
-                (revision + 1) as i64,
+        let key = (
+            project.get() as i64,
+            id.get() as i64,
+            &doc_json,
+            (revision + 1) as i64,
+        );
+        // An unchanged association is left out of the statement entirely rather than written back
+        // with its own value, so a concurrent link change is not silently reverted by a doc write.
+        match stated_link(scratchpad) {
+            Some(link) => conn.execute(
+                "UPDATE todos SET doc = ?3, revision = ?4, scratchpad_id = ?5
+                 WHERE project_id = ?1 AND id = ?2",
+                (key.0, key.1, key.2, key.3, link),
             ),
-        )
+            None => conn.execute(
+                "UPDATE todos SET doc = ?3, revision = ?4 WHERE project_id = ?1 AND id = ?2",
+                key,
+            ),
+        }
         .map_err(sql_err)?;
         read_one(&conn, project, id)?
             .map(|stored| TodoWriteResult::Written(Box::new(stored)))
@@ -299,10 +322,12 @@ impl TodoRepo for SqliteStore {
             return Ok(None);
         }
         // The id is globally unique (AUTOINCREMENT), so re-keying `project_id` cannot collide.
-        // Blockers reference source-project ids and the lock is per-run/process-owned, so both are
-        // cleared; the document, tags, comments, and revision ride along unchanged.
+        // Blockers and the scratchpad association reference source-project rows, and the lock is
+        // per-run/process-owned, so all three are cleared; the document, tags, comments, and
+        // revision ride along unchanged.
         conn.execute(
-            "UPDATE todos SET project_id = ?3, blockers = '[]', locked_by = NULL
+            "UPDATE todos SET project_id = ?3, blockers = '[]', locked_by = NULL,
+                              scratchpad_id = NULL
              WHERE project_id = ?1 AND id = ?2",
             (from.get() as i64, id.get() as i64, to.get() as i64),
         )
@@ -351,155 +376,6 @@ impl SqliteStore {
             None => Ok(CommentEdit::NoComment),
         }
     }
-}
-
-/// Writes back the live (non-document) columns of a todo over an already-held guard.
-fn write_live(
-    conn: &Connection,
-    project: ProjectId,
-    id: TodoId,
-    stored: &StoredTodo,
-) -> Result<(), StoreError> {
-    conn.execute(
-        "UPDATE todos SET tags = ?3, blockers = ?4, comments = ?5, locked_by = ?6
-         WHERE project_id = ?1 AND id = ?2",
-        (
-            project.get() as i64,
-            id.get() as i64,
-            serialize_strings(&stored.tags)?,
-            serialize_blockers(&stored.blockers)?,
-            serialize_comments(&stored.comments)?,
-            stored.locked_by.map(|owner| owner.get() as i64),
-        ),
-    )
-    .map_err(sql_err)?;
-    Ok(())
-}
-
-/// Writes back only the comments column over an already-held guard.
-fn write_comments(
-    conn: &Connection,
-    project: ProjectId,
-    id: TodoId,
-    comments: &[Comment],
-) -> Result<(), StoreError> {
-    conn.execute(
-        "UPDATE todos SET comments = ?3 WHERE project_id = ?1 AND id = ?2",
-        (
-            project.get() as i64,
-            id.get() as i64,
-            serialize_comments(comments)?,
-        ),
-    )
-    .map_err(sql_err)?;
-    Ok(())
-}
-
-/// The current revision of `(project, id)` over an already-held guard, or `None` if absent.
-fn current_revision(
-    conn: &Connection,
-    project: ProjectId,
-    id: TodoId,
-) -> Result<Option<u64>, StoreError> {
-    conn.query_row(
-        "SELECT revision FROM todos WHERE project_id = ?1 AND id = ?2",
-        (project.get() as i64, id.get() as i64),
-        |row| row.get::<_, i64>(0),
-    )
-    .optional()
-    .map_err(sql_err)
-    .map(|revision| revision.map(|revision| revision as u64))
-}
-
-/// One todo by `(project, id)` over an already-held guard, or `None` if absent.
-fn read_one(
-    conn: &Connection,
-    project: ProjectId,
-    id: TodoId,
-) -> Result<Option<StoredTodo>, StoreError> {
-    conn.query_row(
-        &format!("SELECT {TODO_COLUMNS} FROM todos WHERE project_id = ?1 AND id = ?2"),
-        (project.get() as i64, id.get() as i64),
-        row_to_todo,
-    )
-    .optional()
-    .map_err(sql_err)?
-    .transpose()
-}
-
-/// Decodes one row into a [`StoredTodo`]. The outer `rusqlite::Result` carries a column error; the
-/// inner [`StoreError`] carries a JSON deserialize failure, kept distinct so neither is mistaken for
-/// the other.
-fn row_to_todo(row: &Row<'_>) -> rusqlite::Result<Result<StoredTodo, StoreError>> {
-    let id: i64 = row.get(0)?;
-    let project: i64 = row.get(1)?;
-    let doc_json: String = row.get(2)?;
-    let tags_json: String = row.get(3)?;
-    let blockers_json: String = row.get(4)?;
-    let comments_json: String = row.get(5)?;
-    let locked_by: Option<i64> = row.get(6)?;
-    let revision: i64 = row.get(7)?;
-    Ok(decode_doc(&doc_json).and_then(|doc| {
-        Ok(StoredTodo {
-            id: TodoId::from_raw(id as u64),
-            project: ProjectId::from_raw(project as u64),
-            doc,
-            tags: decode_strings(&tags_json)?,
-            blockers: decode_blockers(&blockers_json)?,
-            comments: decode_comments(&comments_json)?,
-            locked_by: locked_by.map(|owner| ProcessId::from_raw(owner as u64)),
-            revision: revision as u64,
-        })
-    }))
-}
-
-/// Serializes a [`TodoDoc`] to the JSON the `doc` column stores.
-fn serialize_doc(doc: &TodoDoc) -> Result<String, StoreError> {
-    serde_json::to_string(doc).map_err(|err| StoreError::Backend(format!("serialize todo: {err}")))
-}
-
-/// Deserializes the `doc` column's JSON into a [`TodoDoc`].
-fn decode_doc(json: &str) -> Result<TodoDoc, StoreError> {
-    serde_json::from_str(json)
-        .map_err(|err| StoreError::Backend(format!("deserialize todo: {err}")))
-}
-
-/// Serializes a string list (tags) to the JSON array its column stores.
-fn serialize_strings(items: &[String]) -> Result<String, StoreError> {
-    serde_json::to_string(items)
-        .map_err(|err| StoreError::Backend(format!("serialize todo tags: {err}")))
-}
-
-/// Deserializes a JSON string array (tags).
-fn decode_strings(json: &str) -> Result<Vec<String>, StoreError> {
-    serde_json::from_str(json)
-        .map_err(|err| StoreError::Backend(format!("deserialize todo tags: {err}")))
-}
-
-/// Serializes the blocker ids to a JSON array of raw ids.
-fn serialize_blockers(blockers: &[TodoId]) -> Result<String, StoreError> {
-    let raw: Vec<u64> = blockers.iter().map(|id| id.get()).collect();
-    serde_json::to_string(&raw)
-        .map_err(|err| StoreError::Backend(format!("serialize todo blockers: {err}")))
-}
-
-/// Deserializes a JSON array of raw ids into blocker ids.
-fn decode_blockers(json: &str) -> Result<Vec<TodoId>, StoreError> {
-    let raw: Vec<u64> = serde_json::from_str(json)
-        .map_err(|err| StoreError::Backend(format!("deserialize todo blockers: {err}")))?;
-    Ok(raw.into_iter().map(TodoId::from_raw).collect())
-}
-
-/// Serializes the comment list to the JSON array its column stores.
-fn serialize_comments(comments: &[Comment]) -> Result<String, StoreError> {
-    serde_json::to_string(comments)
-        .map_err(|err| StoreError::Backend(format!("serialize todo comments: {err}")))
-}
-
-/// Deserializes a JSON array of comments.
-fn decode_comments(json: &str) -> Result<Vec<Comment>, StoreError> {
-    serde_json::from_str(json)
-        .map_err(|err| StoreError::Backend(format!("deserialize todo comments: {err}")))
 }
 
 #[cfg(test)]

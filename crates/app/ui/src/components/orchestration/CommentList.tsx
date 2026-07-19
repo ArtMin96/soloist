@@ -8,7 +8,7 @@ export function CommentList({ comments }: { comments: Comment[] }) {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-[0.6875rem] font-[550] text-muted-foreground">
+      <span className="type-label font-[550] tabular-nums text-muted-foreground">
         Comments ({comments.length})
       </span>
       <ul className="flex flex-col gap-1.5">

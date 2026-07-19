@@ -246,6 +246,7 @@ async fn coordinate(
             stream,
             IpcRequest::TodoCreate {
                 doc: todo_doc(&plan.blocker),
+                scratchpad: None,
             },
         )
         .await?,
@@ -255,6 +256,7 @@ async fn coordinate(
             stream,
             IpcRequest::TodoCreate {
                 doc: todo_doc(&plan.blocked),
+                scratchpad: None,
             },
         )
         .await?,
@@ -275,6 +277,7 @@ async fn coordinate(
             stream,
             IpcRequest::TodoCreate {
                 doc: todo_doc(&plan.commented),
+                scratchpad: None,
             },
         )
         .await?,

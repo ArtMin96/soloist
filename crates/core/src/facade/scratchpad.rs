@@ -106,12 +106,39 @@ impl Facade {
         )
     }
 
+    /// [`scratchpad_rename`](ScopedFacade::scratchpad_rename) scoped to `project` directly — the
+    /// local-UI path (trusts the caller to be entitled to `project`; see
+    /// [`scratchpad_write_in`](Self::scratchpad_write_in)). Renames the scratchpad `from` to `to`,
+    /// keeping its durable id, body, tags, archived flag, and revision, and emitting
+    /// `ScratchpadChanged` under the new name. [`CoordinationError::UnknownScratchpad`] if `from`
+    /// has no such scratchpad and [`CoordinationError::ScratchpadNameTaken`] if `to` is already in
+    /// use, neither of which changes anything.
+    pub fn scratchpad_rename_in(
+        &self,
+        project: ProjectId,
+        from: &str,
+        to: &str,
+    ) -> Result<ScratchpadView, CoordinationError> {
+        self.emit_scratchpad(
+            project,
+            self.scratchpads
+                .rename(project, from, to)
+                .map_err(|err| match err {
+                    RenameError::NotFound => CoordinationError::UnknownScratchpad,
+                    RenameError::NameTaken => CoordinationError::ScratchpadNameTaken,
+                    RenameError::Store(err) => CoordinationError::Store(err),
+                }),
+        )
+    }
+
     /// [`scratchpad_transfer`](Self::scratchpad_transfer) scoped to `from`/`to` directly (local-UI
     /// path — never takes a project from an untrusted surface). Moves the scratchpad `name` from
-    /// `from` to `to`, keeping its document, revision, tags, archived flag, and id. Emits
-    /// `ScratchpadChanged` for **both** boards — the source drops it, the target shows it — or
-    /// [`CoordinationError::UnknownProject`] if `to` is not loaded (refused before the move, so a
-    /// bad target never orphans the scratchpad) / [`CoordinationError::UnknownScratchpad`] /
+    /// `from` to `to`, keeping its document, revision, tags, archived flag, and id, and **taking
+    /// the todos derived from it along** with their association intact — derived work follows its
+    /// source, and because both ends move the link stays valid. Emits `ScratchpadChanged` and a
+    /// `TodoChanged` per moved todo for **both** boards — the source drops them, the target shows
+    /// them — or [`CoordinationError::UnknownProject`] if `to` is not loaded (refused before the
+    /// move, so a bad target never orphans anything) / [`CoordinationError::UnknownScratchpad`] /
     /// [`CoordinationError::ScratchpadNameTaken`].
     pub fn scratchpad_transfer_in(
         &self,
@@ -122,25 +149,24 @@ impl Facade {
         if self.projects.get(to)?.is_none() {
             return Err(CoordinationError::UnknownProject);
         }
-        let result = self
+        let moved = self
             .scratchpads
             .transfer(from, name, to)
             .map_err(|err| match err {
                 RenameError::NotFound => CoordinationError::UnknownScratchpad,
                 RenameError::NameTaken => CoordinationError::ScratchpadNameTaken,
                 RenameError::Store(err) => CoordinationError::Store(err),
-            });
-        if let Ok(view) = &result {
+            })?;
+        for project in [from, to] {
             self.bus.publish(DomainEvent::ScratchpadChanged {
-                project: from,
-                name: view.name.clone(),
+                project,
+                name: moved.scratchpad.name.clone(),
             });
-            self.bus.publish(DomainEvent::ScratchpadChanged {
-                project: to,
-                name: view.name.clone(),
-            });
+            for &id in &moved.todos {
+                self.bus.publish(DomainEvent::TodoChanged { project, id });
+            }
         }
-        result
+        Ok(moved.scratchpad)
     }
 
     /// Publishes a [`DomainEvent::ScratchpadChanged`] for the scratchpad a successful mutation
@@ -199,17 +225,7 @@ impl ScopedFacade<'_> {
         to: &str,
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.emit_scratchpad(
-            project,
-            self.inner
-                .scratchpads
-                .rename(project, from, to)
-                .map_err(|err| match err {
-                    RenameError::NotFound => CoordinationError::UnknownScratchpad,
-                    RenameError::NameTaken => CoordinationError::ScratchpadNameTaken,
-                    RenameError::Store(err) => CoordinationError::Store(err),
-                }),
-        )
+        self.inner.scratchpad_rename_in(project, from, to)
     }
 
     /// Moves the scratchpad `name` into project `to` for a scoped session (context C8 → C6).
@@ -217,7 +233,8 @@ impl ScopedFacade<'_> {
     /// source) and `to` (the target, via [`authentic_scope`](Facade::authentic_scope)); else
     /// [`CoordinationError::ForeignProject`]. Because an MCP session authenticates to a single
     /// project, a genuine cross-project transfer is refused here — the reachable path is the local
-    /// [`scratchpad_transfer_in`](Self::scratchpad_transfer_in). Keeps the document/revision/tags/id.
+    /// [`scratchpad_transfer_in`](Facade::scratchpad_transfer_in), which this routes to, so the
+    /// document/revision/tags/id and the move of its derived todos behave identically either way.
     pub fn scratchpad_transfer(
         &self,
         name: &str,

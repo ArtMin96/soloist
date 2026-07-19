@@ -79,12 +79,12 @@ function CommandReview({ command, onTrust }: { command: TrustReviewCommand; onTr
       </div>
       <code className="truncate font-mono text-xs text-muted-foreground">{command.command}</code>
       {command.working_dir && (
-        <code className="truncate font-mono text-xs text-muted-foreground/80">
+        <code className="truncate font-mono text-xs text-muted-foreground">
           in {command.working_dir}
         </code>
       )}
       {env.length > 0 && (
-        <code className="truncate font-mono text-xs text-muted-foreground/80">
+        <code className="truncate font-mono text-xs text-muted-foreground">
           {env.map(([key, value]) => `${key}=${value}`).join("  ")}
         </code>
       )}
@@ -111,7 +111,7 @@ function DiffSummary({ diff }: { diff: ConfigSync }) {
       {rows.map(([label, value]) => (
         <div key={label} className="flex gap-2">
           <dt className="w-16 shrink-0 text-muted-foreground">{label}</dt>
-          <dd className="min-w-0 flex-1 truncate font-mono text-muted-foreground/90">{value}</dd>
+          <dd className="min-w-0 flex-1 truncate font-mono text-muted-foreground">{value}</dd>
         </div>
       ))}
     </dl>

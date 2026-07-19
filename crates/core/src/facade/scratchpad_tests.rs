@@ -5,10 +5,13 @@ use std::sync::Arc;
 
 use super::*;
 use crate::composition::CorePorts;
+use crate::coordination::{TodoDoc, TodoStatus, TodoView};
+use crate::events::DomainEvent;
+use crate::ids::TodoId;
 use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{
-    authentic_session, terminal_registration, FakeProjectRepo, FakeScratchpadRepo, FakeSpawner,
-    FakeTrustRepo, TEST_PEER_PGID,
+    authentic_session, drain, terminal_registration, FakeProjectRepo, FakeScratchpadRepo,
+    FakeSpawner, FakeTodoRepo, FakeTrustRepo, TEST_PEER_PGID,
 };
 
 /// A representative Markdown body; its first non-heading line is the summary gist.
@@ -158,6 +161,65 @@ fn renaming_onto_a_taken_name_is_refused() {
 }
 
 #[test]
+fn scratchpad_rename_in_renames_the_document_keeping_its_identity_and_revision() {
+    let (facade, a, _) = two_projects();
+    let created = facade
+        .scratchpad_write_in(a, "release-plan", body(), None)
+        .expect("create");
+
+    let renamed = facade
+        .scratchpad_rename_in(a, "release-plan", "Release plan")
+        .expect("rename to a free name succeeds");
+    assert_eq!(renamed.name, "Release plan");
+    assert_eq!(renamed.id, created.id, "the durable id is unchanged");
+    assert_eq!(
+        renamed.revision, created.revision,
+        "renaming is not an edit"
+    );
+    assert_eq!(renamed.body, created.body, "the body is untouched");
+
+    // It reads back under the new handle only — the old one is gone.
+    assert_eq!(
+        facade
+            .scratchpad_read_in(a, "Release plan")
+            .expect("reads under the new name"),
+        renamed
+    );
+    assert!(matches!(
+        facade.scratchpad_read_in(a, "release-plan"),
+        Err(CoordinationError::UnknownScratchpad)
+    ));
+}
+
+#[test]
+fn scratchpad_rename_in_refuses_a_taken_name_and_an_unknown_scratchpad() {
+    let (facade, a, _) = two_projects();
+    facade
+        .scratchpad_write_in(a, "plan", body(), None)
+        .expect("create plan");
+    facade
+        .scratchpad_write_in(a, "research", body(), None)
+        .expect("create research");
+
+    assert!(matches!(
+        facade.scratchpad_rename_in(a, "plan", "research"),
+        Err(CoordinationError::ScratchpadNameTaken)
+    ));
+    assert!(matches!(
+        facade.scratchpad_rename_in(a, "missing", "free"),
+        Err(CoordinationError::UnknownScratchpad)
+    ));
+
+    // Neither refusal moved anything: both documents still read under their own names.
+    assert!(facade.scratchpad_read_in(a, "plan").is_ok());
+    assert!(facade.scratchpad_read_in(a, "research").is_ok());
+    assert!(matches!(
+        facade.scratchpad_read_in(a, "free"),
+        Err(CoordinationError::UnknownScratchpad)
+    ));
+}
+
+#[test]
 fn tags_and_archive_round_trip_through_the_facade() {
     let (facade, session) = scoped_facade();
     facade
@@ -202,8 +264,9 @@ fn tags_and_archive_round_trip_through_the_facade() {
     ));
 }
 
-/// A façade with two projects loaded and the scratchpad store wired, returning the façade and both
-/// project ids — the setup the transfer tests share.
+/// A façade with two projects loaded and the scratchpad *and* todo stores wired over one shared row
+/// set, returning the façade and both project ids — the setup the transfer tests share. Both stores
+/// are wired because a transfer moves the todos derived from the scratchpad along with it.
 fn two_projects() -> (Facade, ProjectId, ProjectId) {
     let projects = Arc::new(FakeProjectRepo::new());
     let a = projects
@@ -214,6 +277,7 @@ fn two_projects() -> (Facade, ProjectId, ProjectId) {
         .upsert(Path::new("/tmp/soloist-sp-b"), Some("b"), None)
         .expect("B")
         .id;
+    let scratchpads = Arc::new(FakeScratchpadRepo::new());
     let facade = Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
@@ -221,10 +285,40 @@ fn two_projects() -> (Facade, ProjectId, ProjectId) {
             Arc::new(FakeTrustRepo::new()),
             projects,
         )
-        .scratchpad_repo(Arc::new(FakeScratchpadRepo::new()))
+        .todo_repo(Arc::new(FakeTodoRepo::joined(Arc::clone(&scratchpads))))
+        .scratchpad_repo(scratchpads)
         .build(),
     );
     (facade, a, b)
+}
+
+/// Creates the scratchpad `name` in `project` and a todo titled `title` derived from it, returning
+/// the todo's id — the two-sided setup every cascade assertion starts from.
+fn derived_todo(facade: &Facade, project: ProjectId, name: &str, title: &str) -> TodoId {
+    let pad = facade
+        .scratchpad_write_in(project, name, body(), None)
+        .expect("create the scratchpad");
+    facade
+        .todo_create_in(project, todo(title), Some(pad.id))
+        .expect("create a todo derived from it")
+        .id
+}
+
+/// A minimal valid todo document.
+fn todo(title: &str) -> TodoDoc {
+    TodoDoc {
+        title: title.to_owned(),
+        body: "do it".to_owned(),
+        status: TodoStatus::Open,
+    }
+}
+
+/// The todos `project`'s board shows, in creation order.
+fn board(facade: &Facade, project: ProjectId) -> Vec<TodoView> {
+    facade
+        .orchestration_snapshot(project)
+        .expect("snapshot")
+        .todos
 }
 
 #[test]
@@ -281,14 +375,88 @@ fn scratchpad_transfer_refuses_a_target_outside_the_callers_authenticated_scope(
         .scoped(session)
         .bind_session_process(owner)
         .expect("bind the session to its process in A");
-    facade
-        .scratchpad_write_in(a, "plan", body(), None)
-        .expect("create in A");
+    let derived = derived_todo(&facade, a, "plan", "ship");
 
     assert!(matches!(
         facade.scoped(session).scratchpad_transfer("plan", b),
         Err(CoordinationError::ForeignProject)
     ));
+
+    // The refusal is decided before anything moves, so neither the document nor the work derived
+    // from it left A.
+    assert!(facade.scratchpad_read_in(a, "plan").is_ok(), "still in A");
+    assert_eq!(
+        board(&facade, a).iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![derived],
+        "the derived todo stayed in A"
+    );
+    assert!(board(&facade, b).is_empty(), "nothing was written to B");
+}
+
+#[test]
+fn scratchpad_transfer_in_takes_the_todos_derived_from_it_and_keeps_their_link() {
+    let (facade, a, b) = two_projects();
+    let derived = derived_todo(&facade, a, "plan", "ship");
+    // A todo deriving from a different scratchpad, and one deriving from nothing at all, both of
+    // which must be left exactly where they are.
+    let other = derived_todo(&facade, a, "notes", "tidy");
+    let loose = facade
+        .todo_create_in(a, todo("triage"), None)
+        .expect("an unlinked todo")
+        .id;
+
+    let moved = facade
+        .scratchpad_transfer_in(a, "plan", b)
+        .expect("transfer");
+
+    let target = board(&facade, b);
+    assert_eq!(
+        target.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![derived],
+        "only the todos derived from the moved scratchpad went with it"
+    );
+    let link = target[0]
+        .scratchpad
+        .as_ref()
+        .expect("the association survives the move");
+    assert_eq!(link.id, moved.id, "still derived from the same document");
+    assert_eq!(link.name, "plan", "and still resolves to its handle");
+
+    let source: Vec<TodoId> = board(&facade, a).iter().map(|t| t.id).collect();
+    assert_eq!(
+        source,
+        vec![other, loose],
+        "todos deriving from another scratchpad or from none are untouched"
+    );
+}
+
+#[test]
+fn scratchpad_transfer_in_announces_the_moved_todos_on_both_boards() {
+    let (facade, a, b) = two_projects();
+    let derived = derived_todo(&facade, a, "plan", "ship");
+    let mut rx = facade.subscribe();
+
+    facade
+        .scratchpad_transfer_in(a, "plan", b)
+        .expect("transfer");
+
+    let events = drain(&mut rx);
+    for project in [a, b] {
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                DomainEvent::ScratchpadChanged { project: p, name } if *p == project && name == "plan"
+            )),
+            "the scratchpad change reaches {project:?}: {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                DomainEvent::TodoChanged { project: p, id } if *p == project && *id == derived
+            )),
+            "the moved todo is announced on {project:?}: {events:?}"
+        );
+    }
 }
 
 #[test]

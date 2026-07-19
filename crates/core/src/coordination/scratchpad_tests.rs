@@ -288,7 +288,8 @@ fn transfer_moves_a_scratchpad_to_the_new_scope_keeping_its_identity() {
 
     let after = pads
         .transfer(PROJECT, "release-plan", OTHER)
-        .expect("transfer succeeds");
+        .expect("transfer succeeds")
+        .scratchpad;
 
     // The durable id, name, tags, body, and revision survive the relocation.
     assert_eq!(after.id, written.id);

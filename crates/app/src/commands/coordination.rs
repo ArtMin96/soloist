@@ -9,7 +9,9 @@
 
 use std::sync::Arc;
 
-use soloist_core::{Facade, ProjectId, ScratchpadId, ScratchpadView, TodoDoc, TodoId, TodoView};
+use soloist_core::{
+    Facade, ProjectId, ScratchpadId, ScratchpadLink, ScratchpadView, TodoDoc, TodoId, TodoView,
+};
 use tauri::State;
 
 /// The full scratchpad `name` in `project` — its Markdown body, rendering, and revision — for the
@@ -59,30 +61,59 @@ pub async fn scratchpad_archive(
         .map_err(|err| err.to_string())
 }
 
-/// Creates a todo from the disciplined `doc` in `project`.
+/// Renames the scratchpad `from` to `to` in `project`, keeping its durable id and revision. Routes
+/// to the one core rename the MCP `scratchpad_rename` tool also drives; a name already in use comes
+/// back as an error string for the header's rename field to surface.
+#[tauri::command]
+pub async fn scratchpad_rename(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+    from: String,
+    to: String,
+) -> Result<ScratchpadView, String> {
+    facade
+        .blocking(move |f| f.scratchpad_rename_in(project, &from, &to))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Creates a todo from the disciplined `doc` in `project`, associated with `scratchpad` when the
+/// board's picker named one.
 #[tauri::command]
 pub async fn todo_create(
     facade: State<'_, Arc<Facade>>,
     project: ProjectId,
     doc: TodoDoc,
+    scratchpad: Option<ScratchpadId>,
 ) -> Result<TodoView, String> {
     facade
-        .blocking(move |f| f.todo_create_in(project, doc))
+        .blocking(move |f| f.todo_create_in(project, doc, scratchpad))
         .await
         .map_err(|err| err.to_string())
 }
 
-/// Replaces todo `id`'s document in `project`, revision-guarded by `expected_revision`.
+/// Replaces todo `id`'s document in `project`, revision-guarded by `expected_revision`, and sets its
+/// association to `scratchpad`. The board's picker is always on screen, so this surface states the
+/// association on every write — hence a plain optional id rather than the wire's three-state link.
 #[tauri::command]
 pub async fn todo_update(
     facade: State<'_, Arc<Facade>>,
     project: ProjectId,
     id: TodoId,
     doc: TodoDoc,
+    scratchpad: Option<ScratchpadId>,
     expected_revision: u64,
 ) -> Result<TodoView, String> {
     facade
-        .blocking(move |f| f.todo_update_in(project, id, doc, expected_revision))
+        .blocking(move |f| {
+            f.todo_update_in(
+                project,
+                id,
+                doc,
+                ScratchpadLink::stated(scratchpad),
+                expected_revision,
+            )
+        })
         .await
         .map_err(|err| err.to_string())
 }

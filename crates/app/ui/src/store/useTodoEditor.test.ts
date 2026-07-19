@@ -23,6 +23,7 @@ function view(id: number, revision: number): TodoView {
     blocked: false,
     comments: [],
     locked_by: null,
+    scratchpad: null,
     revision,
   };
 }
@@ -40,9 +41,9 @@ describe("useTodoEditor", () => {
     expect(result.current.baseRevision).toBeNull();
 
     await act(async () => {
-      await result.current.save({ title: "New", body: "b", status: "open" });
+      await result.current.save({ title: "New", body: "b", status: "open" }, null);
     });
-    expect(create).toHaveBeenCalledWith(7, { title: "New", body: "b", status: "open" });
+    expect(create).toHaveBeenCalledWith(7, { title: "New", body: "b", status: "open" }, null);
     expect(result.current.mode).toBeNull();
   });
 
@@ -56,13 +57,14 @@ describe("useTodoEditor", () => {
 
     update.mockResolvedValue(view(3, 6));
     await act(async () => {
-      await result.current.save({ title: "Ship it", body: "changed", status: "done" });
+      await result.current.save({ title: "Ship it", body: "changed", status: "done" }, null);
     });
     // The write carried the opened revision as its guard; success advances it for the next save.
     expect(update).toHaveBeenCalledWith(
       7,
       3,
       { title: "Ship it", body: "changed", status: "done" },
+      null,
       5,
     );
     await waitFor(() => expect(result.current.baseRevision).toBe(6));
@@ -75,7 +77,7 @@ describe("useTodoEditor", () => {
     act(() => result.current.editTodo(view(3, 5)));
     update.mockRejectedValue("todo is blocked by #2");
     await act(async () => {
-      await result.current.save({ title: "Ship it", body: "b", status: "done" });
+      await result.current.save({ title: "Ship it", body: "b", status: "done" }, null);
     });
     await waitFor(() => expect(result.current.error).toBe("todo is blocked by #2"));
     // The base revision is untouched (nothing was written) and the surface stays open to keep edits.

@@ -105,6 +105,16 @@ export function scratchpadArchive(
   return invoke<ScratchpadView>("scratchpad_archive", { project, name, archived });
 }
 
+// Rename a scratchpad, keeping its durable id and revision. A name already in use is rejected by the
+// core, so the caller surfaces the refusal rather than pre-empting it.
+export function scratchpadRename(
+  project: number,
+  from: string,
+  to: string,
+): Promise<ScratchpadView> {
+  return invoke<ScratchpadView>("scratchpad_rename", { project, from, to });
+}
+
 // Save a scratchpad's Markdown to a user-chosen `.md` file: the native save dialog picks the path,
 // then the backend writes the bytes there. Returns false when the user dismisses the dialog.
 export async function exportMarkdown(defaultName: string, contents: string): Promise<boolean> {
@@ -119,8 +129,12 @@ export async function exportMarkdown(defaultName: string, contents: string): Pro
 }
 
 // Create a todo from its disciplined document.
-export function todoCreate(project: number, doc: TodoDoc): Promise<TodoView> {
-  return invoke<TodoView>("todo_create", { project, doc });
+export function todoCreate(
+  project: number,
+  doc: TodoDoc,
+  scratchpad: number | null,
+): Promise<TodoView> {
+  return invoke<TodoView>("todo_create", { project, doc, scratchpad });
 }
 
 // Replace a todo's document, revision-guarded by `expectedRevision`.
@@ -128,9 +142,10 @@ export function todoUpdate(
   project: number,
   id: number,
   doc: TodoDoc,
+  scratchpad: number | null,
   expectedRevision: number,
 ): Promise<TodoView> {
-  return invoke<TodoView>("todo_update", { project, id, doc, expectedRevision });
+  return invoke<TodoView>("todo_update", { project, id, doc, scratchpad, expectedRevision });
 }
 
 // Mark a todo done; rejects while a blocker is unmet (the board surfaces the gate).

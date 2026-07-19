@@ -65,6 +65,7 @@ mod project_settings;
 mod prompt_template;
 mod scoped;
 mod scoped_process;
+mod scoped_todo;
 mod scratchpad;
 mod session;
 mod settings;

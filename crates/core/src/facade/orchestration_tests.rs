@@ -6,8 +6,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::broadcast;
-
 use super::*;
 use crate::composition::CorePorts;
 use crate::coordination::{IdleMode, TodoDoc, TodoStatus};
@@ -15,7 +13,7 @@ use crate::events::DomainEvent;
 use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::process::ProcessKind;
 use crate::testing::{
-    agent_registration, authentic_session, facade_with_agent_tool, terminal_registration,
+    agent_registration, authentic_session, drain, facade_with_agent_tool, terminal_registration,
     FakeKvRepo, FakeLockRepo, FakeProjectRepo, FakeScratchpadRepo, FakeSpawner, FakeTimerRepo,
     FakeTodoRepo, FakeTrustRepo, MockClock, TEST_PEER_PGID,
 };
@@ -76,16 +74,6 @@ fn scratchpad_body() -> String {
     "## Objective\nship it\n\n## Status\nactive".to_owned()
 }
 
-/// Every event currently buffered for `rx`, drained synchronously — the events emitted by the one
-/// mutation performed since subscribing.
-fn drain(rx: &mut broadcast::Receiver<DomainEvent>) -> Vec<DomainEvent> {
-    let mut events = Vec::new();
-    while let Ok(event) = rx.try_recv() {
-        events.push(event);
-    }
-    events
-}
-
 #[test]
 fn the_snapshot_projects_the_tree_todos_timers_leases_scratchpads_and_kv_for_a_project() {
     let facade = facade();
@@ -99,12 +87,12 @@ fn the_snapshot_projects_the_tree_todos_timers_leases_scratchpads_and_kv_for_a_p
     // A blocked todo: `ship` is gated by `build`.
     let build = facade
         .scoped(session)
-        .todo_create(todo_doc("build"))
+        .todo_create(todo_doc("build"), None)
         .expect("create build")
         .view;
     let ship = facade
         .scoped(session)
-        .todo_create(todo_doc("ship"))
+        .todo_create(todo_doc("ship"), None)
         .expect("create ship")
         .view;
     let ship = facade
@@ -202,7 +190,7 @@ fn the_snapshot_is_scoped_to_its_project() {
     let (session, _owner) = bound_session(&facade, PROJECT);
     facade
         .scoped(session)
-        .todo_create(todo_doc("only in project one"))
+        .todo_create(todo_doc("only in project one"), None)
         .expect("create a todo in project one");
 
     // A different project shares no processes or coordination state.
@@ -221,7 +209,7 @@ fn creating_a_todo_emits_one_todo_changed() {
 
     let todo = facade
         .scoped(session)
-        .todo_create(todo_doc("build"))
+        .todo_create(todo_doc("build"), None)
         .expect("create")
         .view;
 
@@ -239,7 +227,7 @@ fn completing_a_todo_emits_one_todo_changed() {
     let (session, _owner) = bound_session(&facade, PROJECT);
     let todo = facade
         .scoped(session)
-        .todo_create(todo_doc("build"))
+        .todo_create(todo_doc("build"), None)
         .expect("create")
         .view;
     let mut rx = facade.subscribe();

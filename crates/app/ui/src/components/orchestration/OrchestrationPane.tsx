@@ -34,7 +34,7 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
           {project.icon && <AvatarImage src={project.icon} alt="" />}
           <AvatarFallback>{monogram(project.name)}</AvatarFallback>
         </Avatar>
-        <span className="min-w-0 shrink truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">
+        <span className="min-w-0 shrink truncate text-[0.9375rem] font-[550] tracking-[var(--tracking-title)]">
           {project.name}
         </span>
         <div className="ml-auto shrink-0">
@@ -54,7 +54,9 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
             <OrchestrationTree tree={tree} />
           </div>
         )}
-        {view === "todos" && <TodoBoard project={project.id} todos={todos} agents={agents} />}
+        {view === "todos" && (
+          <TodoBoard project={project.id} todos={todos} agents={agents} scratchpads={scratchpads} />
+        )}
         {view === "scratchpads" && (
           <ScratchpadPanel project={project.id} scratchpads={scratchpads} />
         )}

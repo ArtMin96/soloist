@@ -312,7 +312,18 @@ export interface TodoView {
   blocked: boolean;
   comments: Comment[];
   locked_by: number | null;
+  /**
+   * The scratchpad this todo was derived from, or `null` — the permanently valid default. Only the
+   * durable id is stored; the core resolves the handle on read, so a rename follows the link.
+   */
+  scratchpad: ScratchpadRef | null;
   revision: number;
+}
+
+// A reference to one scratchpad: its durable id and the `name` handle resolved when it was read.
+export interface ScratchpadRef {
+  id: number;
+  name: string;
 }
 
 // What a timer waits for (serde tag = "kind").

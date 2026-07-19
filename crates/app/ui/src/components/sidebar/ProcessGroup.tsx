@@ -47,7 +47,7 @@ export function ProcessGroup({
         <span className="text-[0.6875rem] font-[550] tracking-[0.01em] text-muted-foreground">
           {group.label}
         </span>
-        <span className="ml-auto pr-1 font-mono text-[0.6875rem] text-muted-foreground/70">
+        <span className="ml-auto pr-1 font-mono text-[0.6875rem] tabular-nums text-muted-foreground">
           {group.processes.length}
         </span>
       </Collapsible.Trigger>

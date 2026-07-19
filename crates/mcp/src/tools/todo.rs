@@ -6,13 +6,15 @@
 //! and update tools take exactly those fields. Updates are **revision-guarded** (read, then write
 //! back the revision you read). A todo cannot be completed while it has unmet **blockers** (the
 //! gate). The **lock** signals cooperative intent and auto-releases when the owning process closes.
+//! A todo may also carry an optional **scratchpad** association naming the document it was derived
+//! from — stated by name, resolved to a durable id in the core, and never required.
 //! Todos survive an app restart; scope, ownership, and the gate are all resolved in the core, not
 //! here.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
-use soloist_core::{LinkContent, ProjectId, TodoDoc, TodoId, TodoStatus};
+use soloist_core::{LinkContent, ProjectId, ScratchpadLink, TodoDoc, TodoId, TodoStatus};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
@@ -26,7 +28,7 @@ use crate::tools::reply::{app_error, structured, unexpected};
 #[tool_router(router = todo_router, vis = "pub(crate)")]
 impl SoloistMcp {
     #[tool(
-        description = "List the todos in your effective project as one-line summaries (id, title, status, tags, blocked, lock, revision). Todos are durable shared work items that survive restarts."
+        description = "List the todos in your effective project as one-line summaries (id, title, status, tags, blocked, lock, the scratchpad each derives from when it has one, and revision). Todos are durable shared work items that survive restarts."
     )]
     pub(crate) async fn todo_list(&self) -> Result<CallToolResult, ErrorData> {
         match self.client.request(IpcRequest::TodoList).await {
@@ -37,7 +39,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Read one todo by its id or a solo:// link to it. Returns its document (title, Markdown body, status), tags, blockers, which blockers are still unmet, comments, lock, and the revision — pass that revision back to todo_update to update it safely."
+        description = "Read one todo by its id or a solo:// link to it. Returns its document (title, Markdown body, status), tags, blockers, which blockers are still unmet, comments, lock, the scratchpad it derives from (null when it has none), and the revision — pass that revision back to todo_update to update it safely."
     )]
     pub(crate) async fn todo_get(
         &self,
@@ -55,7 +57,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Create a todo: a title, an optional free-form Markdown body (what needs doing and any detail), and an initial status (defaults to open). Leaving the body empty seeds it from the project's default todo template (if one is selected); the reply's `seeded_from` names it. Returns the new todo with its id."
+        description = "Create a todo: a title, an optional free-form Markdown body (what needs doing and any detail), and an initial status (defaults to open). Leaving the body empty seeds it from the project's default todo template (if one is selected); the reply's `seeded_from` names it. Set `scratchpad` only when this todo derives from that scratchpad — say, a task you extracted from its plan — so the board can group it under the document it came from; otherwise omit it, since most todos have none. Returns the new todo with its id."
     )]
     pub(crate) async fn todo_create(
         &self,
@@ -63,6 +65,7 @@ impl SoloistMcp {
             title,
             body,
             status,
+            scratchpad,
         }): Parameters<TodoCreateArg>,
     ) -> Result<CallToolResult, ErrorData> {
         let doc = TodoDoc {
@@ -70,7 +73,11 @@ impl SoloistMcp {
             body: body.unwrap_or_default(),
             status: status.map_or(TodoStatus::Open, Into::into),
         };
-        match self.client.request(IpcRequest::TodoCreate { doc }).await {
+        match self
+            .client
+            .request(IpcRequest::TodoCreate { doc, scratchpad })
+            .await
+        {
             Ok(IpcResponse::TodoCreated { todo, seeded_from }) => {
                 structured(&serde_json::json!({ "todo": todo, "seeded_from": seeded_from }))
             }
@@ -80,7 +87,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Update a todo, revision-guarded — the whole document is replaced. Provide the title and status you want and the revision you read from todo_get (a mismatch means someone edited it first); the Markdown body is optional. Set status to done only when its blockers are all complete (otherwise use todo_complete, which enforces the gate)."
+        description = "Update a todo, revision-guarded — the whole document is replaced. Provide the title and status you want and the revision you read from todo_get (a mismatch means someone edited it first); the Markdown body is optional. Set status to done only when its blockers are all complete (otherwise use todo_complete, which enforces the gate). The `scratchpad` link is NOT part of the document: omitting it leaves any existing link untouched, a name (re)links the todo to the scratchpad it derives from, and an explicit null unlinks it."
     )]
     pub(crate) async fn todo_update(
         &self,
@@ -89,6 +96,7 @@ impl SoloistMcp {
             title,
             body,
             status,
+            scratchpad,
             expected_revision,
         }): Parameters<TodoUpdateArg>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -100,6 +108,10 @@ impl SoloistMcp {
         self.todo_view(IpcRequest::TodoUpdate {
             todo: TodoId::from_raw(todo),
             doc,
+            scratchpad: match scratchpad {
+                None => ScratchpadLink::Unchanged,
+                Some(stated) => ScratchpadLink::stated(stated),
+            },
             expected_revision,
         })
         .await
@@ -139,7 +151,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Move a todo to another project, keeping its comments and completion status and clearing its blockers and lock (those reference the source project). You must be authenticated to the destination — a process you run in belongs to it. Note: an MCP session is scoped to a single project, so a genuine cross-project move over MCP is refused; the desktop app performs cross-project transfers."
+        description = "Move a todo to another project, keeping its comments and completion status and clearing its blockers, lock, and scratchpad link (those all reference the source project). You must be authenticated to the destination — a process you run in belongs to it. Note: an MCP session is scoped to a single project, so a genuine cross-project move over MCP is refused; the desktop app performs cross-project transfers."
     )]
     pub(crate) async fn todo_transfer(
         &self,
