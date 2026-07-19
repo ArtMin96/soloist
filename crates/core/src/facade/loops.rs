@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use super::Facade;
 use crate::agents::IdleSampler;
+use crate::coordination::TemplateEvictor;
 use crate::filewatch::WatchReactor;
 use crate::metrics::MetricsSampler;
 use crate::notify::NotificationReactor;
@@ -124,6 +125,16 @@ impl Facade {
             self.config.clone(),
         )
         .run()
+    }
+
+    /// The template cache eviction loop (coordination C6), returned for the composition root to
+    /// spawn once on its runtime. Removing a project cascades its template rows away in the store
+    /// without the template aggregate seeing a write, so this drops that project's cached entries —
+    /// otherwise a later read of the same scope would serve the removed project's rows. Holds the
+    /// aggregate weakly and ends when the bus closes (app shutdown); self-supervised like the
+    /// samplers.
+    pub fn template_eviction_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        TemplateEvictor::new(&self.templates, &self.bus, self.clock.clone()).run()
     }
 
     /// The notification reactor loop (notifications C7), returned for the composition root to

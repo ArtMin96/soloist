@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 16;
+pub(crate) const SCHEMA_VERSION: i64 = 17;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -287,11 +287,102 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         }
     }
 
+    if version < 17 {
+        // `projects.id` gains `AUTOINCREMENT`, so a project id is never reused. Without it SQLite
+        // assigns `max(rowid) + 1`, which hands the id of a removed highest-id project to the next
+        // project opened — and any in-memory state keyed by `ProjectId` then answers for the new
+        // project with the removed one's data. Every other durable id here is already
+        // `AUTOINCREMENT` for the same reason. The column cannot be altered in place, so the table
+        // is rebuilt.
+        rebuild_projects_with_autoincrement(conn)?;
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
     }
     Ok(())
+}
+
+/// Rebuilds `projects` with an `AUTOINCREMENT` primary key, preserving every row's id so no
+/// foreign key that references it is orphaned.
+///
+/// Follows SQLite's documented table-rebuild procedure: foreign keys are disabled first (so the
+/// `DROP` does not cascade every project-scoped row away, and so the `RENAME` does not rewrite the
+/// child tables' `REFERENCES projects` clauses to the temporary name), the swap runs in one
+/// transaction, and `foreign_key_check` verifies nothing was orphaned before it commits. The
+/// pragma is restored either way. Copying the ids also seeds `sqlite_sequence` to the current
+/// maximum, so the high-water mark carries over rather than restarting.
+fn rebuild_projects_with_autoincrement(conn: &Connection) -> Result<(), StoreError> {
+    if projects_id_autoincrements(conn)? {
+        return Ok(());
+    }
+    let foreign_keys: bool = conn
+        .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+        .map_err(sql_err)?;
+    // A pragma is a no-op inside a transaction, so this must precede the `BEGIN`.
+    conn.pragma_update(None, "foreign_keys", false)
+        .map_err(sql_err)?;
+    let rebuilt = swap_in_rebuilt_projects(conn);
+    conn.pragma_update(None, "foreign_keys", foreign_keys)
+        .map_err(sql_err)?;
+    rebuilt
+}
+
+/// The transactional half of the rebuild: build the replacement, copy the rows, swap the names,
+/// and commit only once the foreign keys still resolve. Any failure rolls the whole swap back, so
+/// the next run sees the original table and retries.
+fn swap_in_rebuilt_projects(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        "BEGIN;
+         DROP TABLE IF EXISTS projects_rebuilt;
+         CREATE TABLE projects_rebuilt (
+             id   INTEGER PRIMARY KEY AUTOINCREMENT,
+             root TEXT NOT NULL UNIQUE,
+             name TEXT,
+             icon TEXT
+         );
+         INSERT INTO projects_rebuilt (id, root, name, icon)
+             SELECT id, root, name, icon FROM projects;
+         DROP TABLE projects;
+         ALTER TABLE projects_rebuilt RENAME TO projects;",
+    )
+    .map_err(sql_err)?;
+    match orphaned_rows(conn) {
+        Ok(0) => conn.execute_batch("COMMIT;").map_err(sql_err),
+        outcome => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            match outcome {
+                Ok(orphans) => Err(StoreError::Backend(format!(
+                    "rebuilding projects would orphan {orphans} referencing row(s)"
+                ))),
+                Err(err) => Err(err),
+            }
+        }
+    }
+}
+
+/// How many rows in the database reference a row that is not there.
+fn orphaned_rows(conn: &Connection) -> Result<i64, StoreError> {
+    conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+        row.get(0)
+    })
+    .map_err(sql_err)
+}
+
+/// Whether `projects` already declares an `AUTOINCREMENT` id — the guard that keeps the rebuild a
+/// no-op on a re-run, like the other guarded steps. The declaration is only recoverable from the
+/// stored `CREATE TABLE` text; no pragma reports it.
+fn projects_id_autoincrements(conn: &Connection) -> Result<bool, StoreError> {
+    let sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'projects'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sql_err)?;
+    Ok(sql.is_some_and(|sql| sql.to_uppercase().contains("AUTOINCREMENT")))
 }
 
 /// Whether a table of `name` exists — used by the guarded rename in the v14 step so it stays a
@@ -546,6 +637,96 @@ mod tests {
         assert_eq!(
             todo.scratchpad, None,
             "an existing todo is left unlinked — an association is stated, never inferred"
+        );
+    }
+
+    #[test]
+    fn a_pre_v17_project_keeps_its_id_and_its_dependent_rows_and_stops_reusing_ids() {
+        use soloist_core::{ProjectId, ProjectRepo};
+
+        // A v16 database whose `projects` table has the plain `INTEGER PRIMARY KEY` every build
+        // before this one wrote, populated across two of the tables that reference it.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("pre-v17.db");
+        let conn = Connection::open(&path).expect("open");
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             CREATE TABLE projects (
+                 id   INTEGER PRIMARY KEY,
+                 root TEXT NOT NULL UNIQUE,
+                 name TEXT,
+                 icon TEXT
+             );
+             CREATE TABLE trust (
+                 project_id   INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 variant_hash TEXT NOT NULL,
+                 PRIMARY KEY (project_id, variant_hash)
+             );
+             CREATE TABLE kv (
+                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 key        TEXT NOT NULL,
+                 value      TEXT NOT NULL,
+                 PRIMARY KEY (project_id, key)
+             );
+             INSERT INTO projects (id, root, name) VALUES (1, '/p/a', 'a'), (7, '/p/b', 'b');
+             INSERT INTO trust (project_id, variant_hash) VALUES (7, 'abc');
+             INSERT INTO kv (project_id, key, value) VALUES (7, 'k', '1');",
+        )
+        .expect("seed the v16 schema");
+        conn.pragma_update(None, "user_version", 16)
+            .expect("mark it as a v16 database");
+        drop(conn);
+
+        let store = crate::SqliteStore::open(&path).expect("upgrade and open");
+
+        // Every project keeps the id its rows already reference — a rebuild that renumbered them
+        // would silently repoint every dependent row.
+        let roots: Vec<(u64, String)> = store
+            .list()
+            .expect("list projects")
+            .into_iter()
+            .map(|record| (record.id.get(), record.root.display().to_string()))
+            .collect();
+        assert_eq!(
+            roots,
+            vec![(7, "/p/b".to_owned()), (1, "/p/a".to_owned())],
+            "the rebuild preserves each project's durable id"
+        );
+
+        // ...and the rows that reference them survive: the drop-and-rename must not cascade.
+        {
+            let conn = store.lock();
+            let trust: i64 = conn
+                .query_row("SELECT COUNT(*) FROM trust WHERE project_id = 7", [], |r| {
+                    r.get(0)
+                })
+                .expect("count trust rows");
+            let kv: i64 = conn
+                .query_row("SELECT COUNT(*) FROM kv WHERE project_id = 7", [], |r| {
+                    r.get(0)
+                })
+                .expect("count kv rows");
+            assert_eq!(trust, 1, "a dependent trust row survives the rebuild");
+            assert_eq!(kv, 1, "a dependent kv row survives the rebuild");
+            // Foreign keys are enforced again once the rebuild is done, not left disabled.
+            let enforcing: bool = conn
+                .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+                .expect("read foreign_keys");
+            assert!(enforcing, "the rebuild restores foreign-key enforcement");
+        }
+
+        // The point of the rebuild: removing the highest-id project must not free its id for the
+        // next one. Before v17 the new project would have been handed id 7 and inherited every
+        // in-memory cache entry keyed by it.
+        store.remove(ProjectId::from_raw(7)).expect("remove b");
+        let fresh = store
+            .upsert(std::path::Path::new("/p/c"), None, None)
+            .expect("open a new project");
+        assert!(
+            fresh.id.get() > 7,
+            "a removed project's id is never handed to the next project, but the new project \
+             took id {}",
+            fresh.id.get()
         );
     }
 
