@@ -73,7 +73,7 @@ export function ScratchpadTitle({ name, onRename }: ScratchpadTitleProps) {
           onClick={() => setDraft(name)}
           title="Rename"
           aria-label={`Rename scratchpad ${title}`}
-          className="max-w-full truncate rounded-md px-1.5 py-0.5 text-[0.9375rem] font-[550] tracking-[-0.005em] transition-colors duration-[var(--dur-fast)] ease-out-quint hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="max-w-full truncate rounded-md px-1.5 py-0.5 text-[0.9375rem] leading-5 font-[550] tracking-[-0.005em] transition-colors duration-[var(--dur-fast)] ease-out-quint hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
         >
           {title}
         </button>
@@ -95,7 +95,7 @@ export function ScratchpadTitle({ name, onRename }: ScratchpadTitleProps) {
         onKeyDown={onKeyDown}
         onBlur={() => void commit()}
         onFocus={(event) => event.target.select()}
-        className="h-7 text-[0.9375rem] font-[550] tracking-[-0.005em]"
+        className="h-7 text-[0.9375rem] leading-5 font-[550] tracking-[-0.005em]"
       />
       {/* Floated under the field so a refusal never grows the fixed-height header and shoves the
           editor down; it is transient, above the body, so it takes the one overlay shadow. */}

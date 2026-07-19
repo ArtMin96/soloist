@@ -136,7 +136,7 @@ export function ScratchpadRoster({ scratchpads, selected, onSelect }: Scratchpad
         />
         {archived.length > 0 && (
           <>
-            <p className="px-3 pt-3 pb-1 text-[0.6875rem] font-[550] text-muted-foreground">
+            <p className="px-3 pt-3 pb-1 text-[0.6875rem] leading-[0.875rem] font-[550] text-muted-foreground">
               Archived
             </p>
             <ScratchpadList

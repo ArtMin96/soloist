@@ -38,7 +38,7 @@ export function ScratchpadPanel({
   useScratchpadHotkeys(panelRef, editor.name != null ? archiveOpen : undefined);
 
   return (
-    <div ref={panelRef} className="flex h-full min-h-0">
+    <div ref={panelRef} className="flex h-full min-h-0 tracking-[var(--tracking-body)]">
       <div className="w-60 shrink-0 border-r">
         <ScratchpadRoster scratchpads={scratchpads} selected={editor.name} onSelect={editor.open} />
       </div>

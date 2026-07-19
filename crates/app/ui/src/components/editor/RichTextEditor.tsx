@@ -69,9 +69,11 @@ export default function RichTextEditor({
     editorProps: {
       attributes: {
         class: "tiptap-body",
-        role: "textbox",
-        "aria-multiline": "true",
         "data-editor": "rich-text",
+        "data-editable": String(editable),
+        // A read-only rendering is prose, not a control: claiming the textbox role would promise a
+        // caret and an edit affordance that are not there.
+        ...(editable ? { role: "textbox", "aria-multiline": "true" } : {}),
         ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
       },
       handleKeyDown: (_view, event) => {
@@ -104,7 +106,9 @@ export default function RichTextEditor({
   }, [editor]);
 
   return (
-    <div className="tiptap-shell">
+    // A read-only surface drops the field chrome: no frame, no focus border, and its own height —
+    // it is content inside whatever renders it, not an input the user can land in.
+    <div className={editable ? "tiptap-shell" : "tiptap-shell tiptap-shell--plain"}>
       {toolbar && editor && (
         <div className="tiptap-toolbar">
           <EditorToolbar editor={editor} />

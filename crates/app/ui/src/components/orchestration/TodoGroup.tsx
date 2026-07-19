@@ -29,10 +29,10 @@ export function TodoGroup({ label, count, open, onOpenChange, children }: TodoGr
           aria-hidden
           className="size-3 text-muted-foreground transition-transform duration-[var(--dur-control)] ease-spring-settle group-data-[state=open]/todogroup:rotate-90"
         />
-        <span className="min-w-0 truncate text-[0.6875rem] font-[550] tracking-[0.01em] text-muted-foreground">
+        <span className="min-w-0 truncate text-[0.6875rem] leading-[0.875rem] font-[550] tracking-[0.01em] text-muted-foreground">
           {label}
         </span>
-        <span className="ml-auto pr-1 font-mono text-[0.6875rem] tabular-nums text-muted-foreground/70">
+        <span className="ml-auto pr-1 font-mono text-[0.6875rem] leading-[0.875rem] tabular-nums text-muted-foreground">
           {count}
         </span>
       </Collapsible.Trigger>

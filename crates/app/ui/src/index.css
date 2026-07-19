@@ -167,6 +167,13 @@
   --dur-sheet-out: 180ms; /* dialog / sheet dismiss */
   --dur-ring: 150ms; /* focus ring grow-in */
 
+  /*
+   * Body tracking. The native desktop type scale tightens 13px text very slightly (−0.08pt at
+   * 13pt); at our sizes that is −0.006em. Set as a token so the surfaces that opt into the
+   * desktop ramp all read from one value.
+   */
+  --tracking-body: -0.006em;
+
   --status-running: oklch(0.58 0.15 150);
   --status-transition: oklch(0.62 0.13 70);
   --status-stopped: oklch(0.55 0.008 255);
@@ -184,20 +191,43 @@
   --sidebar-ring: oklch(0.55 0.13 245);
 
   /*
-   * Source-list selection fill, derived from the accent so one definition serves both themes.
-   * macOS "emphasized" selection (key window) is the azure tint — kept a tint, not a solid bar,
-   * so status hues keep full saturation on it (DESIGN.md spent-on-status rule). The
-   * "unemphasized" neutral (inactive window) is applied via [data-window-active="false"] below.
+   * Source-list selection fills, derived from the accent and the ink so one definition serves both
+   * themes. The "emphasized" pair is the azure tint — kept a tint, not a solid bar, so status hues
+   * keep full saturation on it (DESIGN.md spent-on-status rule). The "unemphasized" pair is the
+   * neutral AppKit falls back to whenever the selection is not the one the keyboard is driving.
    */
-  --sidebar-sel-fill: color-mix(in oklch, var(--primary) 15%, transparent);
-  --sidebar-sel-fill-hover: color-mix(in oklch, var(--primary) 22%, transparent);
+  --sidebar-sel-fill-emphasized: color-mix(in oklch, var(--primary) 15%, transparent);
+  --sidebar-sel-fill-emphasized-hover: color-mix(in oklch, var(--primary) 22%, transparent);
+  --sidebar-sel-fill-unemphasized: color-mix(in oklch, var(--foreground) 9%, transparent);
+  --sidebar-sel-fill-unemphasized-hover: color-mix(in oklch, var(--foreground) 12%, transparent);
+
+  --sidebar-sel-fill: var(--sidebar-sel-fill-emphasized);
+  --sidebar-sel-fill-hover: var(--sidebar-sel-fill-emphasized-hover);
 }
 
 /* Inactive (non-key) window: selection desaturates to neutral, the way AppKit dims a background
  * window's selection. Set on the document root by useWindowActive; absent means active. */
 [data-window-active="false"] {
-  --sidebar-sel-fill: color-mix(in oklch, var(--foreground) 9%, transparent);
-  --sidebar-sel-fill-hover: color-mix(in oklch, var(--foreground) 12%, transparent);
+  --sidebar-sel-fill: var(--sidebar-sel-fill-unemphasized);
+  --sidebar-sel-fill-hover: var(--sidebar-sel-fill-unemphasized-hover);
+}
+
+/*
+ * Per-list selection emphasis. A list marked as a selection scope paints its selected row with the
+ * azure tint only while the keyboard is in that list, and with the neutral fill otherwise — the
+ * AppKit first-responder distinction, which is why a Mac window with two lists never shows two
+ * blue selections at once. Rows read `--sel-fill`; the scope decides which pair it resolves to,
+ * so this stays a pure CSS concern with no focus state in React. An inactive window still wins,
+ * because the emphasized pair itself has already gone neutral by then.
+ */
+[data-selection-scope] {
+  --sel-fill: var(--sidebar-sel-fill-unemphasized);
+  --sel-fill-hover: var(--sidebar-sel-fill-unemphasized-hover);
+}
+
+[data-selection-scope]:focus-within {
+  --sel-fill: var(--sidebar-sel-fill);
+  --sel-fill-hover: var(--sidebar-sel-fill-hover);
 }
 
 .dark {

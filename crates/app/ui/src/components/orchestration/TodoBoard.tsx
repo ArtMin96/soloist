@@ -125,6 +125,9 @@ export function TodoBoard({
     </li>
   );
 
+  // The board's one accent-filled default action — and only while there is no form open, since the
+  // form's own Create is then the default and two filled buttons would each claim to be it.
+  const creating = editor.mode === "create";
   const newTodo = (
     <Button size="sm" onClick={startCreate} className="shrink-0">
       <Plus aria-hidden /> New todo
@@ -132,9 +135,14 @@ export function TodoBoard({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col tracking-[var(--tracking-body)]">
       <div className="flex shrink-0 flex-col gap-1.5 border-b p-2">
-        <TodoFilters filter={filter} tags={tags} onChange={setFilter} trailing={newTodo} />
+        <TodoFilters
+          filter={filter}
+          tags={tags}
+          onChange={setFilter}
+          trailing={creating ? undefined : newTodo}
+        />
         <SegmentedControl<BoardView>
           value={view}
           options={BOARD_VIEWS}
@@ -143,7 +151,7 @@ export function TodoBoard({
         />
       </div>
 
-      {editor.mode === "create" && editor.initial && (
+      {creating && editor.initial && (
         <TodoCreateForm
           onCreate={editor.save}
           scratchpads={scratchpads}

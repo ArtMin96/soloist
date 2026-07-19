@@ -20,6 +20,26 @@
   border-color: var(--ring);
 }
 
+/*
+ * The read-only rendering: the same prose styling with none of the field chrome, sized by its
+ * content so it can sit inline inside a row rather than filling a pane.
+ */
+.tiptap-shell--plain {
+  height: auto;
+  border: none;
+  border-radius: 0;
+  background: none;
+}
+
+.tiptap-shell--plain .tiptap-scroll {
+  overflow-y: visible;
+}
+
+.tiptap-shell--plain .tiptap-body {
+  min-height: 0;
+  padding: 0;
+}
+
 .tiptap-toolbar {
   display: flex;
   align-items: center;
@@ -44,10 +64,11 @@
 /* The editable region. Prose measure is capped for readability; dense notes still scroll. */
 .tiptap-body {
   min-height: 100%;
-  padding: 0.75rem 0.875rem;
+  padding: 0.75rem 1rem;
   outline: none;
   font-size: 0.8125rem;
   line-height: 1.55;
+  letter-spacing: var(--tracking-body);
   color: var(--foreground);
 }
 

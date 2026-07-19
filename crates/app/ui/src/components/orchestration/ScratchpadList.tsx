@@ -86,6 +86,9 @@ export function ScratchpadList({
       aria-label={label}
       tabIndex={-1}
       onKeyDown={onKeyDown}
+      // Marks the list as its own selection scope: its rows are azure-tinted only while the
+      // keyboard is in here, and neutral once focus moves to the document (see index.css).
+      data-selection-scope
       className="flex flex-col gap-px p-1 outline-none"
     >
       {scratchpads.map((pad, index) => {
@@ -106,23 +109,27 @@ export function ScratchpadList({
               onSelect(pad.name);
             }}
             className={cn(
-              "flex w-full flex-col gap-0.5 rounded-md py-1.5 pr-2.5 pl-2.5 text-left outline-none transition-colors duration-[var(--dur-select)] ease-out-quint",
+              // The source list's default row height, so a one-line row keeps the same rhythm as
+              // the sidebar; a row carrying a gist grows to its second line from here.
+              "flex min-h-7 w-full flex-col justify-center rounded-md px-2 py-1 text-left outline-none transition-colors duration-[var(--dur-select)] ease-out-quint",
               "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
               isSelected
-                ? "bg-[var(--sidebar-sel-fill)] hover:bg-[var(--sidebar-sel-fill-hover)]"
+                ? "bg-[var(--sel-fill)] hover:bg-[var(--sel-fill-hover)]"
                 : "hover:bg-sidebar-accent focus-visible:bg-sidebar-accent",
             )}
           >
             <span className="flex items-baseline gap-2">
-              <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-foreground">
+              <span className="min-w-0 flex-1 truncate text-[0.8125rem] leading-4 text-foreground">
                 {humanizeName(pad.name)}
               </span>
-              <span className="shrink-0 font-mono text-[0.6875rem] text-muted-foreground/70">
+              <span className="shrink-0 font-mono text-[0.6875rem] leading-[0.875rem] tabular-nums text-muted-foreground">
                 r{pad.revision}
               </span>
             </span>
             {pad.gist && (
-              <span className="truncate text-[0.6875rem] text-muted-foreground">{pad.gist}</span>
+              <span className="truncate text-[0.6875rem] leading-[0.875rem] text-muted-foreground">
+                {pad.gist}
+              </span>
             )}
           </button>
         );

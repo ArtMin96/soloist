@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { TodoBoard } from "@/components/orchestration/TodoBoard";
 import { UNLINKED_GROUP_LABEL } from "@/store/todoGrouping";
-import type { ScratchpadRef, ScratchpadSummary, TodoView } from "@/domain";
+import type { ScratchpadRef, ScratchpadSummary, TodoDoc, TodoView } from "@/domain";
 
 // The board's own hooks are the only IPC on this surface; stubbing them keeps the test on the
 // board's arrangement (grouping, the view toggle, what a row is told to show) rather than on writes,
@@ -17,11 +17,18 @@ vi.mock("@/store/useTodoActions", () => ({
     comment: vi.fn(),
   }),
 }));
+// The edit session the stubbed hook reports, so a test can put the board in create mode without
+// driving IPC. Reset before each render.
+const session: { mode: "create" | "edit" | null; initial: TodoDoc | null } = {
+  mode: null,
+  initial: null,
+};
+
 vi.mock("@/store/useTodoEditor", () => ({
   useTodoEditor: () => ({
-    mode: null,
+    mode: session.mode,
     editingId: null,
-    initial: null,
+    initial: session.initial,
     scratchpad: null,
     baseRevision: null,
     mountKey: 0,
@@ -32,6 +39,12 @@ vi.mock("@/store/useTodoEditor", () => ({
     save: vi.fn(),
     reload: vi.fn(),
   }),
+}));
+
+// The create form mounts the lazy rich editor, which needs real layout; standing it in keeps this
+// file on the board's arrangement.
+vi.mock("@/components/editor/LazyRichTextEditor", () => ({
+  LazyRichTextEditor: () => <div data-testid="rich-text" />,
 }));
 
 // The board persists its per-group collapse state through `localStorage`, which this environment
@@ -47,6 +60,8 @@ vi.stubGlobal("localStorage", {
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  session.mode = null;
+  session.initial = null;
 });
 
 const plan: ScratchpadRef = { id: 4, name: "release-plan" };
@@ -150,6 +165,19 @@ describe("TodoBoard", () => {
 
     expect(groupLabels()).toEqual([UNLINKED_GROUP_LABEL]);
     expect(screen.queryByText("Ship the release")).toBeNull();
+  });
+
+  it("offers one create action at a time — the form's Create replaces New todo, never joins it", () => {
+    board();
+    expect(screen.getByRole("button", { name: /New todo/ })).toBeTruthy();
+
+    session.mode = "create";
+    session.initial = { title: "", body: "", status: "open" };
+    cleanup();
+    board();
+
+    expect(screen.queryByRole("button", { name: /New todo/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Create todo/ })).toBeTruthy();
   });
 
   it("shows the empty state rather than an empty group when there are no todos", () => {
