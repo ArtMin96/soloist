@@ -441,6 +441,7 @@ pub fn run() {
             commands::scratchpad_read,
             commands::scratchpad_write,
             commands::scratchpad_archive,
+            commands::scratchpad_rename,
             commands::export_markdown,
             commands::todo_create,
             commands::todo_update,

@@ -3,9 +3,11 @@ import { WAIT } from "../harness/waits.js";
 import { waitUntilOr } from "../harness/waitUntilOr.js";
 
 // The scratchpad surface: a roster listbox on the left, and a rich-text editor on the right for the
-// open document. Every handle reads what the user reads — the roster's accessible listbox, the
-// editor's contenteditable body by the stable `data-editor` handle, the revision the editor and
-// roster show, and the conflict banner's alert role. Selectors live only here (charter §3.2); the
+// open document. Every handle reads what the user reads or a stable structural marker — the roster's
+// accessible listbox (whose rows are addressed by the raw name handle they carry, the visible title
+// being that handle's humanized reading), the editor's contenteditable body by the stable
+// `data-editor` handle, the revision the editor and roster show, and the conflict banner's alert
+// role. Selectors live only here (charter §3.2); the
 // spec asserts on the values these return. The editor is a `contenteditable`, so an edit is driven
 // as a deterministic toolbar toggle and the save is flushed with Ctrl+S. WebKitGTK/WebDriver does
 // not deliver the `beforeinput`/text events ProseMirror needs to insert typed characters, so the
@@ -13,6 +15,10 @@ import { waitUntilOr } from "../harness/waitUntilOr.js";
 // than by typing — and the autosave debounce is the backstop should the Ctrl+S keydown be dropped.
 const ROSTER = '[role="listbox"][aria-label="Scratchpads"]';
 const OPTION = '[role="option"]';
+// The raw name handle a roster row addresses. The row *reads* as a humanized title (a slug handle is
+// shown as prose), so the handle the core and the lead agent both name the document by is carried as
+// a stable structural attribute rather than being recovered from the displayed text.
+const NAME_ATTR = "data-scratchpad-name";
 // The editable rich-text region — a ProseMirror contenteditable, marked with a stable structural
 // handle the editor sets (`data-editor="rich-text"`), not styling-coupled.
 const BODY = '[data-editor="rich-text"]';
@@ -61,20 +67,22 @@ export const scratchpadPanel = {
    */
   async rows(): Promise<RosterRow[]> {
     const raw: { name: string; revision: string | null }[] = await browser.execute(
-      (rosterSel: string, optionSel: string) => {
+      (rosterSel: string, optionSel: string, nameAttr: string) => {
         const roster = document.querySelector(rosterSel);
         if (!roster) return [];
         return [...roster.querySelectorAll(optionSel)].map((option) => {
-          // The row's first inner wrapper span holds the name then the `rN` revision, in order.
+          // The row's first inner wrapper span holds the title then the `rN` revision, in order;
+          // the name is the handle attribute, since the title is the humanized reading of it.
           const wrapper = option.querySelector("span");
           return {
-            name: wrapper?.children[0]?.textContent?.trim() ?? "",
+            name: option.getAttribute(nameAttr) ?? "",
             revision: wrapper?.children[1]?.textContent?.trim() ?? null,
           };
         });
       },
       ROSTER,
       OPTION,
+      NAME_ATTR,
     );
     return raw.map(({ name, revision }) => ({
       name,
@@ -214,13 +222,12 @@ export const scratchpadPanel = {
   },
 
   /**
-   * The roster row element itself, found by the exact text of its name span — the same justified
-   * structural handle the sidebar uses for a process row (no accessible name distinguishes one
-   * roster option from another; the name does). Breaks only if the row stops rendering its name.
+   * The roster row element itself, found by the raw name handle it carries. The row's visible title
+   * is the humanized reading of that handle, so the handle — the name the core, the `solo://` link,
+   * and the lead agent all use — is the stable way to address one row. Breaks only if the row stops
+   * carrying its handle.
    */
   optionElement(name: string) {
-    return $(ROSTER).$(
-      `.//button[@role="option"][.//span[normalize-space(text())="${name}"]]`,
-    );
+    return $(ROSTER).$(`button[role="option"][${NAME_ATTR}="${name}"]`);
   },
 };

@@ -15,6 +15,7 @@ import {
   sortScratchpads,
   type ScratchpadSort,
 } from "@/store/scratchpadSort";
+import { humanizeName } from "@/lib/humanize";
 import { cn } from "@/lib/utils";
 import type { ScratchpadSummary } from "@/domain";
 
@@ -45,7 +46,13 @@ export function ScratchpadRoster({ scratchpads, selected, onSelect }: Scratchpad
     const matched = scratchpads.filter((pad) => {
       if (tag !== null && !pad.tags.includes(tag)) return false;
       if (needle === "") return true;
-      return pad.name.toLowerCase().includes(needle) || pad.gist.toLowerCase().includes(needle);
+      // Match both the handle and the title the row actually shows, so searching the prose a user
+      // reads ("editor design") finds a slug-named document just as its handle does.
+      return (
+        pad.name.toLowerCase().includes(needle) ||
+        humanizeName(pad.name).toLowerCase().includes(needle) ||
+        pad.gist.toLowerCase().includes(needle)
+      );
     });
     return sortScratchpads(matched, sort);
   }, [scratchpads, query, tag, sort]);

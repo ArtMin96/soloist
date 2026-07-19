@@ -59,6 +59,22 @@ pub async fn scratchpad_archive(
         .map_err(|err| err.to_string())
 }
 
+/// Renames the scratchpad `from` to `to` in `project`, keeping its durable id and revision. Routes
+/// to the one core rename the MCP `scratchpad_rename` tool also drives; a name already in use comes
+/// back as an error string for the header's rename field to surface.
+#[tauri::command]
+pub async fn scratchpad_rename(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+    from: String,
+    to: String,
+) -> Result<ScratchpadView, String> {
+    facade
+        .blocking(move |f| f.scratchpad_rename_in(project, &from, &to))
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Creates a todo from the disciplined `doc` in `project`.
 #[tauri::command]
 pub async fn todo_create(

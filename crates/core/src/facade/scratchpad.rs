@@ -106,6 +106,31 @@ impl Facade {
         )
     }
 
+    /// [`scratchpad_rename`](ScopedFacade::scratchpad_rename) scoped to `project` directly — the
+    /// local-UI path (trusts the caller to be entitled to `project`; see
+    /// [`scratchpad_write_in`](Self::scratchpad_write_in)). Renames the scratchpad `from` to `to`,
+    /// keeping its durable id, body, tags, archived flag, and revision, and emitting
+    /// `ScratchpadChanged` under the new name. [`CoordinationError::UnknownScratchpad`] if `from`
+    /// has no such scratchpad and [`CoordinationError::ScratchpadNameTaken`] if `to` is already in
+    /// use, neither of which changes anything.
+    pub fn scratchpad_rename_in(
+        &self,
+        project: ProjectId,
+        from: &str,
+        to: &str,
+    ) -> Result<ScratchpadView, CoordinationError> {
+        self.emit_scratchpad(
+            project,
+            self.scratchpads
+                .rename(project, from, to)
+                .map_err(|err| match err {
+                    RenameError::NotFound => CoordinationError::UnknownScratchpad,
+                    RenameError::NameTaken => CoordinationError::ScratchpadNameTaken,
+                    RenameError::Store(err) => CoordinationError::Store(err),
+                }),
+        )
+    }
+
     /// [`scratchpad_transfer`](Self::scratchpad_transfer) scoped to `from`/`to` directly (local-UI
     /// path — never takes a project from an untrusted surface). Moves the scratchpad `name` from
     /// `from` to `to`, keeping its document, revision, tags, archived flag, and id. Emits
@@ -199,17 +224,7 @@ impl ScopedFacade<'_> {
         to: &str,
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.emit_scratchpad(
-            project,
-            self.inner
-                .scratchpads
-                .rename(project, from, to)
-                .map_err(|err| match err {
-                    RenameError::NotFound => CoordinationError::UnknownScratchpad,
-                    RenameError::NameTaken => CoordinationError::ScratchpadNameTaken,
-                    RenameError::Store(err) => CoordinationError::Store(err),
-                }),
-        )
+        self.inner.scratchpad_rename_in(project, from, to)
     }
 
     /// Moves the scratchpad `name` into project `to` for a scoped session (context C8 → C6).

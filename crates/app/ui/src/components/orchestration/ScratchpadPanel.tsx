@@ -62,6 +62,7 @@ export function ScratchpadPanel({
               if (selectedId != null) editor.copyLink(selectedId);
             }}
             onArchive={archiveOpen}
+            onRename={editor.rename}
           />
         )}
       </div>

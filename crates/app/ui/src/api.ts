@@ -105,6 +105,16 @@ export function scratchpadArchive(
   return invoke<ScratchpadView>("scratchpad_archive", { project, name, archived });
 }
 
+// Rename a scratchpad, keeping its durable id and revision. A name already in use is rejected by the
+// core, so the caller surfaces the refusal rather than pre-empting it.
+export function scratchpadRename(
+  project: number,
+  from: string,
+  to: string,
+): Promise<ScratchpadView> {
+  return invoke<ScratchpadView>("scratchpad_rename", { project, from, to });
+}
+
 // Save a scratchpad's Markdown to a user-chosen `.md` file: the native save dialog picks the path,
 // then the backend writes the bytes there. Returns false when the user dismisses the dialog.
 export async function exportMarkdown(defaultName: string, contents: string): Promise<boolean> {

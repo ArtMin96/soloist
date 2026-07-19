@@ -158,6 +158,65 @@ fn renaming_onto_a_taken_name_is_refused() {
 }
 
 #[test]
+fn scratchpad_rename_in_renames_the_document_keeping_its_identity_and_revision() {
+    let (facade, a, _) = two_projects();
+    let created = facade
+        .scratchpad_write_in(a, "release-plan", body(), None)
+        .expect("create");
+
+    let renamed = facade
+        .scratchpad_rename_in(a, "release-plan", "Release plan")
+        .expect("rename to a free name succeeds");
+    assert_eq!(renamed.name, "Release plan");
+    assert_eq!(renamed.id, created.id, "the durable id is unchanged");
+    assert_eq!(
+        renamed.revision, created.revision,
+        "renaming is not an edit"
+    );
+    assert_eq!(renamed.body, created.body, "the body is untouched");
+
+    // It reads back under the new handle only — the old one is gone.
+    assert_eq!(
+        facade
+            .scratchpad_read_in(a, "Release plan")
+            .expect("reads under the new name"),
+        renamed
+    );
+    assert!(matches!(
+        facade.scratchpad_read_in(a, "release-plan"),
+        Err(CoordinationError::UnknownScratchpad)
+    ));
+}
+
+#[test]
+fn scratchpad_rename_in_refuses_a_taken_name_and_an_unknown_scratchpad() {
+    let (facade, a, _) = two_projects();
+    facade
+        .scratchpad_write_in(a, "plan", body(), None)
+        .expect("create plan");
+    facade
+        .scratchpad_write_in(a, "research", body(), None)
+        .expect("create research");
+
+    assert!(matches!(
+        facade.scratchpad_rename_in(a, "plan", "research"),
+        Err(CoordinationError::ScratchpadNameTaken)
+    ));
+    assert!(matches!(
+        facade.scratchpad_rename_in(a, "missing", "free"),
+        Err(CoordinationError::UnknownScratchpad)
+    ));
+
+    // Neither refusal moved anything: both documents still read under their own names.
+    assert!(facade.scratchpad_read_in(a, "plan").is_ok());
+    assert!(facade.scratchpad_read_in(a, "research").is_ok());
+    assert!(matches!(
+        facade.scratchpad_read_in(a, "free"),
+        Err(CoordinationError::UnknownScratchpad)
+    ));
+}
+
+#[test]
 fn tags_and_archive_round_trip_through_the_facade() {
     let (facade, session) = scoped_facade();
     facade

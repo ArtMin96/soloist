@@ -1,4 +1,5 @@
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import { humanizeName } from "@/lib/humanize";
 import { cn } from "@/lib/utils";
 import type { ScratchpadSummary } from "@/domain";
 
@@ -12,8 +13,9 @@ interface ScratchpadListProps {
   emptyHint?: ReactNode;
 }
 
-// The scratchpad roster: a single-select ARIA listbox, one row per shared document (its name over a
-// one-line body gist with its revision in mono). Arrow keys / Home / End move the roving focus
+// The scratchpad roster: a single-select ARIA listbox, one row per shared document (its humanized
+// title over a one-line body gist with its revision in mono). The row still selects by the raw name
+// handle — humanization is display only. Arrow keys / Home / End move the roving focus
 // between options; Enter, Space, or a click opens the focused document. Activation is explicit
 // (opening reads the full document) — scan with the arrows, commit with Enter. The option roles ride
 // native <button>s so each is focusable and keyboard-operable, and the listbox rides a generic <div>
@@ -95,6 +97,8 @@ export function ScratchpadList({
             type="button"
             role="option"
             aria-selected={isSelected}
+            // The raw handle the row addresses, kept reachable now that the row reads as prose.
+            data-scratchpad-name={pad.name}
             // Roving tabindex: only the cursor's option is in the tab order; the arrows move it.
             tabIndex={index === activeIndex ? 0 : -1}
             onClick={() => {
@@ -111,7 +115,7 @@ export function ScratchpadList({
           >
             <span className="flex items-baseline gap-2">
               <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-foreground">
-                {pad.name}
+                {humanizeName(pad.name)}
               </span>
               <span className="shrink-0 font-mono text-[0.6875rem] text-muted-foreground/70">
                 r{pad.revision}
