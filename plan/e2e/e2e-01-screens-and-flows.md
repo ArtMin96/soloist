@@ -261,6 +261,38 @@ each reverted byte-clean:
 
 Surgical because no other spec arms a timer or observes a wake delivery — the mutated paths are scheduler-only.
 
+The prompt-template walk (`specs/coordination/prompt-templates.spec.ts`) drives the Templates manager's
+preview against the real renderer. Its reason to exist is narrow and worth stating, because a thorough
+headless test of the same behavior already exists: `TemplatePreview.test.tsx` asserts the unanswered
+placeholder in jsdom, but against `coreRender`, a **hand-written stand-in for the core's contract** in the
+test file. It proves the window's half given a render that behaves as we believe the core's does. The seam
+it cannot reach is the one the design rides on — the window drops an emptied field from the values it sends
+(`useTemplateRender`), and the core must read an absent key as unanswered rather than as an empty answer.
+Only the real renderer under the real window puts both halves on the screen a user reads. Two new screens
+(`SettingsOverlay`, `TemplatesPanel`) and one arrange flow; the body is authored through the core command
+the create form posts, because a template body is a ProseMirror contenteditable and WebKitGTK under
+WebDriver delivers none of the events it needs to accept typed characters (the same limitation
+`ScratchpadPanel` works around by clicking a toolbar control). Its product-mutation pass is done, reverted
+byte-clean:
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Drop the unanswered-placeholder `AdvisoryNotice` in `TemplatePreview.tsx` — the gap stays literal in the prompt but is never named | only "leaves an unanswered placeholder in the prompt and names it" fails | exactly that: `Expected length: 1, Received length: 0, Received array: []`. The same test's *prompt text* assertion still passed, so the mutation is pinned to the notice and the walk's two independent reports of the gap fail independently; the walk's other four assertions and all eight other spec files passed |
+
+Surgical because no other spec opens a template — and the notice is the one thing in the preview no other
+assertion reads.
+
+**Harness finding (fixed here, not a product defect):** opening the agent picker was a single click and a
+single 10 s wait, and it intermittently never opened — observed on `launch-agent` in one run and on
+`timers-wake-cycle` in another, each time as `element ("[cmdk-root]") still not displayed`. WebKitGTK under
+WebDriver drops a click outright when the app is busy, and the picker is lazy-loaded behind a deferred
+overlay, so the open also waits on a chunk fetch. With no retries configured, one dropped click takes a
+whole spec file with it. `flows/launchAgent.ts` now re-clicks until the picker is actually up — safe
+because the titlebar action *sets* it open rather than toggling, and the re-click is skipped once it is —
+the same remedy `Sidebar.openOrchestration` and `ScratchpadPanel.reload` already use. The picker-opening
+step is now exported and shared, since `launch-agent.spec.ts` was carrying its own copy of the sequence
+that flaked.
+
 ## Risks & mitigations
 
 - **Screens drifting into logic** → a screen returns state and performs intent; it never asserts and never
