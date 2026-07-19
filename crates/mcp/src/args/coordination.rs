@@ -174,6 +174,11 @@ pub(crate) struct TodoCreateArg {
     pub(crate) body: Option<String>,
     /// The lifecycle status to start in; defaults to open when omitted.
     pub(crate) status: Option<TodoStatusArg>,
+    /// The name handle of the scratchpad this todo derives from — set it only when the todo came
+    /// out of that document (for example a task you extracted from its plan). Otherwise omit it:
+    /// having no scratchpad is normal and permanent, never something to fill in. An unknown name is
+    /// refused and nothing is created.
+    pub(crate) scratchpad: Option<String>,
 }
 
 /// Arguments for updating a todo, revision-guarded. The whole document is replaced, so provide the
@@ -189,9 +194,28 @@ pub(crate) struct TodoUpdateArg {
     pub(crate) body: Option<String>,
     /// The lifecycle status. Set it to done only when the todo's blockers are all complete.
     pub(crate) status: TodoStatusArg,
+    /// The name handle of the scratchpad this todo derives from. Unlike `body`, **omitting this
+    /// leaves the existing link exactly as it is** — the link is coordination state alongside the
+    /// todo's tags and blockers, not part of the document this call replaces, so a routine title or
+    /// status edit never destroys it. Pass a name to (re)link, or an explicit `null` to unlink. An
+    /// unknown name is refused and nothing is written.
+    #[serde(default, deserialize_with = "stated_option")]
+    #[schemars(with = "Option<String>")]
+    pub(crate) scratchpad: Option<Option<String>>,
     /// The revision you are updating from, as returned by `todo_get`. A mismatch means someone
     /// edited it first, so re-read and retry.
     pub(crate) expected_revision: u64,
+}
+
+/// Distinguishes a field the caller omitted from one they explicitly set to `null`, which serde's
+/// own `Option` handling collapses into the same `None`. The outer layer is "did they say
+/// anything", the inner "what did they say" — the shape a three-state link needs on the wire.
+fn stated_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Option::deserialize(deserializer).map(Some)
 }
 
 /// Arguments for adding or removing a single tag on a todo.

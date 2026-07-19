@@ -23,6 +23,12 @@ export interface TodoEditorStore {
   error: string | null;
   /** Open the create form with an empty draft. */
   startCreate: () => void;
+  /**
+   * The scratchpad the open draft derives from (its durable id), or null. Held beside the document
+   * rather than inside it: the association is live coordination state like tags and blockers, not
+   * part of the revision-guarded document.
+   */
+  scratchpad: number | null;
   /** Open the edit surface for `todo`, seeded from its current document and revision. */
   editTodo: (todo: TodoView) => void;
   /** Close whichever surface is open, discarding its unsaved edits. */
@@ -32,7 +38,7 @@ export interface TodoEditorStore {
    * base revision, bumping it on success. Resolves once the outcome is applied; a rejection sets
    * `error` and keeps the surface open so the caller's edits survive.
    */
-  save: (doc: TodoDoc) => Promise<void>;
+  save: (doc: TodoDoc, scratchpad: number | null) => Promise<void>;
   /**
    * Re-seed the edit from `todo` (the live snapshot's copy) — the conflict resolution: it discards
    * local edits and adopts the concurrent writer's document and revision.
@@ -47,11 +53,14 @@ const DRAFT: TodoDoc = { title: "", body: "", status: "open" };
 // refused by the core (never clobbering a concurrent edit) — the board watches the live revision to
 // raise the conflict banner and calls `reload` to resolve it. The base revision and edited id are
 // held in refs as well as state so `save` reads the current guard without being re-created on each
-// bump (which would restart the caller's autosave loop). The `project` is the local-UI scope.
+// bump (which would restart the caller's autosave loop). The `project` is the local-UI scope. The
+// scratchpad association travels beside the document on every write, because this surface always has
+// its picker on screen — it never leaves the association unsaid.
 export function useTodoEditor(project: number): TodoEditorStore {
   const [mode, setMode] = useState<TodoEditorMode | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [initial, setInitial] = useState<TodoDoc | null>(null);
+  const [scratchpad, setScratchpad] = useState<number | null>(null);
   const [baseRevision, setBaseRevision] = useState<number | null>(null);
   const [mountKey, setMountKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +72,7 @@ export function useTodoEditor(project: number): TodoEditorStore {
     setEditingId(null);
     editingIdRef.current = null;
     setInitial(DRAFT);
+    setScratchpad(null);
     setBaseRevision(null);
     baseRevisionRef.current = null;
     setError(null);
@@ -74,6 +84,7 @@ export function useTodoEditor(project: number): TodoEditorStore {
     setEditingId(todo.id);
     editingIdRef.current = todo.id;
     setInitial(todo.doc);
+    setScratchpad(todo.scratchpad?.id ?? null);
     setBaseRevision(todo.revision);
     baseRevisionRef.current = todo.revision;
     setError(null);
@@ -85,21 +96,22 @@ export function useTodoEditor(project: number): TodoEditorStore {
     setEditingId(null);
     editingIdRef.current = null;
     setInitial(null);
+    setScratchpad(null);
     setBaseRevision(null);
     baseRevisionRef.current = null;
     setError(null);
   }, []);
 
   const save = useCallback(
-    async (doc: TodoDoc) => {
+    async (doc: TodoDoc, scratchpad: number | null) => {
       setError(null);
       const id = editingIdRef.current;
       try {
         if (id == null) {
-          await todoCreate(project, doc);
+          await todoCreate(project, doc, scratchpad);
           close();
         } else {
-          const view = await todoUpdate(project, id, doc, baseRevisionRef.current ?? 0);
+          const view = await todoUpdate(project, id, doc, scratchpad, baseRevisionRef.current ?? 0);
           setBaseRevision(view.revision);
           baseRevisionRef.current = view.revision;
         }
@@ -117,6 +129,7 @@ export function useTodoEditor(project: number): TodoEditorStore {
     mode,
     editingId,
     initial,
+    scratchpad,
     baseRevision,
     mountKey,
     error,

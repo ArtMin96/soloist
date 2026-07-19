@@ -41,7 +41,7 @@ pub use releaser::LeaseReleaser;
 pub use repo::{LockRepo, NoopLockRepo, StoredLease};
 pub use scheduler::TimerScheduler;
 pub use scratchpad::{
-    RenameError, ScratchpadSummary, ScratchpadView, Scratchpads, WriteError,
+    RenameError, ScratchpadRef, ScratchpadSummary, ScratchpadView, Scratchpads, WriteError,
     MAX_SCRATCHPAD_CONTENT_BYTES,
 };
 pub use scratchpad_repo::{
@@ -58,8 +58,8 @@ pub use timer::{
 };
 pub use timer_repo::{NewTimer, NoopTimerRepo, StoredTimer, TimerRepo};
 pub use todo::{
-    Comment, CommentAuthor, CommentOutcome, TodoDoc, TodoError, TodoStatus, TodoSummary, TodoView,
-    Todos, MAX_TODO_DOC_BYTES,
+    Comment, CommentAuthor, CommentOutcome, ScratchpadLink, TodoDoc, TodoError, TodoStatus,
+    TodoSummary, TodoView, Todos, MAX_TODO_DOC_BYTES,
 };
 pub use todo_releaser::TodoLockReleaser;
 pub use todo_repo::{CommentEdit, NoopTodoRepo, StoredTodo, TodoRepo, TodoWriteResult};

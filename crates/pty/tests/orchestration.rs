@@ -113,7 +113,7 @@ async fn a_lead_spawns_a_worker_assigns_a_locked_todo_and_is_woken_when_the_work
     // the lead as the holder.
     let todo = facade
         .scoped(session)
-        .todo_create(worker_todo())
+        .todo_create(worker_todo(), None)
         .expect("create the todo")
         .view;
     let locked = facade

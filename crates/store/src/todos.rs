@@ -9,25 +9,43 @@
 //! double-grant a lock. A todo is durable and survives an app restart; only its process-owned
 //! `locked_by` is cleared on launch ([`clear_locks`](TodoRepo::clear_locks)). The `project_id`
 //! foreign key cascades, so removing a project drops its todos.
+//!
+//! A todo's optional association with the scratchpad it was derived from is the `scratchpad_id`
+//! column: only the durable id is stored, so a rename never breaks the link, and its foreign key
+//! sets the column NULL when that scratchpad is deleted, so a todo can never point at a document
+//! that is gone. Reads resolve the current handle through an outer join, which is why a caller gets
+//! a named reference rather than a bare id.
 
 use rusqlite::{Connection, OptionalExtension, Row};
 use soloist_core::{
-    Comment, CommentAuthor, CommentEdit, ProcessId, ProjectId, StoreError, StoredTodo, TodoDoc,
-    TodoId, TodoRepo, TodoWriteResult,
+    Comment, CommentAuthor, CommentEdit, ProcessId, ProjectId, ScratchpadId, ScratchpadLink,
+    ScratchpadRef, StoreError, StoredTodo, TodoDoc, TodoId, TodoRepo, TodoWriteResult,
 };
 
 use crate::{sql_err, SqliteStore};
 
-/// The columns every read selects, in order, so [`row_to_todo`] decodes one shape.
-const TODO_COLUMNS: &str = "id, project_id, doc, tags, blockers, comments, locked_by, revision";
+/// The columns every read selects, in order, so [`row_to_todo`] decodes one shape. Only the
+/// scratchpad's id is stored; its current `name` rides along from the join below.
+const TODO_COLUMNS: &str = "t.id, t.project_id, t.doc, t.tags, t.blockers, t.comments, \
+                            t.locked_by, t.revision, t.scratchpad_id, s.name";
+
+/// The source every read selects from: the todo row with its associated scratchpad's handle
+/// resolved. The join is outer because the association is optional, and because a scratchpad the
+/// foreign key has not yet unlinked must still read back as an unlinked todo rather than vanish.
+const TODO_SOURCE: &str = "todos t LEFT JOIN scratchpads s ON s.id = t.scratchpad_id";
 
 impl TodoRepo for SqliteStore {
-    fn create(&self, project: ProjectId, doc: &TodoDoc) -> Result<StoredTodo, StoreError> {
+    fn create(
+        &self,
+        project: ProjectId,
+        doc: &TodoDoc,
+        scratchpad: Option<ScratchpadId>,
+    ) -> Result<StoredTodo, StoreError> {
         let doc_json = serialize_doc(doc)?;
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO todos (project_id, doc, revision) VALUES (?1, ?2, 1)",
-            (project.get() as i64, &doc_json),
+            "INSERT INTO todos (project_id, doc, revision, scratchpad_id) VALUES (?1, ?2, 1, ?3)",
+            (project.get() as i64, &doc_json, raw_id(scratchpad)),
         )
         .map_err(sql_err)?;
         let id = TodoId::from_raw(conn.last_insert_rowid() as u64);
@@ -43,7 +61,7 @@ impl TodoRepo for SqliteStore {
         let conn = self.lock();
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT {TODO_COLUMNS} FROM todos WHERE project_id = ?1 ORDER BY id"
+                "SELECT {TODO_COLUMNS} FROM {TODO_SOURCE} WHERE t.project_id = ?1 ORDER BY t.id"
             ))
             .map_err(sql_err)?;
         let rows = stmt
@@ -61,6 +79,7 @@ impl TodoRepo for SqliteStore {
         project: ProjectId,
         id: TodoId,
         doc: &TodoDoc,
+        scratchpad: ScratchpadLink<ScratchpadId>,
         expected: Option<u64>,
     ) -> Result<TodoWriteResult, StoreError> {
         let doc_json = serialize_doc(doc)?;
@@ -75,15 +94,25 @@ impl TodoRepo for SqliteStore {
                 return Ok(TodoWriteResult::Conflict { actual: revision });
             }
         }
-        conn.execute(
-            "UPDATE todos SET doc = ?3, revision = ?4 WHERE project_id = ?1 AND id = ?2",
-            (
-                project.get() as i64,
-                id.get() as i64,
-                &doc_json,
-                (revision + 1) as i64,
+        let key = (
+            project.get() as i64,
+            id.get() as i64,
+            &doc_json,
+            (revision + 1) as i64,
+        );
+        // An unchanged association is left out of the statement entirely rather than written back
+        // with its own value, so a concurrent link change is not silently reverted by a doc write.
+        match stated_link(scratchpad) {
+            Some(link) => conn.execute(
+                "UPDATE todos SET doc = ?3, revision = ?4, scratchpad_id = ?5
+                 WHERE project_id = ?1 AND id = ?2",
+                (key.0, key.1, key.2, key.3, link),
             ),
-        )
+            None => conn.execute(
+                "UPDATE todos SET doc = ?3, revision = ?4 WHERE project_id = ?1 AND id = ?2",
+                key,
+            ),
+        }
         .map_err(sql_err)?;
         read_one(&conn, project, id)?
             .map(|stored| TodoWriteResult::Written(Box::new(stored)))
@@ -299,10 +328,12 @@ impl TodoRepo for SqliteStore {
             return Ok(None);
         }
         // The id is globally unique (AUTOINCREMENT), so re-keying `project_id` cannot collide.
-        // Blockers reference source-project ids and the lock is per-run/process-owned, so both are
-        // cleared; the document, tags, comments, and revision ride along unchanged.
+        // Blockers and the scratchpad association reference source-project rows, and the lock is
+        // per-run/process-owned, so all three are cleared; the document, tags, comments, and
+        // revision ride along unchanged.
         conn.execute(
-            "UPDATE todos SET project_id = ?3, blockers = '[]', locked_by = NULL
+            "UPDATE todos SET project_id = ?3, blockers = '[]', locked_by = NULL,
+                              scratchpad_id = NULL
              WHERE project_id = ?1 AND id = ?2",
             (from.get() as i64, id.get() as i64, to.get() as i64),
         )
@@ -418,7 +449,7 @@ fn read_one(
     id: TodoId,
 ) -> Result<Option<StoredTodo>, StoreError> {
     conn.query_row(
-        &format!("SELECT {TODO_COLUMNS} FROM todos WHERE project_id = ?1 AND id = ?2"),
+        &format!("SELECT {TODO_COLUMNS} FROM {TODO_SOURCE} WHERE t.project_id = ?1 AND t.id = ?2"),
         (project.get() as i64, id.get() as i64),
         row_to_todo,
     )
@@ -439,6 +470,8 @@ fn row_to_todo(row: &Row<'_>) -> rusqlite::Result<Result<StoredTodo, StoreError>
     let comments_json: String = row.get(5)?;
     let locked_by: Option<i64> = row.get(6)?;
     let revision: i64 = row.get(7)?;
+    let scratchpad_id: Option<i64> = row.get(8)?;
+    let scratchpad_name: Option<String> = row.get(9)?;
     Ok(decode_doc(&doc_json).and_then(|doc| {
         Ok(StoredTodo {
             id: TodoId::from_raw(id as u64),
@@ -448,9 +481,31 @@ fn row_to_todo(row: &Row<'_>) -> rusqlite::Result<Result<StoredTodo, StoreError>
             blockers: decode_blockers(&blockers_json)?,
             comments: decode_comments(&comments_json)?,
             locked_by: locked_by.map(|owner| ProcessId::from_raw(owner as u64)),
+            scratchpad: scratchpad_id
+                .zip(scratchpad_name)
+                .map(|(id, name)| ScratchpadRef {
+                    id: ScratchpadId::from_raw(id as u64),
+                    name,
+                }),
             revision: revision as u64,
         })
     }))
+}
+
+/// The raw column value for an optional scratchpad association.
+fn raw_id(scratchpad: Option<ScratchpadId>) -> Option<i64> {
+    scratchpad.map(|id| id.get() as i64)
+}
+
+/// The column value a stated link writes, or `None` when the link is
+/// [`Unchanged`](ScratchpadLink::Unchanged) and the column must be left out of the statement.
+/// Cleared and linked are both *stated*, so the nesting mirrors the enum's three states exactly.
+fn stated_link(link: ScratchpadLink<ScratchpadId>) -> Option<Option<i64>> {
+    match link {
+        ScratchpadLink::Unchanged => None,
+        ScratchpadLink::Cleared => Some(None),
+        ScratchpadLink::Linked(id) => Some(Some(id.get() as i64)),
+    }
 }
 
 /// Serializes a [`TodoDoc`] to the JSON the `doc` column stores.

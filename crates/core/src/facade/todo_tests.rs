@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use super::*;
 use crate::composition::CorePorts;
-use crate::coordination::TodoStatus;
+use crate::coordination::{CommentAuthor, TodoStatus};
 use crate::ids::ProjectId;
 use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{
-    authentic_session, terminal_registration, FakeProjectRepo, FakeSpawner, FakeTodoRepo,
-    FakeTrustRepo, TEST_PEER_PGID,
+    authentic_session, terminal_registration, FakeProjectRepo, FakeScratchpadRepo, FakeSpawner,
+    FakeTodoRepo, FakeTrustRepo, TEST_PEER_PGID,
 };
 
 fn doc(title: &str, status: TodoStatus) -> TodoDoc {
@@ -21,8 +21,11 @@ fn doc(title: &str, status: TodoStatus) -> TodoDoc {
     }
 }
 
-/// A façade over in-memory fakes with `projects` loaded and the todo store wired.
+/// A façade over in-memory fakes with `projects` loaded and the todo and scratchpad stores wired,
+/// the todo store resolving associations against the scratchpad one exactly as the durable adapter
+/// joins them.
 fn facade_with(projects: Arc<FakeProjectRepo>) -> Facade {
+    let scratchpads = Arc::new(FakeScratchpadRepo::new());
     Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
@@ -30,7 +33,8 @@ fn facade_with(projects: Arc<FakeProjectRepo>) -> Facade {
             Arc::new(FakeTrustRepo::new()),
             projects,
         )
-        .todo_repo(Arc::new(FakeTodoRepo::new()))
+        .todo_repo(Arc::new(FakeTodoRepo::joined(Arc::clone(&scratchpads))))
+        .scratchpad_repo(scratchpads)
         .build(),
     )
 }
@@ -54,7 +58,7 @@ fn creating_with_no_project_in_scope_is_refused() {
     assert!(matches!(
         facade
             .scoped(session)
-            .todo_create(doc("x", TodoStatus::Open)),
+            .todo_create(doc("x", TodoStatus::Open), None),
         Err(CoordinationError::NoProjectScope)
     ));
 }
@@ -65,7 +69,7 @@ fn a_scoped_session_creates_lists_and_completes_without_binding_a_process() {
 
     let created = facade
         .scoped(session)
-        .todo_create(doc("ship", TodoStatus::Open))
+        .todo_create(doc("ship", TodoStatus::Open), None)
         .expect("create with only project scope")
         .view;
     let listed = facade.scoped(session).todo_list().expect("list");
@@ -84,18 +88,26 @@ fn a_stale_update_surfaces_a_todo_revision_conflict() {
     let (facade, session) = scoped_facade();
     let todo = facade
         .scoped(session)
-        .todo_create(doc("v1", TodoStatus::Open))
+        .todo_create(doc("v1", TodoStatus::Open), None)
         .expect("create")
         .view;
     facade
         .scoped(session)
-        .todo_update(todo.id, doc("v2", TodoStatus::InProgress), 1)
+        .todo_update(
+            todo.id,
+            doc("v2", TodoStatus::InProgress),
+            ScratchpadLink::Unchanged,
+            1,
+        )
         .expect("first update");
 
     assert!(matches!(
-        facade
-            .scoped(session)
-            .todo_update(todo.id, doc("v3", TodoStatus::InProgress), 1),
+        facade.scoped(session).todo_update(
+            todo.id,
+            doc("v3", TodoStatus::InProgress),
+            ScratchpadLink::Unchanged,
+            1
+        ),
         Err(CoordinationError::TodoRevisionConflict {
             expected: Some(1),
             actual: Some(2)
@@ -109,7 +121,7 @@ fn a_malformed_create_surfaces_an_invalid_todo() {
     let mut bad = doc("x", TodoStatus::Open);
     bad.title = "  ".into();
     assert!(matches!(
-        facade.scoped(session).todo_create(bad),
+        facade.scoped(session).todo_create(bad, None),
         Err(CoordinationError::InvalidTodo(_))
     ));
 }
@@ -119,12 +131,12 @@ fn completing_a_blocked_todo_surfaces_todo_blocked() {
     let (facade, session) = scoped_facade();
     let blocker = facade
         .scoped(session)
-        .todo_create(doc("dep", TodoStatus::Open))
+        .todo_create(doc("dep", TodoStatus::Open), None)
         .expect("create blocker")
         .view;
     let gated = facade
         .scoped(session)
-        .todo_create(doc("main", TodoStatus::Open))
+        .todo_create(doc("main", TodoStatus::Open), None)
         .expect("create dependent")
         .view;
     facade
@@ -156,7 +168,7 @@ fn locking_a_todo_without_a_bound_process_is_refused() {
     let (facade, session) = scoped_facade();
     let todo = facade
         .scoped(session)
-        .todo_create(doc("x", TodoStatus::Open))
+        .todo_create(doc("x", TodoStatus::Open), None)
         .expect("create")
         .view;
     assert!(matches!(
@@ -180,7 +192,7 @@ fn a_bound_session_locks_and_unlocks_a_todo() {
 
     let todo = facade
         .scoped(session)
-        .todo_create(doc("x", TodoStatus::Open))
+        .todo_create(doc("x", TodoStatus::Open), None)
         .expect("create")
         .view;
     let locked = facade.scoped(session).todo_lock(todo.id).expect("lock");
@@ -195,7 +207,7 @@ fn comments_round_trip_and_report_unknown_targets() {
     let (facade, session) = scoped_facade();
     let todo = facade
         .scoped(session)
-        .todo_create(doc("x", TodoStatus::Open))
+        .todo_create(doc("x", TodoStatus::Open), None)
         .expect("create")
         .view;
 
@@ -227,7 +239,7 @@ fn an_unbound_callers_comment_is_unattributed() {
     let (facade, session) = scoped_facade();
     let todo = facade
         .scoped(session)
-        .todo_create(doc("x", TodoStatus::Open))
+        .todo_create(doc("x", TodoStatus::Open), None)
         .expect("create")
         .view;
     let (view, _) = facade
@@ -250,7 +262,7 @@ fn the_local_comment_path_creates_an_unattributed_comment() {
     let session = facade.open_session(None);
     let todo = facade
         .scoped(session)
-        .todo_create(doc("x", TodoStatus::Open))
+        .todo_create(doc("x", TodoStatus::Open), None)
         .expect("create")
         .view;
 
@@ -282,7 +294,7 @@ fn a_bound_process_stamps_its_actor_on_a_comment() {
 
     let todo = facade
         .scoped(session)
-        .todo_create(doc("x", TodoStatus::Open))
+        .todo_create(doc("x", TodoStatus::Open), None)
         .expect("create")
         .view;
     let (view, _) = facade
@@ -324,12 +336,12 @@ fn todo_transfer_in_preserves_the_document_comments_and_clears_blockers_and_lock
         .expect("bind the session to its process in A");
     let todo = facade
         .scoped(session)
-        .todo_create(doc("ship", TodoStatus::InProgress))
+        .todo_create(doc("ship", TodoStatus::InProgress), None)
         .expect("create")
         .view;
     let blocker = facade
         .scoped(session)
-        .todo_create(doc("dep", TodoStatus::Open))
+        .todo_create(doc("dep", TodoStatus::Open), None)
         .expect("blocker")
         .view;
     facade
@@ -383,7 +395,7 @@ fn todo_transfer_refuses_a_target_outside_the_callers_authenticated_scope() {
         .expect("bind the session to its process in A");
     let todo = facade
         .scoped(session)
-        .todo_create(doc("ship", TodoStatus::Open))
+        .todo_create(doc("ship", TodoStatus::Open), None)
         .expect("create in A")
         .view;
 
@@ -405,7 +417,7 @@ fn todo_transfer_in_refuses_an_unknown_target_project() {
     let session = facade.open_session(None);
     let todo = facade
         .scoped(session)
-        .todo_create(doc("ship", TodoStatus::Open))
+        .todo_create(doc("ship", TodoStatus::Open), None)
         .expect("create in A")
         .view;
 
@@ -419,4 +431,268 @@ fn todo_transfer_in_refuses_an_unknown_target_project() {
         facade.scoped(session).todo_get(todo.id).is_ok(),
         "still in A"
     );
+}
+
+#[test]
+fn a_create_links_the_named_scratchpad_and_reads_its_handle_back() {
+    let (facade, session) = scoped_facade();
+    let project = ProjectId::from_raw(1);
+    let pad = facade
+        .scratchpad_write_in(project, "release-plan", "the plan".into(), None)
+        .expect("write the scratchpad");
+
+    let todo = facade
+        .scoped(session)
+        .todo_create(doc("ship", TodoStatus::Open), Some("release-plan".into()))
+        .expect("create linked to the plan it came from")
+        .view;
+
+    let linked = todo.scratchpad.expect("the todo names its scratchpad");
+    assert_eq!(linked.id, pad.id);
+    assert_eq!(linked.name, "release-plan");
+    // The listing carries it too, so the board can group without fetching every document.
+    let listed = facade.scoped(session).todo_list().expect("list");
+    assert_eq!(
+        listed[0].scratchpad.as_ref().map(|link| link.id),
+        Some(pad.id)
+    );
+}
+
+#[test]
+fn an_update_that_omits_the_scratchpad_leaves_an_existing_link_standing() {
+    // The link is live coordination state beside tags and blockers, not part of the document this
+    // call replaces, so a routine title/status edit must never silently destroy it.
+    let (facade, session) = scoped_facade();
+    let project = ProjectId::from_raw(1);
+    facade
+        .scratchpad_write_in(project, "release-plan", "the plan".into(), None)
+        .expect("write the scratchpad");
+    let todo = facade
+        .scoped(session)
+        .todo_create(doc("ship", TodoStatus::Open), Some("release-plan".into()))
+        .expect("create linked")
+        .view;
+
+    let updated = facade
+        .scoped(session)
+        .todo_update(
+            todo.id,
+            doc("ship it", TodoStatus::InProgress),
+            ScratchpadLink::Unchanged,
+            todo.revision,
+        )
+        .expect("update saying nothing about the association");
+
+    assert_eq!(updated.doc.title, "ship it");
+    assert_eq!(
+        updated.scratchpad.map(|link| link.name),
+        Some("release-plan".to_owned())
+    );
+}
+
+#[test]
+fn an_explicitly_cleared_link_unlinks_the_todo() {
+    let (facade, session) = scoped_facade();
+    let project = ProjectId::from_raw(1);
+    facade
+        .scratchpad_write_in(project, "release-plan", "the plan".into(), None)
+        .expect("write the scratchpad");
+    let todo = facade
+        .scoped(session)
+        .todo_create(doc("ship", TodoStatus::Open), Some("release-plan".into()))
+        .expect("create linked")
+        .view;
+
+    let updated = facade
+        .scoped(session)
+        .todo_update(
+            todo.id,
+            doc("ship", TodoStatus::Open),
+            ScratchpadLink::Cleared,
+            todo.revision,
+        )
+        .expect("update clearing the association");
+
+    assert_eq!(updated.scratchpad, None);
+}
+
+#[test]
+fn a_relink_moves_the_todo_to_another_scratchpad() {
+    let (facade, session) = scoped_facade();
+    let project = ProjectId::from_raw(1);
+    facade
+        .scratchpad_write_in(project, "release-plan", "the plan".into(), None)
+        .expect("write the first scratchpad");
+    let other = facade
+        .scratchpad_write_in(project, "rollout-plan", "the other plan".into(), None)
+        .expect("write the second scratchpad");
+    let todo = facade
+        .scoped(session)
+        .todo_create(doc("ship", TodoStatus::Open), Some("release-plan".into()))
+        .expect("create linked")
+        .view;
+
+    let updated = facade
+        .scoped(session)
+        .todo_update(
+            todo.id,
+            doc("ship", TodoStatus::Open),
+            ScratchpadLink::Linked("rollout-plan".into()),
+            todo.revision,
+        )
+        .expect("update relinking the association");
+
+    assert_eq!(updated.scratchpad.map(|link| link.id), Some(other.id));
+}
+
+#[test]
+fn creating_with_an_unknown_scratchpad_name_is_refused_and_writes_nothing() {
+    let (facade, session) = scoped_facade();
+
+    let refused = facade
+        .scoped(session)
+        .todo_create(doc("ship", TodoStatus::Open), Some("no-such-plan".into()));
+
+    assert!(matches!(refused, Err(CoordinationError::UnknownScratchpad)));
+    assert!(
+        facade.scoped(session).todo_list().expect("list").is_empty(),
+        "a refused create must leave no todo behind"
+    );
+}
+
+#[test]
+fn updating_with_an_unknown_scratchpad_name_is_refused_and_writes_nothing() {
+    let (facade, session) = scoped_facade();
+    let todo = facade
+        .scoped(session)
+        .todo_create(doc("ship", TodoStatus::Open), None)
+        .expect("create")
+        .view;
+
+    let refused = facade.scoped(session).todo_update(
+        todo.id,
+        doc("renamed", TodoStatus::Done),
+        ScratchpadLink::Linked("no-such-plan".into()),
+        todo.revision,
+    );
+
+    assert!(matches!(refused, Err(CoordinationError::UnknownScratchpad)));
+    let unchanged = facade.scoped(session).todo_get(todo.id).expect("re-read");
+    assert_eq!(unchanged.doc, todo.doc, "the document must be untouched");
+    assert_eq!(unchanged.revision, todo.revision, "no revision was burned");
+}
+
+#[test]
+fn deleting_a_scratchpad_leaves_the_todos_that_named_it_unlinked() {
+    let (facade, session) = scoped_facade();
+    let project = ProjectId::from_raw(1);
+    facade
+        .scratchpad_write_in(project, "release-plan", "the plan".into(), None)
+        .expect("write the scratchpad");
+    let todo = facade
+        .scoped(session)
+        .todo_create(doc("ship", TodoStatus::Open), Some("release-plan".into()))
+        .expect("create linked")
+        .view;
+    assert!(todo.scratchpad.is_some());
+
+    assert!(facade
+        .scoped(session)
+        .scratchpad_delete("release-plan")
+        .expect("delete the scratchpad"));
+
+    let after = facade.scoped(session).todo_get(todo.id).expect("re-read");
+    assert_eq!(
+        after.scratchpad, None,
+        "a todo must never point at a document that is gone"
+    );
+    assert_eq!(after.doc, todo.doc, "and the todo itself survives");
+}
+
+#[test]
+fn todo_transfer_in_clears_the_scratchpad_association() {
+    // The association names a scratchpad in the source project, so like blockers and the lock it
+    // cannot survive the move.
+    let projects = Arc::new(FakeProjectRepo::new());
+    let a = projects
+        .upsert(Path::new("/tmp/soloist-todo-link-a"), Some("a"), None)
+        .expect("seed the source project")
+        .id;
+    let b = projects
+        .upsert(Path::new("/tmp/soloist-todo-link-b"), Some("b"), None)
+        .expect("seed the target project")
+        .id;
+    let facade = facade_with(projects);
+    facade
+        .scratchpad_write_in(a, "release-plan", "the plan".into(), None)
+        .expect("write the scratchpad");
+    let pad = facade
+        .scratchpad_read_in(a, "release-plan")
+        .expect("read it back");
+    let todo = facade
+        .todo_create_in(a, doc("ship", TodoStatus::Open), Some(pad.id))
+        .expect("create linked");
+    assert!(todo.scratchpad.is_some());
+
+    let moved = facade
+        .todo_transfer_in(a, b, todo.id)
+        .expect("transfer across projects");
+
+    assert_eq!(moved.scratchpad, None);
+    assert_eq!(moved.doc, todo.doc, "the document rides along unchanged");
+}
+
+#[test]
+fn a_todo_with_no_scratchpad_is_valid_and_untouched_by_every_path() {
+    // Having no scratchpad is a permanent, ordinary state — never a validation failure, never
+    // something a later write fills in on the caller's behalf.
+    let (facade, session) = scoped_facade();
+    let created = facade
+        .scoped(session)
+        .todo_create(doc("ship", TodoStatus::Open), None)
+        .expect("create with no association")
+        .view;
+    assert_eq!(created.scratchpad, None);
+
+    let updated = facade
+        .scoped(session)
+        .todo_update(
+            created.id,
+            doc("ship it", TodoStatus::InProgress),
+            ScratchpadLink::Unchanged,
+            created.revision,
+        )
+        .expect("update");
+    assert_eq!(updated.scratchpad, None);
+
+    facade
+        .scoped(session)
+        .todo_add_tag(created.id, "release")
+        .expect("tag");
+    facade
+        .scoped(session)
+        .todo_comment_create(created.id, "note")
+        .expect("comment");
+    let blocker = facade
+        .scoped(session)
+        .todo_create(doc("dep", TodoStatus::Open), None)
+        .expect("create a blocker")
+        .view;
+    facade
+        .scoped(session)
+        .todo_set_blockers(created.id, vec![blocker.id])
+        .expect("set blockers");
+    facade
+        .scoped(session)
+        .todo_set_blockers(created.id, Vec::new())
+        .expect("clear blockers");
+    let done = facade
+        .scoped(session)
+        .todo_complete(created.id)
+        .expect("complete");
+
+    assert_eq!(done.scratchpad, None, "no path invented an association");
+    assert_eq!(done.doc.status, TodoStatus::Done);
+    assert_eq!(done.tags, vec!["release".to_owned()]);
+    assert_eq!(done.comments.len(), 1);
 }

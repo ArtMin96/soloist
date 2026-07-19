@@ -10,15 +10,19 @@
 //! **revision-guarded** (optimistic concurrency): an [`update`](Todos::update) carries the revision it
 //! expects, and a stale one is refused rather than clobbering a newer edit. Around the document sit
 //! live columns the dedicated operations mutate atomically — **tags**, **blockers** (a todo cannot be
-//! completed while a blocker is still open — the gate), **comments**, and a process-owned **lock**.
+//! completed while a blocker is still open — the gate), **comments**, a process-owned **lock**, and
+//! an optional **scratchpad** association naming the document the todo was derived from. That
+//! association is live state, not part of the document, so it survives a specification edit and is
+//! never validated: having none is a permanently valid state, not a gap to fill.
 //! The durable [`TodoRepo`](super::TodoRepo) performs each state-dependent step atomically.
 
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use super::scratchpad::ScratchpadRef;
 use super::todo_repo::{CommentEdit, StoredTodo, TodoRepo, TodoWriteResult};
-use crate::ids::{ProcessId, ProjectId, TodoId};
+use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
 use crate::ports::StoreError;
 
 /// The most text a todo's document may carry, summed across its fields, in bytes. A todo is a
@@ -117,9 +121,53 @@ pub struct Comment {
     pub author: Option<CommentAuthor>,
 }
 
+/// What a write says about a todo's optional scratchpad association. Three explicit states rather
+/// than a nested `Option`, so "said nothing" and "said none" can never be confused at a call site:
+/// a caller that omits the association leaves whatever is there alone, and clearing it takes an
+/// explicit [`Cleared`](ScratchpadLink::Cleared). Generic over the handle so the one shape serves
+/// both a caller that addresses a scratchpad by `name` and the core, which stores its durable
+/// [`ScratchpadId`].
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ScratchpadLink<T> {
+    /// Leave the association exactly as it is — what a caller that did not mention it means.
+    #[default]
+    Unchanged,
+    /// Drop the association, leaving the todo unlinked.
+    Cleared,
+    /// Point the todo at this scratchpad.
+    Linked(T),
+}
+
+impl<T> ScratchpadLink<T> {
+    /// The link a caller that always states the association explicitly asks for: a handle links,
+    /// its absence clears. [`Unchanged`](Self::Unchanged) is unreachable this way — which is the
+    /// point for a surface (a form, a create) whose association is never merely omitted.
+    pub fn stated(handle: Option<T>) -> Self {
+        match handle {
+            Some(handle) => Self::Linked(handle),
+            None => Self::Cleared,
+        }
+    }
+
+    /// Replaces the handle with `resolve`'s output, keeping the link's state. Used to turn a link
+    /// stated by name into one carrying the durable id, without the resolution failure collapsing
+    /// into "no link".
+    pub fn try_map<U, E>(
+        self,
+        resolve: impl FnOnce(T) -> Result<U, E>,
+    ) -> Result<ScratchpadLink<U>, E> {
+        Ok(match self {
+            Self::Unchanged => ScratchpadLink::Unchanged,
+            Self::Cleared => ScratchpadLink::Cleared,
+            Self::Linked(handle) => ScratchpadLink::Linked(resolve(handle)?),
+        })
+    }
+}
+
 /// A todo as a caller reads it: its durable id, its document, its tags, the ids of the
 /// todos that gate it and the subset still unmet, whether it is blocked, its comments, the process
-/// holding its lock (if any), and the revision to guard the next document write with.
+/// holding its lock (if any), the scratchpad it derives from (if any), and the revision to guard
+/// the next document write with.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TodoView {
     pub id: TodoId,
@@ -132,6 +180,9 @@ pub struct TodoView {
     pub blocked: bool,
     pub comments: Vec<Comment>,
     pub locked_by: Option<ProcessId>,
+    /// The scratchpad this todo was derived from, or `None` — the permanently valid default. A todo
+    /// never requires one; it is linked only when it came out of that document.
+    pub scratchpad: Option<ScratchpadRef>,
     pub revision: u64,
 }
 
@@ -144,6 +195,8 @@ pub struct TodoSummary {
     pub tags: Vec<String>,
     pub blocked: bool,
     pub locked_by: Option<ProcessId>,
+    /// The scratchpad this todo was derived from, or `None` (see [`TodoView::scratchpad`]).
+    pub scratchpad: Option<ScratchpadRef>,
     pub revision: u64,
 }
 
@@ -199,11 +252,18 @@ impl Todos {
         Self { repo }
     }
 
-    /// Creates a todo in `project` from `doc` (validated first), returning it at
-    /// revision 1. A malformed document is [`TodoError::Invalid`] and creates nothing.
-    pub fn create(&self, project: ProjectId, doc: TodoDoc) -> Result<TodoView, TodoError> {
+    /// Creates a todo in `project` from `doc` (validated first), optionally associated with the
+    /// scratchpad it derives from, returning it at revision 1. A malformed document is
+    /// [`TodoError::Invalid`] and creates nothing. `scratchpad` is `None` for a todo that came from
+    /// nowhere in particular — the default, and never a validation failure.
+    pub fn create(
+        &self,
+        project: ProjectId,
+        doc: TodoDoc,
+        scratchpad: Option<ScratchpadId>,
+    ) -> Result<TodoView, TodoError> {
         doc.validate().map_err(TodoError::Invalid)?;
-        let stored = self.repo.create(project, &doc)?;
+        let stored = self.repo.create(project, &doc, scratchpad)?;
         Ok(self.view(stored)?)
     }
 
@@ -236,21 +296,24 @@ impl Todos {
             .collect()
     }
 
-    /// Replaces the document of todo `id` in `project` with `doc`, **revision-guarded** by `expected`.
-    /// Validates the document, refuses a stale write ([`TodoError::Conflict`]), and — when the new
-    /// status is [`Done`](TodoStatus::Done) — enforces the blocker gate ([`TodoError::Blocked`]).
+    /// Replaces the document of todo `id` in `project` with `doc`, **revision-guarded** by `expected`,
+    /// and applies `scratchpad` to its association. Validates the document, refuses a stale write
+    /// ([`TodoError::Conflict`]), and — when the new status is [`Done`](TodoStatus::Done) — enforces
+    /// the blocker gate ([`TodoError::Blocked`]). The document is replaced wholesale; the
+    /// association is not part of it, so [`ScratchpadLink::Unchanged`] leaves it standing.
     pub fn update(
         &self,
         project: ProjectId,
         id: TodoId,
         doc: TodoDoc,
+        scratchpad: ScratchpadLink<ScratchpadId>,
         expected: u64,
     ) -> Result<TodoView, TodoError> {
         doc.validate().map_err(TodoError::Invalid)?;
         if doc.status == TodoStatus::Done {
             self.guard_blockers(project, id)?;
         }
-        self.apply_doc(project, id, &doc, Some(expected))
+        self.apply_doc(project, id, &doc, scratchpad, Some(expected))
     }
 
     /// Marks todo `id` in `project` done — the convenience over [`update`](Self::update) that needs no
@@ -262,7 +325,7 @@ impl Todos {
         };
         self.guard_blockers(project, id)?;
         stored.doc.status = TodoStatus::Done;
-        self.apply_doc(project, id, &stored.doc, None)
+        self.apply_doc(project, id, &stored.doc, ScratchpadLink::Unchanged, None)
     }
 
     /// Deletes todo `id` in `project`, returning whether one was removed.
@@ -270,9 +333,9 @@ impl Todos {
         self.repo.delete(project, id)
     }
 
-    /// Moves todo `id` from `from` to `to`, clearing its blockers and lock (both reference the
-    /// source project) and keeping its document, tags, comments, revision, and id. Returns the
-    /// moved todo's view, or `None` if `from` has no such todo.
+    /// Moves todo `id` from `from` to `to`, clearing its blockers, lock, and scratchpad association
+    /// (all three reference the source project) and keeping its document, tags, comments, revision,
+    /// and id. Returns the moved todo's view, or `None` if `from` has no such todo.
     pub fn transfer(
         &self,
         from: ProjectId,
@@ -455,16 +518,20 @@ impl Todos {
         }
     }
 
-    /// Writes `doc` to todo `id` and projects the result, translating the store outcome to the
-    /// aggregate's errors.
+    /// Writes `doc` and the stated `scratchpad` link to todo `id` and projects the result,
+    /// translating the store outcome to the aggregate's errors.
     fn apply_doc(
         &self,
         project: ProjectId,
         id: TodoId,
         doc: &TodoDoc,
+        scratchpad: ScratchpadLink<ScratchpadId>,
         expected: Option<u64>,
     ) -> Result<TodoView, TodoError> {
-        match self.repo.write_doc(project, id, doc, expected)? {
+        match self
+            .repo
+            .write_doc(project, id, doc, scratchpad, expected)?
+        {
             TodoWriteResult::Written(stored) => Ok(self.view(*stored)?),
             TodoWriteResult::NotFound => Err(TodoError::NotFound),
             TodoWriteResult::Conflict { actual } => Err(TodoError::Conflict {
@@ -486,6 +553,7 @@ impl Todos {
             blocked_by,
             comments: stored.comments,
             locked_by: stored.locked_by,
+            scratchpad: stored.scratchpad,
             revision: stored.revision,
         })
     }
@@ -503,6 +571,7 @@ impl Todos {
             tags: stored.tags,
             blocked,
             locked_by: stored.locked_by,
+            scratchpad: stored.scratchpad,
             revision: stored.revision,
         })
     }

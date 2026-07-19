@@ -88,11 +88,14 @@ fn creating_an_empty_todo_seeds_the_default_template_body() {
 
     let created = facade
         .scoped(session)
-        .todo_create(TodoDoc {
-            title: "sweep".into(),
-            body: String::new(),
-            status: TodoStatus::Open,
-        })
+        .todo_create(
+            TodoDoc {
+                title: "sweep".into(),
+                body: String::new(),
+                status: TodoStatus::Open,
+            },
+            None,
+        )
         .expect("create");
 
     assert_eq!(created.view.doc.body, "## Steps\n\n- [ ] do it");

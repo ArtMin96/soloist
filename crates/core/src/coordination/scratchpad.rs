@@ -70,6 +70,16 @@ fn gist(body: &str) -> String {
         .to_owned()
 }
 
+/// A reference to one scratchpad: the durable `id` that is stored and the `name` handle resolved
+/// when it is read. Something that points *at* a scratchpad — a todo's association — persists only
+/// the id, so a rename never breaks the link; the handle is projected on read so a reader names the
+/// document instead of echoing a bare number.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScratchpadRef {
+    pub id: ScratchpadId,
+    pub name: String,
+}
+
 /// A scratchpad as a caller reads it: its durable identity and handle, its tags and archived flag,
 /// the revision to guard the next write with, the free-form Markdown `body`, and that body rendered
 /// under its name as canonical Markdown. The `rendered` text is derived (not stored), so the

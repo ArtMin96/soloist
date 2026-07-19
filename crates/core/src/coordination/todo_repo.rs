@@ -12,14 +12,15 @@
 //! and per-run, so [`clear_locks`](TodoRepo::clear_locks) drops every lock on launch while keeping the
 //! todos.
 
-use super::todo::{Comment, CommentAuthor, TodoDoc};
-use crate::ids::{ProcessId, ProjectId, TodoId};
+use super::scratchpad::ScratchpadRef;
+use super::todo::{Comment, CommentAuthor, ScratchpadLink, TodoDoc};
+use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
 use crate::ports::StoreError;
 
 /// A persisted todo: its store-assigned [`TodoId`] (durable, stable across runs), the project it
 /// belongs to, its document (including its lifecycle status), its tags, the ids of the
-/// todos that gate it, its comments, the process currently holding its lock (if any), and the
-/// `revision` the next doc write must match.
+/// todos that gate it, its comments, the process currently holding its lock (if any), the
+/// scratchpad it was derived from (if any), and the `revision` the next doc write must match.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredTodo {
     pub id: TodoId,
@@ -29,6 +30,10 @@ pub struct StoredTodo {
     pub blockers: Vec<TodoId>,
     pub comments: Vec<Comment>,
     pub locked_by: Option<ProcessId>,
+    /// The associated scratchpad, resolved on read. Only its [`ScratchpadId`] is persisted — the
+    /// adapter projects the current `name` alongside it, so a rename never breaks the link and a
+    /// reader still gets the handle. `None` when the todo is unlinked or the scratchpad is gone.
+    pub scratchpad: Option<ScratchpadRef>,
     pub revision: u64,
 }
 
@@ -58,8 +63,14 @@ pub enum CommentEdit {
 /// respect to the others.
 pub trait TodoRepo: Send + Sync {
     /// Inserts a new todo in `project` with `doc` at revision 1, no tags, blockers, comments, or
-    /// lock, returning the stored row with its assigned id.
-    fn create(&self, project: ProjectId, doc: &TodoDoc) -> Result<StoredTodo, StoreError>;
+    /// lock, associated with `scratchpad` (`None` leaves it unlinked), returning the stored row with
+    /// its assigned id.
+    fn create(
+        &self,
+        project: ProjectId,
+        doc: &TodoDoc,
+        scratchpad: Option<ScratchpadId>,
+    ) -> Result<StoredTodo, StoreError>;
 
     /// The todo `(project, id)`, or `None` if there is none.
     fn read(&self, project: ProjectId, id: TodoId) -> Result<Option<StoredTodo>, StoreError>;
@@ -67,15 +78,18 @@ pub trait TodoRepo: Send + Sync {
     /// Every todo in `project`, ordered by id (creation order).
     fn list(&self, project: ProjectId) -> Result<Vec<StoredTodo>, StoreError>;
 
-    /// Replaces the document of `(project, id)` with `doc`. When `expected` is `Some`, the write
-    /// applies only if the current revision matches (else [`TodoWriteResult::Conflict`]); when
-    /// `None`, it applies unconditionally (the `complete` shortcut). Either way the revision is
-    /// bumped. [`TodoWriteResult::NotFound`] if no todo exists under the id. One atomic step.
+    /// Replaces the document of `(project, id)` with `doc` and applies `scratchpad` to its
+    /// association. When `expected` is `Some`, the write applies only if the current revision
+    /// matches (else [`TodoWriteResult::Conflict`]); when `None`, it applies unconditionally (the
+    /// `complete` shortcut). Either way the revision is bumped, and a refused write changes neither
+    /// the document nor the association. [`TodoWriteResult::NotFound`] if no todo exists under the
+    /// id. One atomic step.
     fn write_doc(
         &self,
         project: ProjectId,
         id: TodoId,
         doc: &TodoDoc,
+        scratchpad: ScratchpadLink<ScratchpadId>,
         expected: Option<u64>,
     ) -> Result<TodoWriteResult, StoreError>;
 
@@ -194,9 +208,10 @@ pub trait TodoRepo: Send + Sync {
     /// themselves are kept. Returns how many locks were cleared.
     fn clear_locks(&self) -> Result<usize, StoreError>;
 
-    /// Moves todo `id` from project `from` to project `to`, **clearing its blockers and lock**
-    /// (both reference the source project, so they cannot survive the move) while keeping its
-    /// document, tags, comments, revision, and durable id. Returns the moved row read back under
+    /// Moves todo `id` from project `from` to project `to`, **clearing its blockers, lock, and
+    /// scratchpad association** (all reference the source project, so none can survive the move)
+    /// while keeping its document, tags, comments, revision, and durable id. Returns the moved row
+    /// read back under
     /// `to`, or `None` if `from` has no such todo. One atomic step, like the other mutations.
     fn transfer(
         &self,
@@ -213,7 +228,12 @@ pub trait TodoRepo: Send + Sync {
 pub struct NoopTodoRepo;
 
 impl TodoRepo for NoopTodoRepo {
-    fn create(&self, project: ProjectId, doc: &TodoDoc) -> Result<StoredTodo, StoreError> {
+    fn create(
+        &self,
+        project: ProjectId,
+        doc: &TodoDoc,
+        _scratchpad: Option<ScratchpadId>,
+    ) -> Result<StoredTodo, StoreError> {
         Ok(StoredTodo {
             id: TodoId::from_raw(0),
             project,
@@ -222,6 +242,7 @@ impl TodoRepo for NoopTodoRepo {
             blockers: Vec::new(),
             comments: Vec::new(),
             locked_by: None,
+            scratchpad: None,
             revision: 1,
         })
     }
@@ -236,6 +257,7 @@ impl TodoRepo for NoopTodoRepo {
         _project: ProjectId,
         _id: TodoId,
         _doc: &TodoDoc,
+        _scratchpad: ScratchpadLink<ScratchpadId>,
         _expected: Option<u64>,
     ) -> Result<TodoWriteResult, StoreError> {
         Ok(TodoWriteResult::NotFound)

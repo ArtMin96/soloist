@@ -54,7 +54,9 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
             <OrchestrationTree tree={tree} />
           </div>
         )}
-        {view === "todos" && <TodoBoard project={project.id} todos={todos} agents={agents} />}
+        {view === "todos" && (
+          <TodoBoard project={project.id} todos={todos} agents={agents} scratchpads={scratchpads} />
+        )}
         {view === "scratchpads" && (
           <ScratchpadPanel project={project.id} scratchpads={scratchpads} />
         )}

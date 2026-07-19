@@ -129,8 +129,12 @@ export async function exportMarkdown(defaultName: string, contents: string): Pro
 }
 
 // Create a todo from its disciplined document.
-export function todoCreate(project: number, doc: TodoDoc): Promise<TodoView> {
-  return invoke<TodoView>("todo_create", { project, doc });
+export function todoCreate(
+  project: number,
+  doc: TodoDoc,
+  scratchpad: number | null,
+): Promise<TodoView> {
+  return invoke<TodoView>("todo_create", { project, doc, scratchpad });
 }
 
 // Replace a todo's document, revision-guarded by `expectedRevision`.
@@ -138,9 +142,10 @@ export function todoUpdate(
   project: number,
   id: number,
   doc: TodoDoc,
+  scratchpad: number | null,
   expectedRevision: number,
 ): Promise<TodoView> {
-  return invoke<TodoView>("todo_update", { project, id, doc, expectedRevision });
+  return invoke<TodoView>("todo_update", { project, id, doc, scratchpad, expectedRevision });
 }
 
 // Mark a todo done; rejects while a blocker is unmet (the board surfaces the gate).

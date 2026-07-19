@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 15;
+pub(crate) const SCHEMA_VERSION: i64 = 16;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -271,6 +271,22 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         }
     }
 
+    if version < 16 {
+        // A todo gains an optional association with the scratchpad it was derived from. The column
+        // holds the scratchpad's durable id, so a rename never breaks the link, and `ON DELETE SET
+        // NULL` unlinks the todo when that document is deleted rather than leaving it pointing at a
+        // row that is gone. Existing todos stay NULL — an association can only be stated, never
+        // inferred, and being unlinked is a permanently valid state. Guarded on the table existing
+        // (created at v7) and the column's absence, so a re-run after a partial failure is a no-op.
+        if table_exists(conn, "todos")? && !column_exists(conn, "todos", "scratchpad_id")? {
+            conn.execute_batch(
+                "ALTER TABLE todos ADD COLUMN scratchpad_id INTEGER NULL
+                     REFERENCES scratchpads(id) ON DELETE SET NULL;",
+            )
+            .map_err(sql_err)?;
+        }
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
@@ -291,8 +307,8 @@ fn table_exists(conn: &Connection, name: &str) -> Result<bool, StoreError> {
     .map_err(sql_err)
 }
 
-/// Whether `table` has a column named `column` — used by the guarded `ADD COLUMN` in the v15 step
-/// (SQLite has no `ADD COLUMN IF NOT EXISTS`) so it stays a no-op on a re-run. `table` is a code
+/// Whether `table` has a column named `column` — used by the guarded `ADD COLUMN` steps (SQLite has
+/// no `ADD COLUMN IF NOT EXISTS`) so each stays a no-op on a re-run. `table` is a code
 /// literal here, never caller input, so interpolating it into the `PRAGMA` is safe.
 fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, StoreError> {
     let mut stmt = conn
@@ -460,6 +476,76 @@ mod tests {
         assert_eq!(
             updated_at, 0,
             "an intermediate-version scratchpad backfills updated_at to 0"
+        );
+    }
+
+    #[test]
+    fn a_pre_v16_todo_upgrades_to_an_unlinked_one_readable_through_the_repo() {
+        use soloist_core::{TodoRepo, TodoStatus};
+
+        // A v15 database with a real todo row, exactly as the previous build left it: the `todos`
+        // table has no `scratchpad_id` column at all.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("pre-v16.db");
+        let conn = Connection::open(&path).expect("open");
+        conn.execute_batch(
+            "CREATE TABLE projects (
+                 id   INTEGER PRIMARY KEY,
+                 root TEXT NOT NULL UNIQUE,
+                 name TEXT,
+                 icon TEXT
+             );
+             CREATE TABLE scratchpads (
+                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 name       TEXT NOT NULL,
+                 doc        TEXT NOT NULL,
+                 tags       TEXT NOT NULL,
+                 archived   INTEGER NOT NULL DEFAULT 0,
+                 revision   INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL DEFAULT 0,
+                 UNIQUE (project_id, name)
+             );
+             CREATE TABLE todos (
+                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 doc        TEXT NOT NULL,
+                 tags       TEXT NOT NULL DEFAULT '[]',
+                 blockers   TEXT NOT NULL DEFAULT '[]',
+                 comments   TEXT NOT NULL DEFAULT '[]',
+                 locked_by  INTEGER,
+                 revision   INTEGER NOT NULL
+             );",
+        )
+        .expect("seed the v15 schema");
+        conn.execute("INSERT INTO projects (id, root) VALUES (1, '/tmp/p')", [])
+            .expect("seed a project row");
+        conn.execute(
+            "INSERT INTO todos (project_id, doc, tags, revision) \
+             VALUES (1, '{\"title\":\"ship\",\"body\":\"do it\",\"status\":\"open\"}', \
+                     '[\"release\"]', 3)",
+            [],
+        )
+        .expect("seed a todo row");
+        conn.pragma_update(None, "user_version", 15)
+            .expect("mark it as a v15 database");
+        drop(conn);
+
+        // Opening through the store runs the migration; the row then reads back through the repo.
+        let store = crate::SqliteStore::open(&path).expect("upgrade and open");
+        let todo = TodoRepo::list(&store, soloist_core::ProjectId::from_raw(1))
+            .expect("list through the repo")
+            .pop()
+            .expect("the seeded todo survives the upgrade");
+
+        assert_eq!(todo.doc.title, "ship");
+        assert_eq!(todo.doc.body, "do it");
+        assert_eq!(todo.doc.status, TodoStatus::Open);
+        assert_eq!(todo.tags, vec!["release".to_owned()]);
+        assert_eq!(todo.revision, 3);
+        assert_eq!(
+            todo.scratchpad, None,
+            "an existing todo is left unlinked — an association is stated, never inferred"
         );
     }
 

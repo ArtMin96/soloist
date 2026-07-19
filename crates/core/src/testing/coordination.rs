@@ -119,6 +119,16 @@ impl FakeScratchpadRepo {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// The current handle of the scratchpad `id`, or `None` when no such scratchpad exists — the
+    /// lookup [`FakeTodoRepo`](super::FakeTodoRepo) resolves a todo's association through, standing
+    /// in for the durable adapter's join.
+    pub fn name_of(&self, id: ScratchpadId) -> Option<String> {
+        lock(&self.rows)
+            .values()
+            .find(|stored| stored.id == id)
+            .map(|stored| stored.name.clone())
+    }
 }
 
 impl ScratchpadRepo for FakeScratchpadRepo {

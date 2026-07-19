@@ -3,7 +3,7 @@ import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TodoDocFields } from "@/components/orchestration/TodoDocFields";
 import { useAutosave } from "@/components/editor/useAutosave";
-import type { TodoDoc, TodoStatus } from "@/domain";
+import type { ScratchpadSummary, TodoDoc, TodoStatus } from "@/domain";
 
 export interface TodoConflict {
   actual: number;
@@ -12,12 +12,16 @@ export interface TodoConflict {
 interface TodoEditorProps {
   /** The document to seed the fields with. The parent remounts this component per open/reload. */
   initial: TodoDoc;
+  /** The scratchpad the todo derives from at open, or null. */
+  initialScratchpad: number | null;
+  /** The project's scratchpads, offered as the documents this todo may derive from. */
+  scratchpads: ScratchpadSummary[];
   /** A concurrent write moved the todo past the opened revision, or null. */
   conflict: TodoConflict | null;
   /** A non-conflict failure (invalid document, blocked→done gate), or null. */
   error: string | null;
-  /** Persists the whole document revision-guarded — the board routes it to the core. */
-  onSave: (doc: TodoDoc) => Promise<void>;
+  /** Persists the whole document and its association revision-guarded — routed to the core. */
+  onSave: (doc: TodoDoc, scratchpad: number | null) => Promise<void>;
   /** Reload the todo fresh, adopting the concurrent write and discarding local edits. */
   onReload: () => void;
   /** Leave edit mode (edits already autosaved). */
@@ -33,6 +37,8 @@ interface TodoEditorProps {
 // undo history.
 export function TodoEditor({
   initial,
+  initialScratchpad,
+  scratchpads,
   conflict,
   error,
   onSave,
@@ -41,9 +47,10 @@ export function TodoEditor({
 }: TodoEditorProps) {
   const [title, setTitle] = useState(initial.title);
   const [status, setStatus] = useState<TodoStatus>(initial.status);
+  const [scratchpad, setScratchpad] = useState<number | null>(initialScratchpad);
   const bodyRef = useRef(initial.body);
   const autosave = useAutosave({
-    onSave: (body: string) => onSave({ title, body, status }),
+    onSave: (body: string) => onSave({ title, body, status }, scratchpad),
     paused: conflict != null,
   });
 
@@ -82,12 +89,18 @@ export function TodoEditor({
         status={status}
         initialBody={initial.body}
         titleId="todo-edit-title"
+        scratchpads={scratchpads}
+        scratchpad={scratchpad}
         onTitleChange={(value) => {
           setTitle(value);
           autosave.push(bodyRef.current);
         }}
         onStatusChange={(value) => {
           setStatus(value);
+          autosave.push(bodyRef.current);
+        }}
+        onScratchpadChange={(value) => {
+          setScratchpad(value);
           autosave.push(bodyRef.current);
         }}
         onBodyChange={(markdown) => {

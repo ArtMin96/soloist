@@ -5,19 +5,21 @@ import { CommentList } from "@/components/orchestration/CommentList";
 import { TodoEditor, type TodoConflict } from "@/components/orchestration/TodoEditor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { humanizeName } from "@/lib/humanize";
 import { TODO_STATUS } from "@/lib/todo";
 import { cn } from "@/lib/utils";
-import type { TodoDoc, TodoView } from "@/domain";
+import type { ScratchpadSummary, TodoDoc, TodoView } from "@/domain";
 
 // The edit surface's state for this row, present only while it is being edited. The board owns the
 // single edit session (one todo at a time) and hands it here so the expanded row swaps its read
 // view for the editor.
 export interface TodoEditState {
   initial: TodoDoc;
+  initialScratchpad: number | null;
   mountKey: number;
   conflict: TodoConflict | null;
   error: string | null;
-  onSave: (doc: TodoDoc) => Promise<void>;
+  onSave: (doc: TodoDoc, scratchpad: number | null) => Promise<void>;
   onReload: () => void;
   onDone: () => void;
 }
@@ -34,6 +36,14 @@ interface TodoItemProps {
   onCopyLink: () => void;
   onComment: (body: string) => Promise<void>;
   onStartEdit: () => void;
+  /**
+   * Whether the row names the scratchpad it derives from. False while the board groups by
+   * scratchpad, where the group header already says it and repeating it on every row would be
+   * noise; true in the flat view and whenever a filter has flattened the grouping.
+   */
+  showScratchpad: boolean;
+  /** The project's scratchpads, offered in the edit surface's picker. */
+  scratchpads: ScratchpadSummary[];
   /** Non-null only while this row is the one being edited. */
   edit: TodoEditState | null;
 }
@@ -56,6 +66,8 @@ export function TodoItem({
   onCopyLink,
   onComment,
   onStartEdit,
+  showScratchpad,
+  scratchpads,
   edit,
 }: TodoItemProps) {
   const done = todo.doc.status === "done";
@@ -79,6 +91,11 @@ export function TodoItem({
         >
           {todo.doc.title}
         </span>
+        {showScratchpad && todo.scratchpad && (
+          <span className="min-w-0 shrink truncate text-[0.6875rem] text-muted-foreground">
+            {humanizeName(todo.scratchpad.name)}
+          </span>
+        )}
         {todo.blocked && (
           <Badge variant="outline" className="shrink-0">
             Blocked
@@ -100,6 +117,8 @@ export function TodoItem({
           <TodoEditor
             key={edit.mountKey}
             initial={edit.initial}
+            initialScratchpad={edit.initialScratchpad}
+            scratchpads={scratchpads}
             conflict={edit.conflict}
             error={edit.error}
             onSave={edit.onSave}

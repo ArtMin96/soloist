@@ -134,7 +134,9 @@ pub trait ScratchpadRepo: Send + Sync {
         archived: bool,
     ) -> Result<Option<StoredScratchpad>, StoreError>;
 
-    /// Deletes `(project, name)`, returning whether one was removed.
+    /// Deletes `(project, name)`, returning whether one was removed. Any todo associated with the
+    /// removed scratchpad is left **unlinked** rather than pointing at a document that is gone —
+    /// part of this contract, not the caller's to clean up afterwards.
     fn delete(&self, project: ProjectId, name: &str) -> Result<bool, StoreError>;
 }
 
