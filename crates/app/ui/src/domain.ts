@@ -51,6 +51,16 @@ export interface TemplateView {
   revision: number;
 }
 
+// A prompt template rendered with a caller's values (mirrors core::coordination::RenderedPrompt).
+// Both reports are advisory: `text` is usable either way, and they name what did not line up —
+// `unfilled` the declared placeholders left without a value (their `{{token}}` stays literal in the
+// text), `unknown` the supplied names the body declares no placeholder for.
+export interface RenderedPrompt {
+  text: string;
+  unfilled: string[];
+  unknown: string[];
+}
+
 // The selected default template per seedable kind (mirrors core::settings::TemplateDefaults).
 // Global-only in v1; `null` means "seed an empty document". Prompt has no seed default.
 export interface TemplateDefaults {
@@ -265,9 +275,11 @@ export type DomainEvent =
   // Keyed by the scratchpad's `name` handle (the addressing key its surface uses).
   | { type: "ScratchpadChanged"; project: number; name: string }
   | { type: "KvChanged"; project: number; key: string }
-  // A template of `kind` was created, updated, or deleted; a templates surface re-reads that
-  // kind's list (coalesced). Carries no project — the selected default is read separately.
-  | { type: "TemplateChanged"; kind: TemplateKind };
+  // A template of `kind` was created, updated, or deleted. `project` names the scope it changed in
+  // — null for the global library, an id for that project's — because the two are separate lists a
+  // surface reads separately. A templates surface re-reads that (kind, scope) list (coalesced); the
+  // selected default is read separately.
+  | { type: "TemplateChanged"; kind: TemplateKind; project: number | null };
 
 export interface AppInfo {
   name: string;

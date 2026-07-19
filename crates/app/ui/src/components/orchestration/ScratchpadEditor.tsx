@@ -1,4 +1,5 @@
 import { Archive, ArchiveRestore, Link2 } from "lucide-react";
+import { AdvisoryNotice } from "@/components/AdvisoryNotice";
 import { Button } from "@/components/ui/button";
 import { ScratchpadBody } from "@/components/orchestration/ScratchpadBody";
 import { ScratchpadTitle } from "@/components/orchestration/ScratchpadTitle";
@@ -82,18 +83,17 @@ export function ScratchpadEditor({
       </header>
 
       {conflict && (
-        <div
-          role="alert"
-          className="mx-3 mt-3 flex items-center gap-3 rounded-md border border-status-transition/40 bg-status-transition/10 px-3 py-2 text-[0.8125rem]"
+        <AdvisoryNotice
+          className="mx-3 mt-3"
+          action={
+            <Button variant="outline" size="sm" onClick={onReload}>
+              Reload
+            </Button>
+          }
         >
-          <span className="min-w-0 flex-1">
-            This scratchpad changed elsewhere (now at revision {conflict.actual}). Your edits were
-            not saved and nothing was overwritten.
-          </span>
-          <Button variant="outline" size="sm" onClick={onReload}>
-            Reload
-          </Button>
-        </div>
+          This scratchpad changed elsewhere (now at revision {conflict.actual}). Your edits were not
+          saved and nothing was overwritten.
+        </AdvisoryNotice>
       )}
 
       {error && (

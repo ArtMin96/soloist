@@ -4,9 +4,10 @@ import type { DomainEvent, ProcessView } from "@/domain";
 // business logic — the core stays authoritative; this only mirrors its deltas, which
 // keeps it trivially unit-testable. Events that don't change the process list (config
 // sync, terminal title/bell, orphans, restart notices, metrics ticks, agent activity, and
-// the coordination deltas — todo/timer/lease/scratchpad/kv changed) leave it untouched;
+// the coordination deltas — todo/timer/lease/scratchpad/kv/template changed) leave it untouched;
 // their consumers subscribe elsewhere (the coordination deltas drive an orchestration_snapshot
-// re-query once the orchestration view exists). A restart's status move arrives as ProcessStatusChanged;
+// re-query once the orchestration view exists; a template change drives the settings manager to
+// re-read the (kind, scope) list it names). A restart's status move arrives as ProcessStatusChanged;
 // RestartScheduled/RestartExhausted are the discrete signals notifications subscribe to;
 // MetricsTick feeds a coalesced CPU/memory view, not the list.
 export function applyEvent(processes: ProcessView[], event: DomainEvent): ProcessView[] {

@@ -29,6 +29,7 @@ import type {
   ProjectSettings,
   ProjectSettingsPage,
   ProjectView,
+  RenderedPrompt,
   ScratchpadView,
   Sidebar,
   TemplateDefaults,
@@ -411,33 +412,41 @@ export function mcpSetupInfo(): Promise<McpSetupInfo> {
 }
 
 // ── Templates ─────────────────────────────────────────────────────────────────
-// The global template library the Settings manager edits, plus the default-per-kind selection.
-// Every write emits `TemplateChanged`, so the manager re-reads through its load-once hook. Kind
-// grouping, name uniqueness, the revision guard, and clearing a deleted default all live in the core.
+// The template libraries the Settings manager edits, plus the default-per-kind selection. Every
+// call names the scope it addresses: `project` is null for the global library, a project id for
+// that project's. Every write emits `TemplateChanged` carrying that same scope, so the manager
+// re-reads the list that moved. Kind grouping, name uniqueness, the revision guard, and clearing a
+// deleted default all live in the core.
 
-// Every global template of `kind`, ordered by name.
-export function templates(kind: TemplateKind): Promise<TemplateSummary[]> {
-  return invoke<TemplateSummary[]>("templates", { kind });
+// Every template of `kind` in `project`'s scope, ordered by name.
+export function templates(kind: TemplateKind, project: number | null): Promise<TemplateSummary[]> {
+  return invoke<TemplateSummary[]>("templates", { kind, project });
 }
 
-// The full global template to open and edit (its Markdown body, description, and revision).
-export function templateRead(kind: TemplateKind, name: string): Promise<TemplateView> {
-  return invoke<TemplateView>("template_read", { kind, name });
+// The full template to open and edit (its Markdown body, description, and revision).
+export function templateRead(
+  kind: TemplateKind,
+  project: number | null,
+  name: string,
+): Promise<TemplateView> {
+  return invoke<TemplateView>("template_read", { kind, project, name });
 }
 
-// Create a global template. Rejects a taken name or a blank name/body.
+// Create a template in `project`'s scope. Rejects a taken name or a blank name/body.
 export function templateCreate(
   kind: TemplateKind,
+  project: number | null,
   name: string,
   description: string | null,
   body: string,
 ): Promise<TemplateView> {
-  return invoke<TemplateView>("template_create", { kind, name, description, body });
+  return invoke<TemplateView>("template_create", { kind, project, name, description, body });
 }
 
-// Replace a global template's body and description, revision-guarded by `expectedRevision`.
+// Replace a template's body and description, revision-guarded by `expectedRevision`.
 export function templateUpdate(
   kind: TemplateKind,
+  project: number | null,
   name: string,
   description: string | null,
   body: string,
@@ -445,6 +454,7 @@ export function templateUpdate(
 ): Promise<TemplateView> {
   return invoke<TemplateView>("template_update", {
     kind,
+    project,
     name,
     description,
     body,
@@ -452,9 +462,23 @@ export function templateUpdate(
   });
 }
 
-// Delete a global template; the core clears a default that pointed at it. Resolves to whether one existed.
-export function templateDelete(kind: TemplateKind, name: string): Promise<boolean> {
-  return invoke<boolean>("template_delete", { kind, name });
+// Delete a template; the core clears a default that pointed at it. Resolves to whether one existed.
+export function templateDelete(
+  kind: TemplateKind,
+  project: number | null,
+  name: string,
+): Promise<boolean> {
+  return invoke<boolean>("template_delete", { kind, project, name });
+}
+
+// The prompt template `name` in `project`'s scope, substituted with `values` — the manager's live
+// preview. A placeholder with no value stays literal in the text and comes back named in `unfilled`.
+export function templateRender(
+  project: number | null,
+  name: string,
+  values: Record<string, string>,
+): Promise<RenderedPrompt> {
+  return invoke<RenderedPrompt>("template_render", { project, name, values });
 }
 
 // The default-template selection per kind (global-only).

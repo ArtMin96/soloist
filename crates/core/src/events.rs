@@ -160,10 +160,16 @@ pub enum DomainEvent {
     ScratchpadChanged { project: ProjectId, name: String },
     /// A coordination key-value entry `key` in `project` changed (set or deleted).
     KvChanged { project: ProjectId, key: String },
-    /// A template of `kind` was created, updated, or deleted. Carries the kind only — a
-    /// low-frequency change-notification the templates surface re-reads that kind's list on
-    /// (coalesced), rather than trusting a payload; the selected default is read separately.
-    TemplateChanged { kind: TemplateKind },
+    /// A template of `kind` was created, updated, or deleted. `project` names the scope it
+    /// changed in — `None` for the global library, `Some` for that project's — because the two
+    /// scopes are separate libraries a surface reads separately: without it a project-scoped
+    /// write would make a listener re-read the global list and see nothing. A low-frequency
+    /// change-notification carrying no content: the surface re-reads that `(kind, scope)`'s list
+    /// rather than trusting a payload, and the selected default is read separately.
+    TemplateChanged {
+        kind: TemplateKind,
+        project: Option<ProjectId>,
+    },
 }
 
 /// The outbound event port: anything the core publishes domain events through.

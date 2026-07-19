@@ -4,9 +4,10 @@ use soloist_core::testing::{
     FakeTemplateRepo, FakeTrustRepo,
 };
 use soloist_core::{
-    AcquireOutcome, CorePorts, DomainEvent, IntegrationFile, McpFeatureGroup, Origin, ProcStatus,
-    ProcessId, ProjectRepo, StartSummary, TemplateScope, TokioClock,
+    AcquireOutcome, CorePorts, DomainEvent, IntegrationFile, McpFeatureGroup, MissingPolicy,
+    Origin, ProcStatus, ProcessId, ProjectRepo, StartSummary, TemplateScope, TokioClock,
 };
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
@@ -926,6 +927,132 @@ async fn prompt_templates_route_create_read_update_delete_and_export() {
             IpcRequest::PromptTemplateRead {
                 scope: TemplateScope::Project,
                 name: "review".into(),
+            },
+        )
+        .await,
+        Err(IpcError::UnknownTemplate)
+    );
+}
+
+/// Seeds the one template the render tests below address.
+async fn seed_review_template(facade: &Arc<Facade>, session: SessionId) {
+    handle_request(
+        facade,
+        session,
+        IpcRequest::PromptTemplateCreate {
+            scope: TemplateScope::Project,
+            name: "review".into(),
+            description: None,
+            body: "Review {{diff}} for {{focus}}".into(),
+        },
+    )
+    .await
+    .expect("seed the template");
+}
+
+/// A render reaches the core carrying the caller's values: the supplied ones are substituted, the
+/// one left out survives as its marker rather than refusing the render, a value the body declares
+/// no placeholder for is reported back, and the target the caller chose is echoed.
+#[tokio::test]
+async fn a_render_substitutes_the_supplied_values_and_reports_the_gaps() {
+    let facade = facade_with_templates();
+    let session = facade.open_session(None);
+    seed_review_template(&facade, session).await;
+
+    match handle_request(
+        &facade,
+        session,
+        IpcRequest::PromptTemplateRender {
+            scope: TemplateScope::Project,
+            name: "review".into(),
+            values: BTreeMap::from([
+                ("diff".to_owned(), "a/b.rs".to_owned()),
+                ("dif".to_owned(), "a typo".to_owned()),
+            ]),
+            policy: MissingPolicy::LeaveVerbatim,
+        },
+    )
+    .await
+    {
+        Ok(IpcResponse::PromptTemplateRendered(rendered)) => {
+            assert_eq!(rendered.text, "Review a/b.rs for {{focus}}");
+            assert_eq!(rendered.unfilled, vec!["focus".to_owned()]);
+            assert_eq!(rendered.unknown, vec!["dif".to_owned()]);
+        }
+        other => panic!("expected a rendered prompt, got {other:?}"),
+    }
+}
+
+/// The strict policy travels the wire and is honoured by the core: a caller whose protocol cannot
+/// carry a warning gets the render refused, naming every value still to supply so one retry can
+/// fill them all. The refusal is its own wire error — folded into a generic internal failure, an
+/// adapter could not tell a fixable mistake from a genuine fault.
+#[tokio::test]
+async fn a_strict_render_is_refused_on_the_wire_naming_every_missing_value() {
+    let facade = facade_with_templates();
+    let session = facade.open_session(None);
+    seed_review_template(&facade, session).await;
+
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::PromptTemplateRender {
+                scope: TemplateScope::Project,
+                name: "review".into(),
+                values: BTreeMap::new(),
+                policy: MissingPolicy::Strict,
+            },
+        )
+        .await,
+        Err(IpcError::MissingTemplateValues {
+            names: vec!["diff".to_owned(), "focus".to_owned()],
+        })
+    );
+}
+
+/// A strict render that lacks nothing is not refused — the policy only bites on a gap.
+#[tokio::test]
+async fn a_strict_render_with_every_value_supplied_succeeds() {
+    let facade = facade_with_templates();
+    let session = facade.open_session(None);
+    seed_review_template(&facade, session).await;
+
+    match handle_request(
+        &facade,
+        session,
+        IpcRequest::PromptTemplateRender {
+            scope: TemplateScope::Project,
+            name: "review".into(),
+            values: BTreeMap::from([
+                ("diff".to_owned(), "a/b.rs".to_owned()),
+                ("focus".to_owned(), "leaks".to_owned()),
+            ]),
+            policy: MissingPolicy::Strict,
+        },
+    )
+    .await
+    {
+        Ok(IpcResponse::PromptTemplateRendered(rendered)) => {
+            assert_eq!(rendered.text, "Review a/b.rs for leaks");
+        }
+        other => panic!("expected a rendered prompt, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn rendering_a_template_that_does_not_exist_is_refused_on_the_wire() {
+    let facade = facade_with_templates();
+    let session = facade.open_session(None);
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::PromptTemplateRender {
+                scope: TemplateScope::Project,
+                name: "absent".into(),
+                values: BTreeMap::new(),
+                policy: MissingPolicy::LeaveVerbatim,
             },
         )
         .await,

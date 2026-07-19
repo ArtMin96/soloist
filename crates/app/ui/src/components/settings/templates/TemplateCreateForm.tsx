@@ -3,11 +3,13 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LazyRichTextEditor } from "@/components/editor/LazyRichTextEditor";
-import { TEMPLATE_KIND_LABEL } from "@/lib/templates";
-import type { TemplateKind } from "@/domain";
+import { templateScopeHeading } from "@/lib/templates";
+import type { TemplateKind, TemplateScope } from "@/domain";
 
 interface TemplateCreateFormProps {
   kind: TemplateKind;
+  /** Which library the new template lands in — stated up front, since the two are separate. */
+  scope: TemplateScope;
   /** Authors the template — the panel routes it to the core and closes the form on success. */
   onCreate: (name: string, description: string, body: string) => Promise<void>;
   /** Dismiss the form without creating. */
@@ -19,7 +21,7 @@ interface TemplateCreateFormProps {
 // editing it is a single deliberate write, not autosave. A template's name and body are both required
 // (the core refuses either blank), so Create stays disabled until both are present. A rejection (a
 // taken name) stays on the form with the reason so the draft survives.
-export function TemplateCreateForm({ kind, onCreate, onCancel }: TemplateCreateFormProps) {
+export function TemplateCreateForm({ kind, scope, onCreate, onCancel }: TemplateCreateFormProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const bodyRef = useRef("");
@@ -49,7 +51,7 @@ export function TemplateCreateForm({ kind, onCreate, onCancel }: TemplateCreateF
 
       <div>
         <p className="text-[0.6875rem] font-medium tracking-[0.01em] text-muted-foreground">
-          New {TEMPLATE_KIND_LABEL[kind].toLowerCase()} template
+          New {templateScopeHeading(kind, scope).toLowerCase()}
         </p>
       </div>
 
