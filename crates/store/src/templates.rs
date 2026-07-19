@@ -109,6 +109,17 @@ impl TemplateRepo for SqliteStore {
         Ok(found)
     }
 
+    fn count(&self, kind: TemplateKind, project: Option<ProjectId>) -> Result<usize, StoreError> {
+        self.lock()
+            .query_row(
+                &format!("SELECT COUNT(*) FROM templates WHERE {SCOPE_CLAUSE}"),
+                (kind.as_str(), scope_param(project)),
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count as usize)
+            .map_err(sql_err)
+    }
+
     fn delete(
         &self,
         kind: TemplateKind,
