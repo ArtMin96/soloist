@@ -607,3 +607,59 @@ user's process logs (which can carry secrets).
 **Effect on parity:** H1 (HTTP API) and H4 (CLI) are unchanged in surface — the same endpoints, the
 same status mapping (403 trust gate, 404 unknown, 401 auth) — but every route now authenticates and
 the CLI sends the token on every request. No parity row regresses.
+
+---
+
+## D-18 — Todos may carry an optional link to a scratchpad (a Soloist extension) 🟢
+
+**Introduced:** the `macos-native-ux` initiative, 2026-07-19 (`plan/02` G18; owner decision the same
+day). Recorded here alongside the **unified Templates** extension in
+[D-7](#d-7--scratchpads-carry-an-enforced-disciplined-structure-not-free-form-markdown--superseded),
+which set the precedent for logging a Soloist original in both places.
+
+**Solo — silent, not contradicted.** ⚠️ This entry is a **strict-reading exception** to this file's
+scope. `plan/05` records **no** todo↔scratchpad association for Solo: §7's todo catalog (~19 tools)
+lists no such parameter, and §10's Scratchpads & Todos panels describe no link. But **no Solo page
+states that todos and scratchpads cannot be linked** — the public record is simply silent. Per
+`CLAUDE.md` §9 that silence *is* the gap, so the primary record is the gap decision in
+[`plan/05` §12](plan/05-solo-reference-and-sources.md); this entry exists only so the extension is
+discoverable beside the Templates precedent. **Nothing here asserts what Solo does or does not do.**
+
+**Soloist:** a todo may carry an **optional** link to a scratchpad in the same project.
+
+- **Optional means optional.** A todo is linked only when it was created *from* a scratchpad;
+  otherwise it has none, permanently and validly. `validate()` never inspects the field, so every
+  path that does not name a scratchpad behaves exactly as it did before. There is no validation
+  error, no UI nag, and no default the user must undo — "No scratchpad" is a first-class group on the
+  board, not an error bucket.
+- **Live column, not a document field.** The link sits beside tags, blockers, and the lock rather
+  than inside the revision-guarded `TodoDoc`, because it is coordination state, not the user's prose.
+  Migration **v16** adds `todos.scratchpad_id` (`ON DELETE SET NULL`).
+- **Only the durable id is stored; the handle is projected on read.** `TodoView`/`TodoSummary` expose
+  `Option<ScratchpadRef { id, name }>`, resolved by a `LEFT JOIN`, so a rename still follows the link
+  and no adapter ever has to resolve a name itself (`CLAUDE.md` §16).
+- **`todo_update` omitted ≠ null.** An omitted `scratchpad` param leaves the link **unchanged**; an
+  explicit `null` clears it. This differs on purpose from `body` in the same argument struct, which
+  the update replaces — see the `todo_create`/`_update` row in `plan/05` §12.
+- **No `todo_set_scratchpad` tool in v1** (owner-resolved, YAGNI): the two params cover the workflow.
+- **A `scratchpad_transfer` moves the derived todos with it, link intact** (owner decision,
+  2026-07-19 — the case this entry was held open for). The link means "this todo derives from this
+  document", so derived work follows its source: every todo in the source project linked to the
+  moved scratchpad is re-keyed to the target and **keeps its association**, because both ends move
+  and the link therefore stays valid. This is the one place the link is *not* cleared, and
+  deliberately unlike `todo_transfer`, which clears it precisely because the scratchpad stays
+  behind. Bounded on purpose: only *directly* linked todos move — the blocker graph is not followed
+  transitively. A moved todo's blockers naming a todo left behind are **cleared** and its
+  process-owned lock is **dropped**, matching what a cross-project `todo_transfer` already does to
+  both; a blocker between two todos that both move survives. Todos in the source project linked to
+  no scratchpad, or to a different one, are untouched. The whole cascade is one transaction, so a
+  todo is never stranded from the document it derives from.
+
+**Why 🟢 (settled):** all three clearing/keeping rules are now decided — deleting the scratchpad
+clears the link (`ON DELETE SET NULL`), a cross-project `todo_transfer` clears it, and a
+`scratchpad_transfer` keeps it while moving both ends. The asymmetry this entry was previously held
+open for (one association straddling two projects) is gone: no path leaves a todo resolving a
+scratchpad in another project.
+
+**Effect on parity:** no row regresses. G3/G4 are unchanged for any todo without a link; G18 is the
+new row covering the association. Full design: Soloist scratchpad `macos-native-ux-design`.
