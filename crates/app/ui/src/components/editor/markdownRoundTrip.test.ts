@@ -49,6 +49,22 @@ describe("markdown round-trip", () => {
     expect(table).toContain("| 1");
   });
 
+  // The serializer HTML-encodes text on the way out to Markdown, which would persist `&amp;` for a
+  // typed `&`. The encoding is stable, so the fixed-point check above cannot see it — only reading
+  // the characters back does.
+  it("keeps HTML-significant characters literal rather than encoding them as entities", () => {
+    expect(roundTrip("Current State & Context")).toContain("State & Context");
+    expect(roundTrip("Assumption -> Verification")).toContain("-> Verification");
+    expect(roundTrip("A < B and C > D")).toContain("A < B and C > D");
+    expect(roundTrip('Tom & Jerry say "hi"')).toContain("Tom & Jerry");
+  });
+
+  // Inside a code fence the serializer already passes text through untouched, so the entity
+  // correction must not reach in and rewrite a literal entity a user actually typed.
+  it("leaves a literal entity inside a code block alone", () => {
+    expect(roundTrip("```html\n<p>&amp;</p>\n```")).toContain("<p>&amp;</p>");
+  });
+
   it("treats a blank body as valid and empty", () => {
     expect(roundTrip("").trim()).toBe("");
   });

@@ -5,6 +5,7 @@ import { Placeholder } from "@tiptap/extensions";
 import { TaskList } from "@tiptap/extension-task-list";
 import { TaskItem } from "@tiptap/extension-task-item";
 import { TableKit } from "@tiptap/extension-table";
+import { correctMarkdownEntities } from "./markdownEntities";
 import { slashCommand } from "./extensions/slashCommand";
 import { searchExtension } from "./search/searchExtension";
 
@@ -26,6 +27,7 @@ export interface EditorExtensionOptions {
  * flavored Markdown; TaskList/TaskItem add checkboxes; Placeholder prompts an empty note.
  */
 export function buildEditorExtensions(options: EditorExtensionOptions): Extensions {
+  correctMarkdownEntities();
   const extensions: Extensions = [
     StarterKit.configure({
       heading: { levels: [...EDITOR_HEADING_LEVELS] },
