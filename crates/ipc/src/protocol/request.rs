@@ -1,8 +1,11 @@
 //! The request half of the wire protocol: every operation an IPC client can ask of the app.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    IntegrationFile, ProcessId, ProjectId, ScratchpadLink, TemplateScope, TimerId, TodoDoc, TodoId,
+    IntegrationFile, MissingPolicy, ProcessId, ProjectId, ScratchpadLink, TemplateScope, TimerId,
+    TodoDoc, TodoId,
 };
 
 /// A request from an IPC client to the running app. The server resolves identity and
@@ -251,6 +254,17 @@ pub enum IpcRequest {
     PromptTemplateDelete { scope: TemplateScope, name: String },
     /// The template `name` as a portable export envelope.
     PromptTemplateExport { scope: TemplateScope, name: String },
+    /// The prompt template `name` in the chosen scope, substituted with `values`. `policy` decides
+    /// what an unsupplied placeholder means: a caller whose protocol can carry a warning leaves the
+    /// marker in the text and reads the gap off the reply, while one that cannot — MCP's
+    /// `prompts/get` has no warning channel — refuses the render instead, so a partial prompt is
+    /// never mistaken for a complete one.
+    PromptTemplateRender {
+        scope: TemplateScope,
+        name: String,
+        values: BTreeMap<String, String>,
+        policy: MissingPolicy,
+    },
     /// Write the agent guide into the session's effective project root as a managed section.
     SetupAgentIntegration { file: IntegrationFile },
 }

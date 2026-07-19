@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use soloist_core::{
     AcquireOutcome, AgentTool, Comment, ExportedTemplate, FeedbackEntry, IntegrationWrite, KvEntry,
     LeaseView, LinkContent, McpToolGroups, ProcessId, ProcessView, ProjectId, ProjectView,
-    ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome, StartSummary, TemplateSummary,
-    TemplateView, TimerView, TodoSummary, TodoView, Whoami,
+    RenderedPrompt, ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome, StartSummary,
+    TemplateSummary, TemplateView, TimerView, TodoSummary, TodoView, Whoami,
 };
 
 use crate::error::IpcError;
@@ -134,6 +134,10 @@ pub enum IpcResponse {
     PromptTemplateDeleted(bool),
     /// A template's portable export envelope (answer to [`IpcRequest::PromptTemplateExport`]).
     PromptTemplateExport(ExportedTemplate),
+    /// A rendered prompt (answer to [`IpcRequest::PromptTemplateRender`]). Reuses the core result so
+    /// the wire shape — the text, the target it was rendered for, and both advisory reports —
+    /// cannot drift.
+    PromptTemplateRendered(RenderedPrompt),
     /// What a guide write did (answer to [`IpcRequest::SetupAgentIntegration`]). Reuses the core
     /// type so the wire shape cannot drift.
     IntegrationWritten(IntegrationWrite),

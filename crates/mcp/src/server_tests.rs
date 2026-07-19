@@ -10,69 +10,23 @@ use soloist_core::{
     TodoStatus, TodoSummary, TodoView, Whoami,
 };
 use soloist_core::{
-    FeedbackEntry, IntegrationFile, IntegrationWrite, TemplateId, TemplateKind, TemplateScope,
-    TemplateView,
+    FeedbackEntry, IntegrationFile, IntegrationWrite, MissingPolicy, RenderedPrompt, TemplateId,
+    TemplateKind, TemplateScope, TemplateView,
 };
-use soloist_ipc::{
-    read_frame, write_frame, IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome,
-    ProjectSummary,
-};
-use std::collections::BTreeSet;
+use soloist_ipc::{IpcError, IpcRequest, IpcResponse, PortWaitOutcome, ProjectSummary};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use tokio::net::UnixListener;
+
+use crate::testing::{all_feature_groups, handler, handler_with_groups, spawn_fake_app};
 
 use crate::args::{
     HelpArg, IntegrationFileArg, LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, PromptScopeArg,
-    PromptTemplateCreateArg, PromptTemplateUpdateArg, RenameArg, ScratchpadArchiveArg,
-    ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg, SelectProjectArg,
-    SendInputArg, SetupAgentIntegrationArg, SpawnAgentArg, SubmitFeedbackArg, TimerArg,
-    TimerFireWhenIdleArg, TimerSetArg, TodoArg, TodoCommentCreateArg, TodoCreateArg, TodoGetArg,
-    TodoRef, TodoStatusArg, TodoUpdateArg, WaitForPortArg,
+    PromptTemplateCreateArg, PromptTemplateRenderArg, PromptTemplateUpdateArg, RenameArg,
+    ScratchpadArchiveArg, ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg,
+    SelectProjectArg, SendInputArg, SetupAgentIntegrationArg, SpawnAgentArg, SubmitFeedbackArg,
+    TimerArg, TimerFireWhenIdleArg, TimerSetArg, TodoArg, TodoCommentCreateArg, TodoCreateArg,
+    TodoGetArg, TodoRef, TodoStatusArg, TodoUpdateArg, WaitForPortArg,
 };
-
-/// Spawns a fake app on `socket` that answers each request via `respond` until the client
-/// disconnects, so a test drives the real [`SoloistMcp`] handler through the real IPC
-/// transport — exercising tool dispatch, response projection, and error mapping end to end.
-fn spawn_fake_app(socket: PathBuf, respond: impl Fn(IpcRequest) -> IpcResult + Send + 'static) {
-    let listener = UnixListener::bind(&socket).expect("bind");
-    tokio::spawn(async move {
-        let (mut stream, _addr) = listener.accept().await.expect("accept");
-        while let Some(request) = read_frame::<_, IpcRequest>(&mut stream)
-            .await
-            .expect("read request")
-        {
-            let reply = respond(request);
-            write_frame(&mut stream, &reply).await.expect("write reply");
-        }
-    });
-}
-
-/// Every feature group enabled — the full tool surface, so the per-tool tests below exercise every
-/// tool regardless of the default gating (the gating tests construct specific enablements).
-fn all_feature_groups() -> McpToolGroups {
-    McpToolGroups {
-        scratchpads: true,
-        todos: true,
-        timers: true,
-        key_value: true,
-        prompt_templates: true,
-    }
-}
-
-/// A handler whose single client connection talks to the fake app on `socket`, with every feature
-/// group enabled.
-fn handler(socket: PathBuf) -> SoloistMcp {
-    SoloistMcp::new(Arc::new(AppClient::new(None, socket)), all_feature_groups())
-}
-
-/// A handler with the given feature-group enablement. `list_all` reads the statically composed
-/// router, so no IPC connection is opened and the socket path is never used.
-fn handler_with_groups(groups: McpToolGroups) -> SoloistMcp {
-    SoloistMcp::new(
-        Arc::new(AppClient::new(None, PathBuf::from("unused.sock"))),
-        groups,
-    )
-}
 
 /// The tool names the composed router actually serves.
 fn served_tools(handler: &SoloistMcp) -> BTreeSet<String> {
@@ -212,6 +166,7 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "prompt_template_update",
     "prompt_template_delete",
     "prompt_template_export",
+    "prompt_template_render",
 ];
 
 /// With every feature group enabled, the router [`SoloistMcp::new`] composes from the per-category
@@ -379,12 +334,90 @@ fn enabling_prompt_templates_serves_its_tools() {
         "prompt_template_update",
         "prompt_template_delete",
         "prompt_template_export",
+        "prompt_template_render",
     ] {
         assert!(
             served.contains(tool),
             "{tool} should be served when Prompt Templates is enabled"
         );
     }
+}
+
+/// The prompts primitive reads the templates the Prompt Templates group gates, so a server whose
+/// user switched that group off must not offer prompts at all. The handshake is where a client
+/// learns whether to look, and it is computed from the same setting the tools are.
+#[test]
+fn prompts_are_not_advertised_while_prompt_templates_are_off() {
+    let info = handler_with_groups(McpToolGroups::default()).get_info();
+
+    assert_eq!(
+        info.capabilities.prompts, None,
+        "a disabled group must not advertise the prompts capability"
+    );
+}
+
+/// With the group on, prompts are advertised — and with `listChanged`, since the server tells a
+/// client when its list went stale.
+#[test]
+fn prompts_are_advertised_with_list_changed_when_prompt_templates_are_on() {
+    let info = handler_with_groups(all_feature_groups()).get_info();
+
+    assert_eq!(
+        info.capabilities.prompts,
+        Some(PromptsCapability {
+            list_changed: Some(true)
+        })
+    );
+}
+
+/// Tools stay advertised either way — gating prompts must not cost the baseline every client has.
+#[test]
+fn tools_stay_advertised_whether_or_not_prompts_are() {
+    for groups in [McpToolGroups::default(), all_feature_groups()] {
+        assert!(
+            handler_with_groups(groups)
+                .get_info()
+                .capabilities
+                .tools
+                .is_some(),
+            "tools must be advertised with groups {groups:?}"
+        );
+    }
+}
+
+/// The names in [`PROMPT_LIST_MUTATORS`] are matched against live tool names, so a rename that left
+/// one behind would silently stop notifying. Guarded here rather than trusted.
+#[test]
+fn every_prompt_list_mutator_is_a_served_tool() {
+    let served = served_tools(&handler_with_groups(all_feature_groups()));
+
+    for tool in crate::prompts::PROMPT_LIST_MUTATORS {
+        assert!(
+            served.contains(*tool),
+            "{tool} is listed as changing the prompt list but is not a served tool"
+        );
+    }
+}
+
+/// Rendering inherits the group gate from the sub-router it lives in, rather than carrying a check
+/// of its own: with Prompt Templates off the tool is never registered, so it is neither listed nor
+/// callable even though every other feature group is on.
+#[test]
+fn prompt_template_render_is_absent_when_its_group_is_off() {
+    let groups = McpToolGroups {
+        prompt_templates: false,
+        ..all_feature_groups()
+    };
+    let served = served_tools(&handler_with_groups(groups));
+
+    assert!(
+        !served.contains("prompt_template_render"),
+        "rendering must not be served while Prompt Templates is off"
+    );
+    assert!(
+        served.contains("todo_list"),
+        "the other feature groups are unaffected"
+    );
 }
 
 /// Disabling one feature group hides only its tools — the core groups and the other feature groups
@@ -2118,6 +2151,54 @@ async fn a_stale_prompt_template_update_becomes_a_tool_execution_error() {
         .await
         .expect("a request error is a tool result, not a protocol error");
     assert_eq!(result.is_error, Some(true));
+}
+
+/// The values map and the scope both reach the app, and the rendered text plus both advisory
+/// reports come back untouched — the tool carries the render, it does not perform it.
+#[tokio::test]
+async fn prompt_template_render_forwards_the_values_and_projects_the_rendered_prompt() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::PromptTemplateRender {
+            scope: TemplateScope::Global,
+            name,
+            values,
+            // The render tool reports a gap rather than refusing one, so it must never ask for a
+            // strict render: a caller reading `unfilled` would instead see the whole call fail.
+            policy: MissingPolicy::LeaveVerbatim,
+        } if name == "review" => Ok(IpcResponse::PromptTemplateRendered(RenderedPrompt {
+            text: format!(
+                "Review {} for {{{{focus}}}}",
+                values.get("diff").map_or("", String::as_str)
+            ),
+            unfilled: vec!["focus".into()],
+            unknown: values
+                .keys()
+                .filter(|key| *key != "diff")
+                .cloned()
+                .collect(),
+        })),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .prompt_template_render(Parameters(PromptTemplateRenderArg {
+            name: "review".into(),
+            scope: Some(PromptScopeArg::Global),
+            values: BTreeMap::from([
+                ("diff".to_owned(), "a/b.rs".to_owned()),
+                ("dif".to_owned(), "a typo".to_owned()),
+            ]),
+        }))
+        .await
+        .expect("prompt_template_render succeeds");
+    let back: RenderedPrompt =
+        serde_json::from_value(structured_of(result)).expect("decode the rendered prompt");
+
+    assert_eq!(back.text, "Review a/b.rs for {{focus}}");
+    assert_eq!(back.unfilled, vec!["focus".to_owned()]);
+    assert_eq!(back.unknown, vec!["dif".to_owned()]);
 }
 
 /// The scratchpad the association tests link to, and the todo view a fake app answers with.

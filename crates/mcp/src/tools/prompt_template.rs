@@ -1,19 +1,21 @@
 //! Prompt-template tools: durable reusable prompts with `{{placeholder}}` fill-ins,
 //! project-scoped or global.
 //!
-//! Six tools cover the surface: list, read, create, update (revision-guarded), delete, and
-//! export (a portable envelope that re-creates the template anywhere). The scope argument
-//! defaults to the effective project; `global` shares a template across projects. Scope is
-//! resolved in the core, not here. The whole group is toggleable and off by default.
+//! Seven tools cover the surface: list, read, create, update (revision-guarded), delete, export
+//! (a portable envelope that re-creates the template anywhere), and render (the stored body with
+//! the caller's values substituted). The scope argument defaults to the effective project;
+//! `global` shares a template across projects. Scope is resolved in the core, not here, as is
+//! substitution. The whole group is toggleable and off by default.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
-use soloist_core::TemplateScope;
+use soloist_core::{MissingPolicy, TemplateScope};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
-    PromptTemplateCreateArg, PromptTemplateListArg, PromptTemplateNameArg, PromptTemplateUpdateArg,
+    PromptTemplateCreateArg, PromptTemplateListArg, PromptTemplateNameArg, PromptTemplateRenderArg,
+    PromptTemplateUpdateArg,
 };
 use crate::server::SoloistMcp;
 use crate::tools::reply::{app_error, structured, unexpected};
@@ -163,6 +165,36 @@ impl SoloistMcp {
             .await
         {
             Ok(IpcResponse::PromptTemplateExport(exported)) => structured(&exported),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Render a prompt template into the text to send an agent: pass a value per {{placeholder}} in values. A placeholder you leave out stays in the text and is listed in unfilled, so a partial prompt still shows what is missing; a value name the template does not declare is listed in unknown. Read the template first to see its placeholders."
+    )]
+    pub(crate) async fn prompt_template_render(
+        &self,
+        Parameters(PromptTemplateRenderArg {
+            name,
+            scope,
+            values,
+        }): Parameters<PromptTemplateRenderArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let scope = scope_or_default(scope);
+        match self
+            .client
+            .request(IpcRequest::PromptTemplateRender {
+                scope,
+                name,
+                values,
+                // A tool result carries `unfilled`, so a gap is reported rather than refused —
+                // the caller still gets usable text with the missing marker visible in it.
+                policy: MissingPolicy::LeaveVerbatim,
+            })
+            .await
+        {
+            Ok(IpcResponse::PromptTemplateRendered(rendered)) => structured(&rendered),
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }
