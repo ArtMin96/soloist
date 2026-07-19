@@ -52,7 +52,7 @@ export function TemplateEditor({
         </Button>
         <div className="flex-1" />
         {revision != null && (
-          <span className="font-mono text-[0.6875rem] text-muted-foreground/70">
+          <span className="font-mono text-[0.6875rem] text-muted-foreground">
             revision {revision}
           </span>
         )}
