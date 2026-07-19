@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   onDomainEvent,
   setDefaultTemplate,
@@ -11,6 +11,7 @@ import {
 import { TEMPLATE_KINDS } from "@/lib/templates";
 import { persistThenReconcile } from "@/store/persist";
 import { uniqueCopyName } from "@/store/templateCopy";
+import { useLatestRef } from "@/store/useLatestRef";
 import type { TemplateDefaults, TemplateKind, TemplateSummary } from "@/domain";
 
 type TemplateLists = Record<TemplateKind, TemplateSummary[]>;
@@ -47,8 +48,7 @@ export function useTemplates(): TemplatesStore {
 
   // The latest lists, read by `duplicate` for name uniqueness without making it re-created on every
   // refresh (which would not matter, but the ref keeps the action identity stable).
-  const listsRef = useRef(lists);
-  listsRef.current = lists;
+  const listsRef = useLatestRef(lists);
 
   const fail = useCallback((reason: unknown) => setError(String(reason)), []);
 
@@ -103,16 +103,19 @@ export function useTemplates(): TemplatesStore {
     await templateDelete(kind, name);
   }, []);
 
-  const duplicate = useCallback(async (kind: TemplateKind, name: string) => {
-    const source = await templateRead(kind, name);
-    const existing = listsRef.current[kind].map((template) => template.name);
-    await templateCreate(
-      kind,
-      uniqueCopyName(source.name, existing),
-      source.description,
-      source.body,
-    );
-  }, []);
+  const duplicate = useCallback(
+    async (kind: TemplateKind, name: string) => {
+      const source = await templateRead(kind, name);
+      const existing = listsRef.current[kind].map((template) => template.name);
+      await templateCreate(
+        kind,
+        uniqueCopyName(source.name, existing),
+        source.description,
+        source.body,
+      );
+    },
+    [listsRef],
+  );
 
   const setDefault = useCallback((kind: TemplateKind, id: number | null) => {
     setDefaults((prev) => ({ ...prev, [kind]: id }));

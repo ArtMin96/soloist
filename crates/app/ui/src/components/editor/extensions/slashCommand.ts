@@ -27,7 +27,7 @@ export const slashCommand = Extension.create({
           return {
             onStart: (props) => {
               component = new ReactRenderer(SlashCommandList, {
-                props: { items: props.items, command: props.command },
+                props: { items: props.items, command: props.command, query: props.query },
                 editor: props.editor,
               });
               // Managed positioning: the plugin appends the element, anchors it to the caret rect,
@@ -35,7 +35,11 @@ export const slashCommand = Extension.create({
               unmount = props.mount?.(component.element) ?? null;
             },
             onUpdate: (props) => {
-              component?.updateProps({ items: props.items, command: props.command });
+              component?.updateProps({
+                items: props.items,
+                command: props.command,
+                query: props.query,
+              });
             },
             // The list consumes arrow/Enter; Escape is handled by the plugin, which then calls onExit.
             onKeyDown: (props) => component?.ref?.onKeyDown(props) ?? false,

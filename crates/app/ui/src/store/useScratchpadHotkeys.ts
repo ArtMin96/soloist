@@ -1,6 +1,7 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, type RefObject } from "react";
 import { bindingFromEvent, matchHotkey } from "@/lib/hotkeys";
 import { useHotkeys } from "@/store/hotkeysContext";
+import { useLatestRef } from "@/store/useLatestRef";
 
 // Intercepts scratchpad-scope hotkey chords in the capture phase while focus is inside the panel, so
 // the shortcut fires before the roster search field or the rich-text editor sees the key. Installed
@@ -13,10 +14,8 @@ export function useScratchpadHotkeys(
 ): void {
   const { bindings } = useHotkeys();
 
-  const bindingsRef = useRef(bindings);
-  bindingsRef.current = bindings;
-  const onArchiveRef = useRef(onArchive);
-  onArchiveRef.current = onArchive;
+  const bindingsRef = useLatestRef(bindings);
+  const onArchiveRef = useLatestRef(onArchive);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -38,5 +37,5 @@ export function useScratchpadHotkeys(
 
     el.addEventListener("keydown", handleKey, { capture: true });
     return () => el.removeEventListener("keydown", handleKey, { capture: true });
-  }, [containerRef]); // attach once (stable ref); live values are read through refs
+  }, [containerRef, bindingsRef, onArchiveRef]); // all stable refs — attach once, read live values through them
 }

@@ -13,19 +13,18 @@ interface SlashCommandListProps {
   items: SlashItem[];
   /** Runs the chosen item (deletes the "/query" and inserts the block); wired by the plugin. */
   command: (item: SlashItem) => void;
+  /** The text typed after "/", which identifies one filtered menu. */
+  query: string;
 }
 
 // The "/" command palette, mounted by the suggestion plugin via a ReactRenderer and positioned by
 // Floating UI. A keyboard-first single-select listbox: arrows move the highlight (wrapping), Enter
 // runs the highlighted item, the mouse can hover to highlight and click to run. Escape is handled by
 // the plugin itself, which closes the menu and calls the render's cleanup.
-export const SlashCommandList = forwardRef<SlashCommandListHandle, SlashCommandListProps>(
-  function SlashCommandList({ items, command }, ref) {
+const SlashCommandMenu = forwardRef<SlashCommandListHandle, Omit<SlashCommandListProps, "query">>(
+  function SlashCommandMenu({ items, command }, ref) {
     const [active, setActive] = useState(0);
     const activeRef = useRef<HTMLButtonElement>(null);
-
-    // A new query re-filters the items; reset the highlight so it never points past the shorter list.
-    useEffect(() => setActive(0), [items]);
 
     // Keep the highlighted row in view as the arrows walk a list longer than the popup.
     useEffect(() => {
@@ -80,5 +79,15 @@ export const SlashCommandList = forwardRef<SlashCommandListHandle, SlashCommandL
         ))}
       </div>
     );
+  },
+);
+
+// Gives each query its own menu instance. A re-filter must drop the highlight back to the first row
+// so it never points past the shorter list, and remounting on the query does that in the same commit
+// that delivers the new items — where clearing the highlight from an effect would paint one frame of
+// the old index against the new list, and briefly pair an Enter with the wrong item.
+export const SlashCommandList = forwardRef<SlashCommandListHandle, SlashCommandListProps>(
+  function SlashCommandList({ items, command, query }, ref) {
+    return <SlashCommandMenu key={query} ref={ref} items={items} command={command} />;
   },
 );

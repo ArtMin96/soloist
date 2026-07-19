@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLatestRef } from "@/store/useLatestRef";
 
 // The idle window after the last edit before an autosave fires. Named so a future settings knob can
 // promote it without touching call sites.
@@ -47,10 +48,8 @@ export function useAutosave({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The scheduled save reads these through refs so a re-render never re-arms the timer, and the
   // timer always sees the current callback and pause flag.
-  const onSaveRef = useRef(onSave);
-  const pausedRef = useRef(paused);
-  onSaveRef.current = onSave;
-  pausedRef.current = paused;
+  const onSaveRef = useLatestRef(onSave);
+  const pausedRef = useLatestRef(paused);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -68,7 +67,7 @@ export function useAutosave({
     setDirty(false);
     setSaving(true);
     Promise.resolve(onSaveRef.current(value)).finally(() => setSaving(false));
-  }, [clearTimer]);
+  }, [clearTimer, onSaveRef, pausedRef]);
 
   const push = useCallback(
     (value: string) => {
@@ -78,7 +77,7 @@ export function useAutosave({
       if (pausedRef.current) return;
       timerRef.current = setTimeout(commit, delayMs);
     },
-    [clearTimer, commit, delayMs],
+    [clearTimer, commit, delayMs, pausedRef],
   );
 
   const flush = useCallback(() => commit(), [commit]);

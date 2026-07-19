@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import { useLatestRef } from "@/store/useLatestRef";
 import { buildEditorExtensions } from "./editorExtensions";
 import { EditorOutline } from "./EditorOutline";
 import { EditorToolbar } from "./EditorToolbar";
@@ -51,12 +52,9 @@ export default function RichTextEditor({
 }: RichTextEditorProps) {
   // Read the current callbacks through refs so changing them never re-creates the editor (which
   // would drop the undo history and caret).
-  const onChangeRef = useRef(onChange);
-  const onSaveRef = useRef(onSaveShortcut);
-  const onBlurRef = useRef(onBlur);
-  onChangeRef.current = onChange;
-  onSaveRef.current = onSaveShortcut;
-  onBlurRef.current = onBlur;
+  const onChangeRef = useLatestRef(onChange);
+  const onSaveRef = useLatestRef(onSaveShortcut);
+  const onBlurRef = useLatestRef(onBlur);
 
   const [findOpen, setFindOpen] = useState(false);
 
