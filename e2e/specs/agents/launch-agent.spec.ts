@@ -1,11 +1,10 @@
 import type { ProcStatus } from "@domain";
 import { browser } from "@wdio/globals";
 import { openProject } from "../../src/flows/openProject.js";
-import { launchAgent } from "../../src/flows/launchAgent.js";
+import { launchAgent, openAgentPicker } from "../../src/flows/launchAgent.js";
 import { agentPicker } from "../../src/screens/AgentPicker.js";
 import { sidebar } from "../../src/screens/Sidebar.js";
 import { terminalPane } from "../../src/screens/TerminalPane.js";
-import { titlebar } from "../../src/screens/Titlebar.js";
 
 // The tool as the app's built-in registry names it: "Claude" is the display name and registry key,
 // "claude" is the command it spawns. What actually runs is the fixture stub the harness put first
@@ -31,8 +30,7 @@ describe("launching an agent into a project", () => {
   });
 
   it("offers Claude for the open project", async () => {
-    await titlebar.launchAgent();
-    await agentPicker.waitUntilOpen();
+    await openAgentPicker();
 
     expect(await agentPicker.targetProject()).toBe(projectName);
     expect(await agentPicker.tools()).toContain(CLAUDE.name);
