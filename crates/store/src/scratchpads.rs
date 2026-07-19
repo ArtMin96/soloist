@@ -96,6 +96,18 @@ impl ScratchpadRepo for SqliteStore {
         Ok(found)
     }
 
+    fn contains(&self, project: ProjectId, id: ScratchpadId) -> Result<bool, StoreError> {
+        self.lock()
+            .query_row(
+                "SELECT 1 FROM scratchpads WHERE project_id = ?1 AND id = ?2",
+                (project.get() as i64, id.get() as i64),
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|found| found.is_some())
+            .map_err(sql_err)
+    }
+
     fn rename(&self, project: ProjectId, from: &str, to: &str) -> Result<RenameResult, StoreError> {
         let conn = self.lock();
         // Reject a taken target before the update (a clearer outcome than the UNIQUE violation), and

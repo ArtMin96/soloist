@@ -214,6 +214,12 @@ impl Scratchpads {
             .collect())
     }
 
+    /// Whether `project` owns the scratchpad `id` — what a caller stating an association by durable
+    /// id is checked against, since an id names a row without naming a project.
+    pub fn contains(&self, project: ProjectId, id: ScratchpadId) -> Result<bool, StoreError> {
+        self.repo.contains(project, id)
+    }
+
     /// Renames the scratchpad `from` to `to` in `project` (the durable id is unchanged), returning
     /// the renamed scratchpad. [`RenameError::NotFound`] if there is none, [`RenameError::NameTaken`]
     /// if `to` is already used in the project.

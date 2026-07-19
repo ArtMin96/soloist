@@ -99,7 +99,7 @@ export function TodoItem({
           {todo.doc.title}
         </span>
         {showScratchpad && todo.scratchpad && (
-          <span className="min-w-0 shrink truncate text-[0.6875rem] leading-[0.875rem] text-muted-foreground">
+          <span className="type-label min-w-0 shrink truncate text-muted-foreground">
             {humanizeName(todo.scratchpad.name)}
           </span>
         )}
@@ -114,7 +114,7 @@ export function TodoItem({
             {lockOwnerLabel ?? `#${todo.locked_by}`}
           </Badge>
         )}
-        <span className="shrink-0 text-[0.6875rem] leading-[0.875rem] text-muted-foreground">
+        <span className="type-label shrink-0 text-muted-foreground">
           {TODO_STATUS[todo.doc.status]}
         </span>
       </Collapsible.Trigger>
@@ -141,9 +141,7 @@ export function TodoItem({
 
             {todo.blockers.length > 0 && (
               <div className="flex flex-col gap-1">
-                <span className="text-[0.6875rem] leading-[0.875rem] font-[550] text-muted-foreground">
-                  Blockers
-                </span>
+                <span className="type-label font-[550] text-muted-foreground">Blockers</span>
                 <ul className="flex flex-col gap-0.5">
                   {todo.blockers.map((id) => (
                     <li key={id} className="flex items-center gap-2">

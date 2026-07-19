@@ -22,17 +22,17 @@ export function TodoGroup({ label, count, open, onOpenChange, children }: TodoGr
   return (
     <Collapsible.Root open={open} onOpenChange={onOpenChange} className="select-none">
       <Collapsible.Trigger
-        data-todo-group
+        data-todo-group={label}
         className="group/todogroup flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring"
       >
         <ChevronRight
           aria-hidden
           className="size-3 text-muted-foreground transition-transform duration-[var(--dur-control)] ease-spring-settle group-data-[state=open]/todogroup:rotate-90"
         />
-        <span className="min-w-0 truncate text-[0.6875rem] leading-[0.875rem] font-[550] tracking-[0.01em] text-muted-foreground">
+        <span className="type-label min-w-0 truncate font-[550] tracking-[var(--tracking-label)] text-muted-foreground">
           {label}
         </span>
-        <span className="ml-auto pr-1 font-mono text-[0.6875rem] leading-[0.875rem] tabular-nums text-muted-foreground">
+        <span className="type-label ml-auto pr-1 font-mono tabular-nums text-muted-foreground">
           {count}
         </span>
       </Collapsible.Trigger>

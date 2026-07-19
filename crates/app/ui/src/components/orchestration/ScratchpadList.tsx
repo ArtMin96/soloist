@@ -122,14 +122,12 @@ export function ScratchpadList({
               <span className="min-w-0 flex-1 truncate text-[0.8125rem] leading-4 text-foreground">
                 {humanizeName(pad.name)}
               </span>
-              <span className="shrink-0 font-mono text-[0.6875rem] leading-[0.875rem] tabular-nums text-muted-foreground">
+              <span className="type-label shrink-0 font-mono tabular-nums text-muted-foreground">
                 r{pad.revision}
               </span>
             </span>
             {pad.gist && (
-              <span className="truncate text-[0.6875rem] leading-[0.875rem] text-muted-foreground">
-                {pad.gist}
-              </span>
+              <span className="type-label truncate text-muted-foreground">{pad.gist}</span>
             )}
           </button>
         );

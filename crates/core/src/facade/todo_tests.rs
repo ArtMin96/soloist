@@ -582,6 +582,91 @@ fn updating_with_an_unknown_scratchpad_name_is_refused_and_writes_nothing() {
     assert_eq!(unchanged.revision, todo.revision, "no revision was burned");
 }
 
+/// Two seeded projects, each with one scratchpad, over one façade — the setup the cross-project
+/// association guards need. Returns the façade, both project ids, and `b`'s scratchpad id, which is
+/// the foreign handle a write against `a` must refuse.
+fn two_projects_with_scratchpads() -> (Facade, ProjectId, ProjectId, ScratchpadId) {
+    let projects = Arc::new(FakeProjectRepo::new());
+    let a = projects
+        .upsert(Path::new("/tmp/soloist-todo-scope-a"), Some("a"), None)
+        .expect("seed the first project")
+        .id;
+    let b = projects
+        .upsert(Path::new("/tmp/soloist-todo-scope-b"), Some("b"), None)
+        .expect("seed the second project")
+        .id;
+    let facade = facade_with(projects);
+    facade
+        .scratchpad_write_in(b, "other-plan", "the other project's plan".into(), None)
+        .expect("write the foreign scratchpad");
+    let foreign = facade
+        .scratchpad_read_in(b, "other-plan")
+        .expect("read it back")
+        .id;
+    (facade, a, b, foreign)
+}
+
+#[test]
+fn creating_with_a_scratchpad_from_another_project_is_refused_and_writes_nothing() {
+    // The local surface states the association as a durable id, which names a row without naming a
+    // project. An id from outside the project must not link, or the board would render another
+    // project's document as this todo's origin.
+    let (facade, a, _b, foreign) = two_projects_with_scratchpads();
+
+    let refused = facade.todo_create_in(a, doc("ship", TodoStatus::Open), Some(foreign));
+
+    assert!(matches!(refused, Err(CoordinationError::UnknownScratchpad)));
+    assert!(
+        facade
+            .orchestration_snapshot(a)
+            .expect("snapshot")
+            .todos
+            .is_empty(),
+        "a refused create must leave no todo behind"
+    );
+}
+
+#[test]
+fn updating_to_a_scratchpad_from_another_project_is_refused_and_writes_nothing() {
+    let (facade, a, _b, foreign) = two_projects_with_scratchpads();
+    let todo = facade
+        .todo_create_in(a, doc("ship", TodoStatus::Open), None)
+        .expect("create unlinked");
+
+    let refused = facade.todo_update_in(
+        a,
+        todo.id,
+        doc("renamed", TodoStatus::Open),
+        ScratchpadLink::Linked(foreign),
+        todo.revision,
+    );
+
+    assert!(matches!(refused, Err(CoordinationError::UnknownScratchpad)));
+    let unchanged = &facade.orchestration_snapshot(a).expect("snapshot").todos[0];
+    assert_eq!(unchanged.doc, todo.doc, "the document must be untouched");
+    assert_eq!(unchanged.revision, todo.revision, "no revision was burned");
+    assert_eq!(unchanged.scratchpad, None, "and it stays unlinked");
+}
+
+#[test]
+fn a_scratchpad_in_the_callers_own_project_still_links() {
+    // The guard refuses only what is out of scope: the ordinary in-project link is untouched by it.
+    let (facade, a, _b, _foreign) = two_projects_with_scratchpads();
+    facade
+        .scratchpad_write_in(a, "release-plan", "the plan".into(), None)
+        .expect("write the local scratchpad");
+    let own = facade
+        .scratchpad_read_in(a, "release-plan")
+        .expect("read it back")
+        .id;
+
+    let todo = facade
+        .todo_create_in(a, doc("ship", TodoStatus::Open), Some(own))
+        .expect("create linked");
+
+    assert_eq!(todo.scratchpad.map(|link| link.id), Some(own));
+}
+
 #[test]
 fn deleting_a_scratchpad_leaves_the_todos_that_named_it_unlinked() {
     let (facade, session) = scoped_facade();

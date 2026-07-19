@@ -54,14 +54,14 @@ export function ScratchpadEditor({
         <ScratchpadTitle name={name} onRename={onRename} />
         {handle && (
           <span
-            className="max-w-[12rem] shrink-0 truncate font-mono text-[0.6875rem] leading-[0.875rem] text-muted-foreground"
+            className="type-label max-w-[12rem] shrink-0 truncate font-mono text-muted-foreground"
             title={`Handle: ${handle}`}
           >
             {handle}
           </span>
         )}
         {revision != null && (
-          <span className="shrink-0 font-mono text-[0.6875rem] leading-[0.875rem] tabular-nums text-muted-foreground">
+          <span className="type-label shrink-0 font-mono tabular-nums text-muted-foreground">
             revision {revision}
           </span>
         )}

@@ -93,7 +93,14 @@ function OutlineRail({ editor, headings }: { editor: Editor; headings: OutlineEn
   }, [activeIndex]);
 
   return (
-    <nav aria-label="Outline" className="w-40 shrink-0 overflow-y-auto border-l py-2 pr-1 pl-2">
+    // A selection scope of its own: the active heading reads azure only while the keyboard is in
+    // the rail, and neutral while you are reading or typing in the document beside it — so the
+    // outline never competes with the editor for the one emphasized selection on screen.
+    <nav
+      aria-label="Outline"
+      data-selection-scope
+      className="w-40 shrink-0 overflow-y-auto border-l py-2 pr-1 pl-2"
+    >
       <ul className="flex flex-col gap-px">
         {headings.map((heading, index) => {
           const active = index === activeIndex;
@@ -119,7 +126,7 @@ function OutlineRail({ editor, headings }: { editor: Editor; headings: OutlineEn
                   "transition-colors duration-[var(--dur-select)] ease-out-quint",
                   "focus-visible:bg-muted focus-visible:text-foreground focus-visible:outline-none",
                   active
-                    ? "bg-[var(--sidebar-sel-fill)] text-foreground hover:bg-[var(--sidebar-sel-fill-hover)]"
+                    ? "bg-[var(--sel-fill)] text-foreground hover:bg-[var(--sel-fill-hover)]"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
                 title={label}

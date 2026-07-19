@@ -100,6 +100,12 @@ pub trait ScratchpadRepo: Send + Sync {
     /// Every scratchpad in `project`, ordered by name.
     fn list(&self, project: ProjectId) -> Result<Vec<StoredScratchpad>, StoreError>;
 
+    /// Whether `project` owns the scratchpad `id`. A [`ScratchpadId`] addresses a row directly and
+    /// so carries no project with it: a caller that states an association by durable id — rather
+    /// than by a name resolved inside a project — has to be checked against the project before the
+    /// association is written, or it could point a todo at another project's document.
+    fn contains(&self, project: ProjectId, id: ScratchpadId) -> Result<bool, StoreError>;
+
     /// Renames `(project, from)` to `to` (the durable id is unchanged), checking target uniqueness
     /// as part of the update so two renames cannot both take one name.
     fn rename(&self, project: ProjectId, from: &str, to: &str) -> Result<RenameResult, StoreError>;
@@ -195,6 +201,9 @@ impl ScratchpadRepo for NoopScratchpadRepo {
     }
     fn list(&self, _project: ProjectId) -> Result<Vec<StoredScratchpad>, StoreError> {
         Ok(Vec::new())
+    }
+    fn contains(&self, _project: ProjectId, _id: ScratchpadId) -> Result<bool, StoreError> {
+        Ok(false)
     }
     fn rename(
         &self,

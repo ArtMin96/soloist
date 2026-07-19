@@ -148,6 +148,12 @@ impl ScratchpadRepo for FakeScratchpadRepo {
         Ok(found)
     }
 
+    fn contains(&self, project: ProjectId, id: ScratchpadId) -> Result<bool, StoreError> {
+        Ok(lock(&self.rows)
+            .values()
+            .any(|row| row.project == project && row.id == id))
+    }
+
     fn rename(&self, project: ProjectId, from: &str, to: &str) -> Result<RenameResult, StoreError> {
         let mut rows = lock(&self.rows);
         let to_slot = (project.get(), to.to_owned());

@@ -24,8 +24,8 @@ import type { AgentNode, ScratchpadSummary, TodoView } from "@/domain";
 type BoardView = "grouped" | "all";
 
 const BOARD_VIEWS: Option<BoardView>[] = [
-  { value: "grouped", label: "By scratchpad" },
   { value: "all", label: "All" },
+  { value: "grouped", label: "By scratchpad" },
 ];
 
 /** Namespaces this board's persisted collapse keys so they cannot collide with the sidebar's. */
@@ -40,8 +40,10 @@ const COLLAPSE_PREFIX = "todos.scratchpad";
 //
 // Rows are grouped by the scratchpad each todo derives from by default, because that is the shape
 // the work actually has — tasks extracted from a plan belong under it. `All` flattens the board for
-// triage, when the question is "what is open" rather than "what came from where". Grouping is a
-// wrapper: the rows themselves are identical in both views.
+// triage, when the question is "what is open" rather than "what came from where". Filtering flattens
+// it too: a search is already a triage question, and headers over one or two surviving rows each
+// would bury the matches they are meant to organise. A flattened row names its own scratchpad, so
+// nothing is lost with the headers. Grouping is a wrapper — the rows are identical in both views.
 export function TodoBoard({
   project,
   todos,
@@ -63,7 +65,7 @@ export function TodoBoard({
   const tags = useMemo(() => todoTags(todos), [todos]);
   const visible = useMemo(() => filterTodos(todos, filter), [todos, filter]);
   const groups = useMemo(() => groupTodosByScratchpad(visible), [visible]);
-  const grouped = view === "grouped";
+  const grouped = view === "grouped" && !isFiltering(filter);
 
   const titleOf = (id: number) => todos.find((todo) => todo.id === id)?.doc.title;
   const labelOf = (id: number) => agents.find((agent) => agent.id === id)?.label;

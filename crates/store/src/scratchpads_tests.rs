@@ -86,6 +86,33 @@ fn create_then_read_round_trips_the_body() {
 }
 
 #[test]
+fn contains_answers_membership_per_project_not_per_id() {
+    // The membership question the core asks before writing an association stated by durable id: an
+    // id names a row without naming a project, so "this row exists" is not the same answer as "this
+    // project owns it".
+    let store = SqliteStore::open_in_memory().expect("open");
+    let mine = project(&store, "/p/mine");
+    let theirs = project(&store, "/p/theirs");
+    let pad = written(
+        store
+            .write_at(theirs, "their-plan", &body("theirs"), None)
+            .expect("create in the other project"),
+    );
+
+    assert!(store.contains(theirs, pad.id).expect("own project"));
+    assert!(
+        !store.contains(mine, pad.id).expect("other project"),
+        "a real row must not count as a member of a project that does not own it"
+    );
+    assert!(
+        !store
+            .contains(mine, ScratchpadId::from_raw(pad.id.get() + 1))
+            .expect("unknown id"),
+        "an id no row carries is not a member of anything"
+    );
+}
+
+#[test]
 fn a_write_is_revision_guarded() {
     let store = SqliteStore::open_in_memory().expect("open");
     let project = project(&store, "/p/app");

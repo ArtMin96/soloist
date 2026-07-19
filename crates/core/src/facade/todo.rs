@@ -40,6 +40,26 @@ impl Facade {
         Ok(self.create_todo(project, doc, scratchpad)?.view)
     }
 
+    /// Refuses an association naming a scratchpad `project` does not own, with
+    /// [`CoordinationError::UnknownScratchpad`] and nothing written.
+    ///
+    /// The session-scoped surface resolves a *name* inside its own scope, so the id it arrives with
+    /// is in-project by construction. The local surface states the association as a durable id
+    /// straight from the board's picker, and an id names a row without naming a project — so it is
+    /// checked rather than trusted. Both create and update route through here, which is what keeps
+    /// an out-of-project id unusable whichever surface offers it.
+    fn guard_scratchpad(
+        &self,
+        project: ProjectId,
+        scratchpad: Option<ScratchpadId>,
+    ) -> Result<(), CoordinationError> {
+        match scratchpad {
+            None => Ok(()),
+            Some(id) if self.scratchpads.contains(project, id)? => Ok(()),
+            Some(_) => Err(CoordinationError::UnknownScratchpad),
+        }
+    }
+
     /// The one todo-create seam both the local UI and MCP route through: an empty body is seeded
     /// from the default todo template, then the todo is created — associated with `scratchpad` when
     /// one was named — and its event emitted. Returns the view plus the seeding template's name for
@@ -51,6 +71,7 @@ impl Facade {
         mut doc: TodoDoc,
         scratchpad: Option<ScratchpadId>,
     ) -> Result<TodoCreation, CoordinationError> {
+        self.guard_scratchpad(project, scratchpad)?;
         let Seeded { body, from } = self.seed_body(TemplateKind::Todo, doc.body)?;
         doc.body = body;
         let view = self.emit_todo(
@@ -75,6 +96,9 @@ impl Facade {
         scratchpad: ScratchpadLink<ScratchpadId>,
         expected: u64,
     ) -> Result<TodoView, CoordinationError> {
+        if let ScratchpadLink::Linked(id) = &scratchpad {
+            self.guard_scratchpad(project, Some(*id))?;
+        }
         self.emit_todo(
             project,
             self.todos
