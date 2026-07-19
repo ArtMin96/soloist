@@ -169,6 +169,9 @@ fn current_revision(
 
 fn row_to_template(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredTemplate> {
     let kind_str: String = row.get(1)?;
+    // Unreachable through this module: every SELECT filters on a known kind through `SCOPE_CLAUSE`,
+    // so a row a newer build wrote is never handed here. Kept as the decode guard for any future
+    // read that is not scoped by kind, which would otherwise have to invent a variant for it.
     let kind = TemplateKind::from_db(&kind_str).ok_or_else(|| {
         rusqlite::Error::FromSqlConversionFailure(
             1,

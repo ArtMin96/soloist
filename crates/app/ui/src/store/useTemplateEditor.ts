@@ -112,6 +112,8 @@ export function useTemplateEditor(project: number | null): TemplateEditorStore {
       setInitialDescription("");
       setPlaceholders(NO_PLACEHOLDERS);
       setBaseRevision(null);
+      // Disarm the guard for the load window: until the read resolves, a save must not carry the
+      // previously open template's revision into a write against this one.
       baseRevisionRef.current = null;
       load(target, targetScope, targetName);
     },
@@ -126,7 +128,6 @@ export function useTemplateEditor(project: number | null): TemplateEditorStore {
     setInitialDescription("");
     setPlaceholders(NO_PLACEHOLDERS);
     setBaseRevision(null);
-    baseRevisionRef.current = null;
     setConflict(null);
     setError(null);
   }, []);
