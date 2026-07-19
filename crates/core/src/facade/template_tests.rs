@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use super::*;
 use crate::composition::CorePorts;
-use crate::coordination::TodoDoc;
-use crate::ids::{SessionId, TemplateId};
+use crate::coordination::{RenderError, RenderRequest, TodoDoc};
+use crate::ids::{ProjectId, SessionId, TemplateId};
 use crate::ports::{ProjectRepo, TokioClock};
 use crate::template::TemplateKind;
 use crate::testing::{
@@ -39,6 +39,43 @@ fn facade() -> (Facade, SessionId) {
     );
     let session = facade.open_session(None);
     (facade, session)
+}
+
+/// A façade over the same fakes with **two** distinct projects loaded, returned with both ids —
+/// the only way to observe that one project's template library is not another's.
+fn facade_with_two_projects() -> (Facade, ProjectId, ProjectId) {
+    let projects = Arc::new(FakeProjectRepo::new());
+    let first = projects
+        .upsert(Path::new("/tmp/soloist-template-scope-a"), Some("a"), None)
+        .expect("seed the first project")
+        .id;
+    let second = projects
+        .upsert(Path::new("/tmp/soloist-template-scope-b"), Some("b"), None)
+        .expect("seed the second project")
+        .id;
+    assert_ne!(first, second, "the two projects must be distinct");
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            projects,
+        )
+        .template_repo(Arc::new(FakeTemplateRepo::new()))
+        .settings_repo(Arc::new(FakeSettingsRepo::new()))
+        .build(),
+    );
+    (facade, first, second)
+}
+
+/// The names the manager lists for `kind` in `project`'s scope.
+fn listed_names(facade: &Facade, kind: TemplateKind, project: Option<ProjectId>) -> Vec<String> {
+    facade
+        .templates(kind, project)
+        .expect("list the scope")
+        .into_iter()
+        .map(|summary| summary.name)
+        .collect()
 }
 
 /// Seeds a global template of `kind` and selects it as the default, returning its id.
@@ -174,6 +211,7 @@ fn the_manager_creates_reads_lists_and_updates_a_global_template() {
     let created = facade
         .template_create(
             TemplateKind::Scratchpad,
+            None,
             "daily",
             Some("a daily note"),
             "## Plan",
@@ -182,11 +220,13 @@ fn the_manager_creates_reads_lists_and_updates_a_global_template() {
     assert_eq!(created.scope, crate::template::TemplateScope::Global);
 
     // The listing surfaces the new template for its kind, and reading returns the full body.
-    let listed = facade.templates(TemplateKind::Scratchpad).expect("list");
+    let listed = facade
+        .templates(TemplateKind::Scratchpad, None)
+        .expect("list");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].name, "daily");
     let read = facade
-        .template_read(TemplateKind::Scratchpad, "daily")
+        .template_read(TemplateKind::Scratchpad, None, "daily")
         .expect("read");
     assert_eq!(read.body, "## Plan");
 
@@ -194,6 +234,7 @@ fn the_manager_creates_reads_lists_and_updates_a_global_template() {
     let updated = facade
         .template_update(
             TemplateKind::Scratchpad,
+            None,
             "daily",
             Some("a daily note"),
             "## Plan\n\n- [ ] first",
@@ -208,16 +249,17 @@ fn the_manager_creates_reads_lists_and_updates_a_global_template() {
 fn a_taken_template_name_and_a_stale_update_are_refused() {
     let (facade, _session) = facade();
     let created = facade
-        .template_create(TemplateKind::Todo, "chore", None, "body")
+        .template_create(TemplateKind::Todo, None, "chore", None, "body")
         .expect("create");
 
     assert!(matches!(
-        facade.template_create(TemplateKind::Todo, "chore", None, "other"),
+        facade.template_create(TemplateKind::Todo, None, "chore", None, "other"),
         Err(CoordinationError::TemplateNameTaken)
     ));
     assert!(matches!(
         facade.template_update(
             TemplateKind::Todo,
+            None,
             "chore",
             None,
             "body2",
@@ -231,7 +273,7 @@ fn a_taken_template_name_and_a_stale_update_are_refused() {
 fn deleting_a_template_that_is_the_selected_default_clears_the_selection() {
     let (facade, _session) = facade();
     let created = facade
-        .template_create(TemplateKind::Scratchpad, "daily", None, "seed body")
+        .template_create(TemplateKind::Scratchpad, None, "daily", None, "seed body")
         .expect("create");
     facade
         .set_default_template(TemplateKind::Scratchpad, Some(created.id))
@@ -240,7 +282,7 @@ fn deleting_a_template_that_is_the_selected_default_clears_the_selection() {
     // Deleting the selected default through the manager path clears the dangling selection in core,
     // so the settings surface reflects the removal at once (not just at resolve time).
     assert!(facade
-        .template_delete(TemplateKind::Scratchpad, "daily")
+        .template_delete(TemplateKind::Scratchpad, None, "daily")
         .expect("delete"));
     assert_eq!(
         facade
@@ -250,7 +292,7 @@ fn deleting_a_template_that_is_the_selected_default_clears_the_selection() {
         None,
     );
     assert!(facade
-        .templates(TemplateKind::Scratchpad)
+        .templates(TemplateKind::Scratchpad, None)
         .expect("list")
         .is_empty());
 }
@@ -260,12 +302,12 @@ fn deleting_a_non_default_template_leaves_another_kinds_default_untouched() {
     let (facade, _session) = facade();
     let scratch_default = default_template(&facade, TemplateKind::Scratchpad, "daily", "seed body");
     facade
-        .template_create(TemplateKind::Todo, "chore", None, "chore body")
+        .template_create(TemplateKind::Todo, None, "chore", None, "chore body")
         .expect("create a todo template");
 
     // Deleting the todo template must not clear the unrelated scratchpad default.
     assert!(facade
-        .template_delete(TemplateKind::Todo, "chore")
+        .template_delete(TemplateKind::Todo, None, "chore")
         .expect("delete"));
     assert_eq!(
         facade
@@ -302,4 +344,187 @@ fn the_default_selection_round_trips_and_prompt_has_no_seed_default() {
             .get(TemplateKind::Todo),
         Some(id)
     );
+}
+
+#[test]
+fn the_local_render_fills_a_template_at_the_scope_it_names() {
+    let (facade, _) = facade();
+    facade
+        .template_create(
+            TemplateKind::Prompt,
+            None,
+            "review",
+            None,
+            "Review {{diff}} for {{concern}}",
+        )
+        .expect("create a global prompt template");
+
+    let request = RenderRequest {
+        name: "review".to_owned(),
+        values: [("diff".to_owned(), "the patch".to_owned())]
+            .into_iter()
+            .collect(),
+        ..RenderRequest::default()
+    };
+
+    let rendered = facade
+        .template_render(None, &request)
+        .expect("render the global template");
+    assert_eq!(rendered.text, "Review the patch for {{concern}}");
+    assert_eq!(rendered.unfilled, vec!["concern".to_owned()]);
+
+    // The scope is the caller's to state: the same name is absent from a project's library.
+    let refused = facade.template_render(Some(ProjectId::from_raw(1)), &request);
+    assert!(
+        matches!(refused, Err(RenderError::TemplateNotFound)),
+        "expected the project scope to be empty, got {refused:?}"
+    );
+}
+
+#[test]
+fn the_manager_addresses_each_project_scope_separately() {
+    let (facade, first, second) = facade_with_two_projects();
+
+    facade
+        .template_create(TemplateKind::Prompt, Some(first), "notes", None, "body")
+        .expect("create in the first project");
+
+    // The template belongs to the scope it was written to and to no other — not the sibling
+    // project's library, and not the global one the manager used to be hard-wired to.
+    assert_eq!(
+        listed_names(&facade, TemplateKind::Prompt, Some(first)),
+        vec!["notes".to_owned()]
+    );
+    assert!(listed_names(&facade, TemplateKind::Prompt, Some(second)).is_empty());
+    assert!(listed_names(&facade, TemplateKind::Prompt, None).is_empty());
+
+    // Reading and deleting address the same scope: the sibling project has nothing under the name.
+    assert!(matches!(
+        facade.template_read(TemplateKind::Prompt, Some(second), "notes"),
+        Err(CoordinationError::UnknownTemplate)
+    ));
+    assert!(!facade
+        .template_delete(TemplateKind::Prompt, Some(second), "notes")
+        .expect("delete from the sibling project"));
+    assert_eq!(
+        listed_names(&facade, TemplateKind::Prompt, Some(first)),
+        vec!["notes".to_owned()],
+        "a delete aimed at another scope must not remove this one's template"
+    );
+}
+
+#[test]
+fn one_name_holds_a_separate_template_in_each_scope() {
+    let (facade, first, second) = facade_with_two_projects();
+    for (project, body) in [
+        (None, "global body"),
+        (Some(first), "first body"),
+        (Some(second), "second body"),
+    ] {
+        facade
+            .template_create(TemplateKind::Todo, project, "chore", None, body)
+            .expect("create the scope's template");
+    }
+
+    let created = facade
+        .template_read(TemplateKind::Todo, Some(first), "chore")
+        .expect("read the first project's");
+    facade
+        .template_update(
+            TemplateKind::Todo,
+            Some(first),
+            "chore",
+            None,
+            "edited body",
+            created.revision,
+        )
+        .expect("update the first project's");
+
+    // Editing one scope's template leaves the identically-named ones in the other scopes alone.
+    let body_in = |project| {
+        facade
+            .template_read(TemplateKind::Todo, project, "chore")
+            .expect("read the scope's template")
+            .body
+    };
+    assert_eq!(body_in(Some(first)), "edited body");
+    assert_eq!(body_in(Some(second)), "second body");
+    assert_eq!(body_in(None), "global body");
+}
+
+/// Every template change a listener was told about, as the `(kind, scope)` pair it named.
+fn announced(
+    events: &mut tokio::sync::broadcast::Receiver<DomainEvent>,
+) -> Vec<(TemplateKind, Option<ProjectId>)> {
+    std::iter::from_fn(|| events.try_recv().ok())
+        .filter_map(|event| match event {
+            DomainEvent::TemplateChanged { kind, project } => Some((kind, project)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_manager_write_announces_the_scope_it_changed() {
+    let (facade, first, _second) = facade_with_two_projects();
+    let mut events = facade.subscribe();
+
+    let created = facade
+        .template_create(TemplateKind::Scratchpad, None, "daily", None, "body")
+        .expect("create globally");
+    facade
+        .template_create(
+            TemplateKind::Scratchpad,
+            Some(first),
+            "sprint",
+            None,
+            "body",
+        )
+        .expect("create in the project");
+    facade
+        .template_update(
+            TemplateKind::Scratchpad,
+            None,
+            "daily",
+            None,
+            "edited",
+            created.revision,
+        )
+        .expect("update the global one");
+    assert!(facade
+        .template_delete(TemplateKind::Scratchpad, Some(first), "sprint")
+        .expect("delete from the project"));
+
+    // A listener re-reads the list the event names, so both halves must ride along: a project write
+    // announced as global would send it back to a library that did not change, and an edit that
+    // announced nothing at all would leave the panel showing the pre-edit body.
+    assert_eq!(
+        announced(&mut events),
+        vec![
+            (TemplateKind::Scratchpad, None),
+            (TemplateKind::Scratchpad, Some(first)),
+            (TemplateKind::Scratchpad, None),
+            (TemplateKind::Scratchpad, Some(first)),
+        ]
+    );
+}
+
+#[test]
+fn a_delete_that_removed_nothing_announces_nothing() {
+    let (facade, first, second) = facade_with_two_projects();
+    facade
+        .template_create(TemplateKind::Todo, Some(first), "chore", None, "body")
+        .expect("create in the first project");
+    let mut events = facade.subscribe();
+
+    // Neither delete finds a row: one aims at a name no scope holds, the other at a scope that
+    // never held this name. A listener woken by either would re-read a library that did not move.
+    assert!(!facade
+        .template_delete(TemplateKind::Todo, Some(first), "ghost")
+        .expect("delete an absent name"));
+    assert!(!facade
+        .template_delete(TemplateKind::Todo, Some(second), "chore")
+        .expect("delete from the sibling project"));
+
+    assert_eq!(announced(&mut events), Vec::new());
 }

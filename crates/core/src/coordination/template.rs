@@ -11,8 +11,10 @@
 //!
 //! The aggregate owns an in-memory cache of each `(kind, scope)`'s rows, populated on first read
 //! and invalidated by its own writes (single-writer per aggregate), so seeding a new document from
-//! a default template never scans SQLite per creation. A [`crate::events::DomainEvent::TemplateChanged`]
-//! is published by the façade after a write for UI freshness; the cache invalidation lives here.
+//! a default template never scans SQLite per creation. Because that cache holds whole bodies, what
+//! bounds it is [`MAX_TEMPLATES_PER_SCOPE`] against the per-row caps. A
+//! [`crate::events::DomainEvent::TemplateChanged`] is published by the façade after a write for UI
+//! freshness; the cache invalidation lives here.
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -20,14 +22,14 @@ use std::sync::{Arc, RwLock};
 use serde::{Deserialize, Serialize};
 
 use super::template_repo::{StoredTemplate, TemplateRepo, TemplateWriteResult};
+use super::template_scan::{scan, Token};
 use crate::ids::{ProjectId, TemplateId};
 use crate::ports::StoreError;
 use crate::sync::{read_lock, write_lock};
 use crate::template::{TemplateKind, TemplateScope};
 
 /// The longest accepted template body, in bytes. A template is a starting shape, not a document
-/// store; together with the name and description caps this bounds the row, so a runaway caller
-/// cannot grow the table without bound.
+/// store; together with the name and description caps this bounds one row.
 pub const MAX_TEMPLATE_BODY: usize = 64 * 1024;
 
 /// The longest accepted template name, in characters — an addressing handle, not content.
@@ -36,6 +38,24 @@ pub const MAX_TEMPLATE_NAME: usize = 200;
 /// The longest accepted template description, in characters — a one-line summary; the body carries
 /// the content.
 pub const MAX_TEMPLATE_DESCRIPTION: usize = 1_000;
+
+/// The most templates one `(kind, scope)` may hold. The per-row caps bound a row but not how many
+/// rows a caller may add, and this aggregate mirrors a whole group in memory including every body,
+/// so without this ceiling a well-behaved-looking caller grows both the table and RSS one valid row
+/// at a time. A curated library is tens of entries; this leaves an order of magnitude of headroom
+/// while bounding a group at a size the process can hold.
+pub const MAX_TEMPLATES_PER_SCOPE: usize = 500;
+
+/// The most distinct `{{name}}` placeholders one body may declare. Placeholder names are derived
+/// from the body on every read rather than stored, so each name costs a fresh allocation per row per
+/// listing; a body that is nothing but markers would otherwise make listing a scope cost far more
+/// than its bodies do. A template a person fills in by hand has a handful of slots.
+pub const MAX_PLACEHOLDERS_PER_BODY: usize = 100;
+
+/// The longest rendered prompt, in bytes. [`MAX_TEMPLATE_BODY`] bounds the stored *template*, but
+/// substituting its placeholders with caller-supplied values is unbounded on its own — N markers
+/// times a large value each — so the rendered result carries its own ceiling.
+pub const MAX_RENDERED_PROMPT: usize = 256 * 1024;
 
 /// A template's full read model: the stored fields plus the placeholders derived from the body.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,37 +157,44 @@ pub enum TemplateWriteError {
     Store(#[from] StoreError),
 }
 
-/// Opens a placeholder marker.
-const PLACEHOLDER_OPEN: &str = "{{";
-/// Closes a placeholder marker.
-const PLACEHOLDER_CLOSE: &str = "}}";
-
 /// The placeholder names a body declares with `{{name}}` markers, deduplicated, in
 /// first-occurrence order — what a caller must fill in before applying a prompt (kind-agnostic:
 /// derived from any template's body).
 ///
-/// The scan is left-to-right and the first `}}` closes a candidate. Inner text is trimmed
-/// (`{{ name }}` names `name`); a candidate that trims to empty or still contains a brace or
-/// newline is not a placeholder — its span is consumed as plain text, not rescanned. A stray `{{`
-/// with no closing `}}` is plain text.
+/// This is one reading of `template_scan::scan`; substitution is another, so a name reported here
+/// is always one substitution fills, and an escaped `\{{name}}` is reported by neither. The
+/// grammar the scan applies — trimming, malformed candidates, escapes — is documented there.
 pub fn placeholders(body: &str) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
-    let mut rest = body;
-    while let Some(start) = rest.find(PLACEHOLDER_OPEN) {
-        let candidate = &rest[start + PLACEHOLDER_OPEN.len()..];
-        let Some(end) = candidate.find(PLACEHOLDER_CLOSE) else {
-            break;
+    for token in scan(body) {
+        let Token::Placeholder { name, .. } = token else {
+            continue;
         };
-        let name = candidate[..end].trim();
-        if !name.is_empty()
-            && !name.contains(['{', '}', '\n'])
-            && !names.iter().any(|seen| seen == name)
-        {
+        if !names.iter().any(|seen| seen == name) {
             names.push(name.to_owned());
         }
-        rest = &candidate[end + PLACEHOLDER_CLOSE.len()..];
     }
     names
+}
+
+/// Whether `body` declares more than `limit` distinct placeholder names. Stops counting at the
+/// first name past the limit, so refusing a pathological body never costs what naming every
+/// placeholder in it would.
+fn declares_more_placeholders_than(body: &str, limit: usize) -> bool {
+    let mut seen: Vec<&str> = Vec::new();
+    for token in scan(body) {
+        let Token::Placeholder { name, .. } = token else {
+            continue;
+        };
+        if seen.contains(&name) {
+            continue;
+        }
+        seen.push(name);
+        if seen.len() > limit {
+            return true;
+        }
+    }
+    false
 }
 
 /// The cache key: rows are grouped by the `(kind, scope)` a list reads, so a write to one group
@@ -247,7 +274,13 @@ impl Templates {
         expected: Option<u64>,
     ) -> Result<TemplateView, TemplateWriteError> {
         let description = description.map(str::trim).filter(|text| !text.is_empty());
-        validate(name, description, body).map_err(TemplateWriteError::Invalid)?;
+        // Only a create adds a row to the scope; an update replaces one, so it answers to the
+        // content caps alone and an edit is never wedged by a full scope.
+        let occupied = match expected {
+            None => Some(self.repo.count(kind, project)?),
+            Some(_) => None,
+        };
+        validate(name, description, body, occupied).map_err(TemplateWriteError::Invalid)?;
         match self
             .repo
             .write(kind, project, name.trim(), description, body, expected)?
@@ -282,11 +315,9 @@ impl Templates {
         kind: TemplateKind,
         project: Option<ProjectId>,
     ) -> Result<Vec<TemplateSummary>, StoreError> {
-        Ok(self
-            .cached_rows(kind, project)?
-            .iter()
-            .map(TemplateSummary::of)
-            .collect())
+        self.with_cached_rows(kind, project, |rows| {
+            rows.iter().map(TemplateSummary::of).collect()
+        })
     }
 
     /// The template of `kind` in the scope whose durable id is `id`, or `None`. The seeding read:
@@ -298,9 +329,9 @@ impl Templates {
         id: TemplateId,
     ) -> Result<Option<TemplateView>, StoreError> {
         Ok(self
-            .cached_rows(kind, project)?
-            .into_iter()
-            .find(|row| row.id == id)
+            .with_cached_rows(kind, project, |rows| {
+                rows.iter().find(|row| row.id == id).cloned()
+            })?
             .map(TemplateView::of))
     }
 
@@ -331,19 +362,23 @@ impl Templates {
             .map(|stored| ExportedTemplate::of(&stored)))
     }
 
-    /// The stored rows for a `(kind, scope)`, from the cache when warm, else read once and cached.
-    fn cached_rows(
+    /// Reads the stored rows for a `(kind, scope)` through `read` — served from the cache when warm,
+    /// else scanned once and cached. Handing the reader the rows rather than returning them keeps a
+    /// caller that wants only a count, or one row, from cloning every cached body to get it.
+    fn with_cached_rows<T>(
         &self,
         kind: TemplateKind,
         project: Option<ProjectId>,
-    ) -> Result<Vec<StoredTemplate>, StoreError> {
+        read: impl FnOnce(&[StoredTemplate]) -> T,
+    ) -> Result<T, StoreError> {
         let key = (kind, project);
         if let Some(rows) = read_lock(&self.cache).get(&key) {
-            return Ok(rows.clone());
+            return Ok(read(rows));
         }
         let rows = self.repo.list(kind, project)?;
-        write_lock(&self.cache).insert(key, rows.clone());
-        Ok(rows)
+        let value = read(&rows);
+        write_lock(&self.cache).insert(key, rows);
+        Ok(value)
     }
 
     /// Drops the cached rows for a `(kind, scope)` after a write to it, so the next read repopulates
@@ -351,10 +386,32 @@ impl Templates {
     fn invalidate(&self, kind: TemplateKind, project: Option<ProjectId>) {
         write_lock(&self.cache).remove(&(kind, project));
     }
+
+    /// Drops every cached entry belonging to `project`, of any kind — for when its rows are deleted
+    /// underneath this aggregate rather than through it. Removing a project cascades its templates
+    /// away in the store, which no write here observes, so without this the entries would outlive
+    /// the project they describe.
+    pub(super) fn forget_project(&self, project: ProjectId) {
+        write_lock(&self.cache).retain(|(_, scope), _| *scope != Some(project));
+    }
+
+    /// Drops every cached entry, so the next read of any `(kind, scope)` repopulates from the
+    /// store. The recovery path for when this aggregate cannot know what changed underneath it.
+    pub(super) fn forget_all(&self) {
+        write_lock(&self.cache).clear();
+    }
 }
 
 /// Every problem with a template's content, named at once so the caller fixes it in one revision.
-fn validate(name: &str, description: Option<&str>, body: &str) -> Result<(), String> {
+///
+/// `occupied` is how many templates the target scope already holds, for a write that would add a
+/// row to it, and `None` for one that replaces a row and so cannot grow the scope.
+fn validate(
+    name: &str,
+    description: Option<&str>,
+    body: &str,
+    occupied: Option<usize>,
+) -> Result<(), String> {
     let mut problems = Vec::new();
     if name.trim().is_empty() {
         problems.push("the name is empty".to_owned());
@@ -375,6 +432,16 @@ fn validate(name: &str, description: Option<&str>, body: &str) -> Result<(), Str
         problems.push(format!(
             "the body exceeds the {} KiB cap",
             MAX_TEMPLATE_BODY / 1024
+        ));
+    }
+    if declares_more_placeholders_than(body, MAX_PLACEHOLDERS_PER_BODY) {
+        problems.push(format!(
+            "the body declares more than {MAX_PLACEHOLDERS_PER_BODY} distinct placeholders"
+        ));
+    }
+    if occupied.is_some_and(|held| held >= MAX_TEMPLATES_PER_SCOPE) {
+        problems.push(format!(
+            "the scope already holds the maximum of {MAX_TEMPLATES_PER_SCOPE} templates"
         ));
     }
     if problems.is_empty() {
