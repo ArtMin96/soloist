@@ -69,6 +69,12 @@
   letter-spacing: -0.01em;
 }
 
+/* Jumping from the outline rail leaves a heading a little below the container's top edge rather than
+ * flush against it, so the section reads as a section instead of a cropped line. */
+.tiptap-body :is(h1, h2, h3, h4, h5, h6) {
+  scroll-margin-top: 0.75rem;
+}
+
 .tiptap-body h1 {
   font-size: 1.125rem;
 }
