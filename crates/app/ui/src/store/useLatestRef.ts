@@ -10,11 +10,15 @@ import { useLayoutEffect, useRef, type RefObject } from "react";
  * listener firing immediately after commit already observes the current value.
  *
  * Only read the result from code that runs after commit; during render it is a pass behind.
+ *
+ * The effect deliberately has no dependency array: callers routinely pass an inline closure, so a
+ * dependency would churn on every render anyway, and comparing it just to re-run a single assignment
+ * is noise. Running after every commit is the behaviour we want.
  */
 export function useLatestRef<T>(value: T): RefObject<T> {
   const ref = useRef(value);
   useLayoutEffect(() => {
     ref.current = value;
-  }, [value]);
+  });
   return ref;
 }
