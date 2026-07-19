@@ -12,7 +12,7 @@
 //! process-owned: there is no owner column and no launch-reconcile clear — it survives an app
 //! restart.
 
-use crate::ids::{ProjectId, ScratchpadId};
+use crate::ids::{ProjectId, ScratchpadId, TodoId};
 use crate::ports::StoreError;
 
 /// A persisted scratchpad: its store-assigned [`ScratchpadId`] (durable, stable across runs), the
@@ -53,12 +53,22 @@ pub enum RenameResult {
     NameTaken,
 }
 
-/// The outcome of a cross-project [`transfer`](ScratchpadRepo::transfer): the moved row (now under
-/// the target project), no scratchpad under the source name, or the target project already using
-/// that name. The stored row is boxed so the small miss variants stay small.
+/// A completed cross-project [`transfer`](ScratchpadRepo::transfer): the scratchpad now under the
+/// target project, and the todos that were derived from it and moved along with it. Both ends of
+/// each association moved, so every listed todo still points at this scratchpad.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransferredScratchpad {
+    pub scratchpad: StoredScratchpad,
+    /// The derived todos that moved, in id order. Empty when nothing derived from the scratchpad.
+    pub todos: Vec<TodoId>,
+}
+
+/// The outcome of a cross-project [`transfer`](ScratchpadRepo::transfer): the completed move, no
+/// scratchpad under the source name, or the target project already using that name. The success
+/// payload is boxed so the small miss variants stay small.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TransferResult {
-    Transferred(Box<StoredScratchpad>),
+    Transferred(Box<TransferredScratchpad>),
     NotFound,
     NameTaken,
 }
@@ -97,7 +107,17 @@ pub trait ScratchpadRepo: Send + Sync {
     /// Moves the scratchpad `(from, name)` to project `to`, keeping its `name`, document, tags,
     /// archived flag, revision, and durable id. Checks the target `(to, name)` is free as part of
     /// the update — a clearer [`TransferResult::NameTaken`] than a UNIQUE violation — so a move
-    /// cannot collide with an existing scratchpad. One atomic step.
+    /// cannot collide with an existing scratchpad.
+    ///
+    /// **The todos derived from the scratchpad move with it**, since a todo's association records
+    /// that it came out of that document: their link is **kept** (both ends move, so it stays
+    /// valid — unlike [`TodoRepo::transfer`](super::TodoRepo::transfer), which clears it because
+    /// the scratchpad stays behind), their process-owned lock is dropped, and a blocker naming a
+    /// todo left behind is dropped while one naming a todo that moves too survives. Todos in `from`
+    /// that derive from no scratchpad, or from another one, are untouched.
+    ///
+    /// One atomic step: the document and its derived todos either all move or none do, so no read
+    /// ever sees a todo stranded from the scratchpad it derives from.
     fn transfer(
         &self,
         from: ProjectId,

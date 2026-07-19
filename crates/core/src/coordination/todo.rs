@@ -10,8 +10,9 @@
 //! **revision-guarded** (optimistic concurrency): an [`update`](Todos::update) carries the revision it
 //! expects, and a stale one is refused rather than clobbering a newer edit. Around the document sit
 //! live columns the dedicated operations mutate atomically — **tags**, **blockers** (a todo cannot be
-//! completed while a blocker is still open — the gate), **comments**, a process-owned **lock**, and
-//! an optional **scratchpad** association naming the document the todo was derived from. That
+//! completed while a blocker is still open — the gate, in [`todo_blocker`](super::todo_blocker)),
+//! **comments** (in [`todo_comment`](super::todo_comment)), a process-owned **lock**, and an
+//! optional **scratchpad** association naming the document the todo was derived from. That
 //! association is live state, not part of the document, so it survives a specification edit and is
 //! never validated: having none is a permanently valid state, not a gap to fill.
 //! The durable [`TodoRepo`](super::TodoRepo) performs each state-dependent step atomically.
@@ -21,148 +22,12 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::scratchpad::ScratchpadRef;
-use super::todo_repo::{CommentEdit, StoredTodo, TodoRepo, TodoWriteResult};
+use super::scratchpad_link::ScratchpadLink;
+use super::todo_comment::Comment;
+use super::todo_doc::{TodoDoc, TodoStatus};
+use super::todo_repo::{StoredTodo, TodoRepo, TodoWriteResult};
 use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
 use crate::ports::StoreError;
-
-/// The most text a todo's document may carry, summed across its fields, in bytes. A todo is a
-/// work-item specification, not a document store; this bounds the persisted row so a runaway
-/// caller cannot grow the table without limit. Tags, blockers, and comments are separate columns,
-/// each mutated by its own operation, so they are not counted here.
-pub const MAX_TODO_DOC_BYTES: usize = 64 * 1024;
-
-/// A todo's lifecycle status — the label the owning agent declares, a closed set so it is never a
-/// free-form string. Distinct from the *blocker gate*: an agent may mark a todo `Blocked` to
-/// communicate, but what mechanically prevents completion is its unmet [`blockers`](TodoView::blockers),
-/// not this label.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TodoStatus {
-    /// Not yet started.
-    Open,
-    /// Deliberately parked by the owner (a declared label, independent of the blocker gate).
-    Blocked,
-    /// Being worked on.
-    InProgress,
-    /// Finished. Reached only when every blocker is met (the gate).
-    Done,
-}
-
-/// The small document every todo carries — the revision-guarded specification of the work: a title,
-/// a free-form Markdown body, and the lifecycle status. The aggregate validates it on write
-/// ([`validate`](TodoDoc::validate)). Tags, blockers, comments, and the lock are **not** part of the
-/// document — they are live state mutated by their own operations, so a tag or comment change never
-/// collides with a concurrent specification edit (mirroring the scratchpad split of body vs
-/// tags/archived).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TodoDoc {
-    /// A short imperative title — what this todo is.
-    pub title: String,
-    /// The free-form Markdown body: what needs doing and any detail a worker needs to act on it.
-    pub body: String,
-    /// The lifecycle status the owner declares.
-    pub status: TodoStatus,
-}
-
-impl TodoDoc {
-    /// Checks the write is well-formed: the title is not blank and the body stays within the size
-    /// cap. The body may be blank — a blank document is valid; only the title and the size ceiling
-    /// are enforced. Returns a single message naming every problem at once, or `Ok(())` when it is
-    /// well-formed. The status is a closed enum, so it needs no validation.
-    pub fn validate(&self) -> Result<(), String> {
-        let mut problems: Vec<String> = Vec::new();
-        if self.title.trim().is_empty() {
-            problems.push("title must not be blank".to_owned());
-        }
-        if self.content_bytes() > MAX_TODO_DOC_BYTES {
-            problems.push(format!(
-                "the document exceeds the {} KiB cap",
-                MAX_TODO_DOC_BYTES / 1024
-            ));
-        }
-        if problems.is_empty() {
-            Ok(())
-        } else {
-            Err(problems.join("; "))
-        }
-    }
-
-    /// The total bytes of the document's text — what a size cap bounds.
-    fn content_bytes(&self) -> usize {
-        self.title.len() + self.body.len()
-    }
-}
-
-/// Who wrote a comment, captured when it was created so the to-do board can name the author. A
-/// bound process records its per-run [`ProcessId`] — informational only, since process ids are
-/// recycled across runs — alongside the `label` resolved at creation, which is durable and is what
-/// the board shows. An external caller records only its label. The core stamps this from the
-/// caller's resolved identity, so an author can never be forged; an unbound caller leaves a comment
-/// unattributed ([`Comment::author`] is `None`).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum CommentAuthor {
-    /// A Soloist-supervised process: the live id it was bound to and the durable label shown.
-    Process { id: ProcessId, label: String },
-    /// An external (non-supervised) caller, identified by the label it registered under.
-    External { label: String },
-}
-
-/// A comment on a todo: a per-todo sequential `id` (so an update or delete can name it), its body,
-/// and its author when the creating caller was attributable ([`None`] for an unbound caller).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Comment {
-    pub id: u64,
-    pub body: String,
-    /// Who created the comment, stamped by the core from the caller's identity (never caller-set).
-    /// `None` when the caller was unbound. Defaulted so comments written before authorship existed
-    /// read back unattributed.
-    #[serde(default)]
-    pub author: Option<CommentAuthor>,
-}
-
-/// What a write says about a todo's optional scratchpad association. Three explicit states rather
-/// than a nested `Option`, so "said nothing" and "said none" can never be confused at a call site:
-/// a caller that omits the association leaves whatever is there alone, and clearing it takes an
-/// explicit [`Cleared`](ScratchpadLink::Cleared). Generic over the handle so the one shape serves
-/// both a caller that addresses a scratchpad by `name` and the core, which stores its durable
-/// [`ScratchpadId`].
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ScratchpadLink<T> {
-    /// Leave the association exactly as it is — what a caller that did not mention it means.
-    #[default]
-    Unchanged,
-    /// Drop the association, leaving the todo unlinked.
-    Cleared,
-    /// Point the todo at this scratchpad.
-    Linked(T),
-}
-
-impl<T> ScratchpadLink<T> {
-    /// The link a caller that always states the association explicitly asks for: a handle links,
-    /// its absence clears. [`Unchanged`](Self::Unchanged) is unreachable this way — which is the
-    /// point for a surface (a form, a create) whose association is never merely omitted.
-    pub fn stated(handle: Option<T>) -> Self {
-        match handle {
-            Some(handle) => Self::Linked(handle),
-            None => Self::Cleared,
-        }
-    }
-
-    /// Replaces the handle with `resolve`'s output, keeping the link's state. Used to turn a link
-    /// stated by name into one carrying the durable id, without the resolution failure collapsing
-    /// into "no link".
-    pub fn try_map<U, E>(
-        self,
-        resolve: impl FnOnce(T) -> Result<U, E>,
-    ) -> Result<ScratchpadLink<U>, E> {
-        Ok(match self {
-            Self::Unchanged => ScratchpadLink::Unchanged,
-            Self::Cleared => ScratchpadLink::Cleared,
-            Self::Linked(handle) => ScratchpadLink::Linked(resolve(handle)?),
-        })
-    }
-}
 
 /// A todo as a caller reads it: its durable id, its document, its tags, the ids of the
 /// todos that gate it and the subset still unmet, whether it is blocked, its comments, the process
@@ -200,15 +65,6 @@ pub struct TodoSummary {
     pub revision: u64,
 }
 
-/// The outcome of a comment edit through the aggregate: the todo's updated view, no todo under that
-/// id, or no comment under that id within the todo.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CommentOutcome {
-    Edited(Box<TodoView>),
-    NoTodo,
-    NoComment,
-}
-
 /// Why a todo create, update, complete, or blocker change was refused — each the caller's to fix.
 #[derive(Debug, thiserror::Error)]
 pub enum TodoError {
@@ -243,7 +99,7 @@ pub enum TodoError {
 /// step atomic; this aggregate owns the document validation, the revision-guard policy,
 /// and the blocker gate. Cheap to clone-share via the `Arc` it holds.
 pub struct Todos {
-    repo: Arc<dyn TodoRepo>,
+    pub(super) repo: Arc<dyn TodoRepo>,
 }
 
 impl Todos {
@@ -372,42 +228,6 @@ impl Todos {
         self.view_opt(self.repo.remove_tag(project, id, tag)?)
     }
 
-    /// Replaces the blockers of todo `id` in `project` with `blockers`, after checking none is `id`
-    /// itself ([`TodoError::SelfBlocker`]) and each exists in the project ([`TodoError::UnknownBlocker`]).
-    pub fn set_blockers(
-        &self,
-        project: ProjectId,
-        id: TodoId,
-        blockers: Vec<TodoId>,
-    ) -> Result<TodoView, TodoError> {
-        for &blocker in &blockers {
-            self.check_blocker(project, id, blocker)?;
-        }
-        self.require(self.repo.set_blockers(project, id, &blockers)?)
-    }
-
-    /// Adds `blocker` to todo `id` in `project` (idempotent), after the same self/existence checks.
-    pub fn add_blocker(
-        &self,
-        project: ProjectId,
-        id: TodoId,
-        blocker: TodoId,
-    ) -> Result<TodoView, TodoError> {
-        self.check_blocker(project, id, blocker)?;
-        self.require(self.repo.add_blocker(project, id, blocker)?)
-    }
-
-    /// Removes `blocker` from todo `id` in `project`, returning the updated todo, or `None` if there
-    /// is none. Removing a blocker that is not present is a no-op.
-    pub fn remove_blocker(
-        &self,
-        project: ProjectId,
-        id: TodoId,
-        blocker: TodoId,
-    ) -> Result<Option<TodoView>, StoreError> {
-        self.view_opt(self.repo.remove_blocker(project, id, blocker)?)
-    }
-
     /// Locks todo `id` in `project` for `owner` — "signals, not ownership": if another process holds
     /// the lock it is left intact and the returned view reports that holder, so the caller compares
     /// `locked_by` to its own process to know whether it won. `None` if the todo does not exist.
@@ -431,52 +251,6 @@ impl Todos {
         self.view_opt(self.repo.unlock(project, id, owner)?)
     }
 
-    /// Adds a comment to todo `id` in `project`, attributed to `author` (stamped by the façade from
-    /// the caller's identity), returning the updated todo and the new comment's id, or `None` if
-    /// there is none.
-    pub fn comment_create(
-        &self,
-        project: ProjectId,
-        id: TodoId,
-        body: &str,
-        author: Option<CommentAuthor>,
-    ) -> Result<Option<(TodoView, u64)>, StoreError> {
-        match self.repo.comment_create(project, id, body, author)? {
-            Some((stored, comment)) => Ok(Some((self.view(stored)?, comment))),
-            None => Ok(None),
-        }
-    }
-
-    /// Updates comment `comment` of todo `id` in `project` to `body`.
-    pub fn comment_update(
-        &self,
-        project: ProjectId,
-        id: TodoId,
-        comment: u64,
-        body: &str,
-    ) -> Result<CommentOutcome, StoreError> {
-        self.comment_outcome(self.repo.comment_update(project, id, comment, body)?)
-    }
-
-    /// Deletes comment `comment` of todo `id` in `project`.
-    pub fn comment_delete(
-        &self,
-        project: ProjectId,
-        id: TodoId,
-        comment: u64,
-    ) -> Result<CommentOutcome, StoreError> {
-        self.comment_outcome(self.repo.comment_delete(project, id, comment)?)
-    }
-
-    /// The comments on todo `id` in `project`, or `None` if there is none.
-    pub fn comment_list(
-        &self,
-        project: ProjectId,
-        id: TodoId,
-    ) -> Result<Option<Vec<Comment>>, StoreError> {
-        Ok(self.repo.read(project, id)?.map(|stored| stored.comments))
-    }
-
     /// Releases every todo lock held by `process` — the owner-close hook (see
     /// [`TodoLockReleaser`](super::TodoLockReleaser)). Returns how many were released.
     pub fn release_owner(&self, process: ProcessId) -> Result<usize, StoreError> {
@@ -487,35 +261,6 @@ impl Todos {
     /// locks, whose owners are gone and whose per-run ids are recycled, are dropped.
     pub fn reconcile(&self) -> Result<usize, StoreError> {
         self.repo.clear_locks()
-    }
-
-    /// Rejects a blocker that is the todo itself or that does not exist in the project.
-    fn check_blocker(
-        &self,
-        project: ProjectId,
-        id: TodoId,
-        blocker: TodoId,
-    ) -> Result<(), TodoError> {
-        if blocker == id {
-            return Err(TodoError::SelfBlocker);
-        }
-        if self.repo.read(project, blocker)?.is_none() {
-            return Err(TodoError::UnknownBlocker);
-        }
-        Ok(())
-    }
-
-    /// Refuses completion while todo `id` has unmet blockers, naming them.
-    fn guard_blockers(&self, project: ProjectId, id: TodoId) -> Result<(), TodoError> {
-        let Some(stored) = self.repo.read(project, id)? else {
-            return Err(TodoError::NotFound);
-        };
-        let unmet = self.repo.unmet_blockers(project, &stored.blockers)?;
-        if unmet.is_empty() {
-            Ok(())
-        } else {
-            Err(TodoError::Blocked { by: unmet })
-        }
     }
 
     /// Writes `doc` and the stated `scratchpad` link to todo `id` and projects the result,
@@ -542,7 +287,7 @@ impl Todos {
     }
 
     /// Builds a [`TodoView`] from a stored row, resolving its unmet blockers.
-    fn view(&self, stored: StoredTodo) -> Result<TodoView, StoreError> {
+    pub(super) fn view(&self, stored: StoredTodo) -> Result<TodoView, StoreError> {
         let blocked_by = self.repo.unmet_blockers(stored.project, &stored.blockers)?;
         Ok(TodoView {
             id: stored.id,
@@ -577,26 +322,11 @@ impl Todos {
     }
 
     /// Projects an optional stored row to an optional view.
-    fn view_opt(&self, stored: Option<StoredTodo>) -> Result<Option<TodoView>, StoreError> {
+    pub(super) fn view_opt(
+        &self,
+        stored: Option<StoredTodo>,
+    ) -> Result<Option<TodoView>, StoreError> {
         stored.map(|stored| self.view(stored)).transpose()
-    }
-
-    /// Projects a stored row that must exist (the aggregate already checked) to a view, mapping a
-    /// concurrent disappearance to [`TodoError::NotFound`].
-    fn require(&self, stored: Option<StoredTodo>) -> Result<TodoView, TodoError> {
-        match stored {
-            Some(stored) => Ok(self.view(stored)?),
-            None => Err(TodoError::NotFound),
-        }
-    }
-
-    /// Translates a repo [`CommentEdit`] to the aggregate's [`CommentOutcome`], building the view.
-    fn comment_outcome(&self, edit: CommentEdit) -> Result<CommentOutcome, StoreError> {
-        Ok(match edit {
-            CommentEdit::Edited(stored) => CommentOutcome::Edited(Box::new(self.view(*stored)?)),
-            CommentEdit::NoTodo => CommentOutcome::NoTodo,
-            CommentEdit::NoComment => CommentOutcome::NoComment,
-        })
     }
 }
 

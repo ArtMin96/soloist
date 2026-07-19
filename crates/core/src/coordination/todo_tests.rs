@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
+use crate::coordination::{CommentAuthor, CommentOutcome, MAX_TODO_DOC_BYTES};
 use crate::ids::{ProcessId, ProjectId};
 use crate::testing::FakeTodoRepo;
 

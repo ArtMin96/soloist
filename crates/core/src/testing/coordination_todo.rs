@@ -8,7 +8,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::coordination::FakeScratchpadRepo;
+use super::coordination_scratchpad::FakeScratchpadRepo;
 
 use crate::coordination::{
     Comment, CommentAuthor, CommentEdit, ScratchpadLink, ScratchpadRef, StoredTodo, TodoDoc,
@@ -18,13 +18,18 @@ use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
 use crate::ports::StoreError;
 use crate::sync::lock;
 
+/// The todo rows a [`FakeTodoRepo`] reads and writes. Shared with the [`FakeScratchpadRepo`] it is
+/// joined to, so that repo's transfer cascades into the very same todos — standing in for the two
+/// tables the durable adapter moves inside one transaction.
+pub type FakeTodoRows = Arc<Mutex<HashMap<u64, StoredTodo>>>;
+
 /// An in-memory [`TodoRepo`] for headless coordination tests. Keyed by todo id like the durable
 /// table, assigns durable ids from a counter (never reused), and mirrors the store's atomic
 /// revision-guarded doc write, tag/blocker/comment read-modify-write, conditional lock, and
 /// owner-close/launch lock clearing under one lock.
 #[derive(Default)]
 pub struct FakeTodoRepo {
-    rows: Mutex<HashMap<u64, StoredTodo>>,
+    rows: FakeTodoRows,
     next_id: AtomicU64,
     scratchpads: Option<Arc<FakeScratchpadRepo>>,
 }
@@ -36,13 +41,16 @@ impl FakeTodoRepo {
         Self::default()
     }
 
-    /// A repo that resolves associations against `scratchpads`, standing in for the durable
-    /// adapter's join: a todo linked to a scratchpad in that store reads its current handle back
-    /// (so a rename follows), and one whose scratchpad has since been deleted reads back unlinked.
+    /// A repo that resolves associations against `scratchpads` and shares its row set with them,
+    /// standing in for the durable adapter's two joined tables: a todo linked to a scratchpad in
+    /// that store reads its current handle back (so a rename follows), one whose scratchpad has
+    /// since been deleted reads back unlinked, and transferring that scratchpad moves the todos
+    /// derived from it here too.
     pub fn joined(scratchpads: Arc<FakeScratchpadRepo>) -> Self {
         Self {
+            rows: scratchpads.todo_rows(),
             scratchpads: Some(scratchpads),
-            ..Self::default()
+            next_id: AtomicU64::default(),
         }
     }
 

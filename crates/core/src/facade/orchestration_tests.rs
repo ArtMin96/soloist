@@ -6,8 +6,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::broadcast;
-
 use super::*;
 use crate::composition::CorePorts;
 use crate::coordination::{IdleMode, TodoDoc, TodoStatus};
@@ -15,7 +13,7 @@ use crate::events::DomainEvent;
 use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::process::ProcessKind;
 use crate::testing::{
-    agent_registration, authentic_session, facade_with_agent_tool, terminal_registration,
+    agent_registration, authentic_session, drain, facade_with_agent_tool, terminal_registration,
     FakeKvRepo, FakeLockRepo, FakeProjectRepo, FakeScratchpadRepo, FakeSpawner, FakeTimerRepo,
     FakeTodoRepo, FakeTrustRepo, MockClock, TEST_PEER_PGID,
 };
@@ -74,16 +72,6 @@ fn todo_doc(title: &str) -> TodoDoc {
 /// A representative scratchpad Markdown body.
 fn scratchpad_body() -> String {
     "## Objective\nship it\n\n## Status\nactive".to_owned()
-}
-
-/// Every event currently buffered for `rx`, drained synchronously — the events emitted by the one
-/// mutation performed since subscribing.
-fn drain(rx: &mut broadcast::Receiver<DomainEvent>) -> Vec<DomainEvent> {
-    let mut events = Vec::new();
-    while let Ok(event) = rx.try_recv() {
-        events.push(event);
-    }
-    events
 }
 
 #[test]

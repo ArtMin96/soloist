@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::scratchpad_repo::{
     RenameResult, ScratchpadRepo, StoredScratchpad, TransferResult, WriteResult,
 };
-use crate::ids::{ProjectId, ScratchpadId};
+use crate::ids::{ProjectId, ScratchpadId, TodoId};
 use crate::ports::{Clock, StoreError};
 
 /// The most Markdown a scratchpad's body may carry, in bytes. A scratchpad is a coordination
@@ -231,17 +231,22 @@ impl Scratchpads {
     }
 
     /// Moves the scratchpad `name` from `from` to `to`, keeping its name, body, tags, archived
-    /// flag, revision, and durable id. [`RenameError::NotFound`] if `from` has no such scratchpad,
-    /// [`RenameError::NameTaken`] if `to` already has one under that name (reusing the rename error
-    /// taxonomy — a transfer is a cross-project relocation with the same two failure modes).
+    /// flag, revision, and durable id, and **taking the todos derived from it along** with their
+    /// association intact (see [`ScratchpadRepo::transfer`] for the full move contract).
+    /// [`RenameError::NotFound`] if `from` has no such scratchpad, [`RenameError::NameTaken`] if
+    /// `to` already has one under that name (reusing the rename error taxonomy — a transfer is a
+    /// cross-project relocation with the same two failure modes).
     pub fn transfer(
         &self,
         from: ProjectId,
         name: &str,
         to: ProjectId,
-    ) -> Result<ScratchpadView, RenameError> {
+    ) -> Result<ScratchpadTransfer, RenameError> {
         match self.repo.transfer(from, name, to)? {
-            TransferResult::Transferred(stored) => Ok(ScratchpadView::of(*stored)),
+            TransferResult::Transferred(moved) => Ok(ScratchpadTransfer {
+                scratchpad: ScratchpadView::of(moved.scratchpad),
+                todos: moved.todos,
+            }),
             TransferResult::NotFound => Err(RenameError::NotFound),
             TransferResult::NameTaken => Err(RenameError::NameTaken),
         }
@@ -298,6 +303,14 @@ impl Scratchpads {
     pub fn delete(&self, project: ProjectId, name: &str) -> Result<bool, StoreError> {
         self.repo.delete(project, name)
     }
+}
+
+/// A completed [`transfer`](Scratchpads::transfer): the scratchpad as it now reads in the target
+/// project, and the todos that derived from it and moved with it. The caller announces the move on
+/// both boards from these two, so a to-do board never keeps showing work that has left.
+pub struct ScratchpadTransfer {
+    pub scratchpad: ScratchpadView,
+    pub todos: Vec<TodoId>,
 }
 
 /// Why a [`rename`](Scratchpads::rename) failed — both the caller's to fix.

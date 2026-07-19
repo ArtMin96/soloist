@@ -9,13 +9,18 @@
 //! name. Unlike leases and timers a scratchpad is durable and **not** process-owned: it survives an
 //! app restart, so there is no launch-reconcile clear. The `project_id` foreign key cascades, so
 //! removing a project drops its scratchpads.
+//!
+//! A cross-project transfer is the one operation reaching beyond this table: the todos derived from
+//! the moved scratchpad go with it, keeping their association, so it runs inside a transaction and
+//! the two tables can never half-move.
 
 use rusqlite::{Connection, OptionalExtension, Row};
 use soloist_core::{
     ProjectId, RenameResult, ScratchpadId, ScratchpadRepo, StoreError, StoredScratchpad,
-    TransferResult, WriteResult,
+    TransferResult, TransferredScratchpad, WriteResult,
 };
 
+use crate::todo_rows::transfer_derived;
 use crate::{sql_err, SqliteStore};
 
 /// The columns every read selects, in order, so [`row_to_scratchpad`] decodes one shape.
@@ -191,25 +196,31 @@ impl ScratchpadRepo for SqliteStore {
         to: ProjectId,
     ) -> Result<TransferResult, StoreError> {
         let conn = self.lock();
+        // The document and the todos derived from it move as one — a transaction, so a failure
+        // part-way leaves neither moved rather than stranding todos from their source.
+        let tx = conn.unchecked_transaction().map_err(sql_err)?;
         // Reject a name already used in the target before the update (clearer than the UNIQUE
         // violation), and do both under one guard so a move and a create cannot both take the name.
-        if current_revision(&conn, to, name)?.is_some() {
+        if current_revision(&tx, to, name)?.is_some() {
             return Ok(TransferResult::NameTaken);
         }
+        let Some(stored) = read_one(&tx, from, name)? else {
+            return Ok(TransferResult::NotFound);
+        };
         // Re-key the project only; the durable id, name, document, tags, archived flag, and revision
         // all ride along unchanged.
-        let updated = conn
-            .execute(
-                "UPDATE scratchpads SET project_id = ?3 WHERE project_id = ?1 AND name = ?2",
-                (from.get() as i64, name, to.get() as i64),
-            )
-            .map_err(sql_err)?;
-        if updated == 0 {
-            return Ok(TransferResult::NotFound);
-        }
-        read_one(&conn, to, name)?
-            .map(|stored| TransferResult::Transferred(Box::new(stored)))
-            .ok_or_else(|| StoreError::Backend("scratchpad vanished after transfer".into()))
+        tx.execute(
+            "UPDATE scratchpads SET project_id = ?3 WHERE project_id = ?1 AND name = ?2",
+            (from.get() as i64, name, to.get() as i64),
+        )
+        .map_err(sql_err)?;
+        let todos = transfer_derived(&tx, from, to, stored.id)?;
+        let scratchpad = read_one(&tx, to, name)?
+            .ok_or_else(|| StoreError::Backend("scratchpad vanished after transfer".into()))?;
+        tx.commit().map_err(sql_err)?;
+        Ok(TransferResult::Transferred(Box::new(
+            TransferredScratchpad { scratchpad, todos },
+        )))
     }
 }
 

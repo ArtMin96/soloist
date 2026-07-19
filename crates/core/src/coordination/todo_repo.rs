@@ -13,7 +13,9 @@
 //! todos.
 
 use super::scratchpad::ScratchpadRef;
-use super::todo::{Comment, CommentAuthor, ScratchpadLink, TodoDoc};
+use super::scratchpad_link::ScratchpadLink;
+use super::todo_comment::{Comment, CommentAuthor};
+use super::todo_doc::TodoDoc;
 use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
 use crate::ports::StoreError;
 

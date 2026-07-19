@@ -16,6 +16,17 @@ use crate::events::DomainEvent;
 use crate::ids::ProcessId;
 use crate::process::ProcStatus;
 
+/// Every event currently buffered for `rx`, drained synchronously — the events a mutation emitted
+/// since subscribing. Unlike the waiters below this never suspends, so it suits a synchronous
+/// mutation whose events are all published by the time it returns.
+pub fn drain(rx: &mut broadcast::Receiver<DomainEvent>) -> Vec<DomainEvent> {
+    let mut events = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        events.push(event);
+    }
+    events
+}
+
 /// Awaits the next event satisfying `pred`, ignoring the rest, and returns it. A lagged
 /// subscriber keeps waiting (it only missed events it did not ask for); a closed bus is a
 /// test bug.
