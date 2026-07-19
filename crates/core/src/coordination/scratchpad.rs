@@ -2,17 +2,14 @@
 //! coordinate through.
 //!
 //! Unlike a lease or a timer, a scratchpad is **not** process-owned and is **durable** — it
-//! survives an app restart, so launch reconciliation never clears it. A scratchpad
-//! carries a **disciplined, typed body** ([`ScratchpadDoc`]): objective, context, an ordered plan,
-//! acceptance criteria, risks, and a status, plus optional free notes. The shape is enforced (the
-//! tool schema presents exactly these fields and the aggregate rejects a blank one), so every agent
-//! writes the same informative structure rather than free-form prose, and the document renders to
-//! one canonical Markdown layout. Writes are **revision-guarded** (optimistic concurrency): a write
-//! carries the revision it expects, and a stale one is refused rather than clobbering a newer edit.
-//! The durable [`ScratchpadRepo`](super::ScratchpadRepo) performs each state-dependent step
-//! atomically.
+//! survives an app restart, so launch reconciliation never clears it. A scratchpad is a **free-form
+//! Markdown note** addressed by its `name` handle: the `name` is the document's identity and is not
+//! duplicated inside the body. The body is unconstrained Markdown (bounded only by a size cap), so a
+//! caller is free to shape it — a template seeds the initial content, but the schema is not enforced.
+//! Writes are **revision-guarded** (optimistic concurrency): a write carries the revision it expects,
+//! and a stale one is refused rather than clobbering a newer edit. The durable
+//! [`ScratchpadRepo`](super::ScratchpadRepo) performs each state-dependent step atomically.
 
-use std::fmt::Write as _;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -21,157 +18,62 @@ use super::scratchpad_repo::{
     RenameResult, ScratchpadRepo, StoredScratchpad, TransferResult, WriteResult,
 };
 use crate::ids::{ProjectId, ScratchpadId};
-use crate::ports::StoreError;
+use crate::ports::{Clock, StoreError};
 
-/// The most text content a scratchpad may carry, summed across its sections, in bytes. A
-/// scratchpad is a coordination document, not a log store; this bounds the persisted row so a
-/// runaway caller cannot grow the table without limit. Generous for a real plan, far below the
-/// transport frame ceiling.
+/// The most Markdown a scratchpad's body may carry, in bytes. A scratchpad is a coordination
+/// document, not a log store; this bounds the persisted row so a runaway caller cannot grow the
+/// table without limit. Generous for a real note, far below the transport frame ceiling.
 pub const MAX_SCRATCHPAD_CONTENT_BYTES: usize = 256 * 1024;
 
-/// The disciplined body every scratchpad carries. The fields are a fixed, ordered structure — what
-/// makes a scratchpad a consistent, informative coordination artifact rather than free-form notes:
-/// the objective it serves, the context behind it, the ordered plan (the path), the acceptance
-/// criteria that define done, the risks to watch, and a status line. `notes` is the one open field
-/// for anything the structure does not cover. The aggregate validates the structure on write
-/// ([`validate`](ScratchpadDoc::validate)) and renders it to one canonical Markdown layout
-/// ([`render`](ScratchpadDoc::render)), so the shape and its presentation are single-source.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScratchpadDoc {
-    /// What this scratchpad is for — the goal it serves, in a sentence or two.
-    pub objective: String,
-    /// The background and current state a reader needs to act on it.
-    pub context: String,
-    /// The ordered path to the objective: each entry one step, in order.
-    pub plan: Vec<String>,
-    /// The testable criteria that define the objective as done.
-    pub acceptance_criteria: Vec<String>,
-    /// The risks, unknowns, or blockers to watch — state "none identified" rather than omitting.
-    pub risks: Vec<String>,
-    /// The current progress: where the work stands right now.
-    pub status: String,
-    /// Anything the structured sections do not cover — free Markdown, optional.
-    pub notes: Option<String>,
-}
-
-impl ScratchpadDoc {
-    /// Checks the disciplined structure is present and informative: no required field is blank, and
-    /// each list has at least one non-blank entry. Returns a single message naming **every** problem
-    /// at once (so an agent fixes the document in one revision), or `Ok(())` when it is well-formed.
-    /// `notes` is optional and unconstrained.
-    pub fn validate(&self) -> Result<(), String> {
-        let mut problems: Vec<&str> = Vec::new();
-        if self.objective.trim().is_empty() {
-            problems.push("objective must not be blank");
-        }
-        if self.context.trim().is_empty() {
-            problems.push("context must not be blank");
-        }
-        if self.status.trim().is_empty() {
-            problems.push("status must not be blank");
-        }
-        check_list(
-            &self.plan,
-            "plan needs at least one step",
-            "plan steps must not be blank",
-            &mut problems,
-        );
-        check_list(
-            &self.acceptance_criteria,
-            "acceptance_criteria needs at least one criterion",
-            "acceptance_criteria entries must not be blank",
-            &mut problems,
-        );
-        check_list(
-            &self.risks,
-            "risks needs at least one entry",
-            "risks entries must not be blank",
-            &mut problems,
-        );
-        let mut messages: Vec<String> = problems
-            .iter()
-            .map(|problem| (*problem).to_owned())
-            .collect();
-        if self.content_bytes() > MAX_SCRATCHPAD_CONTENT_BYTES {
-            messages.push(format!(
-                "the content exceeds the {} KiB cap",
-                MAX_SCRATCHPAD_CONTENT_BYTES / 1024
-            ));
-        }
-        if messages.is_empty() {
-            Ok(())
-        } else {
-            Err(messages.join("; "))
-        }
+/// Checks a scratchpad write is well-formed: the `name` handle is not blank and the `body` stays
+/// within the size cap. The body may be blank — a blank document is valid; only the addressing
+/// handle and the size ceiling are enforced. Returns a single message naming every problem at once,
+/// or `Ok(())` when it is well-formed.
+fn validate(name: &str, body: &str) -> Result<(), String> {
+    let mut problems: Vec<String> = Vec::new();
+    if name.trim().is_empty() {
+        problems.push("name must not be blank".to_owned());
     }
-
-    /// The total bytes of the document's text across every section — what a size cap bounds.
-    fn content_bytes(&self) -> usize {
-        self.objective.len()
-            + self.context.len()
-            + self.status.len()
-            + self.notes.as_deref().map_or(0, str::len)
-            + self.plan.iter().map(String::len).sum::<usize>()
-            + self
-                .acceptance_criteria
-                .iter()
-                .map(String::len)
-                .sum::<usize>()
-            + self.risks.iter().map(String::len).sum::<usize>()
+    if body.len() > MAX_SCRATCHPAD_CONTENT_BYTES {
+        problems.push(format!(
+            "the content exceeds the {} KiB cap",
+            MAX_SCRATCHPAD_CONTENT_BYTES / 1024
+        ));
     }
-
-    /// Renders the document to its one canonical Markdown layout, titled by the scratchpad's `name`
-    /// (the leading H1). The single rendering used everywhere a scratchpad is read, so every reader
-    /// — agent or the future UI — sees the same shape.
-    pub fn render(&self, name: &str) -> String {
-        let mut out = String::new();
-        let _ = writeln!(out, "# {name}\n");
-        let _ = writeln!(out, "## Objective\n{}\n", self.objective.trim());
-        let _ = writeln!(out, "## Context\n{}\n", self.context.trim());
-        let _ = writeln!(out, "## Plan");
-        for (index, step) in self.plan.iter().enumerate() {
-            let _ = writeln!(out, "{}. {}", index + 1, step.trim());
-        }
-        let _ = writeln!(out, "\n## Acceptance criteria");
-        for criterion in &self.acceptance_criteria {
-            let _ = writeln!(out, "- [ ] {}", criterion.trim());
-        }
-        let _ = writeln!(out, "\n## Risks");
-        for risk in &self.risks {
-            let _ = writeln!(out, "- {}", risk.trim());
-        }
-        let _ = writeln!(out, "\n## Status\n{}", self.status.trim());
-        if let Some(notes) = self
-            .notes
-            .as_deref()
-            .map(str::trim)
-            .filter(|n| !n.is_empty())
-        {
-            let _ = writeln!(out, "\n## Notes\n{notes}");
-        }
-        out
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("; "))
     }
 }
 
-/// Records a list-section problem: `if_empty` when it carries nothing (empty, or every entry
-/// blank), or `if_blank` when it has a blank entry among real ones.
-fn check_list<'a>(
-    items: &[String],
-    if_empty: &'a str,
-    if_blank: &'a str,
-    problems: &mut Vec<&'a str>,
-) {
-    if items.iter().all(|item| item.trim().is_empty()) {
-        problems.push(if_empty);
-    } else if items.iter().any(|item| item.trim().is_empty()) {
-        problems.push(if_blank);
+/// Renders a scratchpad for export/read: the `name` as the leading H1 over its Markdown body. The
+/// single rendering used everywhere a scratchpad is read whole, so every reader — agent or UI —
+/// sees the same shape, and the name (the identity) is never stored inside the body.
+fn render(name: &str, body: &str) -> String {
+    let body = body.trim_end();
+    if body.is_empty() {
+        format!("# {name}\n")
+    } else {
+        format!("# {name}\n\n{body}\n")
     }
+}
+
+/// The one-line gist of a body for a listing: its first non-blank, non-heading line, trimmed. A body
+/// that is empty or only headings has no gist (an empty string), so the summary stays a cheap scan
+/// key without embedding the whole note.
+fn gist(body: &str) -> String {
+    body.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with('#'))
+        .unwrap_or("")
+        .to_owned()
 }
 
 /// A scratchpad as a caller reads it: its durable identity and handle, its tags and archived flag,
-/// the revision to guard the next write with, the disciplined [`ScratchpadDoc`], and that document
-/// rendered to canonical Markdown. The `rendered` text is derived (not stored), so the persisted
-/// shape stays the structured document alone.
+/// the revision to guard the next write with, the free-form Markdown `body`, and that body rendered
+/// under its name as canonical Markdown. The `rendered` text is derived (not stored), so the
+/// persisted shape stays the body alone.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScratchpadView {
     pub id: ScratchpadId,
@@ -179,27 +81,27 @@ pub struct ScratchpadView {
     pub tags: Vec<String>,
     pub archived: bool,
     pub revision: u64,
-    pub doc: ScratchpadDoc,
+    pub body: String,
     pub rendered: String,
 }
 
 impl ScratchpadView {
     fn of(stored: StoredScratchpad) -> Self {
-        let rendered = stored.doc.render(&stored.name);
+        let rendered = render(&stored.name, &stored.body);
         Self {
             id: stored.id,
             name: stored.name,
             tags: stored.tags,
             archived: stored.archived,
             revision: stored.revision,
-            doc: stored.doc,
+            body: stored.body,
             rendered,
         }
     }
 }
 
-/// A scratchpad in a listing: its identity, handle, tags, archived flag, revision, and the
-/// objective as a one-line gist — enough to scan and pick one without fetching every document.
+/// A scratchpad in a listing: its identity, handle, tags, archived flag, revision, and a one-line
+/// `gist` of the body — enough to scan and pick one without fetching every document.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScratchpadSummary {
     pub id: ScratchpadId,
@@ -207,28 +109,32 @@ pub struct ScratchpadSummary {
     pub tags: Vec<String>,
     pub archived: bool,
     pub revision: u64,
-    pub objective: String,
+    pub gist: String,
+    /// Unix millis of the last body write (0 for a document that predates the field), so a listing
+    /// can be sorted by recency as well as by name.
+    pub updated_at: u64,
 }
 
 impl ScratchpadSummary {
     fn of(stored: StoredScratchpad) -> Self {
         Self {
+            gist: gist(&stored.body),
             id: stored.id,
             name: stored.name,
             tags: stored.tags,
             archived: stored.archived,
             revision: stored.revision,
-            objective: stored.doc.objective,
+            updated_at: stored.updated_at,
         }
     }
 }
 
 /// Why a [`write`](Scratchpads::write) did not apply. Each is the caller's to fix: a malformed
-/// document, or a revision that no longer matches (re-read and retry). A [`Store`](WriteError::Store)
+/// write, or a revision that no longer matches (re-read and retry). A [`Store`](WriteError::Store)
 /// failure is the server's.
 #[derive(Debug, thiserror::Error)]
 pub enum WriteError {
-    /// The document failed the disciplined-structure check; the message names every problem.
+    /// The write failed validation (a blank name or an over-cap body); the message names every problem.
     #[error("scratchpad is not well-formed: {0}")]
     Invalid(String),
     /// The write expected a different revision than the one on record — a concurrent edit landed
@@ -245,32 +151,35 @@ pub enum WriteError {
 }
 
 /// The scratchpad aggregate over the durable [`ScratchpadRepo`]. The repo persists and makes each
-/// state-dependent step atomic; this aggregate owns the disciplined-document validation and the
-/// revision-guard policy. Cheap to clone-share via the `Arc` it holds.
+/// state-dependent step atomic; this aggregate owns the body validation and the revision-guard
+/// policy. Cheap to clone-share via the `Arc` it holds.
 pub struct Scratchpads {
     repo: Arc<dyn ScratchpadRepo>,
+    clock: Arc<dyn Clock>,
 }
 
 impl Scratchpads {
-    /// Builds the aggregate over its durable store.
-    pub fn new(repo: Arc<dyn ScratchpadRepo>) -> Self {
-        Self { repo }
+    /// Builds the aggregate over its durable store and clock (the clock stamps each write's
+    /// `updated_at`).
+    pub fn new(repo: Arc<dyn ScratchpadRepo>, clock: Arc<dyn Clock>) -> Self {
+        Self { repo, clock }
     }
 
-    /// Creates or replaces the scratchpad `name` in `project` with the disciplined `doc`,
+    /// Creates or replaces the scratchpad `name` in `project` with the Markdown `body`,
     /// **revision-guarded**: `expected` is `None` to create (refused if one already exists) or the
     /// current revision to update (refused if it has since changed). On success returns the written
     /// scratchpad at its new revision; a stale write returns [`WriteError::Conflict`] and changes
-    /// nothing, and a malformed document [`WriteError::Invalid`].
+    /// nothing, and a malformed write [`WriteError::Invalid`].
     pub fn write(
         &self,
         project: ProjectId,
         name: &str,
-        doc: ScratchpadDoc,
+        body: String,
         expected: Option<u64>,
     ) -> Result<ScratchpadView, WriteError> {
-        doc.validate().map_err(WriteError::Invalid)?;
-        match self.repo.write(project, name, &doc, expected)? {
+        validate(name, &body).map_err(WriteError::Invalid)?;
+        let now = self.clock.now_unix_millis();
+        match self.repo.write(project, name, &body, expected, now)? {
             WriteResult::Written(stored) => Ok(ScratchpadView::of(*stored)),
             WriteResult::Conflict { actual } => Err(WriteError::Conflict { expected, actual }),
         }
@@ -311,7 +220,7 @@ impl Scratchpads {
         }
     }
 
-    /// Moves the scratchpad `name` from `from` to `to`, keeping its name, document, tags, archived
+    /// Moves the scratchpad `name` from `from` to `to`, keeping its name, body, tags, archived
     /// flag, revision, and durable id. [`RenameError::NotFound`] if `from` has no such scratchpad,
     /// [`RenameError::NameTaken`] if `to` already has one under that name (reusing the rename error
     /// taxonomy — a transfer is a cross-project relocation with the same two failure modes).
@@ -362,7 +271,7 @@ impl Scratchpads {
     }
 
     /// Archives or restores the scratchpad `name` in `project`, returning the updated scratchpad, or
-    /// `None` if there is none. Archiving keeps the document — it is a listing flag, not a delete.
+    /// `None` if there is none. Archiving keeps the body — it is a listing flag, not a delete.
     pub fn set_archived(
         &self,
         project: ProjectId,

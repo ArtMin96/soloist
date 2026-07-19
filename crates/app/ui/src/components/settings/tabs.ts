@@ -8,6 +8,7 @@ export type SettingsTabId =
   | "hotkeys"
   | "agents"
   | "tools"
+  | "templates"
   | "integrations"
   | "notifications"
   | "account";
@@ -23,6 +24,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
   { id: "hotkeys", label: "Hotkeys" },
   { id: "agents", label: "Agents" },
   { id: "tools", label: "Tools" },
+  { id: "templates", label: "Templates" },
   { id: "integrations", label: "Integrations" },
   { id: "notifications", label: "Notifications" },
   { id: "account", label: "Account" },

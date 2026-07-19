@@ -40,6 +40,26 @@ fn terminal_search_is_a_terminal_scope_action() {
 }
 
 #[test]
+fn archive_scratchpad_is_a_scratchpad_scope_action() {
+    // Ctrl+Shift+W is dispatched by the scratchpad-panel key handler, so it must be
+    // Scratchpad-scoped — not General — or that handler (which filters to its own scope) never
+    // receives the chord. It must also stay clear of Ctrl+W (close agent/terminal, General).
+    assert_eq!(
+        HotkeyAction::ArchiveScratchpad.scope(),
+        HotkeyScope::Scratchpad
+    );
+    assert_eq!(
+        HotkeyAction::ArchiveScratchpad.default_binding(),
+        Binding::ctrl_shift("W")
+    );
+    assert_ne!(
+        HotkeyAction::ArchiveScratchpad.default_binding(),
+        HotkeyAction::CloseAgentOrTerminal.default_binding(),
+        "archive (Ctrl+Shift+W) must not collide with close (Ctrl+W)"
+    );
+}
+
+#[test]
 fn a_fresh_keymap_is_all_defaults() {
     let hotkeys = Hotkeys::default();
     let view = hotkeys.view();

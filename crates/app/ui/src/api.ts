@@ -4,7 +4,7 @@
 // into React.
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AgentSignal,
   AgentTool,
@@ -29,9 +29,12 @@ import type {
   ProjectSettings,
   ProjectSettingsPage,
   ProjectView,
-  ScratchpadDoc,
   ScratchpadView,
   Sidebar,
+  TemplateDefaults,
+  TemplateKind,
+  TemplateSummary,
+  TemplateView,
   TodoDoc,
   TodoView,
   ToolDefaults,
@@ -71,25 +74,48 @@ export function agentActivity(): Promise<AgentSignal[]> {
 // --- Coordination panels: the scratchpad panel and the to-do board read/write through these.
 // Each routes to the project-scoped core method; writes emit the domain event the panel re-reads on.
 
-// The full scratchpad to open and edit (its disciplined document, rendering, and revision).
+// The full scratchpad to open and edit (its Markdown body, rendering, and revision).
 export function scratchpadRead(project: number, name: string): Promise<ScratchpadView> {
   return invoke<ScratchpadView>("scratchpad_read", { project, name });
 }
 
-// Save the scratchpad, revision-guarded by `expectedRevision` (null to create). A stale write
-// rejects with the conflict message for the panel to surface.
+// Save the scratchpad's Markdown body, revision-guarded by `expectedRevision` (null to create). A
+// stale write rejects with the conflict message for the panel to surface.
 export function scratchpadWrite(
   project: number,
   name: string,
-  doc: ScratchpadDoc,
+  body: string,
   expectedRevision: number | null,
 ): Promise<ScratchpadView> {
   return invoke<ScratchpadView>("scratchpad_write", {
     project,
     name,
-    doc,
+    body,
     expectedRevision,
   });
+}
+
+// Archive or restore a scratchpad (a listing flag, not a delete). Emits the domain event the roster
+// re-reads on.
+export function scratchpadArchive(
+  project: number,
+  name: string,
+  archived: boolean,
+): Promise<ScratchpadView> {
+  return invoke<ScratchpadView>("scratchpad_archive", { project, name, archived });
+}
+
+// Save a scratchpad's Markdown to a user-chosen `.md` file: the native save dialog picks the path,
+// then the backend writes the bytes there. Returns false when the user dismisses the dialog.
+export async function exportMarkdown(defaultName: string, contents: string): Promise<boolean> {
+  const path = await save({
+    title: "Export scratchpad",
+    defaultPath: `${defaultName}.md`,
+    filters: [{ name: "Markdown", extensions: ["md"] }],
+  });
+  if (path == null) return false;
+  await invoke("export_markdown", { path, contents });
+  return true;
 }
 
 // Create a todo from its disciplined document.
@@ -129,6 +155,12 @@ export function todoAddBlocker(project: number, id: number, blocker: number): Pr
 // Remove one blocker from a todo.
 export function todoRemoveBlocker(project: number, id: number, blocker: number): Promise<TodoView> {
   return invoke<TodoView>("todo_remove_blocker", { project, id, blocker });
+}
+
+// Add a comment to a todo (local-UI path). The local user drives no bound session, so the core
+// stamps no author — a local comment reads as unattributed, never a forged label.
+export function todoCommentCreate(project: number, id: number, body: string): Promise<TodoView> {
+  return invoke<TodoView>("todo_comment_create", { project, id, body });
 }
 
 // The solo:// link to a scratchpad / todo, for the "Copy link" affordance.
@@ -361,6 +393,66 @@ export function setMcpToolGroup(group: McpFeatureGroup, enabled: boolean): Promi
 
 export function mcpSetupInfo(): Promise<McpSetupInfo> {
   return invoke<McpSetupInfo>("mcp_setup_info");
+}
+
+// ── Templates ─────────────────────────────────────────────────────────────────
+// The global template library the Settings manager edits, plus the default-per-kind selection.
+// Every write emits `TemplateChanged`, so the manager re-reads through its load-once hook. Kind
+// grouping, name uniqueness, the revision guard, and clearing a deleted default all live in the core.
+
+// Every global template of `kind`, ordered by name.
+export function templates(kind: TemplateKind): Promise<TemplateSummary[]> {
+  return invoke<TemplateSummary[]>("templates", { kind });
+}
+
+// The full global template to open and edit (its Markdown body, description, and revision).
+export function templateRead(kind: TemplateKind, name: string): Promise<TemplateView> {
+  return invoke<TemplateView>("template_read", { kind, name });
+}
+
+// Create a global template. Rejects a taken name or a blank name/body.
+export function templateCreate(
+  kind: TemplateKind,
+  name: string,
+  description: string | null,
+  body: string,
+): Promise<TemplateView> {
+  return invoke<TemplateView>("template_create", { kind, name, description, body });
+}
+
+// Replace a global template's body and description, revision-guarded by `expectedRevision`.
+export function templateUpdate(
+  kind: TemplateKind,
+  name: string,
+  description: string | null,
+  body: string,
+  expectedRevision: number,
+): Promise<TemplateView> {
+  return invoke<TemplateView>("template_update", {
+    kind,
+    name,
+    description,
+    body,
+    expectedRevision,
+  });
+}
+
+// Delete a global template; the core clears a default that pointed at it. Resolves to whether one existed.
+export function templateDelete(kind: TemplateKind, name: string): Promise<boolean> {
+  return invoke<boolean>("template_delete", { kind, name });
+}
+
+// The default-template selection per kind (global-only).
+export function templateDefaults(): Promise<TemplateDefaults> {
+  return invoke<TemplateDefaults>("template_defaults");
+}
+
+// Select (or clear, with null) the default template for `kind`. Prompt has no seed default.
+export function setDefaultTemplate(
+  kind: TemplateKind,
+  template: number | null,
+): Promise<TemplateDefaults> {
+  return invoke<TemplateDefaults>("set_default_template", { kind, template });
 }
 
 // ── Per-project settings ──────────────────────────────────────────────────────

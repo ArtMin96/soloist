@@ -6,18 +6,20 @@
 
 import type { Binding, HotkeyAction, HotkeyBindingView, HotkeyScope } from "@/domain";
 
-export const HOTKEY_SCOPE_ORDER: HotkeyScope[] = ["general", "sidebar", "terminal"];
+export const HOTKEY_SCOPE_ORDER: HotkeyScope[] = ["general", "sidebar", "terminal", "scratchpad"];
 
 export const HOTKEY_SCOPE_LABELS: Record<HotkeyScope, string> = {
   general: "General",
   sidebar: "Sidebar",
   terminal: "Terminal",
+  scratchpad: "Scratchpad",
 };
 
 export const HOTKEY_SCOPE_DESCRIPTIONS: Record<HotkeyScope, string> = {
   general: "App-wide actions, palettes, and system shortcuts.",
   sidebar: "Navigating the project tree.",
   terminal: "Active while the terminal is focused.",
+  scratchpad: "Active while the scratchpad panel is focused.",
 };
 
 // The human label for each action — one source the panel and search read.
@@ -44,6 +46,7 @@ export const HOTKEY_ACTION_LABELS: Record<HotkeyAction, string> = {
   next_process: "Next process",
   increase_terminal_font_size: "Increase terminal font size",
   decrease_terminal_font_size: "Decrease terminal font size",
+  archive_scratchpad: "Archive scratchpad",
 };
 
 // The keys that are modifiers themselves — a chord is only complete once a non-modifier key is

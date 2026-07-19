@@ -1,17 +1,16 @@
 //! Coordination scratchpad tools: the durable, project-scoped shared documents agents coordinate
 //! through.
 //!
-//! A scratchpad carries a **disciplined, typed body** — objective, context, an ordered plan,
-//! acceptance criteria, risks, and a status — so every agent records the same informative structure
-//! rather than free-form prose; the write tool's parameters present exactly those fields. Writes are
-//! **revision-guarded** (read, then write back the revision you read), so concurrent agents do not
-//! clobber each other. Scratchpads are project-scoped shared content and survive an app restart;
-//! scope is resolved in the core, not here.
+//! A scratchpad is a **free-form Markdown note** addressed by its name — the caller writes whatever
+//! structure the work needs; a project template can seed a starting shape, but nothing is enforced.
+//! Writes are **revision-guarded** (read, then write back the revision you read), so concurrent
+//! agents do not clobber each other. Scratchpads are project-scoped shared content and survive an
+//! app restart; scope is resolved in the core, not here.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
-use soloist_core::{is_link, ProjectId, ScratchpadDoc};
+use soloist_core::{is_link, ProjectId};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
@@ -24,7 +23,7 @@ use crate::tools::reply::{app_error, structured, unexpected};
 #[tool_router(router = scratchpad_router, vis = "pub(crate)")]
 impl SoloistMcp {
     #[tool(
-        description = "List the scratchpads in your effective project as one-line summaries (name, tags, revision, archived, objective). Scratchpads are durable shared documents that survive restarts."
+        description = "List the scratchpads in your effective project as one-line summaries (name, tags, revision, archived, and a one-line gist of the body). Scratchpads are durable shared documents that survive restarts."
     )]
     pub(crate) async fn scratchpad_list(&self) -> Result<CallToolResult, ErrorData> {
         match self.client.request(IpcRequest::ScratchpadList).await {
@@ -37,7 +36,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Read one scratchpad by its name or a solo:// link to it. Returns its disciplined document (objective, context, plan, acceptance_criteria, risks, status, notes), its tags, its canonical Markdown rendering, and the revision — pass that revision back to scratchpad_write to update it safely."
+        description = "Read one scratchpad by its name or a solo:// link to it. Returns its Markdown body, its tags, its canonical Markdown rendering (the body under its name as an H1), and the revision — pass that revision back to scratchpad_write to update it safely."
     )]
     pub(crate) async fn scratchpad_read(
         &self,
@@ -59,38 +58,29 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Create or update a scratchpad's disciplined document. Provide the full structure every time: objective, context, an ordered plan (steps), acceptance_criteria, risks (state \"none identified\" if none), and status; notes is optional free Markdown. Omit expected_revision to create; to update, read first and pass the revision you read — a mismatch means someone edited it first."
+        description = "Create or update a scratchpad from its Markdown content — the whole body, free-form. Do not repeat the name as a heading; it is the handle. Omit expected_revision to create; to update, read first and pass the revision you read — a mismatch means someone edited it first. On a create, leaving content empty seeds the body from the project's default scratchpad template (if one is selected); the reply's `seeded_from` names it."
     )]
     pub(crate) async fn scratchpad_write(
         &self,
         Parameters(ScratchpadWriteArg {
             name,
-            objective,
-            context,
-            plan,
-            acceptance_criteria,
-            risks,
-            status,
-            notes,
+            content,
             expected_revision,
         }): Parameters<ScratchpadWriteArg>,
     ) -> Result<CallToolResult, ErrorData> {
-        let doc = ScratchpadDoc {
-            objective,
-            context,
-            plan,
-            acceptance_criteria,
-            risks,
-            status,
-            notes,
-        };
         let request = IpcRequest::ScratchpadWrite {
             name,
-            doc,
+            body: content,
             expected_revision,
         };
         match self.client.request(request).await {
-            Ok(IpcResponse::Scratchpad(view)) => structured(&view),
+            Ok(IpcResponse::ScratchpadWritten {
+                scratchpad,
+                seeded_from,
+            }) => structured(&serde_json::json!({
+                "scratchpad": scratchpad,
+                "seeded_from": seeded_from,
+            })),
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }

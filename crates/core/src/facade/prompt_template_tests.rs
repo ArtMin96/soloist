@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::*;
 use crate::composition::CorePorts;
 use crate::ports::{ProjectRepo, TokioClock};
-use crate::testing::{FakeProjectRepo, FakePromptTemplateRepo, FakeSpawner, FakeTrustRepo};
+use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTemplateRepo, FakeTrustRepo};
 
 /// A façade over in-memory fakes with one project loaded and the template store wired. The
 /// sole loaded project gives an unbound session the single-project default scope.
@@ -26,7 +26,7 @@ fn scoped_facade() -> (Facade, SessionId) {
             Arc::new(FakeTrustRepo::new()),
             projects,
         )
-        .prompt_template_repo(Arc::new(FakePromptTemplateRepo::new()))
+        .template_repo(Arc::new(FakeTemplateRepo::new()))
         .build(),
     );
     let session = facade.open_session(None);
@@ -42,7 +42,7 @@ fn unscoped_facade() -> (Facade, SessionId) {
             Arc::new(FakeTrustRepo::new()),
             Arc::new(FakeProjectRepo::new()),
         )
-        .prompt_template_repo(Arc::new(FakePromptTemplateRepo::new()))
+        .template_repo(Arc::new(FakeTemplateRepo::new()))
         .build(),
     );
     let session = facade.open_session(None);
@@ -54,15 +54,18 @@ fn a_project_scoped_action_with_no_project_in_scope_is_refused() {
     let (facade, session) = unscoped_facade();
 
     assert!(matches!(
-        facade
-            .scoped(session)
-            .prompt_template_create(PromptScope::Project, "review", None, "body"),
+        facade.scoped(session).prompt_template_create(
+            TemplateScope::Project,
+            "review",
+            None,
+            "body"
+        ),
         Err(CoordinationError::NoProjectScope)
     ));
     assert!(matches!(
         facade
             .scoped(session)
-            .prompt_template_list(Some(PromptScope::Project)),
+            .prompt_template_list(Some(TemplateScope::Project)),
         Err(CoordinationError::NoProjectScope)
     ));
 }
@@ -73,13 +76,13 @@ fn the_global_scope_needs_no_project() {
 
     let created = facade
         .scoped(session)
-        .prompt_template_create(PromptScope::Global, "review", None, "Review {{diff}}")
+        .prompt_template_create(TemplateScope::Global, "review", None, "Review {{diff}}")
         .expect("a global create works with nothing in scope");
 
-    assert_eq!(created.scope, PromptScope::Global);
+    assert_eq!(created.scope, TemplateScope::Global);
     let read = facade
         .scoped(session)
-        .prompt_template_read(PromptScope::Global, "review")
+        .prompt_template_read(TemplateScope::Global, "review")
         .expect("read it back");
     assert_eq!(read.placeholders, vec!["diff".to_owned()]);
 }
@@ -91,7 +94,7 @@ fn a_scoped_session_round_trips_create_update_export_delete() {
     let created = facade
         .scoped(session)
         .prompt_template_create(
-            PromptScope::Project,
+            TemplateScope::Project,
             "review",
             Some("PR review"),
             "Review {{diff}}",
@@ -100,7 +103,7 @@ fn a_scoped_session_round_trips_create_update_export_delete() {
     let updated = facade
         .scoped(session)
         .prompt_template_update(
-            PromptScope::Project,
+            TemplateScope::Project,
             "review",
             Some("PR review"),
             "Review {{diff}} for {{focus}}",
@@ -111,19 +114,19 @@ fn a_scoped_session_round_trips_create_update_export_delete() {
 
     let exported = facade
         .scoped(session)
-        .prompt_template_export(PromptScope::Project, "review")
+        .prompt_template_export(TemplateScope::Project, "review")
         .expect("export");
     assert_eq!(exported.body, "Review {{diff}} for {{focus}}");
 
     assert!(facade
         .scoped(session)
-        .prompt_template_delete(PromptScope::Project, "review")
+        .prompt_template_delete(TemplateScope::Project, "review")
         .expect("delete"));
     assert!(matches!(
         facade
             .scoped(session)
-            .prompt_template_read(PromptScope::Project, "review"),
-        Err(CoordinationError::UnknownPromptTemplate)
+            .prompt_template_read(TemplateScope::Project, "review"),
+        Err(CoordinationError::UnknownTemplate)
     ));
 }
 
@@ -132,24 +135,27 @@ fn a_stale_update_and_a_taken_name_surface_their_own_errors() {
     let (facade, session) = scoped_facade();
     facade
         .scoped(session)
-        .prompt_template_create(PromptScope::Project, "review", None, "one")
+        .prompt_template_create(TemplateScope::Project, "review", None, "one")
         .expect("create");
 
     assert!(matches!(
-        facade
-            .scoped(session)
-            .prompt_template_create(PromptScope::Project, "review", None, "two"),
-        Err(CoordinationError::PromptTemplateNameTaken)
+        facade.scoped(session).prompt_template_create(
+            TemplateScope::Project,
+            "review",
+            None,
+            "two"
+        ),
+        Err(CoordinationError::TemplateNameTaken)
     ));
     assert!(matches!(
         facade.scoped(session).prompt_template_update(
-            PromptScope::Project,
+            TemplateScope::Project,
             "review",
             None,
             "two",
             9
         ),
-        Err(CoordinationError::PromptTemplateRevisionConflict {
+        Err(CoordinationError::TemplateRevisionConflict {
             expected: Some(9),
             actual: Some(1),
         })
@@ -157,8 +163,8 @@ fn a_stale_update_and_a_taken_name_surface_their_own_errors() {
     assert!(matches!(
         facade
             .scoped(session)
-            .prompt_template_create(PromptScope::Project, " ", None, " "),
-        Err(CoordinationError::InvalidPromptTemplate(_))
+            .prompt_template_create(TemplateScope::Project, " ", None, " "),
+        Err(CoordinationError::InvalidTemplate(_))
     ));
 }
 
@@ -168,13 +174,13 @@ fn updating_a_missing_template_reports_it_unknown() {
 
     assert!(matches!(
         facade.scoped(session).prompt_template_update(
-            PromptScope::Project,
+            TemplateScope::Project,
             "ghost",
             None,
             "body",
             1
         ),
-        Err(CoordinationError::UnknownPromptTemplate)
+        Err(CoordinationError::UnknownTemplate)
     ));
 }
 
@@ -183,11 +189,11 @@ fn an_unscoped_list_merges_global_and_project_rows() {
     let (facade, session) = scoped_facade();
     facade
         .scoped(session)
-        .prompt_template_create(PromptScope::Global, "review", None, "global")
+        .prompt_template_create(TemplateScope::Global, "review", None, "global")
         .expect("global create");
     facade
         .scoped(session)
-        .prompt_template_create(PromptScope::Project, "triage", None, "project")
+        .prompt_template_create(TemplateScope::Project, "triage", None, "project")
         .expect("project create");
 
     let merged = facade
@@ -200,14 +206,14 @@ fn an_unscoped_list_merges_global_and_project_rows() {
             .map(|s| (s.name.as_str(), s.scope))
             .collect::<Vec<_>>(),
         vec![
-            ("review", PromptScope::Global),
-            ("triage", PromptScope::Project)
+            ("review", TemplateScope::Global),
+            ("triage", TemplateScope::Project)
         ]
     );
 
     let global_only = facade
         .scoped(session)
-        .prompt_template_list(Some(PromptScope::Global))
+        .prompt_template_list(Some(TemplateScope::Global))
         .expect("global list");
     assert_eq!(global_only.len(), 1);
 }
@@ -217,7 +223,7 @@ fn an_unscoped_list_with_no_project_still_serves_the_global_rows() {
     let (facade, session) = unscoped_facade();
     facade
         .scoped(session)
-        .prompt_template_create(PromptScope::Global, "review", None, "global")
+        .prompt_template_create(TemplateScope::Global, "review", None, "global")
         .expect("global create");
 
     let merged = facade

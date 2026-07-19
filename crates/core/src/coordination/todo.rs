@@ -3,10 +3,10 @@
 //!
 //! Like a scratchpad and unlike a lease or timer, a todo is **durable** — it survives an app restart,
 //! so launch reconciliation never clears the todo (only its process-owned *lock*, [`§
-//! TodoLockReleaser`](super::TodoLockReleaser)). A todo carries a **disciplined, typed document**
-//! ([`TodoDoc`]): a title, a description, the acceptance criteria that define it done, the risks to
-//! watch, and a lifecycle status — so every agent records the same informative structure rather than
-//! free-form prose, and the tool schema presents exactly those fields. The document is
+//! TodoLockReleaser`](super::TodoLockReleaser)). A todo carries a small document ([`TodoDoc`]): a
+//! title, a free-form Markdown body, and a lifecycle status. The body is unconstrained (bounded only
+//! by a size cap), so a caller shapes it freely — a template seeds it, but the schema is not
+//! enforced; the `status` stays a closed enum (workflow state, not prose). The document is
 //! **revision-guarded** (optimistic concurrency): an [`update`](Todos::update) carries the revision it
 //! expects, and a stale one is refused rather than clobbering a newer edit. Around the document sit
 //! live columns the dedicated operations mutate atomically — **tags**, **blockers** (a todo cannot be
@@ -44,95 +44,48 @@ pub enum TodoStatus {
     Done,
 }
 
-/// The disciplined document every todo carries — the revision-guarded specification of the work. The
-/// fields are a fixed structure: the title, the description of what to do, the acceptance criteria
-/// that define it done, the risks to watch, and the lifecycle status. The aggregate validates it on
-/// write ([`validate`](TodoDoc::validate)). Tags, blockers, comments, and the lock are **not** part of
-/// the document — they are live state mutated by their own operations, so a tag or comment change
-/// never collides with a concurrent specification edit (mirroring the scratchpad split of doc vs
+/// The small document every todo carries — the revision-guarded specification of the work: a title,
+/// a free-form Markdown body, and the lifecycle status. The aggregate validates it on write
+/// ([`validate`](TodoDoc::validate)). Tags, blockers, comments, and the lock are **not** part of the
+/// document — they are live state mutated by their own operations, so a tag or comment change never
+/// collides with a concurrent specification edit (mirroring the scratchpad split of body vs
 /// tags/archived).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TodoDoc {
     /// A short imperative title — what this todo is.
     pub title: String,
-    /// What needs doing and any detail a worker needs to act on it.
-    pub description: String,
-    /// The testable criteria that define the todo as done.
-    pub acceptance_criteria: Vec<String>,
-    /// The risks, unknowns, or blockers to watch — state "none identified" rather than omitting.
-    pub risks: Vec<String>,
+    /// The free-form Markdown body: what needs doing and any detail a worker needs to act on it.
+    pub body: String,
     /// The lifecycle status the owner declares.
     pub status: TodoStatus,
 }
 
 impl TodoDoc {
-    /// Checks the disciplined structure is present and informative: the title and description are not
-    /// blank, and the acceptance-criteria and risks lists each have at least one non-blank entry.
-    /// Returns a single message naming **every** problem at once (so an agent fixes the document in
-    /// one revision), or `Ok(())` when it is well-formed. The status is a closed enum, so it needs no
-    /// validation.
+    /// Checks the write is well-formed: the title is not blank and the body stays within the size
+    /// cap. The body may be blank — a blank document is valid; only the title and the size ceiling
+    /// are enforced. Returns a single message naming every problem at once, or `Ok(())` when it is
+    /// well-formed. The status is a closed enum, so it needs no validation.
     pub fn validate(&self) -> Result<(), String> {
-        let mut problems: Vec<&str> = Vec::new();
+        let mut problems: Vec<String> = Vec::new();
         if self.title.trim().is_empty() {
-            problems.push("title must not be blank");
+            problems.push("title must not be blank".to_owned());
         }
-        if self.description.trim().is_empty() {
-            problems.push("description must not be blank");
-        }
-        check_list(
-            &self.acceptance_criteria,
-            "acceptance_criteria needs at least one criterion",
-            "acceptance_criteria entries must not be blank",
-            &mut problems,
-        );
-        check_list(
-            &self.risks,
-            "risks needs at least one entry",
-            "risks entries must not be blank",
-            &mut problems,
-        );
-        let mut messages: Vec<String> = problems
-            .iter()
-            .map(|problem| (*problem).to_owned())
-            .collect();
         if self.content_bytes() > MAX_TODO_DOC_BYTES {
-            messages.push(format!(
+            problems.push(format!(
                 "the document exceeds the {} KiB cap",
                 MAX_TODO_DOC_BYTES / 1024
             ));
         }
-        if messages.is_empty() {
+        if problems.is_empty() {
             Ok(())
         } else {
-            Err(messages.join("; "))
+            Err(problems.join("; "))
         }
     }
 
-    /// The total bytes of the document's text across every field — what a size cap bounds.
+    /// The total bytes of the document's text — what a size cap bounds.
     fn content_bytes(&self) -> usize {
-        self.title.len()
-            + self.description.len()
-            + self
-                .acceptance_criteria
-                .iter()
-                .map(String::len)
-                .sum::<usize>()
-            + self.risks.iter().map(String::len).sum::<usize>()
-    }
-}
-
-/// Records a list-section problem: `if_empty` when it carries nothing (empty, or every entry blank),
-/// or `if_blank` when it has a blank entry among real ones.
-fn check_list<'a>(
-    items: &[String],
-    if_empty: &'a str,
-    if_blank: &'a str,
-    problems: &mut Vec<&'a str>,
-) {
-    if items.iter().all(|item| item.trim().is_empty()) {
-        problems.push(if_empty);
-    } else if items.iter().any(|item| item.trim().is_empty()) {
-        problems.push(if_blank);
+        self.title.len() + self.body.len()
     }
 }
 
@@ -164,7 +117,7 @@ pub struct Comment {
     pub author: Option<CommentAuthor>,
 }
 
-/// A todo as a caller reads it: its durable id, the disciplined document, its tags, the ids of the
+/// A todo as a caller reads it: its durable id, its document, its tags, the ids of the
 /// todos that gate it and the subset still unmet, whether it is blocked, its comments, the process
 /// holding its lock (if any), and the revision to guard the next document write with.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -206,7 +159,7 @@ pub enum CommentOutcome {
 /// Why a todo create, update, complete, or blocker change was refused — each the caller's to fix.
 #[derive(Debug, thiserror::Error)]
 pub enum TodoError {
-    /// The document failed the disciplined-structure check; the message names every problem.
+    /// The document failed validation (a blank title or an over-cap body); the message names every problem.
     #[error("todo is not well-formed: {0}")]
     Invalid(String),
     /// The action named a todo that does not exist in the project.
@@ -234,7 +187,7 @@ pub enum TodoError {
 }
 
 /// The todo aggregate over the durable [`TodoRepo`]. The repo persists and makes each state-dependent
-/// step atomic; this aggregate owns the disciplined-document validation, the revision-guard policy,
+/// step atomic; this aggregate owns the document validation, the revision-guard policy,
 /// and the blocker gate. Cheap to clone-share via the `Arc` it holds.
 pub struct Todos {
     repo: Arc<dyn TodoRepo>,
@@ -246,7 +199,7 @@ impl Todos {
         Self { repo }
     }
 
-    /// Creates a todo in `project` from the disciplined `doc` (validated first), returning it at
+    /// Creates a todo in `project` from `doc` (validated first), returning it at
     /// revision 1. A malformed document is [`TodoError::Invalid`] and creates nothing.
     pub fn create(&self, project: ProjectId, doc: TodoDoc) -> Result<TodoView, TodoError> {
         doc.validate().map_err(TodoError::Invalid)?;

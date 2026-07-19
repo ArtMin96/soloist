@@ -1,47 +1,52 @@
 //! The coordination scratchpad repository — the core [`ScratchpadRepo`] port.
 //!
 //! One row per `(project_id, name)` in the `scratchpads` table, identified durably by the
-//! `AUTOINCREMENT` id (never reused, so a renamed scratchpad keeps its identity). The disciplined
-//! document is stored as its JSON in `doc` and the tag set as a JSON array in `tags`, so the
-//! persisted shapes are exactly the domain types and cannot drift. Each state-dependent method holds
-//! the single connection guard for its whole operation, so the revision-guarded write, the tag
-//! read-modify-write, and the rename uniqueness check are atomic — two agents editing one project's
-//! scratchpads cannot interleave to clobber an edit or duplicate a name. Unlike leases and timers a
-//! scratchpad is durable and **not** process-owned: it survives an app restart, so there is no
-//! launch-reconcile clear. The `project_id` foreign key cascades, so removing a project drops its
-//! scratchpads.
+//! `AUTOINCREMENT` id (never reused, so a renamed scratchpad keeps its identity). The free-form
+//! Markdown body is stored as-is in the `doc` column and the tag set as a JSON array in `tags`. Each
+//! state-dependent method holds the single connection guard for its whole operation, so the
+//! revision-guarded write, the tag read-modify-write, and the rename uniqueness check are atomic —
+//! two agents editing one project's scratchpads cannot interleave to clobber an edit or duplicate a
+//! name. Unlike leases and timers a scratchpad is durable and **not** process-owned: it survives an
+//! app restart, so there is no launch-reconcile clear. The `project_id` foreign key cascades, so
+//! removing a project drops its scratchpads.
 
 use rusqlite::{Connection, OptionalExtension, Row};
 use soloist_core::{
-    ProjectId, RenameResult, ScratchpadDoc, ScratchpadId, ScratchpadRepo, StoreError,
-    StoredScratchpad, TransferResult, WriteResult,
+    ProjectId, RenameResult, ScratchpadId, ScratchpadRepo, StoreError, StoredScratchpad,
+    TransferResult, WriteResult,
 };
 
 use crate::{sql_err, SqliteStore};
 
 /// The columns every read selects, in order, so [`row_to_scratchpad`] decodes one shape.
-const SCRATCHPAD_COLUMNS: &str = "id, project_id, name, doc, tags, archived, revision";
+const SCRATCHPAD_COLUMNS: &str = "id, project_id, name, doc, tags, archived, revision, updated_at";
 
 impl ScratchpadRepo for SqliteStore {
     fn write(
         &self,
         project: ProjectId,
         name: &str,
-        doc: &ScratchpadDoc,
+        body: &str,
         expected: Option<u64>,
+        now: u64,
     ) -> Result<WriteResult, StoreError> {
-        let doc_json = serialize_doc(doc)?;
         let conn = self.lock();
         // Read the current revision and update-or-insert under one guard, so the guard check and the
         // write cannot interleave with a concurrent writer.
         let current = current_revision(&conn, project, name)?;
         match (current, expected) {
-            // Update the existing row at the expected revision, bumping it.
+            // Update the existing row at the expected revision, bumping it and stamping the write.
             (Some(revision), Some(expected)) if revision == expected => {
                 conn.execute(
-                    "UPDATE scratchpads SET doc = ?3, revision = ?4
+                    "UPDATE scratchpads SET doc = ?3, revision = ?4, updated_at = ?5
                      WHERE project_id = ?1 AND name = ?2",
-                    (project.get() as i64, name, &doc_json, (revision + 1) as i64),
+                    (
+                        project.get() as i64,
+                        name,
+                        body,
+                        (revision + 1) as i64,
+                        now as i64,
+                    ),
                 )
                 .map_err(sql_err)?;
                 read_one(&conn, project, name)?
@@ -51,9 +56,9 @@ impl ScratchpadRepo for SqliteStore {
             // Create a fresh row only when none exists and the caller expected absence.
             (None, None) => {
                 conn.execute(
-                    "INSERT INTO scratchpads (project_id, name, doc, tags, archived, revision)
-                     VALUES (?1, ?2, ?3, '[]', 0, 1)",
-                    (project.get() as i64, name, &doc_json),
+                    "INSERT INTO scratchpads (project_id, name, doc, tags, archived, revision, updated_at)
+                     VALUES (?1, ?2, ?3, '[]', 0, 1, ?4)",
+                    (project.get() as i64, name, body, now as i64),
                 )
                 .map_err(sql_err)?;
                 read_one(&conn, project, name)?
@@ -270,39 +275,27 @@ fn read_one(
 }
 
 /// Decodes one row into a [`StoredScratchpad`]. The outer `rusqlite::Result` carries a column error;
-/// the inner [`StoreError`] carries a `doc`/`tags` JSON deserialize failure, kept distinct so neither
-/// is mistaken for the other.
+/// the inner [`StoreError`] carries a `tags` JSON deserialize failure, kept distinct so neither is
+/// mistaken for the other. The `doc` column is the raw Markdown body, read as-is.
 fn row_to_scratchpad(row: &Row<'_>) -> rusqlite::Result<Result<StoredScratchpad, StoreError>> {
     let id: i64 = row.get(0)?;
     let project: i64 = row.get(1)?;
     let name: String = row.get(2)?;
-    let doc_json: String = row.get(3)?;
+    let body: String = row.get(3)?;
     let tags_json: String = row.get(4)?;
     let archived: i64 = row.get(5)?;
     let revision: i64 = row.get(6)?;
-    Ok(decode_doc(&doc_json).and_then(|doc| {
-        Ok(StoredScratchpad {
-            id: ScratchpadId::from_raw(id as u64),
-            project: ProjectId::from_raw(project as u64),
-            name,
-            doc,
-            tags: decode_tags(&tags_json)?,
-            archived: archived != 0,
-            revision: revision as u64,
-        })
+    let updated_at: i64 = row.get(7)?;
+    Ok(decode_tags(&tags_json).map(|tags| StoredScratchpad {
+        id: ScratchpadId::from_raw(id as u64),
+        project: ProjectId::from_raw(project as u64),
+        name,
+        body,
+        tags,
+        archived: archived != 0,
+        revision: revision as u64,
+        updated_at: updated_at as u64,
     }))
-}
-
-/// Serializes a [`ScratchpadDoc`] to the JSON the `doc` column stores.
-fn serialize_doc(doc: &ScratchpadDoc) -> Result<String, StoreError> {
-    serde_json::to_string(doc)
-        .map_err(|err| StoreError::Backend(format!("serialize scratchpad document: {err}")))
-}
-
-/// Deserializes the `doc` column's JSON into a [`ScratchpadDoc`].
-fn decode_doc(json: &str) -> Result<ScratchpadDoc, StoreError> {
-    serde_json::from_str(json)
-        .map_err(|err| StoreError::Backend(format!("deserialize scratchpad document: {err}")))
 }
 
 /// Serializes a tag set to the JSON array the `tags` column stores.

@@ -11,6 +11,7 @@
 //! typed outcomes to the shared [`CoordinationError`].
 
 use super::scoped::ScopedFacade;
+use super::template::Seeded;
 use super::Facade;
 use crate::coordination::{
     Comment, CommentAuthor, CommentOutcome, TodoDoc, TodoError, TodoSummary, TodoView,
@@ -20,6 +21,14 @@ use crate::facade::CoordinationError;
 use crate::identity::Origin;
 use crate::ids::{ProjectId, TodoId};
 use crate::ports::StoreError;
+use crate::template::TemplateKind;
+
+/// The outcome of creating a todo: the new view, plus the name of the template that seeded its body
+/// when it was created with an empty body (`None` when nothing seeded).
+pub struct TodoCreation {
+    pub view: TodoView,
+    pub seeded_from: Option<String>,
+}
 
 impl Facade {
     // The project-scoped write surface the local-UI to-do board drives. Each mirrors its
@@ -34,10 +43,28 @@ impl Facade {
         project: ProjectId,
         doc: TodoDoc,
     ) -> Result<TodoView, CoordinationError> {
-        self.emit_todo(
+        Ok(self.create_todo(project, doc)?.view)
+    }
+
+    /// The one todo-create seam both the local UI and MCP route through: an empty body is seeded
+    /// from the default todo template, then the todo is created and its event emitted. Returns the
+    /// view plus the seeding template's name for the MCP create response; the local-UI
+    /// [`todo_create_in`](Self::todo_create_in) keeps just the view.
+    pub(crate) fn create_todo(
+        &self,
+        project: ProjectId,
+        mut doc: TodoDoc,
+    ) -> Result<TodoCreation, CoordinationError> {
+        let Seeded { body, from } = self.seed_body(TemplateKind::Todo, doc.body)?;
+        doc.body = body;
+        let view = self.emit_todo(
             project,
             self.todos.create(project, doc).map_err(map_todo_error),
-        )
+        )?;
+        Ok(TodoCreation {
+            view,
+            seeded_from: from,
+        })
     }
 
     /// [`todo_update`](Self::todo_update) scoped to `project` directly (local-UI path).
@@ -113,6 +140,24 @@ impl Facade {
         )
     }
 
+    /// Adds a comment `body` to todo `id` in `project` (local-UI path). The local user drives no
+    /// bound session, so the comment is left **unattributed** — authorship is the core's call from
+    /// the caller's identity, never the caller's to supply, so it can never be forged (an agent's
+    /// bound comment carries its label; see [`ScopedFacade::todo_comment_create`]).
+    pub fn todo_comment_create_in(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        body: &str,
+    ) -> Result<TodoView, CoordinationError> {
+        let created = self
+            .todos
+            .comment_create(project, id, body, None)?
+            .map(|(view, _)| view)
+            .ok_or(CoordinationError::UnknownTodo);
+        self.emit_todo(project, created)
+    }
+
     /// [`todo_transfer`](Self::todo_transfer) scoped to `from`/`to` directly (local-UI path — never
     /// takes a project from an untrusted surface). Moves todo `id` from `from` to `to`, keeping its
     /// comments and completion and clearing its blockers (which referenced source-project ids) and
@@ -166,11 +211,12 @@ impl Facade {
 }
 
 impl ScopedFacade<'_> {
-    /// Creates a todo from the disciplined `doc` in the session's effective project. A malformed
-    /// document is [`CoordinationError::InvalidTodo`].
-    pub fn todo_create(&self, doc: TodoDoc) -> Result<TodoView, CoordinationError> {
+    /// Creates a todo from `doc` in the session's effective project. A malformed document is
+    /// [`CoordinationError::InvalidTodo`]; an empty body is seeded from the default todo template,
+    /// and the returned [`TodoCreation`] names it.
+    pub fn todo_create(&self, doc: TodoDoc) -> Result<TodoCreation, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.todo_create_in(project, doc)
+        self.inner.create_todo(project, doc)
     }
 
     /// Every todo in the session's effective project, as one-line summaries.

@@ -126,7 +126,7 @@ fn build_facade(app: AppHandle) -> Facade {
         .scratchpad_repo(store.clone())
         .todo_repo(store.clone())
         .kv_repo(store.clone())
-        .prompt_template_repo(store.clone())
+        .template_repo(store.clone())
         .settings_repo(store.clone())
         .feedback_repo(store.clone())
         .project_settings_repo(store)
@@ -409,6 +409,13 @@ pub fn run() {
             commands::mcp_tool_groups,
             commands::set_mcp_tool_group,
             commands::mcp_setup_info,
+            commands::templates,
+            commands::template_read,
+            commands::template_create,
+            commands::template_update,
+            commands::template_delete,
+            commands::template_defaults,
+            commands::set_default_template,
             commands::project_settings_page,
             commands::project_settings,
             commands::set_project_auto_start_gate,
@@ -433,12 +440,15 @@ pub fn run() {
             commands::agent_activity,
             commands::scratchpad_read,
             commands::scratchpad_write,
+            commands::scratchpad_archive,
+            commands::export_markdown,
             commands::todo_create,
             commands::todo_update,
             commands::todo_complete,
             commands::todo_set_blockers,
             commands::todo_add_blocker,
             commands::todo_remove_blocker,
+            commands::todo_comment_create,
             commands::scratchpad_link,
             commands::todo_link,
             commands::timer_cancel,

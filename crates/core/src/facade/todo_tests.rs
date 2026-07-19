@@ -16,9 +16,7 @@ use crate::testing::{
 fn doc(title: &str, status: TodoStatus) -> TodoDoc {
     TodoDoc {
         title: title.into(),
-        description: "do it".into(),
-        acceptance_criteria: vec!["done".into()],
-        risks: vec!["none identified".into()],
+        body: "do it".into(),
         status,
     }
 }
@@ -68,7 +66,8 @@ fn a_scoped_session_creates_lists_and_completes_without_binding_a_process() {
     let created = facade
         .scoped(session)
         .todo_create(doc("ship", TodoStatus::Open))
-        .expect("create with only project scope");
+        .expect("create with only project scope")
+        .view;
     let listed = facade.scoped(session).todo_list().expect("list");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, created.id);
@@ -86,7 +85,8 @@ fn a_stale_update_surfaces_a_todo_revision_conflict() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("v1", TodoStatus::Open))
-        .expect("create");
+        .expect("create")
+        .view;
     facade
         .scoped(session)
         .todo_update(todo.id, doc("v2", TodoStatus::InProgress), 1)
@@ -107,7 +107,7 @@ fn a_stale_update_surfaces_a_todo_revision_conflict() {
 fn a_malformed_create_surfaces_an_invalid_todo() {
     let (facade, session) = scoped_facade();
     let mut bad = doc("x", TodoStatus::Open);
-    bad.description = "  ".into();
+    bad.title = "  ".into();
     assert!(matches!(
         facade.scoped(session).todo_create(bad),
         Err(CoordinationError::InvalidTodo(_))
@@ -120,11 +120,13 @@ fn completing_a_blocked_todo_surfaces_todo_blocked() {
     let blocker = facade
         .scoped(session)
         .todo_create(doc("dep", TodoStatus::Open))
-        .expect("create blocker");
+        .expect("create blocker")
+        .view;
     let gated = facade
         .scoped(session)
         .todo_create(doc("main", TodoStatus::Open))
-        .expect("create dependent");
+        .expect("create dependent")
+        .view;
     facade
         .scoped(session)
         .todo_set_blockers(gated.id, vec![blocker.id])
@@ -155,7 +157,8 @@ fn locking_a_todo_without_a_bound_process_is_refused() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("x", TodoStatus::Open))
-        .expect("create");
+        .expect("create")
+        .view;
     assert!(matches!(
         facade.scoped(session).todo_lock(todo.id),
         Err(CoordinationError::NoBoundProcess)
@@ -178,7 +181,8 @@ fn a_bound_session_locks_and_unlocks_a_todo() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("x", TodoStatus::Open))
-        .expect("create");
+        .expect("create")
+        .view;
     let locked = facade.scoped(session).todo_lock(todo.id).expect("lock");
     assert_eq!(locked.locked_by, Some(owner));
 
@@ -192,7 +196,8 @@ fn comments_round_trip_and_report_unknown_targets() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("x", TodoStatus::Open))
-        .expect("create");
+        .expect("create")
+        .view;
 
     let (_, comment) = facade
         .scoped(session)
@@ -223,12 +228,43 @@ fn an_unbound_callers_comment_is_unattributed() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("x", TodoStatus::Open))
-        .expect("create");
+        .expect("create")
+        .view;
     let (view, _) = facade
         .scoped(session)
         .todo_comment_create(todo.id, "drive-by note")
         .expect("comment");
     assert_eq!(view.comments[0].author, None);
+}
+
+#[test]
+fn the_local_comment_path_creates_an_unattributed_comment() {
+    // The local UI drives no session, so `todo_comment_create_in` posts through the core with no
+    // author — the honest in-model behavior for the unbound local user (never a forged label).
+    let projects = Arc::new(FakeProjectRepo::new());
+    let project = projects
+        .upsert(Path::new("/tmp/soloist-local-comment"), Some("p"), None)
+        .expect("seed one project")
+        .id;
+    let facade = facade_with(projects);
+    let session = facade.open_session(None);
+    let todo = facade
+        .scoped(session)
+        .todo_create(doc("x", TodoStatus::Open))
+        .expect("create")
+        .view;
+
+    let view = facade
+        .todo_comment_create_in(project, todo.id, "local note")
+        .expect("local comment");
+    assert_eq!(view.comments.len(), 1);
+    assert_eq!(view.comments[0].body, "local note");
+    assert_eq!(view.comments[0].author, None);
+
+    assert!(matches!(
+        facade.todo_comment_create_in(project, crate::ids::TodoId::from_raw(404), "x"),
+        Err(CoordinationError::UnknownTodo)
+    ));
 }
 
 #[test]
@@ -247,7 +283,8 @@ fn a_bound_process_stamps_its_actor_on_a_comment() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("x", TodoStatus::Open))
-        .expect("create");
+        .expect("create")
+        .view;
     let (view, _) = facade
         .scoped(session)
         .todo_comment_create(todo.id, "reviewed")
@@ -288,11 +325,13 @@ fn todo_transfer_in_preserves_the_document_comments_and_clears_blockers_and_lock
     let todo = facade
         .scoped(session)
         .todo_create(doc("ship", TodoStatus::InProgress))
-        .expect("create");
+        .expect("create")
+        .view;
     let blocker = facade
         .scoped(session)
         .todo_create(doc("dep", TodoStatus::Open))
-        .expect("blocker");
+        .expect("blocker")
+        .view;
     facade
         .scoped(session)
         .todo_add_blocker(todo.id, blocker.id)
@@ -345,7 +384,8 @@ fn todo_transfer_refuses_a_target_outside_the_callers_authenticated_scope() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("ship", TodoStatus::Open))
-        .expect("create in A");
+        .expect("create in A")
+        .view;
 
     // Transferring to B — which the caller does not run in — is refused (the cross-scope guard).
     assert!(matches!(
@@ -366,7 +406,8 @@ fn todo_transfer_in_refuses_an_unknown_target_project() {
     let todo = facade
         .scoped(session)
         .todo_create(doc("ship", TodoStatus::Open))
-        .expect("create in A");
+        .expect("create in A")
+        .view;
 
     // A target project that is not loaded is refused before any move, so a bad id never orphans
     // the todo — it stays readable in A.

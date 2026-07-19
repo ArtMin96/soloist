@@ -6,28 +6,30 @@
 //! adapter performs under a single guard, never a read the aggregate then acts on, so two agents
 //! editing one project's scratchpads cannot interleave to clobber an edit or duplicate a name. The
 //! revision *guard* (a write applies only at the expected revision) is part of this contract; the
-//! disciplined-document policy lives in the [`Scratchpads`](super::Scratchpads) aggregate. The
-//! bounded context owns its own port (with a [`NoopScratchpadRepo`] default), so coordination
-//! persistence stays confined to coordination. Unlike leases and timers, a scratchpad is durable
-//! and **not** process-owned: there is no owner column and no launch-reconcile clear — it survives
-//! an app restart.
+//! body validation lives in the [`Scratchpads`](super::Scratchpads) aggregate. The bounded context
+//! owns its own port (with a [`NoopScratchpadRepo`] default), so coordination persistence stays
+//! confined to coordination. Unlike leases and timers, a scratchpad is durable and **not**
+//! process-owned: there is no owner column and no launch-reconcile clear — it survives an app
+//! restart.
 
-use super::scratchpad::ScratchpadDoc;
 use crate::ids::{ProjectId, ScratchpadId};
 use crate::ports::StoreError;
 
 /// A persisted scratchpad: its store-assigned [`ScratchpadId`] (durable, stable across runs), the
-/// project it belongs to, the mutable `name` handle, the disciplined document, its tags and
+/// project it belongs to, the mutable `name` handle, the free-form Markdown `body`, its tags and
 /// archived flag, and the `revision` the next write must match.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredScratchpad {
     pub id: ScratchpadId,
     pub project: ProjectId,
     pub name: String,
-    pub doc: ScratchpadDoc,
+    pub body: String,
     pub tags: Vec<String>,
     pub archived: bool,
     pub revision: u64,
+    /// Unix millis of the last body write (0 for a row that predates the field). The recency key the
+    /// listing sorts on; unaffected by archive/rename/tag changes, which are not body edits.
+    pub updated_at: u64,
 }
 
 /// The outcome of a revision-guarded [`write`](ScratchpadRepo::write): either the write applied and
@@ -65,18 +67,21 @@ pub enum TransferResult {
 /// addressing by `name` but identified durably by a store-assigned [`ScratchpadId`] a rename does
 /// not change. Every state-dependent method is atomic with respect to the others.
 pub trait ScratchpadRepo: Send + Sync {
-    /// Creates or updates the scratchpad `(project, name)` with `doc`, **revision-guarded** in one
+    /// Creates or updates the scratchpad `(project, name)` with `body`, **revision-guarded** in one
     /// atomic step: `expected` is `None` to create (applies only if absent) or the current revision
     /// to update (applies only if it still matches). On success returns
     /// [`WriteResult::Written`] with the stored row at its new revision (1 on create, otherwise
     /// `expected + 1`); on a mismatch returns [`WriteResult::Conflict`] with the revision on record
-    /// and changes nothing.
+    /// and changes nothing. `now` is the wall-clock (unix millis) the applied write stamps
+    /// `updated_at` with — supplied by the aggregate's [`Clock`](crate::ports::Clock) so the store
+    /// stays deterministic under test.
     fn write(
         &self,
         project: ProjectId,
         name: &str,
-        doc: &ScratchpadDoc,
+        body: &str,
         expected: Option<u64>,
+        now: u64,
     ) -> Result<WriteResult, StoreError>;
 
     /// The scratchpad `(project, name)`, or `None` if there is none.
@@ -144,17 +149,19 @@ impl ScratchpadRepo for NoopScratchpadRepo {
         &self,
         project: ProjectId,
         name: &str,
-        doc: &ScratchpadDoc,
+        body: &str,
         _expected: Option<u64>,
+        now: u64,
     ) -> Result<WriteResult, StoreError> {
         Ok(WriteResult::Written(Box::new(StoredScratchpad {
             id: ScratchpadId::from_raw(0),
             project,
             name: name.to_owned(),
-            doc: doc.clone(),
+            body: body.to_owned(),
             tags: Vec::new(),
             archived: false,
             revision: 1,
+            updated_at: now,
         })))
     }
     fn read(

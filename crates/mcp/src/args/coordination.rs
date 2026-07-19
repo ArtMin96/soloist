@@ -57,27 +57,15 @@ pub(crate) struct ScratchpadNameArg {
     pub(crate) name: String,
 }
 
-/// Arguments for writing a scratchpad's disciplined document. The fields ARE the required structure
-/// — every scratchpad records the same sections, so they stay consistent and informative.
+/// Arguments for writing a scratchpad's free-form Markdown body.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub(crate) struct ScratchpadWriteArg {
     /// The scratchpad's name handle (unique within the project). Omit `expected_revision` to create
     /// it; pass the current revision (from `scratchpad_read`) to update it.
     pub(crate) name: String,
-    /// What this scratchpad is for — the goal it serves, in a sentence or two.
-    pub(crate) objective: String,
-    /// The background and current state a reader needs to act on it.
-    pub(crate) context: String,
-    /// The ordered path to the objective: each entry one step, in order. At least one.
-    pub(crate) plan: Vec<String>,
-    /// The testable criteria that define the objective as done. At least one.
-    pub(crate) acceptance_criteria: Vec<String>,
-    /// The risks, unknowns, or blockers to watch. State "none identified" rather than leaving empty.
-    pub(crate) risks: Vec<String>,
-    /// Where the work stands right now.
-    pub(crate) status: String,
-    /// Anything the structured sections do not cover — free Markdown. Optional.
-    pub(crate) notes: Option<String>,
+    /// The scratchpad's Markdown content — the whole body. Do not repeat the name as a heading; it
+    /// is the handle, not part of the body. May be empty.
+    pub(crate) content: String,
     /// The revision you are updating from, as returned by `scratchpad_read`. Omit to create a new
     /// scratchpad; a mismatch means someone edited it first, so re-read and retry.
     pub(crate) expected_revision: Option<u64>,
@@ -176,35 +164,29 @@ pub(crate) struct TodoGetArg {
     pub(crate) todo: TodoRef,
 }
 
-/// Arguments for creating a todo's disciplined document. The fields ARE the required structure —
-/// every todo records the same sections, so they stay consistent and informative.
+/// Arguments for creating a todo.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub(crate) struct TodoCreateArg {
     /// A short imperative title — what this todo is.
     pub(crate) title: String,
-    /// What needs doing and any detail a worker needs to act on it.
-    pub(crate) description: String,
-    /// The testable criteria that define the todo as done. At least one.
-    pub(crate) acceptance_criteria: Vec<String>,
-    /// The risks, unknowns, or blockers to watch. State "none identified" rather than leaving empty.
-    pub(crate) risks: Vec<String>,
-    /// The lifecycle status to start in (usually open).
-    pub(crate) status: TodoStatusArg,
+    /// The free-form Markdown body: what needs doing and any detail a worker needs. Optional — omit
+    /// for an empty body.
+    pub(crate) body: Option<String>,
+    /// The lifecycle status to start in; defaults to open when omitted.
+    pub(crate) status: Option<TodoStatusArg>,
 }
 
-/// Arguments for updating a todo's document, revision-guarded.
+/// Arguments for updating a todo, revision-guarded. The whole document is replaced, so provide the
+/// title and status you want; the body is optional (omit to clear it).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub(crate) struct TodoUpdateArg {
     /// The id of the todo to update.
     pub(crate) todo: u64,
     /// A short imperative title — what this todo is.
     pub(crate) title: String,
-    /// What needs doing and any detail a worker needs to act on it.
-    pub(crate) description: String,
-    /// The testable criteria that define the todo as done. At least one.
-    pub(crate) acceptance_criteria: Vec<String>,
-    /// The risks, unknowns, or blockers to watch. State "none identified" rather than leaving empty.
-    pub(crate) risks: Vec<String>,
+    /// The free-form Markdown body: what needs doing and any detail a worker needs. Optional — omit
+    /// for an empty body.
+    pub(crate) body: Option<String>,
     /// The lifecycle status. Set it to done only when the todo's blockers are all complete.
     pub(crate) status: TodoStatusArg,
     /// The revision you are updating from, as returned by `todo_get`. A mismatch means someone

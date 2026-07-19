@@ -1,46 +1,44 @@
-import { useId } from "react";
-import { Link2 } from "lucide-react";
-import { FieldList } from "@/components/orchestration/FieldList";
+import { Archive, ArchiveRestore, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import type { ScratchpadForm } from "@/store/scratchpadForm";
+import { ScratchpadBody } from "@/components/orchestration/ScratchpadBody";
 import type { ScratchpadConflict } from "@/store/useScratchpadEditor";
 
 interface ScratchpadEditorProps {
   name: string;
-  form: ScratchpadForm;
+  initialBody: string;
   revision: number | null;
-  saving: boolean;
+  /** Bumped on open/reload so the editor body remounts with fresh content and undo history. */
+  mountKey: number;
   conflict: ScratchpadConflict | null;
   error: string | null;
-  onChange: (form: ScratchpadForm) => void;
-  onSave: () => void;
+  /** Whether the open scratchpad is archived — flips the header control between Archive and Restore. */
+  archived: boolean;
+  onSave: (markdown: string) => Promise<void>;
   onReload: () => void;
   onCopyLink: () => void;
+  /** Archives the open scratchpad, or restores it when already archived (also bound to Ctrl+Shift+W). */
+  onArchive: () => void;
 }
 
-// The structured editor over a scratchpad's disciplined document — a field per section, not a free
-// Markdown textarea, so every scratchpad records the same shape. Presentational: the form and every
-// callback arrive as props; the parent owns the read/write and revision guard. A stale save surfaces
-// the conflict banner (the core already refused it, nothing was clobbered) with a reload to the
-// other edit; validity is the core's call, surfaced as the error line.
+// The scratchpad's editing surface: a persistent header (name, revision, actions), the conflict
+// banner, and the remounting editor body. Presentational — the body, the revision guard, and every
+// callback arrive as props; the parent owns the read/write. A stale save surfaces the conflict banner
+// (the core already refused it, so nothing was clobbered) with a Reload to the other edit; while it
+// shows, autosave is paused (`paused`) so the rejected edit is never retried behind the user's back.
+// Validity is the core's call, surfaced as the error line.
 export function ScratchpadEditor({
   name,
-  form,
+  initialBody,
   revision,
-  saving,
+  mountKey,
   conflict,
   error,
-  onChange,
+  archived,
   onSave,
   onReload,
   onCopyLink,
+  onArchive,
 }: ScratchpadEditorProps) {
-  const fieldId = useId();
-  const set = <K extends keyof ScratchpadForm>(key: K, value: ScratchpadForm[K]) =>
-    onChange({ ...form, [key]: value });
-
   return (
     <div className="flex h-full min-w-0 flex-col">
       <header className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
@@ -52,6 +50,17 @@ export function ScratchpadEditor({
             revision {revision}
           </span>
         )}
+        <Button variant="ghost" size="sm" onClick={onArchive}>
+          {archived ? (
+            <>
+              <ArchiveRestore aria-hidden /> Restore
+            </>
+          ) : (
+            <>
+              <Archive aria-hidden /> Archive
+            </>
+          )}
+        </Button>
         <Button variant="ghost" size="sm" onClick={onCopyLink}>
           <Link2 aria-hidden /> Copy link
         </Button>
@@ -72,81 +81,19 @@ export function ScratchpadEditor({
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3">
-        <label htmlFor={`${fieldId}-objective`} className="flex flex-col gap-1.5">
-          <span className="text-[0.6875rem] font-[550] text-muted-foreground">Objective</span>
-          <Input
-            id={`${fieldId}-objective`}
-            value={form.objective}
-            placeholder="What this scratchpad is for"
-            onChange={(event) => set("objective", event.target.value)}
-            className="h-7 text-[0.8125rem]"
-          />
-        </label>
+      {error && (
+        <p className="mx-3 mt-3 text-[0.8125rem] text-destructive" aria-live="polite">
+          {error}
+        </p>
+      )}
 
-        <label htmlFor={`${fieldId}-context`} className="flex flex-col gap-1.5">
-          <span className="text-[0.6875rem] font-[550] text-muted-foreground">Context</span>
-          <Textarea
-            id={`${fieldId}-context`}
-            value={form.context}
-            placeholder="The background a reader needs"
-            onChange={(event) => set("context", event.target.value)}
-            className="min-h-16 text-[0.8125rem]"
-          />
-        </label>
-
-        <FieldList
-          label="Plan"
-          items={form.plan}
-          placeholder="A step"
-          onChange={(items) => set("plan", items)}
-        />
-        <FieldList
-          label="Acceptance criteria"
-          items={form.acceptance_criteria}
-          placeholder="A condition for done"
-          onChange={(items) => set("acceptance_criteria", items)}
-        />
-        <FieldList
-          label="Risks"
-          items={form.risks}
-          placeholder='A risk (or "none identified")'
-          onChange={(items) => set("risks", items)}
-        />
-
-        <label htmlFor={`${fieldId}-status`} className="flex flex-col gap-1.5">
-          <span className="text-[0.6875rem] font-[550] text-muted-foreground">Status</span>
-          <Input
-            id={`${fieldId}-status`}
-            value={form.status}
-            placeholder="e.g. in progress"
-            onChange={(event) => set("status", event.target.value)}
-            className="h-7 text-[0.8125rem]"
-          />
-        </label>
-
-        <label htmlFor={`${fieldId}-notes`} className="flex flex-col gap-1.5">
-          <span className="text-[0.6875rem] font-[550] text-muted-foreground">
-            Notes (optional)
-          </span>
-          <Textarea
-            id={`${fieldId}-notes`}
-            value={form.notes}
-            placeholder="Anything else, in Markdown"
-            onChange={(event) => set("notes", event.target.value)}
-            className="min-h-16 text-[0.8125rem]"
-          />
-        </label>
-      </div>
-
-      <footer className="flex h-11 shrink-0 items-center justify-end gap-3 border-t px-3">
-        {error && (
-          <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-destructive">{error}</span>
-        )}
-        <Button size="sm" onClick={onSave} disabled={saving}>
-          {saving ? "Saving…" : "Save"}
-        </Button>
-      </footer>
+      <ScratchpadBody
+        key={`${name}:${mountKey}`}
+        initialBody={initialBody}
+        name={name}
+        onSave={onSave}
+        paused={conflict != null}
+      />
     </div>
   );
 }

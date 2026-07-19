@@ -19,7 +19,7 @@ use crate::agents::{AgentLineage, Agents, IdleTracker};
 use crate::composition::CorePorts;
 use crate::config::ConfigEngine;
 use crate::configchange::ConfigSync;
-use crate::coordination::{Kv, Leases, PromptTemplates, Scratchpads, Timers, Todos};
+use crate::coordination::{Kv, Leases, Scratchpads, Templates, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::FileWatcher;
 use crate::identity::Identity;
@@ -69,12 +69,16 @@ mod scratchpad;
 mod session;
 mod settings;
 mod support;
+mod template;
 mod todo;
 
 pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
 pub use scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
+pub use scratchpad::ScratchpadWrite;
 pub use support::SetupIntegrationError;
+pub use template::Seeded;
+pub use todo::TodoCreation;
 
 /// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot
 /// (see [`crate::events`]) rather than growing memory without limit.
@@ -102,7 +106,7 @@ pub struct Facade {
     timers: Timers,
     scratchpads: Scratchpads,
     todos: Todos,
-    prompt_templates: PromptTemplates,
+    templates: Templates,
     settings: Arc<SettingsStore<(), Settings>>,
     project_settings: Arc<SettingsStore<ProjectId, ProjectSettings>>,
     feedback: Feedback,
@@ -130,7 +134,7 @@ impl Facade {
             timer_repo,
             scratchpad_repo,
             todo_repo,
-            prompt_template_repo,
+            template_repo,
             settings_repo,
             project_settings_repo,
             feedback_repo,
@@ -144,9 +148,9 @@ impl Facade {
             // or resuming a timer re-evaluates the schedule at once.
             timers: Timers::new(timer_repo, clock.clone(), Arc::new(Notify::new())),
             agents: Agents::new(agent_tools, version_probe, clock.clone()),
-            scratchpads: Scratchpads::new(scratchpad_repo),
+            scratchpads: Scratchpads::new(scratchpad_repo, clock.clone()),
             todos: Todos::new(todo_repo),
-            prompt_templates: PromptTemplates::new(prompt_template_repo),
+            templates: Templates::new(template_repo),
             settings: Arc::new(SettingsStore::new(settings_repo)),
             project_settings: Arc::new(SettingsStore::new(project_settings_repo)),
             feedback: Feedback::new(feedback_repo, clock.clone()),

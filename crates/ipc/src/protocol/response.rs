@@ -5,10 +5,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AcquireOutcome, AgentTool, Comment, ExportedPromptTemplate, FeedbackEntry, IntegrationWrite,
-    KvEntry, LeaseView, LinkContent, McpToolGroups, ProcessId, ProcessView, ProjectId, ProjectView,
-    PromptTemplateSummary, PromptTemplateView, ScratchpadSummary, ScratchpadView,
-    SetWhenIdleOutcome, StartSummary, TimerView, TodoSummary, TodoView, Whoami,
+    AcquireOutcome, AgentTool, Comment, ExportedTemplate, FeedbackEntry, IntegrationWrite, KvEntry,
+    LeaseView, LinkContent, McpToolGroups, ProcessId, ProcessView, ProjectId, ProjectView,
+    ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome, StartSummary, TemplateSummary,
+    TemplateView, TimerView, TodoSummary, TodoView, Whoami,
 };
 
 use crate::error::IpcError;
@@ -73,18 +73,31 @@ pub enum IpcResponse {
     TimerChanged(bool),
     /// Every timer the caller owns (answer to [`IpcRequest::TimerList`]).
     Timers(Vec<TimerView>),
-    /// One scratchpad (answer to a read, write, rename, tag, or archive request). Reuses the core
-    /// view so the wire shape — including the canonically rendered Markdown — cannot drift.
+    /// One scratchpad (answer to a read, rename, tag, or archive request). Reuses the core view so
+    /// the wire shape — including the canonically rendered Markdown — cannot drift.
     Scratchpad(ScratchpadView),
+    /// A written scratchpad plus the template that seeded it (answer to [`IpcRequest::ScratchpadWrite`]).
+    /// `seeded_from` names the default template whose body seeded an empty create, or `None` on an
+    /// update or when nothing seeded.
+    ScratchpadWritten {
+        scratchpad: ScratchpadView,
+        seeded_from: Option<String>,
+    },
     /// Every scratchpad in scope, as one-line summaries (answer to [`IpcRequest::ScratchpadList`]).
     Scratchpads(Vec<ScratchpadSummary>),
     /// The distinct scratchpad tags in scope (answer to [`IpcRequest::ScratchpadTagsList`]).
     ScratchpadTags(Vec<String>),
     /// Whether a scratchpad was deleted (answer to [`IpcRequest::ScratchpadDelete`]).
     ScratchpadDeleted(bool),
-    /// One todo (answer to a get, create, update, tag, blocker, or lock request). Reuses the core
-    /// view so the wire shape cannot drift.
+    /// One todo (answer to a get, update, tag, blocker, or lock request). Reuses the core view so
+    /// the wire shape cannot drift.
     Todo(TodoView),
+    /// A created todo plus the template that seeded it (answer to [`IpcRequest::TodoCreate`]).
+    /// `seeded_from` names the default template whose body seeded an empty body, or `None`.
+    TodoCreated {
+        todo: TodoView,
+        seeded_from: Option<String>,
+    },
     /// Every todo in scope, as one-line summaries (answer to [`IpcRequest::TodoList`]).
     Todos(Vec<TodoSummary>),
     /// A todo and a new comment's id (answer to [`IpcRequest::TodoCommentCreate`]).
@@ -113,14 +126,14 @@ pub enum IpcResponse {
     /// the wire shape cannot drift.
     Feedback(FeedbackEntry),
     /// One prompt template (answer to a read, create, or update request). Reuses the core view so
-    /// the wire shape — including the derived placeholders — cannot drift.
-    PromptTemplate(PromptTemplateView),
+    /// the wire shape — including the kind and derived placeholders — cannot drift.
+    PromptTemplate(TemplateView),
     /// The templates in scope, as summaries (answer to [`IpcRequest::PromptTemplateList`]).
-    PromptTemplates(Vec<PromptTemplateSummary>),
+    PromptTemplates(Vec<TemplateSummary>),
     /// Whether a template was deleted (answer to [`IpcRequest::PromptTemplateDelete`]).
     PromptTemplateDeleted(bool),
     /// A template's portable export envelope (answer to [`IpcRequest::PromptTemplateExport`]).
-    PromptTemplateExport(ExportedPromptTemplate),
+    PromptTemplateExport(ExportedTemplate),
     /// What a guide write did (answer to [`IpcRequest::SetupAgentIntegration`]). Reuses the core
     /// type so the wire shape cannot drift.
     IntegrationWritten(IntegrationWrite),

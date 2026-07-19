@@ -12,14 +12,18 @@
 //! the whole command surface stays under one `commands::` namespace in the invoke handler.
 
 mod coordination;
+mod export;
 mod orchestration;
 mod project_settings;
 mod settings;
+mod templates;
 mod timers;
 pub use coordination::*;
+pub use export::*;
 pub use orchestration::*;
 pub use project_settings::*;
 pub use settings::*;
+pub use templates::*;
 pub use timers::*;
 
 use std::path::Path;

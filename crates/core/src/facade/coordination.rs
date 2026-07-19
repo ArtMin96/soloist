@@ -34,8 +34,8 @@ pub enum CoordinationError {
     /// or auto-release a lease on close).
     #[error("not bound to a process; bind a session before owning a timer or lease")]
     NoBoundProcess,
-    /// A scratchpad write carried a malformed document — the disciplined-structure check failed; the
-    /// message names every problem so the caller can fix the document in one revision.
+    /// A scratchpad write was malformed — a blank name or an over-cap body; the message names every
+    /// problem so the caller can fix it in one revision.
     #[error("scratchpad is not well-formed: {0}")]
     InvalidScratchpad(String),
     /// A scratchpad write expected a different revision than the one on record — a concurrent edit
@@ -52,8 +52,8 @@ pub enum CoordinationError {
     /// A scratchpad rename targeted a name already used by another scratchpad in the project.
     #[error("a scratchpad with that name already exists")]
     ScratchpadNameTaken,
-    /// A todo write carried a malformed document — the disciplined-structure check failed; the
-    /// message names every problem so the caller can fix the document in one revision.
+    /// A todo write was malformed — a blank title or an over-cap body; the message names every
+    /// problem so the caller can fix it in one revision.
     #[error("todo is not well-formed: {0}")]
     InvalidTodo(String),
     /// A todo update expected a different revision than the one on record — a concurrent edit landed
@@ -79,23 +79,23 @@ pub enum CoordinationError {
     /// A comment action named one that does not exist on the todo.
     #[error("no comment under that id on that todo")]
     UnknownComment,
-    /// A prompt-template write carried malformed content; the message names every problem so the
-    /// caller can fix it in one revision.
-    #[error("prompt template is not well-formed: {0}")]
-    InvalidPromptTemplate(String),
-    /// A prompt-template update expected a different revision than the one on record — a
-    /// concurrent edit landed first, so the write was refused rather than clobbering it.
-    #[error("prompt template revision conflict (expected {expected:?}, found {actual:?})")]
-    PromptTemplateRevisionConflict {
+    /// A template write carried malformed content; the message names every problem so the caller
+    /// can fix it in one revision.
+    #[error("template is not well-formed: {0}")]
+    InvalidTemplate(String),
+    /// A template update expected a different revision than the one on record — a concurrent edit
+    /// landed first, so the write was refused rather than clobbering it.
+    #[error("template revision conflict (expected {expected:?}, found {actual:?})")]
+    TemplateRevisionConflict {
         expected: Option<u64>,
         actual: Option<u64>,
     },
-    /// A prompt-template action named one that does not exist in the addressed scope.
-    #[error("no prompt template under that name")]
-    UnknownPromptTemplate,
-    /// A prompt-template create named a template that already exists in the addressed scope.
-    #[error("a prompt template with that name already exists")]
-    PromptTemplateNameTaken,
+    /// A template action named one that does not exist in the addressed scope.
+    #[error("no template under that name")]
+    UnknownTemplate,
+    /// A template create named one that already exists in the addressed scope and kind.
+    #[error("a template with that name already exists")]
+    TemplateNameTaken,
     /// A `solo://` link could not be parsed — it is not in the
     /// `solo://proj/<project>/scratchpad|todo/<id>` shape.
     #[error("not a valid solo:// link")]

@@ -1,12 +1,12 @@
 //! Versioned, idempotent SQLite migrations for the durable store.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use soloist_core::{AgentTool, StoreError};
 
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 12;
+pub(crate) const SCHEMA_VERSION: i64 = 15;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -230,11 +230,80 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         .map_err(sql_err)?;
     }
 
+    if version < 13 {
+        // Scratchpad and todo documents go free-form: a scratchpad `doc` becomes its raw Markdown
+        // body and a todo `doc` becomes `{title, body, status}`. The former structured JSON is
+        // converted in place, laid out as Markdown sections so no field is lost. Idempotent (a body
+        // already converted is left untouched), like every step here.
+        crate::doc_to_markdown::convert(conn)?;
+    }
+
+    if version < 14 {
+        // Generalize `prompt_templates` into the unified `templates` table: add a `kind` column
+        // (existing rows are prompts — the DEFAULT backfills them), and re-key uniqueness on
+        // (kind, scope, name) so the same name may exist as a prompt, a scratchpad shape, and a
+        // todo shape. Guarded so a re-run after a partial failure is a no-op, like every step here:
+        // the rename runs only while the old table exists and the new one does not.
+        if table_exists(conn, "prompt_templates")? && !table_exists(conn, "templates")? {
+            conn.execute_batch(
+                "ALTER TABLE prompt_templates RENAME TO templates;
+                 ALTER TABLE templates ADD COLUMN kind TEXT NOT NULL DEFAULT 'prompt';
+                 DROP INDEX IF EXISTS prompt_templates_scope_name;
+                 CREATE UNIQUE INDEX IF NOT EXISTS templates_kind_scope_name
+                     ON templates (kind, COALESCE(project_id, 0), name);",
+            )
+            .map_err(sql_err)?;
+        }
+    }
+
+    if version < 15 {
+        // A scratchpad gains an `updated_at` wall clock (unix millis of its last body write), so the
+        // list can be ordered by recency, not only by name. Existing rows backfill to 0 — their last
+        // edit time is unknown, so a recency sort lists them oldest — and are stamped on the next
+        // write. Guarded on the table existing (created at v6, so always present in a real chain) and
+        // the column's absence, so a re-run after a partial failure is a no-op.
+        if table_exists(conn, "scratchpads")? && !column_exists(conn, "scratchpads", "updated_at")?
+        {
+            conn.execute_batch(
+                "ALTER TABLE scratchpads ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;",
+            )
+            .map_err(sql_err)?;
+        }
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
     }
     Ok(())
+}
+
+/// Whether a table of `name` exists — used by the guarded rename in the v14 step so it stays a
+/// no-op on a re-run.
+fn table_exists(conn: &Connection, name: &str) -> Result<bool, StoreError> {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [name],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|found| found.is_some())
+    .map_err(sql_err)
+}
+
+/// Whether `table` has a column named `column` — used by the guarded `ADD COLUMN` in the v15 step
+/// (SQLite has no `ADD COLUMN IF NOT EXISTS`) so it stays a no-op on a re-run. `table` is a code
+/// literal here, never caller input, so interpolating it into the `PRAGMA` is safe.
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, StoreError> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(sql_err)?;
+    let mut names = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(sql_err)?;
+    names
+        .try_fold(false, |found, name| Ok(found || name? == column))
+        .map_err(sql_err)
 }
 
 /// Seeds the built-in agent providers into a fresh `agent_tools` table, preserving their
@@ -285,7 +354,7 @@ mod tests {
             "settings",
             "project_settings",
             "feedback",
-            "prompt_templates",
+            "templates",
         ] {
             let exists = conn
                 .query_row(
@@ -355,17 +424,15 @@ mod tests {
             "the upgrade advances a populated database to the current schema"
         );
 
-        // A table added after v6 now exists...
-        let has_prompt_templates = conn
-            .query_row(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prompt_templates'",
-                [],
-                |_| Ok(()),
-            )
-            .is_ok();
+        // A table added after v6 now exists — the unified `templates` table (the prompt-templates
+        // table generalized by v14), and the pre-v14 `prompt_templates` name is gone.
         assert!(
-            has_prompt_templates,
+            table_exists(&conn, "templates").expect("check templates"),
             "the upgrade creates tables added after the intermediate version"
+        );
+        assert!(
+            !table_exists(&conn, "prompt_templates").expect("check prompt_templates"),
+            "v14 renames prompt_templates away"
         );
 
         // ...and the pre-existing rows survive it.
@@ -379,6 +446,20 @@ mod tests {
         assert_eq!(
             scratchpads, 1,
             "rows in an intermediate-version database survive the upgrade"
+        );
+
+        // v15 adds `updated_at`; a pre-existing row backfills to 0 (its last-write time is unknown)
+        // rather than failing the NOT NULL column or being dropped.
+        let updated_at: i64 = conn
+            .query_row(
+                "SELECT updated_at FROM scratchpads WHERE name = 'note'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read the backfilled updated_at");
+        assert_eq!(
+            updated_at, 0,
+            "an intermediate-version scratchpad backfills updated_at to 0"
         );
     }
 

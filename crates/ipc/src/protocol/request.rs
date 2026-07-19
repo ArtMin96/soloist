@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    IntegrationFile, ProcessId, ProjectId, PromptScope, ScratchpadDoc, TimerId, TodoDoc, TodoId,
+    IntegrationFile, ProcessId, ProjectId, TemplateScope, TimerId, TodoDoc, TodoId,
 };
 
 /// A request from an IPC client to the running app. The server resolves identity and
@@ -124,12 +124,12 @@ pub enum IpcRequest {
     TimerResume { timer: TimerId },
     /// Every timer the session's bound process owns.
     TimerList,
-    /// Create or replace the scratchpad `name` in the session's effective project with the
-    /// disciplined `doc`, revision-guarded: `expected_revision` is omitted to create or the current
-    /// revision to update.
+    /// Create or replace the scratchpad `name` in the session's effective project with the Markdown
+    /// `body`, revision-guarded: `expected_revision` is omitted to create or the current revision to
+    /// update.
     ScratchpadWrite {
         name: String,
-        doc: ScratchpadDoc,
+        body: String,
         expected_revision: Option<u64>,
     },
     /// The scratchpad `name` in the session's effective project.
@@ -220,28 +220,28 @@ pub enum IpcRequest {
     SubmitFeedback { message: String },
     /// The templates the session can address: one scope's when given, else global merged
     /// with the effective project's.
-    PromptTemplateList { scope: Option<PromptScope> },
+    PromptTemplateList { scope: Option<TemplateScope> },
     /// The template `name` in the chosen scope (project = the session's effective one).
-    PromptTemplateRead { scope: PromptScope, name: String },
+    PromptTemplateRead { scope: TemplateScope, name: String },
     /// Create the template `name` in the chosen scope; a taken name is refused.
     PromptTemplateCreate {
-        scope: PromptScope,
+        scope: TemplateScope,
         name: String,
         description: Option<String>,
         body: String,
     },
     /// Replace the template `name`'s description and body, revision-guarded.
     PromptTemplateUpdate {
-        scope: PromptScope,
+        scope: TemplateScope,
         name: String,
         description: Option<String>,
         body: String,
         expected_revision: u64,
     },
     /// Delete the template `name` from the chosen scope.
-    PromptTemplateDelete { scope: PromptScope, name: String },
+    PromptTemplateDelete { scope: TemplateScope, name: String },
     /// The template `name` as a portable export envelope.
-    PromptTemplateExport { scope: PromptScope, name: String },
+    PromptTemplateExport { scope: TemplateScope, name: String },
     /// Write the agent guide into the session's effective project root as a managed section.
     SetupAgentIntegration { file: IntegrationFile },
 }

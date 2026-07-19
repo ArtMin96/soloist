@@ -8,7 +8,7 @@
 > This is **not** the gap log. Undocumented-behavior decisions live in `plan/05 §12`. This file
 > is for cases where Solo's behavior *is* documented and we chose to do something different.
 
-Status key: 🟢 settled · 🟡 revisit in a later phase.
+Status key: 🟢 settled · 🟡 revisit in a later phase · ⚪ superseded (reversed by a later decision; the entry is kept as history).
 
 ---
 
@@ -224,7 +224,33 @@ both refused.
 
 ---
 
-## D-7 — Scratchpads carry an enforced disciplined structure, not free-form Markdown 🟢
+## D-7 — Scratchpads carry an enforced disciplined structure, not free-form Markdown ⚪ SUPERSEDED
+
+> **⚪ SUPERSEDED (owner decision, 2026-07-18).** The owner reversed the enforced-structure
+> directive: scratchpads (and todos, [D-8](#d-8--todos-carry-an-enforced-disciplined-structure-and-a-blocker-gate--superseded)) are now **free-form Markdown documents** — `Scratchpad { name, body: String, tags,
+> archived, revision }` — edited in a rich, Notion-style TipTap editor (slash commands, autosave,
+> undo/redo). This **realigns Soloist with Solo's actual model**, which `plan/05` §6/§7 already record
+> as free-form ("a scratchpad is a free-form Markdown note", `plan/05`:233; "a todo is a free-form item
+> with a title and an arbitrary body", `plan/05`:282), so the entry below no longer describes a
+> divergence — it is history. Size caps (256 KiB scratchpad / 64 KiB todo) and the revision guard are
+> unchanged; **blank bodies are now valid** (name/title + caps are the only invariants). Migration v13
+> converts every stored structured doc to sectioned Markdown one-way, using the old canonical `render()`
+> layout as the faithful converter (proven zero-loss by a seeded-row test).
+>
+> **New in place of the enforced schema — a deliberate Soloist EXTENSION beyond Solo:** a **unified
+> Templates system**. One `Template { kind: TemplateKind::{Prompt, Scratchpad, Todo}, … }` aggregate
+> (generalized from the prompt-template vertical — no parallel implementation) lets users author
+> scratchpad/todo templates in a Settings surface with the same editor, select a global default per
+> kind, and have every creation path (UI **and** MCP) seed a new empty document from the selected
+> template through **one core seam**. This keeps the coordination value the enforced structure provided
+> — "write it the same way every time" — but as **user policy an author configures**, not a schema the
+> core imposes; a template is a suggestion an agent may still ignore (the accepted trade-off). Solo has
+> no equivalent templates concept, so this is a Soloist original, recorded here and as a gap decision in
+> [`plan/05` §12](plan/05-solo-reference-and-sources.md). Full design + research evidence: Soloist
+> scratchpad `rich-editor-design` (revision 3); shipped across build phases A–F, evidenced in
+> `PROGRESS.md`.
+>
+> *The original entry is retained below unchanged for the historical record.*
 
 **Introduced:** Phase 9 (Coordination, G1/G2). **Per the project owner's directive** (2026-06-24):
 scratchpads and todos must have *disciplined, informative schemas* — "I don't want to let AI write
@@ -274,9 +300,20 @@ clean-room per-tool semantics are recorded in `plan/05` §12.
 
 ---
 
-## D-8 — Todos carry an enforced disciplined structure and a blocker gate 🟢
+## D-8 — Todos carry an enforced disciplined structure and a blocker gate ⚪ SUPERSEDED
 
-**Introduced:** Phase 9 (Coordination, G3/G4/G5). Same project-owner directive as [D-7](#d-7--scratchpads-carry-an-enforced-disciplined-structure-not-free-form-markdown-): the
+> **⚪ SUPERSEDED (owner decision, 2026-07-18)** — the enforced-structure half only. A todo's
+> **document** is now free-form: `TodoDoc { title, body: String, status: TodoStatus }` (256/64 KiB caps
+> and the revision guard unchanged; blank bodies valid), edited in the same rich editor as scratchpads,
+> seeded on create from the selected Todo template through the one core seam. This is the reversal
+> described in [D-7](#d-7--scratchpads-carry-an-enforced-disciplined-structure-not-free-form-markdown--superseded); see it for the Templates extension and the migration (v13 for the todo doc). **The
+> blocker gate, the process-owned lock, comment authorship, and the durable identity are NOT superseded**
+> — they are live columns around the document, unchanged, and remain the correct clean-room record below.
+> Full design: Soloist scratchpad `rich-editor-design`; shipped in build phases A–F (`PROGRESS.md`).
+>
+> *The original entry is retained below unchanged for the historical record.*
+
+**Introduced:** Phase 9 (Coordination, G3/G4/G5). Same project-owner directive as [D-7](#d-7--scratchpads-carry-an-enforced-disciplined-structure-not-free-form-markdown--superseded): the
 shared coordination artifacts must have *disciplined, informative schemas*, not free-form bodies.
 
 **Solo (ref `plan/05` §7):** a todo is a free-form item with a title and an arbitrary body, tags,

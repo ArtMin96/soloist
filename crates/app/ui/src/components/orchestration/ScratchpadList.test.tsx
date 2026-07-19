@@ -6,13 +6,14 @@ import type { ScratchpadSummary } from "@/domain";
 
 afterEach(cleanup);
 
-const pad = (id: number, name: string, objective = ""): ScratchpadSummary => ({
+const pad = (id: number, name: string, gist = ""): ScratchpadSummary => ({
   id,
   name,
   tags: [],
   archived: false,
   revision: 1,
-  objective,
+  gist,
+  updated_at: 0,
 });
 
 const pads = [pad(1, "plan", "the plan"), pad(2, "research"), pad(3, "risks")];

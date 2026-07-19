@@ -2,21 +2,30 @@ import { $, browser } from "@wdio/globals";
 import { WAIT } from "../harness/waits.js";
 import { waitUntilOr } from "../harness/waitUntilOr.js";
 
-// The scratchpad surface: a roster listbox on the left, and a structured editor on the right for the
+// The scratchpad surface: a roster listbox on the left, and a rich-text editor on the right for the
 // open document. Every handle reads what the user reads — the roster's accessible listbox, the
-// editor's objective field by its label's accessible name, the revision the editor and roster show,
-// and the conflict banner's alert role. Selectors live only here (charter §3.2); the spec asserts on
-// the values these return.
+// editor's contenteditable body by the stable `data-editor` handle, the revision the editor and
+// roster show, and the conflict banner's alert role. Selectors live only here (charter §3.2); the
+// spec asserts on the values these return. The editor is a `contenteditable`, so an edit is driven
+// as a deterministic toolbar toggle and the save is flushed with Ctrl+S. WebKitGTK/WebDriver does
+// not deliver the `beforeinput`/text events ProseMirror needs to insert typed characters, so the
+// edit is made by clicking a formatting control (a real mouse interaction, which does land) rather
+// than by typing — and the autosave debounce is the backstop should the Ctrl+S keydown be dropped.
 const ROSTER = '[role="listbox"][aria-label="Scratchpads"]';
 const OPTION = '[role="option"]';
-// The objective field. Its accessible name ("Objective") is shared with its own <label>'s text
-// span, so `aria/Objective` resolves to the span, not the input (verified: setValue silently no-ops
-// on it). The input is instead reached by its stable id suffix — a structural handle the editor sets
-// (`id={`${fieldId}-objective`}`), the only "-objective" input on the surface. Not styling-coupled.
-const OBJECTIVE = 'input[id$="-objective"]';
-const SAVE = "aria/Save";
+// The editable rich-text region — a ProseMirror contenteditable, marked with a stable structural
+// handle the editor sets (`data-editor="rich-text"`), not styling-coupled.
+const BODY = '[data-editor="rich-text"]';
+// The Heading-1 formatting control in the editor toolbar. Clicking it toggles the caret's block to a
+// heading — a document change autosave marks dirty — without relying on dropped keystrokes.
+const TOOLBAR_H1 = 'button[aria-label="Heading 1"]';
 const RELOAD = "aria/Reload";
 const CONFLICT = '[role="alert"]';
+
+// The W3C WebDriver code point for the left Control key (WebdriverIO's `Key.Control`), held as the
+// modifier of a chord when it leads a `keys` array. Used to press Ctrl+S — the editor's deterministic
+// save flush. Even if the chord were dropped, the autosave debounce is the backstop that still saves.
+const CONTROL = "\uE009";
 
 /** One scratchpad as the roster summarises it. */
 interface RosterRow {
@@ -108,46 +117,68 @@ export const scratchpadPanel = {
   },
 
   /**
-   * Opens the roster row named `name` into the editor and waits for the document to load — the Save
-   * button appears only once the editor has read the document, so it is the loaded signal. The
-   * editor loads at the row's current revision, which the caller reads from the roster.
+   * Opens the roster row named `name` into the editor and waits for the document to load — the
+   * rich-text body appears only once the editor has read the document and its lazy chunk has
+   * mounted, so it is the loaded signal. The editor loads at the row's current revision, which the
+   * caller reads from the roster.
    */
   async open(name: string): Promise<void> {
     await this.optionElement(name).waitForClickable({ timeout: WAIT.render });
     await this.optionElement(name).click();
-    await $(SAVE).waitForDisplayed({ timeout: WAIT.core });
-  },
-
-  /** Replaces the objective field's contents. */
-  async setObjective(text: string): Promise<void> {
-    await $(OBJECTIVE).setValue(text);
-  },
-
-  /** The objective field's current value. */
-  async objectiveValue(): Promise<string> {
-    return $(OBJECTIVE).getValue();
+    await $(BODY).waitForDisplayed({ timeout: WAIT.core });
   },
 
   /**
-   * Waits until the objective field settles on `expected` — used after a reload, whose read is
+   * Makes a real edit in the open editor by toggling the first block to a heading from the toolbar —
+   * a document change the editor emits and autosave marks dirty. It is driven by a mouse click, not
+   * typed text, because WebKitGTK/WebDriver does not deliver the input events ProseMirror needs to
+   * insert characters. Focusing the body first places the caret the toggle acts on. It confirms the
+   * edit by the heading the toggle produced — a persistent structural change — rather than the
+   * fleeting "unsaved" status, which autosave clears within ~1 s (by then raising the conflict).
+   */
+  async edit(): Promise<void> {
+    await $(BODY).waitForClickable({ timeout: WAIT.render });
+    await $(BODY).click();
+    await $(TOOLBAR_H1).waitForClickable({ timeout: WAIT.render });
+    await $(TOOLBAR_H1).click();
+    await $(BODY).$("h1").waitForDisplayed({ timeout: WAIT.render });
+  },
+
+  /**
+   * The open editor's rendered body text — what the contenteditable shows, with block structure
+   * flattened to text. Used after a reload to read the concurrent writer's content back.
+   */
+  async bodyText(): Promise<string> {
+    return $(BODY).getText();
+  },
+
+  /**
+   * Waits until the editor body settles on `expected` — used after a reload, whose read is
    * asynchronous (the conflict banner clears before the fresh document arrives). Reaching the
-   * expected value is the assertion that the reloaded content is what the concurrent writer wrote,
+   * expected content is the assertion that the reloaded body is what the concurrent writer wrote,
    * with the window's rejected edit gone.
    */
-  async waitForObjective(expected: string): Promise<void> {
+  async waitForBody(expected: string): Promise<void> {
     let last = "";
     await waitUntilOr(
       async () => {
-        last = await this.objectiveValue();
-        return last === expected;
+        last = await this.bodyText();
+        // The remounted editor re-serializes the body, which may add block whitespace around the
+        // prose; a containment check reads the concurrent writer's content without coupling to it.
+        return last.includes(expected);
       },
-      () => `the objective never settled on "${expected}"; last seen: "${last}"`,
+      () => `the editor body never settled on "${expected}"; last seen: "${last}"`,
     );
   },
 
-  /** Clicks Save on the open editor. */
+  /**
+   * Flushes the pending edit deterministically with Ctrl+S — the editor intercepts it and saves
+   * immediately, so the save never depends on the autosave debounce timing. The stale write is what
+   * the core refuses, raising the conflict.
+   */
   async save(): Promise<void> {
-    await $(SAVE).click();
+    await $(BODY).click();
+    await browser.keys([CONTROL, "s"]);
   },
 
   /**
@@ -165,10 +196,21 @@ export const scratchpadPanel = {
     return revision;
   },
 
-  /** Reloads the open scratchpad fresh, discarding the window's local edits (the conflict fix). */
+  /**
+   * Reloads the open scratchpad fresh, discarding the window's local edits (the conflict fix).
+   * WebKitGTK/WebDriver can drop a single click under parallel load, so it re-clicks Reload until the
+   * conflict banner clears — the same retry the pane-open uses for a dropped menu keystroke.
+   */
   async reload(): Promise<void> {
-    await $(RELOAD).click();
-    await $(CONFLICT).waitForDisplayed({ reverse: true, timeout: WAIT.core });
+    const conflict = $(CONFLICT);
+    await browser.waitUntil(
+      async () => {
+        if (!(await conflict.isDisplayed())) return true;
+        await $(RELOAD).click();
+        return !(await conflict.isDisplayed());
+      },
+      { timeout: WAIT.core, timeoutMsg: "the conflict banner never cleared after Reload" },
+    );
   },
 
   /**

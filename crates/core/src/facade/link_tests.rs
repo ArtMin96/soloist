@@ -5,31 +5,21 @@ use std::sync::Arc;
 
 use super::*;
 use crate::composition::CorePorts;
-use crate::coordination::{Link, LinkContent, ScratchpadDoc, TodoDoc, TodoStatus};
+use crate::coordination::{Link, LinkContent, TodoDoc, TodoStatus};
 use crate::ids::{ProjectId, ScratchpadId};
 use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{
     FakeProjectRepo, FakeScratchpadRepo, FakeSpawner, FakeTodoRepo, FakeTrustRepo,
 };
 
-fn scratchpad_doc() -> ScratchpadDoc {
-    ScratchpadDoc {
-        objective: "Ship v1".into(),
-        context: "RC cut".into(),
-        plan: vec!["Cut RC".into()],
-        acceptance_criteria: vec!["soak green".into()],
-        risks: vec!["none identified".into()],
-        status: "in progress".into(),
-        notes: None,
-    }
+fn scratchpad_body() -> String {
+    "## Objective\nShip v1\n\n## Status\nin progress".to_owned()
 }
 
 fn todo_doc() -> TodoDoc {
     TodoDoc {
         title: "wire it".into(),
-        description: "do it".into(),
-        acceptance_criteria: vec!["done".into()],
-        risks: vec!["none identified".into()],
+        body: "do it".into(),
         status: TodoStatus::Open,
     }
 }
@@ -63,8 +53,9 @@ fn a_scratchpad_link_resolves_within_scope() {
     let (facade, session, project) = facade();
     let pad = facade
         .scoped(session)
-        .scratchpad_write("release-plan", scratchpad_doc(), None)
-        .expect("create");
+        .scratchpad_write("release-plan", scratchpad_body(), None)
+        .expect("create")
+        .view;
     let link = Link::scratchpad(project, pad.id).to_link();
 
     let content = facade
@@ -80,7 +71,8 @@ fn a_todo_link_resolves_within_scope() {
     let todo = facade
         .scoped(session)
         .todo_create(todo_doc())
-        .expect("create");
+        .expect("create")
+        .view;
     let link = Link::todo(project, todo.id).to_link();
 
     let content = facade
@@ -95,8 +87,9 @@ fn a_foreign_scope_link_is_refused_not_resolved() {
     let (facade, session, project) = facade();
     let pad = facade
         .scoped(session)
-        .scratchpad_write("release-plan", scratchpad_doc(), None)
-        .expect("create");
+        .scratchpad_write("release-plan", scratchpad_body(), None)
+        .expect("create")
+        .view;
     // The same id but a different project must be refused, never resolved to our content.
     let foreign = Link::scratchpad(ProjectId::from_raw(project.get() + 1), pad.id).to_link();
 

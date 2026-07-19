@@ -9,13 +9,11 @@
 
 use std::sync::Arc;
 
-use soloist_core::{
-    Facade, ProjectId, ScratchpadDoc, ScratchpadId, ScratchpadView, TodoDoc, TodoId, TodoView,
-};
+use soloist_core::{Facade, ProjectId, ScratchpadId, ScratchpadView, TodoDoc, TodoId, TodoView};
 use tauri::State;
 
-/// The full scratchpad `name` in `project` — its disciplined document, rendering, and revision —
-/// for the panel to open and edit.
+/// The full scratchpad `name` in `project` — its Markdown body, rendering, and revision — for the
+/// panel to open and edit.
 #[tauri::command]
 pub async fn scratchpad_read(
     facade: State<'_, Arc<Facade>>,
@@ -28,18 +26,35 @@ pub async fn scratchpad_read(
         .map_err(|err| err.to_string())
 }
 
-/// Saves the scratchpad `name` in `project`, revision-guarded by `expected_revision` (omit to
-/// create). A stale revision returns the conflict as an error string for the panel to surface.
+/// Saves the scratchpad `name` in `project` with the Markdown `body`, revision-guarded by
+/// `expected_revision` (omit to create). A stale revision returns the conflict as an error string
+/// for the panel to surface.
 #[tauri::command]
 pub async fn scratchpad_write(
     facade: State<'_, Arc<Facade>>,
     project: ProjectId,
     name: String,
-    doc: ScratchpadDoc,
+    body: String,
     expected_revision: Option<u64>,
 ) -> Result<ScratchpadView, String> {
     facade
-        .blocking(move |f| f.scratchpad_write_in(project, &name, doc, expected_revision))
+        .blocking(move |f| f.scratchpad_write_in(project, &name, body, expected_revision))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Archives or restores the scratchpad `name` in `project` — a listing flag, not a delete. Routes to
+/// the one core archive behaviour the MCP surface also drives; the panel re-reads on the emitted
+/// `ScratchpadChanged`.
+#[tauri::command]
+pub async fn scratchpad_archive(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+    name: String,
+    archived: bool,
+) -> Result<ScratchpadView, String> {
+    facade
+        .blocking(move |f| f.scratchpad_archive_in(project, &name, archived))
         .await
         .map_err(|err| err.to_string())
 }
@@ -123,6 +138,22 @@ pub async fn todo_remove_blocker(
 ) -> Result<TodoView, String> {
     facade
         .blocking(move |f| f.todo_remove_blocker_in(project, id, blocker))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Adds a comment `body` to todo `id` in `project` (local-UI path). The local user drives no bound
+/// session, so the core leaves the comment unattributed — authorship is the core's call, never the
+/// caller's, so a to-do board comment can never carry a forged author.
+#[tauri::command]
+pub async fn todo_comment_create(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+    id: TodoId,
+    body: String,
+) -> Result<TodoView, String> {
+    facade
+        .blocking(move |f| f.todo_comment_create_in(project, id, &body))
         .await
         .map_err(|err| err.to_string())
 }

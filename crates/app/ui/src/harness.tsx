@@ -393,19 +393,21 @@ const AUDIT_PADS: ScratchpadSummary[] = [
     id: 1,
     name: "research",
     revision: 4,
-    objective: "Survey the auth options",
+    gist: "Survey the auth options",
     tags: [],
     archived: false,
+    updated_at: 3_000,
   },
   {
     id: 2,
     name: "plan",
     revision: 12,
-    objective: "Migration steps and order",
+    gist: "Migration steps and order",
     tags: [],
     archived: false,
+    updated_at: 2_000,
   },
-  { id: 3, name: "risks", revision: 1, objective: "", tags: [], archived: false },
+  { id: 3, name: "risks", revision: 1, gist: "", tags: [], archived: false, updated_at: 1_000 },
 ];
 
 function AuditView() {

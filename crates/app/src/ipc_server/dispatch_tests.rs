@@ -1,11 +1,11 @@
 use super::*;
 use soloist_core::testing::{
-    terminal_registration, FakeLockRepo, FakeProjectRepo, FakePromptTemplateRepo, FakeSettingsRepo,
-    FakeSpawner, FakeTrustRepo,
+    terminal_registration, FakeLockRepo, FakeProjectRepo, FakeSettingsRepo, FakeSpawner,
+    FakeTemplateRepo, FakeTrustRepo,
 };
 use soloist_core::{
     AcquireOutcome, CorePorts, DomainEvent, IntegrationFile, McpFeatureGroup, Origin, ProcStatus,
-    ProcessId, ProjectRepo, PromptScope, StartSummary, TokioClock,
+    ProcessId, ProjectRepo, StartSummary, TemplateScope, TokioClock,
 };
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -847,7 +847,7 @@ fn facade_with_templates() -> Arc<Facade> {
             Arc::new(FakeTrustRepo::new()),
             projects,
         )
-        .prompt_template_repo(Arc::new(FakePromptTemplateRepo::new()))
+        .template_repo(Arc::new(FakeTemplateRepo::new()))
         .build(),
     ))
 }
@@ -861,7 +861,7 @@ async fn prompt_templates_route_create_read_update_delete_and_export() {
         &facade,
         session,
         IpcRequest::PromptTemplateCreate {
-            scope: PromptScope::Project,
+            scope: TemplateScope::Project,
             name: "review".into(),
             description: None,
             body: "Review {{diff}}".into(),
@@ -878,7 +878,7 @@ async fn prompt_templates_route_create_read_update_delete_and_export() {
         &facade,
         session,
         IpcRequest::PromptTemplateUpdate {
-            scope: PromptScope::Project,
+            scope: TemplateScope::Project,
             name: "review".into(),
             description: Some("PR review".into()),
             body: "Review {{diff}} for {{focus}}".into(),
@@ -895,7 +895,7 @@ async fn prompt_templates_route_create_read_update_delete_and_export() {
         &facade,
         session,
         IpcRequest::PromptTemplateExport {
-            scope: PromptScope::Project,
+            scope: TemplateScope::Project,
             name: "review".into(),
         },
     )
@@ -912,7 +912,7 @@ async fn prompt_templates_route_create_read_update_delete_and_export() {
             &facade,
             session,
             IpcRequest::PromptTemplateDelete {
-                scope: PromptScope::Project,
+                scope: TemplateScope::Project,
                 name: "review".into(),
             },
         )
@@ -924,12 +924,12 @@ async fn prompt_templates_route_create_read_update_delete_and_export() {
             &facade,
             session,
             IpcRequest::PromptTemplateRead {
-                scope: PromptScope::Project,
+                scope: TemplateScope::Project,
                 name: "review".into(),
             },
         )
         .await,
-        Err(IpcError::UnknownPromptTemplate)
+        Err(IpcError::UnknownTemplate)
     );
 }
 
@@ -938,8 +938,8 @@ async fn an_unscoped_template_list_merges_global_and_project_rows() {
     let facade = facade_with_templates();
     let session = facade.open_session(None);
     for (scope, name) in [
-        (PromptScope::Global, "shared"),
-        (PromptScope::Project, "mine"),
+        (TemplateScope::Global, "shared"),
+        (TemplateScope::Project, "mine"),
     ] {
         handle_request(
             &facade,
@@ -977,7 +977,7 @@ async fn a_stale_template_update_maps_to_the_wire_conflict() {
         &facade,
         session,
         IpcRequest::PromptTemplateCreate {
-            scope: PromptScope::Project,
+            scope: TemplateScope::Project,
             name: "review".into(),
             description: None,
             body: "one".into(),
@@ -991,7 +991,7 @@ async fn a_stale_template_update_maps_to_the_wire_conflict() {
             &facade,
             session,
             IpcRequest::PromptTemplateUpdate {
-                scope: PromptScope::Project,
+                scope: TemplateScope::Project,
                 name: "review".into(),
                 description: None,
                 body: "two".into(),
@@ -999,7 +999,7 @@ async fn a_stale_template_update_maps_to_the_wire_conflict() {
             },
         )
         .await,
-        Err(IpcError::PromptTemplateRevisionConflict {
+        Err(IpcError::TemplateRevisionConflict {
             expected: Some(9),
             actual: Some(1),
         })

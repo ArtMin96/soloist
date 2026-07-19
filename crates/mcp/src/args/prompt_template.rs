@@ -4,7 +4,8 @@ use rmcp::schemars;
 use serde::Deserialize;
 
 /// The scope a prompt-template tool addresses — a closed set, mirroring the core
-/// `PromptScope` on the wire; the handler converts it.
+/// `TemplateScope` on the wire; the handler converts it. The wire name and shape are unchanged
+/// (Global/Project), so the prompt-template tool contract stays byte-stable.
 #[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum PromptScopeArg {
@@ -12,11 +13,11 @@ pub(crate) enum PromptScopeArg {
     Project,
 }
 
-impl From<PromptScopeArg> for soloist_core::PromptScope {
+impl From<PromptScopeArg> for soloist_core::TemplateScope {
     fn from(scope: PromptScopeArg) -> Self {
         match scope {
-            PromptScopeArg::Global => soloist_core::PromptScope::Global,
-            PromptScopeArg::Project => soloist_core::PromptScope::Project,
+            PromptScopeArg::Global => soloist_core::TemplateScope::Global,
+            PromptScopeArg::Project => soloist_core::TemplateScope::Project,
         }
     }
 }

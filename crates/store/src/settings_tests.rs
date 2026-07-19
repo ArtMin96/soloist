@@ -1,7 +1,8 @@
 use soloist_core::{
     Appearance, Binding, FontScale, FontWeight, HotkeyAction, Hotkeys, Integrations, LetterSpacing,
     LineHeight, McpFeatureGroup, McpToolGroups, Notifications, ProcessCpuThreshold,
-    ProcessMemThreshold, Settings, SettingsRepo, Sidebar, TerminalAppearance, Theme, ToolDefaults,
+    ProcessMemThreshold, Settings, SettingsRepo, Sidebar, TemplateDefaults, TemplateId,
+    TerminalAppearance, Theme, ToolDefaults,
 };
 use tempfile::tempdir;
 
@@ -60,6 +61,10 @@ fn fully_populated() -> Settings {
         },
         notifications: Notifications { enabled: false },
         mcp_tool_groups,
+        template_defaults: TemplateDefaults {
+            scratchpad: Some(TemplateId::from_raw(3)),
+            todo: None,
+        },
     }
 }
 

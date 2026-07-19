@@ -19,6 +19,45 @@ export type ProcStatus =
 // "Ready" = the awaited port bound.
 export type Readiness = "Ungated" | "Waiting" | "Ready";
 
+// The kind of document a template seeds (mirrors core::TemplateKind, serde snake_case). One
+// unified template aggregate serves all three.
+export type TemplateKind = "prompt" | "scratchpad" | "todo";
+
+// Which scope a template lives in (mirrors core::TemplateScope). The Settings manager edits the
+// global library; the project scope is reached over MCP.
+export type TemplateScope = "global" | "project";
+
+// A template in a listing: identity, kind, handle, one-line description, the {{placeholders}} the
+// core derives from the body, scope, and revision (the guard the next edit carries).
+export interface TemplateSummary {
+  id: number;
+  kind: TemplateKind;
+  name: string;
+  description: string | null;
+  placeholders: string[];
+  scope: TemplateScope;
+  revision: number;
+}
+
+// A template as the manager reads it to edit: the full Markdown body plus everything in a summary.
+export interface TemplateView {
+  id: number;
+  kind: TemplateKind;
+  name: string;
+  description: string | null;
+  body: string;
+  placeholders: string[];
+  scope: TemplateScope;
+  revision: number;
+}
+
+// The selected default template per seedable kind (mirrors core::settings::TemplateDefaults).
+// Global-only in v1; `null` means "seed an empty document". Prompt has no seed default.
+export interface TemplateDefaults {
+  scratchpad: number | null;
+  todo: number | null;
+}
+
 export interface ProcessView {
   id: number;
   project: number;
@@ -225,7 +264,10 @@ export type DomainEvent =
   | { type: "LeaseChanged"; project: number; key: string }
   // Keyed by the scratchpad's `name` handle (the addressing key its surface uses).
   | { type: "ScratchpadChanged"; project: number; name: string }
-  | { type: "KvChanged"; project: number; key: string };
+  | { type: "KvChanged"; project: number; key: string }
+  // A template of `kind` was created, updated, or deleted; a templates surface re-reads that
+  // kind's list (coalesced). Carries no project — the selected default is read separately.
+  | { type: "TemplateChanged"; kind: TemplateKind };
 
 export interface AppInfo {
   name: string;
@@ -238,12 +280,10 @@ export interface AppInfo {
 
 export type TodoStatus = "open" | "blocked" | "in_progress" | "done";
 
-// The disciplined, revision-guarded specification a todo carries.
+// The revision-guarded document a todo carries: a title, a free-form Markdown body, and status.
 export interface TodoDoc {
   title: string;
-  description: string;
-  acceptance_criteria: string[];
-  risks: string[];
+  body: string;
   status: TodoStatus;
 }
 
@@ -314,37 +354,28 @@ export interface LeaseView {
   expires_unix_millis: number;
 }
 
-// A scratchpad in a listing (identity, handle, tags, archived flag, revision, objective gist).
+// A scratchpad in a listing (identity, handle, tags, archived flag, revision, and a one-line gist of
+// the body — its first non-heading line).
 export interface ScratchpadSummary {
   id: number;
   name: string;
   tags: string[];
   archived: boolean;
   revision: number;
-  objective: string;
+  gist: string;
+  /** Unix millis of the last body write (0 for a document predating the field) — the recency sort key. */
+  updated_at: number;
 }
 
-// A scratchpad's disciplined, typed document — the fields ARE the required structure (each list
-// needs at least one non-blank entry); `status` is a free label and `notes` optional Markdown.
-export interface ScratchpadDoc {
-  objective: string;
-  context: string;
-  plan: string[];
-  acceptance_criteria: string[];
-  risks: string[];
-  status: string;
-  notes: string | null;
-}
-
-// A scratchpad as the panel reads it: the disciplined document plus its tags, revision (to guard the
-// next write), and the canonical Markdown rendering the core derives.
+// A scratchpad as the panel reads it: the free-form Markdown body plus its tags, revision (to guard
+// the next write), and the canonical Markdown rendering the core derives (the body under its name).
 export interface ScratchpadView {
   id: number;
   name: string;
   tags: string[];
   archived: boolean;
   revision: number;
-  doc: ScratchpadDoc;
+  body: string;
   rendered: string;
 }
 
@@ -452,7 +483,7 @@ export interface Sidebar {
 
 // The context a hotkey is active in (mirrors core::HotkeyScope). Bindings only conflict within
 // the same scope.
-export type HotkeyScope = "general" | "sidebar" | "terminal";
+export type HotkeyScope = "general" | "sidebar" | "terminal" | "scratchpad";
 
 // A named, remappable action (mirrors core::HotkeyAction). The closed set is the single source
 // the settings panel and the keyboard handler iterate.
@@ -478,7 +509,8 @@ export type HotkeyAction =
   | "previous_process"
   | "next_process"
   | "increase_terminal_font_size"
-  | "decrease_terminal_font_size";
+  | "decrease_terminal_font_size"
+  | "archive_scratchpad";
 
 // A key chord (mirrors core::Binding): the modifier flags plus the main key (a
 // `KeyboardEvent.key` token, e.g. "K", "ArrowDown", "="). `super` is the core's `super_key`.

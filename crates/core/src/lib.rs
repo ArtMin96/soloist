@@ -42,6 +42,7 @@ pub mod settings;
 pub mod shellenv;
 pub mod supervisor;
 pub mod support;
+pub mod template;
 pub mod terminal;
 pub mod trust;
 
@@ -64,15 +65,14 @@ pub use config::{
 pub use configchange::{ConfigSync, Rename, TrustReviewCommand};
 pub use coordination::{
     is_link, placeholders, AcquireOutcome, Comment, CommentAuthor, CommentEdit, CommentOutcome,
-    ExportedPromptTemplate, FireCond, IdleMode, Kv, KvEntry, KvRepo, LeaseReleaser, LeaseView,
-    Leases, Link, LinkContent, LinkError, LinkTarget, LockRepo, NewTimer, NoopKvRepo, NoopLockRepo,
-    NoopPromptTemplateRepo, NoopScratchpadRepo, NoopTimerRepo, NoopTodoRepo, PromptScope,
-    PromptTemplateRepo, PromptTemplateSummary, PromptTemplateView, PromptTemplateWriteResult,
-    PromptTemplates, RenameError, RenameResult, ScratchpadDoc, ScratchpadRepo, ScratchpadSummary,
-    ScratchpadView, Scratchpads, SetWhenIdleOutcome, StoredLease, StoredPromptTemplate,
-    StoredScratchpad, StoredTimer, StoredTodo, TimerRepo, TimerScheduler, TimerStatus, TimerView,
-    Timers, TodoDoc, TodoError, TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView,
-    TodoWriteResult, Todos, TransferResult, WriteError, WriteResult,
+    ExportedTemplate, FireCond, IdleMode, Kv, KvEntry, KvRepo, LeaseReleaser, LeaseView, Leases,
+    Link, LinkContent, LinkError, LinkTarget, LockRepo, NewTimer, NoopKvRepo, NoopLockRepo,
+    NoopScratchpadRepo, NoopTemplateRepo, NoopTimerRepo, NoopTodoRepo, RenameError, RenameResult,
+    ScratchpadRepo, ScratchpadSummary, ScratchpadView, Scratchpads, SetWhenIdleOutcome,
+    StoredLease, StoredScratchpad, StoredTemplate, StoredTimer, StoredTodo, TemplateRepo,
+    TemplateSummary, TemplateView, TemplateWriteResult, Templates, TimerRepo, TimerScheduler,
+    TimerStatus, TimerView, Timers, TodoDoc, TodoError, TodoLockReleaser, TodoRepo, TodoStatus,
+    TodoSummary, TodoView, TodoWriteResult, Todos, TransferResult, WriteError, WriteResult,
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
@@ -85,8 +85,7 @@ pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, 
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, Whoami};
 pub use ids::{
-    ProcessId, ProjectId, PromptTemplateId, ScratchpadId, SessionId, TimerId, TodoId,
-    PROCESS_ID_ENV,
+    ProcessId, ProjectId, ScratchpadId, SessionId, TemplateId, TimerId, TodoId, PROCESS_ID_ENV,
 };
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use notify::{NoopNotifier, Notification, NotificationReactor, Notifier};
@@ -109,7 +108,8 @@ pub use settings::{
     Appearance, Binding, FontScale, FontWeight, HotkeyAction, HotkeyBindingView, HotkeyScope,
     Hotkeys, Integrations, LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups,
     NoopSettingsRepo, Notifications, ProcessCpuThreshold, ProcessMemThreshold, ProjectSettings,
-    Settings, SettingsRepo, SettingsStore, Sidebar, TerminalAppearance, Theme, ToolDefaults,
+    Settings, SettingsRepo, SettingsStore, Sidebar, TemplateDefaults, TerminalAppearance, Theme,
+    ToolDefaults,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError, SupervisorPorts};
@@ -118,5 +118,6 @@ pub use support::{
     FeedbackError, FeedbackRepo, IntegrationFile, IntegrationWrite, IntegrationWriteError,
     NoopFeedbackRepo,
 };
+pub use template::{TemplateKind, TemplateScope};
 pub use terminal::{LogLine, PtyChunk, RenderedScreen};
 pub use trust::{Trust, TrustStore};

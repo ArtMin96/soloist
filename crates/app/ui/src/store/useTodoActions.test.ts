@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { afterEach, describe, it, vi } from "vitest";
-import { todoLink } from "@/api";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { todoCommentCreate, todoLink } from "@/api";
 import { useTodoActions } from "@/store/useTodoActions";
 import { expectCopyLinkWritesCoreLink } from "@/test/copyLinkContract";
 
@@ -10,6 +11,7 @@ import { expectCopyLinkWritesCoreLink } from "@/test/copyLinkContract";
 vi.mock("@/api", () => ({
   todoComplete: vi.fn(),
   todoLink: vi.fn(),
+  todoCommentCreate: vi.fn(),
 }));
 
 describe("useTodoActions copy link", () => {
@@ -23,4 +25,30 @@ describe("useTodoActions copy link", () => {
       target: 3,
       link: "solo://proj/7/todo/3",
     }));
+});
+
+describe("useTodoActions comment", () => {
+  const comment = vi.mocked(todoCommentCreate);
+  afterEach(() => vi.clearAllMocks());
+
+  it("posts the comment through the core for the scoped project", async () => {
+    comment.mockResolvedValue({} as never);
+    const { result } = renderHook(() => useTodoActions(7));
+
+    await act(async () => {
+      await result.current.comment(3, "looks good");
+    });
+    expect(comment).toHaveBeenCalledWith(7, 3, "looks good");
+    expect(result.current.errorById[3]).toBeUndefined();
+  });
+
+  it("surfaces a rejection in the todo's error slot and rethrows so the draft survives", async () => {
+    comment.mockRejectedValue("no such todo");
+    const { result } = renderHook(() => useTodoActions(7));
+
+    await act(async () => {
+      await expect(result.current.comment(3, "orphan note")).rejects.toBe("no such todo");
+    });
+    await waitFor(() => expect(result.current.errorById[3]).toBe("no such todo"));
+  });
 });

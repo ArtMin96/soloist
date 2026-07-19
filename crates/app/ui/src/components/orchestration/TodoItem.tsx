@@ -1,11 +1,26 @@
-import { ChevronRight, Link2, Lock } from "lucide-react";
+import { ChevronRight, Link2, Lock, Pencil } from "lucide-react";
 import { Collapsible } from "radix-ui";
+import { CommentComposer } from "@/components/orchestration/CommentComposer";
 import { CommentList } from "@/components/orchestration/CommentList";
+import { TodoEditor, type TodoConflict } from "@/components/orchestration/TodoEditor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TODO_STATUS } from "@/lib/todo";
 import { cn } from "@/lib/utils";
-import type { TodoView } from "@/domain";
+import type { TodoDoc, TodoView } from "@/domain";
+
+// The edit surface's state for this row, present only while it is being edited. The board owns the
+// single edit session (one todo at a time) and hands it here so the expanded row swaps its read
+// view for the editor.
+export interface TodoEditState {
+  initial: TodoDoc;
+  mountKey: number;
+  conflict: TodoConflict | null;
+  error: string | null;
+  onSave: (doc: TodoDoc) => Promise<void>;
+  onReload: () => void;
+  onDone: () => void;
+}
 
 interface TodoItemProps {
   todo: TodoView;
@@ -17,12 +32,18 @@ interface TodoItemProps {
   error: string | undefined;
   onComplete: () => void;
   onCopyLink: () => void;
+  onComment: (body: string) => Promise<void>;
+  onStartEdit: () => void;
+  /** Non-null only while this row is the one being edited. */
+  edit: TodoEditState | null;
 }
 
 // One todo on the board: a row with its declared status, the derived blocked gate, and its lock
-// owner, expanding to the disciplined document, its blockers (the unmet ones stand out — the gate),
-// its comments with their authors, and the actions. Presentational: completing routes to the
-// core, which refuses a blocked todo with a message surfaced below — the UI never pre-empts the gate.
+// owner, expanding to its document and actions. Two expanded modes share the row: the read view
+// (Markdown body, blockers, comments, a comment composer, and the actions) and, while editing, the
+// inline editor in place of the read view. Presentational — completing routes to the core, which
+// refuses a blocked todo with a message surfaced below (the UI never pre-empts the gate); creating,
+// editing, and commenting all route to the same core commands agents use.
 export function TodoItem({
   todo,
   open,
@@ -33,6 +54,9 @@ export function TodoItem({
   error,
   onComplete,
   onCopyLink,
+  onComment,
+  onStartEdit,
+  edit,
 }: TodoItemProps) {
   const done = todo.doc.status === "done";
   const unmet = new Set(todo.blocked_by);
@@ -72,70 +96,72 @@ export function TodoItem({
       </Collapsible.Trigger>
 
       <Collapsible.Content className="flex flex-col gap-3 px-6 pb-3 text-[0.8125rem]">
-        {todo.doc.description && (
-          <p className="whitespace-pre-wrap text-foreground">{todo.doc.description}</p>
+        {edit ? (
+          <TodoEditor
+            key={edit.mountKey}
+            initial={edit.initial}
+            conflict={edit.conflict}
+            error={edit.error}
+            onSave={edit.onSave}
+            onReload={edit.onReload}
+            onDone={edit.onDone}
+          />
+        ) : (
+          <>
+            {todo.doc.body && (
+              <p className="whitespace-pre-wrap text-foreground">{todo.doc.body}</p>
+            )}
+
+            {todo.blockers.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <span className="text-[0.6875rem] font-[550] text-muted-foreground">Blockers</span>
+                <ul className="flex flex-col gap-0.5">
+                  {todo.blockers.map((id) => (
+                    <li key={id} className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 truncate",
+                          unmet.has(id) ? "text-foreground" : "text-muted-foreground line-through",
+                        )}
+                      >
+                        {titleOf(id) ?? `Todo #${id}`}
+                      </span>
+                      <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
+                        {unmet.has(id) ? "open" : "done"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1.5">
+              <CommentList comments={todo.comments} />
+              <CommentComposer onSubmit={onComment} />
+            </div>
+
+            {error && (
+              <p role="alert" className="text-[0.8125rem] text-destructive">
+                {error}
+              </p>
+            )}
+
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={onStartEdit}>
+                <Pencil aria-hidden /> Edit
+              </Button>
+              {!done && (
+                <Button size="sm" onClick={onComplete} disabled={busy}>
+                  {busy ? "Completing…" : "Complete"}
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={onCopyLink}>
+                <Link2 aria-hidden /> Copy link
+              </Button>
+            </div>
+          </>
         )}
-
-        <DetailList label="Acceptance criteria" items={todo.doc.acceptance_criteria} />
-        <DetailList label="Risks" items={todo.doc.risks} />
-
-        {todo.blockers.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <span className="text-[0.6875rem] font-[550] text-muted-foreground">Blockers</span>
-            <ul className="flex flex-col gap-0.5">
-              {todo.blockers.map((id) => (
-                <li key={id} className="flex items-center gap-2">
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate",
-                      unmet.has(id) ? "text-foreground" : "text-muted-foreground line-through",
-                    )}
-                  >
-                    {titleOf(id) ?? `Todo #${id}`}
-                  </span>
-                  <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
-                    {unmet.has(id) ? "open" : "done"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <CommentList comments={todo.comments} />
-
-        {error && (
-          <p role="alert" className="text-[0.8125rem] text-destructive">
-            {error}
-          </p>
-        )}
-
-        <div className="flex items-center gap-2">
-          {!done && (
-            <Button size="sm" onClick={onComplete} disabled={busy}>
-              {busy ? "Completing…" : "Complete"}
-            </Button>
-          )}
-          <Button variant="ghost" size="sm" onClick={onCopyLink}>
-            <Link2 aria-hidden /> Copy link
-          </Button>
-        </div>
       </Collapsible.Content>
     </Collapsible.Root>
-  );
-}
-
-function DetailList({ label, items }: { label: string; items: string[] }) {
-  if (items.length === 0) return null;
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[0.6875rem] font-[550] text-muted-foreground">{label}</span>
-      <ul className="flex list-disc flex-col gap-0.5 pl-4 text-foreground marker:text-muted-foreground">
-        {items.map((item, index) => (
-          // Read-only display of the disciplined document's lists; index is a stable key here.
-          <li key={index}>{item}</li>
-        ))}
-      </ul>
-    </div>
   );
 }
