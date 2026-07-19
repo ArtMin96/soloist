@@ -663,3 +663,46 @@ scratchpad in another project.
 
 **Effect on parity:** no row regresses. G3/G4 are unchanged for any todo without a link; G18 is the
 new row covering the association. Full design: Soloist scratchpad `macos-native-ux-design`.
+
+## D-19 — A rendered prompt is returned to its caller, never applied to a running process 🟢
+
+**Solo's documented behavior:** the prompt-templates view offers "**placeholder** fill-in before a
+prompt is **applied**" (changelog v0.8.2, `plan/05` §10, 🟡 changelog-only). The wording implies a
+consumer — filling in values and then delivering the finished prompt somewhere.
+
+**What Soloist does (owner decision 2026-07-19):** F15 renders, and stops there. Substituted text is
+returned to whoever asked for it — the `prompt_template_render` MCP tool returns a string, MCP
+`prompts/get` returns messages the client injects into its own conversation, and the Templates
+Settings surface fills and previews for copying. **No path writes a rendered prompt into a running
+process**, so nothing in Soloist "applies" a prompt the way Solo's wording suggests.
+
+**Why:** writing into a live process is a different operation with a different risk profile — it
+would have to pass the trust gate (CLAUDE.md §3) and needs process targeting that render itself does
+not. Folding it into F15 would have made a pure, side-effect-free query into a gated mutation, and
+would have shipped a substitution engine and a delivery mechanism as one unreviewable change. Solo's
+mechanism is undocumented in any case (`plan/05` §12 records the whole substitution semantics as
+ours), so there is no behavior here to match precisely — only a shape to choose deliberately.
+
+**Why 🟢 (settled, owner decision 2026-07-20):** the gap closed on its own once F15's two delivery
+paths shipped, so there is nothing left for a push mechanism to add.
+
+An agent reaches a template **by pulling it**, and both routes are live. The MCP **tools** path
+(`prompt_template_list`/`_read`/`_render`) is model-controlled and supported by every MCP client
+without exception — asked in plain language to use a template, an agent reads it, sees which
+placeholders it declares, fills them from the context it already has, renders, and then *follows the
+result*. It is the one doing the work, so nothing needs delivering anywhere. The MCP **prompts**
+path is user-controlled and adds an explicit slash command on the clients that implement the
+primitive. Between them, every agent Soloist hosts can obtain a fully substituted prompt.
+
+What a push would have added is therefore only the case of forcing text into a process the user is
+not currently driving — which no workflow here needs, and which would have cost a trust gate, a
+process picker, and the risk of landing text in an agent mid-task. Solo's wording ("before a prompt
+is applied") describes *its* delivery choice, not a capability Soloist lacks.
+
+**If this is ever revisited** it would be a genuinely new capability, not the completion of this one:
+its own parity row, behind the trust gate, and UI-initiated rather than agent-initiated (one agent
+injecting text into another agent's terminal is a coordination and security hazard, not a feature).
+This entry would then become ⚪ superseded.
+
+**Effect on parity:** F15 is satisfied without it — its Verify clauses cover render, missing-value
+reporting, `-32602`, and capability gating, none of which involve delivery. No row regresses.

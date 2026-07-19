@@ -311,7 +311,18 @@ Hard rules, checked every phase. A change that violates one is **not done**:
 - **Small, single-purpose files.** A file does one thing; ~400-line non-test source is a split smell to act on. Many small focused modules over one large one, in Rust and the frontend.
 - **Clear domain separation.** Logic in its context; adapters thin; React renders projections. Don't smear one concern across layers.
 - **Component-based frontend.** Structure: `domain.ts` (types) · `api.ts` (typed IPC only) · `store/` (pure reducers + hooks) · `components/` (small, reusable, presentational). No business logic in components; no huge `App.tsx`; no duplicated markup — extract a component.
-- **Tests test behaviour.** Every test exercises real logic and can fail for a real reason. No placeholder/empty tests, no tautological asserts. Never `#[ignore]`, skip, or comment out a test to dodge a red — fix the cause or report it red (§12). If a module has nothing meaningful to test yet, it has no test yet — that's honest. Delete pretend tests on sight.
+- **Tests test behaviour.** Every test exercises real logic and can fail for a
+real reason. No placeholder/empty tests, no tautological asserts. **Assert the
+observable outcome, never the call shape** — a test that pins the arguments a
+function was called with describes the implementation, so when the
+implementation is wrong the test defends the bug (a real case: a template's
+description could not be cleared, and the test asserting `called with null`
+was green throughout). **A new or changed test must be shown to fail against
+the unfixed behaviour** — break the fix, watch it redden, restore. A test
+never observed failing is unproven, not passing. Never `#[ignore]`, skip, or
+comment out a test to dodge a red — fix the cause or report it red (§12). If a
+module has nothing meaningful to test yet, it has no test yet — that's honest.
+Delete pretend tests on sight.
 - **No unnecessary code or comments.** Doc comments on public items; the rare non-obvious-decision comment only. No dead code, no speculative abstraction (YAGNI).
 - **Built to change safely.** Typed boundaries, exhaustive `match`, ports over concretions, names that say what they mean. Keep tunables (limits, timeouts, paths, default policies) as named values in one place so they can be promoted to config without touching call sites — don't pre-build config you don't need yet.
 
