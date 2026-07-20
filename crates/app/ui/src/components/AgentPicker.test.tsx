@@ -13,7 +13,7 @@ const TOOLS: DetectedTool[] = [
       kind: "Claude",
       prompt_mode: "AppendedArg",
     },
-    installed: true,
+    detection: "Installed",
   },
   {
     tool: {
@@ -23,7 +23,7 @@ const TOOLS: DetectedTool[] = [
       kind: "Gemini",
       prompt_mode: "AppendedArg",
     },
-    installed: false,
+    detection: "Missing",
   },
 ];
 
@@ -56,6 +56,29 @@ describe("AgentPicker", () => {
     expect(screen.getByText("not found")).toBeTruthy();
     // The footer names the launch target so it is never ambiguous.
     expect(screen.getByTestId("palette-target").textContent).toBe("Storefront");
+  });
+
+  it("marks a tool the probe could not check as unchecked, not as absent", () => {
+    // "The probe reached no answer" and "this CLI is not on the machine" are different facts;
+    // showing both as "not found" is what made a failing probe indistinguishable from an empty
+    // toolchain.
+    renderPicker({
+      tools: [
+        {
+          tool: {
+            name: "Claude",
+            command: "claude",
+            default_args: [],
+            kind: "Claude",
+            prompt_mode: "AppendedArg",
+          },
+          detection: "Unknown",
+        },
+      ],
+    });
+
+    expect(screen.getByText("not checked")).toBeTruthy();
+    expect(screen.queryByText("not found")).toBeNull();
   });
 
   it("launches the chosen tool with no flags into the active project", () => {

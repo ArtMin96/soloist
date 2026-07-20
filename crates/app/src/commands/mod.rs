@@ -108,14 +108,26 @@ pub async fn agent_list(facade: State<'_, Arc<Facade>>) -> Result<Vec<AgentTool>
         .map_err(|err| err.to_string())
 }
 
-/// Each configured agent tool paired with whether its CLI appears installed, by probing
-/// `<command> --version` off the runtime. The picker badges installed tools; this is slower
-/// than [`agent_list`], so the UI lists first and fills in detection when this resolves.
+/// Each configured agent tool paired with what probing `<command> --version` revealed, run off
+/// the runtime. The picker badges installed tools; this is slower than [`agent_list`], so the UI
+/// lists first and fills in detection when this resolves. Served from the core's cached sweep
+/// when one is still fresh — [`agent_redetect`] is the explicit re-probe.
 #[tauri::command]
 pub async fn agent_detect(facade: State<'_, Arc<Facade>>) -> Result<Vec<DetectedTool>, String> {
     facade
         .agents()
         .detect_installed()
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// A detection sweep that re-probes rather than reusing the core's cached one — what the
+/// Agents settings "Detect" action routes to, so an explicit re-check always checks.
+#[tauri::command]
+pub async fn agent_redetect(facade: State<'_, Arc<Facade>>) -> Result<Vec<DetectedTool>, String> {
+    facade
+        .agents()
+        .redetect_installed()
         .await
         .map_err(|err| err.to_string())
 }

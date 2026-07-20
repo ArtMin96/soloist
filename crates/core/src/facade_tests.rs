@@ -133,7 +133,11 @@ async fn the_facade_exposes_the_agent_registry_and_detection() {
         .iter()
         .find(|d| d.tool.command == "claude")
         .expect("claude detected");
-    assert!(claude.installed, "the probed CLI is reported installed");
+    assert_eq!(
+        claude.detection,
+        crate::agents::Detection::Installed,
+        "the probed CLI is reported installed"
+    );
 }
 
 #[tokio::test]

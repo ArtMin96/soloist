@@ -11,7 +11,8 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
-import type { DetectedTool, ProjectView } from "@/domain";
+import type { Detection, DetectedTool, ProjectView } from "@/domain";
+import { detectionLabel } from "@/lib/agents";
 import { tokenizeArgs } from "@/lib/tokenizeArgs";
 import { cn } from "@/lib/utils";
 
@@ -126,14 +127,14 @@ function ToolStep({
       <CommandList>
         <CommandEmpty>No agent tools configured.</CommandEmpty>
         <CommandGroup>
-          {tools.map(({ tool, installed }) => (
+          {tools.map(({ tool, detection }) => (
             <CommandItem key={tool.name} value={tool.name} onSelect={() => onLaunch(tool.name)}>
               <ToolInitial name={tool.name} />
               <span className="font-medium">{tool.name}</span>
               <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
                 {tool.command}
               </code>
-              <InstalledMark installed={installed} />
+              <InstalledMark detection={detection} />
             </CommandItem>
           ))}
         </CommandGroup>
@@ -250,18 +251,22 @@ function ToolInitial({ name }: { name: string }) {
   );
 }
 
-// Whether the tool's CLI was detected, encoded with shape + label (never color alone, and
-// never the saturated status palette — installation is not a ProcStatus).
-function InstalledMark({ installed }: { installed: boolean }) {
+// What detection found, encoded with shape + label (never color alone, and never the saturated
+// status palette — installation is not a ProcStatus). Three shapes for three outcomes: a filled
+// dot for a detected CLI, a solid ring for one the probe confirmed absent, and a dashed ring for
+// one it never got an answer about.
+function InstalledMark({ detection }: { detection: Detection }) {
   return (
     <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
       <span
         className={cn(
           "size-1.5 rounded-full",
-          installed ? "bg-muted-foreground" : "border border-muted-foreground/50",
+          detection === "Installed" && "bg-muted-foreground",
+          detection === "Missing" && "border border-muted-foreground/50",
+          detection === "Unknown" && "border border-dashed border-muted-foreground/50",
         )}
       />
-      {installed ? "installed" : "not found"}
+      {detectionLabel[detection]}
     </span>
   );
 }

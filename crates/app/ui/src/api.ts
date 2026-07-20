@@ -244,10 +244,17 @@ export function agentList(): Promise<AgentTool[]> {
   return invoke<AgentTool[]>("agent_list");
 }
 
-// Each configured tool paired with whether its CLI appears installed (probes `--version`).
-// Slower than `agentList`, so the picker lists first and fills in detection when this resolves.
+// Each configured tool paired with what probing `--version` revealed. Slower than `agentList`,
+// so the picker lists first and fills in detection when this resolves. Served from the core's
+// cached sweep while one is fresh.
 export function agentDetect(): Promise<DetectedTool[]> {
   return invoke<DetectedTool[]>("agent_detect");
+}
+
+// Detection that re-probes instead of reusing the core's cached sweep — what an explicit
+// user-triggered "detect" routes to, so asking to check again always checks.
+export function agentRedetect(): Promise<DetectedTool[]> {
+  return invoke<DetectedTool[]>("agent_redetect");
 }
 
 // Launches an agent tool as an interactive Agent process in `project` and starts it,

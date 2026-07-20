@@ -18,7 +18,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use soloist_core::VersionProbe;
+use soloist_core::{Detection, VersionProbe};
 use soloist_sys::CommandVersionProbe;
 
 /// Writes an executable shell script that runs `body`, and returns its absolute path.
@@ -53,31 +53,38 @@ fn the_version_probe_reflects_whether_a_command_runs() {
 
     // A command whose `--version` exits zero is installed.
     let ok = write_script(dir.path(), "agent-ok", "exit 0");
-    assert!(
-        probe.is_installed(path_of(&ok)),
+    assert_eq!(
+        probe.probe(path_of(&ok)),
+        Detection::Installed,
         "a command whose --version exits 0 is installed"
     );
 
-    // A missing binary is not installed (the shell reports command-not-found → non-zero exit).
-    assert!(
-        !probe.is_installed("/nonexistent/soloist-not-a-real-agent-binary"),
-        "a missing command is not installed"
+    // A missing binary is absent (the shell reports command-not-found → non-zero exit). The
+    // probe ran to completion, so this is an answer about the machine, not a failure to check.
+    assert_eq!(
+        probe.probe("/nonexistent/soloist-not-a-real-agent-binary"),
+        Detection::Missing,
+        "a missing command is reported absent, not unknown"
     );
 
-    // A command whose `--version` exits non-zero is not installed.
+    // A command whose `--version` exits non-zero is absent.
     let err = write_script(dir.path(), "agent-err", "exit 3");
-    assert!(
-        !probe.is_installed(path_of(&err)),
-        "a command whose --version fails is not installed"
+    assert_eq!(
+        probe.probe(path_of(&err)),
+        Detection::Missing,
+        "a command whose --version fails is reported absent"
     );
 
-    // A command that hangs past the timeout is given up on (and reaped), reporting
-    // not-installed — and promptly, not after the child's own duration.
+    // A command that hangs past the timeout is given up on (and reaped) — promptly, not after
+    // the child's own duration. It reports *unknown*, never absent: the probe reached no
+    // answer, and reporting that as "not installed" is what let a too-short timeout masquerade
+    // as an empty toolchain.
     let hang = write_script(dir.path(), "agent-hang", "sleep 10");
     let started = Instant::now();
-    assert!(
-        !probe.is_installed(path_of(&hang)),
-        "a hanging --version times out as not installed"
+    assert_eq!(
+        probe.probe(path_of(&hang)),
+        Detection::Unknown,
+        "a hanging --version is unknown, not absent"
     );
     assert!(
         started.elapsed() < Duration::from_secs(5),

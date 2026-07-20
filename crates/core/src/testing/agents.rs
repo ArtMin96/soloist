@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::agents::{AgentTool, AgentToolRepo, VersionProbe};
+use crate::agents::{AgentTool, AgentToolRepo, Detection, VersionProbe};
 use crate::ports::StoreError;
 
 /// An [`AgentToolRepo`] returning a fixed list of tools, for headless registry tests.
@@ -43,15 +43,19 @@ impl FakeVersionProbe {
         }
     }
 
-    /// How many times [`VersionProbe::is_installed`] has been called across the probe's life.
+    /// How many times [`VersionProbe::probe`] has been called across the probe's life.
     pub fn probes(&self) -> usize {
         self.probes.load(Ordering::SeqCst)
     }
 }
 
 impl VersionProbe for FakeVersionProbe {
-    fn is_installed(&self, command: &str) -> bool {
+    fn probe(&self, command: &str) -> Detection {
         self.probes.fetch_add(1, Ordering::SeqCst);
-        self.installed.contains(command)
+        if self.installed.contains(command) {
+            Detection::Installed
+        } else {
+            Detection::Missing
+        }
     }
 }

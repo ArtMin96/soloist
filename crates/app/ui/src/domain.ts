@@ -176,12 +176,19 @@ export interface AgentTool {
   prompt_mode: PromptMode;
 }
 
-// A configured tool paired with whether its CLI appears installed (mirrors core::DetectedTool)
-// — the result of `--version` auto-detection. Tools outside the probe set (Copilot, Kimi,
-// Generic) always report installed: false. The picker badges installed tools as launchable.
+// What `--version` auto-detection learned about one agent CLI (mirrors core::Detection).
+// "Missing" and "Unknown" are distinct on purpose: the first is a fact about the machine (the
+// probe ran, the CLI is not here), the second means the probe reached no answer — it timed out,
+// could not run, or the provider is outside the probe set and is never checked. Rendering an
+// unanswered probe as "not found" is what let a broken probe look like an empty toolchain.
+export type Detection = "Installed" | "Missing" | "Unknown";
+
+// A configured tool paired with what auto-detection found (mirrors core::DetectedTool). Tools
+// outside the probe set (Copilot, Kimi, Generic) always report "Unknown". The picker badges
+// installed tools as launchable.
 export interface DetectedTool {
   tool: AgentTool;
-  installed: boolean;
+  detection: Detection;
 }
 
 // The five-state agent activity (mirrors core::agents::AgentActivity), derived from an agent's

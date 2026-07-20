@@ -54,8 +54,8 @@ mod sync;
 pub mod testing;
 
 pub use agents::{
-    AgentActivity, AgentKind, AgentTool, AgentToolRepo, Agents, DetectedTool, NoopAgentToolRepo,
-    NoopVersionProbe, PromptMode, VersionProbe,
+    AgentActivity, AgentKind, AgentTool, AgentToolRepo, Agents, DetectedTool, Detection,
+    NoopAgentToolRepo, NoopVersionProbe, PromptMode, VersionProbe,
 };
 pub use composition::{CorePorts, CorePortsBuilder};
 pub use config::{
