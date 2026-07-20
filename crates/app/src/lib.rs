@@ -382,6 +382,7 @@ pub fn run() {
             commands::config_trust,
             commands::agent_list,
             commands::agent_detect,
+            commands::agent_redetect,
             commands::agent_launch,
             commands::proc_start,
             commands::proc_stop,

@@ -2,7 +2,7 @@ import { SettingRow } from "@/components/settings/controls/SettingRow";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { toolInvocation } from "@/lib/agents";
+import { detectionLabel, toolInvocation, UNCHECKED_HINT } from "@/lib/agents";
 import { useAgentTools } from "@/store/useAgentTools";
 
 // The Agents tab: the read-only registry of detectable agent CLIs Soloist can launch. Pure
@@ -24,8 +24,12 @@ export function AgentsPanel() {
                 {toolInvocation(detected.tool)}
               </p>
             </div>
-            <Badge variant={detected.installed ? "outline" : "muted"} className="shrink-0">
-              {detected.installed ? "Installed" : "Not found"}
+            <Badge
+              variant={detected.detection === "Installed" ? "outline" : "muted"}
+              className="shrink-0 first-letter:uppercase"
+              title={detected.detection === "Unknown" ? UNCHECKED_HINT : undefined}
+            >
+              {detectionLabel[detected.detection]}
             </Badge>
           </div>
         ))}

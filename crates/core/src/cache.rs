@@ -68,6 +68,14 @@ impl<T: Clone> ReadCache<T> {
         });
         Ok(value)
     }
+
+    /// Discards the cached value so the next read recomputes, whatever the TTL would have
+    /// allowed. The escape hatch for an explicit user-triggered refresh: the TTL exists to
+    /// spare a burst of readers one expensive computation, not to make a deliberate "check
+    /// again" a no-op.
+    pub(crate) async fn invalidate(&self) {
+        *self.cached.lock().await = None;
+    }
 }
 
 #[cfg(test)]

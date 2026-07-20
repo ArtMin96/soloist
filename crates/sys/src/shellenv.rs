@@ -30,7 +30,7 @@ const FALLBACK_SHELL: &str = "/bin/sh";
 /// no captured environment on exactly the setups (version managers initialised from interactive rc
 /// files) it exists to serve. The capture is best-effort and runs off the async runtime, so waiting
 /// longer for an answer costs a background thread its patience, not the user their interface.
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How often to poll the shell while waiting, between spawn and the timeout.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);

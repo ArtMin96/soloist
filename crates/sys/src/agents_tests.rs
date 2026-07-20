@@ -1,4 +1,20 @@
-use super::{probe_command, PROBE_SCRIPT};
+use super::{probe_command, DEFAULT_TIMEOUT, PROBE_SCRIPT};
+
+#[test]
+fn the_probe_waits_at_least_as_long_as_starting_the_login_shell() {
+    // The probe's floor is the login shell's startup, not the CLI's runtime: `-ilc` sources the
+    // user's rc files before `--version` runs at all, and a plugin-laden shell takes seconds to
+    // reach that point. A budget below what the environment capture allows the very same shell
+    // therefore cannot succeed — the deadline fires mid-startup and every CLI is reported
+    // absent, on exactly the version-manager setups auto-detection exists to serve. The two
+    // budgets pay for the same shell, so this one may not be the smaller.
+    assert!(
+        DEFAULT_TIMEOUT >= crate::shellenv::DEFAULT_TIMEOUT,
+        "the --version probe ({DEFAULT_TIMEOUT:?}) must allow a login shell at least the \
+         headroom the environment capture does ({:?})",
+        crate::shellenv::DEFAULT_TIMEOUT
+    );
+}
 
 #[test]
 fn the_probe_runs_version_through_an_interactive_login_shell() {

@@ -13,7 +13,7 @@ mod repo;
 mod resume;
 mod tool;
 
-pub use detect::{DetectedTool, NoopVersionProbe, VersionProbe};
+pub use detect::{DetectedTool, Detection, NoopVersionProbe, VersionProbe};
 pub use idle::{AgentActivity, IdleSampler, IdleTracker};
 pub use lineage::AgentLineage;
 pub use repo::{AgentToolRepo, NoopAgentToolRepo};
@@ -73,30 +73,61 @@ impl Agents {
             .find(|tool| tool.name == name))
     }
 
-    /// Each configured tool paired with whether its CLI appears installed, by probing
-    /// `<command> --version`. A [`AgentKind::Generic`] tool is never probed (it is
-    /// user-configured) and so reports not-installed. The probes run **off** the async
-    /// runtime, so a missing or slow CLI never stalls a runtime worker; a failed probe simply
-    /// reports not-installed. The sweep is cached for [`DETECT_CACHE_TTL`], so repeated picker
-    /// opens reuse one round of probes. Must run within a `tokio` runtime.
+    /// Each configured tool paired with what probing `<command> --version` revealed. A tool
+    /// outside the auto-detect set is never probed and reports [`Detection::Unknown`]; a probe
+    /// that cannot reach an answer reports the same rather than failing the sweep.
+    ///
+    /// The probes run **off** the async runtime and **concurrently** — one blocking task each —
+    /// so the sweep costs about one probe rather than their sum. That matters because a probe
+    /// pays the user's login-shell startup, which dominates its duration. Results are returned
+    /// in the registry's stable order regardless of which probe finished first. The sweep is
+    /// cached for [`DETECT_CACHE_TTL`], so repeated picker opens reuse one round of probes; an
+    /// explicit refresh goes through [`Self::redetect_installed`]. Must run within a `tokio`
+    /// runtime.
     pub async fn detect_installed(&self) -> Result<Vec<DetectedTool>, StoreError> {
         self.detect_cache
             .get_or_try_init(|| async {
                 let tools = self.tools.list()?;
-                let probe = self.version_probe.clone();
-                Ok(crate::supervision::run_blocking(move || {
-                    tools
-                        .into_iter()
-                        .map(|tool| {
-                            let installed =
-                                tool.kind.auto_detectable() && probe.is_installed(&tool.command);
-                            DetectedTool { tool, installed }
-                        })
-                        .collect()
-                })
-                .await)
+                Ok(self.probe_all(tools).await)
             })
             .await
+    }
+
+    /// A detection sweep that ignores the cache: the cached result is discarded and the CLIs
+    /// are probed again. What the UI's explicit "detect" action routes to — a deliberate
+    /// "check again" must actually check, or a stale wrong answer (every tool reported absent
+    /// because the probe was failing) is unfixable until the TTL lapses.
+    pub async fn redetect_installed(&self) -> Result<Vec<DetectedTool>, StoreError> {
+        self.detect_cache.invalidate().await;
+        self.detect_installed().await
+    }
+
+    /// Probes every tool concurrently, one blocking task each, and restores the input order.
+    async fn probe_all(&self, tools: Vec<AgentTool>) -> Vec<DetectedTool> {
+        let mut probes = tokio::task::JoinSet::new();
+        for (position, tool) in tools.into_iter().enumerate() {
+            let probe = self.version_probe.clone();
+            probes.spawn_blocking(move || {
+                let detection = if tool.kind.auto_detectable() {
+                    probe.probe(&tool.command)
+                } else {
+                    Detection::Unknown
+                };
+                (position, DetectedTool { tool, detection })
+            });
+        }
+
+        let mut detected = Vec::with_capacity(probes.len());
+        while let Some(joined) = probes.join_next().await {
+            match joined {
+                Ok(result) => detected.push(result),
+                // A blocking task cannot be cancelled, so a join error is always a panic;
+                // re-raise it so the supervised loop's panic-isolation boundary catches it.
+                Err(join_err) => std::panic::resume_unwind(join_err.into_panic()),
+            }
+        }
+        detected.sort_by_key(|(position, _)| *position);
+        detected.into_iter().map(|(_, tool)| tool).collect()
     }
 }
 
