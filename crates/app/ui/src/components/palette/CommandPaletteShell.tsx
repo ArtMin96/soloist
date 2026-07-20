@@ -18,7 +18,7 @@ interface CommandPaletteShellProps {
 
 // The standard single-step command palette frame: a titled command dialog over a fuzzy-filtered
 // list with a key-hint footer. Palettes pass their grouped command items as children and run each
-// action through `useCommandAction` so the dialog closes on select. (AgentPicker is intentionally
+// action through `useCommandAction` so the dialog closes on select. (LaunchPicker is intentionally
 // not built on this — it is a multi-step picker — but shares the same footer.)
 export function CommandPaletteShell({
   open,

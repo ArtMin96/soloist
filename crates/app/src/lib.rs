@@ -384,6 +384,7 @@ pub fn run() {
             commands::agent_detect,
             commands::agent_redetect,
             commands::agent_launch,
+            commands::terminal_create,
             commands::proc_start,
             commands::proc_stop,
             commands::proc_restart,

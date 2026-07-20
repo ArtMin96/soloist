@@ -1,7 +1,7 @@
 import type { AgentActivity, ProcStatus, ProjectView } from "@domain";
 import { closeLeadFromOutside, LEAD_AGENT } from "../../src/harness/leadAgent.js";
 import { openProject } from "../../src/flows/openProject.js";
-import { launchAgent } from "../../src/flows/launchAgent.js";
+import { launchAgent } from "../../src/flows/launch.js";
 import { orchestrationPane } from "../../src/screens/OrchestrationPane.js";
 import { sidebar } from "../../src/screens/Sidebar.js";
 

@@ -5,7 +5,7 @@ import {
   requestLeadCoordination,
   triggerScratchpadRewrite,
 } from "../../src/harness/leadAgent.js";
-import { launchAgent } from "../../src/flows/launchAgent.js";
+import { launchAgent } from "../../src/flows/launch.js";
 import { openProject } from "../../src/flows/openProject.js";
 import { orchestrationPane } from "../../src/screens/OrchestrationPane.js";
 import { scratchpadPanel } from "../../src/screens/ScratchpadPanel.js";

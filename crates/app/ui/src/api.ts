@@ -264,6 +264,12 @@ export function agentLaunch(project: number, tool: string, extraArgs: string[]):
   return invoke<number>("agent_launch", { project, tool, extraArgs });
 }
 
+// Opens a plain interactive shell in `project` as a Terminal process and starts it, resolving
+// to its process id. Takes no command — the shell is fixed in the core.
+export function terminalCreate(project: number): Promise<number> {
+  return invoke<number>("terminal_create", { project });
+}
+
 export function procStart(id: number): Promise<void> {
   return invoke<void>("proc_start", { id });
 }

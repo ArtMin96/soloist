@@ -71,6 +71,7 @@ mod session;
 mod settings;
 mod support;
 mod template;
+mod terminal;
 mod todo;
 
 pub use commands::{LocalCommandError, MoveCommandError};
@@ -80,6 +81,7 @@ pub use scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
 pub use scratchpad::ScratchpadWrite;
 pub use support::SetupIntegrationError;
 pub use template::Seeded;
+pub use terminal::CreateTerminalError;
 pub use todo::TodoCreation;
 
 /// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot
