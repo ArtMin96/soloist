@@ -16,6 +16,33 @@ function roundTrip(markdown: string): string {
   return out;
 }
 
+// Serializes text the user typed, rather than text parsed from Markdown — the other half of the
+// cycle, and the half that decides what actually lands in the store.
+function save(typed: string): string {
+  const editor = new Editor({
+    extensions: buildEditorExtensions({ placeholder: "", slash: false }),
+  });
+  editor.commands.setContent({
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text: typed }] }],
+  });
+  const out = editor.getMarkdown();
+  editor.destroy();
+  return out;
+}
+
+// The text a reader ends up with after stored Markdown is loaded back — what the typed characters
+// have to survive as, whatever form the store holds them in.
+function loadText(markdown: string): string {
+  const editor = new Editor({
+    extensions: buildEditorExtensions({ placeholder: "", slash: false }),
+  });
+  editor.commands.setContent(markdown, { contentType: "markdown", emitUpdate: false });
+  const out = editor.getText();
+  editor.destroy();
+  return out;
+}
+
 const CASES: [label: string, markdown: string][] = [
   ["headings", "# Title\n\n## Section\n\n### Detail"],
   ["bullet list", "- one\n- two\n- three"],
@@ -49,18 +76,31 @@ describe("markdown round-trip", () => {
     expect(table).toContain("| 1");
   });
 
-  // The serializer HTML-encodes text on the way out to Markdown, which would persist `&amp;` for a
-  // typed `&`. The encoding is stable, so the fixed-point check above cannot see it — only reading
-  // the characters back does.
-  it("keeps HTML-significant characters literal rather than encoding them as entities", () => {
-    expect(roundTrip("Current State & Context")).toContain("State & Context");
-    expect(roundTrip("Assumption -> Verification")).toContain("-> Verification");
-    expect(roundTrip("A < B and C > D")).toContain("A < B and C > D");
-    expect(roundTrip('Tom & Jerry say "hi"')).toContain("Tom & Jerry");
+  // The serializer HTML-encodes text on the way out, which would persist `&amp;` for a typed `&`.
+  // The encoding is stable, so the fixed-point check above cannot see it — only reading the stored
+  // characters back does, which is what an agent gets over MCP.
+  it.each([
+    ["ampersand", "Current State & Context"],
+    ["arrow", "Assumption -> Verification needed"],
+    ["comparison", "A < B and C > D"],
+    ["quotes", 'Tom & Jerry say "hi"'],
+  ])("stores %s as literal characters, not entities", (_label, typed) => {
+    expect(save(typed)).toBe(typed);
   });
 
-  // Inside a code fence the serializer already passes text through untouched, so the entity
-  // correction must not reach in and rewrite a literal entity a user actually typed.
+  // Storing these literally would hand the next load real markup to parse, destroying the typed
+  // text, so the encoding stays. Reading them back is what has to be right, not the stored bytes.
+  it.each([
+    ["an HTML tag", "Use <div> tags here"],
+    ["a tag pair", "A <b>bold</b> B"],
+    ["a literal entity", "Ampersand is &amp; in HTML"],
+    ["a leading angle bracket", "> not a quotation"],
+  ])("survives a save and reload with %s intact", (_label, typed) => {
+    expect(loadText(save(typed))).toBe(typed);
+  });
+
+  // Inside a code fence the serializer passes text through untouched, so the correction must not
+  // reach in and rewrite an entity the user actually typed.
   it("leaves a literal entity inside a code block alone", () => {
     expect(roundTrip("```html\n<p>&amp;</p>\n```")).toContain("<p>&amp;</p>");
   });
