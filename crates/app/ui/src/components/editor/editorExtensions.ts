@@ -5,8 +5,13 @@ import { Placeholder } from "@tiptap/extensions";
 import { TaskList } from "@tiptap/extension-task-list";
 import { TaskItem } from "@tiptap/extension-task-item";
 import { TableKit } from "@tiptap/extension-table";
+import { applyMarkdownEntityCorrection } from "./markdownEntities";
 import { slashCommand } from "./extensions/slashCommand";
 import { searchExtension } from "./search/searchExtension";
+
+// The Markdown serializer is a module-level singleton, so its correction is applied once here rather
+// than from inside the builder, which would re-run it on every editor mounted.
+applyMarkdownEntityCorrection();
 
 // The heading depth a note reaches for — three levels are enough structure for a scratchpad; more
 // would invite an over-deep outline. Named so the toolbar, the outline, and the parser agree.
