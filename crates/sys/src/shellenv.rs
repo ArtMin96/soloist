@@ -22,9 +22,15 @@ use soloist_core::{ShellEnvError, ShellEnvProbe};
 /// Fallback shell when neither `$SHELL` nor the passwd entry yields one.
 const FALLBACK_SHELL: &str = "/bin/sh";
 
-/// How long to wait for the shell to dump its environment before giving up. An interactive
-/// login shell with heavy rc files can take a moment; the ceiling only guards a hang.
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long to wait for the shell to dump its environment before giving up.
+///
+/// The ceiling is only meant to guard a hang, so it has to clear a shell that is merely slow. A
+/// stock plugin-laden zsh measured 3.7s to reach a prompt on a developer machine — over the 3s
+/// this used to allow, so the capture was killed mid-startup and the feature silently degraded to
+/// no captured environment on exactly the setups (version managers initialised from interactive rc
+/// files) it exists to serve. The capture is best-effort and runs off the async runtime, so waiting
+/// longer for an answer costs a background thread its patience, not the user their interface.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How often to poll the shell while waiting, between spawn and the timeout.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);

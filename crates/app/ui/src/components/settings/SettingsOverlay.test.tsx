@@ -24,7 +24,7 @@ function mockSettings(initial: Appearance, onSave?: (next: Appearance) => void) 
 function renderSettings() {
   render(
     <AppearanceProvider>
-      <SettingsOverlay open onOpenChange={() => {}} />
+      <SettingsOverlay open onOpenChange={() => {}} project={null} />
     </AppearanceProvider>,
   );
 }

@@ -8,12 +8,14 @@
 //! method resolves the caller's chosen [`TemplateScope`] here, in the core: `Project` goes through
 //! the session's effective project (like every other coordination surface), `Global` needs none. A
 //! list may span both — it merges the global rows with the effective project's when one is in scope,
-//! and never fails on scope alone. Every write announces [`DomainEvent::TemplateChanged`] so a
-//! templates surface refreshes.
+//! and never fails on scope alone. Every write announces [`DomainEvent::TemplateChanged`] carrying
+//! the scope it resolved, so a templates surface refreshes the list that actually moved.
 
 use super::scoped::ScopedFacade;
 use super::template::{create_error, update_error};
-use crate::coordination::{ExportedTemplate, TemplateSummary, TemplateView};
+use crate::coordination::{
+    ExportedTemplate, RenderError, RenderRequest, RenderedPrompt, TemplateSummary, TemplateView,
+};
 use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
 use crate::ids::ProjectId;
@@ -21,6 +23,20 @@ use crate::template::{TemplateKind, TemplateScope};
 
 /// Every prompt-template action addresses this kind of the unified aggregate.
 const KIND: TemplateKind = TemplateKind::Prompt;
+
+/// Why a session-scoped render was refused: the session had no project to resolve
+/// [`TemplateScope::Project`] against, or the render itself failed.
+///
+/// The scope refusal is carried rather than restated, so the one wording for "no project in scope"
+/// stays in [`CoordinationError`] and an adapter maps it exactly as it maps every other scoped
+/// refusal.
+#[derive(Debug, thiserror::Error)]
+pub enum PromptRenderError {
+    #[error(transparent)]
+    Scope(CoordinationError),
+    #[error(transparent)]
+    Render(#[from] RenderError),
+}
 
 impl ScopedFacade<'_> {
     /// The repo scope a session's template action addresses: the effective project for
@@ -32,11 +48,13 @@ impl ScopedFacade<'_> {
         }
     }
 
-    /// Announces a prompt-template change so a templates surface re-reads.
-    fn emit_template_changed(&self) {
-        self.inner
-            .bus
-            .publish(DomainEvent::TemplateChanged { kind: KIND });
+    /// Announces a prompt-template change in `project`'s scope so a templates surface re-reads the
+    /// list that moved rather than the other scope's.
+    fn emit_template_changed(&self, project: Option<ProjectId>) {
+        self.inner.bus.publish(DomainEvent::TemplateChanged {
+            kind: KIND,
+            project,
+        });
     }
 
     /// Creates the template `name` in the chosen scope. A taken name is refused.
@@ -53,7 +71,7 @@ impl ScopedFacade<'_> {
             .templates
             .create(KIND, project, name, description, body)
             .map_err(create_error)?;
-        self.emit_template_changed();
+        self.emit_template_changed(project);
         Ok(view)
     }
 
@@ -73,7 +91,7 @@ impl ScopedFacade<'_> {
             .templates
             .update(KIND, project, name, description, body, expected_revision)
             .map_err(update_error)?;
-        self.emit_template_changed();
+        self.emit_template_changed(project);
         Ok(view)
     }
 
@@ -123,9 +141,21 @@ impl ScopedFacade<'_> {
         let project = self.prompt_scope(scope)?;
         let removed = self.inner.templates.delete(KIND, project, name)?;
         if removed {
-            self.emit_template_changed();
+            self.emit_template_changed(project);
         }
         Ok(removed)
+    }
+
+    /// The template `name` in the chosen scope, rendered with the request's values — the same core
+    /// behaviour [`Facade::template_render`](crate::Facade::template_render) runs for the local
+    /// user, reached here through the session's own scope so a caller cannot render out of it.
+    pub fn prompt_template_render(
+        &self,
+        scope: TemplateScope,
+        request: &RenderRequest,
+    ) -> Result<RenderedPrompt, PromptRenderError> {
+        let project = self.prompt_scope(scope).map_err(PromptRenderError::Scope)?;
+        Ok(self.inner.templates.render(project, request)?)
     }
 
     /// The template `name` as a portable export envelope.

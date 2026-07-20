@@ -21,10 +21,17 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useScrollEdge } from "@/store/useScrollEdge";
 
+// What every settings panel is handed. Only the panels that address project-scoped state read it;
+// the rest declare no props and ignore it, so one map can build them all.
+interface SettingsPanelProps {
+  /** The project whose settings are in view, or null when none is open. */
+  project: number | null;
+}
+
 // The built panel for each tab — the single place a tab maps to its component. Tabs absent here
 // fall through to a placeholder (undefined-in-source vs. still-to-come, decided below), so the
 // rail can list every source tab without each one needing a panel yet.
-const PANELS: Partial<Record<SettingsTabId, ComponentType>> = {
+const PANELS: Partial<Record<SettingsTabId, ComponentType<SettingsPanelProps>>> = {
   appearance: AppearancePanel,
   agents: AgentsPanel,
   hotkeys: HotkeysPanel,
@@ -35,9 +42,9 @@ const PANELS: Partial<Record<SettingsTabId, ComponentType>> = {
   tools: ToolsPanel,
 };
 
-function panelFor(id: SettingsTabId): ReactNode {
+function panelFor(id: SettingsTabId, props: SettingsPanelProps): ReactNode {
   const Panel = PANELS[id];
-  if (Panel) return <Panel />;
+  if (Panel) return <Panel {...props} />;
   const label = SETTINGS_TABS.find((tab) => tab.id === id)?.label ?? "Settings";
   return UNDEFINED_TABS.has(id) ? (
     <PlaceholderPanel title={label} message="These settings have not been defined yet." />
@@ -52,9 +59,12 @@ function panelFor(id: SettingsTabId): ReactNode {
 export function SettingsOverlay({
   open,
   onOpenChange,
+  project,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The project in view, handed to the panels that address project-scoped state (Templates). */
+  project: number | null;
 }) {
   const [active, setActive] = useState<SettingsTabId>("appearance");
   const { ref: panelRef, scrolled } = useScrollEdge<HTMLDivElement>();
@@ -90,7 +100,7 @@ export function SettingsOverlay({
               aria-labelledby={settingsTabButtonId(active)}
               className="min-w-0 flex-1 overflow-y-auto bg-sidebar"
             >
-              <div className="mx-auto max-w-2xl px-6 py-6">{panelFor(active)}</div>
+              <div className="mx-auto max-w-2xl px-6 py-6">{panelFor(active, { project })}</div>
             </div>
           </div>
         </DialogPrimitive.Content>

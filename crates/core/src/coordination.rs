@@ -27,7 +27,10 @@ mod scratchpad;
 mod scratchpad_link;
 mod scratchpad_repo;
 mod template;
+mod template_evictor;
+mod template_render;
 mod template_repo;
+mod template_scan;
 mod timer;
 mod timer_repo;
 mod todo;
@@ -55,8 +58,11 @@ pub use scratchpad_repo::{
 };
 pub use template::{
     placeholders, ExportedTemplate, TemplateSummary, TemplateView, TemplateWriteError, Templates,
-    MAX_TEMPLATE_BODY, MAX_TEMPLATE_DESCRIPTION, MAX_TEMPLATE_NAME,
+    MAX_PLACEHOLDERS_PER_BODY, MAX_RENDERED_PROMPT, MAX_TEMPLATES_PER_SCOPE, MAX_TEMPLATE_BODY,
+    MAX_TEMPLATE_DESCRIPTION, MAX_TEMPLATE_NAME,
 };
+pub use template_evictor::TemplateEvictor;
+pub use template_render::{MissingPolicy, RenderError, RenderRequest, RenderedPrompt};
 pub use template_repo::{NoopTemplateRepo, StoredTemplate, TemplateRepo, TemplateWriteResult};
 pub(crate) use timer::watched_is_idle;
 pub use timer::{

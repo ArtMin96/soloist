@@ -109,6 +109,17 @@ impl TemplateRepo for SqliteStore {
         Ok(found)
     }
 
+    fn count(&self, kind: TemplateKind, project: Option<ProjectId>) -> Result<usize, StoreError> {
+        self.lock()
+            .query_row(
+                &format!("SELECT COUNT(*) FROM templates WHERE {SCOPE_CLAUSE}"),
+                (kind.as_str(), scope_param(project)),
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count as usize)
+            .map_err(sql_err)
+    }
+
     fn delete(
         &self,
         kind: TemplateKind,
@@ -158,6 +169,9 @@ fn current_revision(
 
 fn row_to_template(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredTemplate> {
     let kind_str: String = row.get(1)?;
+    // Unreachable through this module: every SELECT filters on a known kind through `SCOPE_CLAUSE`,
+    // so a row a newer build wrote is never handed here. Kept as the decode guard for any future
+    // read that is not scoped by kind, which would otherwise have to invent a variant for it.
     let kind = TemplateKind::from_db(&kind_str).ok_or_else(|| {
         rusqlite::Error::FromSqlConversionFailure(
             1,

@@ -1,13 +1,27 @@
 import { useState } from "react";
 import { ArrowLeft, Trash2 } from "lucide-react";
+import { RevisionConflictNotice } from "@/components/RevisionConflictNotice";
 import { Button } from "@/components/ui/button";
 import { TemplateEditorBody } from "@/components/settings/templates/TemplateEditorBody";
-import { TEMPLATE_KIND_LABEL } from "@/lib/templates";
+import { templateScopeHeading } from "@/lib/templates";
+import { TemplatePreview } from "@/components/settings/templates/TemplatePreview";
 import type { TemplateConflict } from "@/store/useTemplateEditor";
-import type { TemplateKind } from "@/domain";
+import type { RenderedPrompt, TemplateKind, TemplateScope } from "@/domain";
+
+// Everything the preview needs: the declared placeholders, the values typed against them, and the
+// core's latest render of the pair.
+export interface TemplatePreviewState {
+  placeholders: string[];
+  values: Record<string, string>;
+  rendered: RenderedPrompt | null;
+  error: string | null;
+  onValueChange: (placeholder: string, value: string) => void;
+}
 
 interface TemplateEditorProps {
   kind: TemplateKind;
+  /** Which library the open template lives in — the caption states it, since a name can exist in both. */
+  scope: TemplateScope;
   name: string;
   initialBody: string;
   initialDescription: string;
@@ -16,6 +30,8 @@ interface TemplateEditorProps {
   mountKey: number;
   conflict: TemplateConflict | null;
   error: string | null;
+  /** The live preview for a renderable kind, or null when this kind is never rendered. */
+  preview: TemplatePreviewState | null;
   onSave: (description: string, body: string) => Promise<void>;
   onReload: () => void;
   onDelete: () => void;
@@ -30,6 +46,7 @@ interface TemplateEditorProps {
 // is a deliberate two-step so an authored template is never lost to one mis-click.
 export function TemplateEditor({
   kind,
+  scope,
   name,
   initialBody,
   initialDescription,
@@ -37,6 +54,7 @@ export function TemplateEditor({
   mountKey,
   conflict,
   error,
+  preview,
   onSave,
   onReload,
   onDelete,
@@ -79,24 +97,13 @@ export function TemplateEditor({
 
       <div>
         <p className="text-[0.6875rem] font-medium tracking-[0.01em] text-muted-foreground">
-          {TEMPLATE_KIND_LABEL[kind]} template
+          {templateScopeHeading(kind, scope)}
         </p>
         <h2 className="truncate text-[0.9375rem] font-[550] tracking-[-0.005em]">{name}</h2>
       </div>
 
       {conflict && (
-        <div
-          role="alert"
-          className="flex items-center gap-3 rounded-md border border-status-transition/40 bg-status-transition/10 px-3 py-2 text-[0.8125rem]"
-        >
-          <span className="min-w-0 flex-1">
-            This template changed elsewhere (now at revision {conflict.actual}). Your edits were not
-            saved and nothing was overwritten.
-          </span>
-          <Button variant="outline" size="sm" onClick={onReload}>
-            Reload
-          </Button>
-        </div>
+        <RevisionConflictNotice subject="template" revision={conflict.actual} onReload={onReload} />
       )}
 
       {error && (
@@ -109,10 +116,19 @@ export function TemplateEditor({
         key={`${kind}:${name}:${mountKey}`}
         initialBody={initialBody}
         initialDescription={initialDescription}
-        name={name}
         onSave={onSave}
         paused={conflict != null}
       />
+
+      {preview && (
+        <TemplatePreview
+          placeholders={preview.placeholders}
+          values={preview.values}
+          onValueChange={preview.onValueChange}
+          rendered={preview.rendered}
+          error={preview.error}
+        />
+      )}
     </div>
   );
 }

@@ -64,6 +64,11 @@ pub trait TemplateRepo: Send + Sync {
         project: Option<ProjectId>,
     ) -> Result<Vec<StoredTemplate>, StoreError>;
 
+    /// How many templates of `kind` the scope holds. Distinct from [`TemplateRepo::list`] because
+    /// this answer gates every create, and loading every body to reach it is the growth the count
+    /// cap exists to refuse.
+    fn count(&self, kind: TemplateKind, project: Option<ProjectId>) -> Result<usize, StoreError>;
+
     /// Removes the template `name` from the `(kind, scope)`, returning whether one was present.
     fn delete(
         &self,
@@ -118,6 +123,10 @@ impl TemplateRepo for NoopTemplateRepo {
         _project: Option<ProjectId>,
     ) -> Result<Vec<StoredTemplate>, StoreError> {
         Ok(Vec::new())
+    }
+
+    fn count(&self, _kind: TemplateKind, _project: Option<ProjectId>) -> Result<usize, StoreError> {
+        Ok(0)
     }
 
     fn delete(

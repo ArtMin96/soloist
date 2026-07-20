@@ -66,21 +66,22 @@ pub use configchange::{ConfigSync, Rename, TrustReviewCommand};
 pub use coordination::{
     is_link, placeholders, AcquireOutcome, Comment, CommentAuthor, CommentEdit, CommentOutcome,
     ExportedTemplate, FireCond, IdleMode, Kv, KvEntry, KvRepo, LeaseReleaser, LeaseView, Leases,
-    Link, LinkContent, LinkError, LinkTarget, LockRepo, NewTimer, NoopKvRepo, NoopLockRepo,
-    NoopScratchpadRepo, NoopTemplateRepo, NoopTimerRepo, NoopTodoRepo, RenameError, RenameResult,
-    ScratchpadLink, ScratchpadRef, ScratchpadRepo, ScratchpadSummary, ScratchpadTransfer,
-    ScratchpadView, Scratchpads, SetWhenIdleOutcome, StoredLease, StoredScratchpad, StoredTemplate,
-    StoredTimer, StoredTodo, TemplateRepo, TemplateSummary, TemplateView, TemplateWriteResult,
-    Templates, TimerRepo, TimerScheduler, TimerStatus, TimerView, Timers, TodoDoc, TodoError,
-    TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView, TodoWriteResult, Todos,
-    TransferResult, TransferredScratchpad, WriteError, WriteResult,
+    Link, LinkContent, LinkError, LinkTarget, LockRepo, MissingPolicy, NewTimer, NoopKvRepo,
+    NoopLockRepo, NoopScratchpadRepo, NoopTemplateRepo, NoopTimerRepo, NoopTodoRepo, RenameError,
+    RenameResult, RenderError, RenderRequest, RenderedPrompt, ScratchpadLink, ScratchpadRef,
+    ScratchpadRepo, ScratchpadSummary, ScratchpadTransfer, ScratchpadView, Scratchpads,
+    SetWhenIdleOutcome, StoredLease, StoredScratchpad, StoredTemplate, StoredTimer, StoredTodo,
+    TemplateRepo, TemplateSummary, TemplateView, TemplateWriteResult, Templates, TimerRepo,
+    TimerScheduler, TimerStatus, TimerView, Timers, TodoDoc, TodoError, TodoLockReleaser, TodoRepo,
+    TodoStatus, TodoSummary, TodoView, TodoWriteResult, Todos, TransferResult,
+    TransferredScratchpad, WriteError, WriteResult,
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
     CoordinationError, Facade, LaunchAgentError, LocalCommandError, MoveCommandError,
-    ScopedActionError, ScopedFacade, SetupIntegrationError, SpawnAgentError, StatusSummary,
-    TrustCommandError,
+    PromptRenderError, ScopedActionError, ScopedFacade, SetupIntegrationError, SpawnAgentError,
+    StatusSummary, TrustCommandError,
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};

@@ -214,6 +214,25 @@ default and enabled in Soloist's settings."
                 .to_string(),
         },
         GuideTopic {
+            key: "prompt-templates",
+            aliases: &["prompt", "prompts", "template", "templates"],
+            title: "Prompt templates",
+            body: "- Prompt templates are durable, reusable prompt bodies with `{{name}}` \
+fill-ins. `prompt_template_list`, `_read`, `_create`, `_update`, `_delete` and `_export` manage \
+them; `prompt_template_render` hands back one with your values substituted. Updates are \
+revision-guarded like scratchpads — write with the revision you read.\n\
+- A template lives in your effective project (the default) or in the `global` scope shared across \
+projects, and the same name may exist in both. A `list` with no scope merges the two.\n\
+- A single backslash before `{{` escapes the marker and is consumed, so `\\{{x}}` is the literal \
+text `{{x}}` and declares no placeholder. A doubled backslash is one literal backslash and escapes \
+nothing; a longer run pairs off, with an odd one left over escaping.\n\
+- Render with a `values` map. A placeholder you supply no value for is left in the text as-is and \
+named in `unfilled`; a value naming no placeholder is named in `unknown`. Substituted text is \
+never rescanned, so a value containing `{{a}}` stays literal. This group is off by default and \
+enabled under Integrations in Soloist's settings."
+                .to_string(),
+        },
+        GuideTopic {
             key: "yaml",
             aliases: &["config", "solo.yml", "solo-yml"],
             title: "solo.yml configuration",

@@ -102,6 +102,30 @@ fn a_topic_resolves_by_key_and_by_alias() {
 }
 
 #[test]
+fn the_prompt_templates_topic_resolves_by_key_and_by_every_alias() {
+    // Prompt templates is the only toggleable group that defaults off, so an agent's only in-band
+    // way to learn it exists is this topic — which the overview already advertises the group in.
+    // Each alias is asserted on its own: the loop over declared aliases above cannot catch an alias
+    // that was never declared, and `help(topic="prompt templates")` is the query that found nothing.
+    let by_key =
+        help_topic("prompt-templates").expect("the prompt-templates topic resolves by key");
+    assert!(by_key.contains("prompt_template_render"));
+    for query in [
+        "prompt templates",
+        "prompt",
+        "prompts",
+        "template",
+        "templates",
+    ] {
+        assert_eq!(
+            help_topic(query).as_deref(),
+            Some(by_key.as_str()),
+            "the query {query:?} resolves to the prompt-templates topic"
+        );
+    }
+}
+
+#[test]
 fn topic_lookup_normalizes_separators_and_case() {
     // The tweet's example aliases all route to a topic regardless of spelling.
     for query in [

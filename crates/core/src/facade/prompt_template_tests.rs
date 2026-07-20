@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::composition::CorePorts;
+use crate::coordination::{RenderError, RenderRequest};
 use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTemplateRepo, FakeTrustRepo};
 
@@ -231,4 +232,172 @@ fn an_unscoped_list_with_no_project_still_serves_the_global_rows() {
         .prompt_template_list(None)
         .expect("an unscoped list never fails on scope");
     assert_eq!(merged.len(), 1);
+}
+
+/// Every template change a listener was told about, as the scope it named.
+fn announced(
+    events: &mut tokio::sync::broadcast::Receiver<crate::events::DomainEvent>,
+) -> Vec<Option<crate::ids::ProjectId>> {
+    std::iter::from_fn(|| events.try_recv().ok())
+        .filter_map(|event| match event {
+            crate::events::DomainEvent::TemplateChanged { project, .. } => Some(project),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_session_scoped_write_announces_the_scope_it_resolved() {
+    let (facade, session) = scoped_facade();
+    let project = facade
+        .effective_project(session)
+        .expect("the sole loaded project is in scope");
+    let mut events = facade.subscribe();
+
+    let created = facade
+        .scoped(session)
+        .prompt_template_create(TemplateScope::Global, "review", None, "body")
+        .expect("global create");
+    facade
+        .scoped(session)
+        .prompt_template_update(
+            TemplateScope::Global,
+            "review",
+            None,
+            "edited",
+            created.revision,
+        )
+        .expect("global update");
+    facade
+        .scoped(session)
+        .prompt_template_create(TemplateScope::Project, "triage", None, "body")
+        .expect("project create");
+    assert!(facade
+        .scoped(session)
+        .prompt_template_delete(TemplateScope::Project, "triage")
+        .expect("project delete"));
+
+    // A remote caller writes into whichever scope it named; the Settings panel listening on the bus
+    // re-reads the library the event points at, so a `Project` write announced as global (or an
+    // update announced not at all) leaves the authored template invisible until a manual reload.
+    assert_eq!(
+        announced(&mut events),
+        vec![None, None, Some(project), Some(project)]
+    );
+}
+
+#[test]
+fn a_session_scoped_delete_that_removed_nothing_announces_nothing() {
+    let (facade, session) = scoped_facade();
+    let mut events = facade.subscribe();
+
+    assert!(!facade
+        .scoped(session)
+        .prompt_template_delete(TemplateScope::Project, "ghost")
+        .expect("delete a name no scope holds"));
+
+    assert_eq!(announced(&mut events), Vec::new());
+}
+
+#[test]
+fn a_name_held_in_both_scopes_lists_its_global_row_first() {
+    let (facade, session) = scoped_facade();
+    for scope in [TemplateScope::Global, TemplateScope::Project] {
+        facade
+            .scoped(session)
+            .prompt_template_create(scope, "review", None, "body")
+            .expect("create the scope's template");
+    }
+
+    // Both rows survive the merge under one name — a sort that dropped or reordered the collision
+    // would hide one library's template behind the other's, and the caller could not tell which of
+    // the two it is about to read. The global row leads, matching the merge order.
+    let merged = facade
+        .scoped(session)
+        .prompt_template_list(None)
+        .expect("merged list");
+    assert_eq!(
+        merged
+            .iter()
+            .map(|row| (row.name.as_str(), row.scope))
+            .collect::<Vec<_>>(),
+        vec![
+            ("review", TemplateScope::Global),
+            ("review", TemplateScope::Project),
+        ]
+    );
+}
+
+/// A render of `name` with one value supplied, at the caller's chosen scope.
+fn render_request(name: &str, value: (&str, &str)) -> RenderRequest {
+    RenderRequest {
+        name: name.to_owned(),
+        values: [(value.0.to_owned(), value.1.to_owned())]
+            .into_iter()
+            .collect(),
+        ..RenderRequest::default()
+    }
+}
+
+#[test]
+fn a_scoped_render_fills_the_session_scoped_template() {
+    let (facade, session) = scoped_facade();
+    facade
+        .scoped(session)
+        .prompt_template_create(
+            TemplateScope::Project,
+            "review",
+            None,
+            "Review {{diff}} for {{concern}}",
+        )
+        .expect("project create");
+
+    let rendered = facade
+        .scoped(session)
+        .prompt_template_render(
+            TemplateScope::Project,
+            &render_request("review", ("diff", "the patch")),
+        )
+        .expect("render the project template");
+
+    assert_eq!(rendered.text, "Review the patch for {{concern}}");
+    assert_eq!(rendered.unfilled, vec!["concern".to_owned()]);
+}
+
+#[test]
+fn a_scoped_render_cannot_reach_another_scopes_template() {
+    let (facade, session) = scoped_facade();
+    facade
+        .scoped(session)
+        .prompt_template_create(TemplateScope::Global, "review", None, "global {{a}}")
+        .expect("global create");
+
+    let refused = facade.scoped(session).prompt_template_render(
+        TemplateScope::Project,
+        &render_request("review", ("a", "x")),
+    );
+    assert!(
+        matches!(
+            refused,
+            Err(PromptRenderError::Render(RenderError::TemplateNotFound))
+        ),
+        "expected the project scope to be empty, got {refused:?}"
+    );
+}
+
+#[test]
+fn a_project_scoped_render_with_no_project_in_scope_is_refused() {
+    let (facade, session) = unscoped_facade();
+
+    let refused = facade.scoped(session).prompt_template_render(
+        TemplateScope::Project,
+        &render_request("review", ("a", "x")),
+    );
+    assert!(
+        matches!(
+            refused,
+            Err(PromptRenderError::Scope(CoordinationError::NoProjectScope))
+        ),
+        "expected the scope guard to refuse, got {refused:?}"
+    );
 }

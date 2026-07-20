@@ -292,6 +292,10 @@ pub fn run() {
             // Start the notification reactor: it shows a desktop toast on a crash or an
             // exhausted auto-restart via the notification plugin (also weakly held).
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().notifications_loop());
+            // Start the template cache evictor: removing a project cascades its template rows
+            // away in the store without the aggregate seeing a write, so this drops that
+            // project's cached rows (aggregate weakly held, also self-supervised).
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().template_eviction_loop());
             // Re-register previously-opened projects so they reappear in the sidebar on
             // launch (resting — restore never starts a process); the UI seeds from the
             // resulting snapshots.
@@ -414,6 +418,7 @@ pub fn run() {
             commands::template_create,
             commands::template_update,
             commands::template_delete,
+            commands::template_render,
             commands::template_defaults,
             commands::set_default_template,
             commands::project_settings_page,

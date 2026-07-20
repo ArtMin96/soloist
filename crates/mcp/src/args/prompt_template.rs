@@ -1,5 +1,7 @@
 //! Parameter structs for the prompt-template tools.
 
+use std::collections::BTreeMap;
+
 use rmcp::schemars;
 use serde::Deserialize;
 
@@ -37,6 +39,20 @@ pub(crate) struct PromptTemplateNameArg {
     pub(crate) name: String,
     /// The scope the name lives in. Omit for the current project's scope.
     pub(crate) scope: Option<PromptScopeArg>,
+}
+
+/// Arguments for rendering a prompt template into the text an agent is handed.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct PromptTemplateRenderArg {
+    /// The template's name — the addressing handle, unique within its scope.
+    pub(crate) name: String,
+    /// The scope the name lives in. Omit for the current project's scope.
+    pub(crate) scope: Option<PromptScopeArg>,
+    /// A value per {{placeholder}}, keyed by the placeholder's name as prompt_template_read
+    /// reports it. A placeholder you supply no value for is left in the text verbatim and named
+    /// in "unfilled"; a name the body declares no placeholder for is named in "unknown". Values
+    /// are substituted literally, so a value containing {{...}} lands as text.
+    pub(crate) values: BTreeMap<String, String>,
 }
 
 /// Arguments for creating a prompt template.

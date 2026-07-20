@@ -7,18 +7,30 @@ use tempfile::tempdir;
 use crate::SqliteStore;
 
 const P: ProjectId = ProjectId::from_raw(1);
+const OTHER: ProjectId = ProjectId::from_raw(2);
 const PROMPT: TemplateKind = TemplateKind::Prompt;
 
 fn store_with_project() -> SqliteStore {
     let store = SqliteStore::open_in_memory().expect("in-memory store");
+    seed_project(&store, P, "/p");
+    store
+}
+
+/// A store holding both projects, for the tests that must tell one project's scope from another's.
+fn store_with_two_projects() -> SqliteStore {
+    let store = store_with_project();
+    seed_project(&store, OTHER, "/other");
+    store
+}
+
+fn seed_project(store: &SqliteStore, id: ProjectId, root: &str) {
     store
         .lock()
         .execute(
             "INSERT INTO projects (id, root, name) VALUES (?1, ?2, ?3)",
-            (P.get() as i64, "/p", "P"),
+            (id.get() as i64, root, root),
         )
-        .expect("seed project P");
-    store
+        .expect("seed the project");
 }
 
 fn written(result: TemplateWriteResult) -> StoredTemplate {
@@ -168,24 +180,26 @@ fn the_same_name_lives_independently_across_kinds() {
 
 #[test]
 fn delete_is_scope_exact_and_reports_presence() {
-    let store = store_with_project();
-    store
-        .write(PROMPT, None, "review", None, "global", None)
-        .expect("create");
-    store
-        .write(PROMPT, Some(P), "review", None, "project", None)
-        .expect("create");
+    let store = store_with_two_projects();
+    for scope in [None, Some(P), Some(OTHER)] {
+        store
+            .write(PROMPT, scope, "review", None, "body", None)
+            .expect("create");
+    }
 
     assert!(store.delete(PROMPT, None, "review").expect("delete global"));
     assert!(!store
         .delete(PROMPT, None, "review")
         .expect("re-delete is absent"));
+    assert!(store
+        .delete(PROMPT, Some(P), "review")
+        .expect("delete in P"));
     assert!(
         store
-            .read(PROMPT, Some(P), "review")
+            .read(PROMPT, Some(OTHER), "review")
             .expect("read")
             .is_some(),
-        "the project row is untouched"
+        "another project's same-named row is untouched by both deletes"
     );
 }
 
@@ -210,6 +224,46 @@ fn list_is_scoped_and_ordered_by_name() {
         .collect();
     assert_eq!(names, vec!["a".to_owned(), "b".to_owned()]);
     assert_eq!(store.list(PROMPT, None).expect("global list").len(), 1);
+}
+
+#[test]
+fn count_is_scoped_like_a_list_and_follows_deletes() {
+    let store = store_with_two_projects();
+    for (kind, project, name) in [
+        (PROMPT, Some(P), "a"),
+        (PROMPT, Some(P), "b"),
+        (PROMPT, None, "g"),
+        (PROMPT, Some(OTHER), "theirs"),
+        (TemplateKind::Scratchpad, Some(P), "shape"),
+    ] {
+        store
+            .write(kind, project, name, None, "body", None)
+            .expect("create");
+    }
+
+    // Each `(kind, scope)` counts only its own rows — the global scope included, which the NULL
+    // project id makes the easy one to match by accident.
+    for (kind, project, expected) in [
+        (PROMPT, Some(P), 2),
+        (PROMPT, None, 1),
+        (PROMPT, Some(OTHER), 1),
+        (TemplateKind::Scratchpad, Some(P), 1),
+        (TemplateKind::Todo, Some(P), 0),
+    ] {
+        assert_eq!(
+            store.count(kind, project).expect("count"),
+            expected,
+            "count of {kind:?} in {project:?}"
+        );
+        assert_eq!(
+            store.count(kind, project).expect("count"),
+            store.list(kind, project).expect("list").len(),
+            "count agrees with the list it stands in for"
+        );
+    }
+
+    assert!(store.delete(PROMPT, Some(P), "a").expect("delete"));
+    assert_eq!(store.count(PROMPT, Some(P)).expect("count"), 1);
 }
 
 #[test]
@@ -238,9 +292,12 @@ fn templates_survive_a_store_reopen() {
 
 #[test]
 fn deleting_a_project_cascades_to_its_templates_and_leaves_globals() {
-    let store = store_with_project();
+    let store = store_with_two_projects();
     store
         .write(PROMPT, Some(P), "mine", None, "project", None)
+        .expect("create");
+    store
+        .write(PROMPT, Some(OTHER), "mine", None, "other project", None)
         .expect("create");
     store
         .write(PROMPT, None, "shared", None, "global", None)
@@ -253,6 +310,13 @@ fn deleting_a_project_cascades_to_its_templates_and_leaves_globals() {
 
     assert!(store.read(PROMPT, Some(P), "mine").expect("read").is_none());
     assert!(store.read(PROMPT, None, "shared").expect("read").is_some());
+    assert!(
+        store
+            .read(PROMPT, Some(OTHER), "mine")
+            .expect("read")
+            .is_some(),
+        "the cascade stops at the removed project"
+    );
 }
 
 #[test]
@@ -388,4 +452,66 @@ fn concurrent_writes_at_one_revision_apply_exactly_one() {
             .revision,
         2
     );
+}
+
+#[test]
+fn one_projects_scope_never_matches_another_projects_rows() {
+    let store = store_with_two_projects();
+    // The same name in three scopes: the unique index keys on (kind, scope, name), so all three
+    // coexist and only the scope tells them apart.
+    for (scope, body) in [(None, "global"), (Some(P), "mine"), (Some(OTHER), "theirs")] {
+        written(
+            store
+                .write(PROMPT, scope, "review", None, body, None)
+                .expect("create in the scope"),
+        );
+    }
+
+    // A read in one project's scope resolves that project's row — the value-vs-value branch of the
+    // scope filter, which a single-project fixture can never exercise.
+    for (scope, expected) in [(None, "global"), (Some(P), "mine"), (Some(OTHER), "theirs")] {
+        let read = store
+            .read(PROMPT, scope, "review")
+            .expect("read")
+            .expect("the scope has its own row");
+        assert_eq!(read.body, expected, "scope {scope:?} read the wrong row");
+        assert_eq!(read.project, scope);
+        let listed = store.list(PROMPT, scope).expect("list");
+        assert_eq!(listed.len(), 1, "scope {scope:?} lists only its own row");
+        assert_eq!(listed[0].body, expected);
+    }
+}
+
+#[test]
+fn a_row_of_a_kind_this_build_does_not_know_is_invisible_rather_than_fatal() {
+    let store = store_with_project();
+    store
+        .write(PROMPT, Some(P), "review", None, "body", None)
+        .expect("seed a readable row");
+    // A row a newer build wrote carries a `kind` this one has no variant for. Every query filters on
+    // a known kind, so such a row is simply not addressed — an older build keeps working against a
+    // table a newer one has written to, instead of failing every read of the scope.
+    store
+        .lock()
+        .execute(
+            "INSERT INTO templates (kind, project_id, name, description, body, revision)
+             VALUES ('grimoire', ?1, 'future', NULL, 'body', 1)",
+            (P.get() as i64,),
+        )
+        .expect("insert an unrecognised kind");
+
+    assert!(store
+        .read(PROMPT, Some(P), "future")
+        .expect("a read of the scope still succeeds")
+        .is_none());
+    assert_eq!(
+        store
+            .list(PROMPT, Some(P))
+            .expect("a list of the scope still succeeds")
+            .into_iter()
+            .map(|row| row.name)
+            .collect::<Vec<_>>(),
+        vec!["review".to_owned()]
+    );
+    assert_eq!(store.count(PROMPT, Some(P)).expect("count"), 1);
 }

@@ -3,12 +3,13 @@ use super::*;
 use crate::error::IpcError;
 use soloist_core::{
     AcquireOutcome, AgentKind, AgentTool, ExportedTemplate, FeedbackEntry, FireCond,
-    IntegrationFile, IntegrationWrite, LeaseView, Origin, ProcStatus, ProcessId, ProcessKind,
-    ProcessView, ProjectId, ProjectRef, ProjectView, PromptMode, Readiness, ScratchpadId,
-    ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary, TemplateId, TemplateKind,
-    TemplateScope, TemplateSummary, TemplateView, TimerId, TimerStatus, TimerView, TodoDoc, TodoId,
-    TodoStatus, TodoView, Whoami,
+    IntegrationFile, IntegrationWrite, LeaseView, MissingPolicy, Origin, ProcStatus, ProcessId,
+    ProcessKind, ProcessView, ProjectId, ProjectRef, ProjectView, PromptMode, Readiness,
+    RenderedPrompt, ScratchpadId, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary,
+    TemplateId, TemplateKind, TemplateScope, TemplateSummary, TemplateView, TimerId, TimerStatus,
+    TimerView, TodoDoc, TodoId, TodoStatus, TodoView, Whoami,
 };
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// A sample scratchpad view for the create-with-seed response round-trip.
@@ -191,35 +192,6 @@ fn requests_round_trip_through_json() {
         IpcRequest::SetupAgentIntegration {
             file: IntegrationFile::AgentsMd,
         },
-        IpcRequest::PromptTemplateList { scope: None },
-        IpcRequest::PromptTemplateList {
-            scope: Some(TemplateScope::Global),
-        },
-        IpcRequest::PromptTemplateRead {
-            scope: TemplateScope::Project,
-            name: "review".into(),
-        },
-        IpcRequest::PromptTemplateCreate {
-            scope: TemplateScope::Global,
-            name: "review".into(),
-            description: Some("PR review".into()),
-            body: "Review {{diff}}".into(),
-        },
-        IpcRequest::PromptTemplateUpdate {
-            scope: TemplateScope::Project,
-            name: "review".into(),
-            description: None,
-            body: "Review {{diff}} for {{focus}}".into(),
-            expected_revision: 2,
-        },
-        IpcRequest::PromptTemplateDelete {
-            scope: TemplateScope::Project,
-            name: "review".into(),
-        },
-        IpcRequest::PromptTemplateExport {
-            scope: TemplateScope::Global,
-            name: "review".into(),
-        },
     ];
     for request in requests {
         let json = serde_json::to_string(&request).expect("serialize");
@@ -357,32 +329,6 @@ fn every_response_variant_round_trips_through_json() {
             path: PathBuf::from("/projects/storefront/CLAUDE.md"),
             created: true,
         }),
-        IpcResponse::PromptTemplate(TemplateView {
-            id: TemplateId::from_raw(4),
-            kind: TemplateKind::Prompt,
-            name: "review".into(),
-            description: Some("PR review".into()),
-            body: "Review {{diff}}".into(),
-            placeholders: vec!["diff".into()],
-            scope: TemplateScope::Project,
-            revision: 1,
-        }),
-        IpcResponse::PromptTemplates(vec![TemplateSummary {
-            id: TemplateId::from_raw(4),
-            kind: TemplateKind::Prompt,
-            name: "review".into(),
-            description: None,
-            placeholders: vec!["diff".into()],
-            scope: TemplateScope::Global,
-            revision: 3,
-        }]),
-        IpcResponse::PromptTemplateDeleted(true),
-        IpcResponse::PromptTemplateExport(ExportedTemplate {
-            format: "soloist.prompt-template/v1".into(),
-            name: "review".into(),
-            description: None,
-            body: "Review {{diff}}".into(),
-        }),
         IpcResponse::ScratchpadWritten {
             scratchpad: sample_scratchpad(),
             seeded_from: Some("daily".into()),
@@ -397,6 +343,220 @@ fn every_response_variant_round_trips_through_json() {
         let back: IpcResponse = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, response);
     }
+}
+
+/// Asserts `value` serializes to exactly `json` and deserializes back from it.
+fn pins<T>(value: T, json: serde_json::Value)
+where
+    T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug,
+{
+    assert_eq!(serde_json::to_value(&value).expect("serialize"), json);
+    assert_eq!(
+        serde_json::from_value::<T>(json).expect("deserialize"),
+        value
+    );
+}
+
+/// The prompt-template requests are read off the wire by an out-of-process client, so each `op` tag
+/// and field name is the contract rather than merely the fact that it round-trips: a symmetric
+/// to_string→from_str would agree with itself through a rename that silently breaks every reader.
+#[test]
+fn the_prompt_template_requests_serialize_to_their_wire_shape() {
+    pins(
+        IpcRequest::PromptTemplateList { scope: None },
+        serde_json::json!({ "op": "prompt_template_list", "scope": null }),
+    );
+    pins(
+        IpcRequest::PromptTemplateList {
+            scope: Some(TemplateScope::Global),
+        },
+        serde_json::json!({ "op": "prompt_template_list", "scope": "global" }),
+    );
+    pins(
+        IpcRequest::PromptTemplateRead {
+            scope: TemplateScope::Project,
+            name: "review".into(),
+        },
+        serde_json::json!({ "op": "prompt_template_read", "scope": "project", "name": "review" }),
+    );
+    pins(
+        IpcRequest::PromptTemplateCreate {
+            scope: TemplateScope::Global,
+            name: "review".into(),
+            description: Some("PR review".into()),
+            body: "Review {{diff}}".into(),
+        },
+        serde_json::json!({
+            "op": "prompt_template_create",
+            "scope": "global",
+            "name": "review",
+            "description": "PR review",
+            "body": "Review {{diff}}",
+        }),
+    );
+    // An omitted description is carried as an explicit null, not a missing key: the core reads the
+    // two apart (keep the stored description versus clear it), so the field must survive the wire.
+    pins(
+        IpcRequest::PromptTemplateUpdate {
+            scope: TemplateScope::Project,
+            name: "review".into(),
+            description: None,
+            body: "Review {{diff}} for {{focus}}".into(),
+            expected_revision: 2,
+        },
+        serde_json::json!({
+            "op": "prompt_template_update",
+            "scope": "project",
+            "name": "review",
+            "description": null,
+            "body": "Review {{diff}} for {{focus}}",
+            "expected_revision": 2,
+        }),
+    );
+    pins(
+        IpcRequest::PromptTemplateDelete {
+            scope: TemplateScope::Project,
+            name: "review".into(),
+        },
+        serde_json::json!({ "op": "prompt_template_delete", "scope": "project", "name": "review" }),
+    );
+    pins(
+        IpcRequest::PromptTemplateExport {
+            scope: TemplateScope::Global,
+            name: "review".into(),
+        },
+        serde_json::json!({ "op": "prompt_template_export", "scope": "global", "name": "review" }),
+    );
+}
+
+/// The prompt-template replies, pinned for the same reason: the `ok` tag a client dispatches on, the
+/// field names it reads, and — for an export — the format tag a saved envelope carries forever.
+#[test]
+fn the_prompt_template_responses_serialize_to_their_wire_shape() {
+    pins(
+        IpcResponse::PromptTemplate(TemplateView {
+            id: TemplateId::from_raw(4),
+            kind: TemplateKind::Prompt,
+            name: "review".into(),
+            description: Some("PR review".into()),
+            body: "Review {{diff}}".into(),
+            placeholders: vec!["diff".into()],
+            scope: TemplateScope::Project,
+            revision: 1,
+        }),
+        serde_json::json!({
+            "ok": "prompt_template",
+            "data": {
+                "id": 4,
+                "kind": "prompt",
+                "name": "review",
+                "description": "PR review",
+                "body": "Review {{diff}}",
+                "placeholders": ["diff"],
+                "scope": "project",
+                "revision": 1,
+            },
+        }),
+    );
+    // A summary is the same row minus the body — a client that listed and then rendered a body it
+    // never received would show an empty template.
+    pins(
+        IpcResponse::PromptTemplates(vec![TemplateSummary {
+            id: TemplateId::from_raw(4),
+            kind: TemplateKind::Prompt,
+            name: "review".into(),
+            description: None,
+            placeholders: vec!["diff".into()],
+            scope: TemplateScope::Global,
+            revision: 3,
+        }]),
+        serde_json::json!({
+            "ok": "prompt_templates",
+            "data": [{
+                "id": 4,
+                "kind": "prompt",
+                "name": "review",
+                "description": null,
+                "placeholders": ["diff"],
+                "scope": "global",
+                "revision": 3,
+            }],
+        }),
+    );
+    // The purest case for pinning: the payload is a bare bool, so a round-trip would survive the
+    // variant being renamed to anything at all.
+    pins(
+        IpcResponse::PromptTemplateDeleted(true),
+        serde_json::json!({ "ok": "prompt_template_deleted", "data": true }),
+    );
+    pins(
+        IpcResponse::PromptTemplateExport(ExportedTemplate {
+            format: "soloist.prompt-template/v1".into(),
+            name: "review".into(),
+            description: None,
+            body: "Review {{diff}}".into(),
+        }),
+        serde_json::json!({
+            "ok": "prompt_template_export",
+            "data": {
+                "format": "soloist.prompt-template/v1",
+                "name": "review",
+                "description": null,
+                "body": "Review {{diff}}",
+            },
+        }),
+    );
+}
+
+/// The render exchange is read off the wire by an out-of-process client, so its exact shape is the
+/// contract, not merely that it round-trips: the two op/ok tags, the values map as a plain JSON
+/// object, and the policy as its snake_case tag. Pinned literally for the same reason the port-wait
+/// tags below are — a symmetric round-trip would survive a rename that breaks every reader.
+#[test]
+fn the_prompt_render_exchange_serializes_to_its_wire_shape() {
+    let request = IpcRequest::PromptTemplateRender {
+        scope: TemplateScope::Project,
+        name: "review".into(),
+        values: BTreeMap::from([("diff".to_owned(), "a/b.rs".to_owned())]),
+        policy: MissingPolicy::Strict,
+    };
+    let request_json = serde_json::json!({
+        "op": "prompt_template_render",
+        "scope": "project",
+        "name": "review",
+        "values": { "diff": "a/b.rs" },
+        "policy": "strict",
+    });
+    assert_eq!(
+        serde_json::to_value(&request).expect("serialize"),
+        request_json
+    );
+    assert_eq!(
+        serde_json::from_value::<IpcRequest>(request_json).expect("deserialize"),
+        request
+    );
+
+    let response = IpcResponse::PromptTemplateRendered(RenderedPrompt {
+        text: "Review a/b.rs for {{focus}}".into(),
+        unfilled: vec!["focus".into()],
+        unknown: vec!["dif".into()],
+    });
+    let response_json = serde_json::json!({
+        "ok": "prompt_template_rendered",
+        "data": {
+            "text": "Review a/b.rs for {{focus}}",
+            "unfilled": ["focus"],
+            "unknown": ["dif"],
+        },
+    });
+    assert_eq!(
+        serde_json::to_value(&response).expect("serialize"),
+        response_json
+    );
+    assert_eq!(
+        serde_json::from_value::<IpcResponse>(response_json).expect("deserialize"),
+        response
+    );
 }
 
 #[test]

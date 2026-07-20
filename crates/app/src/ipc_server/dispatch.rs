@@ -13,7 +13,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use soloist_core::{Facade, IdleMode, ProjectId, SessionId, WaitForPortError};
+use soloist_core::{Facade, IdleMode, ProjectId, RenderRequest, SessionId, WaitForPortError};
 use soloist_ipc::{
     IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome, ProjectStatus, ProjectSummary,
 };
@@ -550,6 +550,23 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .scoped(session)
             .prompt_template_export(scope, &name)
             .map(IpcResponse::PromptTemplateExport)
+            .map_err(IpcError::from),
+        IpcRequest::PromptTemplateRender {
+            scope,
+            name,
+            values,
+            policy,
+        } => facade
+            .scoped(session)
+            .prompt_template_render(
+                scope,
+                &RenderRequest {
+                    name,
+                    values,
+                    policy,
+                },
+            )
+            .map(IpcResponse::PromptTemplateRendered)
             .map_err(IpcError::from),
     }
 }

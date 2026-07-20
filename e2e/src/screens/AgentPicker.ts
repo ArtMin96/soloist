@@ -11,6 +11,11 @@ export const agentPicker = {
     await $(ROOT).waitForDisplayed({ timeout: WAIT.render });
   },
 
+  /** Whether the picker is up right now — read without waiting, so a caller can drive it open. */
+  async isOpen(): Promise<boolean> {
+    return $(ROOT).isDisplayed();
+  },
+
   async waitUntilClosed(): Promise<void> {
     await $(ROOT).waitForDisplayed({ timeout: WAIT.render, reverse: true });
   },

@@ -16,14 +16,16 @@ use std::sync::Arc;
 
 use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, Content, Implementation, ListToolsResult,
-    PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+    CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams, GetPromptResult,
+    Implementation, ListPromptsResult, ListToolsResult, PaginatedRequestParams, PromptsCapability,
+    ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{tool_handler, ErrorData, RoleServer, ServerHandler};
 use soloist_core::{onboarding_hint, McpFeatureGroup, McpToolGroups};
 
 use crate::client::AppClient;
+use crate::prompts::changed_prompt_list;
 use crate::suggestions::Suggestions;
 
 /// One tool group's identity: the display label the summary groups it under, the constructor for
@@ -65,6 +67,9 @@ const FEATURED_TOOLS: &[&str] = &[
 pub struct SoloistMcp {
     pub(crate) client: Arc<AppClient>,
     tool_router: ToolRouter<Self>,
+    /// Which feature groups the user has enabled. Held beyond composing the router because the
+    /// prompts primitive is gated by the same settings but is not a router entry.
+    groups: McpToolGroups,
     /// The per-session decaying next-tool suggestions. Shared across handler clones so the decay
     /// counts are one ledger for the connection.
     suggestions: Arc<Suggestions>,
@@ -91,7 +96,34 @@ impl SoloistMcp {
         Self {
             client,
             tool_router,
+            groups,
             suggestions: Arc::new(Suggestions::default()),
+        }
+    }
+
+    /// Whether the prompts primitive is served.
+    ///
+    /// It reads the very templates the Prompt Templates feature group gates, so it follows that one
+    /// setting. The group is otherwise enforced by leaving its sub-router out of the composed
+    /// router — a mechanism `prompts/list` and `prompts/get` are outside of, since they are
+    /// [`ServerHandler`] methods rather than tool routes. Without this the user could switch the
+    /// group off and still have every template read out over the prompts door.
+    pub(crate) fn prompts_enabled(&self) -> bool {
+        self.groups.enabled(McpFeatureGroup::PromptTemplates)
+    }
+
+    /// What this server advertises at initialization. Tools are always served; prompts are
+    /// advertised only while [`prompts_enabled`](Self::prompts_enabled), and with `listChanged` so a
+    /// client knows to re-read the list when told to.
+    fn capabilities(&self) -> ServerCapabilities {
+        let capabilities = ServerCapabilities::builder().enable_tools();
+        match self.prompts_enabled() {
+            true => capabilities
+                .enable_prompts_with(PromptsCapability {
+                    list_changed: Some(true),
+                })
+                .build(),
+            false => capabilities.build(),
         }
     }
 
@@ -271,18 +303,38 @@ fn first_sentence(description: Option<&str>) -> String {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for SoloistMcp {
-    /// The initialization handshake. Advertises the tool capability and the server's own
-    /// identity (the default reports the `rmcp` crate, not this binary), and carries the
+    /// The initialization handshake. Advertises [this server's capabilities](SoloistMcp::capabilities)
+    /// and its own identity (the default reports the `rmcp` crate, not this binary), and carries the
     /// first-run path an agent should follow — `whoami`, then `help`, then `help` on a topic.
     /// The path is single-sourced from the core guide, so the handshake and the `help` tool
     /// teach the same start. The `#[tool_handler]` macro still supplies `list_tools`/`call_tool`.
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        ServerInfo::new(self.capabilities())
             .with_server_info(Implementation::new(
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION"),
             ))
             .with_instructions(onboarding_hint())
+    }
+
+    /// Serves `prompts/list` (see [`SoloistMcp::prompt_list`]). Never an error: a client that meets
+    /// one here may drop this server outright, tools included, so an unreachable app or a disabled
+    /// feature group is an empty list.
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        self.prompt_list().await
+    }
+
+    /// Serves `prompts/get` (see [`SoloistMcp::prompt_get`]).
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResult, ErrorData> {
+        self.prompt_get(request).await
     }
 
     /// Serves `tools/list` with the featured tools first (see [`SoloistMcp::featured_tool_list`])
@@ -304,14 +356,23 @@ impl ServerHandler for SoloistMcp {
     /// Routes a tool call to the composed router (as the `#[tool_handler]` macro's default would),
     /// then appends a decaying next-tool suggestion when one applies (see
     /// [`SoloistMcp::with_suggestion`]). Providing this suppresses the macro's default `call_tool`.
+    ///
+    /// A call that changed which templates exist also tells the client its prompt list is stale.
+    /// This is the one place every tool call passes through, and the only place holding the peer to
+    /// notify on. A failed send means the connection is already going away, so there is nothing left
+    /// to tell and nothing to do about it.
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let tool = request.name.clone();
+        let peer = context.peer.clone();
         let call = ToolCallContext::new(self, request, context);
         let result = self.tool_router.call(call).await?;
+        if changed_prompt_list(&tool, &result) {
+            let _ = peer.notify_prompt_list_changed().await;
+        }
         Ok(self.with_suggestion(&tool, result))
     }
 }

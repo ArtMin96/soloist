@@ -75,6 +75,7 @@ mod todo;
 
 pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
+pub use prompt_template::PromptRenderError;
 pub use scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
 pub use scratchpad::ScratchpadWrite;
 pub use support::SetupIntegrationError;
@@ -107,7 +108,7 @@ pub struct Facade {
     timers: Timers,
     scratchpads: Scratchpads,
     todos: Todos,
-    templates: Templates,
+    templates: Arc<Templates>,
     settings: Arc<SettingsStore<(), Settings>>,
     project_settings: Arc<SettingsStore<ProjectId, ProjectSettings>>,
     feedback: Feedback,
@@ -151,7 +152,7 @@ impl Facade {
             agents: Agents::new(agent_tools, version_probe, clock.clone()),
             scratchpads: Scratchpads::new(scratchpad_repo, clock.clone()),
             todos: Todos::new(todo_repo),
-            templates: Templates::new(template_repo),
+            templates: Arc::new(Templates::new(template_repo)),
             settings: Arc::new(SettingsStore::new(settings_repo)),
             project_settings: Arc::new(SettingsStore::new(project_settings_repo)),
             feedback: Feedback::new(feedback_repo, clock.clone()),

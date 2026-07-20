@@ -274,7 +274,11 @@ export default function App() {
                   />
                 </DeferredOverlay>
                 <DeferredOverlay open={settingsOpen}>
-                  <SettingsOverlay open={settingsOpen} onOpenChange={setSettingsOpen} />
+                  <SettingsOverlay
+                    open={settingsOpen}
+                    onOpenChange={setSettingsOpen}
+                    project={activeProjectId}
+                  />
                 </DeferredOverlay>
                 <DeferredOverlay open={quickJumpOpen}>
                   <QuickJumpPalette

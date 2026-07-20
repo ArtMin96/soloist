@@ -111,6 +111,14 @@ impl TemplateRepo for FakeTemplateRepo {
         Ok(rows)
     }
 
+    fn count(&self, kind: TemplateKind, project: Option<ProjectId>) -> Result<usize, StoreError> {
+        let scope = project.map(ProjectId::get);
+        Ok(lock(&self.rows)
+            .keys()
+            .filter(|(row_kind, row_scope, _)| *row_kind == kind && *row_scope == scope)
+            .count())
+    }
+
     fn delete(
         &self,
         kind: TemplateKind,

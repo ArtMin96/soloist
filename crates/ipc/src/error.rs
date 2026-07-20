@@ -9,8 +9,13 @@
 use serde::{Deserialize, Serialize};
 use soloist_core::{
     CoordinationError, FeedbackError, IdentityError, IntegrationWriteError, LaunchAgentError,
-    ScopedActionError, SetupIntegrationError, SpawnAgentError, TodoId,
+    PromptRenderError, RenderError, ScopedActionError, SetupIntegrationError, SpawnAgentError,
+    TodoId,
 };
+
+/// What an over-cap render is named as in [`IpcError::PayloadTooLarge`], matching how the
+/// coordination write caps name the payload they refused.
+const RENDERED_PROMPT: &str = "the rendered prompt";
 
 /// Why a request failed: a typed error the client maps to a clear MCP tool error.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
@@ -99,6 +104,11 @@ pub enum IpcError {
     /// A template create named one that already exists in the addressed scope and kind.
     #[error("a template with that name already exists")]
     TemplateNameTaken,
+    /// A render that refuses a partial result met placeholders the caller supplied no value for;
+    /// `names` lists every one, so they can all be supplied in one retry. Distinct from a generic
+    /// failure because a caller can fix it — an adapter maps it to its "bad argument" code.
+    #[error("no value supplied for: {}", .names.join(", "))]
+    MissingTemplateValues { names: Vec<String> },
     /// A `solo://` link could not be parsed.
     #[error("not a valid solo:// link")]
     MalformedLink,
@@ -163,6 +173,7 @@ impl IpcError {
             | IpcError::TemplateRevisionConflict { .. }
             | IpcError::UnknownTemplate
             | IpcError::TemplateNameTaken
+            | IpcError::MissingTemplateValues { .. }
             | IpcError::MalformedLink
             | IpcError::ForeignScopeLink
             | IpcError::OutOfScope
@@ -281,6 +292,29 @@ impl From<CoordinationError> for IpcError {
                 max_bytes,
             },
             CoordinationError::Store(err) => IpcError::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<RenderError> for IpcError {
+    fn from(err: RenderError) -> Self {
+        match err {
+            RenderError::TemplateNotFound => IpcError::UnknownTemplate,
+            RenderError::RenderedTooLarge { cap, .. } => IpcError::PayloadTooLarge {
+                what: RENDERED_PROMPT.to_owned(),
+                max_bytes: cap,
+            },
+            RenderError::MissingValues(names) => IpcError::MissingTemplateValues { names },
+            RenderError::Store(err) => IpcError::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<PromptRenderError> for IpcError {
+    fn from(err: PromptRenderError) -> Self {
+        match err {
+            PromptRenderError::Scope(err) => err.into(),
+            PromptRenderError::Render(err) => err.into(),
         }
     }
 }

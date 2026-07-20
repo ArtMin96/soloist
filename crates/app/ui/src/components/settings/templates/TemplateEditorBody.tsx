@@ -10,8 +10,6 @@ interface TemplateEditorBodyProps {
   initialBody: string;
   /** The one-line description the template loaded with — read once, then controlled locally. */
   initialDescription: string;
-  /** The template's name, used to shape the copied Markdown (`# name` + body). */
-  name: string;
   /** Persists the description + body revision-guarded; the panel routes it to the core. */
   onSave: (description: string, body: string) => Promise<void>;
   /** True while a revision conflict is unresolved: autosave pauses until the panel reloads. */
@@ -26,7 +24,6 @@ interface TemplateEditorBodyProps {
 export function TemplateEditorBody({
   initialBody,
   initialDescription,
-  name,
   onSave,
   paused,
 }: TemplateEditorBodyProps) {
@@ -43,8 +40,12 @@ export function TemplateEditorBody({
     autosave.push(bodyRef.current);
   };
 
+  // The body verbatim — the template's source, markers and all. A heading naming the template used to
+  // be prepended here, which corrupted every paste: a prompt pasted to an agent gained a title it
+  // never declared, and a seedable template's copy gained an H1 that is not part of the document it
+  // seeds. The filled-in prompt is a different artifact and has its own copy on the preview.
   const copyMarkdown = () => {
-    void navigator.clipboard?.writeText(`# ${name}\n\n${bodyRef.current}`);
+    void navigator.clipboard?.writeText(bodyRef.current);
   };
 
   const status = autosave.saving ? "Saving…" : autosave.dirty ? "Unsaved changes" : "Saved";

@@ -3,8 +3,11 @@
 
 mod args;
 mod client;
+mod prompts;
 mod server;
 mod suggestions;
+#[cfg(test)]
+mod testing;
 mod tools;
 
 use std::sync::Arc;

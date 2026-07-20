@@ -68,3 +68,7 @@ pub enum TemplateScope {
     Global,
     Project,
 }
+
+#[cfg(test)]
+#[path = "template_tests.rs"]
+mod tests;

@@ -32,16 +32,31 @@ edges() {
     from="${f#crates/core/src/}"
     from="${from%%/*}"
     from="${from%.rs}"
+    # POSIX awk only: the capture-array form of `match` is a gawk extension, and under mawk it is a
+    # syntax error that yields no edges at all — which reads as a clean graph. RSTART/RLENGTH and
+    # `sub` are portable and say the same thing.
     awk -v from="$from" '
       /^[[:space:]]*#\[cfg\(test\)\]/ { exit }
-      match($0, /^[[:space:]]*use crate::([a-z_][a-z0-9_]*)/, m) {
-        if (m[1] != from && m[1] != "testing") print from " " m[1]
+      match($0, /^[[:space:]]*use crate::[a-z_][a-z0-9_]*/) {
+        mod = substr($0, RSTART, RLENGTH)
+        sub(/^[[:space:]]*use crate::/, "", mod)
+        if (mod != from && mod != "testing") print from " " mod
       }
     ' "$f"
   done | sort -u
 }
 
 mapfile -t graph < <(edges)
+
+# An empty graph is not a clean graph. The core's modules always import across each other, so zero
+# edges means extraction broke — a stricter awk, a moved source root, a renamed glob — and an empty
+# edge list trivially has no cycles. Without this the gate reports success while checking nothing.
+if [ "${#graph[@]}" -eq 0 ]; then
+  echo "error: no module edges found, so nothing was actually checked."
+  echo "The core always imports across its modules; zero edges means the extraction above is"
+  echo "broken rather than the graph being acyclic. Check the awk invocation and the file glob."
+  exit 1
+fi
 
 # Report every cycle by walking each edge back to its source (depth-first over the edge list).
 cycles="$(printf '%s\n' "${graph[@]}" | awk '
