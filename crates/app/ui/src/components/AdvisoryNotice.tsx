@@ -8,18 +8,27 @@ import { cn } from "@/lib/utils";
 //
 // `action` carries the one control that resolves the notice (a Reload for a stale revision), and is
 // omitted when the notice is purely something to know.
+//
+// `urgency` decides how a screen reader announces it. `alert` interrupts, which is right for
+// something that just happened to the user's work — a save refused because the document moved on.
+// `status` waits for a pause, which is what an advisory that re-renders while the user types needs:
+// announcing the unfilled-placeholder notice assertively would re-interrupt on every keystroke.
+export type AdvisoryUrgency = "alert" | "status";
+
 export function AdvisoryNotice({
   children,
   action,
   className,
+  urgency = "alert",
 }: {
   children: ReactNode;
   action?: ReactNode;
   className?: string;
+  urgency?: AdvisoryUrgency;
 }) {
   return (
     <div
-      role="alert"
+      role={urgency}
       className={cn(
         "flex items-center gap-3 rounded-md border border-status-transition/40 bg-status-transition/10 px-3 py-2 text-[0.8125rem]",
         className,

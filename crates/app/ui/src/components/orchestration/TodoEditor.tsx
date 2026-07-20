@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Check } from "lucide-react";
-import { AdvisoryNotice } from "@/components/AdvisoryNotice";
+import { RevisionConflictNotice } from "@/components/RevisionConflictNotice";
 import { Button } from "@/components/ui/button";
 import { TodoDocFields } from "@/components/orchestration/TodoDocFields";
 import { useAutosave } from "@/components/editor/useAutosave";
@@ -65,16 +65,7 @@ export function TodoEditor({
   return (
     <div className="flex flex-col gap-2">
       {conflict && (
-        <AdvisoryNotice
-          action={
-            <Button variant="outline" size="sm" onClick={onReload}>
-              Reload
-            </Button>
-          }
-        >
-          This todo changed elsewhere (now at revision {conflict.actual}). Your edits were not saved
-          and nothing was overwritten.
-        </AdvisoryNotice>
+        <RevisionConflictNotice subject="todo" revision={conflict.actual} onReload={onReload} />
       )}
 
       {error && !conflict && (

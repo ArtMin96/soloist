@@ -48,7 +48,8 @@ pub enum MissingPolicy {
 pub struct RenderRequest {
     /// The template's name within the addressed scope.
     pub name: String,
-    /// A value per placeholder name. Sorted, so `unknown` is reported in a stable order.
+    /// A value per placeholder name, keyed and therefore ordered by that name — which is what
+    /// makes `unknown` a stable list rather than one that reshuffles per call.
     pub values: BTreeMap<String, String>,
     pub policy: MissingPolicy,
 }
@@ -63,7 +64,8 @@ pub struct RenderedPrompt {
     pub text: String,
     /// Placeholders the body declares that no value was supplied for, in the body's order.
     pub unfilled: Vec<String>,
-    /// Value names the body declares no placeholder for, in the values' order.
+    /// Value names the body declares no placeholder for, in name order (the map's, not the
+    /// caller's — a `BTreeMap` keeps no record of the order values were supplied in).
     pub unknown: Vec<String>,
 }
 

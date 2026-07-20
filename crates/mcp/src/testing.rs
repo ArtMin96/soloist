@@ -55,8 +55,13 @@ pub(crate) fn handler_on(socket: PathBuf, groups: McpToolGroups) -> SoloistMcp {
     SoloistMcp::new(Arc::new(AppClient::new(None, socket)), groups)
 }
 
+/// A socket path nothing listens on. A handler built with it can still answer everything it decides
+/// for itself — what it advertises, what it refuses — because those never open a connection; a test
+/// that reached the app through this would fail to connect rather than quietly pass.
+const UNREACHABLE_APP: &str = "unused.sock";
+
 /// A handler with the given feature-group enablement and no reachable app — for a test that reads
 /// only what the handler decides on its own, never opening a connection.
 pub(crate) fn handler_with_groups(groups: McpToolGroups) -> SoloistMcp {
-    handler_on(PathBuf::from("unused.sock"), groups)
+    handler_on(PathBuf::from(UNREACHABLE_APP), groups)
 }

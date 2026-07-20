@@ -363,8 +363,14 @@ impl Templates {
     }
 
     /// Reads the stored rows for a `(kind, scope)` through `read` — served from the cache when warm,
-    /// else scanned once and cached. Handing the reader the rows rather than returning them keeps a
-    /// caller that wants only a count, or one row, from cloning every cached body to get it.
+    /// else scanned once and cached. Handing the reader the rows rather than returning them is what
+    /// keeps both callers off a full clone: `list` projects each row to a summary and drops the
+    /// bodies, and `resolve` keeps exactly the one row it was looking for.
+    ///
+    /// The scope's row count deliberately does not come through here. It is only ever needed to
+    /// check the per-scope cap on a create, where the cache may well be cold — and populating it
+    /// would mean loading every body to learn how many there are, where the store answers with a
+    /// `COUNT`.
     fn with_cached_rows<T>(
         &self,
         kind: TemplateKind,

@@ -68,10 +68,12 @@ export function TemplatePreview({
           rendered != null && (
             <>
               {rendered.unfilled.length > 0 && (
-                <AdvisoryNotice>{unfilledNotice(rendered.unfilled)}</AdvisoryNotice>
+                <AdvisoryNotice urgency="status">
+                  {unfilledNotice(rendered.unfilled)}
+                </AdvisoryNotice>
               )}
               {rendered.unknown.length > 0 && (
-                <AdvisoryNotice>{unknownNotice(rendered.unknown)}</AdvisoryNotice>
+                <AdvisoryNotice urgency="status">{unknownNotice(rendered.unknown)}</AdvisoryNotice>
               )}
               <CodeBlock className="whitespace-pre-wrap break-words" copy={rendered.text}>
                 {rendered.text}

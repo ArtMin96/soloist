@@ -56,6 +56,12 @@ fn swap_in_rebuilt_projects(conn: &Connection) -> Result<(), StoreError> {
 }
 
 /// The swap itself, from `BEGIN` to `COMMIT`. Every exit is an error the caller rolls back.
+///
+/// The column list is deliberately a copy of `projects` as it stood at v16, not a shared definition
+/// with the `CREATE TABLE` in the v2 step. A migration step describes the schema at one moment in
+/// history and must keep describing it: a later column arrives through its own step, on a database
+/// this one has long since rebuilt. Sharing one definition between the two would silently rewrite
+/// what an old database is upgraded *through*, which is the one thing a migration may never do.
 fn rebuilt_projects_committed(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(
         "BEGIN;

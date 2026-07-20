@@ -149,7 +149,9 @@ describe("template preview", () => {
     await waitFor(() => expect(output()).toBe("Review the auth patch with an eye on {{focus}}."));
     // ...and named, so it is findable without hunting through a long prompt.
     const notice = await screen.findByText(/No value for \{\{focus\}\}/);
-    expect(notice.closest("[role='alert']")).toBeTruthy();
+    // A polite live region, not an assertive one: this advisory re-renders as the user types, and
+    // `alert` would re-interrupt a screen reader on every keystroke.
+    expect(notice.closest("[role='status']")).toBeTruthy();
   });
 
   it("puts the marker back when a filled value is cleared", async () => {
@@ -177,7 +179,9 @@ describe("template preview", () => {
     });
 
     const notice = await screen.findByText(/\{\{focus\}\} matches no placeholder/);
-    expect(notice.closest("[role='alert']")).toBeTruthy();
+    // A polite live region, not an assertive one: this advisory re-renders as the user types, and
+    // `alert` would re-interrupt a screen reader on every keystroke.
+    expect(notice.closest("[role='status']")).toBeTruthy();
     // The stray value changes nothing about the prompt itself.
     await waitFor(() => expect(output()).toBe("Review {{diff}}."));
   });

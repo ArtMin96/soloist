@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ArrowLeft, Trash2 } from "lucide-react";
-import { AdvisoryNotice } from "@/components/AdvisoryNotice";
+import { RevisionConflictNotice } from "@/components/RevisionConflictNotice";
 import { Button } from "@/components/ui/button";
 import { TemplateEditorBody } from "@/components/settings/templates/TemplateEditorBody";
 import { templateScopeHeading } from "@/lib/templates";
@@ -103,16 +103,7 @@ export function TemplateEditor({
       </div>
 
       {conflict && (
-        <AdvisoryNotice
-          action={
-            <Button variant="outline" size="sm" onClick={onReload}>
-              Reload
-            </Button>
-          }
-        >
-          This template changed elsewhere (now at revision {conflict.actual}). Your edits were not
-          saved and nothing was overwritten.
-        </AdvisoryNotice>
+        <RevisionConflictNotice subject="template" revision={conflict.actual} onReload={onReload} />
       )}
 
       {error && (
