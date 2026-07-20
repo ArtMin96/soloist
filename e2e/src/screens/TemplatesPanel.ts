@@ -21,11 +21,15 @@ const AUTOSAVE_STATUS = "[data-autosave-status]";
 // The autosave read-out at rest — the editor has no unsaved changes and none in flight.
 const SAVED = "Saved";
 // The preview section is reached from its heading rather than from a container class: the editor's
-// conflict banner is an advisory strip of exactly the same kind, and an unscoped alert read would
+// conflict banner is an advisory strip of exactly the same kind, and an unscoped notice read would
 // count it as a placeholder notice.
 const PREVIEW_TITLE = "Preview";
 const RENDERED = "pre";
-const NOTICE = '[role="alert"]';
+// The strips are addressed by their own marker rather than by ARIA role. Role here is a politeness
+// choice that legitimately changes — these advisories re-render per keystroke, so they ask for
+// `status` where a refusal asks for `alert` — and the rendered prompt beside them carries a `status`
+// live region of its own for the copy read-out, which a role read would miscount as a notice.
+const NOTICE = "[data-advisory-notice]";
 // How the preview names each placeholder's value field (its `aria-label`), used both to address one
 // field and to recover the declared placeholder list in rendered order.
 const VALUE_LABEL_PREFIX = "Value for ";
@@ -116,14 +120,18 @@ export const templatesPanel = {
    * output it does not consider laid out (the same trap the sidebar's telemetry read documents).
    * A `null` prompt means the section showed no output at all, which is a different failure from
    * showing the wrong one.
+   *
+   * A missing section throws rather than reading back as an empty preview. No notices is a state the
+   * preview really reaches, so answering "none" for a section that was never found would let a walk
+   * assert emptiness against a screen the harness cannot see at all.
    */
   async readPreview(): Promise<Preview> {
-    return browser.execute(
+    const preview: Preview | null = await browser.execute(
       (heading: string, rendered: string, notice: string) => {
         const section = [...document.querySelectorAll("h3")]
           .find((title) => title.textContent?.trim() === heading)
           ?.closest("section");
-        if (!section) return { prompt: null, notices: [] };
+        if (!section) return null;
         return {
           prompt: section.querySelector(rendered)?.textContent ?? null,
           notices: [...section.querySelectorAll(notice)].map(
@@ -135,6 +143,13 @@ export const templatesPanel = {
       RENDERED,
       NOTICE,
     );
+    if (preview === null) {
+      throw new Error(
+        `no section headed "${PREVIEW_TITLE}" is on screen, so nothing about the preview can be ` +
+          `read — the open template is not a prompt, or the section's markup changed`,
+      );
+    }
+    return preview;
   },
 
   /** The description the open template loaded with, as its field shows it. */

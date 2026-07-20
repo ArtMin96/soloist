@@ -64,6 +64,12 @@ describe("filling in a prompt template", () => {
   });
 
   it("fills the prompt out once every placeholder is answered", async () => {
+    // Read the gap still being reported before closing it. Bare emptiness is not a claim this test
+    // can make on its own: no notices is where the preview is supposed to end up, so a harness that
+    // had gone blind to notices altogether would satisfy it just as well as the notice clearing.
+    // Watching it go from reported to gone is what makes the empty read mean the clearing.
+    expect((await templatesPanel.readPreview()).notices).toHaveLength(1);
+
     await templatesPanel.fill("focus", FOCUS_VALUE);
 
     const preview = await templatesPanel.waitForPreview(FULLY_FILLED);

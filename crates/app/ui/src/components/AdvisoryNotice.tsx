@@ -29,6 +29,9 @@ export function AdvisoryNotice({
   return (
     <div
       role={urgency}
+      // A strip stays identifiable as one whatever politeness it asks for. Addressing it by role
+      // instead would make every urgency decision a change to whoever reads the strip back.
+      data-advisory-notice
       className={cn(
         "flex items-center gap-3 rounded-md border border-status-transition/40 bg-status-transition/10 px-3 py-2 text-[0.8125rem]",
         className,
