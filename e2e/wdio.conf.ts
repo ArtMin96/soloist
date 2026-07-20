@@ -88,7 +88,15 @@ function buildBinary(
   options: { cwd?: string; env: NodeJS.ProcessEnv },
   binary: string,
 ): void {
-  const build = spawnSync("cargo", args, { stdio: "inherit", ...options });
+  // A build inherits the harness's environment but never its TypeScript loader. This config is read
+  // through tsx, which advertises itself to child processes as `NODE_OPTIONS=--import <loader>`; the
+  // app build shells out to `pnpm`, and pnpm looks for an optional `.pnpmfile.mjs` by importing it.
+  // Under the loader an absent file comes back as a failed import rather than as absent, so pnpm
+  // reports a pnpmfile error and the build dies on a file that was never meant to exist.
+  const env = { ...options.env };
+  delete env.NODE_OPTIONS;
+
+  const build = spawnSync("cargo", args, { stdio: "inherit", ...options, env });
   if (build.status !== 0) {
     throw new Error(`Failed to build ${what} for e2e (exit ${build.status})`);
   }
