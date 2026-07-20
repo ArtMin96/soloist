@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { templateRender } from "@/api";
-import { RENDERABLE_TEMPLATE_KIND } from "@/lib/templates";
+import { RENDERABLE_TEMPLATE_KIND, templateScopeProject } from "@/lib/templates";
 import type { RenderedPrompt, TemplateKind, TemplateScope } from "@/domain";
 
 // The quiet window after the last keystroke before the preview re-renders. Each render is an IPC
@@ -76,7 +76,7 @@ export function useTemplateRender({
     // before it is sent, so a burst of typing costs one round-trip rather than one per character.
     const timer = setTimeout(() => {
       const stamp = ++latest.current;
-      templateRender(scope === "global" ? null : project, name, values).then(
+      templateRender(templateScopeProject(scope, project), name, values).then(
         (result) => {
           if (stamp !== latest.current) return;
           setRendered(result);

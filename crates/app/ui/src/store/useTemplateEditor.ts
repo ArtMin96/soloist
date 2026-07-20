@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { templateRead, templateUpdate } from "@/api";
+import { templateScopeProject } from "@/lib/templates";
 import type { TemplateKind, TemplateScope } from "@/domain";
 
 // A revision conflict surfaced to the editor: an edit was refused because the template moved on since
@@ -72,10 +73,9 @@ export function useTemplateEditor(project: number | null): TemplateEditorStore {
   const [error, setError] = useState<string | null>(null);
   const baseRevisionRef = useRef<number | null>(null);
 
-  // The project id a scope addresses, so every read and write in this hook stays inside the library
-  // the template was opened from.
+  // Keeps every read and write in this hook inside the library the template was opened from.
   const idOf = useCallback(
-    (target: TemplateScope) => (target === "global" ? null : project),
+    (target: TemplateScope) => templateScopeProject(target, project),
     [project],
   );
 

@@ -144,7 +144,7 @@ impl SoloistMcp {
             .await
         {
             Ok(IpcResponse::PromptTemplateDeleted(deleted)) => {
-                structured(&serde_json::json!({ "deleted": deleted }))
+                structured(&serde_json::json!({ crate::prompts::DELETED: deleted }))
             }
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),

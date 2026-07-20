@@ -8,7 +8,7 @@ import {
   templateRead,
   templates as listTemplates,
 } from "@/api";
-import { TEMPLATE_KINDS, TEMPLATE_SCOPES } from "@/lib/templates";
+import { TEMPLATE_KINDS, TEMPLATE_SCOPES, templateScopeProject } from "@/lib/templates";
 import { persistThenReconcile } from "@/store/persist";
 import { uniqueCopyName } from "@/store/templateCopy";
 import { useLatestRef } from "@/store/useLatestRef";
@@ -67,10 +67,8 @@ export function useTemplates(project: number | null): TemplatesStore {
 
   const fail = useCallback((reason: unknown) => setError(String(reason)), []);
 
-  // The project id a scope addresses: the global library has none, and the project scope is only
-  // readable while a project is open.
   const idOf = useCallback(
-    (scope: TemplateScope) => (scope === "global" ? null : project),
+    (scope: TemplateScope) => templateScopeProject(scope, project),
     [project],
   );
 

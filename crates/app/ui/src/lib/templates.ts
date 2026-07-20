@@ -31,6 +31,16 @@ export const TEMPLATE_KIND_DESCRIPTION: Record<TemplateKind, string> = {
 // first, then the open project's own.
 export const TEMPLATE_SCOPES: readonly TemplateScope[] = ["global", "project"];
 
+// The project id a scope addresses on the wire: the global library belongs to no project, and the
+// project scope only resolves while one is open. Every template call that takes a project id routes
+// through here, so the rule lives in one place rather than being re-decided per caller.
+export function templateScopeProject(
+  scope: TemplateScope | null,
+  project: number | null,
+): number | null {
+  return scope === "global" ? null : project;
+}
+
 // The visible group label for a scope. Sentence case, never an all-caps eyebrow.
 export const TEMPLATE_SCOPE_LABEL: Record<TemplateScope, string> = {
   global: "Global",

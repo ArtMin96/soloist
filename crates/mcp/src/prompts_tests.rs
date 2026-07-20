@@ -419,11 +419,20 @@ fn a_successful_template_write_reports_the_prompt_list_changed() {
 /// A delete that found nothing to remove changed no list, so there is nothing to tell a client.
 #[test]
 fn a_delete_that_removed_nothing_reports_no_change() {
-    let removed = CallToolResult::structured(serde_json::json!({ "deleted": true }));
-    let absent = CallToolResult::structured(serde_json::json!({ "deleted": false }));
+    let removed = CallToolResult::structured(serde_json::json!({ DELETED: true }));
+    let absent = CallToolResult::structured(serde_json::json!({ DELETED: false }));
 
     assert!(changed_prompt_list("prompt_template_delete", &removed));
     assert!(!changed_prompt_list("prompt_template_delete", &absent));
+}
+
+/// The one place the key is spelled out. The delete tool and the staleness check share the
+/// constant, so they cannot drift apart — but the key is also structured output an MCP client
+/// reads, so renaming it is a wire change and has to be a deliberate edit here rather than a
+/// rename that quietly carries every caller with it.
+#[test]
+fn the_delete_result_key_is_part_of_the_tool_contract() {
+    assert_eq!(DELETED, "deleted");
 }
 
 /// A refused write changed nothing, and a tool that does not touch templates never does.

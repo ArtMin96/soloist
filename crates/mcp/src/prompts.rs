@@ -55,8 +55,9 @@ pub(crate) const PROMPT_LIST_MUTATORS: &[&str] = &[
 ];
 
 /// The key a delete reports on: it removes nothing when the name was already absent, and a list
-/// that did not change is not worth telling a client about.
-const DELETED: &str = "deleted";
+/// that did not change is not worth telling a client about. Shared with the tool that emits it —
+/// a literal on either side could be renamed alone, and the notification would just stop firing.
+pub(crate) const DELETED: &str = "deleted";
 
 /// Whether a completed tool call changed which prompt templates exist, leaving a client's
 /// `prompts/list` result stale. A call that failed changed nothing, and neither did a delete that
