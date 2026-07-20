@@ -58,7 +58,12 @@ for f in "$cargo_toml" "$package_json" "$tauri_conf"; do
     || { echo "$f still not at $new after the bump — aborting, no commit made" >&2; git checkout -- "$cargo_toml" "$package_json" "$tauri_conf"; exit 1; }
 done
 
-git add "$cargo_toml" "$package_json" "$tauri_conf"
+# Cargo.lock pins each workspace crate's own version too. Refresh it now so the release
+# commit never leaves it pointing at the old version — offline, since only the local
+# packages' version stamps change, not the resolved dependency graph.
+cargo update --workspace --offline --quiet
+
+git add "$cargo_toml" "$package_json" "$tauri_conf" Cargo.lock
 git commit --quiet -m "chore(release): cut $tag"
 git tag -a "$tag" -m "Soloist $tag"
 git push --quiet origin main "$tag"
