@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { templateCreate, templateDelete, templateRead } from "@/api";
-import type { TemplateKind, TemplateSummary } from "@/domain";
+import type { DomainEvent, TemplateKind, TemplateSummary } from "@/domain";
 import { TemplatesPanel } from "@/components/settings/TemplatesPanel";
 
 vi.mock("@/api", () => ({
@@ -13,7 +13,7 @@ vi.mock("@/api", () => ({
   templateDelete: vi.fn(),
   templateRead: vi.fn(),
   templateUpdate: vi.fn(),
-  onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
+  onDomainEvent: vi.fn(),
 }));
 
 // Stub the lazy rich editor so the panel test never mounts TipTap — the editor is covered on its own.
@@ -26,10 +26,14 @@ vi.mock("@/components/editor/LazyRichTextEditor", () => ({
   ),
 }));
 
-import { templates as listTemplates, templateDefaults } from "@/api";
+import { templates as listTemplates, templateDefaults, onDomainEvent } from "@/api";
 
 const list = vi.mocked(listTemplates);
 const defaults = vi.mocked(templateDefaults);
+const subscribe = vi.mocked(onDomainEvent);
+
+// Captures the panel's domain-event handler so a test can announce a change the way the core does.
+let handler: ((event: DomainEvent) => void) | undefined;
 const read = vi.mocked(templateRead);
 const create = vi.mocked(templateCreate);
 const remove = vi.mocked(templateDelete);
@@ -68,7 +72,9 @@ function summary(id: number, name: string, kind: TemplateKind): TemplateSummary 
 
 // Stubs the backend as two separate scratchpad libraries, the way the core stores them. A read for
 // any project other than the open one resolves empty.
-function seed(
+// Restubs just the libraries, standing for a write that landed underneath the panel. Kept apart
+// from `seed` so a mid-test call cannot drop the captured event handler along with it.
+function mockLibraries(
   globals: TemplateSummary[] = [summary(1, "daily", "scratchpad")],
   projectOwned: TemplateSummary[] = [],
 ) {
@@ -77,7 +83,19 @@ function seed(
     if (project == null) return Promise.resolve(globals);
     return Promise.resolve(project === OPEN_PROJECT ? projectOwned : []);
   });
+}
+
+function seed(
+  globals: TemplateSummary[] = [summary(1, "daily", "scratchpad")],
+  projectOwned: TemplateSummary[] = [],
+) {
+  mockLibraries(globals, projectOwned);
   defaults.mockResolvedValue({ scratchpad: 1, todo: null });
+  handler = undefined;
+  subscribe.mockImplementation((fn) => {
+    handler = fn;
+    return Promise.resolve(() => {});
+  });
 }
 
 afterEach(() => {
@@ -163,8 +181,14 @@ describe("TemplatesPanel", () => {
     await screen.findByRole("button", { name: "Duplicate daily" });
 
     fireEvent.click(screen.getByRole("button", { name: "Duplicate daily" }));
+    await waitFor(() => expect(create).toHaveBeenCalled());
 
-    await waitFor(() => expect(read).toHaveBeenCalledWith("scratchpad", null, "daily"));
+    // The copy is only real once it comes back through the library the panel re-reads, so announce
+    // the change the way the core does and look for the copy on screen.
+    mockLibraries([summary(1, "daily", "scratchpad"), summary(9, "daily copy", "scratchpad")]);
+    act(() => handler?.({ type: "TemplateChanged", kind: "scratchpad", project: null }));
+
+    expect(await screen.findByRole("button", { name: "daily copy" })).toBeTruthy();
   });
 
   it("drills into a create form and posts a new template", async () => {

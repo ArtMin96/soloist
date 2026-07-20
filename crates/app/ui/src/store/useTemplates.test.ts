@@ -10,7 +10,13 @@ import {
   templateRead,
   templates as listTemplates,
 } from "@/api";
-import type { DomainEvent, TemplateKind, TemplateSummary, TemplateView } from "@/domain";
+import type {
+  DomainEvent,
+  TemplateKind,
+  TemplateScope,
+  TemplateSummary,
+  TemplateView,
+} from "@/domain";
 import { useTemplates } from "@/store/useTemplates";
 
 vi.mock("@/api", () => ({
@@ -55,6 +61,37 @@ function mockLibraries(
     if (project == null) return Promise.resolve(globals);
     return Promise.resolve(project === OPEN_PROJECT ? projectOwned : []);
   });
+}
+
+// A write-through stand-in for the core: `create` keeps whatever template it was handed, and
+// `settle` makes it readable through the same re-read a real `TemplateChanged` drives. Tests then
+// assert on the template that ended up in the library, which is what a user sees — not on the
+// argument tuple it was created from, which describes the call rather than the outcome.
+function writeThrough(existing: TemplateSummary[] = []) {
+  const created: TemplateSummary[] = [];
+  create.mockImplementation((kind, project, name, description, body) => {
+    const row: TemplateView = {
+      id: 100 + created.length,
+      kind,
+      name,
+      description,
+      body,
+      placeholders: [],
+      scope: project == null ? "global" : "project",
+      revision: 1,
+    };
+    created.push(row);
+    return Promise.resolve(row);
+  });
+  return (kind: TemplateKind, scope: TemplateScope, project: number | null) => {
+    const rows = [...existing, ...created].filter((row) => row.kind === kind);
+    list.mockImplementation((askedKind, askedProject) =>
+      Promise.resolve(
+        askedKind === kind && (askedProject == null) === (scope === "global") ? rows : [],
+      ),
+    );
+    act(() => handler?.({ type: "TemplateChanged", kind, project }));
+  };
 }
 
 function setup(
@@ -193,15 +230,23 @@ describe("useTemplates", () => {
       revision: 3,
     };
     read.mockResolvedValue(source);
-    create.mockResolvedValue({ ...source, id: 9, name: "daily copy 2" });
+    const settle = writeThrough([
+      summary(1, "daily", "scratchpad"),
+      summary(2, "daily copy", "scratchpad"),
+    ]);
     const { result } = renderHook(() => useTemplates(OPEN_PROJECT));
     await waitFor(() => expect(result.current.lists.scratchpad.global).toHaveLength(2));
 
     await act(async () => {
       await result.current.duplicate("scratchpad", "global", "daily");
     });
+    settle("scratchpad", "global", null);
+
     // "daily copy" is taken, so the copy takes the next free slot, carrying the source's content.
-    expect(create).toHaveBeenCalledWith("scratchpad", null, "daily copy 2", "notes", "## Plan");
+    await waitFor(() => expect(result.current.lists.scratchpad.global).toHaveLength(3));
+    const copy = result.current.lists.scratchpad.global.find((t) => t.name === "daily copy 2");
+    expect(copy, "the copy lands under the next free name").toBeDefined();
+    expect(copy?.description).toBe("notes");
   });
 
   // A copy lands beside its source, so a name free in the project library is free even when the
@@ -219,14 +264,18 @@ describe("useTemplates", () => {
       revision: 1,
     };
     read.mockResolvedValue(source);
-    create.mockResolvedValue({ ...source, id: 9, name: "daily copy" });
+    const settle = writeThrough([summary(2, "daily", "scratchpad")]);
     const { result } = renderHook(() => useTemplates(OPEN_PROJECT));
     await waitFor(() => expect(result.current.lists.scratchpad.project).toHaveLength(1));
 
     await act(async () => {
       await result.current.duplicate("scratchpad", "project", "daily");
     });
-    expect(create).toHaveBeenCalledWith("scratchpad", OPEN_PROJECT, "daily copy", null, "## Plan");
+    settle("scratchpad", "project", OPEN_PROJECT);
+
+    // "daily copy" is free in the project library even though the global one holds that name.
+    await waitFor(() => expect(result.current.lists.scratchpad.project).toHaveLength(2));
+    expect(result.current.lists.scratchpad.project.map((t) => t.name)).toContain("daily copy");
   });
 
   it("reports whether a delete removed anything", async () => {
@@ -274,24 +323,20 @@ describe("useTemplates", () => {
     expect(result.current.error).toBeNull();
   });
 
-  it("creates with a null description when the field is blank", async () => {
+  it("creates a template with no description when the field is blank", async () => {
     setup();
-    create.mockResolvedValue({
-      id: 9,
-      kind: "todo",
-      name: "chore",
-      description: null,
-      body: "b",
-      placeholders: [],
-      scope: "global",
-      revision: 1,
-    });
+    const settle = writeThrough();
     const { result } = renderHook(() => useTemplates(OPEN_PROJECT));
     await waitFor(() => expect(result.current.lists.scratchpad.global).toHaveLength(1));
 
     await act(async () => {
       await result.current.create("todo", "global", "chore", "   ", "b");
     });
-    expect(create).toHaveBeenCalledWith("todo", null, "chore", null, "b");
+    settle("todo", "global", null);
+
+    // A field holding only whitespace means "no description", so the template must end up with
+    // none — not with a description made of spaces that no one can see but every reader carries.
+    await waitFor(() => expect(result.current.lists.todo.global).toHaveLength(1));
+    expect(result.current.lists.todo.global[0].description).toBeNull();
   });
 });

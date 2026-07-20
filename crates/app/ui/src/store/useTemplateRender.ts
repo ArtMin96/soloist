@@ -3,6 +3,12 @@ import { templateRender } from "@/api";
 import { RENDERABLE_TEMPLATE_KIND } from "@/lib/templates";
 import type { RenderedPrompt, TemplateKind, TemplateScope } from "@/domain";
 
+// The quiet window after the last keystroke before the preview re-renders. Each render is an IPC
+// round-trip that re-reads the stored body, so typing a value must not send one per character.
+// Short enough to read as live; named so a future settings knob can promote it without touching
+// the call site.
+const RENDER_DEBOUNCE_MS = 200;
+
 /** Which template the preview renders, and the revision that re-reads it when the stored body moves. */
 export interface TemplateRenderTarget {
   kind: TemplateKind | null;
@@ -66,19 +72,24 @@ export function useTemplateRender({
 
   useEffect(() => {
     if (!renderable || name == null || revision == null) return;
-    const stamp = ++latest.current;
-    templateRender(scope === "global" ? null : project, name, values).then(
-      (result) => {
-        if (stamp !== latest.current) return;
-        setRendered(result);
-        setError(null);
-      },
-      (reason) => {
-        if (stamp !== latest.current) return;
-        setRendered(null);
-        setError(String(reason));
-      },
-    );
+    // Debounced through the effect's own cleanup: any further keystroke cancels this pending render
+    // before it is sent, so a burst of typing costs one round-trip rather than one per character.
+    const timer = setTimeout(() => {
+      const stamp = ++latest.current;
+      templateRender(scope === "global" ? null : project, name, values).then(
+        (result) => {
+          if (stamp !== latest.current) return;
+          setRendered(result);
+          setError(null);
+        },
+        (reason) => {
+          if (stamp !== latest.current) return;
+          setRendered(null);
+          setError(String(reason));
+        },
+      );
+    }, RENDER_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
   }, [renderable, scope, project, name, revision, values]);
 
   // An empty field is not a supplied value, so it is dropped from the map rather than sent as "".
