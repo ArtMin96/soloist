@@ -44,12 +44,15 @@ pub(crate) fn rebuild_projects_with_autoincrement(conn: &Connection) -> Result<(
 /// restores `foreign_keys` afterwards, and a pragma is silently ignored inside an open transaction,
 /// so an un-rolled-back failure would leave foreign keys disabled on a live connection.
 fn swap_in_rebuilt_projects(conn: &Connection) -> Result<(), StoreError> {
-    match rebuilt_projects_committed(conn) {
+    let in_tx = !conn.is_autocommit();
+    match rebuilt_projects_committed(conn, in_tx) {
         Ok(()) => Ok(()),
         Err(err) => {
             // Best-effort: if the `BEGIN` itself never took, there is nothing to roll back and the
             // failure to do so is not the error worth reporting.
-            let _ = conn.execute_batch("ROLLBACK;");
+            if !in_tx {
+                let _ = conn.execute_batch("ROLLBACK;");
+            }
             Err(err)
         }
     }
@@ -62,10 +65,12 @@ fn swap_in_rebuilt_projects(conn: &Connection) -> Result<(), StoreError> {
 /// history and must keep describing it: a later column arrives through its own step, on a database
 /// this one has long since rebuilt. Sharing one definition between the two would silently rewrite
 /// what an old database is upgraded *through*, which is the one thing a migration may never do.
-fn rebuilt_projects_committed(conn: &Connection) -> Result<(), StoreError> {
+fn rebuilt_projects_committed(conn: &Connection, in_tx: bool) -> Result<(), StoreError> {
+    if !in_tx {
+        conn.execute_batch("BEGIN;").map_err(sql_err)?;
+    }
     conn.execute_batch(
-        "BEGIN;
-         DROP TABLE IF EXISTS projects_rebuilt;
+        "DROP TABLE IF EXISTS projects_rebuilt;
          CREATE TABLE projects_rebuilt (
              id   INTEGER PRIMARY KEY AUTOINCREMENT,
              root TEXT NOT NULL UNIQUE,
@@ -79,7 +84,12 @@ fn rebuilt_projects_committed(conn: &Connection) -> Result<(), StoreError> {
     )
     .map_err(sql_err)?;
     match orphaned_rows(conn)? {
-        0 => conn.execute_batch("COMMIT;").map_err(sql_err),
+        0 => {
+            if !in_tx {
+                conn.execute_batch("COMMIT;").map_err(sql_err)?;
+            }
+            Ok(())
+        }
         orphans => Err(StoreError::Backend(format!(
             "rebuilding projects would orphan {orphans} referencing row(s)"
         ))),

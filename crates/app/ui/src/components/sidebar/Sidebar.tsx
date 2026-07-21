@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Settings } from "lucide-react";
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
 import { useSidebarHotkeys } from "@/components/sidebar/useSidebarHotkeys";
@@ -63,14 +63,26 @@ export function Sidebar({
   const { sidebar } = useSidebarSettings();
   const [filter, setFilter] = useState("");
   // The filter only narrows the tree while its input is shown; hiding the input restores the full
-  // list (there is then no way to change the query).
-  const visible = filterSidebar(processes, projects, sidebar.show_filter_input ? filter : "");
-  const trees = groupByProject(
-    visible.processes,
-    visible.projects,
-    sidebar.hide_empty_sections,
-    lineage,
+  // list (there is then no way to change the query). Memoized to avoid redundant filtering on
+  // metrics ticks or other unrelated renders.
+  const visible = useMemo(
+    () => filterSidebar(processes, projects, sidebar.show_filter_input ? filter : ""),
+    [processes, projects, sidebar.show_filter_input, filter],
   );
+
+  // Grouping is memoized to prevent expensive tree rebuilding operations unless the visible set
+  // of projects/processes, sidebar settings, or process lineage edge states have actually changed.
+  const trees = useMemo(
+    () =>
+      groupByProject(
+        visible.processes,
+        visible.projects,
+        sidebar.hide_empty_sections,
+        lineage,
+      ),
+    [visible, sidebar.hide_empty_sections, lineage],
+  );
+
   const [collapsed, setCollapsed] = useCollapseState();
   const collapsedLeads = useToggleSet();
   const handleNavKeyDown = useSidebarHotkeys({

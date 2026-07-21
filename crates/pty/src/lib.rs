@@ -80,6 +80,15 @@ impl ProcessSpawner for PtyProcessSpawner {
         builder.arg(&spec.command);
         builder.cwd(&spec.working_dir);
         builder.env("TERM", TERM);
+
+        // Sanitization: strip internal Tauri environment variables from the child's inherited env
+        // to prevent child processes or untrusted agent tools from accessing sensitive app state.
+        for (key, _) in std::env::vars() {
+            if key.starts_with("TAURI_") {
+                builder.env_remove(key);
+            }
+        }
+
         for (key, value) in &spec.env {
             builder.env(key, value);
         }
