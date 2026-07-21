@@ -1,4 +1,4 @@
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useRef, useState, type ComponentType, type ReactNode } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { X } from "lucide-react";
 import { AgentsPanel } from "@/components/settings/AgentsPanel";
@@ -72,12 +72,24 @@ export function SettingsOverlay({
 }) {
   const [active, setActive] = useState<SettingsTabId>("appearance");
   const { ref: panelRef, scrolled } = useScrollEdge<HTMLDivElement>();
+  const contentRef = useRef<HTMLDivElement>(null);
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Content
+          ref={contentRef}
           aria-describedby={undefined}
+          // Radix decides "outside" from a capture handler it skips whenever the pointerdown is
+          // already `defaultPrevented`. The resizable split's divider prevents default on the way
+          // down, so a press on it read as a click outside the overlay and dismissed Settings
+          // mid-drag. The DOM knows better: re-check containment against the real event target.
+          onPointerDownOutside={(event) => {
+            const target = event.detail.originalEvent.target;
+            if (target instanceof Node && contentRef.current?.contains(target)) {
+              event.preventDefault();
+            }
+          }}
           className="fixed inset-0 z-50 flex flex-col bg-background text-foreground outline-none duration-[var(--dur-sheet)] ease-out-quint data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-bottom-2 data-[state=closed]:duration-[var(--dur-sheet-out)] motion-reduce:animate-none"
         >
           <header

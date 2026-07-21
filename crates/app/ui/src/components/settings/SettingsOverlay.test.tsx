@@ -27,10 +27,10 @@ function mockSettings(initial: Appearance, onSave?: (next: Appearance) => void) 
   });
 }
 
-function renderSettings() {
+function renderSettings(onOpenChange: (open: boolean) => void = () => {}) {
   render(
     <AppearanceProvider>
-      <SettingsOverlay open onOpenChange={() => {}} project={null} />
+      <SettingsOverlay open onOpenChange={onOpenChange} project={null} />
     </AppearanceProvider>,
   );
 }
@@ -90,6 +90,43 @@ describe("Settings — Appearance", () => {
     expect(screen.getByRole("tab", { name: "Appearance" }).getAttribute("aria-selected")).toBe(
       "true",
     );
+  });
+});
+
+describe("Settings — dismissal", () => {
+  // The resizable split's divider calls preventDefault on pointerdown from a document-level capture
+  // listener, before React dispatches. Radix skips its own "the pointer went down inside me" capture
+  // handler for an already-prevented event, so without a containment guard a press on the divider
+  // read as an outside click and closed Settings the instant the user grabbed it.
+  it("stays open when a press inside it arrives already default-prevented", async () => {
+    const onOpenChange = vi.fn();
+    mockSettings(DEFAULT_APPEARANCE);
+    renderSettings(onOpenChange);
+    const inside = await screen.findByRole("tab", { name: "Appearance" });
+
+    const preventOnTheWayDown = (event: Event) => event.preventDefault();
+    document.addEventListener("pointerdown", preventOnTheWayDown, true);
+    try {
+      fireEvent.pointerDown(inside);
+    } finally {
+      document.removeEventListener("pointerdown", preventOnTheWayDown, true);
+    }
+
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("tab", { name: "Appearance" })).toBeTruthy();
+  });
+
+  // The guard is a containment check, not a blanket refusal to dismiss — a genuine press outside
+  // the overlay must still close it.
+  it("still closes on a press that genuinely lands outside it", async () => {
+    const onOpenChange = vi.fn();
+    mockSettings(DEFAULT_APPEARANCE);
+    renderSettings(onOpenChange);
+    await screen.findByRole("tab", { name: "Appearance" });
+
+    fireEvent.pointerDown(document.body);
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 });
 
