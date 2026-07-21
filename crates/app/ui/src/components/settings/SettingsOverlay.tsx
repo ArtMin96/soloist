@@ -7,6 +7,7 @@ import { HotkeysPanel } from "@/components/settings/HotkeysPanel";
 import { IntegrationsPanel } from "@/components/settings/IntegrationsPanel";
 import { NotificationsPanel } from "@/components/settings/NotificationsPanel";
 import { PlaceholderPanel } from "@/components/settings/PlaceholderPanel";
+import { SettingsColumn } from "@/components/settings/SettingsPanelLayout";
 import { SettingsTabRail } from "@/components/settings/SettingsTabRail";
 import { SidebarPanel } from "@/components/settings/SidebarPanel";
 import { TemplatesPanel } from "@/components/settings/TemplatesPanel";
@@ -36,15 +37,24 @@ const PANELS: Partial<Record<SettingsTabId, ComponentType<SettingsPanelProps>>> 
   tools: ToolsPanel,
 };
 
-function panelFor(id: SettingsTabId, props: SettingsPanelProps): ReactNode {
-  const Panel = PANELS[id];
-  if (Panel) return <Panel {...props} />;
+// Panels whose width follows their own internal state, so they render their own wrapper — Templates
+// is a centered column while browsing and a full-width builder once a create form or the editor is
+// open. Everything else takes the standard column from here.
+const SELF_LAID_OUT_PANELS: ReadonlySet<SettingsTabId> = new Set(["templates"]);
+
+function placeholderFor(id: SettingsTabId): ReactNode {
   const label = SETTINGS_TABS.find((tab) => tab.id === id)?.label ?? "Settings";
   return UNDEFINED_TABS.has(id) ? (
     <PlaceholderPanel title={label} message="These settings have not been defined yet." />
   ) : (
     <PlaceholderPanel title={label} message="Coming in a later update of this build." />
   );
+}
+
+function panelFor(id: SettingsTabId, props: SettingsPanelProps): ReactNode {
+  const Panel = PANELS[id];
+  const content = Panel ? <Panel {...props} /> : placeholderFor(id);
+  return SELF_LAID_OUT_PANELS.has(id) ? content : <SettingsColumn>{content}</SettingsColumn>;
 }
 
 // The global Settings surface: a full-window overlay with a left section rail and the active
@@ -61,14 +71,6 @@ export function SettingsOverlay({
   project: number | null;
 }) {
   const [active, setActive] = useState<SettingsTabId>("appearance");
-  // A panel's full-width builder layout (Templates' create/edit forms) is specific to that panel's
-  // own drill-in state, so it never survives a tab switch — selecting any tab, including the one
-  // already active, returns to the standard centered column.
-  const [wide, setWide] = useState(false);
-  const selectTab = (id: SettingsTabId) => {
-    setActive(id);
-    setWide(false);
-  };
   const { ref: panelRef, scrolled } = useScrollEdge<HTMLDivElement>();
 
   return (
@@ -95,20 +97,14 @@ export function SettingsOverlay({
             </DialogPrimitive.Close>
           </header>
           <div className="flex min-h-0 flex-1">
-            <SettingsTabRail active={active} onSelect={selectTab} />
+            <SettingsTabRail active={active} onSelect={setActive} />
             <div
               ref={panelRef}
               role="tabpanel"
               aria-labelledby={settingsTabButtonId(active)}
               className="min-w-0 flex-1 overflow-y-auto bg-sidebar"
             >
-              <div
-                className={
-                  wide ? "flex h-full min-h-0 flex-col px-6 py-6" : "mx-auto max-w-2xl px-6 py-6"
-                }
-              >
-                {panelFor(active, { project, onWideChange: setWide })}
-              </div>
+              {panelFor(active, { project })}
             </div>
           </div>
         </DialogPrimitive.Content>

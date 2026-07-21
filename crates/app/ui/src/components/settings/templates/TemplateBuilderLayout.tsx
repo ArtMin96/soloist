@@ -1,8 +1,12 @@
 import type { ReactNode } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+  useDefaultLayout,
+} from "@/components/ui/resizable";
 
-const SPLIT_STORAGE_ID = "templates.builder";
+const SPLIT_STORAGE_ID = "soloist.templates.builder";
 const EDITOR_PANEL_ID = "editor";
 const PREVIEW_PANEL_ID = "preview";
 const PANEL_IDS = [EDITOR_PANEL_ID, PREVIEW_PANEL_ID];
