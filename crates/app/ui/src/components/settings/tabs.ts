@@ -38,3 +38,11 @@ export const UNDEFINED_TABS: ReadonlySet<SettingsTabId> = new Set(["account"]);
 export function settingsTabButtonId(id: SettingsTabId): string {
   return `settings-tab-${id}`;
 }
+
+// What every settings panel is handed. Only the panels that address project-scoped state
+// (Templates) read `project`; the rest declare no props and ignore it, so one map can build them
+// all.
+export interface SettingsPanelProps {
+  /** The project whose settings are in view, or null when none is open. */
+  project: number | null;
+}

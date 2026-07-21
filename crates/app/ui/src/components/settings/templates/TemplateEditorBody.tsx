@@ -51,7 +51,7 @@ export function TemplateEditorBody({
   const status = autosave.saving ? "Saving…" : autosave.dirty ? "Unsaved changes" : "Saved";
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex h-full flex-col gap-2">
       <Input
         value={description}
         onChange={(event) => changeDescription(event.target.value)}
@@ -61,7 +61,7 @@ export function TemplateEditorBody({
         className="h-8 text-[0.8125rem]"
       />
 
-      <div className="h-[22rem]">
+      <div className="min-h-0 flex-1">
         <LazyRichTextEditor
           initialMarkdown={initialBody}
           ariaLabel="Template body"

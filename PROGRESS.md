@@ -5312,9 +5312,87 @@ culprit commits are from the unticketed set above.
 - Not re-run: `just soak` (the leak gate) — unchanged by this session; no supervisor/PTY behaviour was
   altered, only where code lives and which thread two store calls run on.
 
+## Session 2026-07-21 — `/code-review` fixes on the templates-builder-layout branch (PR #84)
+
+A two-axis `/code-review` (Standards + Spec) of `main..feat/templates-builder-layout` returned 7 Standards
+findings and 3 Spec findings. Both axes independently converged on the same seam — the `wide` layout
+signal the panel mirrored up to the overlay through an effect — which is what the fix removes.
+
+**The keystone fix — the `wide` channel is gone.** `TemplatesPanel` computed a `wide` boolean from its
+own render state, pushed it to `SettingsOverlay` via `useEffect`, and the overlay held a shadow copy that
+decided the column width. Two owners of one fact. Replaced by each panel rendering its own width wrapper:
+new `settings/SettingsPanelLayout.tsx` exports `SettingsColumn` (the standard centered column) and
+`SettingsBuilderColumn` (the full-height builder), and `SettingsOverlay` picks between "panel lays itself
+out" and "wrap it in the standard column" from a static `SELF_LAID_OUT_PANELS` set. This deleted
+`SettingsPanelProps.onWideChange`, the overlay's `wide` state, and its `selectTab` wrapper. It closes:
+- **Spec (c)#1 — the real defect.** `SettingsTabRail` fires `onSelect` unconditionally, so clicking the
+  already-active Templates tab ran `setWide(false)` while the panel kept rendering the editor. The
+  container reverted to `mx-auto max-w-2xl` (auto height), which broke the `h-full → min-h-0 flex-1`
+  chain this PR exists to build — the editor and preview collapsed to zero height until you navigated
+  away and back. With width derived from what the panel renders, the desync is unrepresentable.
+- **Standards #1 (DRY).** The drill-in predicate was written twice in one file (the comment admitted it:
+  *"Mirrors the two conditions below"*). Each branch now wraps itself; the condition exists once.
+- **Standards #2/#3 (derived-state-through-an-effect, Shotgun Surgery).** One concept was spread across
+  `tabs.ts`, `SettingsOverlay.tsx`, and `TemplatesPanel.tsx`. It now lives in one place.
+- **Spec (c)#2.** `wide` was true during load and on "Not found", stretching a one-line status across the
+  full width. That branch now returns a `SettingsColumn`.
+
+**Other fixes:**
+- **Standards #4 (Middle Man).** `TemplateCreateForm` always passed `preview={null}`, pulling in the
+  split-pane component to get a plain `<div className="min-h-0 flex-1">`. Inlined; `TemplateBuilderLayout`
+  is now used only where a split can actually happen (`TemplateEditor`).
+- **Standards #5 (single source).** `SPLIT_STORAGE_ID` `"templates.builder"` → `"soloist.templates.builder"`,
+  matching the only other persisted-UI key (`useCollapseState`'s `"soloist.sidebar.collapsed"`). The split
+  import seam is closed too: `useDefaultLayout` is re-exported from `@/components/ui/resizable`, so
+  `TemplateBuilderLayout` reaches the library through one door.
+- **Standards #7 (tests asserted call shape).** `expect(onWideChange).toHaveBeenLastCalledWith(true)`
+  pinned a callback's arguments — exactly what §15 forbids, and it tested a channel that no longer exists.
+  Deleted. Replaced with three tests in `SettingsOverlay.test.tsx` that assert the **rendered container**
+  through the real overlay. **All three are mutation-verified:** reverting the three source files to
+  `ad35a1e` reddens *"keeps the builder width when its own tab is re-selected"* (the Spec #1 regression)
+  while the other two stay green; emptying `SELF_LAID_OUT_PANELS` reddens the other two.
+
+**Standards #6 — the new dependency, now measured (§6).** `react-resizable-panels@4.12.2` was added with
+no size evidence. Measured `vite build` gzip, `main` (`fe4fff2`) vs this branch, both built from a clean
+`--frozen-lockfile` install:
+- **Initial load (`index` chunk): 102,127 → 102,287 B gzip — +160 B (+0.16%).** Effectively unchanged.
+- **Lazy `SettingsOverlay` chunk: 11,231 → 23,223 B gzip — +11,992 B.**
+- Total JS: 483,164 → 495,059 B gzip (+11,895 B, +2.46%).
+
+The cost is real but lands entirely in the code-split Settings chunk, which is fetched only when a user
+opens Settings — the initial-load budget is untouched. That is the justification the dep needed; it is
+recorded here rather than asserted.
+
+**Spec (c)#3 — a wording defect in the PR description, not the code.** The summary said *"session-persisted
+preview pane"*; `useDefaultLayout` defaults to `localStorage`, so the split persists **across** sessions.
+The commit body and the component doc comment were already correct — only the PR summary line was wrong.
+Corrected in the PR description on 2026-07-21.
+
+**Not changed:** the vendored `components/ui/resizable.tsx` handle renders a bare bar where upstream shadcn
+has a `GripVertical` icon. Both reviewers flagged it as "fine if deliberate"; left as-is.
+
+**Gates (run 2026-07-21, after the fixes):**
+- `tsc --noEmit` — **exit 0**.
+- `eslint` on every changed file — **exit 0** (`components/ui/resizable.tsx` is prettier/eslint-ignored
+  vendored shadcn, as before).
+- `prettier --write` on all changed files — clean.
+- `vitest run` (full UI suite) — **488 passed / 88 files**, up from 485 (three added, one deleted).
+- `npx react-doctor@latest src/components/settings` — **100/100, no issues**, up from the bot's
+  **80/100 (3 warnings)** on `ad35a1e`. All three (`no-pass-data-to-parent`, `no-pass-live-state-to-parent`,
+  `no-prop-callback-in-effect`) fired on the same line — the `onWideChange` effect — and all three are
+  resolved by deleting the channel rather than suppressed. The bot's suggested fix was a Provider; the
+  cheaper answer was to stop mirroring the state at all, since it is derivable from what the panel renders.
+- Not run: the Rust workspace suite and `just soak` — this session changed frontend layout only, no
+  Rust and no supervisor/PTY behaviour.
+
 ## Next session should start with
 
-**◆ NEW (2026-07-16) — E2E: the harness AND the first journey are built and green.** `just e2e` opens
+**◆ NEW (2026-07-21) — PR #84 review fixes are applied, green, and uncommitted.** The working tree holds
+the Standards + Spec fixes below; nothing is committed or pushed yet. Once they land, PR #84's summary
+bullet describing `onWideChange` / the `wide` signal is stale — that channel no longer exists — so the
+description needs a pass to match the merged code.
+
+**◆ (2026-07-16) — E2E: the harness AND the first journey are built and green.** `just e2e` opens
 a fixture project, launches Claude into it, and asserts the app really starts it (7 specs, ~18 s).
 The pattern to copy is `e2e/specs/agents/launch-agent.spec.ts` + `e2e/src/` — **not** the smoke spec,
 which is deliberately direct. Next walk: pick a row from `plan/e2e/README.md` §4 (Dashboard core and

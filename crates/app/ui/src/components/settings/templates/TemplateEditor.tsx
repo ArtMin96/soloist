@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { RevisionConflictNotice } from "@/components/RevisionConflictNotice";
 import { Button } from "@/components/ui/button";
+import { TemplateBuilderLayout } from "@/components/settings/templates/TemplateBuilderLayout";
 import { TemplateEditorBody } from "@/components/settings/templates/TemplateEditorBody";
 import { templateScopeHeading } from "@/lib/templates";
 import { TemplatePreview } from "@/components/settings/templates/TemplatePreview";
@@ -63,7 +64,7 @@ export function TemplateEditor({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       <header className="flex items-center gap-2">
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft aria-hidden /> Templates
@@ -112,23 +113,28 @@ export function TemplateEditor({
         </p>
       )}
 
-      <TemplateEditorBody
-        key={`${kind}:${name}:${mountKey}`}
-        initialBody={initialBody}
-        initialDescription={initialDescription}
-        onSave={onSave}
-        paused={conflict != null}
+      <TemplateBuilderLayout
+        editor={
+          <TemplateEditorBody
+            key={`${kind}:${name}:${mountKey}`}
+            initialBody={initialBody}
+            initialDescription={initialDescription}
+            onSave={onSave}
+            paused={conflict != null}
+          />
+        }
+        preview={
+          preview ? (
+            <TemplatePreview
+              placeholders={preview.placeholders}
+              values={preview.values}
+              onValueChange={preview.onValueChange}
+              rendered={preview.rendered}
+              error={preview.error}
+            />
+          ) : null
+        }
       />
-
-      {preview && (
-        <TemplatePreview
-          placeholders={preview.placeholders}
-          values={preview.values}
-          onValueChange={preview.onValueChange}
-          rendered={preview.rendered}
-          error={preview.error}
-        />
-      )}
     </div>
   );
 }

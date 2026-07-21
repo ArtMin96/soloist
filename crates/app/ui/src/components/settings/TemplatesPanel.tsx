@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { SettingsBuilderColumn, SettingsColumn } from "@/components/settings/SettingsPanelLayout";
 import { TemplateCreateForm } from "@/components/settings/templates/TemplateCreateForm";
 import { TemplateEditor } from "@/components/settings/templates/TemplateEditor";
 import {
   type SeedDefault,
   TemplateKindSection,
 } from "@/components/settings/templates/TemplateKindSection";
+import type { SettingsPanelProps } from "@/components/settings/tabs";
 import { TEMPLATE_KINDS, TEMPLATE_SCOPES } from "@/lib/templates";
 import { useTemplateEditor } from "@/store/useTemplateEditor";
 import { useTemplateRender } from "@/store/useTemplateRender";
@@ -26,7 +28,7 @@ interface Creating {
 // read/write routes through the two hooks to the one façade; kind grouping, scope isolation, name
 // uniqueness, the revision guard, and clearing a deleted default live in the core. This surface also
 // delivers the reserved prompt-templates view (the Prompt kind).
-export function TemplatesPanel({ project }: { project: number | null }) {
+export function TemplatesPanel({ project }: SettingsPanelProps) {
   const { lists, defaults, error, create, remove, duplicate, setDefault } = useTemplates(project);
   const editor = useTemplateEditor(project);
   const preview = useTemplateRender({
@@ -71,83 +73,96 @@ export function TemplatesPanel({ project }: { project: number | null }) {
 
   if (editor.kind != null && editor.scope != null && editor.name != null) {
     const { kind, scope, name } = editor;
-    return editor.initialBody == null ? (
-      <p className="py-3 text-[0.8125rem] text-muted-foreground">
-        {editor.loading ? "Loading…" : (editor.error ?? "Not found.")}
-      </p>
-    ) : (
-      <TemplateEditor
-        kind={kind}
-        scope={scope}
-        name={name}
-        initialBody={editor.initialBody}
-        initialDescription={editor.initialDescription}
-        revision={editor.baseRevision}
-        mountKey={editor.mountKey}
-        conflict={editor.conflict}
-        error={writeError ?? editor.error}
-        preview={
-          preview.renderable
-            ? {
-                placeholders: editor.placeholders,
-                values: preview.values,
-                rendered: preview.rendered,
-                error: preview.error,
-                onValueChange: preview.setValue,
-              }
-            : null
-        }
-        onSave={editor.save}
-        onReload={editor.reload}
-        onBack={closeEditor}
-        onDelete={() => {
-          setWriteError(null);
-          // Only a resolved delete closes the editor — a refused one keeps the template on screen
-          // with the reason, so the user can retry or go back deliberately.
-          remove(kind, scope, name)
-            .then(closeEditor)
-            .catch((reason) => setWriteError(String(reason)));
-        }}
-      />
+    // Nothing to build yet — a one-line status reads better in the standard column than stretched
+    // across a full-width builder.
+    if (editor.initialBody == null) {
+      return (
+        <SettingsColumn>
+          <p className="py-3 text-[0.8125rem] text-muted-foreground">
+            {editor.loading ? "Loading…" : (editor.error ?? "Not found.")}
+          </p>
+        </SettingsColumn>
+      );
+    }
+    return (
+      <SettingsBuilderColumn>
+        <TemplateEditor
+          kind={kind}
+          scope={scope}
+          name={name}
+          initialBody={editor.initialBody}
+          initialDescription={editor.initialDescription}
+          revision={editor.baseRevision}
+          mountKey={editor.mountKey}
+          conflict={editor.conflict}
+          error={writeError ?? editor.error}
+          preview={
+            preview.renderable
+              ? {
+                  placeholders: editor.placeholders,
+                  values: preview.values,
+                  rendered: preview.rendered,
+                  error: preview.error,
+                  onValueChange: preview.setValue,
+                }
+              : null
+          }
+          onSave={editor.save}
+          onReload={editor.reload}
+          onBack={closeEditor}
+          onDelete={() => {
+            setWriteError(null);
+            // Only a resolved delete closes the editor — a refused one keeps the template on screen
+            // with the reason, so the user can retry or go back deliberately.
+            remove(kind, scope, name)
+              .then(closeEditor)
+              .catch((reason) => setWriteError(String(reason)));
+          }}
+        />
+      </SettingsBuilderColumn>
     );
   }
 
   if (creating != null) {
     const { kind, scope } = creating;
     return (
-      <TemplateCreateForm
-        kind={kind}
-        scope={scope}
-        onCancel={() => setCreating(null)}
-        onCreate={(name, description, body) =>
-          create(kind, scope, name, description, body).then(() => setCreating(null))
-        }
-      />
+      <SettingsBuilderColumn>
+        <TemplateCreateForm
+          kind={kind}
+          scope={scope}
+          onCancel={() => setCreating(null)}
+          onCreate={(name, description, body) =>
+            create(kind, scope, name, description, body).then(() => setCreating(null))
+          }
+        />
+      </SettingsBuilderColumn>
     );
   }
 
   return (
-    <div className="flex flex-col">
-      {(writeError ?? error) && (
-        <p className="mb-3 text-[0.8125rem] text-destructive" aria-live="polite">
-          {writeError ?? error}
-        </p>
-      )}
-      {TEMPLATE_KINDS.map((kind) => (
-        <TemplateKindSection
-          key={kind}
-          kind={kind}
-          templates={lists[kind]}
-          scopes={scopes}
-          seedDefault={seedDefaultFor(kind)}
-          onOpen={open(kind)}
-          onDuplicate={(scope, name) => {
-            setWriteError(null);
-            duplicate(kind, scope, name).catch((reason) => setWriteError(String(reason)));
-          }}
-          onNew={(scope) => setCreating({ kind, scope })}
-        />
-      ))}
-    </div>
+    <SettingsColumn>
+      <div className="flex flex-col">
+        {(writeError ?? error) && (
+          <p className="mb-3 text-[0.8125rem] text-destructive" aria-live="polite">
+            {writeError ?? error}
+          </p>
+        )}
+        {TEMPLATE_KINDS.map((kind) => (
+          <TemplateKindSection
+            key={kind}
+            kind={kind}
+            templates={lists[kind]}
+            scopes={scopes}
+            seedDefault={seedDefaultFor(kind)}
+            onOpen={open(kind)}
+            onDuplicate={(scope, name) => {
+              setWriteError(null);
+              duplicate(kind, scope, name).catch((reason) => setWriteError(String(reason)));
+            }}
+            onNew={(scope) => setCreating({ kind, scope })}
+          />
+        ))}
+      </div>
+    </SettingsColumn>
   );
 }
