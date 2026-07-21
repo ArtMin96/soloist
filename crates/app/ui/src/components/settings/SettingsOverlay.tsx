@@ -14,19 +14,13 @@ import { ToolsPanel } from "@/components/settings/ToolsPanel";
 import {
   SETTINGS_TABS,
   settingsTabButtonId,
+  type SettingsPanelProps,
   type SettingsTabId,
   UNDEFINED_TABS,
 } from "@/components/settings/tabs";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useScrollEdge } from "@/store/useScrollEdge";
-
-// What every settings panel is handed. Only the panels that address project-scoped state read it;
-// the rest declare no props and ignore it, so one map can build them all.
-interface SettingsPanelProps {
-  /** The project whose settings are in view, or null when none is open. */
-  project: number | null;
-}
 
 // The built panel for each tab — the single place a tab maps to its component. Tabs absent here
 // fall through to a placeholder (undefined-in-source vs. still-to-come, decided below), so the
@@ -67,6 +61,14 @@ export function SettingsOverlay({
   project: number | null;
 }) {
   const [active, setActive] = useState<SettingsTabId>("appearance");
+  // A panel's full-width builder layout (Templates' create/edit forms) is specific to that panel's
+  // own drill-in state, so it never survives a tab switch — selecting any tab, including the one
+  // already active, returns to the standard centered column.
+  const [wide, setWide] = useState(false);
+  const selectTab = (id: SettingsTabId) => {
+    setActive(id);
+    setWide(false);
+  };
   const { ref: panelRef, scrolled } = useScrollEdge<HTMLDivElement>();
 
   return (
@@ -93,14 +95,20 @@ export function SettingsOverlay({
             </DialogPrimitive.Close>
           </header>
           <div className="flex min-h-0 flex-1">
-            <SettingsTabRail active={active} onSelect={setActive} />
+            <SettingsTabRail active={active} onSelect={selectTab} />
             <div
               ref={panelRef}
               role="tabpanel"
               aria-labelledby={settingsTabButtonId(active)}
               className="min-w-0 flex-1 overflow-y-auto bg-sidebar"
             >
-              <div className="mx-auto max-w-2xl px-6 py-6">{panelFor(active, { project })}</div>
+              <div
+                className={
+                  wide ? "flex h-full min-h-0 flex-col px-6 py-6" : "mx-auto max-w-2xl px-6 py-6"
+                }
+              >
+                {panelFor(active, { project, onWideChange: setWide })}
+              </div>
             </div>
           </div>
         </DialogPrimitive.Content>

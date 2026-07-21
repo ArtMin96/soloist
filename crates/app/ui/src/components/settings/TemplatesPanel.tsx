@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TemplateCreateForm } from "@/components/settings/templates/TemplateCreateForm";
 import { TemplateEditor } from "@/components/settings/templates/TemplateEditor";
 import {
   type SeedDefault,
   TemplateKindSection,
 } from "@/components/settings/templates/TemplateKindSection";
+import type { SettingsPanelProps } from "@/components/settings/tabs";
 import { TEMPLATE_KINDS, TEMPLATE_SCOPES } from "@/lib/templates";
 import { useTemplateEditor } from "@/store/useTemplateEditor";
 import { useTemplateRender } from "@/store/useTemplateRender";
@@ -26,7 +27,7 @@ interface Creating {
 // read/write routes through the two hooks to the one façade; kind grouping, scope isolation, name
 // uniqueness, the revision guard, and clearing a deleted default live in the core. This surface also
 // delivers the reserved prompt-templates view (the Prompt kind).
-export function TemplatesPanel({ project }: { project: number | null }) {
+export function TemplatesPanel({ project, onWideChange }: SettingsPanelProps) {
   const { lists, defaults, error, create, remove, duplicate, setDefault } = useTemplates(project);
   const editor = useTemplateEditor(project);
   const preview = useTemplateRender({
@@ -37,6 +38,13 @@ export function TemplatesPanel({ project }: { project: number | null }) {
     revision: editor.baseRevision,
   });
   const [creating, setCreating] = useState<Creating | null>(null);
+  // Mirrors the two conditions below that decide what to render: a create form or an opened editor
+  // both need the full-width builder layout in place of the standard settings column.
+  const wide =
+    creating != null || (editor.kind != null && editor.scope != null && editor.name != null);
+  useEffect(() => {
+    onWideChange?.(wide);
+  }, [wide, onWideChange]);
   // Delete and duplicate reject with the core's reason (a name past the length cap, a template already
   // removed elsewhere). The hook reports only read failures, so this surface holds the reason for the
   // writes it starts — the same way the create form keeps its own rejection on screen.

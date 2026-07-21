@@ -275,6 +275,32 @@ describe("TemplatesPanel", () => {
     await waitFor(() => expect(screen.getByText("no template under that name")).toBeTruthy());
   });
 
+  // `onWideChange` is the signal `SettingsOverlay` uses to widen the settings column for the
+  // builder layout — it must track exactly the create-form/editor drill-in, not the browse list.
+  it("reports wide only while a create form or the editor is open", async () => {
+    seed();
+    read.mockResolvedValue(DAILY);
+    const onWideChange = vi.fn();
+    render(<TemplatesPanel project={OPEN_PROJECT} onWideChange={onWideChange} />);
+    await screen.findByRole("button", { name: "Duplicate daily" });
+    await waitFor(() => expect(onWideChange).toHaveBeenLastCalledWith(false));
+
+    fireEvent.click(screen.getByRole("button", { name: "daily" }));
+    await screen.findByRole("button", { name: "Delete template" });
+    await waitFor(() => expect(onWideChange).toHaveBeenLastCalledWith(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "Templates" }));
+    await waitFor(() => expect(onWideChange).toHaveBeenLastCalledWith(false));
+
+    const promptGroup = await screen.findByRole("group", { name: "Global prompt templates" });
+    fireEvent.click(within(promptGroup).getByRole("button", { name: /New template/ }));
+    await screen.findByRole("button", { name: /Create template/ });
+    await waitFor(() => expect(onWideChange).toHaveBeenLastCalledWith(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "Templates" }));
+    await waitFor(() => expect(onWideChange).toHaveBeenLastCalledWith(false));
+  });
+
   it("does not show another project's templates", async () => {
     seed([], [summary(2, "sprint", "scratchpad")]);
     render(<TemplatesPanel project={OTHER_PROJECT} />);

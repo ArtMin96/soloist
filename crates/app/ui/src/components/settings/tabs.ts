@@ -38,3 +38,15 @@ export const UNDEFINED_TABS: ReadonlySet<SettingsTabId> = new Set(["account"]);
 export function settingsTabButtonId(id: SettingsTabId): string {
   return `settings-tab-${id}`;
 }
+
+// What every settings panel is handed. Only the panels that address project-scoped state
+// (Templates) read `project`; the rest declare no props and ignore it, so one map can build them
+// all. `onWideChange` is the same story — only a panel with its own full-width drill-in (Templates'
+// create/edit builder) ever calls it.
+export interface SettingsPanelProps {
+  /** The project whose settings are in view, or null when none is open. */
+  project: number | null;
+  /** Reports whether this panel currently wants the full-width builder layout in place of the
+   * standard centered column. Omitted (or never called) by panels that never go wide. */
+  onWideChange?: (wide: boolean) => void;
+}

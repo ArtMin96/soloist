@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LazyRichTextEditor } from "@/components/editor/LazyRichTextEditor";
+import { TemplateBuilderLayout } from "@/components/settings/templates/TemplateBuilderLayout";
 import { templateScopeHeading } from "@/lib/templates";
 import type { TemplateKind, TemplateScope } from "@/domain";
 
@@ -41,7 +42,7 @@ export function TemplateCreateForm({ kind, scope, onCreate, onCancel }: Template
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       <header className="flex items-center gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel}>
           <ArrowLeft aria-hidden /> Templates
@@ -76,19 +77,22 @@ export function TemplateCreateForm({ kind, scope, onCreate, onCancel }: Template
         className="h-8 text-[0.8125rem]"
       />
 
-      <div className="h-[22rem]">
-        <LazyRichTextEditor
-          initialMarkdown=""
-          ariaLabel="Template body"
-          placeholder="Write the template — press / for commands"
-          outline
-          onChange={(markdown) => {
-            bodyRef.current = markdown;
-            setHasBody(markdown.trim() !== "");
-          }}
-          onSaveShortcut={create}
-        />
-      </div>
+      <TemplateBuilderLayout
+        editor={
+          <LazyRichTextEditor
+            initialMarkdown=""
+            ariaLabel="Template body"
+            placeholder="Write the template — press / for commands"
+            outline
+            onChange={(markdown) => {
+              bodyRef.current = markdown;
+              setHasBody(markdown.trim() !== "");
+            }}
+            onSaveShortcut={create}
+          />
+        }
+        preview={null}
+      />
 
       <footer className="flex items-center justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel}>
