@@ -1,3 +1,4 @@
+import { HOTKEY_ACTION_LABELS } from "@/lib/hotkeys";
 import { runnableProcessActions, type ProcessActionHandlers } from "@/lib/processActions";
 import type { ProcessView, ProjectView, Theme } from "@/domain";
 
@@ -55,7 +56,7 @@ export function buildCommands(ctx: CommandContext): CommandGroup[] {
       commands: [
         {
           id: "action:new",
-          label: "New agent or terminal",
+          label: HOTKEY_ACTION_LABELS.new_agent_or_terminal,
           keywords: ["launch", "agent", "terminal", "spawn"],
           run: ctx.newAgentOrTerminal,
         },

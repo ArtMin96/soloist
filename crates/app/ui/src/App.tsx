@@ -43,8 +43,8 @@ const OrchestrationPane = lazy(() =>
 const SettingsOverlay = lazy(() =>
   import("@/components/settings/SettingsOverlay").then((m) => ({ default: m.SettingsOverlay })),
 );
-const AgentPicker = lazy(() =>
-  import("@/components/AgentPicker").then((m) => ({ default: m.AgentPicker })),
+const LaunchPicker = lazy(() =>
+  import("@/components/LaunchPicker").then((m) => ({ default: m.LaunchPicker })),
 );
 const QuickJumpPalette = lazy(() =>
   import("@/components/QuickJumpPalette").then((m) => ({ default: m.QuickJumpPalette })),
@@ -161,6 +161,18 @@ export default function App() {
     [launchAgent, selectProcess],
   );
 
+  // Open a terminal and focus it, so the user lands on a live shell ready to type into —
+  // the same landing the agent launch gives.
+  const { createTerminal } = store;
+  const onCreateTerminal = useCallback(
+    (project: number) => {
+      void createTerminal(project).then((id) => {
+        if (id !== null) selectProcess(id);
+      });
+    },
+    [createTerminal, selectProcess],
+  );
+
   // Keep-alive terminal pool: the recently-viewed processes whose terminals stay mounted so
   // switching back is instant. The pool tracks selection over renders; the current selection is
   // folded in immediately (the effect that formalizes it lands next tick) so a first-time selection
@@ -265,12 +277,13 @@ export default function App() {
                   onDismiss={trust.dismiss}
                 />
                 <DeferredOverlay open={pickerOpen}>
-                  <AgentPicker
+                  <LaunchPicker
                     open={pickerOpen}
                     onOpenChange={setPickerOpen}
                     tools={agents.tools}
                     projects={projects.projects}
                     onLaunch={onLaunchAgent}
+                    onCreateTerminal={onCreateTerminal}
                   />
                 </DeferredOverlay>
                 <DeferredOverlay open={settingsOpen}>

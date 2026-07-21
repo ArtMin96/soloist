@@ -4,7 +4,9 @@ import type { ProcessKind, ProcessView } from "@/domain";
 // then Commands — matching Solo's process tree.
 const GROUP_ORDER: ProcessKind[] = ["Agent", "Terminal", "Command"];
 
-const GROUP_LABELS: Record<ProcessKind, string> = {
+// The plural heading for a group of one kind — the sidebar's section headings, and the launch
+// picker's, so the two surfaces name the same group identically.
+export const GROUP_LABELS: Record<ProcessKind, string> = {
   Agent: "Agents",
   Terminal: "Terminals",
   Command: "Commands",

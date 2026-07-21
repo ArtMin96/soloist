@@ -264,6 +264,11 @@ export function agentLaunch(project: number, tool: string, extraArgs: string[]):
   return invoke<number>("agent_launch", { project, tool, extraArgs });
 }
 
+// Opens a terminal in `project`, resolving to its process id.
+export function terminalCreate(project: number): Promise<number> {
+  return invoke<number>("terminal_create", { project });
+}
+
 export function procStart(id: number): Promise<void> {
   return invoke<void>("proc_start", { id });
 }

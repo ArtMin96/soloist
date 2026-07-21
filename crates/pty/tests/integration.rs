@@ -607,6 +607,84 @@ async fn spawn_agent_launches_a_worker_in_the_sessions_project() {
     wait_for_status(&mut events, ProcStatus::Stopped).await;
 }
 
+#[tokio::test]
+async fn create_terminal_runs_an_interactive_shell_in_the_project_dir() {
+    use soloist_core::testing::{FakeProjectRepo, FakeTrustRepo};
+    use soloist_core::ProcessKind;
+
+    // The one thing no unit test can prove: the fixed shell command the core spawns actually
+    // yields a *live interactive shell* on a real PTY — one that reads a typed line, runs it,
+    // and echoes the result back. A shell that exited at once (an empty `$SHELL`, a bad
+    // invocation) would still register a row and still reach Running for an instant, so only
+    // driving it like a user does distinguishes a working terminal from a dead one.
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(PtyProcessSpawner),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .build(),
+    );
+    let mut events = facade.subscribe();
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade
+        .projects()
+        .add(dir.path(), None, None)
+        .expect("register the project");
+
+    let id = facade.create_terminal(project.id).expect("create terminal");
+
+    let view = facade
+        .snapshot()
+        .into_iter()
+        .find(|view| view.id == id)
+        .expect("the terminal is registered");
+    assert_eq!(view.kind, ProcessKind::Terminal);
+    wait_for_status(&mut events, ProcStatus::Running).await;
+
+    // One typed line answers both questions: the shell is interactive (it read from the PTY and
+    // ran what it read) and it started in the project's directory. The prefix matters — a themed
+    // prompt commonly prints the working directory itself, so matching the bare path would pass
+    // against a shell that never ran anything. Only the command's own output carries the marker.
+    facade
+        .supervisor()
+        .write_stdin(id, b"printf 'SOLOIST-CWD:%s\\n' \"$PWD\"\r".to_vec())
+        .await
+        .expect("the shell accepts typed input");
+
+    let marked = format!("SOLOIST-CWD:{}", project.root.to_string_lossy());
+    let rendered = read_rendered_until(&facade, id, &marked).await;
+    assert!(
+        rendered.contains(&marked),
+        "the interactive shell ran the typed command in the project dir; saw {rendered:?}"
+    );
+
+    // Tear down through the same stop path the UI uses when a terminal is closed, so nothing
+    // outlives the test. (A user's own Ctrl-D also exits the shell; that is the shell's EOF
+    // behaviour, not this feature's, and waiting on it here only adds timing flake.)
+    assert!(facade.supervisor().stop(id), "stop finds the terminal");
+    wait_for_status(&mut events, ProcStatus::Stopped).await;
+}
+
+/// Polls a process's rendered output until it contains `needle`, returning what was rendered.
+/// The shell writes asynchronously after the input is accepted, so the read must wait rather
+/// than sample once.
+async fn read_rendered_until(facade: &Facade, id: soloist_core::ProcessId, needle: &str) -> String {
+    let mut rendered = String::new();
+    for _ in 0..100 {
+        rendered = facade
+            .process_output(id, None)
+            .unwrap_or_default()
+            .join("\n");
+        if rendered.contains(needle) {
+            break;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+    rendered
+}
+
 async fn wait_for_status(events: &mut Receiver<DomainEvent>, target: ProcStatus) {
     let found = timeout(Duration::from_secs(10), async {
         loop {

@@ -13,11 +13,26 @@ use crate::ids::ProjectId;
 use crate::ports::{PtySize, SpawnSpec};
 use crate::process::ProcessKind;
 
+/// How a registration's label is filed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Labelling {
+    /// File the label exactly as given. A `solo.yml` command (whose name is already unique
+    /// per project) and an agent (named for its tool) both take their name as-is.
+    Exact,
+    /// Treat the label as a base name and number it — "Terminal", then "Terminal 2" — against
+    /// the labels already in the project, whatever their kind. Resolved inside the registry,
+    /// under the same guard that inserts, so two concurrent registrations cannot both claim
+    /// the same name.
+    NumberedIfTaken,
+}
+
 /// How to create a managed process.
 pub struct Registration {
     pub project: ProjectId,
     pub kind: ProcessKind,
     pub label: String,
+    /// Whether [`label`](Self::label) is the final name or a base to be numbered.
+    pub labelling: Labelling,
     pub launch: SpawnSpec,
     /// The project root, recorded as part of the process's orphan-adoption identity.
     pub project_root: PathBuf,
@@ -53,6 +68,7 @@ impl Registration {
             project,
             kind: ProcessKind::Command,
             label: name.into(),
+            labelling: Labelling::Exact,
             launch: SpawnSpec {
                 command: spec.command.clone(),
                 working_dir: spec.resolved_working_dir(root),
@@ -84,6 +100,7 @@ impl Registration {
             project,
             kind,
             label: label.into(),
+            labelling: Labelling::Exact,
             launch,
             project_root,
             trust_variant: None,
@@ -93,6 +110,14 @@ impl Registration {
             // Set by [`Self::resumable_with`] for an agent whose provider can resume.
             resume_command: None,
         }
+    }
+
+    /// Treats the label as a base name to be numbered against the labels already in the
+    /// project ([`Labelling::NumberedIfTaken`]) — how several open terminals stay tellable
+    /// apart in the sidebar.
+    pub fn numbered(mut self) -> Self {
+        self.labelling = Labelling::NumberedIfTaken;
+        self
     }
 
     /// Records the command line that resumes this process's last session, marking it

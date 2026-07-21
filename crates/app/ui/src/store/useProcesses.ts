@@ -9,6 +9,7 @@ import {
   stackRestartRunning,
   stackStart,
   stackStop,
+  terminalCreate,
 } from "@/api";
 import { applyEvent } from "@/store/projection";
 import { useReconcile } from "@/store/useReconcile";
@@ -31,6 +32,11 @@ export interface ProcessStore {
   restart: (id: number) => void;
   /** Resume a stopped resumable agent's last session (vs `start`, which begins fresh). */
   resume: (id: number) => void;
+  /**
+   * Opens a terminal in `project`, resolving to the new process id — or `null` if it failed
+   * (the error is surfaced on the shared banner), so the caller can no-op.
+   */
+  createTerminal: (project: number) => Promise<number | null>;
   /** Bulk operations are scoped to a project so each project's header controls its own stack. */
   startAll: (project: number) => void;
   stopAll: (project: number) => void;
@@ -80,6 +86,16 @@ export function useProcesses(): ProcessStore {
   const stop = useCallback((id: number) => void procStop(id).catch(fail), [fail]);
   const restart = useCallback((id: number) => void procRestart(id).catch(fail), [fail]);
   const resume = useCallback((id: number) => void agentResume(id).catch(fail), [fail]);
+  // Resolves the new id (unlike the lifecycle actions above) so the caller can focus the
+  // terminal it just opened; the row itself still arrives via `ProcessSpawned`.
+  const createTerminal = useCallback(
+    (project: number): Promise<number | null> =>
+      terminalCreate(project).catch((reason: unknown) => {
+        fail(reason);
+        return null;
+      }),
+    [fail],
+  );
 
   const startAll = useCallback((project: number) => void stackStart(project).catch(fail), [fail]);
   const stopAll = useCallback((project: number) => void stackStop(project).catch(fail), [fail]);
@@ -132,6 +148,7 @@ export function useProcesses(): ProcessStore {
     stop,
     restart,
     resume,
+    createTerminal,
     startAll,
     stopAll,
     restartRunning,

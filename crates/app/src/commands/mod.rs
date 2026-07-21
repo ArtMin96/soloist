@@ -150,6 +150,18 @@ pub async fn agent_launch(
         .map_err(|err| err.to_string())
 }
 
+/// Opens a plain interactive shell in a project as a Terminal process and starts it, returning
+/// its process id. Takes no command: the shell is fixed in the core, so this surface cannot ask
+/// for an arbitrary one.
+#[tauri::command]
+pub async fn terminal_create(project: u64, facade: State<'_, Arc<Facade>>) -> Result<u64, String> {
+    facade
+        .blocking(move |f| f.create_terminal(ProjectId::from_raw(project)))
+        .await
+        .map(|id| id.get())
+        .map_err(|err| err.to_string())
+}
+
 /// Starts one process; refused by the core trust gate if its command is untrusted.
 #[tauri::command]
 pub async fn proc_start(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {

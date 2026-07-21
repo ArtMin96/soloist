@@ -47,7 +47,7 @@ use registry::{ActorHandle, Registry};
 use restart::RestartPolicy;
 
 pub use bulk::StartSummary;
-pub use registration::Registration;
+pub use registration::{Labelling, Registration};
 
 /// Per-actor mailbox capacity. Tiny on purpose: at most a couple of control messages
 /// are ever in flight for one process, and a bounded channel honours the no-unbounded
@@ -169,12 +169,16 @@ impl Supervisor {
     }
 
     /// Registers a process as `Stopped` without starting it, announcing it on the bus.
+    ///
+    /// A [`Labelling::NumberedIfTaken`] registration's label is a base name the registry
+    /// resolves as it inserts; the announced label is the one actually filed.
     pub fn register(&self, registration: Registration) -> ProcessId {
         let id = ProcessId::next();
         let Registration {
             project,
             kind,
             label,
+            labelling,
             launch,
             project_root,
             trust_variant,
@@ -191,7 +195,7 @@ impl Supervisor {
             id,
             project,
             kind,
-            label: label.clone(),
+            label,
             status: ProcStatus::Stopped,
             exit_code: None,
             requires_trust,
@@ -199,8 +203,9 @@ impl Supervisor {
             ports: Vec::new(),
             ready: Readiness::Ungated,
         };
-        self.registry.add(
+        let label = self.registry.add(
             view,
+            labelling,
             launch,
             project_root,
             trust_variant,

@@ -1,8 +1,8 @@
 import type { ProcStatus } from "@domain";
 import { browser } from "@wdio/globals";
 import { openProject } from "../../src/flows/openProject.js";
-import { launchAgent, openAgentPicker } from "../../src/flows/launchAgent.js";
-import { agentPicker } from "../../src/screens/AgentPicker.js";
+import { launchAgent, openLaunchPicker } from "../../src/flows/launch.js";
+import { agentEntry, launchPicker } from "../../src/screens/LaunchPicker.js";
 import { sidebar } from "../../src/screens/Sidebar.js";
 import { terminalPane } from "../../src/screens/TerminalPane.js";
 
@@ -30,14 +30,14 @@ describe("launching an agent into a project", () => {
   });
 
   it("offers Claude for the open project", async () => {
-    await openAgentPicker();
+    await openLaunchPicker();
 
-    expect(await agentPicker.targetProject()).toBe(projectName);
-    expect(await agentPicker.tools()).toContain(CLAUDE.name);
-    expect(await agentPicker.commandFor(CLAUDE.name)).toBe(CLAUDE.command);
+    expect(await launchPicker.targetProject()).toBe(projectName);
+    expect(await launchPicker.entries()).toContain(agentEntry(CLAUDE.name));
+    expect(await launchPicker.commandFor(CLAUDE.name)).toBe(CLAUDE.command);
 
     await browser.keys("Escape");
-    await agentPicker.waitUntilClosed();
+    await launchPicker.waitUntilClosed();
   });
 
   it("renders the agent in the sidebar once launched", async () => {
