@@ -118,8 +118,8 @@ describe("LaunchPicker", () => {
   });
 
   it("offers a terminal alongside the agent tools", () => {
-    // Ctrl+T has always been labelled "New agent or terminal"; the terminal is the half that
-    // used to be missing, so it must be reachable from the same list without configuring one.
+    // A terminal needs no configuring, so it is reachable from the same list as the agent
+    // tools rather than from a separate affordance.
     renderPicker();
     expect(screen.getByText("Terminal")).toBeTruthy();
     expect(screen.getByText("your default shell")).toBeTruthy();
@@ -154,5 +154,43 @@ describe("LaunchPicker", () => {
     // The terminal is still the one thing on offer, and still opens.
     fireEvent.click(screen.getByText("Terminal"));
     expect(onCreateTerminal).toHaveBeenCalledWith(1);
+  });
+
+  it("narrows to a tool typed by its own name", () => {
+    // Entries are identified by a kind-prefixed value the user never sees, so search has to keep
+    // matching what the row actually reads rather than that internal token.
+    renderPicker();
+    fireEvent.change(screen.getByPlaceholderText("Launch an agent or open a terminal…"), {
+      target: { value: "Gemini" },
+    });
+
+    expect(screen.getByText("Gemini")).toBeTruthy();
+    expect(screen.queryByText("Claude")).toBeNull();
+  });
+
+  it("keeps an agent tool named Terminal distinct from the terminal entry", () => {
+    // Both rows read "Terminal", so only their identity tells them apart. If they shared one, the
+    // picker could launch the agent when the user asked for a shell — or the reverse.
+    const namesake: DetectedTool = {
+      tool: {
+        name: "Terminal",
+        command: "terminal-agent",
+        default_args: [],
+        kind: "Claude",
+        prompt_mode: "AppendedArg",
+      },
+      detection: "Installed",
+    };
+    const { onLaunch, onCreateTerminal } = renderPicker({ tools: [namesake] });
+
+    const entries = document.querySelectorAll("[cmdk-item]");
+    expect([...entries].map((entry) => entry.getAttribute("data-value"))).toEqual([
+      "agent:Terminal",
+      "terminal",
+    ]);
+
+    fireEvent.click(document.querySelector('[data-value="terminal"]')!);
+    expect(onCreateTerminal).toHaveBeenCalledWith(1);
+    expect(onLaunch).not.toHaveBeenCalled();
   });
 });

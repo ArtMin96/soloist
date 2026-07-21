@@ -1,11 +1,11 @@
 import { waitUntilOr } from "../harness/waitUntilOr.js";
-import { launchPicker } from "../screens/LaunchPicker.js";
+import { agentEntry, launchPicker, TERMINAL_ENTRY } from "../screens/LaunchPicker.js";
 import { sidebar } from "../screens/Sidebar.js";
 import { titlebar } from "../screens/Titlebar.js";
 import type { RowHandle } from "../screens/Sidebar.js";
 
-/** The picker's entry for a plain shell, as the app labels it. */
-export const TERMINAL_ENTRY = "Terminal";
+/** The label the core gives a project's first terminal — what its sidebar row and pane read. */
+export const TERMINAL_LABEL = "Terminal";
 
 /**
  * Launches an agent the way a user does: open the picker from the titlebar, pick the tool, and wait
@@ -16,7 +16,7 @@ export const TERMINAL_ENTRY = "Terminal";
  */
 export async function launchAgent(tool: string): Promise<RowHandle> {
   await openLaunchPicker();
-  await launchPicker.choose(tool);
+  await launchPicker.choose(agentEntry(tool));
   await launchPicker.waitUntilClosed();
   return sidebar.waitForRow(tool);
 }
@@ -28,7 +28,7 @@ export async function launchAgent(tool: string): Promise<RowHandle> {
  * `label` is which terminal to wait for — the first is "Terminal" and later ones are numbered
  * ("Terminal 2", …) by the core, so a spec opening several names the one it expects.
  */
-export async function openTerminal(label: string = TERMINAL_ENTRY): Promise<RowHandle> {
+export async function openTerminal(label: string = TERMINAL_LABEL): Promise<RowHandle> {
   await openLaunchPicker();
   await launchPicker.choose(TERMINAL_ENTRY);
   await launchPicker.waitUntilClosed();

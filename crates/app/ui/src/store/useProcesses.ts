@@ -33,8 +33,8 @@ export interface ProcessStore {
   /** Resume a stopped resumable agent's last session (vs `start`, which begins fresh). */
   resume: (id: number) => void;
   /**
-   * Opens a plain interactive shell in `project`, resolving to the new process id — or `null`
-   * if it failed (the error is surfaced on the shared banner), so the caller can no-op.
+   * Opens a terminal in `project`, resolving to the new process id — or `null` if it failed
+   * (the error is surfaced on the shared banner), so the caller can no-op.
    */
   createTerminal: (project: number) => Promise<number | null>;
   /** Bulk operations are scoped to a project so each project's header controls its own stack. */

@@ -1,18 +1,16 @@
-//! The terminal surface (context C8 → C2): opening a plain interactive shell in a project.
+//! Opening a plain interactive shell in a project.
 //!
 //! A terminal is the third process subtype, and the only one the user creates with nothing to
 //! configure — there is no tool to resolve, no command to compose, and no flags to pass. It is
 //! therefore the thinnest possible composition over the supervisor: resolve the project's
-//! directory, name the process, register an ungated [`ProcessKind::Terminal`], and start it.
-//! Every policy that distinguishes a terminal from a command (no trust gate, no auto-start, no
-//! auto-restart, no file-watch restart) already follows from [`Registration::launched`], so
+//! directory, register an ungated [`ProcessKind::Terminal`] under a numbered label, and start
+//! it. Every policy that distinguishes a terminal from a command (no trust gate, no auto-start,
+//! no auto-restart, no file-watch restart) already follows from [`Registration::launched`], so
 //! none of it is restated here.
-
-use std::collections::{BTreeMap, HashSet};
 
 use super::Facade;
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::{PtySize, SpawnSpec, StoreError};
+use crate::ports::{SpawnSpec, StoreError};
 use crate::process::ProcessKind;
 use crate::supervisor::{Registration, SupervisorError};
 
@@ -28,7 +26,7 @@ use crate::supervisor::{Registration, SupervisorError};
 /// immediately.
 const TERMINAL_COMMAND: &str = "exec ${SHELL:-/bin/sh}";
 
-/// The label a new terminal takes, before [`next_label`] numbers a duplicate.
+/// The base label a new terminal takes; the registry numbers a duplicate ("Terminal 2", …).
 const TERMINAL_LABEL: &str = "Terminal";
 
 impl Facade {
@@ -40,62 +38,25 @@ impl Facade {
     /// spawns a fixed constant, so no surface can turn it into arbitrary code execution.
     ///
     /// The label is unique within the project ("Terminal", then "Terminal 2", …) so several
-    /// open terminals stay tellable apart in the sidebar. Many can run at once; each call is a
-    /// new process. Must run within a `tokio` runtime (starting spawns the actor).
+    /// open terminals stay tellable apart in the sidebar; the registry resolves it as it
+    /// files the process. Many can run at once; each call is a new process. Must run within a
+    /// `tokio` runtime (starting spawns the actor).
     pub fn create_terminal(&self, project: ProjectId) -> Result<ProcessId, CreateTerminalError> {
         let root = self
-            .projects
-            .get(project)?
-            .ok_or(CreateTerminalError::UnknownProject)?
-            .root;
-        let spec = SpawnSpec {
-            command: TERMINAL_COMMAND.to_string(),
-            working_dir: root,
-            // No env overrides: the shell inherits Soloist's environment, layered over the
-            // captured login-shell environment exactly like every other spawn.
-            env: BTreeMap::new(),
-            size: PtySize::default(),
-        };
-        let id = self.supervisor.register(Registration::launched(
-            project,
-            ProcessKind::Terminal,
-            next_label(TERMINAL_LABEL, &self.labels_in(project)),
-            spec,
-        ));
+            .project_root(project)?
+            .ok_or(CreateTerminalError::UnknownProject)?;
+        let id = self.supervisor.register(
+            Registration::launched(
+                project,
+                ProcessKind::Terminal,
+                TERMINAL_LABEL,
+                SpawnSpec::inheriting_env(TERMINAL_COMMAND, root),
+            )
+            .numbered(),
+        );
         self.supervisor.start(id)?;
         Ok(id)
     }
-
-    /// Every process label in use in `project`, whatever its kind — what a new terminal's label
-    /// must not collide with.
-    fn labels_in(&self, project: ProjectId) -> HashSet<String> {
-        self.supervisor
-            .snapshot()
-            .into_iter()
-            .filter(|view| view.project == project)
-            .map(|view| view.label)
-            .collect()
-    }
-}
-
-/// `base` when it is free, otherwise the lowest numbered variant that is ("Terminal 2",
-/// "Terminal 3", …).
-///
-/// Uniqueness spans every kind in the project rather than terminals alone, so a new terminal
-/// never renders beside a `solo.yml` command that happens to share its name.
-fn next_label(base: &str, taken: &HashSet<String>) -> String {
-    if !taken.contains(base) {
-        return base.to_string();
-    }
-    // `taken` is finite and each step tries a distinct label, so at most `taken.len()`
-    // candidates can collide and the search always lands.
-    let mut suffix = 2;
-    let mut candidate = format!("{base} {suffix}");
-    while taken.contains(&candidate) {
-        suffix += 1;
-        candidate = format!("{base} {suffix}");
-    }
-    candidate
 }
 
 /// Why opening a terminal failed: the project is not known, a durable read failed, or the

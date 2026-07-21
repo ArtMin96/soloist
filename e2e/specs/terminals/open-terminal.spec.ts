@@ -1,7 +1,7 @@
 import type { ProcStatus } from "@domain";
 import { openProject } from "../../src/flows/openProject.js";
-import { openLaunchPicker, openTerminal, TERMINAL_ENTRY } from "../../src/flows/launch.js";
-import { launchPicker } from "../../src/screens/LaunchPicker.js";
+import { openLaunchPicker, openTerminal, TERMINAL_LABEL } from "../../src/flows/launch.js";
+import { launchPicker, TERMINAL_ENTRY } from "../../src/screens/LaunchPicker.js";
 import { sidebar } from "../../src/screens/Sidebar.js";
 import { terminalPane } from "../../src/screens/TerminalPane.js";
 import { browser } from "@wdio/globals";
@@ -14,6 +14,10 @@ const OPENED: ProcStatus = "Running";
 // The second terminal's label, numbered by the core so two open shells stay tellable apart.
 const SECOND_TERMINAL = "Terminal 2";
 
+// The sidebar heading a terminal files under. Spelled out rather than imported from the app: this
+// walk asserts what the user reads on screen, so a heading that silently changed should fail here.
+const TERMINALS_GROUP = "Terminals";
+
 describe("opening a terminal in a project", () => {
   before(async () => {
     await openProject("basic");
@@ -22,7 +26,7 @@ describe("opening a terminal in a project", () => {
   after(async () => {
     // Leave nothing running: a shell that outlives its app session is a leftover the next
     // session's app would (rightly) raise its orphan dialog over.
-    await sidebar.stopIfRunning(TERMINAL_ENTRY);
+    await sidebar.stopIfRunning(TERMINAL_LABEL);
     await sidebar.stopIfRunning(SECOND_TERMINAL);
   });
 
@@ -38,18 +42,18 @@ describe("opening a terminal in a project", () => {
   it("renders the terminal in the sidebar once opened", async () => {
     const row = await openTerminal();
 
-    expect(row.label).toBe(TERMINAL_ENTRY);
+    expect(row.label).toBe(TERMINAL_LABEL);
     expect(row.selected).toBe(true);
-    // It lands under Terminals, the group that has always rendered but never had anything in it.
-    expect(await sidebar.hasGroup("Terminals")).toBe(true);
+    // A terminal files under its own sidebar group, not among the agents or commands.
+    expect(await sidebar.hasGroup(TERMINALS_GROUP)).toBe(true);
   });
 
   it("actually starts the shell", async () => {
-    await sidebar.waitForRowStatus(TERMINAL_ENTRY, OPENED);
+    await sidebar.waitForRowStatus(TERMINAL_LABEL, OPENED);
   });
 
   it("opens a laid-out terminal pane for it", async () => {
-    expect(await terminalPane.title()).toContain(TERMINAL_ENTRY);
+    expect(await terminalPane.title()).toContain(TERMINAL_LABEL);
     expect(await terminalPane.isMounted()).toBe(true);
 
     // jsdom cannot prove this and the unit suites do not try: a terminal that mounts but measures

@@ -13,9 +13,25 @@ import {
 import { Input } from "@/components/ui/input";
 import type { Detection, DetectedTool, ProjectView } from "@/domain";
 import { detectionLabel } from "@/lib/agents";
+import { HOTKEY_ACTION_LABELS } from "@/lib/hotkeys";
 import { tokenizeArgs } from "@/lib/tokenizeArgs";
 import { cn } from "@/lib/utils";
 import { GROUP_LABELS, KIND_LABELS } from "@/store/grouping";
+
+// cmdk identifies, highlights, and reports every entry by one opaque `value` string, so all the
+// entries share a single name-space: an agent tool named "Terminal" would otherwise be
+// indistinguishable from the terminal entry, and Alt+Enter could not tell which was highlighted.
+// Prefixing the agent entries keeps the two apart. The value is still what search scores, and it
+// keeps the tool's own name, so typing a tool still finds it; typing "agent" lists them all.
+const AGENT_ENTRY_PREFIX = "agent:";
+const TERMINAL_ENTRY = "terminal";
+
+const agentEntry = (tool: string) => `${AGENT_ENTRY_PREFIX}${tool}`;
+
+/** The tool an entry launches, or null if it is not an agent entry (so it takes no flags). */
+function agentOf(entry: string): string | null {
+  return entry.startsWith(AGENT_ENTRY_PREFIX) ? entry.slice(AGENT_ENTRY_PREFIX.length) : null;
+}
 
 interface LaunchPickerProps {
   open: boolean;
@@ -30,7 +46,7 @@ interface LaunchPickerProps {
   onCreateTerminal: (project: number) => void;
 }
 
-// The launch picker (E4): a Cmd/Ctrl+T command palette over everything the user can start — the
+// The launch picker: a Cmd/Ctrl+T command palette over everything the user can start — the
 // configured agent tools, and a plain terminal. Enter launches the highlighted entry instantly;
 // Alt+Enter opens a one-shot flags field for an agent ("agent with flags"), which a terminal has
 // no use for. When several projects are open it always asks which first — the footer always names
@@ -84,7 +100,7 @@ export function LaunchPicker({
     <CommandDialog
       open={open}
       onOpenChange={handleOpenChange}
-      title="New agent or terminal"
+      title={HOTKEY_ACTION_LABELS.new_agent_or_terminal}
       description="Pick an agent tool to launch, or open a plain terminal, in the current project."
     >
       {step === "project" ? (
@@ -105,9 +121,10 @@ export function LaunchPicker({
           onLaunch={(tool) => launchWith(tool, [])}
           onCreateTerminal={createTerminal}
           onEditFlags={() => {
-            const name = activeRef.current || tools[0]?.tool.name;
+            const entry = activeRef.current || (tools[0] && agentEntry(tools[0].tool.name));
             // Flags belong to an agent's command line; a terminal takes none, so Alt+Enter on
             // it does nothing rather than opening a field that could not be applied.
+            const name = entry ? agentOf(entry) : null;
             if (name && tools.some((candidate) => candidate.tool.name === name)) {
               setFlagsTool(name);
             }
@@ -152,7 +169,11 @@ function LaunchStep({
         <CommandEmpty>Nothing matches.</CommandEmpty>
         <CommandGroup heading={GROUP_LABELS.Agent}>
           {tools.map(({ tool, detection }) => (
-            <CommandItem key={tool.name} value={tool.name} onSelect={() => onLaunch(tool.name)}>
+            <CommandItem
+              key={tool.name}
+              value={agentEntry(tool.name)}
+              onSelect={() => onLaunch(tool.name)}
+            >
               <EntryInitial name={tool.name} />
               <span className="font-medium">{tool.name}</span>
               <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
@@ -163,7 +184,7 @@ function LaunchStep({
           ))}
         </CommandGroup>
         <CommandGroup heading={GROUP_LABELS.Terminal}>
-          <CommandItem value={KIND_LABELS.Terminal} onSelect={onCreateTerminal}>
+          <CommandItem value={TERMINAL_ENTRY} onSelect={onCreateTerminal}>
             <EntryInitial name={KIND_LABELS.Terminal} />
             <span className="font-medium">{KIND_LABELS.Terminal}</span>
             {/* No command is shown: a terminal runs the user's own login shell, resolved on the

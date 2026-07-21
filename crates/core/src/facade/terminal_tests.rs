@@ -158,6 +158,41 @@ async fn each_project_numbers_its_own_terminals() {
     assert_eq!(label_of(&facade, other), "Terminal");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn terminals_created_concurrently_never_land_on_one_label() {
+    // The façade runs store-touching ops on the blocking pool, so two `create_terminal` calls
+    // genuinely overlap. Naming is only unique if the label is chosen under the same lock that
+    // files the process: a caller that read the labels first and registered second could be
+    // overtaken in between, and both would file "Terminal". The barrier releases every task at
+    // once so the calls overlap where that window used to be.
+    const TERMINALS: usize = 8;
+    let (facade, project, _dir) = facade_with_project();
+    let facade = Arc::new(facade);
+    let barrier = Arc::new(std::sync::Barrier::new(TERMINALS));
+
+    let mut handles = Vec::with_capacity(TERMINALS);
+    for _ in 0..TERMINALS {
+        let facade = Arc::clone(&facade);
+        let barrier = Arc::clone(&barrier);
+        handles.push(tokio::task::spawn_blocking(move || {
+            barrier.wait();
+            facade.create_terminal(project).expect("create terminal")
+        }));
+    }
+    let mut ids = Vec::with_capacity(TERMINALS);
+    for handle in handles {
+        ids.push(handle.await.expect("the creating task did not panic"));
+    }
+
+    let labels: std::collections::HashSet<String> =
+        ids.iter().map(|&id| label_of(&facade, id)).collect();
+    assert_eq!(
+        labels.len(),
+        TERMINALS,
+        "every concurrently created terminal took its own label, got {labels:?}"
+    );
+}
+
 #[tokio::test]
 async fn creating_a_terminal_in_an_unknown_project_is_refused() {
     let facade = facade();

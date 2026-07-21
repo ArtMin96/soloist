@@ -8,8 +8,7 @@
 //! trusted" is implemented exactly once. Adapters translate requests in and project the
 //! read model out; they hold no business state.
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,7 +25,7 @@ use crate::identity::Identity;
 use crate::ids::{ProcessId, ProjectId};
 use crate::metrics::MetricsProbe;
 use crate::notify::Notifier;
-use crate::ports::{Clock, PtySize, SpawnSpec, StoreError};
+use crate::ports::{Clock, SpawnSpec, StoreError};
 use crate::portscan::{self, PortProbe, WaitForPortError};
 use crate::process::{ProcStatus, ProcessKind, ProcessView};
 use crate::projects::{
@@ -335,24 +334,15 @@ impl Facade {
             .tool(tool)?
             .ok_or(LaunchAgentError::UnknownTool)?;
         let root = self
-            .projects
-            .get(project)?
-            .ok_or(LaunchAgentError::UnknownProject)?
-            .root;
+            .project_root(project)?
+            .ok_or(LaunchAgentError::UnknownProject)?;
         let kind = tool.kind;
         // The resume invocation is composed once here, from the same extra args as this
         // launch, by the single per-provider strategy ([`AgentTool::resume_command_line`]);
         // the supervisor stores it and replays it for "Resume last session". `None` for a
         // provider with no documented resume, leaving the process non-resumable.
         let resume_command = tool.resume_command_line(&extra_args);
-        let spec = SpawnSpec {
-            command: tool.launch_command_line(&extra_args),
-            working_dir: root,
-            // No env overrides: the agent inherits Soloist's environment as-is so its own
-            // native auth flow works untouched. Soloist injects no credential.
-            env: BTreeMap::new(),
-            size: PtySize::default(),
-        };
+        let spec = SpawnSpec::inheriting_env(tool.launch_command_line(&extra_args), root);
         let id = self.supervisor.register(
             Registration::launched(project, ProcessKind::Agent, tool.name, spec)
                 .resumable_with(resume_command),
@@ -362,6 +352,12 @@ impl Facade {
         // interval using its provider's heuristic.
         self.idle.track(id, kind);
         Ok(id)
+    }
+
+    /// The directory a launch runs in: `project`'s root, or `None` if it is not open. The one
+    /// place a launch resolves its working directory, so every launched process agrees on it.
+    fn project_root(&self, project: ProjectId) -> Result<Option<PathBuf>, StoreError> {
+        Ok(self.projects.get(project)?.map(|project| project.root))
     }
 }
 

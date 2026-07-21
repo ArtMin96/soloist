@@ -2,7 +2,7 @@ import type { ProcStatus } from "@domain";
 import { browser } from "@wdio/globals";
 import { openProject } from "../../src/flows/openProject.js";
 import { launchAgent, openLaunchPicker } from "../../src/flows/launch.js";
-import { launchPicker } from "../../src/screens/LaunchPicker.js";
+import { agentEntry, launchPicker } from "../../src/screens/LaunchPicker.js";
 import { sidebar } from "../../src/screens/Sidebar.js";
 import { terminalPane } from "../../src/screens/TerminalPane.js";
 
@@ -33,7 +33,7 @@ describe("launching an agent into a project", () => {
     await openLaunchPicker();
 
     expect(await launchPicker.targetProject()).toBe(projectName);
-    expect(await launchPicker.entries()).toContain(CLAUDE.name);
+    expect(await launchPicker.entries()).toContain(agentEntry(CLAUDE.name));
     expect(await launchPicker.commandFor(CLAUDE.name)).toBe(CLAUDE.command);
 
     await browser.keys("Escape");

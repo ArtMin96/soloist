@@ -5,7 +5,7 @@
 //! writer for its lifecycle state — the actor that owns it — so there is no shared
 //! mutable domain state behind a lock beyond the map itself.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -19,6 +19,7 @@ use crate::process::{ProcStatus, ProcessKind, ProcessView, Readiness};
 use crate::sync::lock;
 
 use super::actor::{ActorMsg, OrphanIdentity};
+use super::registration::Labelling;
 
 mod actors;
 mod queries;
@@ -86,11 +87,19 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// Records a freshly registered (stopped) process.
+    /// Records a freshly registered (stopped) process, returning the label it was filed under.
+    ///
+    /// Under [`Labelling::NumberedIfTaken`] the view's label is a base name, numbered here
+    /// rather than by the caller: resolving it needs to read every label in the project, and
+    /// doing that under the same guard as the insert is what makes the name unique. A caller
+    /// that read the labels first and registered second could be overtaken between the two,
+    /// leaving two processes with one name. The returned label is the one that was stored —
+    /// the caller announces *that*, not the base it asked for.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn add(
         &self,
-        view: ProcessView,
+        mut view: ProcessView,
+        labelling: Labelling,
         launch: SpawnSpec,
         project_root: PathBuf,
         trust_variant: Option<Hash>,
@@ -98,8 +107,12 @@ impl Registry {
         auto_restart: bool,
         restart_when_changed: Vec<String>,
         resume_command: Option<String>,
-    ) {
+    ) -> String {
         let mut guard = lock(&self.inner);
+        if labelling == Labelling::NumberedIfTaken {
+            view.label = number_label(&view.label, view.project, &guard);
+        }
+        let label = view.label.clone();
         guard.insert(
             view.id,
             Managed {
@@ -115,6 +128,7 @@ impl Registry {
                 pgid: None,
             },
         );
+        label
     }
 
     /// Records (or clears) the leader pgid of a process's running OS group. The actor sets
@@ -376,6 +390,34 @@ impl Registry {
     }
 }
 
+/// `base` when no process in `project` holds it, otherwise the lowest numbered variant that is
+/// free ("Terminal 2", "Terminal 3", …).
+///
+/// Takes the map already held by the caller's guard rather than locking again, so the name it
+/// picks is still free when the insert lands. Uniqueness spans every kind in the project, not
+/// terminals alone, so a new terminal never renders beside a `solo.yml` command of the same
+/// name; and it reads the labels *in use*, so closing a terminal frees its number instead of a
+/// counter climbing forever.
+fn number_label(base: &str, project: ProjectId, entries: &HashMap<ProcessId, Managed>) -> String {
+    let taken: HashSet<&str> = entries
+        .values()
+        .filter(|entry| entry.view.project == project)
+        .map(|entry| entry.view.label.as_str())
+        .collect();
+    if !taken.contains(base) {
+        return base.to_string();
+    }
+    // `taken` is finite and each step tries a distinct label, so at most `taken.len()`
+    // candidates can collide and the search always lands.
+    let mut suffix = 2;
+    let mut candidate = format!("{base} {suffix}");
+    while taken.contains(candidate.as_str()) {
+        suffix += 1;
+        candidate = format!("{base} {suffix}");
+    }
+    candidate
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,6 +448,7 @@ mod tests {
         };
         registry.add(
             view,
+            Labelling::Exact,
             launch,
             PathBuf::from("/"),
             None,

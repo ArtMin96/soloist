@@ -66,6 +66,24 @@ pub struct SpawnSpec {
     pub size: PtySize,
 }
 
+impl SpawnSpec {
+    /// A spawn that adds no environment of its own: the child inherits Soloist's environment,
+    /// layered over the captured login-shell environment, and starts at the default size.
+    ///
+    /// This is the shape every directly launched process takes — an agent, whose own native
+    /// auth flow must see the user's environment untouched (Soloist injects no credential),
+    /// and a terminal, which is the user's own shell. Only a `solo.yml` command carries
+    /// per-process `env` overrides.
+    pub fn inheriting_env(command: impl Into<String>, working_dir: PathBuf) -> Self {
+        Self {
+            command: command.into(),
+            working_dir,
+            env: BTreeMap::new(),
+            size: PtySize::default(),
+        }
+    }
+}
+
 /// How a child finished: an exit code, or the signal that terminated it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExitStatus {
