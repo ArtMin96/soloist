@@ -17,7 +17,7 @@ use tokio::sync::{broadcast, Notify};
 use crate::agents::{AgentLineage, Agents, IdleTracker};
 use crate::composition::CorePorts;
 use crate::config::ConfigEngine;
-use crate::configchange::ConfigSync;
+use crate::configchange::{ConfigSync, TrustReviewCommand};
 use crate::coordination::{Kv, Leases, Scratchpads, Templates, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::FileWatcher;
@@ -291,6 +291,17 @@ impl Facade {
             processes: processes.len(),
             running,
         })
+    }
+
+    /// What trusting a project's command would authorize: the command line, working
+    /// directory, and environment of its current variant, `None` when the project has no
+    /// such command. The same detail a `solo.yml` change publishes for review, available
+    /// on demand — so a grant can be shown before it is made, including on a project's
+    /// first open, where no change has been observed to publish one.
+    pub fn command_review(&self, project: ProjectId, name: &str) -> Option<TrustReviewCommand> {
+        self.config
+            .spec(project, name)
+            .map(|spec| TrustReviewCommand::from_spec(name, &spec))
     }
 
     /// Trusts a project's command by name: resolves the command to its current variant

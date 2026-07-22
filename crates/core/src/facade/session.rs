@@ -152,10 +152,11 @@ impl ScopedFacade<'_> {
 
     /// The managed process the session's connecting peer runs in (its *home* process),
     /// resolved from the kernel-reported peer process group via the supervisor — the
-    /// unforgeable basis for authenticating a bind or a project selection. `None` when the
-    /// transport supplied no peer group, or no live managed process owns it (an external
-    /// caller, or a stale group).
-    fn home_process(&self) -> Option<ProcessId> {
+    /// unforgeable basis for authenticating a bind or a project selection, and for any gate
+    /// that must hold whether or not the caller chose to bind. `None` when the transport
+    /// supplied no peer group, or no live managed process owns it (an external caller, or a
+    /// stale group).
+    pub(in crate::facade) fn home_process(&self) -> Option<ProcessId> {
         self.inner
             .identity
             .peer_pgid(self.session)

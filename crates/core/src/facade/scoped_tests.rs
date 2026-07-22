@@ -264,6 +264,69 @@ async fn a_spawned_worker_cannot_spawn_its_own_worker() {
 }
 
 #[tokio::test]
+async fn a_worker_that_never_binds_is_still_refused_a_spawn() {
+    let (facade, project) = facade_with_agent_tool();
+    let lead = facade
+        .supervisor()
+        .register(agent_registration(project, "lead"));
+    let lead_session = scoped_to(&facade, lead);
+    let worker = facade
+        .scoped(lead_session)
+        .spawn_agent("worker", Vec::new())
+        .expect("a lead spawns a worker");
+
+    // The worker's client connects from the worker's own process group but never binds, so
+    // the session asserts no identity of its own. The group it connects from is not the
+    // caller's to choose, and it is what the gate reads.
+    let worker_session = authentic_session(&facade, worker, TEST_PEER_PGID + 1);
+    let registered_before = facade.snapshot().len();
+
+    assert!(matches!(
+        facade
+            .scoped(worker_session)
+            .spawn_agent("worker", Vec::new()),
+        Err(SpawnAgentError::WorkerMayNotSpawn)
+    ));
+    assert_eq!(
+        facade.snapshot().len(),
+        registered_before,
+        "a refused spawn registers nothing",
+    );
+}
+
+#[tokio::test]
+async fn the_worker_gate_survives_the_group_the_caller_was_recognised_by_going_away() {
+    let (facade, project) = facade_with_agent_tool();
+    let lead = facade
+        .supervisor()
+        .register(agent_registration(project, "lead"));
+    let lead_session = scoped_to(&facade, lead);
+    let worker = facade
+        .scoped(lead_session)
+        .spawn_agent("worker", Vec::new())
+        .expect("a lead spawns a worker");
+    let worker_pgid = TEST_PEER_PGID + 1;
+    let worker_session = authentic_session(&facade, worker, worker_pgid);
+    facade
+        .scoped(worker_session)
+        .bind_session_process(worker)
+        .expect("an authentic bind to the worker");
+
+    // The worker's OS group is only live while its process is: a restart leaves the session's
+    // original peer group owning nothing, so the group alone no longer names the caller.
+    facade
+        .supervisor()
+        .assign_test_group(worker, worker_pgid + 100);
+
+    assert!(matches!(
+        facade
+            .scoped(worker_session)
+            .spawn_agent("worker", Vec::new()),
+        Err(SpawnAgentError::WorkerMayNotSpawn)
+    ));
+}
+
+#[tokio::test]
 async fn the_worker_gate_outlives_a_closed_lead() {
     let (facade, project) = facade_with_agent_tool();
     let lead = facade

@@ -42,6 +42,49 @@ describe("TrustDialog", () => {
     expect(screen.getByLabelText("Trust Api")).toBeTruthy();
   });
 
+  it("asks about one command without claiming the file changed", () => {
+    render(
+      <TrustDialog
+        review={{ ...REVIEW, diff: null }}
+        onTrustCommand={() => {}}
+        onTrustAll={() => {}}
+        onDismiss={() => {}}
+      />,
+    );
+
+    // Reached from the sidebar affordance, not from a solo.yml change: the copy says what
+    // is true, and there is no change summary to show.
+    expect(screen.getByText("Trust this command")).toBeTruthy();
+    expect(screen.queryByText("Added")).toBeNull();
+    expect(screen.getByText("cargo run")).toBeTruthy();
+  });
+
+  it("gives every environment pair its own line", () => {
+    render(
+      <TrustDialog
+        review={{
+          ...REVIEW,
+          commands: [
+            {
+              name: "Api",
+              command: "cargo run",
+              working_dir: null,
+              env: { PORT: "4000", LD_PRELOAD: "/tmp/evil.so" },
+            },
+          ],
+        }}
+        onTrustCommand={() => {}}
+        onTrustAll={() => {}}
+        onDismiss={() => {}}
+      />,
+    );
+
+    // Joined into one line, a trailing pair is the first thing a single row's overflow
+    // hides — the point of the review is that the last pair reads as plainly as the first.
+    expect(screen.getByText("PORT=4000")).toBeTruthy();
+    expect(screen.getByText("LD_PRELOAD=/tmp/evil.so")).toBeTruthy();
+  });
+
   it("routes trust decisions to their callbacks", () => {
     const onTrustCommand = vi.fn();
     const onTrustAll = vi.fn();
@@ -58,7 +101,8 @@ describe("TrustDialog", () => {
     fireEvent.click(screen.getByLabelText("Trust Api"));
     expect(onTrustCommand).toHaveBeenCalledWith("Api");
 
-    fireEvent.click(screen.getByText("Trust all"));
+    // One command under review, so the primary action grants that one rather than "all".
+    fireEvent.click(screen.getByRole("button", { name: "Trust" }));
     expect(onTrustAll).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByText("Not now"));

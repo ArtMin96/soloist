@@ -70,8 +70,11 @@ impl Perform for Renderer<'_> {
             b'\n' => self.flush_line(),
             b'\r' => *self.cursor = 0,
             b'\t' => {
-                let stop = (*self.cursor / TAB_WIDTH + 1) * TAB_WIDTH;
-                while *self.cursor < stop {
+                // The number of spaces is fixed before the first one is printed: `print`
+                // flushes the line at `MAX_LINE_CHARS` and resets the cursor to zero, so a
+                // loop watching the cursor for a stop it had already passed would never end.
+                let pad = TAB_WIDTH - *self.cursor % TAB_WIDTH;
+                for _ in 0..pad {
                     self.print(' ');
                 }
             }
@@ -92,3 +95,7 @@ impl Perform for Renderer<'_> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "parser_tests.rs"]
+mod tests;

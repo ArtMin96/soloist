@@ -31,6 +31,7 @@ use std::sync::Arc;
 
 use soloist_core::{
     AgentTool, DetectedTool, Facade, ProcessId, ProcessView, ProjectId, ProjectLoad, ProjectView,
+    TrustReviewCommand,
 };
 use tauri::ipc::{Channel, Response};
 use tauri::State;
@@ -83,6 +84,20 @@ pub async fn project_remove(project: u64, facade: State<'_, Arc<Facade>>) -> Res
         .remove_project(ProjectId::from_raw(project))
         .await
         .map_err(|err| err.to_string())
+}
+
+/// What trusting a project's command would authorize — its command line, working
+/// directory, and environment — so the UI can show the grant before offering to make it.
+/// `None` when the project has no such command.
+#[tauri::command]
+pub async fn config_command_review(
+    project: u64,
+    name: String,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<Option<TrustReviewCommand>, String> {
+    Ok(facade
+        .blocking(move |f| f.command_review(ProjectId::from_raw(project), &name))
+        .await)
 }
 
 /// Trusts a project's command by name so it can start (A6). Routes to the one core
