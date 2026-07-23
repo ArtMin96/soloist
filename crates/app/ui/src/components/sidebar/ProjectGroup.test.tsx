@@ -46,7 +46,7 @@ describe("ProjectGroup header", () => {
     expect(screen.getByText("Storefront")).toBeTruthy();
     // The fix: a single ••• actions affordance in the header, not a row of inline controls
     // that crush the truncating name. The bulk controls now live only inside the menu.
-    expect(screen.getByRole("button", { name: "Storefront actions" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Actions for Storefront" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Start all" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Restart running" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Stop all" })).toBeNull();
@@ -54,6 +54,6 @@ describe("ProjectGroup header", () => {
 
   it("shows the running count for the project", () => {
     renderGroup();
-    expect(screen.getByLabelText("2 of 4 running").textContent).toBe("2/4");
+    expect(screen.getByLabelText("2 of 4 processes running").textContent).toBe("2/4");
   });
 });

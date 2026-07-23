@@ -1,4 +1,4 @@
-import { Collapsible } from "radix-ui";
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { ProcessRow } from "@/components/sidebar/ProcessRow";
 import type { ProcessNode as Node } from "@/store/grouping";
 import type { ToggleSet } from "@/store/useToggleSet";
@@ -59,9 +59,9 @@ export function ProcessNode({
   if (!hasChildren) return row;
 
   return (
-    <Collapsible.Root open={expanded}>
+    <Collapsible open={expanded}>
       {row}
-      <Collapsible.Content
+      <CollapsibleContent
         role="group"
         className="flex flex-col gap-px overflow-hidden data-[state=open]:animate-disclose-down data-[state=closed]:animate-disclose-up"
       >
@@ -81,7 +81,7 @@ export function ProcessNode({
             onTrust={onTrust}
           />
         ))}
-      </Collapsible.Content>
-    </Collapsible.Root>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

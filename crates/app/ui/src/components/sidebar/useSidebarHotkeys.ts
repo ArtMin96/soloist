@@ -32,6 +32,32 @@ export function useSidebarHotkeys(state: SidebarHotkeysState) {
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (isEditableTarget(event.target)) return;
+
+    // Native tree traversal is independent of the configurable command bindings. Collapsed
+    // descendants are absent from the DOM, so this list is exactly the visible navigation order.
+    const unmodified = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+    if (unmodified && ["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+      const rows = [...event.currentTarget.querySelectorAll<HTMLElement>("[role='treeitem']")];
+      if (rows.length === 0) return;
+      const focused = document.activeElement?.closest<HTMLElement>("[role='treeitem']");
+      const current = focused ? rows.indexOf(focused) : -1;
+      const next =
+        event.key === "Home"
+          ? rows[0]
+          : event.key === "End"
+            ? rows[rows.length - 1]
+            : event.key === "ArrowUp"
+              ? rows[Math.max(0, current <= 0 ? 0 : current - 1)]
+              : rows[Math.min(rows.length - 1, current + 1)];
+      const id = Number(next?.dataset.processId);
+      if (next && Number.isFinite(id)) {
+        next.focus();
+        stateRef.current.onSelect(id);
+        event.preventDefault();
+      }
+      return;
+    }
+
     const pressed = bindingFromEvent(event.nativeEvent);
     if (!pressed) return;
 

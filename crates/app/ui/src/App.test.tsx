@@ -128,19 +128,19 @@ describe("App dashboard", () => {
     expect(row(2).querySelector("[data-status]")?.getAttribute("data-status")).toBe("Running");
   });
 
-  it("derives control enabled-state from the status FSM", async () => {
+  it("derives sparse control availability from the status FSM", async () => {
     mockBackend(STACK);
     render(<App />);
     await screen.findAllByRole("treeitem");
 
-    // A stopped process can start, not stop; a running one is the inverse.
+    // A stopped process offers Start, not Stop; a running terminal offers Stop, not Start.
     const stopped = within(row(1));
-    expect((stopped.getByLabelText("Start") as HTMLButtonElement).disabled).toBe(false);
-    expect((stopped.getByLabelText("Stop") as HTMLButtonElement).disabled).toBe(true);
+    expect(stopped.getByLabelText("Start")).toBeTruthy();
+    expect(stopped.queryByLabelText("Stop")).toBeNull();
 
     const running = within(row(2));
-    expect((running.getByLabelText("Start") as HTMLButtonElement).disabled).toBe(true);
-    expect((running.getByLabelText("Stop") as HTMLButtonElement).disabled).toBe(false);
+    expect(running.queryByLabelText("Start")).toBeNull();
+    expect(running.getByLabelText("Stop")).toBeTruthy();
   });
 
   it("selects a process and opens its terminal pane", async () => {
@@ -208,7 +208,7 @@ describe("App dashboard", () => {
 
     // The untrusted command (row 3) cannot start; it offers a trust affordance instead.
     const untrusted = within(row(3));
-    expect((untrusted.getByLabelText("Start") as HTMLButtonElement).disabled).toBe(true);
+    expect(untrusted.queryByLabelText("Start")).toBeNull();
 
     fireEvent.click(untrusted.getByLabelText("Trust"));
 

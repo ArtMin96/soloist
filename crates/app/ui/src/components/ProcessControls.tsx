@@ -1,104 +1,109 @@
-import type { ReactNode } from "react";
-import { History, Play, RotateCw, ShieldCheck, Square } from "lucide-react";
+import { History, MoreHorizontal, Play, RotateCw, ShieldCheck, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { processActions } from "@/lib/processActions";
-import type { ProcStatus } from "@/domain";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  presentProcessActions,
+  runnableProcessActions,
+  type ProcessActionHandlers,
+  type ProcessActionKind,
+  type RunnableProcessAction,
+} from "@/lib/processActions";
+import type { ProcessView } from "@/domain";
 
 type ControlSize = "icon-xs" | "icon-sm";
 
 interface ProcessControlsProps {
-  status: ProcStatus;
-  onStart: () => void;
-  onStop: () => void;
-  onRestart: () => void;
+  process: ProcessView;
+  handlers: ProcessActionHandlers;
   size?: ControlSize;
-  /** A trust-gated command whose variant is not trusted — Start is blocked until then. */
-  requiresTrust?: boolean;
-  /** Trust the command; when provided and `requiresTrust`, a trust affordance is shown. */
-  onTrust?: () => void;
-  /** A stopped agent whose provider supports "Resume last session" — when set with
-   *  `onResume`, a Resume control sits beside Start, enabled from the same resting states. */
-  resumable?: boolean;
-  /** Resume the agent's last session; shown only for a `resumable` process. */
-  onResume?: () => void;
 }
 
-// The per-process start / restart / stop cluster, reused in the sidebar row and the
-// terminal header. Enabled state is derived from the status FSM (single source in
-// `lib/status`), so a control is never offered for a transition the core would reject. An
-// untrusted command blocks Start and surfaces a trust affordance (A6).
-export function ProcessControls({
-  status,
-  onStart,
-  onStop,
-  onRestart,
-  size = "icon-sm",
-  requiresTrust = false,
-  onTrust,
-  resumable = false,
-  onResume,
-}: ProcessControlsProps) {
-  // The same single source the palettes read decides which actions are live; the cluster shows the
-  // full set of affordances and disables the ones that aren't currently runnable, so it never
-  // reflows as a process changes state.
-  const available = new Set(processActions({ status, requiresTrust, resumable }));
+const ACTION_ICONS = {
+  trust: ShieldCheck,
+  resume: History,
+  start: Play,
+  stop: Square,
+  restart: RotateCw,
+} satisfies Record<ProcessActionKind, typeof Play>;
+
+// A dense projection of the canonical runnable-action list. Exactly one action stays one-click;
+// secondary actions move into a menu, and unavailable actions do not exist in the DOM. The same
+// resolver also feeds palettes and row context menus, so this component never interprets status.
+export function ProcessControls({ process, handlers, size = "icon-sm" }: ProcessControlsProps) {
+  const runnable = runnableProcessActions(process, handlers);
+  const { primary, secondary } = presentProcessActions(process.kind, process.status, runnable);
+  if (primary == null) return null;
+
   return (
     <div className="flex items-center gap-0.5">
-      {requiresTrust && onTrust && (
-        <Control label="Trust" size={size} disabled={!available.has("trust")} onClick={onTrust}>
-          <ShieldCheck />
-        </Control>
+      <ActionButton action={primary} size={size} />
+      {secondary.length > 0 && (
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size={size}
+                  aria-label={`More actions for ${process.label}`}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <MoreHorizontal data-icon="inline-start" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>More actions for {process.label}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuGroup>
+              {secondary.map((action) => (
+                <ActionMenuItem key={action.kind} action={action} />
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
-      <Control label="Start" size={size} disabled={!available.has("start")} onClick={onStart}>
-        <Play />
-      </Control>
-      {resumable && onResume && (
-        <Control
-          label="Resume last session"
-          size={size}
-          disabled={!available.has("resume")}
-          onClick={onResume}
-        >
-          <History />
-        </Control>
-      )}
-      <Control label="Restart" size={size} disabled={!available.has("restart")} onClick={onRestart}>
-        <RotateCw />
-      </Control>
-      <Control label="Stop" size={size} disabled={!available.has("stop")} onClick={onStop}>
-        <Square />
-      </Control>
     </div>
   );
 }
 
-function Control({
-  label,
-  size,
-  disabled,
-  onClick,
-  children,
-}: {
-  label: string;
-  size: ControlSize;
-  disabled: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
+function ActionButton({ action, size }: { action: RunnableProcessAction; size: ControlSize }) {
+  const Icon = ACTION_ICONS[action.kind];
   return (
-    <Button
-      variant="ghost"
-      size={size}
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={(event) => {
-        // The row is itself clickable (select); a control click must not select it.
-        event.stopPropagation();
-        onClick();
-      }}
-    >
-      {children}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size={size}
+          aria-label={action.label}
+          onClick={(event) => {
+            event.stopPropagation();
+            action.run();
+          }}
+        >
+          <Icon data-icon="inline-start" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{action.label}</TooltipContent>
+    </Tooltip>
   );
 }
+
+function ActionMenuItem({ action }: { action: RunnableProcessAction }) {
+  const Icon = ACTION_ICONS[action.kind];
+  return (
+    <DropdownMenuItem onClick={(event) => event.stopPropagation()} onSelect={action.run}>
+      <Icon aria-hidden />
+      {action.label}
+    </DropdownMenuItem>
+  );
+}
+
+export { ACTION_ICONS };

@@ -40,7 +40,7 @@ export function ProcessMeta({
       title={resolved.title}
       className={cn(
         "font-mono whitespace-nowrap text-muted-foreground tabular-nums",
-        verbose ? "text-xs" : "text-[0.6875rem]",
+        verbose ? "text-xs" : "max-w-28 truncate text-[0.6875rem] @max-[220px]/sidebar:hidden",
       )}
     >
       {resolved.text}

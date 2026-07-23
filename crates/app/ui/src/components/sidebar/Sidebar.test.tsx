@@ -260,6 +260,31 @@ describe("Sidebar lineage nesting", () => {
 });
 
 describe("Sidebar hotkeys", () => {
+  it("keeps one selected tree row in the tab order", () => {
+    renderSidebar({ selectedId: 10 });
+    expect(screen.getByRole("treeitem", { name: /claude/ }).getAttribute("tabindex")).toBe("0");
+    expect(screen.getByRole("treeitem", { name: /build/ }).getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("moves through visible rows with an unmodified ArrowDown", () => {
+    const onSelect = vi.fn();
+    renderSidebar({ selectedId: 10, onSelect });
+    const current = screen.getByRole("treeitem", { name: /claude/ });
+    current.focus();
+    fireEvent.keyDown(current, { key: "ArrowDown" });
+    expect(onSelect).toHaveBeenCalledWith(11);
+    expect(document.activeElement).toBe(screen.getByRole("treeitem", { name: /build/ }));
+  });
+
+  it("moves to the last visible row with End", () => {
+    const onSelect = vi.fn();
+    renderSidebar({ selectedId: 10, onSelect });
+    const current = screen.getByRole("treeitem", { name: /claude/ });
+    current.focus();
+    fireEvent.keyDown(current, { key: "End" });
+    expect(onSelect).toHaveBeenCalledWith(20);
+  });
+
   it("restart_selection calls onRestart with the selected id", () => {
     const onRestart = vi.fn();
     const nav = renderSidebar({ selectedId: 10, onRestart });

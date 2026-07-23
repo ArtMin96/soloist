@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ProcessRow } from "@/components/sidebar/ProcessRow";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EMPTY_SIGNALS, type SignalState } from "@/store/signals";
@@ -149,6 +149,59 @@ describe("ProcessRow as a tree row", () => {
     screen.getByRole("button", { name: "Collapse web's workers" }).click();
     expect(toggled).toBe(1);
     expect(selected).toBe(0);
+  });
+
+  it("expands and collapses lineage with Right and Left", () => {
+    let toggled = 0;
+    const { rerender } = render(
+      <TooltipProvider>
+        <SignalsContext value={EMPTY_STORE}>
+          <ProcessRow
+            process={running}
+            selected
+            onSelect={noop}
+            onStart={noop}
+            onStop={noop}
+            onRestart={noop}
+            onResume={noop}
+            onTrust={noop}
+            treeColumn
+            hasChildren
+            expanded={false}
+            onToggleExpand={() => {
+              toggled += 1;
+            }}
+          />
+        </SignalsContext>
+      </TooltipProvider>,
+    );
+    fireEvent.keyDown(screen.getByRole("treeitem", { name: /web/ }), { key: "ArrowRight" });
+    expect(toggled).toBe(1);
+
+    rerender(
+      <TooltipProvider>
+        <SignalsContext value={EMPTY_STORE}>
+          <ProcessRow
+            process={running}
+            selected
+            onSelect={noop}
+            onStart={noop}
+            onStop={noop}
+            onRestart={noop}
+            onResume={noop}
+            onTrust={noop}
+            treeColumn
+            hasChildren
+            expanded
+            onToggleExpand={() => {
+              toggled += 1;
+            }}
+          />
+        </SignalsContext>
+      </TooltipProvider>,
+    );
+    fireEvent.keyDown(screen.getByRole("treeitem", { name: /web/ }), { key: "ArrowLeft" });
+    expect(toggled).toBe(2);
   });
 
   it("indents one step per lineage level", () => {

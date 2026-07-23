@@ -88,7 +88,7 @@ export function Sidebar({
   });
 
   return (
-    <div className="flex w-64 shrink-0 flex-col border-r bg-sidebar">
+    <div className="@container/sidebar flex w-64 shrink-0 flex-col border-r bg-sidebar">
       {sidebar.show_filter_input && (
         <div className="border-b border-sidebar-border p-2">
           <Input

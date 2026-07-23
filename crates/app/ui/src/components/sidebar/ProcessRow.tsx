@@ -1,8 +1,23 @@
+import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
-import { ProcessControls } from "@/components/ProcessControls";
+import { ACTION_ICONS, ProcessControls } from "@/components/ProcessControls";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessMeta } from "@/components/sidebar/ProcessMeta";
+import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuGroup,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { PROCESS_CPU_FLOOR, PROCESS_MEM_FLOOR } from "@/lib/sidebar";
+import {
+  runnableProcessActions,
+  shouldPersistProcessActions,
+  type ProcessActionHandlers,
+  type RunnableProcessAction,
+} from "@/lib/processActions";
 import { cn } from "@/lib/utils";
 import { useSignal } from "@/store/signalsContext";
 import { useSidebarSettings } from "@/store/sidebarSettingsContext";
@@ -56,23 +71,42 @@ export function ProcessRow({
 }: ProcessRowProps) {
   const { metrics, restart, activity } = useSignal(process.id);
   const { sidebar } = useSidebarSettings();
-  // Controls are always present for the selected row and for an untrusted command (so its
-  // trust affordance stays visible); otherwise they reveal on hover/focus, replacing the
-  // at-rest telemetry.
-  const showControls = selected || process.requires_trust;
-  return (
+  const handlers: ProcessActionHandlers = {
+    onTrust: () => onTrust(),
+    onResume: () => onResume(),
+    onStart: () => onStart(),
+    onStop: () => onStop(),
+    onRestart: () => onRestart(),
+  };
+  // Selected rows and attention-worthy canonical actions stay visible. Ordinary controls reveal
+  // on hover/focus, replacing the at-rest telemetry.
+  const showControls =
+    selected ||
+    shouldPersistProcessActions({
+      status: process.status,
+      requiresTrust: process.requires_trust,
+      resumable: process.resumable,
+    });
+  const actions = runnableProcessActions(process, handlers);
+  const row = (
     <div
       role="treeitem"
       aria-selected={selected}
       aria-level={depth + 1}
       aria-expanded={treeColumn && hasChildren ? expanded : undefined}
-      tabIndex={0}
+      tabIndex={selected ? 0 : -1}
       data-process-id={process.id}
       onClick={onSelect}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onSelect();
+        } else if (event.key === "ArrowRight" && hasChildren && !expanded) {
+          event.preventDefault();
+          onToggleExpand?.();
+        } else if (event.key === "ArrowLeft" && hasChildren && expanded) {
+          event.preventDefault();
+          onToggleExpand?.();
         }
       }}
       style={{ paddingLeft: `${ROW_BASE_PADDING_PX + depth * ROW_INDENT_STEP_PX}px` }}
@@ -87,8 +121,10 @@ export function ProcessRow({
     >
       {treeColumn &&
         (hasChildren ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
             aria-label={
               expanded ? `Collapse ${process.label}'s workers` : `Expand ${process.label}'s workers`
             }
@@ -100,21 +136,24 @@ export function ProcessRow({
               // The button handles its own activation; don't let it bubble into row-select.
               if (event.key === "Enter" || event.key === " ") event.stopPropagation();
             }}
-            className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+            className="size-4 shrink-0 text-muted-foreground hover:text-foreground"
           >
             <ChevronRight
               aria-hidden
+              data-icon="inline-start"
               className={cn(
                 "size-3 transition-transform duration-[var(--dur-control)] ease-spring-settle",
                 expanded && "rotate-90",
               )}
             />
-          </button>
+          </Button>
         ) : (
           <span aria-hidden className="size-4 shrink-0" />
         ))}
       <ProcessIndicator status={process.status} activity={activity} showLabel={false} />
-      <span className="min-w-0 flex-1 truncate">{process.label}</span>
+      <span className="min-w-0 flex-1 truncate" title={process.label}>
+        {process.label}
+      </span>
       {/* The right zone stacks at-rest telemetry under the controls in one grid cell, so the
           cell keeps the width of whichever is wider and the name never reflows on hover. */}
       <div
@@ -148,19 +187,39 @@ export function ProcessRow({
             showControls && "pointer-events-auto translate-x-0 opacity-100",
           )}
         >
-          <ProcessControls
-            status={process.status}
-            size="icon-xs"
-            onStart={onStart}
-            onStop={onStop}
-            onRestart={onRestart}
-            resumable={process.resumable}
-            onResume={onResume}
-            requiresTrust={process.requires_trust}
-            onTrust={onTrust}
-          />
+          <ProcessControls process={process} handlers={handlers} size="icon-xs" />
         </div>
       </div>
     </div>
+  );
+
+  if (actions.length === 0) return row;
+  return <ProcessRowContextMenu actions={actions}>{row}</ProcessRowContextMenu>;
+}
+
+function ProcessRowContextMenu({
+  actions,
+  children,
+}: {
+  actions: RunnableProcessAction[];
+  children: ReactNode;
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent className="w-44">
+        <ContextMenuGroup>
+          {actions.map((action) => {
+            const Icon = ACTION_ICONS[action.kind];
+            return (
+              <ContextMenuItem key={action.kind} onSelect={action.run}>
+                <Icon aria-hidden />
+                {action.label}
+              </ContextMenuItem>
+            );
+          })}
+        </ContextMenuGroup>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

@@ -50,7 +50,7 @@ describe("reviewing an external solo.yml change", () => {
   it("the changed command cannot start until trusted from the review", async () => {
     // The untrusted row keeps its controls visible even unselected, and the modal review
     // blocks sidebar clicks anyway — so the gate is read, not clicked, while the dialog is up.
-    expect(await sidebar.startEnabled(ECHO)).toBe(false);
+    expect(await sidebar.hasStart(ECHO)).toBe(false);
 
     await trustDialog.trust(ECHO);
     await trustDialog.waitUntilClosed();

@@ -8,6 +8,7 @@ import { useTerminal } from "@/components/terminal/useTerminal";
 import { useTerminalChrome } from "@/components/terminal/useTerminalChrome";
 import { useTerminalHotkeys } from "@/components/terminal/useTerminalHotkeys";
 import { terminalColors } from "@/lib/appearance";
+import type { ProcessActionHandlers } from "@/lib/processActions";
 import { useAppearance } from "@/store/appearanceContext";
 import { useSignal } from "@/store/signalsContext";
 import { cn } from "@/lib/utils";
@@ -54,6 +55,13 @@ export function TerminalPane({
   // The emulator's own surface color, so the host bleeds it to every edge — the sub-cell
   // remainder and scrollbar gutter read as terminal margin, not an app-colored frame.
   const surface = terminalColors(dark).background;
+  const processActionHandlers: ProcessActionHandlers = {
+    onTrust: () => onTrust(),
+    onResume: () => onResume(),
+    onStart: () => onStart(),
+    onStop: () => onStop(),
+    onRestart: () => onRestart(),
+  };
 
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
@@ -102,17 +110,7 @@ export function TerminalPane({
           />
         )}
         <div className="ml-auto">
-          <ProcessControls
-            status={process.status}
-            size="icon-sm"
-            onStart={onStart}
-            onStop={onStop}
-            onRestart={onRestart}
-            resumable={process.resumable}
-            onResume={onResume}
-            requiresTrust={process.requires_trust}
-            onTrust={onTrust}
-          />
+          <ProcessControls process={process} handlers={processActionHandlers} size="icon-sm" />
         </div>
       </header>
       <div className="relative min-h-0 flex-1">
