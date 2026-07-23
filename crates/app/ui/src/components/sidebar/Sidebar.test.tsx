@@ -92,6 +92,7 @@ function renderSidebar(
     selectedId?: number | null;
     onSelect?: (id: number) => void;
     onRestart?: (id: number) => void;
+    onOpenStart?: () => void;
     bindings?: HotkeyBindingView[];
     lineage?: ReadonlyMap<number, number>;
   } = {},
@@ -101,6 +102,7 @@ function renderSidebar(
     selectedId = null,
     onSelect = noop,
     onRestart = noop,
+    onOpenStart = noop,
     bindings = DEFAULT_BINDINGS,
     lineage = new Map(),
   } = overrides;
@@ -122,6 +124,8 @@ function renderSidebar(
             onStartAll={noop}
             onRestartRunning={noop}
             onStopAll={noop}
+            onOpenStart={onOpenStart}
+            startActive={selectedId === null}
             onOpenSettings={noop}
             onOpenProjectSettings={noop}
             onOpenOrchestration={noop}
@@ -137,6 +141,20 @@ function renderSidebar(
 afterEach(cleanup);
 
 describe("Sidebar footer", () => {
+  it("keeps Start available when the Settings footer preference is off", () => {
+    const onOpenStart = vi.fn();
+    renderSidebar({
+      settings: { ...DEFAULT_SIDEBAR, show_settings_footer: false },
+      onOpenStart,
+    });
+
+    const start = screen.getByRole("button", { name: "Start page" });
+    expect(start.getAttribute("aria-current")).toBe("page");
+    fireEvent.click(start);
+    expect(onOpenStart).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
+  });
+
   it("shows the Settings footer button when the setting is on", () => {
     renderSidebar({ settings: { ...DEFAULT_SIDEBAR, show_settings_footer: true } });
     expect(screen.getByRole("button", { name: "Settings" })).toBeTruthy();
@@ -214,6 +232,8 @@ describe("Sidebar lineage nesting", () => {
               onStartAll={noop}
               onRestartRunning={noop}
               onStopAll={noop}
+              onOpenStart={noop}
+              startActive
               onOpenSettings={noop}
               onOpenProjectSettings={noop}
               onOpenOrchestration={noop}

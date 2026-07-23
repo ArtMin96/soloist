@@ -1,15 +1,10 @@
-import { Bot, FolderOpen } from "lucide-react";
 import type { MouseEvent } from "react";
 import { useWindowControls } from "@/components/titlebar/useWindowControls";
 import { WindowControls } from "@/components/titlebar/WindowControls";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 
 interface TitlebarProps {
   appName: string;
   appVersion?: string;
-  onOpenProject: () => void;
-  onLaunchAgent: () => void;
 }
 
 // Marks an element as a window-drag handle. Tauri starts a drag on mousedown over any
@@ -17,11 +12,10 @@ interface TitlebarProps {
 // clickable.
 const DRAG = { "data-tauri-drag-region": "" };
 
-// The single window-chrome surface: a unified toolbar carrying the app identity (logo +
-// wordmark), the global Launch-agent / Open-project actions, and the OS window controls. It
-// stands in for the native decorations, which are turned off in tauri.conf.json. The whole
-// strip is a drag handle except the interactive controls.
-export function Titlebar({ appName, appVersion, onOpenProject, onLaunchAgent }: TitlebarProps) {
+// The single window-chrome surface: a unified toolbar carrying app identity and the OS window
+// controls. Workspace and session actions live on the start surface, leaving this strip available
+// for contextual repository controls. It stands in for the disabled native decorations.
+export function Titlebar({ appName, appVersion }: TitlebarProps) {
   const { isMaximized, minimize, toggleMaximize, close } = useWindowControls();
 
   // Double-clicking the bare bar (not a button) toggles maximize, matching native
@@ -58,18 +52,6 @@ export function Titlebar({ appName, appVersion, onOpenProject, onLaunchAgent }: 
         </span>
       )}
       <div {...DRAG} className="h-full flex-1" />
-      <Button variant="secondary" size="sm" onClick={onLaunchAgent}>
-        <Bot />
-        Launch agent
-      </Button>
-      <Button variant="ghost" size="sm" onClick={onOpenProject}>
-        <FolderOpen />
-        Open project
-      </Button>
-      <Separator
-        orientation="vertical"
-        className="mx-1 data-vertical:h-5 data-vertical:self-center"
-      />
       <WindowControls
         isMaximized={isMaximized}
         onMinimize={minimize}

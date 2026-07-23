@@ -5,7 +5,8 @@
 // Not part of the production bundle: Vite serves /harness.html in dev, but the Tauri build's
 // rollup input is index.html alone, so nothing here ships.
 //
-// Usage: /harness.html (gallery) · ?dark · ?view=dialog|menus|settings|audit (each combinable with &dark)
+// Usage: /harness.html (gallery) · ?dark · ?view=start|dialog|menus|settings|audit
+// (each combinable with &dark)
 import { useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Check, Play, RotateCw, Settings as SettingsIcon, Square, Trash2 } from "lucide-react";
@@ -54,6 +55,7 @@ import { CommandList as ProjectCommandList } from "@/components/project-settings
 import { ScratchpadList } from "@/components/orchestration/ScratchpadList";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { SettingsTabRail } from "@/components/settings/SettingsTabRail";
+import { StartSurface } from "@/components/StartSurface";
 import { applyDarkClass } from "@/lib/appearance";
 import type {
   AgentActivity,
@@ -542,17 +544,27 @@ function DialogView() {
   );
 }
 
+function StartSurfaceView() {
+  return (
+    <div className="h-screen bg-background">
+      <StartSurface hasProjects onOpenProject={() => {}} onLaunchAgent={() => {}} />
+    </div>
+  );
+}
+
 const view = params.get("view");
 const Root =
-  view === "dialog"
-    ? DialogView
-    : view === "menus"
-      ? MenusView
-      : view === "settings"
-        ? SettingsView
-        : view === "audit"
-          ? AuditView
-          : Gallery;
+  view === "start"
+    ? StartSurfaceView
+    : view === "dialog"
+      ? DialogView
+      : view === "menus"
+        ? MenusView
+        : view === "settings"
+          ? SettingsView
+          : view === "audit"
+            ? AuditView
+            : Gallery;
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <TooltipProvider delayDuration={400}>

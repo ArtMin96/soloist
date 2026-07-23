@@ -83,11 +83,11 @@ const PROJECT = { id: 1, name: "storefront", root: "/p", icon: null };
 // Stand in for the Tauri backend: answer the snapshot/identity/project commands with a
 // fixture and let every other command (the event listener, the pty channel) resolve to
 // undefined.
-function mockBackend(processes: ProcessView[]) {
+function mockBackend(processes: ProcessView[], projects = [PROJECT]) {
   mockIPC((cmd) => {
     if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
     if (cmd === "proc_list") return processes;
-    if (cmd === "project_list") return [PROJECT];
+    if (cmd === "project_list") return projects;
     if (cmd === "appearance") return DEFAULT_APPEARANCE;
     if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
     if (cmd === "hotkeys") return [];
@@ -148,8 +148,8 @@ describe("App dashboard", () => {
     render(<App />);
     await screen.findAllByRole("treeitem");
 
-    // With a populated stack but nothing selected, the pane guides the next action.
-    expect(screen.getByText(/Select a process in the sidebar/)).toBeTruthy();
+    // With a populated stack but nothing selected, the pane remains the canonical start surface.
+    expect(screen.getByRole("heading", { name: "Start in Soloist" })).toBeTruthy();
     expect(row(1).getAttribute("aria-selected")).toBe("false");
 
     fireEvent.click(row(1));
@@ -158,17 +158,24 @@ describe("App dashboard", () => {
     // The terminal pane mounts lazily: once its code-split chunk loads, the label appears in
     // both the row and the pane header.
     await waitFor(() => expect(screen.getAllByText("assistant")).toHaveLength(2));
-    expect(screen.queryByText(/Select a process in the sidebar/)).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Start in Soloist" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start page" }));
+    expect(screen.getByRole("heading", { name: "Start in Soloist" })).toBeTruthy();
+    expect(row(1).getAttribute("aria-selected")).toBe("false");
   });
 
   it("shows the no-config empty state when the stack is empty", async () => {
-    mockBackend([]);
+    mockBackend([], []);
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText("No project open")).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Start in Soloist" })).toBeTruthy();
     });
-    expect(screen.getByText(/Open a folder with a solo\.yml/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Open project/ })).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Launch agent" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
     expect(screen.queryAllByRole("treeitem")).toHaveLength(0);
   });
 
