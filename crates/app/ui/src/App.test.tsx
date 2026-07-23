@@ -183,7 +183,13 @@ describe("App dashboard", () => {
       if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
       if (cmd === "hotkeys") return [];
       if (cmd === "config_command_review")
-        return { name: "build", command: HIDDEN_TAIL, working_dir: null, env: {} };
+        return {
+          name: "build",
+          variant_hash: "build-v1",
+          command: HIDDEN_TAIL,
+          working_dir: null,
+          env: {},
+        };
       if (cmd === "config_trust") {
         trusted = args as { project: number; name: string };
         return undefined;
@@ -205,7 +211,9 @@ describe("App dashboard", () => {
     expect(trusted).toBeNull();
 
     fireEvent.click(screen.getByLabelText("Trust build"));
-    await waitFor(() => expect(trusted).toEqual({ project: 1, name: "build" }));
+    await waitFor(() =>
+      expect(trusted).toEqual({ project: 1, name: "build", variantHash: "build-v1" }),
+    );
   });
 
   it("pops the trust dialog when a config change needs trust", async () => {

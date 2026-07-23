@@ -91,7 +91,7 @@ describe("api — per-project settings wrappers", () => {
   it("addSharedCommand invokes add_shared_command with project, name and spec and returns the trust list", async () => {
     const spec: ProcessSpec = { command: "cargo run" };
     const pending: TrustReviewCommand[] = [
-      { name: "Api", command: "cargo run", working_dir: null, env: {} },
+      { name: "Api", variant_hash: "api-v1", command: "cargo run", working_dir: null, env: {} },
     ];
     const seen = captureIpc("add_shared_command", pending);
 

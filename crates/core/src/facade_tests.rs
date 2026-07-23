@@ -205,6 +205,48 @@ async fn command_review_reports_what_a_grant_would_authorize_on_a_first_open() {
 }
 
 #[tokio::test]
+async fn a_review_cannot_trust_a_command_variant_that_changed_after_it_was_shown() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let dir = tempfile::tempdir().expect("temp dir");
+    let config = crate::config::config_path(dir.path());
+    std::fs::write(
+        &config,
+        "processes:\n  Web:\n    command: npm run reviewed\n",
+    )
+    .expect("write reviewed solo.yml");
+    let project = facade.load_project(dir.path()).expect("load");
+    let review = facade
+        .command_review(project.id, "Web")
+        .expect("review Web");
+
+    std::fs::write(
+        &config,
+        "processes:\n  Web:\n    command: npm run replacement\n",
+    )
+    .expect("replace solo.yml");
+    facade
+        .reload_project(project.id)
+        .expect("reload changed command");
+
+    assert!(matches!(
+        facade.trust_reviewed_command(project.id, "Web", &review.variant_hash),
+        Err(TrustCommandError::ChangedSinceReview)
+    ));
+    let current = facade
+        .command_review(project.id, "Web")
+        .expect("current command");
+    assert_ne!(current.variant_hash, review.variant_hash);
+    assert!(
+        facade
+            .snapshot()
+            .into_iter()
+            .find(|process| process.label == "Web")
+            .expect("Web remains registered")
+            .requires_trust
+    );
+}
+
+#[tokio::test]
 async fn trust_command_rejects_an_unknown_command() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
     let dir = tempfile::tempdir().expect("temp dir");

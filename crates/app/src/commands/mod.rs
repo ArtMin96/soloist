@@ -106,10 +106,13 @@ pub async fn config_command_review(
 pub async fn config_trust(
     project: u64,
     name: String,
+    variant_hash: String,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<(), String> {
     facade
-        .blocking(move |f| f.trust_command(ProjectId::from_raw(project), &name))
+        .blocking(move |f| {
+            f.trust_reviewed_command(ProjectId::from_raw(project), &name, &variant_hash)
+        })
         .await
         .map_err(|err| err.to_string())
 }

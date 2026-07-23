@@ -7,7 +7,15 @@ import type { TrustReview } from "@/store/useTrust";
 const REVIEW: TrustReview = {
   project: 1,
   diff: { added: ["Api"], updated: [], removed: [], renamed: [] },
-  commands: [{ name: "Api", command: "cargo run", working_dir: "api", env: { PORT: "4000" } }],
+  commands: [
+    {
+      name: "Api",
+      variant_hash: "api-v1",
+      command: "cargo run",
+      working_dir: "api",
+      env: { PORT: "4000" },
+    },
+  ],
 };
 
 afterEach(cleanup);
@@ -67,6 +75,7 @@ describe("TrustDialog", () => {
           commands: [
             {
               name: "Api",
+              variant_hash: "api-v2",
               command: "cargo run",
               working_dir: null,
               env: { PORT: "4000", LD_PRELOAD: "/tmp/evil.so" },

@@ -75,27 +75,47 @@ export function useTrust(refresh: () => void, reportError: (reason: unknown) => 
       // Only mutate the review once trust actually applied — a failed grant leaves the
       // command in the dialog (still blocked) and surfaces the error, rather than
       // silently dropping it.
-      configTrust(project, name)
+      const reviewed = review?.commands.find((command) => command.name === name);
+      if (!reviewed) {
+        reportError(new Error(`${name} is no longer in the open trust review`));
+        return;
+      }
+      configTrust(project, name, reviewed.variant_hash)
         .then(() => {
           refresh();
           setReview((prev) => {
             if (!prev) return prev;
-            const commands = prev.commands.filter((command) => command.name !== name);
+            const commands = prev.commands.filter(
+              (command) => command.name !== name || command.variant_hash !== reviewed.variant_hash,
+            );
             return commands.length > 0 ? { ...prev, commands } : null;
           });
         })
         .catch(reportError);
     },
-    [refresh, reportError],
+    [review, refresh, reportError],
   );
 
   const trustAll = useCallback(() => {
     if (!review) return;
     // Close the dialog only after every grant resolved; a failure keeps it open.
-    Promise.all(review.commands.map((command) => configTrust(review.project, command.name)))
+    Promise.all(
+      review.commands.map((command) =>
+        configTrust(review.project, command.name, command.variant_hash),
+      ),
+    )
       .then(() => {
         refresh();
-        setReview(null);
+        setReview((prev) => {
+          if (!prev || prev.project !== review.project) return prev;
+          const granted = new Set(
+            review.commands.map((command) => `${command.name}\0${command.variant_hash}`),
+          );
+          const commands = prev.commands.filter(
+            (command) => !granted.has(`${command.name}\0${command.variant_hash}`),
+          );
+          return commands.length > 0 ? { ...prev, commands } : null;
+        });
       })
       .catch(reportError);
   }, [review, refresh, reportError]);

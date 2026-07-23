@@ -9,6 +9,7 @@ impl TrustReviewCommand {
     pub fn from_spec(name: &str, spec: &ProcessSpec) -> Self {
         Self {
             name: name.to_string(),
+            variant_hash: spec.variant_hash().to_hex(),
             command: spec.command.clone(),
             working_dir: spec
                 .working_dir

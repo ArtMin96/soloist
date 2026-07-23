@@ -2,6 +2,7 @@ import type { ProcStatus } from "@domain";
 import { $, browser } from "@wdio/globals";
 import { WAIT } from "../harness/waits.js";
 import { ROW_ACTIVITY, ROW_STATUS, ROW_TEXT } from "./indicatorRow.js";
+import { trustDialog } from "./TrustDialog.js";
 
 const NAV = 'nav[aria-label="Projects"]';
 const ROW = '[role="treeitem"]';
@@ -156,9 +157,18 @@ export const sidebar = {
     await row.click();
   },
 
-  /** Clicks Trust on the row's control cluster — the core trust gate, cleared per command. */
-  async trust(label: string): Promise<void> {
+  /** Reviews the exact command shown by the row's Trust affordance, then grants it. */
+  async trust(label: string, command: string): Promise<void> {
     await this.clickControl(label, "Trust");
+    await trustDialog.waitUntilOpen();
+    if (!(await trustDialog.listsCommand(label))) {
+      throw new Error(`the trust review did not list "${label}"`);
+    }
+    if (!(await trustDialog.showsCommand(command))) {
+      throw new Error(`the trust review did not show command ${JSON.stringify(command)}`);
+    }
+    await trustDialog.trust(label);
+    await trustDialog.waitUntilClosed();
   },
 
   /** Clicks Start on the row's control cluster. */

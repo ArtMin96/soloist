@@ -245,8 +245,8 @@ export function configCommandReview(
 
 // Trusts a project's command by name (the core trust gate) so it can start. The read
 // model clears the command's blocked state; callers re-read the snapshot to reflect it.
-export function configTrust(project: number, name: string): Promise<void> {
-  return invoke<void>("config_trust", { project, name });
+export function configTrust(project: number, name: string, variantHash: string): Promise<void> {
+  return invoke<void>("config_trust", { project, name, variantHash });
 }
 
 // Every configured agent tool, for the launch picker to render instantly (no probing).
