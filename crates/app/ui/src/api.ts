@@ -233,10 +233,20 @@ export function projectRemove(project: number): Promise<void> {
   return invoke<void>("project_remove", { project });
 }
 
+// What trusting a project's command would authorize — its command line, working directory
+// and environment — so a grant can be shown before it is offered. `null` when the project
+// has no such command.
+export function configCommandReview(
+  project: number,
+  name: string,
+): Promise<TrustReviewCommand | null> {
+  return invoke<TrustReviewCommand | null>("config_command_review", { project, name });
+}
+
 // Trusts a project's command by name (the core trust gate) so it can start. The read
 // model clears the command's blocked state; callers re-read the snapshot to reflect it.
-export function configTrust(project: number, name: string): Promise<void> {
-  return invoke<void>("config_trust", { project, name });
+export function configTrust(project: number, name: string, variantHash: string): Promise<void> {
+  return invoke<void>("config_trust", { project, name, variantHash });
 }
 
 // Every configured agent tool, for the launch picker to render instantly (no probing).

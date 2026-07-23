@@ -52,6 +52,8 @@ impl ConfigSync {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TrustReviewCommand {
     pub name: String,
+    /// The exact command/working-directory/environment variant shown by this review.
+    pub variant_hash: String,
     pub command: String,
     pub working_dir: Option<String>,
     pub env: BTreeMap<String, String>,

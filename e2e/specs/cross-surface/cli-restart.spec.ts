@@ -25,7 +25,7 @@ describe("driving the stack from the command line", () => {
 
   it("a CLI restart replaces the process, and the window shows the new one", async () => {
     await sidebar.select(LISTENER);
-    await sidebar.trust(LISTENER);
+    await sidebar.trust(LISTENER, "./bin/listener.sh");
     await sidebar.start(LISTENER);
     await sidebar.waitForRowStatus(LISTENER, RUNNING);
 

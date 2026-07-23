@@ -124,6 +124,7 @@ export interface OrphanInfo {
 // runs (command, working dir, env) before trusting it. Carried by ConfigChanged.
 export interface TrustReviewCommand {
   name: string;
+  variant_hash: string;
   command: string;
   working_dir: string | null;
   env: Record<string, string>;

@@ -17,7 +17,7 @@ use tokio::sync::{broadcast, Notify};
 use crate::agents::{AgentLineage, Agents, IdleTracker};
 use crate::composition::CorePorts;
 use crate::config::ConfigEngine;
-use crate::configchange::ConfigSync;
+use crate::configchange::{ConfigSync, TrustReviewCommand};
 use crate::coordination::{Kv, Leases, Scratchpads, Templates, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::FileWatcher;
@@ -293,6 +293,17 @@ impl Facade {
         })
     }
 
+    /// What trusting a project's command would authorize: the command line, working
+    /// directory, and environment of its current variant, `None` when the project has no
+    /// such command. The same detail a `solo.yml` change publishes for review, available
+    /// on demand — so a grant can be shown before it is made, including on a project's
+    /// first open, where no change has been observed to publish one.
+    pub fn command_review(&self, project: ProjectId, name: &str) -> Option<TrustReviewCommand> {
+        self.config
+            .spec(project, name)
+            .map(|spec| TrustReviewCommand::from_spec(name, &spec))
+    }
+
     /// Trusts a project's command by name: resolves the command to its current variant
     /// from the loaded `solo.yml`, records trust for that variant, and updates the read
     /// model so the command becomes startable. One method behind the trust gate, so the
@@ -302,6 +313,27 @@ impl Facade {
             .config
             .spec(project, name)
             .ok_or(TrustCommandError::NotFound)?;
+        self.trust.trust(project, &spec)?;
+        self.supervisor.mark_trusted(project, &spec.variant_hash());
+        Ok(())
+    }
+
+    /// Trusts a command only when its current variant is the one the caller reviewed.
+    /// The comparison and trust write use the same resolved spec, so a stale dialog can
+    /// never authorize a replacement command that was not shown.
+    pub fn trust_reviewed_command(
+        &self,
+        project: ProjectId,
+        name: &str,
+        reviewed_variant: &str,
+    ) -> Result<(), TrustCommandError> {
+        let spec = self
+            .config
+            .spec(project, name)
+            .ok_or(TrustCommandError::NotFound)?;
+        if spec.variant_hash().to_hex() != reviewed_variant {
+            return Err(TrustCommandError::ChangedSinceReview);
+        }
         self.trust.trust(project, &spec)?;
         self.supervisor.mark_trusted(project, &spec.variant_hash());
         Ok(())
@@ -367,6 +399,10 @@ impl Facade {
 pub enum TrustCommandError {
     #[error("no such command in the loaded project config")]
     NotFound,
+    #[error(
+        "command changed since it was reviewed; review the current command before trusting it"
+    )]
+    ChangedSinceReview,
     #[error(transparent)]
     Store(#[from] StoreError),
 }

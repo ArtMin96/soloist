@@ -379,6 +379,7 @@ pub fn run() {
             commands::project_list,
             commands::project_load,
             commands::project_remove,
+            commands::config_command_review,
             commands::config_trust,
             commands::agent_list,
             commands::agent_detect,

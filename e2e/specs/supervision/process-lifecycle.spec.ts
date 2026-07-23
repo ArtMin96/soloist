@@ -30,7 +30,7 @@ describe("supervising a project's commands", () => {
 
   it("starts a trusted command and reports it Running", async () => {
     await sidebar.select(ECHO);
-    await sidebar.trust(ECHO);
+    await sidebar.trust(ECHO, "./bin/echo-loop.sh");
     await sidebar.start(ECHO);
 
     await sidebar.waitForRowStatus(ECHO, RUNNING);
@@ -44,7 +44,7 @@ describe("supervising a project's commands", () => {
 
   it("reports a command that exits nonzero as Crashed", async () => {
     await sidebar.select(CRASHER);
-    await sidebar.trust(CRASHER);
+    await sidebar.trust(CRASHER, "./bin/crasher.sh");
     await sidebar.start(CRASHER);
 
     await sidebar.waitForRowStatus(CRASHER, CRASHED);
@@ -52,7 +52,7 @@ describe("supervising a project's commands", () => {
 
   it("restart replaces the process, not just the row", async () => {
     await sidebar.select(LISTENER);
-    await sidebar.trust(LISTENER);
+    await sidebar.trust(LISTENER, "./bin/listener.sh");
     await sidebar.start(LISTENER);
     await sidebar.waitForRowStatus(LISTENER, RUNNING);
 

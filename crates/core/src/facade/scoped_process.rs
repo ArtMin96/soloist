@@ -100,8 +100,9 @@ impl ScopedFacade<'_> {
     /// lineage is recorded under that lead so the orchestration tree nests it; an unbound or
     /// external caller's spawn is a root. Delegation is one level deep: a caller that was
     /// itself spawned as a worker this run is refused with
-    /// [`SpawnAgentError::WorkerMayNotSpawn`]. Must run within a `tokio` runtime (starting
-    /// spawns the actor).
+    /// [`SpawnAgentError::WorkerMayNotSpawn`], whether it identified itself by binding or is
+    /// recognised by the process group it connects from. Must run within a `tokio` runtime
+    /// (starting spawns the actor).
     pub fn spawn_agent(
         &self,
         tool: &str,
@@ -114,11 +115,17 @@ impl ScopedFacade<'_> {
         // Delegation is one level deep: a caller recorded as a spawned worker is refused for
         // its whole run — deliberately unfiltered by parent liveness, so a closed lead never
         // promotes its workers to spawners. Refusal precedes the launch: nothing is spawned,
-        // registered, or recorded.
-        if let Some(caller) = self.inner.identity.origin(self.session).process() {
-            if self.inner.lineage.parent_of(caller).is_some() {
-                return Err(SpawnAgentError::WorkerMayNotSpawn);
-            }
+        // registered, or recorded. The caller is resolved from the kernel-reported peer group
+        // as well as from its own binding, so a worker cannot lift the gate by never binding.
+        let caller_is_worker = [
+            self.home_process(),
+            self.inner.identity.origin(self.session).process(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|caller| self.inner.lineage.parent_of(caller).is_some());
+        if caller_is_worker {
+            return Err(SpawnAgentError::WorkerMayNotSpawn);
         }
         let worker = self.inner.launch_agent(project, tool, extra_args)?;
         // A worker spawned by a bound lead nests under it in the orchestration tree; an

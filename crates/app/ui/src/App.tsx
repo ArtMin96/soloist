@@ -112,11 +112,12 @@ export default function App() {
     setSelectedProjectId(null);
   }, []);
 
-  // Trust a command by id: the row/header carries the project and name the gate needs.
-  const trustById = useCallback(
+  // Review a command by id: the row/header carries the project and name, and the review
+  // shows what trusting it would run — the row itself shows only a name the solo.yml chose.
+  const reviewById = useCallback(
     (id: number) => {
       const process = store.processes.find((candidate) => candidate.id === id);
-      if (process) trust.trust(process.project, process.label);
+      if (process) trust.requestReview(process.project, process.label);
     },
     [store.processes, trust],
   );
@@ -215,7 +216,7 @@ export default function App() {
                     onStop={store.stop}
                     onRestart={store.restart}
                     onResume={store.resume}
-                    onTrust={trustById}
+                    onTrust={reviewById}
                     onStartAll={store.startAll}
                     onRestartRunning={store.restartRunning}
                     onStopAll={store.stopAll}
@@ -241,7 +242,7 @@ export default function App() {
                           onStop={() => store.stop(process.id)}
                           onRestart={() => store.restart(process.id)}
                           onResume={() => store.resume(process.id)}
-                          onTrust={() => trustById(process.id)}
+                          onTrust={() => reviewById(process.id)}
                         />
                       ))}
                       {!selected &&
@@ -314,7 +315,7 @@ export default function App() {
                     onStop={store.stop}
                     onRestart={store.restart}
                     onResume={store.resume}
-                    onTrust={trust.trust}
+                    onTrust={trust.requestReview}
                   />
                 </DeferredOverlay>
                 <DeferredOverlay open={commandPaletteOpen}>
@@ -333,7 +334,7 @@ export default function App() {
                     stopAll={store.stopAll}
                     restartRunning={store.restartRunning}
                     process={{
-                      onTrust: trust.trust,
+                      onTrust: trust.requestReview,
                       onResume: store.resume,
                       onStart: store.start,
                       onStop: store.stop,
