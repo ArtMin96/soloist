@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ProjectTree } from "@/store/projects";
 
 const tree: ProjectTree = {
@@ -14,27 +15,29 @@ const noop = () => {};
 
 function renderGroup() {
   render(
-    <ProjectGroup
-      tree={tree}
-      open
-      onOpenChange={noop}
-      kindOpen={() => true}
-      onKindOpenChange={noop}
-      collapsedLeads={{ has: () => false, toggle: noop }}
-      selectedId={null}
-      onSelect={noop}
-      onStart={noop}
-      onStop={noop}
-      onRestart={noop}
-      onResume={noop}
-      onTrust={noop}
-      onStartAll={noop}
-      onRestartRunning={noop}
-      onStopAll={noop}
-      onOpenProjectSettings={noop}
-      onOpenOrchestration={noop}
-      onRemoveProject={noop}
-    />,
+    <TooltipProvider>
+      <ProjectGroup
+        tree={tree}
+        open
+        onOpenChange={noop}
+        kindOpen={() => true}
+        onKindOpenChange={noop}
+        collapsedLeads={{ has: () => false, toggle: noop }}
+        selectedId={null}
+        onSelect={noop}
+        onStart={noop}
+        onStop={noop}
+        onRestart={noop}
+        onResume={noop}
+        onTrust={noop}
+        onStartAll={noop}
+        onRestartRunning={noop}
+        onStopAll={noop}
+        onOpenProjectSettings={noop}
+        onOpenOrchestration={noop}
+        onRemoveProject={noop}
+      />
+    </TooltipProvider>,
   );
 }
 

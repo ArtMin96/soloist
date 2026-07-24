@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ProcessView } from "@/domain";
 
 // The emulator hook drives xterm.js against a measured surface jsdom can't provide; stub
@@ -28,6 +29,21 @@ const PROCESS: ProcessView = {
 
 const noop = () => {};
 
+function renderPane() {
+  render(
+    <TooltipProvider>
+      <TerminalPane
+        process={PROCESS}
+        onStart={noop}
+        onStop={noop}
+        onRestart={noop}
+        onResume={noop}
+        onTrust={noop}
+      />
+    </TooltipProvider>,
+  );
+}
+
 // Let the listener registered in the pane's effect resolve before emitting (events have
 // no replay, so emitting too early would be missed).
 async function flush() {
@@ -44,16 +60,7 @@ afterEach(() => {
 describe("TerminalPane chrome", () => {
   it("shows the label until an OSC title arrives, then the title", async () => {
     mockIPC(() => {}, { shouldMockEvents: true });
-    render(
-      <TerminalPane
-        process={PROCESS}
-        onStart={noop}
-        onStop={noop}
-        onRestart={noop}
-        onResume={noop}
-        onTrust={noop}
-      />,
-    );
+    renderPane();
     await flush();
     expect(screen.getByText("assistant")).toBeTruthy();
 
@@ -70,16 +77,7 @@ describe("TerminalPane chrome", () => {
 
   it("ignores a title meant for a different process", async () => {
     mockIPC(() => {}, { shouldMockEvents: true });
-    render(
-      <TerminalPane
-        process={PROCESS}
-        onStart={noop}
-        onStop={noop}
-        onRestart={noop}
-        onResume={noop}
-        onTrust={noop}
-      />,
-    );
+    renderPane();
     await flush();
 
     await act(async () => {
@@ -90,16 +88,7 @@ describe("TerminalPane chrome", () => {
 
   it("raises a bell indicator when the process rings the bell", async () => {
     mockIPC(() => {}, { shouldMockEvents: true });
-    render(
-      <TerminalPane
-        process={PROCESS}
-        onStart={noop}
-        onStop={noop}
-        onRestart={noop}
-        onResume={noop}
-        onTrust={noop}
-      />,
-    );
+    renderPane();
     await flush();
     expect(screen.queryByLabelText("Terminal bell")).toBeNull();
 

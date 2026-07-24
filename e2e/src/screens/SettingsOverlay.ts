@@ -1,9 +1,9 @@
 import { $ } from "@wdio/globals";
 import { WAIT } from "../harness/waits.js";
 
-// The global Settings surface: the sidebar footer opens it, and a left rail switches sections. Both
-// handles are the exact text the user reads, which WebdriverIO rates the best available strategy.
-const FOOTER_ENTRY = "button=Settings";
+// The global Settings surface: the sidebar footer opens it through its accessible name, and a left
+// rail switches sections through the exact text the user reads.
+const FOOTER_ENTRY = 'button[aria-label="Settings"]';
 const RAIL = '[role="tablist"][aria-label="Settings sections"]';
 const TEMPLATES_TAB = "button=Templates";
 
@@ -27,9 +27,12 @@ export const settingsOverlay = {
     const tab = $(RAIL).$(TEMPLATES_TAB);
     await tab.waitForClickable({ timeout: WAIT.render });
     await tab.click();
-    await tab.waitUntil(async () => (await tab.getAttribute("aria-selected")) === "true", {
-      timeout: WAIT.render,
-      timeoutMsg: "the Templates section never became the selected one",
-    });
+    await tab.waitUntil(
+      async () => (await tab.getAttribute("aria-selected")) === "true",
+      {
+        timeout: WAIT.render,
+        timeoutMsg: "the Templates section never became the selected one",
+      },
+    );
   },
 };
