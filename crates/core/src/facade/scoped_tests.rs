@@ -12,6 +12,7 @@ use crate::testing::{
     agent_registration, authentic_session, facade_with_agent_tool, terminal_registration,
     FakeProjectRepo, FakeSpawner, FakeTrustRepo, TEST_PEER_PGID,
 };
+use crate::PeerCredentials;
 use async_trait::async_trait;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -94,7 +95,7 @@ async fn an_in_scope_process_starts_and_stops() {
 #[test]
 fn an_unknown_process_is_refused() {
     let (facade, _trust) = facade();
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     assert!(matches!(
         facade
             .scoped(session)
@@ -109,7 +110,7 @@ fn acting_without_a_project_in_scope_is_refused() {
     // The process exists, so the guard passes the existence check, but the unbound session
     // has no project loaded, selected, or bound — its scope is ambiguous.
     let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     assert!(matches!(
         facade.scoped(session).start_process(id),
         Err(ScopedActionError::NoProjectScope)
@@ -210,7 +211,7 @@ async fn send_input_enforces_scope() {
 #[test]
 fn spawn_agent_without_a_project_in_scope_is_refused() {
     let (facade, _trust) = facade();
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     assert!(matches!(
         facade.scoped(session).spawn_agent("Claude", Vec::new()),
         Err(SpawnAgentError::NoProjectScope)
@@ -365,7 +366,7 @@ fn bulk_commands_without_a_project_in_scope_are_refused() {
     // A process exists, but the unbound session has no project in scope, so a project-wide
     // bulk action is ambiguous — every bulk entry point refuses it the same way.
     terminal_in(&facade, ProjectId::from_raw(1), "term");
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     assert!(matches!(
         facade.scoped(session).start_all_commands(),
         Err(ScopedActionError::NoProjectScope)
@@ -418,7 +419,7 @@ fn services_list_returns_only_the_in_scope_projects_commands() {
     assert_eq!(ids, vec![command], "only the in-scope project's commands");
 
     // Unscoped, the query is ambiguous and refused like the other scoped operations.
-    let unscoped = facade.open_session(None);
+    let unscoped = facade.open_session(PeerCredentials::unauthenticated());
     assert!(matches!(
         facade.scoped(unscoped).services_list(),
         Err(ScopedActionError::NoProjectScope)
@@ -616,7 +617,7 @@ fn a_scoped_read_refuses_an_unknown_process_and_an_unscoped_session() {
     ));
     // A session with no project in scope cannot read a process — ambiguous, so refused, and
     // it discloses nothing.
-    let unscoped = facade.open_session(None);
+    let unscoped = facade.open_session(PeerCredentials::unauthenticated());
     assert!(matches!(
         facade.scoped(unscoped).process_output_scoped(id, None),
         Err(ScopedActionError::NoProjectScope)

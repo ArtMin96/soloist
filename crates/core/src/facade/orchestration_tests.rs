@@ -3,6 +3,7 @@
 //! clock (no real time), so the snapshot assembly and the one-event-per-mutation contract are both
 //! deterministic and headless.
 
+use crate::PeerCredentials;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -391,7 +392,7 @@ async fn an_unbound_spawn_is_a_root() {
     let (facade, project) = facade_with_agent_tool();
     // A session with no bound process: it still resolves its scope to the sole project, but has
     // no lead to spawn under.
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
 
     let worker = facade
         .scoped(session)

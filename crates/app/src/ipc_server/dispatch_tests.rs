@@ -5,7 +5,8 @@ use soloist_core::testing::{
 };
 use soloist_core::{
     AcquireOutcome, CorePorts, DomainEvent, IntegrationFile, McpFeatureGroup, MissingPolicy,
-    Origin, ProcStatus, ProcessId, ProjectRepo, StartSummary, TemplateScope, TokioClock,
+    Origin, PeerCredentials, ProcStatus, ProcessId, ProjectRepo, StartSummary, TemplateScope,
+    TokioClock,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -41,7 +42,7 @@ async fn wait_for(rx: &mut broadcast::Receiver<DomainEvent>, target: ProcStatus)
 #[tokio::test]
 async fn whoami_routes_to_the_identity_session() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     match handle_request(&facade, session, IpcRequest::Whoami).await {
         Ok(IpcResponse::Whoami(who)) => {
             assert_eq!(who.session, session);
@@ -54,7 +55,7 @@ async fn whoami_routes_to_the_identity_session() {
 #[tokio::test]
 async fn register_agent_acks_and_whoami_reflects_the_label() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     assert_eq!(
         handle_request(
             &facade,
@@ -77,7 +78,7 @@ async fn register_agent_acks_and_whoami_reflects_the_label() {
 #[tokio::test]
 async fn list_processes_returns_the_registered_processes() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     let id = facade.supervisor().register(terminal_registration(
         ProjectId::from_raw(1),
         "term",
@@ -95,7 +96,7 @@ async fn list_processes_returns_the_registered_processes() {
 #[tokio::test]
 async fn get_process_status_returns_an_in_scope_process() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     match handle_request(
         &facade,
@@ -112,7 +113,7 @@ async fn get_process_status_returns_an_in_scope_process() {
 #[tokio::test]
 async fn get_process_status_reports_unknown_for_a_missing_id() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     assert_eq!(
         handle_request(
             &facade,
@@ -129,7 +130,7 @@ async fn get_process_status_reports_unknown_for_a_missing_id() {
 #[tokio::test]
 async fn list_projects_is_empty_without_any_loaded() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     assert_eq!(
         handle_request(&facade, session, IpcRequest::ListProjects).await,
         Ok(IpcResponse::Projects(Vec::new()))
@@ -139,7 +140,7 @@ async fn list_projects_is_empty_without_any_loaded() {
 #[tokio::test]
 async fn project_status_without_scope_is_refused() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     // No project loaded, bound, or selected: an unscoped status request is ambiguous.
     assert_eq!(
         handle_request(
@@ -155,7 +156,7 @@ async fn project_status_without_scope_is_refused() {
 #[tokio::test]
 async fn project_status_for_an_unknown_project_is_refused() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     assert_eq!(
         handle_request(
             &facade,
@@ -172,7 +173,7 @@ async fn project_status_for_an_unknown_project_is_refused() {
 #[tokio::test]
 async fn binding_an_unknown_process_maps_to_the_wire_error() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     assert_eq!(
         handle_request(
             &facade,
@@ -191,6 +192,19 @@ async fn binding_an_unknown_process_maps_to_the_wire_error() {
 /// with it (a real Unix-socket connection always carries a peer group), and [`scoped_terminal`]
 /// assigns the same group to the process it binds, so the bind is authentic.
 use soloist_core::testing::TEST_PEER_PGID as PEER_PGID;
+
+/// Opens a session as the UDS adapter would for an MCP client running inside a managed process's
+/// group — the shape a Soloist-launched agent presents (a real Unix-socket connection always
+/// carries a peer group). The routing tests that then bind via [`scoped_terminal`] start here.
+fn grouped_session(facade: &Facade) -> SessionId {
+    facade.open_session(PeerCredentials::in_group(PEER_PGID))
+}
+
+/// Opens a session the transport could not authenticate — no peer group, no directory — which gets
+/// the open read tools but can neither bind to a process nor select a project scope.
+fn unauthenticated_session(facade: &Facade) -> SessionId {
+    facade.open_session(PeerCredentials::unauthenticated())
+}
 
 /// Registers a terminal in `project`, gives it the session's peer process group (standing in
 /// for the group a real spawn creates), and binds `session` to it — putting that project in
@@ -216,7 +230,7 @@ fn scoped_terminal(
 #[tokio::test]
 async fn starting_an_in_scope_process_is_acked() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     assert_eq!(
         handle_request(&facade, session, IpcRequest::StartProcess { process: id }).await,
@@ -227,7 +241,7 @@ async fn starting_an_in_scope_process_is_acked() {
 #[tokio::test]
 async fn stopping_an_idle_in_scope_process_reports_it_was_not_running() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     // Never started, so the stop finds nothing live — the bool the agent reads back.
     assert_eq!(
@@ -239,7 +253,7 @@ async fn stopping_an_idle_in_scope_process_reports_it_was_not_running() {
 #[tokio::test]
 async fn renaming_an_in_scope_process_is_acked() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     assert_eq!(
         handle_request(
@@ -262,7 +276,7 @@ async fn renaming_an_in_scope_process_is_acked() {
 #[tokio::test]
 async fn closing_an_in_scope_process_removes_it() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     // Never started, so close is a pure removal — acked, and the process leaves the registry.
     assert_eq!(
@@ -275,7 +289,7 @@ async fn closing_an_in_scope_process_removes_it() {
 #[tokio::test]
 async fn selecting_a_process_is_acked_and_reported_by_whoami() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     assert_eq!(
         handle_request(&facade, session, IpcRequest::SelectProcess { process: id }).await,
@@ -293,7 +307,7 @@ async fn selecting_a_process_is_acked_and_reported_by_whoami() {
 async fn sending_input_without_a_wait_returns_no_tail() {
     let facade = facade();
     let mut rx = facade.subscribe();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     facade.supervisor().start(id).expect("terminal starts");
     wait_for(&mut rx, ProcStatus::Running).await;
@@ -316,7 +330,7 @@ async fn sending_input_without_a_wait_returns_no_tail() {
 #[tokio::test]
 async fn spawning_an_agent_without_scope_is_refused() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     assert_eq!(
         handle_request(
             &facade,
@@ -334,7 +348,7 @@ async fn spawning_an_agent_without_scope_is_refused() {
 #[tokio::test]
 async fn list_agent_tools_routes_to_the_registry() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     // The default fakes register no tools; routing is what we assert, not the contents.
     assert!(matches!(
         handle_request(&facade, session, IpcRequest::ListAgentTools).await,
@@ -345,7 +359,7 @@ async fn list_agent_tools_routes_to_the_registry() {
 #[tokio::test]
 async fn bulk_commands_without_scope_are_refused() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     for request in [
         IpcRequest::StartAllCommands,
         IpcRequest::StopAllCommands,
@@ -361,7 +375,7 @@ async fn bulk_commands_without_scope_are_refused() {
 #[tokio::test]
 async fn bulk_start_in_scope_returns_a_summary() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     // Only a terminal is in scope, so the bulk command start finds nothing to start.
     scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     assert_eq!(
@@ -373,7 +387,7 @@ async fn bulk_start_in_scope_returns_a_summary() {
 #[tokio::test]
 async fn bulk_stop_in_scope_reports_how_many_were_stopped() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     assert_eq!(
         handle_request(&facade, session, IpcRequest::StopAllCommands).await,
@@ -384,7 +398,7 @@ async fn bulk_stop_in_scope_reports_how_many_were_stopped() {
 #[tokio::test]
 async fn bulk_restart_in_scope_is_acked() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     assert_eq!(
         handle_request(&facade, session, IpcRequest::RestartAllCommands).await,
@@ -395,7 +409,7 @@ async fn bulk_restart_in_scope_is_acked() {
 #[tokio::test]
 async fn output_reads_for_an_unknown_process_are_refused() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     let unknown = ProcessId::from_raw(999);
     for request in [
         IpcRequest::GetProcessOutput {
@@ -421,7 +435,7 @@ async fn output_reads_for_an_unknown_process_are_refused() {
 #[tokio::test]
 async fn reading_an_in_scope_processs_output_and_ports() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     let id = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
     // Registered but never started: output is empty (not an error), and it has no ports.
     assert_eq!(
@@ -460,7 +474,7 @@ async fn reading_an_in_scope_processs_output_and_ports() {
 #[tokio::test]
 async fn the_read_tools_refuse_an_out_of_scope_process_but_list_stays_cross_project() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     // The caller's scope is project 1; a process in project 2 is out of scope.
     let here = scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
     let elsewhere = facade.supervisor().register(terminal_registration(
@@ -513,7 +527,7 @@ async fn the_read_tools_refuse_an_out_of_scope_process_but_list_stays_cross_proj
 #[tokio::test]
 async fn clear_output_in_scope_is_acked_and_out_of_scope_is_refused() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     let here = scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
     let elsewhere = facade.supervisor().register(terminal_registration(
         ProjectId::from_raw(2),
@@ -538,7 +552,7 @@ async fn clear_output_in_scope_is_acked_and_out_of_scope_is_refused() {
 #[tokio::test]
 async fn services_list_without_scope_is_refused_and_filters_to_commands_in_scope() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     // Unscoped: ambiguous, refused.
     assert_eq!(
         handle_request(&facade, session, IpcRequest::ServicesList).await,
@@ -556,7 +570,7 @@ async fn services_list_without_scope_is_refused_and_filters_to_commands_in_scope
 #[tokio::test]
 async fn wait_for_bound_port_on_a_resting_process_reports_not_running() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     // Bind to one process in project 1 to put that project in scope, then wait on a *different*,
     // never-started process in the same project: in scope, but with no group it has no port to
     // wait for, so it resolves at once as NotRunning (no wait).
@@ -584,7 +598,7 @@ async fn wait_for_bound_port_on_a_resting_process_reports_not_running() {
 #[tokio::test]
 async fn wait_for_bound_port_on_an_out_of_scope_process_is_refused() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     // Scope is project 1; a process in project 2 is out of scope, so the port-bind probe is
     // refused rather than disclosing whether the foreign process bound the port.
     scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
@@ -621,7 +635,7 @@ async fn acquiring_a_lease_in_scope_is_granted_then_released() {
         .lock_repo(Arc::new(FakeLockRepo::new()))
         .build(),
     ));
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     let owner = scoped_terminal(&facade, session, ProjectId::from_raw(1), "term");
 
     match handle_request(
@@ -667,7 +681,7 @@ async fn acquiring_a_lease_in_scope_is_granted_then_released() {
 #[tokio::test]
 async fn a_lease_action_without_scope_is_refused() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     assert_eq!(
         handle_request(
             &facade,
@@ -685,7 +699,7 @@ async fn a_lease_action_without_scope_is_refused() {
 #[tokio::test]
 async fn an_action_on_another_projects_process_maps_to_out_of_scope() {
     let facade = facade();
-    let session = facade.open_session(Some(PEER_PGID));
+    let session = grouped_session(&facade);
     // The session is scoped to project 1; the target lives in project 2.
     scoped_terminal(&facade, session, ProjectId::from_raw(1), "here");
     let elsewhere = facade.supervisor().register(terminal_registration(
@@ -733,7 +747,7 @@ fn facade_with_settings() -> Arc<Facade> {
 async fn mcp_tool_groups_returns_the_default_enablement() {
     // A global read — no scope needed, so an unbound session resolves it.
     let facade = facade();
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
     match handle_request(&facade, session, IpcRequest::McpToolGroups).await {
         Ok(IpcResponse::McpToolGroups(groups)) => {
             assert!(groups.scratchpads && groups.todos && groups.timers);
@@ -749,7 +763,7 @@ async fn mcp_tool_groups_reflects_a_persisted_change() {
     facade
         .set_mcp_tool_group(McpFeatureGroup::KeyValue, true)
         .expect("enable key-value");
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
     match handle_request(&facade, session, IpcRequest::McpToolGroups).await {
         Ok(IpcResponse::McpToolGroups(groups)) => assert!(groups.key_value),
         other => panic!("expected an McpToolGroups reply, got {other:?}"),
@@ -760,7 +774,7 @@ async fn mcp_tool_groups_reflects_a_persisted_change() {
 async fn submit_feedback_routes_and_echoes_the_stored_entry() {
     // A global write — no scope needed, so an unbound session resolves it.
     let facade = facade();
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
     match handle_request(
         &facade,
         session,
@@ -780,7 +794,7 @@ async fn submit_feedback_routes_and_echoes_the_stored_entry() {
 #[tokio::test]
 async fn blank_feedback_is_refused_as_a_request_error() {
     let facade = facade();
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
     match handle_request(
         &facade,
         session,
@@ -812,7 +826,7 @@ async fn setup_agent_integration_writes_into_the_scoped_project_root() {
         .build(),
     ));
     // The sole loaded project gives the unbound session its default scope.
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
     match handle_request(
         &facade,
         session,
@@ -856,7 +870,7 @@ fn facade_with_templates() -> Arc<Facade> {
 #[tokio::test]
 async fn prompt_templates_route_create_read_update_delete_and_export() {
     let facade = facade_with_templates();
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
 
     let created = match handle_request(
         &facade,
@@ -956,7 +970,7 @@ async fn seed_review_template(facade: &Arc<Facade>, session: SessionId) {
 #[tokio::test]
 async fn a_render_substitutes_the_supplied_values_and_reports_the_gaps() {
     let facade = facade_with_templates();
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
     seed_review_template(&facade, session).await;
 
     match handle_request(
@@ -990,7 +1004,7 @@ async fn a_render_substitutes_the_supplied_values_and_reports_the_gaps() {
 #[tokio::test]
 async fn a_strict_render_is_refused_on_the_wire_naming_every_missing_value() {
     let facade = facade_with_templates();
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
     seed_review_template(&facade, session).await;
 
     assert_eq!(
@@ -1015,7 +1029,7 @@ async fn a_strict_render_is_refused_on_the_wire_naming_every_missing_value() {
 #[tokio::test]
 async fn a_strict_render_with_every_value_supplied_succeeds() {
     let facade = facade_with_templates();
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
     seed_review_template(&facade, session).await;
 
     match handle_request(
@@ -1043,7 +1057,7 @@ async fn a_strict_render_with_every_value_supplied_succeeds() {
 #[tokio::test]
 async fn rendering_a_template_that_does_not_exist_is_refused_on_the_wire() {
     let facade = facade_with_templates();
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
     assert_eq!(
         handle_request(
             &facade,
@@ -1063,7 +1077,7 @@ async fn rendering_a_template_that_does_not_exist_is_refused_on_the_wire() {
 #[tokio::test]
 async fn an_unscoped_template_list_merges_global_and_project_rows() {
     let facade = facade_with_templates();
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
     for (scope, name) in [
         (TemplateScope::Global, "shared"),
         (TemplateScope::Project, "mine"),
@@ -1099,7 +1113,7 @@ async fn an_unscoped_template_list_merges_global_and_project_rows() {
 #[tokio::test]
 async fn a_stale_template_update_maps_to_the_wire_conflict() {
     let facade = facade_with_templates();
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
     handle_request(
         &facade,
         session,
@@ -1136,7 +1150,7 @@ async fn a_stale_template_update_maps_to_the_wire_conflict() {
 #[tokio::test]
 async fn setup_agent_integration_with_no_scope_is_refused() {
     let facade = facade();
-    let session = facade.open_session(None);
+    let session = unauthenticated_session(&facade);
     assert_eq!(
         handle_request(
             &facade,

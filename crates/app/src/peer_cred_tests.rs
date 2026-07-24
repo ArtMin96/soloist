@@ -1,5 +1,6 @@
-use super::{peer_pgid, peer_scope, peer_uid_permitted, PeerScope};
+use super::{peer_credentials, peer_scope, peer_uid_permitted, PeerScope};
 use nix::unistd::getpgrp;
+use soloist_core::PeerCredentials;
 use tokio::net::{UnixListener, UnixStream};
 
 /// Only the UID Soloist runs as may authenticate a session; every other peer is refused. The
@@ -20,18 +21,19 @@ fn only_the_apps_own_uid_may_authenticate_a_session() {
 }
 
 /// The connection policy is fail-closed: refused credentials (an `Err`) drop the connection,
-/// while a resolved or unresolved peer opens a session — an unresolved (`None`) peer is
-/// downgraded to an unauthenticated scope, deliberately not dropped.
+/// while any resolved credentials open a session — even fully unauthenticated ones (both facts
+/// `None`) are downgraded to an unauthenticated scope, deliberately not dropped.
 #[test]
 fn the_connection_policy_drops_only_refused_credentials() {
+    let resolved = PeerCredentials::in_group(42);
     assert_eq!(
-        peer_scope(&Ok(Some(42))),
-        PeerScope::Open(Some(42)),
-        "a resolved peer is scoped to its group"
+        peer_scope(&Ok(resolved.clone())),
+        PeerScope::Open(resolved),
+        "a resolved peer is scoped to its credentials"
     );
     assert_eq!(
-        peer_scope(&Ok(None)),
-        PeerScope::Open(None),
+        peer_scope(&Ok(PeerCredentials::default())),
+        PeerScope::Open(PeerCredentials::default()),
         "an unresolved peer opens an unauthenticated session, not a dropped connection"
     );
     let refused = Err(std::io::Error::new(
@@ -45,22 +47,31 @@ fn the_connection_policy_drops_only_refused_credentials() {
     );
 }
 
-/// Resolving the peer of a connection this process opened yields this process's own group:
-/// the test process is the one that called `connect`, so `SO_PEERCRED` reports its pid and the
-/// resolved group is `getpgrp()`. This is exactly how a Soloist-launched agent's `soloist-mcp`
-/// child resolves to the agent's managed process group in production.
+/// Resolving the peer of a connection this process opened yields this process's own group *and*
+/// working directory: the test process is the one that called `connect`, so `SO_PEERCRED` reports
+/// its pid, from which the group resolves to `getpgrp()` and the directory to this process's cwd.
+/// This is exactly how a Soloist-launched agent's `soloist-mcp` child resolves to the agent's
+/// managed process group, and how an externally-launched one resolves to the project directory it
+/// runs in, in production.
 #[tokio::test]
-async fn resolves_the_connecting_peers_process_group() {
+async fn resolves_the_connecting_peers_group_and_working_directory() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("peer.sock");
     let listener = UnixListener::bind(&path).expect("bind");
     let _client = UnixStream::connect(&path).await.expect("connect");
     let (server, _addr) = listener.accept().await.expect("accept");
 
-    let resolved = peer_pgid(&server).expect("read peer credentials");
+    let resolved = peer_credentials(&server).expect("read peer credentials");
     assert_eq!(
-        resolved,
+        resolved.pgid,
         Some(getpgrp().as_raw()),
         "the peer group is this process's own group"
+    );
+    let own_cwd =
+        std::fs::canonicalize(std::env::current_dir().expect("cwd")).expect("canonical cwd");
+    assert_eq!(
+        resolved.cwd,
+        Some(own_cwd),
+        "the peer working directory is this process's own cwd, read from /proc"
     );
 }

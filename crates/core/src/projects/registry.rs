@@ -45,6 +45,27 @@ impl Projects {
         self.repo.get(id)
     }
 
+    /// The loaded project whose canonical root contains `path` — the project a caller runs *in*,
+    /// resolved from its kernel-read working directory. The deepest (most specific) root that is an
+    /// ancestor of, or equal to, `path` wins, so a project nested inside another resolves to the
+    /// inner one. Containment is by whole path components ([`Path::starts_with`]), so a directory
+    /// under `/p/trackler2` never matches a sibling project rooted at `/p/trackler`. `None` when no
+    /// open project contains the path.
+    ///
+    /// `path` must be canonical and absolute: it is compared verbatim against the canonicalized
+    /// stored roots ([`Self::add`]), so a path carrying symlinks or `..` could mis-match. The sole
+    /// caller supplies the kernel-canonical `/proc/<pid>/cwd`, which already satisfies this — hence
+    /// no `canonicalize` here (it is filesystem I/O, fails on a path that no longer exists, and does
+    /// not belong in this pure registry lookup).
+    pub fn project_at_path(&self, path: &Path) -> Result<Option<ProjectId>, StoreError> {
+        Ok(self
+            .list()?
+            .into_iter()
+            .filter(|record| path.starts_with(&record.root))
+            .max_by_key(|record| record.root.components().count())
+            .map(|record| record.id))
+    }
+
     /// The display projection of every known project, most-recently-added first — the
     /// project read model the UI groups its process tree by (snapshot half of
     /// snapshot-then-deltas; paired with [`crate::events::DomainEvent::ProjectOpened`]).
@@ -130,5 +151,95 @@ mod tests {
         let remaining = projects.list().expect("list");
         assert_eq!(remaining.len(), 1);
         assert_ne!(remaining[0].id, pa.id);
+    }
+
+    #[test]
+    fn project_at_path_resolves_the_containing_project() {
+        // Seed sibling projects with the canonical roots the store would hold, then resolve a
+        // working directory to the project whose root contains it — the directory signal that
+        // scopes an agent Soloist did not launch.
+        let repo = Arc::new(FakeProjectRepo::new());
+        let alpha = repo
+            .upsert(Path::new("/home/dev/alpha"), None, None)
+            .expect("seed alpha");
+        let beta = repo
+            .upsert(Path::new("/home/dev/beta"), None, None)
+            .expect("seed beta");
+        let _gamma = repo
+            .upsert(Path::new("/home/dev/gamma"), None, None)
+            .expect("seed gamma");
+        let projects = Projects::new(repo);
+
+        // A directory inside a project's root resolves to that project.
+        assert_eq!(
+            projects
+                .project_at_path(Path::new("/home/dev/beta/src"))
+                .expect("resolve"),
+            Some(beta.id),
+        );
+        // The root itself resolves to it.
+        assert_eq!(
+            projects
+                .project_at_path(Path::new("/home/dev/alpha"))
+                .expect("resolve"),
+            Some(alpha.id),
+        );
+        // A directory under no project's root resolves to nothing.
+        assert_eq!(
+            projects
+                .project_at_path(Path::new("/home/dev/elsewhere"))
+                .expect("resolve"),
+            None,
+        );
+    }
+
+    #[test]
+    fn project_at_path_is_component_wise_not_a_string_prefix() {
+        // A project rooted at /p/trackler must never match a directory under the sibling
+        // /p/trackler2, even though the first path is a string prefix of the second.
+        let repo = Arc::new(FakeProjectRepo::new());
+        let _trackler = repo
+            .upsert(Path::new("/p/trackler"), None, None)
+            .expect("seed trackler");
+        let trackler2 = repo
+            .upsert(Path::new("/p/trackler2"), None, None)
+            .expect("seed trackler2");
+        let projects = Projects::new(repo);
+
+        assert_eq!(
+            projects
+                .project_at_path(Path::new("/p/trackler2/crates"))
+                .expect("resolve"),
+            Some(trackler2.id),
+            "a cwd under /p/trackler2 resolves to trackler2, never the string-prefix sibling /p/trackler",
+        );
+    }
+
+    #[test]
+    fn project_at_path_picks_the_deepest_root_for_nested_projects() {
+        // A project nested inside another resolves to the inner (most specific) one.
+        let repo = Arc::new(FakeProjectRepo::new());
+        let outer = repo
+            .upsert(Path::new("/work/outer"), None, None)
+            .expect("seed outer");
+        let inner = repo
+            .upsert(Path::new("/work/outer/inner"), None, None)
+            .expect("seed inner");
+        let projects = Projects::new(repo);
+
+        assert_eq!(
+            projects
+                .project_at_path(Path::new("/work/outer/inner/src"))
+                .expect("resolve"),
+            Some(inner.id),
+            "the deepest containing root wins",
+        );
+        assert_eq!(
+            projects
+                .project_at_path(Path::new("/work/outer/other"))
+                .expect("resolve"),
+            Some(outer.id),
+            "a directory only the outer root contains resolves to the outer project",
+        );
     }
 }

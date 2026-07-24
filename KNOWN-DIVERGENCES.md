@@ -198,12 +198,41 @@ auto-bind matches, while a forged binding to a sibling project's process does no
 detail lives only in the adapter (`crates/app/src/peer_cred.rs`); the core compares plain
 process-group ids, so the dependency rule holds.
 
-**Residual (accepted, documented as policy — not a divergence):** when exactly **one** project is
-loaded, an **external** caller (`register_agent`, no managed process in its group) still acts on that
-sole project via the unambiguous single-project default — identical to the local user's own authority
-on the `0700` socket, and with no sibling to cross into. With **≥2** projects open such a caller has
-no authenticated scope and the scoped mutating tools refuse. This external-caller policy is recorded
-in `plan/05` §12 (MCP session↔process binding authenticity).
+**Second authenticated signal — the working directory (2026-07-24):** the process-group check above
+answers "which managed process is this peer?", which resolves an agent *Soloist launched*. An agent
+Soloist did **not** launch (the documented `register_agent` path) has no managed process in its
+group, so with ≥2 projects open it fell through to no scope at all — it could not select the very
+project whose directory it was running in. Fixed at root cause by generalizing "the process I run in"
+to "the project I run in", proven by **either** of two kernel-read facts about the socket peer: its
+process **group** — unforgeable lineage, since a peer cannot join another project's managed-process
+group — **or** its working **directory** (`/proc/<pid>/cwd`, read in the same adapter as
+`SO_PEERCRED`), matched to the open project whose canonical root contains it (deepest root wins;
+component-wise, so a directory under `/p/trackler2` never matches a sibling rooted at `/p/trackler`).
+Neither is a tool argument the caller asserts; the group cannot be forged at all, and the directory
+is kernel-read but caller-chosen — trusted only under the same-UID local model, where a process
+rooted in a project already holds full filesystem access to it. The core is handed a plain path and
+does the containment match (`Projects::project_at_path`). `effective_project` gains a cwd step
+reached **only for a caller with no managed process in its group** (an agent Soloist did not launch):
+selected → bound process → *(groupless only)* cwd project → sole project → none. A caller whose group
+owns a managed process is a Soloist-launched agent, scoped by that group (via bind or select), so the
+directory never pulls it into a folder it merely sits in — one session stays scoped to one project,
+and `effective_project` never disagrees with the `select_project`/`authentic_scope` gate, which
+authenticates against the same home project (its group's, else its directory's). This is what lets an
+agent working in a project's folder simply *know* its scope (`whoami` reports it) without selecting
+anything, even with 100 projects open.
+
+**Residual (accepted, documented as policy — not a divergence):** an **external** caller
+(`register_agent`, no managed process in its group) is authentically scoped to the project whose
+directory it runs in, or — when its directory is inside none of the open projects **and** exactly
+**one** project is loaded — to that sole project via the unambiguous single-project default. Only a
+caller whose directory is inside no open project **with ≥2 open** has no authenticated scope, and the
+scoped mutating tools refuse. The directory signal grants a caller genuinely rooted in a project the
+ability to reach that project's *live* process surface (scrollback/start/stop) over MCP; a same-user,
+unsandboxed process rooted there already holds full filesystem access to that project (the D2
+local-execution model), and "opened an agent in that repo" is the intent — so the added authority is
+narrow and aligned, and far narrower than the *self-asserted* `select_project(id)` the F13 check
+closed. This external-caller policy is recorded in `plan/05` §12 (MCP session↔process/directory
+authenticity).
 
 **Read tools scoped too (stability audit PRD-06, 2026-07-14):** the original F13 note left the MCP
 **read** tools open by design — any session could read any process's output/status/ports by id. On a

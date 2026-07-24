@@ -3,7 +3,10 @@
 //! the synthetic peer group and the bind/select scope setup the identity tests share, across
 //! the core's own tests and the adapter crates that consume the `testing` feature.
 
+use std::path::PathBuf;
+
 use crate::facade::Facade;
+use crate::identity::PeerCredentials;
 use crate::ids::{ProcessId, SessionId};
 
 /// A synthetic peer process group for a session authenticated to its bound process. Any
@@ -19,5 +22,14 @@ pub const TEST_PEER_PGID: i32 = 5000;
 /// authenticity check. Does not bind; a caller that needs the bound origin binds itself.
 pub fn authentic_session(facade: &Facade, process: ProcessId, pgid: i32) -> SessionId {
     facade.supervisor().assign_test_group(process, pgid);
-    facade.open_session(Some(pgid))
+    facade.open_session(PeerCredentials::in_group(pgid))
+}
+
+/// Opens an identity session authenticated by its working directory, as the UDS adapter would for
+/// an agent Soloist did not launch (its group owns no managed process): the session's peer reports
+/// `cwd` and no group, so its effective scope — and a [`select_project`](Facade::select_project) of
+/// the containing project — resolves from the project root that contains `cwd`. The single source
+/// for the directory-authenticated setup the scope tests share.
+pub fn session_in_dir(facade: &Facade, cwd: PathBuf) -> SessionId {
+    facade.open_session(PeerCredentials::in_dir(cwd))
 }

@@ -104,11 +104,14 @@ and releases them when it closes.\n\
             aliases: &["project", "projects", "select_project", "effective-project"],
             title: "Project scope",
             body: "- Your tools act on your *effective project*: the one you set with \
-`select_project`, the one your bound process runs in, or the sole open project. Scope never \
-widens — a tool cannot touch another project.\n\
-- Scope is proven by the process you run in. An agent launched *outside* Soloist while several \
-projects are open has no project scope and cannot select one: use a global scope where a tool \
-offers one (prompt templates), keep exactly one project open, or have Soloist launch you."
+`select_project`, the one your bound process runs in, the one whose directory you are running in, \
+or the sole open project. Scope never widens — a tool cannot touch another project.\n\
+- Scope is proven by the process *or the directory* you run in. An agent Soloist launched proves \
+it by its process; an agent launched *outside* Soloist proves it by its working directory — so \
+running inside your project's folder scopes you to it automatically, even with several projects \
+open. If your directory is inside none of the open projects, you have no scope: run inside your \
+project, keep exactly one project open, or use a global scope where a tool offers one (prompt \
+templates)."
                 .to_string(),
         },
         GuideTopic {

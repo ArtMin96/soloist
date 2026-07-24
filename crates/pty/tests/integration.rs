@@ -12,9 +12,9 @@ use nix::errno::Errno;
 use nix::sys::signal::killpg;
 use nix::unistd::Pid;
 use soloist_core::{
-    CorePorts, DomainEvent, Facade, Hash, OrphanControl, OrphanRecord, ProcStatus, ProcessIdentity,
-    ProcessSpawner, ProjectId, ProjectRecord, ProjectRepo, PtySize, SpawnSpec, StoreError,
-    TokioClock, TrustRepo,
+    CorePorts, DomainEvent, Facade, Hash, OrphanControl, OrphanRecord, PeerCredentials, ProcStatus,
+    ProcessIdentity, ProcessSpawner, ProjectId, ProjectRecord, ProjectRepo, PtySize, SpawnSpec,
+    StoreError, TokioClock, TrustRepo,
 };
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use tokio::sync::broadcast::error::RecvError;
@@ -364,7 +364,7 @@ async fn send_input_writes_to_the_pty_and_returns_the_rendered_tail() {
         .supervisor()
         .pgid_of(id)
         .expect("a running process has a live group");
-    let session = facade.open_session(Some(pgid));
+    let session = facade.open_session(PeerCredentials::in_group(pgid));
     facade
         .scoped(session)
         .bind_session_process(id)
@@ -547,7 +547,7 @@ async fn spawn_agent_launches_a_worker_in_the_sessions_project() {
     use std::os::unix::fs::PermissionsExt;
 
     use soloist_core::testing::{FakeAgentToolRepo, FakeProjectRepo, FakeTrustRepo};
-    use soloist_core::{AgentKind, AgentTool, ProcessKind, PromptMode};
+    use soloist_core::{AgentKind, AgentTool, PeerCredentials, ProcessKind, PromptMode};
 
     // End to end: a session selects a project, then spawn_agent (the scoped
     // wrapper over launch_agent) starts the worker in that project on a real PTY.
@@ -582,7 +582,7 @@ async fn spawn_agent_launches_a_worker_in_the_sessions_project() {
 
     // Exactly one project is loaded, so it is the session's unambiguous effective scope
     // without an explicit selection — the single-project default a worker spawns into.
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
 
     let id = facade
         .scoped(session)
