@@ -92,9 +92,9 @@ fn build_facade(app: AppHandle) -> Facade {
     };
 
     // One SQLite store backs the trust, project, agent-tool, and coordination (lease + timer +
-    // scratchpad + todo) repositories the façade needs. The lock releaser fans a closing process's
-    // close out to both its leases and its todo locks (over the same store), and the lease, timer,
-    // scratchpad, and todo stores persist them; the runtime-state and orphan-control adapters are
+    // scratchpad + diagram + todo) repositories the façade needs. The lock releaser fans a closing
+    // process's close out to both its leases and its todo locks (over the same store), and the lease,
+    // timer, scratchpad, diagram, and todo stores persist them; the runtime-state and orphan-control adapters are
     // wired for adoption, the metrics probe reads CPU/memory from /proc, the port probe reads /proc,
     // the file watcher reports filesystem changes via notify, the notifier shows desktop toasts via
     // the Tauri notification plugin, the version probe auto-detects installed agent CLIs, and the
@@ -124,6 +124,7 @@ fn build_facade(app: AppHandle) -> Facade {
         .lock_repo(store.clone())
         .timer_repo(store.clone())
         .scratchpad_repo(store.clone())
+        .diagram_repo(store.clone())
         .todo_repo(store.clone())
         .kv_repo(store.clone())
         .template_repo(store.clone())
@@ -450,7 +451,12 @@ pub fn run() {
             commands::scratchpad_write,
             commands::scratchpad_archive,
             commands::scratchpad_rename,
+            commands::diagram_read,
+            commands::diagram_write,
+            commands::diagram_archive,
+            commands::diagram_rename,
             commands::export_markdown,
+            commands::export_bytes,
             commands::todo_create,
             commands::todo_update,
             commands::todo_complete,

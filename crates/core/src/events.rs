@@ -158,6 +158,9 @@ pub enum DomainEvent {
     /// A coordination scratchpad `name` in `project` changed (written, renamed, retagged, archived,
     /// or deleted). Keyed by the scratchpad's `name` handle — the addressing key its surface uses.
     ScratchpadChanged { project: ProjectId, name: String },
+    /// A coordination diagram `name` in `project` changed (written, renamed, retagged, archived, or
+    /// deleted). Keyed by the diagram's `name` handle — the addressing key its surface uses.
+    DiagramChanged { project: ProjectId, name: String },
     /// A coordination key-value entry `key` in `project` changed (set or deleted).
     KvChanged { project: ProjectId, key: String },
     /// A template of `kind` was created, updated, or deleted. `project` names the scope it

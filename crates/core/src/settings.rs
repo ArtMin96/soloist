@@ -12,8 +12,8 @@
 //! wrote.
 //!
 //! The first global setting is the per-group MCP tool enablement: the MCP server's core tool groups
-//! are always served, while the feature groups can be toggled — Scratchpads, Todos and Timers
-//! default on, Key-Value defaults off.
+//! are always served, while the feature groups can be toggled — Scratchpads, Diagrams, Todos and
+//! Timers default on, Key-Value and Prompt Templates default off.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -48,6 +48,7 @@ pub use tools::ToolDefaults;
 #[serde(rename_all = "snake_case")]
 pub enum McpFeatureGroup {
     Scratchpads,
+    Diagrams,
     Todos,
     Timers,
     KeyValue,
@@ -58,8 +59,9 @@ impl McpFeatureGroup {
     /// Every toggleable feature group, in display order — the single source the settings document
     /// and the MCP server iterate, so adding a group is one edit here plus the exhaustive matches
     /// in [`McpToolGroups`].
-    pub const ALL: [McpFeatureGroup; 5] = [
+    pub const ALL: [McpFeatureGroup; 6] = [
         McpFeatureGroup::Scratchpads,
+        McpFeatureGroup::Diagrams,
         McpFeatureGroup::Todos,
         McpFeatureGroup::Timers,
         McpFeatureGroup::KeyValue,
@@ -71,6 +73,7 @@ impl McpFeatureGroup {
     pub fn label(self) -> &'static str {
         match self {
             McpFeatureGroup::Scratchpads => "Scratchpads",
+            McpFeatureGroup::Diagrams => "Diagrams",
             McpFeatureGroup::Todos => "Todos",
             McpFeatureGroup::Timers => "Timers",
             McpFeatureGroup::KeyValue => "Key-Value",
@@ -79,13 +82,14 @@ impl McpFeatureGroup {
     }
 }
 
-/// Which MCP feature-tool groups the server exposes. Scratchpads, Todos and Timers default on;
-/// Key-Value and Prompt Templates default off. `#[serde(default)]` fills any field an older
+/// Which MCP feature-tool groups the server exposes. Scratchpads, Diagrams, Todos and Timers default
+/// on; Key-Value and Prompt Templates default off. `#[serde(default)]` fills any field an older
 /// record omits from [`Default`], so adding a group stays backward-compatible with stored records.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct McpToolGroups {
     pub scratchpads: bool,
+    pub diagrams: bool,
     pub todos: bool,
     pub timers: bool,
     pub key_value: bool,
@@ -96,6 +100,7 @@ impl Default for McpToolGroups {
     fn default() -> Self {
         Self {
             scratchpads: true,
+            diagrams: true,
             todos: true,
             timers: true,
             key_value: false,
@@ -109,6 +114,7 @@ impl McpToolGroups {
     pub fn enabled(&self, group: McpFeatureGroup) -> bool {
         match group {
             McpFeatureGroup::Scratchpads => self.scratchpads,
+            McpFeatureGroup::Diagrams => self.diagrams,
             McpFeatureGroup::Todos => self.todos,
             McpFeatureGroup::Timers => self.timers,
             McpFeatureGroup::KeyValue => self.key_value,
@@ -120,6 +126,7 @@ impl McpToolGroups {
     pub fn set(&mut self, group: McpFeatureGroup, enabled: bool) {
         match group {
             McpFeatureGroup::Scratchpads => self.scratchpads = enabled,
+            McpFeatureGroup::Diagrams => self.diagrams = enabled,
             McpFeatureGroup::Todos => self.todos = enabled,
             McpFeatureGroup::Timers => self.timers = enabled,
             McpFeatureGroup::KeyValue => self.key_value = enabled,

@@ -12,3 +12,11 @@
 pub async fn export_markdown(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|err| err.to_string())
 }
+
+/// Writes `bytes` to `path` — the file the save dialog returned. The diagram exports (rendered SVG,
+/// raw `.mmd` source, rasterized PNG) are already-projected artifacts, so like [`export_markdown`]
+/// this is adapter I/O to a path the user just consented to, never a route through the core façade.
+#[tauri::command]
+pub async fn export_bytes(path: String, bytes: Vec<u8>) -> Result<(), String> {
+    std::fs::write(&path, bytes).map_err(|err| err.to_string())
+}

@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 17;
+pub(crate) const SCHEMA_VERSION: i64 = 18;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -295,6 +295,30 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         // `AUTOINCREMENT` for the same reason. The column cannot be altered in place, so the table
         // is rebuilt.
         crate::projects_rebuild::rebuild_projects_with_autoincrement(conn)?;
+    }
+
+    if version < 18 {
+        // Coordination diagrams: durable, project-scoped shared documents mirroring scratchpads, but
+        // whose body is a raw Mermaid `source` string the core never renders or validates. The
+        // store-assigned `id` is durable and never reused (`AUTOINCREMENT`); `tags` is a JSON array;
+        // `revision` guards optimistic-concurrency writes; `updated_at` stamps the last source write
+        // for recency ordering; `(project_id, name)` is unique (the addressing handle). Like
+        // scratchpads these are NOT process-owned and are NOT cleared on launch — a diagram survives
+        // an app restart. The project foreign key cascades.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS diagrams (
+                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 name       TEXT NOT NULL,
+                 source     TEXT NOT NULL,
+                 tags       TEXT NOT NULL DEFAULT '[]',
+                 archived   INTEGER NOT NULL DEFAULT 0,
+                 revision   INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL DEFAULT 0,
+                 UNIQUE (project_id, name)
+             );",
+        )
+        .map_err(sql_err)?;
     }
 
     if version < SCHEMA_VERSION {
