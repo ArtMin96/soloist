@@ -24,6 +24,44 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         )));
     }
 
+    // Run steps 1 to 16 in a single transaction if needed.
+    // We do not include step 17 here because step 17 (projects rebuild)
+    // requires toggling `PRAGMA foreign_keys` which is a no-op inside an active transaction.
+    // If the connection is already inside a transaction, run migrations directly
+    // to avoid starting a nested transaction.
+    let in_tx = !conn.is_autocommit();
+    if version < 16 {
+        if !in_tx {
+            conn.execute("BEGIN TRANSACTION", []).map_err(sql_err)?;
+        }
+
+        let result = run_migrations_1_to_16(conn, version);
+
+        if let Err(err) = result {
+            if !in_tx {
+                let _ = conn.execute("ROLLBACK", []);
+            }
+            return Err(err);
+        }
+
+        if !in_tx {
+            conn.execute("COMMIT", []).map_err(sql_err)?;
+        }
+    }
+
+    // Now run Step 17 (which manages its own transaction and foreign key toggling)
+    if version < 17 {
+        crate::projects_rebuild::rebuild_projects_with_autoincrement(conn)?;
+    }
+
+    if version < SCHEMA_VERSION {
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION)
+            .map_err(sql_err)?;
+    }
+    Ok(())
+}
+
+fn run_migrations_1_to_16(conn: &Connection, version: i64) -> Result<(), StoreError> {
     if version < 1 {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS meta (
@@ -285,21 +323,6 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
             )
             .map_err(sql_err)?;
         }
-    }
-
-    if version < 17 {
-        // `projects.id` gains `AUTOINCREMENT`, so a project id is never reused. Without it SQLite
-        // assigns `max(rowid) + 1`, which hands the id of a removed highest-id project to the next
-        // project opened — and any in-memory state keyed by `ProjectId` then answers for the new
-        // project with the removed one's data. Every other durable id here is already
-        // `AUTOINCREMENT` for the same reason. The column cannot be altered in place, so the table
-        // is rebuilt.
-        crate::projects_rebuild::rebuild_projects_with_autoincrement(conn)?;
-    }
-
-    if version < SCHEMA_VERSION {
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION)
-            .map_err(sql_err)?;
     }
     Ok(())
 }
