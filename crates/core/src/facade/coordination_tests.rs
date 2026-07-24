@@ -1,3 +1,4 @@
+use crate::PeerCredentials;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,7 +47,7 @@ fn bound_session(facade: &Facade, project: ProjectId) -> (SessionId, ProcessId) 
 fn acquiring_with_no_project_in_scope_is_refused() {
     // No projects loaded and an unbound session → no effective project to scope the lease to.
     let facade = facade_with(Arc::new(FakeProjectRepo::new()));
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
 
     assert!(matches!(
         facade
@@ -65,7 +66,7 @@ fn acquiring_without_a_bound_process_is_refused() {
         .upsert(Path::new("/tmp/soloist-coordination-test"), Some("p"), None)
         .expect("seed one project");
     let facade = facade_with(projects);
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
 
     assert!(matches!(
         facade
@@ -121,7 +122,7 @@ fn setting_a_timer_without_a_bound_process_is_refused() {
         .upsert(Path::new("/tmp/soloist-timer-test"), Some("p"), None)
         .expect("seed one project");
     let facade = facade_with(projects);
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
 
     assert!(matches!(
         facade

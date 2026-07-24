@@ -10,19 +10,20 @@
 
 use super::scoped::ScopedFacade;
 use super::Facade;
-use crate::identity::{IdentityError, Whoami};
+use crate::identity::{IdentityError, PeerCredentials, Whoami};
 use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::projects::ProjectRef;
 
 impl Facade {
     /// Opens an identity session for a new MCP connection (C8). The IPC server holds the
     /// returned [`SessionId`] for the life of the connection and passes it on every call,
-    /// so each tool acts under the right identity and project scope. `peer_pgid` is the
-    /// connecting peer's process group, read from the kernel by the transport adapter
-    /// (`None` when it cannot authenticate the peer); a bind or project selection is matched
-    /// against it, so a session can only scope to a process it actually runs in.
-    pub fn open_session(&self, peer_pgid: Option<i32>) -> SessionId {
-        self.identity.open(peer_pgid)
+    /// so each tool acts under the right identity and project scope. `peer` is the connecting
+    /// peer's [`PeerCredentials`], read from the kernel by the transport adapter (both facts
+    /// `None` when it cannot authenticate the peer); a bind or project selection is matched
+    /// against them, so a session can only scope to a process — or a project directory — it
+    /// actually runs in.
+    pub fn open_session(&self, peer: PeerCredentials) -> SessionId {
+        self.identity.open(peer)
     }
 
     /// The lean id-and-name reference for a resolved effective project. The id is authoritative —
@@ -36,13 +37,14 @@ impl Facade {
         }
     }
 
-    /// The project a session's scoped tools act on: its explicit selection, else the
-    /// project owning its bound process, else the sole loaded project when there is
-    /// exactly one — otherwise `None` (ambiguous; a scoped tool must ask the caller to
-    /// `select_project`). Best-effort: a store read error resolves to `None` rather than
-    /// failing `whoami`. The selection and bound process are themselves authenticated at
-    /// bind/select time, so each non-`None` resolution is a project the caller runs in (the
-    /// sole-project default is the one unambiguous exception).
+    /// The project a session's scoped tools act on: its explicit selection, else the project
+    /// owning its bound process, else the project its connecting peer's working directory sits
+    /// inside, else the sole loaded project when there is exactly one — otherwise `None`
+    /// (ambiguous; a scoped tool must ask the caller to `select_project`). Best-effort: a store
+    /// read error resolves to `None` rather than failing `whoami`. The selection, bound process,
+    /// and working directory are each authenticated (the selection and bind at their own time, the
+    /// directory being a kernel-read fact), so every non-`None` resolution is a project the caller
+    /// runs in (the sole-project default is the one unambiguous exception).
     pub fn effective_project(&self, session: SessionId) -> Option<ProjectId> {
         if let Some(project) = self.identity.selected_project(session) {
             return Some(project);
@@ -52,10 +54,25 @@ impl Facade {
                 return Some(view.project);
             }
         }
+        if let Some(project) = self.project_at_peer_cwd(session) {
+            return Some(project);
+        }
         match self.projects.list() {
             Ok(projects) if projects.len() == 1 => projects.first().map(|record| record.id),
             _ => None,
         }
+    }
+
+    /// The loaded project the session's connecting peer runs *in*, resolved from the kernel-read
+    /// working directory the transport authenticated — the open project whose root contains that
+    /// directory (deepest wins). This is the authenticated scope signal for an agent Soloist did
+    /// not launch (no managed process in its group); it is the counterpart to the process-group
+    /// signal for one it did, and both the scope resolution and the `select_project` authenticity
+    /// check share it. `None` when the peer supplied no directory or no open project contains it;
+    /// best-effort, so a store read error also resolves to `None`.
+    fn project_at_peer_cwd(&self, session: SessionId) -> Option<ProjectId> {
+        let cwd = self.identity.peer_cwd(session)?;
+        self.projects.project_at_path(&cwd).ok().flatten()
     }
 }
 
@@ -163,12 +180,15 @@ impl ScopedFacade<'_> {
             .and_then(|pgid| self.inner.supervisor.process_at_pgid(pgid))
     }
 
-    /// The project the session's home process belongs to — the only project a caller can
-    /// authentically select. `None` when the caller has no home process.
+    /// The project the session's caller authentically runs in — the only project it can select or
+    /// transfer to. It is the project of its home process (the group signal, for a Soloist-launched
+    /// agent), else the project its connecting peer's working directory sits inside (the directory
+    /// signal, for an agent Soloist did not launch). `None` when neither resolves.
     fn home_project(&self) -> Option<ProjectId> {
         self.home_process()
             .and_then(|id| self.inner.process_view(id))
             .map(|view| view.project)
+            .or_else(|| self.inner.project_at_peer_cwd(self.session))
     }
 
     /// Whether `session` is authentically scoped to `project` — its connecting peer runs in it,

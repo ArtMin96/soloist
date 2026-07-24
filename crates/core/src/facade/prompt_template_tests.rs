@@ -1,5 +1,6 @@
 use crate::facade::Facade;
 use crate::ids::SessionId;
+use crate::PeerCredentials;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -30,7 +31,7 @@ fn scoped_facade() -> (Facade, SessionId) {
         .template_repo(Arc::new(FakeTemplateRepo::new()))
         .build(),
     );
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     (facade, session)
 }
 
@@ -46,7 +47,7 @@ fn unscoped_facade() -> (Facade, SessionId) {
         .template_repo(Arc::new(FakeTemplateRepo::new()))
         .build(),
     );
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     (facade, session)
 }
 

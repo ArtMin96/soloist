@@ -1,3 +1,4 @@
+use crate::PeerCredentials;
 use std::sync::Arc;
 
 use super::*;
@@ -45,7 +46,7 @@ fn blank_feedback_is_refused() {
 #[test]
 fn writing_the_guide_with_no_project_in_scope_is_refused() {
     let facade = facade_over(Arc::new(FakeProjectRepo::new()));
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
 
     assert!(matches!(
         facade
@@ -66,7 +67,7 @@ fn the_guide_lands_in_the_scoped_projects_root_and_reruns_replace() {
         .expect("seed one project");
     let facade = facade_over(projects);
     // The sole loaded project gives the unbound session its default scope.
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
 
     let first = facade
         .scoped(session)

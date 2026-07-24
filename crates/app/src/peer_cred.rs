@@ -1,28 +1,34 @@
-//! Reading the connecting peer's process group from a Unix-socket connection.
+//! Reading the connecting peer's credentials from a Unix-socket connection.
 //!
 //! The local IPC server authenticates a session's project scope against the kernel-reported
-//! credentials of the process on the other end of the socket (`SO_PEERCRED`), resolving that
-//! peer's process group so the core can match it to the managed process the caller runs in.
-//! This is the one place that OS credential detail lives; the core only ever compares plain
-//! process-group ids it is handed.
+//! credentials of the process on the other end of the socket (`SO_PEERCRED`), resolving that peer's
+//! process **group** so the core can match it to the managed process the caller runs in, and its
+//! working **directory** so the core can match it to the project root the caller runs under. This
+//! is the one place that OS credential detail lives; the core only ever compares plain
+//! process-group ids and paths it is handed.
+
+use std::path::PathBuf;
 
 use nix::unistd::{getpgid, Pid, Uid};
+use soloist_core::PeerCredentials;
 use tokio::net::UnixStream;
 
-/// The connecting peer's process group, or `None` when it cannot be resolved — the peer
-/// reported no pid, or it exited before we looked. A `None` peer leaves the session
-/// unauthenticated: it can use the open read tools but cannot bind to a process or select a
-/// project scope (both require a matching home process), so no cross-project surface is
-/// granted. The pid (from `SO_PEERCRED`) and its group are read in two steps; in the rare
-/// case the peer exits and its pid is reused in between, the resolved group is stale and
-/// matches no managed process — a refused bind, never a wrong-scope grant (fail closed).
+/// The connecting peer's [`PeerCredentials`] — its process group and working directory, each
+/// `None` when it cannot be resolved (the peer reported no pid, exited before we looked, or its
+/// `/proc` entry was unreadable). Both `None` leaves the session unauthenticated: it can use the
+/// open read tools but cannot bind to a process or select a project scope (both require a matching
+/// home process or directory), so no cross-project surface is granted. The pid (from `SO_PEERCRED`)
+/// and its group/cwd are read in two steps; in the rare case the peer exits and its pid is reused in
+/// between, the resolved facts are stale and match no managed process (and, for a stale cwd, at most
+/// a project the caller genuinely ran in) — a refused or same-scope grant, never a foreign one (fail
+/// closed).
 ///
 /// Returns an error — which the caller treats as a dead connection and drops — when the peer
-/// credentials cannot be read at all, **or** when the peer is a different UID than Soloist
-/// runs as. The `0700` data directory already confines the socket to the owning user, so a
-/// foreign UID should never reach here; asserting it anyway (`SO_PEERCRED` reports the peer's
-/// UID unforgeably) fails the connection closed rather than serving any surface to another user.
-pub fn peer_pgid(stream: &UnixStream) -> std::io::Result<Option<i32>> {
+/// credentials cannot be read at all, **or** when the peer is a different UID than Soloist runs as.
+/// The `0700` data directory already confines the socket to the owning user, so a foreign UID should
+/// never reach here; asserting it anyway (`SO_PEERCRED` reports the peer's UID unforgeably) fails the
+/// connection closed rather than serving any surface to another user.
+pub fn peer_credentials(stream: &UnixStream) -> std::io::Result<PeerCredentials> {
     let cred = stream.peer_cred()?;
     let own = Uid::current().as_raw();
     if !peer_uid_permitted(cred.uid(), own) {
@@ -32,11 +38,22 @@ pub fn peer_pgid(stream: &UnixStream) -> std::io::Result<Option<i32>> {
         ));
     }
     let Some(pid) = cred.pid() else {
-        return Ok(None);
+        return Ok(PeerCredentials::default());
     };
-    Ok(getpgid(Some(Pid::from_raw(pid)))
-        .ok()
-        .map(|pgid| pgid.as_raw()))
+    Ok(PeerCredentials {
+        pgid: getpgid(Some(Pid::from_raw(pid)))
+            .ok()
+            .map(|pgid| pgid.as_raw()),
+        cwd: peer_cwd(pid),
+    })
+}
+
+/// The peer's working directory, read from `/proc/<pid>/cwd` (a symlink to the resolved absolute
+/// path). `None` when it cannot be read — the peer exited, or the kernel denied the read — so an
+/// unreadable directory grants no scope rather than a wrong one (fail closed). The read is confined
+/// here so the core is handed a plain path, never a `/proc` detail.
+fn peer_cwd(pid: i32) -> Option<PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
 }
 
 /// Whether a peer connecting as `peer_uid` may be served on a socket owned by `own_uid`: only
@@ -46,22 +63,23 @@ fn peer_uid_permitted(peer_uid: u32, own_uid: u32) -> bool {
     peer_uid == own_uid
 }
 
-/// What to do with a new connection given the resolved peer group from [`peer_pgid`]: open a
-/// session with that scope, or drop the connection. A `None` scope is *unauthenticated* (open
-/// read tools only, no bind or project select) — it is **not** a drop; only refused credentials
-/// (unreadable, or a foreign UID, surfaced as an `Err`) drop the connection. Split out as a pure
-/// mapping so this fail-closed decision is unit-tested directly, without a real broken socket.
+/// What to do with a new connection given the resolved peer credentials from [`peer_credentials`]:
+/// open a session with them, or drop the connection. Credentials with both facts `None` are
+/// *unauthenticated* (open read tools only, no bind or project select) — that is **not** a drop;
+/// only refused credentials (unreadable, or a foreign UID, surfaced as an `Err`) drop the
+/// connection. Split out as a pure mapping so this fail-closed decision is unit-tested directly,
+/// without a real broken socket.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PeerScope {
-    /// Open a session scoped to this peer group; `None` is unauthenticated.
-    Open(Option<i32>),
+    /// Open a session with these peer credentials; both facts `None` is unauthenticated.
+    Open(PeerCredentials),
     /// Refuse the connection outright.
     Drop,
 }
 
-pub fn peer_scope(resolved: &std::io::Result<Option<i32>>) -> PeerScope {
+pub fn peer_scope(resolved: &std::io::Result<PeerCredentials>) -> PeerScope {
     match resolved {
-        Ok(pgid) => PeerScope::Open(*pgid),
+        Ok(credentials) => PeerScope::Open(credentials.clone()),
         Err(_) => PeerScope::Drop,
     }
 }

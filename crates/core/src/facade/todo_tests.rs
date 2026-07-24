@@ -1,5 +1,6 @@
 use crate::facade::Facade;
 use crate::ids::SessionId;
+use crate::PeerCredentials;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -47,14 +48,14 @@ fn scoped_facade() -> (Facade, SessionId) {
         .upsert(Path::new("/tmp/soloist-todo-test"), Some("p"), None)
         .expect("seed one project");
     let facade = facade_with(projects);
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     (facade, session)
 }
 
 #[test]
 fn creating_with_no_project_in_scope_is_refused() {
     let facade = facade_with(Arc::new(FakeProjectRepo::new()));
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     assert!(matches!(
         facade
             .scoped(session)
@@ -259,7 +260,7 @@ fn the_local_comment_path_creates_an_unattributed_comment() {
         .expect("seed one project")
         .id;
     let facade = facade_with(projects);
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     let todo = facade
         .scoped(session)
         .todo_create(doc("x", TodoStatus::Open), None)
@@ -414,7 +415,7 @@ fn todo_transfer_in_refuses_an_unknown_target_project() {
         .expect("A")
         .id;
     let facade = facade_with(projects);
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     let todo = facade
         .scoped(session)
         .todo_create(doc("ship", TodoStatus::Open), None)

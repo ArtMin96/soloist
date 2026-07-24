@@ -8,6 +8,7 @@ use crate::testing::{
     authentic_session, terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
     TEST_PEER_PGID,
 };
+use crate::PeerCredentials;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
@@ -365,7 +366,7 @@ async fn launch_agent_rejects_an_unknown_project() {
 #[tokio::test]
 async fn whoami_of_a_fresh_session_is_unbound_and_unscoped() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
 
     let who = facade.scoped(session).whoami();
     assert_eq!(who.session, session);
@@ -408,7 +409,7 @@ async fn binding_scopes_a_session_to_its_process_project() {
 #[tokio::test]
 async fn binding_an_unknown_process_is_rejected() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     assert!(matches!(
         facade
             .scoped(session)
@@ -429,7 +430,7 @@ async fn binding_a_process_the_caller_does_not_run_in_is_refused() {
         "sleep 60",
     ));
     facade.supervisor().assign_test_group(id, TEST_PEER_PGID);
-    let session = facade.open_session(Some(9999)); // a peer group owning no managed process
+    let session = facade.open_session(PeerCredentials::in_group(9999)); // a peer group owning no managed process
     assert!(matches!(
         facade.scoped(session).bind_session_process(id),
         Err(IdentityError::ForeignProcess)
@@ -497,7 +498,7 @@ async fn selecting_an_out_of_scope_process_is_refused() {
 #[tokio::test]
 async fn selecting_an_unknown_process_is_rejected() {
     let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     assert!(matches!(
         facade
             .scoped(session)
@@ -514,7 +515,7 @@ async fn a_lone_loaded_project_is_the_default_scope() {
 
     // With exactly one project and no explicit selection, it is the effective scope — the
     // unambiguous single-project default, granted even to an unauthenticated peer.
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     assert_eq!(
         facade
             .scoped(session)

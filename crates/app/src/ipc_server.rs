@@ -109,17 +109,18 @@ fn accept_error_is_fatal(err: &std::io::Error) -> bool {
     )
 }
 
-/// Serves one client connection: reads the connecting peer's process group, opens an identity
-/// session bound to it, answers framed requests until the peer disconnects, then closes the
-/// session so its scope and binding are forgotten. The peer group is what authenticates a
-/// session's project scope — the core matches it to the managed process the caller runs in —
-/// so a client cannot bind to or act on a sibling project it does not run in. A connection
-/// whose peer credentials cannot be read, or whose peer is a different UID than Soloist runs
-/// as, is dropped (fail closed).
+/// Serves one client connection: reads the connecting peer's credentials, opens an identity
+/// session with them, answers framed requests until the peer disconnects, then closes the
+/// session so its scope and binding are forgotten. The peer's group and working directory are
+/// what authenticate a session's project scope — the core matches the group to the managed
+/// process the caller runs in, and the directory to the project root it runs under — so a client
+/// cannot bind to or act on a sibling project it does not run in. A connection whose peer
+/// credentials cannot be read, or whose peer is a different UID than Soloist runs as, is dropped
+/// (fail closed).
 async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
-    let resolved = peer_cred::peer_pgid(&stream);
-    let peer_pgid = match peer_cred::peer_scope(&resolved) {
-        peer_cred::PeerScope::Open(peer_pgid) => peer_pgid,
+    let resolved = peer_cred::peer_credentials(&stream);
+    let credentials = match peer_cred::peer_scope(&resolved) {
+        peer_cred::PeerScope::Open(credentials) => credentials,
         peer_cred::PeerScope::Drop => {
             // Credentials unreadable, or the peer is a different user — refuse either way.
             if let Err(err) = &resolved {
@@ -128,7 +129,7 @@ async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
             return;
         }
     };
-    let session = app.state::<Arc<Facade>>().open_session(peer_pgid);
+    let session = app.state::<Arc<Facade>>().open_session(credentials);
     loop {
         let request: IpcRequest = match read_frame(&mut stream).await {
             Ok(Some(request)) => request,

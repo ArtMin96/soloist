@@ -1,5 +1,6 @@
 use crate::facade::Facade;
 use crate::ids::SessionId;
+use crate::PeerCredentials;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -37,7 +38,7 @@ fn scoped_facade() -> (Facade, SessionId) {
         .scratchpad_repo(Arc::new(FakeScratchpadRepo::new()))
         .build(),
     );
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     (facade, session)
 }
 
@@ -54,7 +55,7 @@ fn writing_with_no_project_in_scope_is_refused() {
         .scratchpad_repo(Arc::new(FakeScratchpadRepo::new()))
         .build(),
     );
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
 
     assert!(matches!(
         facade

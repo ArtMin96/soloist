@@ -8,6 +8,7 @@
 //! which alone can see the project registry and the supervisor.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -43,24 +44,66 @@ impl Origin {
     }
 }
 
+/// The unforgeable facts the transport reads from the kernel about a connection's peer: the
+/// process group it runs in and the working directory it runs from. Both authenticate a session's
+/// project scope *without the caller asserting either* — the group matches a managed process the
+/// caller runs in, the directory matches a project root the caller runs under — so neither can be
+/// forged by a tool argument. Read together from the one peer at [`Identity::open`], they are the
+/// two ways to prove the same fact: which project the caller is in. A Soloist-launched agent proves
+/// it by its group (its `soloist-mcp` child inherits the managed process's group); an agent Soloist
+/// did not launch proves it by its directory (its group owns no managed process). Either field is
+/// `None` when the transport could not read it — an absent fact grants no scope (fail closed).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PeerCredentials {
+    /// The peer's process group, or `None` when the transport could not resolve it.
+    pub pgid: Option<i32>,
+    /// The peer's working directory, or `None` when the transport could not read it.
+    pub cwd: Option<PathBuf>,
+}
+
+impl PeerCredentials {
+    /// A peer authenticated by its process group, with no known working directory — the shape an
+    /// MCP client running inside a managed process's group presents (and the identity tests use).
+    pub fn in_group(pgid: i32) -> Self {
+        Self {
+            pgid: Some(pgid),
+            cwd: None,
+        }
+    }
+
+    /// A peer authenticated by the working directory it runs in, with no managed process group —
+    /// the shape an agent Soloist did not launch presents (its group owns no managed process).
+    pub fn in_dir(cwd: PathBuf) -> Self {
+        Self {
+            pgid: None,
+            cwd: Some(cwd),
+        }
+    }
+
+    /// A peer the transport could not authenticate at all (no group, no directory).
+    pub fn unauthenticated() -> Self {
+        Self::default()
+    }
+}
+
 /// The mutable state of one session: who the caller *claims* to be, the project it
-/// explicitly selected (if any), and the transport-authenticated process group of the
+/// explicitly selected (if any), and the transport-authenticated [`PeerCredentials`] of the
 /// connecting peer.
 ///
-/// `peer_pgid` is the one fact the caller cannot forge: the transport adapter reads it from
-/// the kernel (`SO_PEERCRED` on the Unix socket) and supplies it at [`Identity::open`]. The
-/// façade reconciles a self-asserted bind/select against it, so a session can only scope to a
-/// process it actually runs in. `None` means the transport could not authenticate the peer
-/// (no live cross-project surface is granted to such a session — see the façade gates).
+/// `peer` is the part the caller cannot forge: the transport adapter reads it from the kernel
+/// (`SO_PEERCRED` on the Unix socket) and supplies it at [`Identity::open`]. The façade reconciles
+/// a self-asserted bind/select against it, so a session can only scope to a process — or a project
+/// directory — it actually runs in. Both facts `None` means the transport could not authenticate
+/// the peer (no live cross-project surface is granted to such a session — see the façade gates).
 #[derive(Clone, Debug, Default)]
 struct Session {
     origin: Origin,
     selected_project: Option<ProjectId>,
     /// An informational default-target hint the caller selected, reported by `whoami`. Unlike
     /// `selected_project` it confers no scope or authority — every scoped tool takes an
-    /// explicit process id — so it is never reconciled against `peer_pgid`.
+    /// explicit process id — so it is never reconciled against `peer`.
     selected_process: Option<ProcessId>,
-    peer_pgid: Option<i32>,
+    peer: PeerCredentials,
 }
 
 /// What a session resolves to: its caller [`Origin`], the process it is bound to (if any) with
@@ -124,16 +167,17 @@ impl Identity {
         Self::default()
     }
 
-    /// Opens a fresh session for a new MCP connection and returns its id. `peer_pgid` is the
-    /// connecting peer's process group, read from the kernel by the transport adapter (`None`
-    /// when the transport cannot authenticate the peer); the façade matches a bind/select
-    /// against it so the session can only scope to a process it actually runs in.
-    pub fn open(&self, peer_pgid: Option<i32>) -> SessionId {
+    /// Opens a fresh session for a new MCP connection and returns its id. `peer` is the
+    /// connecting peer's [`PeerCredentials`], read from the kernel by the transport adapter (both
+    /// facts `None` when it cannot authenticate the peer); the façade matches a bind/select against
+    /// them so the session can only scope to a process — or a project directory — it actually runs
+    /// in.
+    pub fn open(&self, peer: PeerCredentials) -> SessionId {
         let id = SessionId::next();
         lock(&self.sessions).insert(
             id,
             Session {
-                peer_pgid,
+                peer,
                 ..Session::default()
             },
         );
@@ -190,9 +234,18 @@ impl Identity {
 
     /// The connecting peer's process group recorded for a session ([`None`] if unknown or the
     /// transport could not authenticate it) — the unforgeable fact the façade matches a
-    /// bind/select against.
+    /// bind/select against for a Soloist-launched agent.
     pub fn peer_pgid(&self, session: SessionId) -> Option<i32> {
-        lock(&self.sessions).get(&session).and_then(|s| s.peer_pgid)
+        lock(&self.sessions).get(&session).and_then(|s| s.peer.pgid)
+    }
+
+    /// The connecting peer's working directory recorded for a session ([`None`] if the transport
+    /// could not read it) — the unforgeable fact the façade resolves to a project root for an agent
+    /// Soloist did not launch (no managed process in its group).
+    pub fn peer_cwd(&self, session: SessionId) -> Option<PathBuf> {
+        lock(&self.sessions)
+            .get(&session)
+            .and_then(|s| s.peer.cwd.clone())
     }
 
     /// Applies `f` to a session's state, creating the entry if the session was never

@@ -1,5 +1,6 @@
 use crate::facade::Facade;
 use crate::ids::SessionId;
+use crate::PeerCredentials;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -44,7 +45,7 @@ fn facade() -> (Facade, SessionId, ProjectId) {
         .todo_repo(Arc::new(FakeTodoRepo::new()))
         .build(),
     );
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     (facade, session, project)
 }
 

@@ -20,8 +20,8 @@ use soloist_core::testing::{
     FakeTodoRepo, FakeTrustRepo,
 };
 use soloist_core::{
-    AgentActivity, AgentKind, AgentSignal, AgentTool, CorePorts, Facade, IdleMode, ProcStatus,
-    ProcessId, PromptMode, TodoDoc, TodoStatus, TokioClock,
+    AgentActivity, AgentKind, AgentSignal, AgentTool, CorePorts, Facade, IdleMode, PeerCredentials,
+    ProcStatus, ProcessId, PromptMode, TodoDoc, TodoStatus, TokioClock,
 };
 use soloist_pty::PtyProcessSpawner;
 use tokio::time::{sleep, timeout};
@@ -93,7 +93,7 @@ async fn a_lead_spawns_a_worker_assigns_a_locked_todo_and_is_woken_when_the_work
         .supervisor()
         .pgid_of(lead)
         .expect("the running lead has a live group");
-    let session = facade.open_session(Some(pgid));
+    let session = facade.open_session(PeerCredentials::in_group(pgid));
     facade
         .scoped(session)
         .bind_session_process(lead)

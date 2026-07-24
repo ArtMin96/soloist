@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn a_fresh_session_is_unbound_with_no_selection() {
     let identity = Identity::new();
-    let session = identity.open(None);
+    let session = identity.open(PeerCredentials::unauthenticated());
     assert_eq!(identity.origin(session), Origin::Unbound);
     assert_eq!(identity.selected_project(session), None);
     assert_eq!(identity.selected_process(session), None);
@@ -12,13 +12,16 @@ fn a_fresh_session_is_unbound_with_no_selection() {
 #[test]
 fn open_mints_distinct_sessions() {
     let identity = Identity::new();
-    assert_ne!(identity.open(None), identity.open(None));
+    assert_ne!(
+        identity.open(PeerCredentials::unauthenticated()),
+        identity.open(PeerCredentials::unauthenticated())
+    );
 }
 
 #[test]
 fn binding_records_the_process_origin() {
     let identity = Identity::new();
-    let session = identity.open(None);
+    let session = identity.open(PeerCredentials::unauthenticated());
     let process = ProcessId::from_raw(7);
     identity.bind_process(session, process);
     assert_eq!(identity.origin(session), Origin::Process(process));
@@ -28,7 +31,7 @@ fn binding_records_the_process_origin() {
 #[test]
 fn registering_records_an_external_label() {
     let identity = Identity::new();
-    let session = identity.open(None);
+    let session = identity.open(PeerCredentials::unauthenticated());
     identity.register_external(session, "claude-code".to_string());
     assert_eq!(
         identity.origin(session),
@@ -41,7 +44,7 @@ fn registering_records_an_external_label() {
 #[test]
 fn selecting_records_the_project() {
     let identity = Identity::new();
-    let session = identity.open(None);
+    let session = identity.open(PeerCredentials::unauthenticated());
     let project = ProjectId::from_raw(3);
     identity.select_project(session, project);
     assert_eq!(identity.selected_project(session), Some(project));
@@ -50,7 +53,7 @@ fn selecting_records_the_project() {
 #[test]
 fn selecting_records_the_process() {
     let identity = Identity::new();
-    let session = identity.open(None);
+    let session = identity.open(PeerCredentials::unauthenticated());
     let process = ProcessId::from_raw(5);
     identity.select_process(session, process);
     assert_eq!(identity.selected_process(session), Some(process));
@@ -61,7 +64,7 @@ fn the_latest_origin_wins() {
     // A session that binds to a process and later registers a label keeps the label —
     // each call replaces the origin rather than accumulating.
     let identity = Identity::new();
-    let session = identity.open(None);
+    let session = identity.open(PeerCredentials::unauthenticated());
     identity.bind_process(session, ProcessId::from_raw(1));
     identity.register_external(session, "external".to_string());
     assert_eq!(
@@ -73,7 +76,7 @@ fn the_latest_origin_wins() {
 #[test]
 fn closing_drops_session_state() {
     let identity = Identity::new();
-    let session = identity.open(None);
+    let session = identity.open(PeerCredentials::unauthenticated());
     identity.bind_process(session, ProcessId::from_raw(1));
     identity.select_project(session, ProjectId::from_raw(1));
     identity.close(session);
@@ -91,11 +94,26 @@ fn an_unknown_session_reads_as_unbound() {
 }
 
 #[test]
-fn open_records_the_transport_peer_group() {
-    // The connecting peer's process group is recorded at open so the façade can match a
-    // bind/select against it; a session opened without one (a transport that cannot
-    // authenticate) reads as no peer group.
+fn open_records_the_transport_peer_group_and_working_directory() {
+    // The connecting peer's process group and working directory are recorded at open so the façade
+    // can match a bind/select against them; a session opened without either (a transport that
+    // cannot authenticate) reads as no peer group and no peer directory.
     let identity = Identity::new();
-    assert_eq!(identity.peer_pgid(identity.open(Some(4242))), Some(4242));
-    assert_eq!(identity.peer_pgid(identity.open(None)), None);
+
+    let by_group = identity.open(PeerCredentials::in_group(4242));
+    assert_eq!(identity.peer_pgid(by_group), Some(4242));
+    assert_eq!(identity.peer_cwd(by_group), None);
+
+    let by_dir = identity.open(PeerCredentials::in_dir(PathBuf::from(
+        "/projects/storefront",
+    )));
+    assert_eq!(identity.peer_pgid(by_dir), None);
+    assert_eq!(
+        identity.peer_cwd(by_dir),
+        Some(PathBuf::from("/projects/storefront"))
+    );
+
+    let unauthenticated = identity.open(PeerCredentials::unauthenticated());
+    assert_eq!(identity.peer_pgid(unauthenticated), None);
+    assert_eq!(identity.peer_cwd(unauthenticated), None);
 }

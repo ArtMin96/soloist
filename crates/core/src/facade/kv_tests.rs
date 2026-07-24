@@ -1,4 +1,5 @@
 use crate::facade::Facade;
+use crate::PeerCredentials;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -30,14 +31,14 @@ fn scoped_facade() -> (Facade, SessionId) {
         .upsert(Path::new("/tmp/soloist-kv-test"), Some("p"), None)
         .expect("seed one project");
     let facade = facade_with_kv(projects);
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     (facade, session)
 }
 
 #[test]
 fn kv_set_with_no_project_scope_is_refused() {
     let facade = facade_with_kv(Arc::new(FakeProjectRepo::new()));
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     // Two or more projects → no automatic scope
     assert!(matches!(
         facade.scoped(session).kv_set("k".into(), json!(1)),

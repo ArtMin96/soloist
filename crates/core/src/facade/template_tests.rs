@@ -1,5 +1,6 @@
 //! The seeding seam and the default-template selection, exercised end to end through the façade.
 
+use crate::PeerCredentials;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -37,7 +38,7 @@ fn facade() -> (Facade, SessionId) {
         .settings_repo(Arc::new(FakeSettingsRepo::new()))
         .build(),
     );
-    let session = facade.open_session(None);
+    let session = facade.open_session(PeerCredentials::unauthenticated());
     (facade, session)
 }
 
