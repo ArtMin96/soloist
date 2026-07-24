@@ -134,6 +134,7 @@ describe("api — orchestration read-model wrapper", () => {
       timers: [],
       leases: [],
       scratchpads: [],
+      diagrams: [],
       kv: [],
     };
     const seen = captureIpc("orchestration_snapshot", snapshot);

@@ -35,6 +35,7 @@ function snapshotWith(agentIds: number[]): OrchestrationSnapshot {
     timers: [],
     leases: [],
     scratchpads: [],
+    diagrams: [],
     kv: [],
   };
 }
