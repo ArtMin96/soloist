@@ -1,5 +1,4 @@
 import { useRef, useState, type ComponentType, type ReactNode } from "react";
-import { Dialog as DialogPrimitive } from "radix-ui";
 import { X } from "lucide-react";
 import { AgentsPanel } from "@/components/settings/AgentsPanel";
 import { AppearancePanel } from "@/components/settings/AppearancePanel";
@@ -20,6 +19,7 @@ import {
   UNDEFINED_TABS,
 } from "@/components/settings/tabs";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useScrollEdge } from "@/store/useScrollEdge";
 
@@ -75,52 +75,51 @@ export function SettingsOverlay({
   const contentRef = useRef<HTMLDivElement>(null);
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Content
-          ref={contentRef}
-          aria-describedby={undefined}
-          // Radix decides "outside" from a capture handler it skips whenever the pointerdown is
-          // already `defaultPrevented`. The resizable split's divider prevents default on the way
-          // down, so a press on it read as a click outside the overlay and dismissed Settings
-          // mid-drag. The DOM knows better: re-check containment against the real event target.
-          onPointerDownOutside={(event) => {
-            const target = event.detail.originalEvent.target;
-            if (target instanceof Node && contentRef.current?.contains(target)) {
-              event.preventDefault();
-            }
-          }}
-          className="fixed inset-0 z-50 flex flex-col bg-background text-foreground outline-none duration-[var(--dur-sheet)] ease-out-quint data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-bottom-2 data-[state=closed]:duration-[var(--dur-sheet-out)] motion-reduce:animate-none"
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        ref={contentRef}
+        showCloseButton={false}
+        presentation="fullscreen"
+        aria-describedby={undefined}
+        // Radix decides "outside" from a capture handler it skips whenever the pointerdown is
+        // already `defaultPrevented`. The resizable split's divider prevents default on the way
+        // down, so a press on it read as a click outside the overlay and dismissed Settings
+        // mid-drag. The DOM knows better: re-check containment against the real event target.
+        onPointerDownOutside={(event) => {
+          const target = event.detail.originalEvent.target;
+          if (target instanceof Node && contentRef.current?.contains(target)) {
+            event.preventDefault();
+          }
+        }}
+      >
+        <header
+          data-tauri-drag-region
+          className={cn(
+            "flex h-11 shrink-0 items-center justify-between border-b px-4 transition-colors duration-[var(--dur-fast)]",
+            scrolled ? "border-border" : "border-transparent",
+          )}
         >
-          <header
-            data-tauri-drag-region
-            className={cn(
-              "flex h-11 shrink-0 items-center justify-between border-b px-4 transition-colors duration-[var(--dur-fast)]",
-              scrolled ? "border-border" : "border-transparent",
-            )}
+          <DialogTitle className="text-[0.9375rem] font-medium tracking-[-0.005em]">
+            Settings
+          </DialogTitle>
+          <DialogClose asChild>
+            <Button variant="ghost" size="icon-sm" aria-label="Close settings">
+              <X />
+            </Button>
+          </DialogClose>
+        </header>
+        <div className="flex min-h-0 flex-1">
+          <SettingsTabRail active={active} onSelect={setActive} />
+          <div
+            ref={panelRef}
+            role="tabpanel"
+            aria-labelledby={settingsTabButtonId(active)}
+            className="min-w-0 flex-1 overflow-y-auto bg-sidebar"
           >
-            <DialogPrimitive.Title className="text-[0.9375rem] font-medium tracking-[-0.005em]">
-              Settings
-            </DialogPrimitive.Title>
-            <DialogPrimitive.Close asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Close settings">
-                <X />
-              </Button>
-            </DialogPrimitive.Close>
-          </header>
-          <div className="flex min-h-0 flex-1">
-            <SettingsTabRail active={active} onSelect={setActive} />
-            <div
-              ref={panelRef}
-              role="tabpanel"
-              aria-labelledby={settingsTabButtonId(active)}
-              className="min-w-0 flex-1 overflow-y-auto bg-sidebar"
-            >
-              {panelFor(active, { project })}
-            </div>
+            {panelFor(active, { project })}
           </div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

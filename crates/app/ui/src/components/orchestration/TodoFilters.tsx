@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -49,12 +50,14 @@ export function TodoFilters({ filter, tags, onChange, trailing }: TodoFiltersPro
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            {TODO_STATUS_ORDER.map((status) => (
-              <SelectItem key={status} value={status}>
-                {TODO_STATUS[status]}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              <SelectItem value="all">All statuses</SelectItem>
+              {TODO_STATUS_ORDER.map((status) => (
+                <SelectItem key={status} value={status}>
+                  {TODO_STATUS[status]}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
         {trailing}

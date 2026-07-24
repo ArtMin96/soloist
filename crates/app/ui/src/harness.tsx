@@ -34,6 +34,7 @@ import { Kbd } from "@/components/ui/kbd";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -225,9 +226,11 @@ function Gallery() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="small">Small</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="large">Large</SelectItem>
+              <SelectGroup>
+                <SelectItem value="small">Small</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="large">Large</SelectItem>
+              </SelectGroup>
             </SelectContent>
           </Select>
           <Input disabled placeholder="Disabled" className="max-w-40" />
@@ -631,10 +634,12 @@ function MenusView() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="small">Small</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="large">Large</SelectItem>
-              <SelectItem value="extra">Extra large</SelectItem>
+              <SelectGroup>
+                <SelectItem value="small">Small</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="large">Large</SelectItem>
+                <SelectItem value="extra">Extra large</SelectItem>
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>

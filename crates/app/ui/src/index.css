@@ -1,15 +1,20 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
-@import "@fontsource-variable/geist-mono";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  /*
+   * AppKit typography is owned here, rather than repeated in individual components. On macOS,
+   * `-apple-system` resolves to San Francisco, Apple's current system UI family. The remaining
+   * stack keeps the app equally legible on the Linux platforms Soloist supports.
+   */
   --font-heading: var(--font-sans);
-  --font-sans: "Geist Variable", system-ui, sans-serif;
-  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono: "SF Mono", Menlo, Monaco, ui-monospace, monospace;
 
   /*
    * Motion easings. macOS animates with springs ({duration, bounce} → stiffness/damping,
@@ -296,10 +301,18 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-feature-settings: "cv01", "ss01";
+    font-family: var(--font-sans);
+    font-feature-settings: "kern";
+    font-kerning: normal;
+    text-rendering: optimizeLegibility;
   }
   html {
     @apply font-sans antialiased;
+    text-size-adjust: 100%;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
   }
 
   /*

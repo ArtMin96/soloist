@@ -2,6 +2,7 @@ import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -82,11 +83,13 @@ export function TodoDocFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {TODO_STATUS_ORDER.map((option) => (
-              <SelectItem key={option} value={option}>
-                {TODO_STATUS[option]}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              {TODO_STATUS_ORDER.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {TODO_STATUS[option]}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
       </div>

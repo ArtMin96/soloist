@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 interface FindBarProps {
@@ -43,7 +45,7 @@ export function FindBar({ query, onChange, onFindNext, onFindPrevious, onClose }
       )}
       aria-label="Find in terminal"
     >
-      <input
+      <Input
         ref={inputRef}
         type="text"
         value={query}
@@ -51,39 +53,18 @@ export function FindBar({ query, onChange, onFindNext, onFindPrevious, onClose }
         onKeyDown={handleKeyDown}
         placeholder="Find…"
         aria-label="Search query"
-        className={cn(
-          "w-40 bg-transparent text-[0.8125rem] outline-none",
-          "placeholder:text-muted-foreground",
-        )}
+        className="h-6 w-40 border-0 bg-transparent px-0 text-[0.8125rem] shadow-none focus-visible:ring-0"
       />
-      <div className="mx-1.5 h-3.5 w-px bg-border/60" aria-hidden />
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        onClick={onFindPrevious}
-        aria-label="Previous match"
-        className="size-6"
-      >
-        <ChevronUp className="size-3.5" />
+      <Separator orientation="vertical" className="mx-1.5 h-3.5 bg-border/60" />
+      <Button variant="ghost" size="icon-xs" onClick={onFindPrevious} aria-label="Previous match">
+        <ChevronUp />
       </Button>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        onClick={onFindNext}
-        aria-label="Next match"
-        className="size-6"
-      >
-        <ChevronDown className="size-3.5" />
+      <Button variant="ghost" size="icon-xs" onClick={onFindNext} aria-label="Next match">
+        <ChevronDown />
       </Button>
-      <div className="mx-0.5 h-3.5 w-px bg-border/60" aria-hidden />
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        onClick={onClose}
-        aria-label="Close find"
-        className="size-6"
-      >
-        <X className="size-3.5" />
+      <Separator orientation="vertical" className="mx-0.5 h-3.5 bg-border/60" />
+      <Button variant="ghost" size="icon-xs" onClick={onClose} aria-label="Close find">
+        <X />
       </Button>
     </search>
   );

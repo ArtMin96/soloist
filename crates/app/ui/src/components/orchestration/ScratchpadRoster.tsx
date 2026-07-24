@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -89,11 +90,13 @@ export function ScratchpadRoster({ scratchpads, selected, onSelect }: Scratchpad
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {SCRATCHPAD_SORT_ORDER.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {SCRATCHPAD_SORT_LABELS[option]}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {SCRATCHPAD_SORT_ORDER.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {SCRATCHPAD_SORT_LABELS[option]}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>

@@ -68,8 +68,9 @@ const LETTER_SPACING_PX: Record<LetterSpacing, number> = {
   wider: 1.3,
 };
 
-// The bundled monospace stack the terminal falls back to when no family is chosen.
-const DEFAULT_MONO_STACK = '"Geist Mono Variable", ui-monospace, monospace';
+// The terminal follows the same native-family policy as the app shell. SF Mono is used on macOS;
+// the remaining faces are platform fallbacks, not bundled web fonts.
+const DEFAULT_MONO_STACK = '"SF Mono", Menlo, Monaco, ui-monospace, monospace';
 
 const ROOT_FONT_PX = 16;
 
