@@ -6,10 +6,11 @@
 
 import type { McpFeatureGroup, McpSetupInfo, McpToolGroups } from "@/domain";
 
-// The pre-load fallback for the enablement: Scratchpads / Todos / Timers default on, Key-Value
-// and Prompt Templates off. The facade's stored value supersedes this on load.
+// The pre-load fallback for the enablement: Scratchpads / Diagrams / Todos / Timers default on,
+// Key-Value and Prompt Templates off. The facade's stored value supersedes this on load.
 export const DEFAULT_MCP_TOOL_GROUPS: McpToolGroups = {
   scratchpads: true,
+  diagrams: true,
   todos: true,
   timers: true,
   key_value: false,
@@ -29,6 +30,11 @@ export const MCP_TOOL_GROUPS: McpGroupInfo[] = [
     group: "scratchpads",
     label: "Scratchpads",
     description: "Shared structured documents agents read and write.",
+  },
+  {
+    group: "diagrams",
+    label: "Diagrams",
+    description: "Shared Mermaid diagrams agents create and edit.",
   },
   {
     group: "todos",

@@ -1,7 +1,8 @@
 //! The orchestration read-model (a query projection over contexts C2/C4/C6).
 //!
 //! [`OrchestrationSnapshot`] is the single read the orchestration UI renders: the project's agent
-//! lineage tree plus its coordination state (todos, timers, leases, scratchpads, key-value). It is
+//! lineage tree plus its coordination state (todos, timers, leases, scratchpads, diagrams,
+//! key-value). It is
 //! **derived on read** from the live process registry (C2), the idle tracker (C4), and the durable
 //! coordination aggregates (C6) — never a separately stored copy of that state, so it cannot drift
 //! from the source of truth. The Facade assembles it ([`crate::facade::Facade::orchestration_snapshot`]);
@@ -11,7 +12,9 @@
 use serde::Serialize;
 
 use crate::agents::AgentActivity;
-use crate::coordination::{KvEntry, LeaseView, ScratchpadSummary, TimerView, TodoView};
+use crate::coordination::{
+    DiagramSummary, KvEntry, LeaseView, ScratchpadSummary, TimerView, TodoView,
+};
 use crate::ids::{ProcessId, ProjectId};
 use crate::process::{ProcStatus, ProcessKind};
 
@@ -72,6 +75,8 @@ pub struct OrchestrationSnapshot {
     pub leases: Vec<LeaseView>,
     /// One-line scratchpad summaries in the project.
     pub scratchpads: Vec<ScratchpadSummary>,
+    /// One-line diagram summaries in the project.
+    pub diagrams: Vec<DiagramSummary>,
     /// Key-value entries in the project, ordered by key.
     pub kv: Vec<KvEntry>,
 }

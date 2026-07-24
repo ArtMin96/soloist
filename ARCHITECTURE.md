@@ -93,7 +93,7 @@ the layer those contexts import.
 | **C3** Terminal I/O | `terminal/` | PTY read loop, rendered+raw buffers, OSC parse, attach replay | live (P4) |
 | **C4** Agents & Idle | `agents` (incl. `agents/idle/`) | agent-tool defs, launch, the 5-state idle FSM that decides `idle::AgentActivity` | live (P7) |
 | **C5** Monitoring | `metrics/` `portscan/` | CPU/mem sampling, `/proc` port discovery, readiness | live (P6: D1/D2/D3) |
-| **C6** Coordination | `coordination` | scratchpads, todos, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos + key-value); end-to-end orchestration (E7) proven |
+| **C6** Coordination | `coordination` | scratchpads, todos, diagrams, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos + key-value); **diagrams** (Mermaid source docs, `mermaid-diagrams` initiative) mirror scratchpads; end-to-end orchestration (E7) proven |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
 | **C8** Integration façade | `facade` `identity` | the public command/query API (`Facade`, local authority) + the session-scoped surface (`ScopedFacade`); MCP identity & effective scope | live (`facade`) |
 
@@ -114,7 +114,7 @@ until then. That is a roadmap marker — **not** dead code. A leftover empty fil
 
 ### Coordination flow — create → delegate → use (C6, the metaharness)
 
-Coordination (scratchpads, todos, timers, leases, key-value) is **durable, project-scoped SQLite state**
+Coordination (scratchpads, todos, diagrams, timers, leases, key-value) is **durable, project-scoped SQLite state**
 agents share to orchestrate each other token-free. All paths route through the **one `Facade`** (UI, MCP,
 HTTP behave identically):
 

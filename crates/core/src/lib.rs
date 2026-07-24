@@ -65,12 +65,14 @@ pub use config::{
 pub use configchange::{ConfigSync, Rename, TrustReviewCommand};
 pub use coordination::{
     is_link, placeholders, AcquireOutcome, Comment, CommentAuthor, CommentEdit, CommentOutcome,
-    ExportedTemplate, FireCond, IdleMode, Kv, KvEntry, KvRepo, LeaseReleaser, LeaseView, Leases,
-    Link, LinkContent, LinkError, LinkTarget, LockRepo, MissingPolicy, NewTimer, NoopKvRepo,
-    NoopLockRepo, NoopScratchpadRepo, NoopTemplateRepo, NoopTimerRepo, NoopTodoRepo, RenameError,
-    RenameResult, RenderError, RenderRequest, RenderedPrompt, ScratchpadLink, ScratchpadRef,
-    ScratchpadRepo, ScratchpadSummary, ScratchpadTransfer, ScratchpadView, Scratchpads,
-    SetWhenIdleOutcome, StoredLease, StoredScratchpad, StoredTemplate, StoredTimer, StoredTodo,
+    DiagramRef, DiagramRenameError, DiagramRenameResult, DiagramRepo, DiagramSummary, DiagramView,
+    DiagramWriteError, DiagramWriteResult, Diagrams, ExportedTemplate, FireCond, IdleMode, Kv,
+    KvEntry, KvRepo, LeaseReleaser, LeaseView, Leases, Link, LinkContent, LinkError, LinkTarget,
+    LockRepo, MissingPolicy, NewTimer, NoopDiagramRepo, NoopKvRepo, NoopLockRepo,
+    NoopScratchpadRepo, NoopTemplateRepo, NoopTimerRepo, NoopTodoRepo, RenameError, RenameResult,
+    RenderError, RenderRequest, RenderedPrompt, ScratchpadLink, ScratchpadRef, ScratchpadRepo,
+    ScratchpadSummary, ScratchpadTransfer, ScratchpadView, Scratchpads, SetWhenIdleOutcome,
+    StoredDiagram, StoredLease, StoredScratchpad, StoredTemplate, StoredTimer, StoredTodo,
     TemplateRepo, TemplateSummary, TemplateView, TemplateWriteResult, Templates, TimerRepo,
     TimerScheduler, TimerStatus, TimerView, Timers, TodoDoc, TodoError, TodoLockReleaser, TodoRepo,
     TodoStatus, TodoSummary, TodoView, TodoWriteResult, Todos, TransferResult,
@@ -87,7 +89,8 @@ pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, 
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};
 pub use ids::{
-    ProcessId, ProjectId, ScratchpadId, SessionId, TemplateId, TimerId, TodoId, PROCESS_ID_ENV,
+    DiagramId, ProcessId, ProjectId, ScratchpadId, SessionId, TemplateId, TimerId, TodoId,
+    PROCESS_ID_ENV,
 };
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use notify::{NoopNotifier, Notification, NotificationReactor, Notifier};

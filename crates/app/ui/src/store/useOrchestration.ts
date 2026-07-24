@@ -2,13 +2,20 @@ import { useCallback, useEffect, useState } from "react";
 import { onDomainEvent, orchestrationSnapshot } from "@/api";
 import { buildOrchestrationTree, type OrchestrationTreeNode } from "@/store/orchestrationTree";
 import { useReconcile } from "@/store/useReconcile";
-import type { AgentNode, DomainEvent, ScratchpadSummary, TimerView, TodoView } from "@/domain";
+import type {
+  AgentNode,
+  DiagramSummary,
+  DomainEvent,
+  ScratchpadSummary,
+  TimerView,
+  TodoView,
+} from "@/domain";
 
 // Domain events that change anything the orchestration surface renders: a process entering or
 // leaving the registry, a status / label / activity change (the agent tree), or a todo, scratchpad,
-// or timer mutation (the coordination panels). The snapshot is derived on read and its events carry
-// ids only, so the hook re-reads the one snapshot rather than folding deltas. Timer pause/resume
-// events are included so the panel reflects the new status without polling.
+// diagram, or timer mutation (the coordination panels). The snapshot is derived on read and its
+// events carry ids only, so the hook re-reads the one snapshot rather than folding deltas. Timer
+// pause/resume events are included so the panel reflects the new status without polling.
 const SNAPSHOT_EVENTS: ReadonlySet<DomainEvent["type"]> = new Set([
   "ProcessSpawned",
   "ProcessStatusChanged",
@@ -17,6 +24,7 @@ const SNAPSHOT_EVENTS: ReadonlySet<DomainEvent["type"]> = new Set([
   "AgentActivityChanged",
   "TodoChanged",
   "ScratchpadChanged",
+  "DiagramChanged",
   "TimerArmed",
   "TimerFired",
   "TimerCleared",
@@ -30,6 +38,8 @@ export interface OrchestrationStore {
   agents: AgentNode[];
   todos: TodoView[];
   scratchpads: ScratchpadSummary[];
+  /** One-line diagram summaries in the project. */
+  diagrams: DiagramSummary[];
   /** Armed and paused timers in the project, ordered by id. */
   timers: TimerView[];
   error: string | null;
@@ -44,6 +54,7 @@ const EMPTY: Snapshot = {
   agents: [],
   todos: [],
   scratchpads: [],
+  diagrams: [],
   timers: [],
 };
 
@@ -69,6 +80,7 @@ export function useOrchestration(project: number | null): OrchestrationStore {
           agents: snap.agents,
           todos: snap.todos,
           scratchpads: snap.scratchpads,
+          diagrams: snap.diagrams,
           timers: snap.timers,
         }),
       )
@@ -126,6 +138,7 @@ export function useOrchestration(project: number | null): OrchestrationStore {
     agents: view.agents,
     todos: view.todos,
     scratchpads: view.scratchpads,
+    diagrams: view.diagrams,
     timers: view.timers,
     error,
     refresh,

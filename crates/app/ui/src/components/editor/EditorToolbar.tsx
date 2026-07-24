@@ -13,9 +13,12 @@ import {
   SquareCode,
   Strikethrough,
   TextQuote,
+  Workflow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MERMAID_LANGUAGE } from "@/lib/mermaid";
 import { cn } from "@/lib/utils";
+import { insertMermaidDiagram } from "./mermaidBlock";
 
 // One toolbar control: the icon, its accessible name, whether it reads active in the current
 // selection, and the toggle it runs. Keeping them as data means the row is one map, not twelve
@@ -105,6 +108,12 @@ const TOOLS: ToolEntry[] = [
     label: "Code block",
     active: (e) => e.isActive("codeBlock"),
     run: (e) => e.chain().focus().toggleCodeBlock().run(),
+  },
+  {
+    icon: Workflow,
+    label: "Mermaid diagram",
+    active: (e) => e.isActive("codeBlock", { language: MERMAID_LANGUAGE }),
+    run: (e) => insertMermaidDiagram(e),
   },
 ];
 

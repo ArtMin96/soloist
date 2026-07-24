@@ -282,6 +282,8 @@ export type DomainEvent =
   | { type: "LeaseChanged"; project: number; key: string }
   // Keyed by the scratchpad's `name` handle (the addressing key its surface uses).
   | { type: "ScratchpadChanged"; project: number; name: string }
+  // Keyed by the diagram's `name` handle (the addressing key its surface uses).
+  | { type: "DiagramChanged"; project: number; name: string }
   | { type: "KvChanged"; project: number; key: string }
   // A template of `kind` was created, updated, or deleted. `project` names the scope it changed in
   // — null for the global library, an id for that project's — because the two are separate lists a
@@ -410,6 +412,37 @@ export interface ScratchpadView {
   rendered: string;
 }
 
+// A diagram in a listing (identity, handle, tags, archived flag, revision, and a one-line gist of the
+// source — its first non-blank line). Mirrors a scratchpad summary; the body is Mermaid source.
+export interface DiagramSummary {
+  id: number;
+  name: string;
+  tags: string[];
+  archived: boolean;
+  revision: number;
+  gist: string;
+  /** Unix millis of the last source write (0 for a document predating the field) — the recency sort key. */
+  updated_at: number;
+}
+
+// A diagram as the panel reads it: the raw Mermaid `source` plus its tags and revision (to guard the
+// next write). There is no `rendered` field — the core stores the source verbatim and never renders
+// it; rendering the Mermaid is the frontend's job.
+export interface DiagramView {
+  id: number;
+  name: string;
+  tags: string[];
+  archived: boolean;
+  revision: number;
+  source: string;
+}
+
+// A reference to one diagram: its durable id and the `name` handle resolved when it was read.
+export interface DiagramRef {
+  id: number;
+  name: string;
+}
+
 // A project-scoped key-value entry; `value` is arbitrary JSON.
 export interface KvEntry {
   key: string;
@@ -447,6 +480,7 @@ export interface OrchestrationSnapshot {
   timers: TimerView[];
   leases: LeaseView[];
   scratchpads: ScratchpadSummary[];
+  diagrams: DiagramSummary[];
   kv: KvEntry[];
 }
 
@@ -587,12 +621,19 @@ export interface Notifications {
 
 // A toggleable MCP feature-tool group (mirrors core::McpFeatureGroup). Core groups are always
 // served and are not represented here.
-export type McpFeatureGroup = "scratchpads" | "todos" | "timers" | "key_value" | "prompt_templates";
+export type McpFeatureGroup =
+  | "scratchpads"
+  | "diagrams"
+  | "todos"
+  | "timers"
+  | "key_value"
+  | "prompt_templates";
 
 // Which MCP feature-tool groups the server exposes (mirrors core::McpToolGroups). Scratchpads,
-// Todos and Timers default on; Key-Value and Prompt Templates default off.
+// Diagrams, Todos and Timers default on; Key-Value and Prompt Templates default off.
 export interface McpToolGroups {
   scratchpads: boolean;
+  diagrams: boolean;
   todos: boolean;
   timers: boolean;
   key_value: boolean;

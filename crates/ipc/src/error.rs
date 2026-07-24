@@ -64,6 +64,21 @@ pub enum IpcError {
     /// A scratchpad rename targeted a name already used in the project.
     #[error("a scratchpad with that name already exists")]
     ScratchpadNameTaken,
+    /// A diagram write carried a malformed source; the detail names every problem.
+    #[error("diagram is not well-formed: {0}")]
+    InvalidDiagram(String),
+    /// A diagram write expected a revision other than the one on record — re-read and retry.
+    #[error("diagram revision conflict (expected {expected:?}, found {actual:?})")]
+    DiagramRevisionConflict {
+        expected: Option<u64>,
+        actual: Option<u64>,
+    },
+    /// A diagram action named one that does not exist in the session's effective project.
+    #[error("no diagram under that name")]
+    UnknownDiagram,
+    /// A diagram rename targeted a name already used in the project.
+    #[error("a diagram with that name already exists")]
+    DiagramNameTaken,
     /// A todo write carried a malformed document; the detail names every problem.
     #[error("todo is not well-formed: {0}")]
     InvalidTodo(String),
@@ -161,6 +176,10 @@ impl IpcError {
             | IpcError::RevisionConflict { .. }
             | IpcError::UnknownScratchpad
             | IpcError::ScratchpadNameTaken
+            | IpcError::InvalidDiagram(_)
+            | IpcError::DiagramRevisionConflict { .. }
+            | IpcError::UnknownDiagram
+            | IpcError::DiagramNameTaken
             | IpcError::InvalidTodo(_)
             | IpcError::TodoRevisionConflict { .. }
             | IpcError::UnknownTodo
@@ -267,6 +286,12 @@ impl From<CoordinationError> for IpcError {
             }
             CoordinationError::UnknownScratchpad => IpcError::UnknownScratchpad,
             CoordinationError::ScratchpadNameTaken => IpcError::ScratchpadNameTaken,
+            CoordinationError::InvalidDiagram(message) => IpcError::InvalidDiagram(message),
+            CoordinationError::DiagramRevisionConflict { expected, actual } => {
+                IpcError::DiagramRevisionConflict { expected, actual }
+            }
+            CoordinationError::UnknownDiagram => IpcError::UnknownDiagram,
+            CoordinationError::DiagramNameTaken => IpcError::DiagramNameTaken,
             CoordinationError::InvalidTodo(message) => IpcError::InvalidTodo(message),
             CoordinationError::TodoRevisionConflict { expected, actual } => {
                 IpcError::TodoRevisionConflict { expected, actual }

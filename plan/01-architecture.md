@@ -62,7 +62,7 @@ The dependency rule (adapters → core, never the reverse) is CI-enforced (ref `
 | C3 | `terminal` | PTY read loops; **rendered + raw** buffers; input; resize; OSC parse | ProcessSpawner |
 | C4 | `agents` + `idle` | agent tool defs; launch; **5-state idle FSM**; optional summarization | Summarizer, Clock |
 | C5 | `metrics` + `ports` | CPU/mem sampling; `/proc` port discovery; readiness | Clock |
-| C6 | `coordination` (`scratchpads`,`todos`,`timers`,`locks`,`kv`) | durable coordination aggregates | Store, Clock |
+| C6 | `coordination` (`scratchpads`,`todos`,`diagrams`,`timers`,`locks`,`kv`) | durable coordination aggregates | Store, Clock |
 | C7 | `notify` | crash/attention/idle toasts; unread/attention-bell | Notifier, EventSink |
 | C8 | `facade` + `identity` | public command/query API; effective-project scope; `SOLOIST_PROCESS_ID` | — |
 | — | `events` | typed `DomainEvent` bus (`broadcast`) | — |

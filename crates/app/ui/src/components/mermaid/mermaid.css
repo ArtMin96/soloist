@@ -1,0 +1,78 @@
+/*
+ * Styling for the reusable diagram renderer and its three states — loading, error, rendered. It draws
+ * only from the design tokens (border, muted, foreground, destructive, radius) so a diagram reads as
+ * the same calm surface as the editor around it, and it carries a reduced-motion fallback. The diagram
+ * itself is themed by Mermaid from the same tokens (see the theme bridge); this file styles the frame.
+ */
+
+.mermaid-surface {
+  min-width: 0;
+}
+
+/* Loading: a calm pulsing block sized to the diagram's rough footprint, so the surface does not jump
+ * when the SVG arrives. Skeleton over spinner — the product register. */
+.mermaid-loading {
+  min-height: 7rem;
+  border-radius: var(--radius);
+  background: var(--muted);
+  animation: mermaid-pulse 1.6s var(--ease-out-quint) infinite;
+}
+
+@keyframes mermaid-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* Error: a quiet banner, never hue-only — a triangle-alert icon rides alongside the message so the
+ * state reads without relying on color. The tint is mixed from the destructive token so it stays
+ * subdued in both light and dark. */
+.mermaid-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid color-mix(in oklch, var(--destructive) 35%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in oklch, var(--destructive) 8%, transparent);
+  color: var(--destructive);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.mermaid-error-icon {
+  flex-shrink: 0;
+  width: 0.9375rem;
+  height: 0.9375rem;
+  margin-top: 0.05rem;
+}
+
+.mermaid-error-message {
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
+}
+
+/* Rendered: center the SVG and let a diagram wider than the surface scroll on its own rather than
+ * pushing the page sideways. */
+.mermaid-rendered {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0;
+  overflow-x: auto;
+}
+
+.mermaid-rendered svg {
+  max-width: 100%;
+  height: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mermaid-loading {
+    animation: none;
+  }
+}

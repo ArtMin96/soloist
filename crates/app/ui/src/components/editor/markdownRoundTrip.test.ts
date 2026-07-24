@@ -49,6 +49,7 @@ const CASES: [label: string, markdown: string][] = [
   ["ordered list", "1. one\n2. two"],
   ["task list", "- [ ] pending\n- [x] done"],
   ["code block", "```ts\nconst x = 1;\n```"],
+  ["mermaid diagram", "```mermaid\nflowchart TD\n  A --> B\n```"],
   ["inline marks", "A **bold** and *italic* and `code` word."],
   ["link", "See [the docs](https://example.com/page)."],
   ["blockquote", "> a quotation"],
@@ -103,6 +104,20 @@ describe("markdown round-trip", () => {
   // reach in and rewrite an entity the user actually typed.
   it("leaves a literal entity inside a code block alone", () => {
     expect(roundTrip("```html\n<p>&amp;</p>\n```")).toContain("<p>&amp;</p>");
+  });
+
+  // A ```mermaid fence must survive the editor's NodeView as an ordinary language-tagged code block:
+  // the language tag is kept and the diagram source — arrows, ampersands, angle brackets — is stored
+  // verbatim (the entity-correction layer treats code text as literal). A NodeView that swapped the
+  // codeBlock node for an atom would drop the fence and fail this.
+  it("round-trips a mermaid fence, keeping its language tag and diagram source verbatim", () => {
+    const source = "```mermaid\nflowchart LR\n  A -->|yes & no| B\n  C[a < b]\n```";
+    const out = roundTrip(source);
+    expect(out).toContain("```mermaid");
+    expect(out).toContain("A -->|yes & no| B");
+    expect(out).toContain("C[a < b]");
+    // And a second pass is a fixed point, so autosave never rewrites an unchanged diagram.
+    expect(roundTrip(out)).toBe(out);
   });
 
   it("treats a blank body as valid and empty", () => {

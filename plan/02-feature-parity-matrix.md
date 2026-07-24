@@ -144,6 +144,25 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | G16 | Inline images in scratchpad / todo bodies | 🟡 | — | later | A pasted/attached image renders in the editor and persists |
 | G17 | Todo **priority** field (High/Medium/Low) + bulk actions | 🟡 | — | later | A todo carries a priority; a bulk action applies to a selection |
 
+## DG. Diagrams — Mermaid (Soloist extension, `solo.yml`-independent)
+
+> **Soloist-only, not Solo parity.** `plan/05` records no diagram or Mermaid capability for Solo, and
+> no Solo page denies one — the public record is **silent**, and per `CLAUDE.md` §9 that silence is the
+> gap, decided in `plan/05` §12 and `KNOWN-DIVERGENCES` **D-20**. These rows are `v1` because the owner
+> directed the feature (2026-07-24, the `mermaid-diagrams` initiative), not because Solo is known to
+> have it. A Diagram is a first-class coordination document (sibling of scratchpads/todos) whose body
+> is a raw Mermaid `source` string; one reusable renderer serves both the standalone panel and the
+> in-note editor.
+
+| ID | Feature | Src | Phase | Target | Verify |
+|----|---------|-----|:----:|--------|--------|
+| DG1 | Diagram document CRUD — first-class coordination doc holding raw Mermaid `source`, tags/archive, **revision-guarded**; durable (`DiagramId`, migration v18), project-scoped, survives restart | ❓ | mermaid-diagrams | v1 | Read/write a diagram; a stale write → `DiagramRevisionConflict`; a diagram survives relaunch |
+| DG2 | `diagram_*` MCP tools (9 tools, default-**ON** group `Diagrams`), project-scoped, ungated by trust | ❓ | mermaid-diagrams | v1 | An agent `diagram_write`s a diagram and it appears live in the roster; a bound agent in project A cannot touch project B's diagrams |
+| DG3 | Standalone **Diagrams tab** in the Orchestration pane — roster + source-editor/live-preview, live on `DiagramChanged` | ❓ | mermaid-diagrams | v1 | Create/edit/rename/archive a diagram in the tab; an AI-written diagram appears without a manual refresh |
+| DG4 | Diagram panel **toolbox** — zoom/pan/fit+reset, copy source + SVG, export SVG/PNG/`.mmd`, fullscreen, per-diagram theme override (Mermaid frontmatter) | ❓ | mermaid-diagrams | v1 | Each toolbox action works; export writes a valid file; "Follow app" theme tracks light/dark |
+| DG5 | **Mermaid in notes** — a ```` ```mermaid ```` fenced block renders in the scratchpad/todo TipTap editor with a source⇄preview toggle; round-trips as Markdown | ❓ | mermaid-diagrams | v1 | Type a mermaid fence → it renders; a parse error shows the editable source + message; `roundTrip(roundTrip(x)) == roundTrip(x)` |
+| DG6 | One **reusable, theme-following, lazy-loaded** renderer shared by the panel and the editor — `base` theme from OKLCH tokens, `strict` security under the app CSP, code-split chunk | ❓ | mermaid-diagrams | v1 | The diagram recolors when the app theme flips; Mermaid loads in its own chunk (measured, not in the initial bundle); renders under the CSP unchanged |
+
 ## H. HTTP API & CLI (Phase 10)
 
 | ID | Feature | Src | Phase | Target | Verify |
