@@ -31,6 +31,34 @@ async function openedEditor(name: string, revision = 3) {
 
 afterEach(() => vi.clearAllMocks());
 
+describe("useDiagramEditor open", () => {
+  it("discards a superseded read that resolves after the current diagram", async () => {
+    let resolveFirst!: (value: DiagramView) => void;
+    vi.mocked(diagramRead)
+      .mockReturnValueOnce(
+        new Promise<DiagramView>((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockResolvedValueOnce(view("data-model", 8, "flowchart LR\n  D-->E"));
+    const { result } = renderHook(() => useDiagramEditor(7));
+
+    act(() => result.current.open("auth-flow"));
+    act(() => result.current.open("data-model"));
+    await waitFor(() => expect(result.current.initialSource).toBe("flowchart LR\n  D-->E"));
+
+    await act(async () => resolveFirst(view("auth-flow", 3, "flowchart TD\n  A-->B")));
+
+    expect(result.current.name).toBe("data-model");
+    expect(result.current.initialSource).toBe("flowchart LR\n  D-->E");
+    expect(result.current.baseRevision).toBe(8);
+
+    vi.mocked(diagramWrite).mockResolvedValueOnce(view("data-model", 9));
+    await act(() => result.current.save("flowchart LR\n  D-->F"));
+    expect(diagramWrite).toHaveBeenCalledWith(7, "data-model", "flowchart LR\n  D-->F", 8);
+  });
+});
+
 describe("useDiagramEditor save", () => {
   it("advances the base revision on a successful write and stays clean", async () => {
     const result = await openedEditor("auth-flow", 3);

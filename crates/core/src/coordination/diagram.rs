@@ -24,6 +24,14 @@ use crate::ports::{Clock, StoreError};
 /// transport frame ceiling.
 pub const MAX_DIAGRAM_SOURCE_BYTES: usize = 256 * 1024;
 
+fn validate_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        Err("name must not be blank".to_owned())
+    } else {
+        Ok(())
+    }
+}
+
 /// Checks a diagram write is well-formed: the `name` handle is not blank and the `source` stays
 /// within the size cap. The source may be blank — a blank document is valid; only the addressing
 /// handle and the size ceiling are enforced. **The Mermaid syntax itself is never checked here** —
@@ -31,8 +39,8 @@ pub const MAX_DIAGRAM_SOURCE_BYTES: usize = 256 * 1024;
 /// when it is well-formed.
 fn validate(name: &str, source: &str) -> Result<(), String> {
     let mut problems: Vec<String> = Vec::new();
-    if name.trim().is_empty() {
-        problems.push("name must not be blank".to_owned());
+    if let Err(problem) = validate_name(name) {
+        problems.push(problem);
     }
     if source.len() > MAX_DIAGRAM_SOURCE_BYTES {
         problems.push(format!(
@@ -211,6 +219,7 @@ impl Diagrams {
         from: &str,
         to: &str,
     ) -> Result<DiagramView, RenameError> {
+        validate_name(to).map_err(RenameError::Invalid)?;
         match self.repo.rename(project, from, to)? {
             RenameResult::Renamed(stored) => Ok(DiagramView::of(*stored)),
             RenameResult::NotFound => Err(RenameError::NotFound),
@@ -274,6 +283,9 @@ impl Diagrams {
 /// Why a [`rename`](Diagrams::rename) failed — both the caller's to fix.
 #[derive(Debug, thiserror::Error)]
 pub enum RenameError {
+    /// The target name failed the same validation applied when a diagram is written.
+    #[error("diagram is not well-formed: {0}")]
+    Invalid(String),
     /// No diagram exists under the source name in the project.
     #[error("no diagram under that name")]
     NotFound,

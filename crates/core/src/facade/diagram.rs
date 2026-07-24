@@ -84,8 +84,8 @@ impl Facade {
     /// archived flag, and revision, and emitting `DiagramChanged` under the new name — the local-UI
     /// path (see [`diagram_write_in`](Self::diagram_write_in)).
     /// [`CoordinationError::UnknownDiagram`] if `from` has no such diagram and
-    /// [`CoordinationError::DiagramNameTaken`] if `to` is already in use, neither of which changes
-    /// anything.
+    /// [`CoordinationError::DiagramNameTaken`] if `to` is already in use, or
+    /// [`CoordinationError::InvalidDiagram`] if `to` is blank; none changes anything.
     pub fn diagram_rename_in(
         &self,
         project: ProjectId,
@@ -122,6 +122,7 @@ impl Facade {
 /// the local and scoped rename surfaces so both report a missing/taken diagram identically.
 fn map_rename_error(err: DiagramRenameError) -> CoordinationError {
     match err {
+        DiagramRenameError::Invalid(message) => CoordinationError::InvalidDiagram(message),
         DiagramRenameError::NotFound => CoordinationError::UnknownDiagram,
         DiagramRenameError::NameTaken => CoordinationError::DiagramNameTaken,
         DiagramRenameError::Store(err) => CoordinationError::Store(err),

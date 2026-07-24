@@ -56,14 +56,17 @@ export function useDiagramEditor(project: number): DiagramEditorStore {
   const [conflict, setConflict] = useState<DiagramConflict | null>(null);
   const [error, setError] = useState<string | null>(null);
   const baseRevisionRef = useRef<number | null>(null);
+  const loadRequestRef = useRef(0);
 
   const load = useCallback(
     (target: string) => {
+      const request = ++loadRequestRef.current;
       setLoading(true);
       setConflict(null);
       setError(null);
       diagramRead(project, target)
         .then((view) => {
+          if (request !== loadRequestRef.current) return;
           setInitialSource(view.source);
           setBaseRevision(view.revision);
           baseRevisionRef.current = view.revision;
@@ -71,10 +74,13 @@ export function useDiagramEditor(project: number): DiagramEditorStore {
           setMountKey((key) => key + 1);
         })
         .catch((reason) => {
+          if (request !== loadRequestRef.current) return;
           setInitialSource(null);
           setError(String(reason));
         })
-        .finally(() => setLoading(false));
+        .finally(() => {
+          if (request === loadRequestRef.current) setLoading(false);
+        });
     },
     [project],
   );
@@ -91,6 +97,7 @@ export function useDiagramEditor(project: number): DiagramEditorStore {
   );
 
   const close = useCallback(() => {
+    loadRequestRef.current += 1;
     setName(null);
     setInitialSource(null);
     setBaseRevision(null);

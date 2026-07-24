@@ -222,6 +222,21 @@ fn rename_reports_missing_and_taken() {
 }
 
 #[test]
+fn rename_rejects_a_blank_target_name_without_moving_the_diagram() {
+    let diagrams = diagrams();
+    diagrams
+        .write(PROJECT, "flow", source(), None)
+        .expect("create");
+
+    assert!(matches!(
+        diagrams.rename(PROJECT, "flow", "   "),
+        Err(RenameError::Invalid(message)) if message.contains("name")
+    ));
+    assert!(diagrams.read(PROJECT, "flow").unwrap().is_some());
+    assert!(diagrams.read(PROJECT, "   ").unwrap().is_none());
+}
+
+#[test]
 fn tags_add_dedupe_remove_and_list_distinct() {
     let diagrams = diagrams();
     diagrams

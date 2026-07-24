@@ -182,6 +182,20 @@ fn renaming_onto_a_taken_name_is_refused() {
 }
 
 #[test]
+fn renaming_to_a_blank_name_surfaces_an_invalid_diagram() {
+    let (facade, session) = scoped_facade();
+    facade
+        .scoped(session)
+        .diagram_write("flow", source(), None)
+        .expect("create");
+
+    assert!(matches!(
+        facade.scoped(session).diagram_rename("flow", "   "),
+        Err(CoordinationError::InvalidDiagram(message)) if message.contains("name")
+    ));
+}
+
+#[test]
 fn tags_and_archive_round_trip_through_the_facade() {
     let (facade, session) = scoped_facade();
     facade
