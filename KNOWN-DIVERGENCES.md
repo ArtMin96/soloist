@@ -203,16 +203,23 @@ answers "which managed process is this peer?", which resolves an agent *Soloist 
 Soloist did **not** launch (the documented `register_agent` path) has no managed process in its
 group, so with ≥2 projects open it fell through to no scope at all — it could not select the very
 project whose directory it was running in. Fixed at root cause by generalizing "the process I run in"
-to "the project I run in", proven by **either** of two unforgeable, kernel-read facts about the
-socket peer: its process **group** (as before) **or** its working **directory**
-(`/proc/<pid>/cwd`, read in the same adapter as `SO_PEERCRED`), matched to the open project whose
-canonical root contains it (deepest root wins; component-wise, so a directory under `/p/trackler2`
-never matches a sibling rooted at `/p/trackler`). The directory is not a tool argument, so it cannot
-be forged; the core is handed a plain path and does the containment match (`Projects::project_at_path`).
-`effective_project` gains a cwd step (selected → bound process → **cwd project** → sole project →
-none) and `select_project`/`authentic_scope` authenticate against the same generalized home project,
-so every adapter inherits it. This is what lets an agent working in a project's folder simply *know*
-its scope (`whoami` reports it) without selecting anything, even with 100 projects open.
+to "the project I run in", proven by **either** of two kernel-read facts about the socket peer: its
+process **group** — unforgeable lineage, since a peer cannot join another project's managed-process
+group — **or** its working **directory** (`/proc/<pid>/cwd`, read in the same adapter as
+`SO_PEERCRED`), matched to the open project whose canonical root contains it (deepest root wins;
+component-wise, so a directory under `/p/trackler2` never matches a sibling rooted at `/p/trackler`).
+Neither is a tool argument the caller asserts; the group cannot be forged at all, and the directory
+is kernel-read but caller-chosen — trusted only under the same-UID local model, where a process
+rooted in a project already holds full filesystem access to it. The core is handed a plain path and
+does the containment match (`Projects::project_at_path`). `effective_project` gains a cwd step
+reached **only for a caller with no managed process in its group** (an agent Soloist did not launch):
+selected → bound process → *(groupless only)* cwd project → sole project → none. A caller whose group
+owns a managed process is a Soloist-launched agent, scoped by that group (via bind or select), so the
+directory never pulls it into a folder it merely sits in — one session stays scoped to one project,
+and `effective_project` never disagrees with the `select_project`/`authentic_scope` gate, which
+authenticates against the same home project (its group's, else its directory's). This is what lets an
+agent working in a project's folder simply *know* its scope (`whoami` reports it) without selecting
+anything, even with 100 projects open.
 
 **Residual (accepted, documented as policy — not a divergence):** an **external** caller
 (`register_agent`, no managed process in its group) is authentically scoped to the project whose

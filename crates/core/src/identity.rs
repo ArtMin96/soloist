@@ -44,15 +44,19 @@ impl Origin {
     }
 }
 
-/// The unforgeable facts the transport reads from the kernel about a connection's peer: the
-/// process group it runs in and the working directory it runs from. Both authenticate a session's
-/// project scope *without the caller asserting either* — the group matches a managed process the
-/// caller runs in, the directory matches a project root the caller runs under — so neither can be
-/// forged by a tool argument. Read together from the one peer at [`Identity::open`], they are the
-/// two ways to prove the same fact: which project the caller is in. A Soloist-launched agent proves
-/// it by its group (its `soloist-mcp` child inherits the managed process's group); an agent Soloist
-/// did not launch proves it by its directory (its group owns no managed process). Either field is
-/// `None` when the transport could not read it — an absent fact grants no scope (fail closed).
+/// The facts the transport reads from the kernel about a connection's peer — the process group it
+/// runs in and the working directory it runs from — each authenticating a session's project scope
+/// *without the caller asserting it as a tool argument*. They differ in strength. The **group** is
+/// unforgeable lineage: a peer cannot join another project's managed-process group, so a group that
+/// owns a managed process proves the caller is that Soloist-launched agent (its `soloist-mcp` child
+/// inherits the managed process's group). The **directory** is kernel-*read* but caller-*chosen* —
+/// the peer ran there — so it authenticates only "a project this caller runs under", trusted under
+/// the same-UID local model: a same-UID process rooted in a project already holds full filesystem
+/// access to it (the D2 local-execution model), so the directory grants no reach the caller did not
+/// already have. It is the home signal for an agent Soloist did not launch (its group owns no
+/// managed process). Read together from the one peer at [`Identity::open`], they are two ways to
+/// prove which project the caller is in. Either field is `None` when the transport could not read
+/// it — an absent fact grants no scope (fail closed).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PeerCredentials {
     /// The peer's process group, or `None` when the transport could not resolve it.
@@ -143,8 +147,9 @@ pub enum IdentityError {
     /// `select_project` named a project that is not loaded.
     #[error("no such project")]
     UnknownProject,
-    /// `select_project` named a project the caller does not run in — no process in the
-    /// caller's own process group belongs to it, so the scope would not be authentic.
+    /// `select_project` named a project the caller does not run in — neither a managed process in
+    /// the caller's own group nor its working directory belongs to it, so the scope would not be
+    /// authentic.
     #[error("you are not running in that project")]
     ForeignProject,
     /// The project store could not be read.
@@ -240,7 +245,7 @@ impl Identity {
     }
 
     /// The connecting peer's working directory recorded for a session ([`None`] if the transport
-    /// could not read it) — the unforgeable fact the façade resolves to a project root for an agent
+    /// could not read it) — the kernel-read fact the façade resolves to a project root for an agent
     /// Soloist did not launch (no managed process in its group).
     pub fn peer_cwd(&self, session: SessionId) -> Option<PathBuf> {
         lock(&self.sessions)

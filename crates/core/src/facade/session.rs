@@ -2,11 +2,13 @@
 //! caller (MCP today, the HTTP API later) drives to say who it is and which project its tools
 //! act on.
 //!
-//! A session opens with the connecting peer's process group (the transport adapter reads it
-//! from the kernel). A bind or a project selection is authenticated against that group: a
-//! session can only bind to the process it runs in and only select a project it runs in, so
-//! the effective-project scope the [scoped actions](super::scoped) trust is unforgeable. The
-//! Tauri UI never opens a session — the local user is not scope-limited.
+//! A session opens with the connecting peer's kernel-read credentials (the transport adapter reads
+//! them): the process group it runs in and the working directory it runs from. A bind or a project
+//! selection is authenticated against them — a session can only bind to the process it runs in and
+//! only select a project it runs *in*: the project of a managed process in its group, or, for an
+//! agent Soloist did not launch, the project directory it runs under. So the effective-project scope
+//! the [scoped actions](super::scoped) trust is one the caller genuinely runs in, not one it can
+//! assert. The Tauri UI never opens a session — the local user is not scope-limited.
 
 use super::scoped::ScopedFacade;
 use super::Facade;
@@ -38,13 +40,18 @@ impl Facade {
     }
 
     /// The project a session's scoped tools act on: its explicit selection, else the project
-    /// owning its bound process, else the project its connecting peer's working directory sits
-    /// inside, else the sole loaded project when there is exactly one — otherwise `None`
-    /// (ambiguous; a scoped tool must ask the caller to `select_project`). Best-effort: a store
-    /// read error resolves to `None` rather than failing `whoami`. The selection, bound process,
-    /// and working directory are each authenticated (the selection and bind at their own time, the
-    /// directory being a kernel-read fact), so every non-`None` resolution is a project the caller
-    /// runs in (the sole-project default is the one unambiguous exception).
+    /// owning its bound process, else — only for a caller with no managed process in its group (an
+    /// agent Soloist did not launch) — the project its connecting peer's working directory sits
+    /// inside, else the sole loaded project when there is exactly one — otherwise `None` (ambiguous;
+    /// a scoped tool must ask the caller to `select_project`). Best-effort: a store read error
+    /// resolves to `None` rather than failing `whoami`. The selection, bound process, and working
+    /// directory are each authenticated (the selection and bind at their own time, the directory a
+    /// kernel-read fact matched to a project the caller runs under), so every non-`None` resolution
+    /// is a project the caller runs in (the sole-project default is the one unambiguous exception).
+    /// A caller whose group owns a managed process is a Soloist-launched agent: its group is its
+    /// authenticated home, so it resolves its scope by binding or selecting, never by the directory
+    /// it happens to sit in — keeping one session's scope to one project, and never disagreeing with
+    /// the [`select_project`](ScopedFacade::select_project) authenticity gate.
     pub fn effective_project(&self, session: SessionId) -> Option<ProjectId> {
         if let Some(project) = self.identity.selected_project(session) {
             return Some(project);
@@ -54,13 +61,28 @@ impl Facade {
                 return Some(view.project);
             }
         }
-        if let Some(project) = self.project_at_peer_cwd(session) {
-            return Some(project);
+        if self.home_process(session).is_none() {
+            if let Some(project) = self.project_at_peer_cwd(session) {
+                return Some(project);
+            }
         }
         match self.projects.list() {
             Ok(projects) if projects.len() == 1 => projects.first().map(|record| record.id),
             _ => None,
         }
+    }
+
+    /// The managed process the session's connecting peer runs in (its *home* process), resolved
+    /// from the kernel-reported peer process group via the supervisor. `None` when the transport
+    /// supplied no peer group, or no live managed process owns it — an external caller Soloist did
+    /// not launch, or a stale group. The group is unforgeable — a peer cannot join another
+    /// project's managed-process group — so this is the authenticated basis for a bind or a project
+    /// selection, and the fact that marks a caller as a Soloist-launched agent (whose scope comes
+    /// from its group, not the directory it sits in).
+    pub(in crate::facade) fn home_process(&self, session: SessionId) -> Option<ProcessId> {
+        self.identity
+            .peer_pgid(session)
+            .and_then(|pgid| self.supervisor.process_at_pgid(pgid))
     }
 
     /// The loaded project the session's connecting peer runs *in*, resolved from the kernel-read
@@ -108,9 +130,10 @@ impl ScopedFacade<'_> {
 
     /// Sets a session's effective project scope explicitly. Fails
     /// [`UnknownProject`](IdentityError::UnknownProject) if the project is not loaded, or
-    /// [`ForeignProject`](IdentityError::ForeignProject) if the caller does not run in it —
-    /// no process in the caller's own process group belongs to it. A session can therefore
-    /// only select a project it actually runs in, never a sibling on the shared local socket.
+    /// [`ForeignProject`](IdentityError::ForeignProject) if the caller does not run in it — it is
+    /// neither the project of a managed process in the caller's own group nor the project its
+    /// connecting peer's working directory sits inside. A session can therefore only select a
+    /// project it actually runs in, never a sibling on the shared local socket.
     pub fn select_project(&self, project: ProjectId) -> Result<(), IdentityError> {
         if self.inner.projects.get(project)?.is_none() {
             return Err(IdentityError::UnknownProject);
@@ -167,17 +190,11 @@ impl ScopedFacade<'_> {
         }
     }
 
-    /// The managed process the session's connecting peer runs in (its *home* process),
-    /// resolved from the kernel-reported peer process group via the supervisor — the
-    /// unforgeable basis for authenticating a bind or a project selection, and for any gate
-    /// that must hold whether or not the caller chose to bind. `None` when the transport
-    /// supplied no peer group, or no live managed process owns it (an external caller, or a
-    /// stale group).
+    /// The managed process this session's connecting peer runs in — its *home* process. See
+    /// [`Facade::home_process`](super::Facade::home_process) for the resolution and why the group
+    /// is the unforgeable basis for authenticating a bind or a project selection.
     pub(in crate::facade) fn home_process(&self) -> Option<ProcessId> {
-        self.inner
-            .identity
-            .peer_pgid(self.session)
-            .and_then(|pgid| self.inner.supervisor.process_at_pgid(pgid))
+        self.inner.home_process(self.session)
     }
 
     /// The project the session's caller authentically runs in — the only project it can select or

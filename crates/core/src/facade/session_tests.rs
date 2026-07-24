@@ -4,7 +4,10 @@ use std::sync::Arc;
 use super::*;
 use crate::composition::CorePorts;
 use crate::ports::{ProjectRepo, TokioClock};
-use crate::testing::{session_in_dir, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
+use crate::testing::{
+    session_in_dir, terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
+    TEST_PEER_PGID,
+};
 
 /// A façade over in-memory fakes with the given project repo.
 fn facade_over(projects: Arc<FakeProjectRepo>) -> Facade {
@@ -118,4 +121,58 @@ fn a_working_directory_outside_every_project_grants_no_scope() {
 
     let session = session_in_dir(&facade, PathBuf::from("/home/dev/unrelated"));
     assert_eq!(facade.effective_project(session), None);
+}
+
+/// A caller whose process group owns a managed process in project A, but whose working directory
+/// sits inside a *different* open project B, is a Soloist-launched agent — the group is its
+/// authenticated home. The directory signal is only for an agent Soloist did not launch (no managed
+/// process in its group), so it must not pull the caller's scope into B. Its scope stays its group's
+/// project A: it gets no implicit B scope, can select A, and B is refused as foreign. This keeps one
+/// session scoped to one project and keeps `effective_project` in step with the `select_project`
+/// gate (which would otherwise report a scope the caller cannot select).
+#[test]
+fn a_grouped_caller_is_scoped_by_its_group_not_the_directory_it_sits_in() {
+    let projects = Arc::new(FakeProjectRepo::new());
+    let alpha = projects
+        .upsert(Path::new("/home/dev/alpha"), Some("alpha"), None)
+        .expect("seed alpha");
+    let beta = projects
+        .upsert(Path::new("/home/dev/beta"), Some("beta"), None)
+        .expect("seed beta");
+    let facade = facade_over(projects.clone());
+
+    // A managed process in alpha, in the peer's process group: this caller is a Soloist-launched
+    // agent whose authenticated home is alpha.
+    let in_alpha = facade
+        .supervisor()
+        .register(terminal_registration(alpha.id, "term", "sleep 60"));
+    facade
+        .supervisor()
+        .assign_test_group(in_alpha, TEST_PEER_PGID);
+
+    // ...but its working directory is inside beta, and it has not bound.
+    let session = facade.open_session(PeerCredentials {
+        pgid: Some(TEST_PEER_PGID),
+        cwd: Some(PathBuf::from("/home/dev/beta/crates")),
+    });
+
+    // The directory does not scope a grouped caller: with two projects and no bind or selection the
+    // scope is unresolved — the group is authenticate-only, and beta (the directory) is ignored.
+    assert_eq!(
+        facade.effective_project(session),
+        None,
+        "a grouped caller gets no implicit scope from the directory it sits in",
+    );
+
+    // Its authenticated home is alpha (the group), not beta (the directory): beta is refused as
+    // foreign, only alpha may be selected, and selecting it resolves the scope to alpha.
+    assert!(
+        matches!(
+            facade.scoped(session).select_project(beta.id),
+            Err(IdentityError::ForeignProject),
+        ),
+        "the directory it sits in is not a project it may select",
+    );
+    assert!(facade.scoped(session).select_project(alpha.id).is_ok());
+    assert_eq!(facade.effective_project(session), Some(alpha.id));
 }

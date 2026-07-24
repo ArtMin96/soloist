@@ -18,10 +18,12 @@ use tokio::net::UnixStream;
 /// `/proc` entry was unreadable). Both `None` leaves the session unauthenticated: it can use the
 /// open read tools but cannot bind to a process or select a project scope (both require a matching
 /// home process or directory), so no cross-project surface is granted. The pid (from `SO_PEERCRED`)
-/// and its group/cwd are read in two steps; in the rare case the peer exits and its pid is reused in
-/// between, the resolved facts are stale and match no managed process (and, for a stale cwd, at most
-/// a project the caller genuinely ran in) — a refused or same-scope grant, never a foreign one (fail
-/// closed).
+/// and its group/cwd are read in two steps: if the peer exits and the kernel reuses its pid between
+/// the two reads, the resolved group/cwd describe the replacement process instead — a narrow (two
+/// adjacent syscalls), same-UID (`0700` socket) window in which a recycled pid could resolve to a
+/// different open project. An absent fact still grants no scope (fail closed), but this is a real
+/// residual of reading the group/cwd from `/proc` by pid rather than from a handle pinned to the
+/// original peer; it is not closed here.
 ///
 /// Returns an error — which the caller treats as a dead connection and drops — when the peer
 /// credentials cannot be read at all, **or** when the peer is a different UID than Soloist runs as.

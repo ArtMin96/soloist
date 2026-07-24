@@ -51,6 +51,12 @@ impl Projects {
     /// inner one. Containment is by whole path components ([`Path::starts_with`]), so a directory
     /// under `/p/trackler2` never matches a sibling project rooted at `/p/trackler`. `None` when no
     /// open project contains the path.
+    ///
+    /// `path` must be canonical and absolute: it is compared verbatim against the canonicalized
+    /// stored roots ([`Self::add`]), so a path carrying symlinks or `..` could mis-match. The sole
+    /// caller supplies the kernel-canonical `/proc/<pid>/cwd`, which already satisfies this — hence
+    /// no `canonicalize` here (it is filesystem I/O, fails on a path that no longer exists, and does
+    /// not belong in this pure registry lookup).
     pub fn project_at_path(&self, path: &Path) -> Result<Option<ProjectId>, StoreError> {
         Ok(self
             .list()?
