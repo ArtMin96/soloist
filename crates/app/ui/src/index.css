@@ -12,7 +12,7 @@
    */
   --font-heading: var(--font-sans);
   --font-sans:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial,
+    "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial,
     sans-serif;
   --font-mono: "SF Mono", Menlo, Monaco, ui-monospace, monospace;
 
