@@ -166,14 +166,14 @@ closed `ProcStatus` enum so the UI can never invent a state the core didn't emit
 - **Signal Running** (`oklch(0.58 0.15 150)`) — green, glyph **● filled disc**, label
   "Running". The process is up.
 - **Signal Transition** (`oklch(0.62 0.13 70)`) — amber, glyph **◐ half disc**, labels
-  "Starting" / "Restarting" / "Stopping". A reversible in-flight state; controls disable
-  while it holds.
+  "Starting" / "Restarting" / "Stopping". Starting and Restarting may expose one Stop
+  cancellation while the owning actor can receive it; Stopping exposes no action.
 - **Signal Stopped** (`oklch(0.55 0.008 255)`) — grey, glyph **○ hollow ring**, label
   "Stopped". At rest, no attention owed.
 - **Signal Crashed** (`oklch(0.55 0.20 27)`) — red, glyph **✕ cross**, label "Crashed". Exited
   unexpectedly; needs a decision.
 - **Signal Exhausted** (`oklch(0.47 0.19 22)`) — deep red, glyph **⚠ triangle**, label
-  "Exhausted". Auto-restart gave up (10/60s). Distinct from Crashed by glyph *and* a deeper,
+  "Restart limit reached". Auto-restart gave up (10/60s). Distinct from Crashed by glyph *and* a deeper,
   more alarming red — the most severe resting state.
 
 Dark theme lifts each status hue ~0.10–0.12 in lightness (e.g. running `oklch(0.70 0.16 150)`)
@@ -267,8 +267,9 @@ for the genuine appear/disappear of incidental chrome. Bounce/elastic is forbidd
   icon buttons, ~28px square, with a tooltip and an `aria-label`.
 - **Focus:** A 2px Azure Accent ring (`outline`, 2px offset). Always visible on keyboard focus —
   keyboard operability is a product principle, not a nicety.
-- **Disabled:** 40% opacity, no hover. Controls disable during a `Transition` status, never
-  vanish — the row must not reflow when a process is starting.
+- **Unavailable actions are absent:** never render disabled or irrelevant controls to preserve a
+  button pattern. Disabled styling (40% opacity, no hover) is reserved for a real action that is
+  temporarily pending for reasons other than the process lifecycle.
 
 ### Toolbar / Window chrome
 The unified macOS toolbar stands in for the native decorations (turned off in `tauri.conf.json`).
@@ -308,9 +309,12 @@ unmistakably mac-native while keeping the status vocabulary and density rules ab
 - **Groups:** Three collapsible sections — Agents / Terminals / Commands — each a sentence-case
   Label header with a muted count and a disclosure chevron. Collapse state persists per project.
   The chevron rotates and the group **springs open by height** (~220 ms), rather than snapping.
-- **Rows:** body type, `rounded.md`, inset from the sidebar edge. Left: status indicator. Center:
-  process name. Right: per-row ghost controls that **slide in** on hover/focus (never a bare fade),
-  always present for the selected row, over reserved space so the name never reflows.
+- **Rows:** body type, `rounded.md`, inset from the sidebar edge. Left: lineage disclosure and the
+  status indicator. Center: a truncating process name and priority-ordered metadata. Right: one
+  state-correct quick action that **slides in** on hover/focus (never a bare fade), stays present
+  for the selected row, and is followed by an overflow menu only when a secondary action exists.
+  Trust and crash-recovery actions remain visible at rest because they require attention. All
+  projections read the same action resolver; no component reinterprets `ProcStatus`.
 - **Selected:** the macOS source-list selection — an **azure-tinted rounded fill** (`primary` at
   ~15% over the sidebar), inset, not a side-stripe or a full-saturation bar. Status hues keep
   their **full saturation** on the selection (the heartbeat must not lose contrast to it), so the
@@ -326,7 +330,8 @@ unmistakably mac-native while keeping the status vocabulary and density rules ab
 ### Terminal Pane (signature component)
 - The interactive PTY (xterm.js) on Cool Surface chrome, Geist Mono, generous internal padding,
   full-bleed scrollback. A compact header strip names the selected process (Title type) with its
-  Status Indicator and the per-process ▶/⟳/■ controls. A "Terminal | Logs" segmented control
+  Status Indicator and the same one-primary-action plus overflow controls used by the sidebar. A
+  "Terminal | Logs" segmented control
   switches the rendered-logs view. The terminal background follows theme; output color is the
   PTY's own ANSI, untouched.
 
@@ -360,7 +365,8 @@ bordered cards.
 - **Do** keep the azure accent to ≤10% of a screen and to one meaning: focused / selected / primary.
 - **Do** draw structure with 1px hairlines and tonal layering; keep resting surfaces flat.
 - **Do** use Geist Mono *only* for terminal output and aligned data (PIDs, ports, metrics).
-- **Do** disable (40% opacity) controls during a Transition status; never let a row reflow.
+- **Do** omit unavailable lifecycle controls; Starting/Restarting may show only Stop cancellation,
+  and Stopping shows none. Keep the trailing intent zone stable so a row never reflows.
 - **Do** give every control a visible 2px Azure focus ring and full keyboard operability.
 - **Do** answer interaction with native spring motion on the shared tokens — selection settles,
   segments glide, disclosures unfold, sheets pop — kept crisp (~180–240 ms) and overshoot-free

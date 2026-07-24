@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Settings } from "lucide-react";
+import { House, Settings } from "lucide-react";
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
 import { useSidebarHotkeys } from "@/components/sidebar/useSidebarHotkeys";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import {
   filterSidebar,
   groupByProject,
@@ -30,6 +32,8 @@ interface SidebarProps {
   onStartAll: (project: number) => void;
   onRestartRunning: (project: number) => void;
   onStopAll: (project: number) => void;
+  onOpenStart: () => void;
+  startActive: boolean;
   onOpenSettings: () => void;
   onOpenProjectSettings: (projectId: number) => void;
   onOpenOrchestration: (projectId: number) => void;
@@ -55,6 +59,8 @@ export function Sidebar({
   onStartAll,
   onRestartRunning,
   onStopAll,
+  onOpenStart,
+  startActive,
   onOpenSettings,
   onOpenProjectSettings,
   onOpenOrchestration,
@@ -82,7 +88,7 @@ export function Sidebar({
   });
 
   return (
-    <div className="flex w-64 shrink-0 flex-col border-r bg-sidebar">
+    <div className="@container/sidebar flex w-64 shrink-0 flex-col border-r bg-sidebar">
       {sidebar.show_filter_input && (
         <div className="border-b border-sidebar-border p-2">
           <Input
@@ -129,19 +135,42 @@ export function Sidebar({
           </div>
         ))}
       </nav>
-      {sidebar.show_settings_footer && (
-        <div className="border-t border-sidebar-border p-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start gap-2 px-2 text-muted-foreground hover:text-foreground"
-            onClick={onOpenSettings}
-          >
-            <Settings />
-            Settings
-          </Button>
-        </div>
-      )}
+      <div className="flex items-center gap-1 border-t border-sidebar-border p-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className={cn(
+                "text-muted-foreground hover:text-foreground",
+                startActive && "bg-sidebar-accent text-foreground",
+              )}
+              aria-label="Start page"
+              aria-current={startActive ? "page" : undefined}
+              onClick={onOpenStart}
+            >
+              <House />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Start</TooltipContent>
+        </Tooltip>
+        {sidebar.show_settings_footer && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Settings"
+                onClick={onOpenSettings}
+              >
+                <Settings />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Settings</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
     </div>
   );
 }

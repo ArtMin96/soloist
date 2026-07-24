@@ -1,6 +1,6 @@
 import { browser } from "@wdio/globals";
 import { sidebar } from "../src/screens/Sidebar.js";
-import { titlebar } from "../src/screens/Titlebar.js";
+import { startSurface } from "../src/screens/StartSurface.js";
 
 // The window title set in tauri.conf.json and the page title in index.html; nothing retitles it at
 // runtime, so the session reporting it proves the driver is attached to the app's own webview.
@@ -15,7 +15,7 @@ describe("app shell", () => {
   });
 
   it("offers the open-project action", async () => {
-    expect(await titlebar.offersOpenProject()).toBe(true);
+    expect(await startSurface.offersOpenProject()).toBe(true);
   });
 
   it("reports the window title", async () => {

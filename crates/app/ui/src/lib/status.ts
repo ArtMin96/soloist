@@ -54,10 +54,10 @@ export const STATUS: Record<ProcStatus, StatusDisplay> = {
     transitional: false,
   },
   RestartExhausted: {
-    label: "Exhausted",
+    label: "Restart limit reached",
     glyph: "⚠",
     toneClass: "text-status-exhausted",
-    transitional: true,
+    transitional: false,
   },
 };
 
@@ -98,9 +98,9 @@ export function isActive(status: ProcStatus): boolean {
 // them here keeps presentation policy out of the domain; the core stays the authority on what is
 // legal and refuses anything these let through.
 
-/** Start is offered only from a resting state. */
+/** Start begins a fresh run from an ordinary stop. Crash recovery is named Restart. */
 export function canStart(status: ProcStatus): boolean {
-  return !isActive(status);
+  return status === "Stopped";
 }
 
 /** Stop is offered while live and not already stopping — a second stop would read as a no-op. */
@@ -108,7 +108,7 @@ export function canStop(status: ProcStatus): boolean {
   return isActive(status) && status !== "Stopping";
 }
 
-/** Restart (stop + start) is offered for a running process; a resting one offers Start instead. */
+/** Restart cycles a live process or explicitly retries a failed/exhausted one. */
 export function canRestart(status: ProcStatus): boolean {
-  return status === "Running";
+  return status === "Running" || status === "Crashed" || status === "RestartExhausted";
 }

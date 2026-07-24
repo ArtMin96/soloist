@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import { Collapsible } from "radix-ui";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ProcessNode } from "@/components/sidebar/ProcessNode";
 import type { ProcessGroup as Group } from "@/store/grouping";
 import type { ToggleSet } from "@/store/useToggleSet";
@@ -38,8 +38,8 @@ export function ProcessGroup({
 }: ProcessGroupProps) {
   const treeColumn = group.roots.some((root) => root.children.length > 0);
   return (
-    <Collapsible.Root open={open} onOpenChange={onOpenChange} className="select-none">
-      <Collapsible.Trigger className="group/trigger flex w-full items-center gap-1.5 rounded-sm px-1 py-1 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+    <Collapsible open={open} onOpenChange={onOpenChange} className="select-none">
+      <CollapsibleTrigger className="group/trigger flex w-full items-center gap-1.5 rounded-sm px-1 py-1 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
         <ChevronRight
           aria-hidden
           className="size-3 text-muted-foreground transition-transform duration-[var(--dur-control)] ease-spring-settle group-data-[state=open]/trigger:rotate-90"
@@ -50,8 +50,8 @@ export function ProcessGroup({
         <span className="ml-auto pr-1 font-mono text-[0.6875rem] tabular-nums text-muted-foreground">
           {group.processes.length}
         </span>
-      </Collapsible.Trigger>
-      <Collapsible.Content className="overflow-hidden data-[state=open]:animate-disclose-down data-[state=closed]:animate-disclose-up">
+      </CollapsibleTrigger>
+      <CollapsibleContent className="overflow-hidden data-[state=open]:animate-disclose-down data-[state=closed]:animate-disclose-up">
         <div role="tree" aria-label={group.label} className="mt-0.5 flex flex-col gap-px pl-1">
           {group.roots.map((root) => (
             <ProcessNode
@@ -70,7 +70,7 @@ export function ProcessGroup({
             />
           ))}
         </div>
-      </Collapsible.Content>
-    </Collapsible.Root>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

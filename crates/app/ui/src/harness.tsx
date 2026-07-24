@@ -5,7 +5,8 @@
 // Not part of the production bundle: Vite serves /harness.html in dev, but the Tauri build's
 // rollup input is index.html alone, so nothing here ships.
 //
-// Usage: /harness.html (gallery) · ?dark · ?view=dialog|menus|settings|audit (each combinable with &dark)
+// Usage: /harness.html (gallery) · ?dark · ?view=start|dialog|menus|settings|audit
+// (each combinable with &dark)
 import { useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Check, Play, RotateCw, Settings as SettingsIcon, Square, Trash2 } from "lucide-react";
@@ -50,11 +51,14 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessRow } from "@/components/sidebar/ProcessRow";
+import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
 import { CommandList as ProjectCommandList } from "@/components/project-settings/CommandList";
 import { ScratchpadList } from "@/components/orchestration/ScratchpadList";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { SettingsTabRail } from "@/components/settings/SettingsTabRail";
+import { StartSurface } from "@/components/StartSurface";
 import { applyDarkClass } from "@/lib/appearance";
+import { cn } from "@/lib/utils";
 import type {
   AgentActivity,
   ProcessView,
@@ -462,6 +466,128 @@ function AuditColumn({ label, children }: { label: string; children: React.React
   );
 }
 
+const SIDEBAR_STATES: Array<{ group: string; process: ProcessView }> = [
+  { group: "Agents", process: proc(101, "Claude lead", "Running") },
+  { group: "Agents", process: proc(102, "Codex stopped", "Stopped") },
+  {
+    group: "Agents",
+    process: proc(103, "Claude resumable session", "Stopped", { resumable: true }),
+  },
+  {
+    group: "Agents",
+    process: proc(104, "Agent configuration awaiting review", "Stopped", {
+      requires_trust: true,
+    }),
+  },
+  { group: "Agents", process: proc(105, "Starting agent", "Starting") },
+  { group: "Agents", process: proc(106, "Stopping agent", "Stopping") },
+  { group: "Agents", process: proc(107, "Restarting agent", "Restarting") },
+  { group: "Agents", process: proc(108, "Crashed worker", "Crashed") },
+  { group: "Agents", process: proc(109, "Restart limit reached", "RestartExhausted") },
+  {
+    group: "Terminals",
+    process: proc(110, "Terminal with a deliberately long project-specific label", "Running", {
+      kind: "Terminal",
+    }),
+  },
+  {
+    group: "Commands",
+    process: proc(111, "web-development-server-with-long-name", "Running", {
+      kind: "Command",
+      ports: [5173],
+    }),
+  },
+  {
+    group: "Commands",
+    process: proc(112, "background worker", "Stopped", { kind: "Command" }),
+  },
+];
+
+const LARGE_COMMAND_SET = Array.from({ length: 24 }, (_, index) => ({
+  group: "Commands",
+  process: proc(200 + index, `service-${String(index + 1).padStart(2, "0")}`, "Running", {
+    kind: "Command" as const,
+    ports: [5200 + index],
+  }),
+}));
+
+function SidebarRowsView() {
+  return (
+    <div className="min-h-screen bg-background p-8 text-foreground">
+      <div className="flex items-start gap-8">
+        <SidebarStateColumn title="Default · 256px" width="w-64" />
+        <SidebarStateColumn title="Narrow · 208px" width="w-52" />
+      </div>
+    </div>
+  );
+}
+
+function SidebarStateColumn({ title, width }: { title: string; width: string }) {
+  const rows = params.has("large") ? [...SIDEBAR_STATES, ...LARGE_COMMAND_SET] : SIDEBAR_STATES;
+  return (
+    <section className="flex flex-col gap-2.5">
+      <h1 className="text-[0.8125rem] font-medium">{title}</h1>
+      <div
+        className={cn(
+          "@container/sidebar flex max-h-[48rem] flex-col gap-2 overflow-y-auto rounded-md border border-sidebar-border bg-sidebar p-2",
+          width,
+        )}
+      >
+        <ProjectGroup
+          tree={{
+            project: { id: 1, name: "Soloist workspace", root: "/workspace", icon: null },
+            kinds: [],
+            count: { running: 12, total: 36 },
+          }}
+          open={false}
+          onOpenChange={() => {}}
+          kindOpen={() => true}
+          onKindOpenChange={() => {}}
+          collapsedLeads={{ has: () => false, toggle: () => {} }}
+          selectedId={101}
+          onSelect={() => {}}
+          onStart={() => {}}
+          onStop={() => {}}
+          onRestart={() => {}}
+          onResume={() => {}}
+          onTrust={() => {}}
+          onStartAll={() => {}}
+          onRestartRunning={() => {}}
+          onStopAll={() => {}}
+          onOpenProjectSettings={() => {}}
+          onOpenOrchestration={() => {}}
+          onRemoveProject={() => {}}
+        />
+        {["Agents", "Terminals", "Commands"].map((group) => (
+          <div key={group} className="flex flex-col gap-px">
+            <div className="flex h-6 items-center px-1 text-[0.6875rem] font-medium text-muted-foreground">
+              <span>{group}</span>
+              <span className="ml-auto tabular-nums">
+                {rows.filter((row) => row.group === group).length}
+              </span>
+            </div>
+            {rows
+              .filter((row) => row.group === group)
+              .map(({ process }) => (
+                <ProcessRow
+                  key={process.id}
+                  process={process}
+                  selected={process.id === 101}
+                  onSelect={() => {}}
+                  onStart={() => {}}
+                  onStop={() => {}}
+                  onRestart={() => {}}
+                  onResume={() => {}}
+                  onTrust={() => {}}
+                />
+              ))}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // Open menu surfaces, so the floating dropdown/select share one overlay shadow + item language.
 function MenusView() {
   return (
@@ -542,17 +668,29 @@ function DialogView() {
   );
 }
 
+function StartSurfaceView() {
+  return (
+    <div className="h-screen bg-background">
+      <StartSurface hasProjects onOpenProject={() => {}} onLaunchAgent={() => {}} />
+    </div>
+  );
+}
+
 const view = params.get("view");
 const Root =
-  view === "dialog"
-    ? DialogView
-    : view === "menus"
-      ? MenusView
-      : view === "settings"
-        ? SettingsView
-        : view === "audit"
-          ? AuditView
-          : Gallery;
+  view === "start"
+    ? StartSurfaceView
+    : view === "dialog"
+      ? DialogView
+      : view === "menus"
+        ? MenusView
+        : view === "settings"
+          ? SettingsView
+          : view === "audit"
+            ? AuditView
+            : view === "sidebar"
+              ? SidebarRowsView
+              : Gallery;
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <TooltipProvider delayDuration={400}>

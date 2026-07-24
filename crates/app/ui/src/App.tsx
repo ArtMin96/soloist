@@ -1,9 +1,9 @@
 import { lazy, Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { DeferredOverlay } from "@/components/DeferredOverlay";
-import { EmptyState } from "@/components/EmptyState";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { OrphanDialog } from "@/components/OrphanDialog";
 import { Sidebar } from "@/components/sidebar/Sidebar";
+import { StartSurface } from "@/components/StartSurface";
 import { Titlebar } from "@/components/titlebar/Titlebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TrustDialog } from "@/components/TrustDialog";
@@ -111,6 +111,11 @@ export default function App() {
     setSelectedId(null);
     setSelectedProjectId(null);
   }, []);
+  const openStart = useCallback(() => {
+    setSelectedId(null);
+    setSelectedProjectId(null);
+    setOrchestrationProjectId(null);
+  }, []);
 
   // Review a command by id: the row/header carries the project and name, and the review
   // shows what trusting it would run — the row itself shows only a name the solo.yml chose.
@@ -198,12 +203,7 @@ export default function App() {
           <SignalsProvider>
             <TooltipProvider delayDuration={400}>
               <div className="flex h-screen flex-col bg-background text-foreground">
-                <Titlebar
-                  appName={info?.name ?? "Soloist"}
-                  appVersion={info?.version}
-                  onOpenProject={projects.open}
-                  onLaunchAgent={openPicker}
-                />
+                <Titlebar appName={info?.name ?? "Soloist"} appVersion={info?.version} />
                 {store.error && <ErrorBanner message={store.error} onDismiss={store.clearError} />}
                 <div className="flex min-h-0 flex-1">
                   <Sidebar
@@ -220,6 +220,8 @@ export default function App() {
                     onStartAll={store.startAll}
                     onRestartRunning={store.restartRunning}
                     onStopAll={store.stopAll}
+                    onOpenStart={openStart}
+                    startActive={!selected && !selectedProject && !orchestrationProject}
                     onOpenSettings={() => setSettingsOpen(true)}
                     onOpenProjectSettings={openProjectSettings}
                     onOpenOrchestration={openOrchestration}
@@ -254,9 +256,10 @@ export default function App() {
                             project={orchestrationProject}
                           />
                         ) : (
-                          <EmptyState
-                            hasProcesses={store.processes.length > 0}
+                          <StartSurface
+                            hasProjects={projects.projects.length > 0}
                             onOpenProject={projects.open}
+                            onLaunchAgent={openPicker}
                             notice={projects.notice}
                           />
                         ))}

@@ -16,7 +16,12 @@ const RUNNING: ProcStatus = "Running";
 const STOPPED: ProcStatus = "Stopped";
 
 /** The per-row control cluster's actions, by their accessible names. */
-type RowControl = "Trust" | "Start" | "Stop" | "Restart";
+type RowControl =
+  | "Trust"
+  | "Resume last session"
+  | "Start"
+  | "Stop"
+  | "Restart";
 
 /** One process row as the sidebar renders it. */
 export interface RowHandle {
@@ -50,9 +55,7 @@ export const sidebar = {
 
   /** Waits for a project to appear in the tree by its display name. */
   async waitForProject(name: string): Promise<void> {
-    await $(NAV)
-      .$(`span*=${name}`)
-      .waitForDisplayed({ timeout: WAIT.core });
+    await $(NAV).$(`span*=${name}`).waitForDisplayed({ timeout: WAIT.core });
   },
 
   /**
@@ -65,12 +68,23 @@ export const sidebar = {
    */
   async rows(): Promise<RowHandle[]> {
     const snapshots: RowSnapshot[] = await browser.execute(
-      (nav: string, row: string, label: string, status: string, activity: string, meta: string) => {
+      (
+        nav: string,
+        row: string,
+        label: string,
+        status: string,
+        activity: string,
+        meta: string,
+      ) => {
         const tree = document.querySelector(nav);
         if (!tree) return [];
         return [...tree.querySelectorAll(row)].map((node) => ({
-          label: (node.querySelector(label) as HTMLElement | null)?.innerText.trim() ?? "",
-          status: node.querySelector(status)?.getAttribute("data-status") ?? null,
+          label:
+            (
+              node.querySelector(label) as HTMLElement | null
+            )?.innerText.trim() ?? "",
+          status:
+            node.querySelector(status)?.getAttribute("data-status") ?? null,
           hasActivity: node.querySelector(activity) !== null,
           selected: node.getAttribute("aria-selected") === "true",
           // textContent rather than innerText: the read-out hides under the controls while the
@@ -134,7 +148,9 @@ export const sidebar = {
     try {
       await browser.waitUntil(
         async () => {
-          const row = (await this.rows()).find((candidate) => candidate.label === label);
+          const row = (await this.rows()).find(
+            (candidate) => candidate.label === label,
+          );
           last = row?.status;
           return last === status;
         },
@@ -165,7 +181,9 @@ export const sidebar = {
       throw new Error(`the trust review did not list "${label}"`);
     }
     if (!(await trustDialog.showsCommand(command))) {
-      throw new Error(`the trust review did not show command ${JSON.stringify(command)}`);
+      throw new Error(
+        `the trust review did not show command ${JSON.stringify(command)}`,
+      );
     }
     await trustDialog.trust(label);
     await trustDialog.waitUntilClosed();
@@ -193,7 +211,9 @@ export const sidebar = {
    * real failure masked by cleanup.
    */
   async stopIfRunning(label: string): Promise<void> {
-    const row = (await this.rows()).find((candidate) => candidate.label === label);
+    const row = (await this.rows()).find(
+      (candidate) => candidate.label === label,
+    );
     if (row === undefined || row.status !== RUNNING) return;
     await this.select(label);
     await this.stop(label);
@@ -210,7 +230,9 @@ export const sidebar = {
     try {
       await browser.waitUntil(
         async () => {
-          const row = (await this.rows()).find((candidate) => candidate.label === label);
+          const row = (await this.rows()).find(
+            (candidate) => candidate.label === label,
+          );
           port = row?.port ?? null;
           return port !== null && port !== previous;
         },
@@ -251,18 +273,24 @@ export const sidebar = {
    * opened is never toggled shut.
    */
   async openOrchestration(project: string): Promise<void> {
-    const actions = await $(`aria/${project} actions`);
+    const actions = await $(`aria/Actions for ${project}`);
     await actions.waitForExist({ timeout: WAIT.render });
 
     const menu = $('[role="menu"]');
     await browser.waitUntil(
       async () => {
         if (await menu.isDisplayed()) return true;
-        await browser.execute((element: HTMLElement) => element.focus(), actions);
+        await browser.execute(
+          (element: HTMLElement) => element.focus(),
+          actions,
+        );
         await browser.keys("Enter");
         return menu.isDisplayed();
       },
-      { timeout: WAIT.render, timeoutMsg: `the "${project}" actions menu never opened` },
+      {
+        timeout: WAIT.render,
+        timeoutMsg: `the "${project}" actions menu never opened`,
+      },
     );
 
     // Scoped to the open menu rather than looked up globally: the pane this opens also carries an
@@ -280,23 +308,38 @@ export const sidebar = {
    * waited on until clickable, which is when the reveal has landed.
    */
   rowElement(label: string) {
-    return $(NAV).$(`.//*[@role="treeitem"][./span[normalize-space(text())="${label}"]]`);
+    return $(NAV).$(
+      `.//*[@role="treeitem"][./span[normalize-space(text())="${label}"]]`,
+    );
   },
 
-  /**
-   * Whether the row's Start control is currently enabled — the trust gate as the user sees
-   * it: an untrusted command renders Start disabled until its variant is trusted.
-   */
-  async startEnabled(label: string): Promise<boolean> {
+  /** Whether Start is offered at all. Irrelevant actions are absent rather than disabled. */
+  async hasStart(label: string): Promise<boolean> {
     const control = await this.control(label, "Start");
-    await control.waitForExist({ timeout: WAIT.render });
-    return control.isEnabled();
+    return control.isExisting();
   },
 
   async clickControl(label: string, action: RowControl): Promise<void> {
+    await this.select(label);
     const control = await this.control(label, action);
-    await control.waitForClickable({ timeout: WAIT.render });
-    await control.click();
+    if (await control.isClickable()) {
+      await control.click();
+      return;
+    }
+
+    // Secondary actions are progressively disclosed in the row's shadcn dropdown. Open it via
+    // the genuine keyboard path—the same reliable WebKit strategy used for project actions.
+    const more = await this.rowElement(label).$(
+      `.//button[@aria-label="More actions for ${label}"]`,
+    );
+    await more.waitForExist({ timeout: WAIT.render });
+    await browser.execute((element: HTMLElement) => element.focus(), more);
+    await browser.keys("Enter");
+    const menu = $('[role="menu"]');
+    await menu.waitForDisplayed({ timeout: WAIT.render });
+    const item = await menu.$(`div=${action}`);
+    await item.waitForClickable({ timeout: WAIT.render });
+    await item.click();
   },
 
   control(label: string, action: RowControl) {

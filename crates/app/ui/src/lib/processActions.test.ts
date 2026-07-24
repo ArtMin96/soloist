@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   processActions,
+  presentProcessActions,
   runnableProcessActions,
+  shouldPersistProcessActions,
   type ProcessActionHandlers,
 } from "@/lib/processActions";
 import type { ProcessView } from "@/domain";
@@ -43,8 +45,36 @@ describe("processActions", () => {
     ]);
   });
 
+  it.each(["Starting", "Restarting"] as const)(
+    "offers only Stop while %s so the in-flight launch can be cancelled",
+    (status) => {
+      expect(processActions({ status, requiresTrust: false, resumable: false })).toEqual(["stop"]);
+    },
+  );
+
   it("offers only Stop while stopping (no restart of an in-flight stop)", () => {
     expect(processActions({ status: "Stopping", requiresTrust: false, resumable: false })).toEqual(
+      [],
+    );
+  });
+
+  it.each(["Crashed", "RestartExhausted"] as const)(
+    "offers Restart rather than Start for %s recovery",
+    (status) => {
+      expect(processActions({ status, requiresTrust: false, resumable: false })).toEqual([
+        "restart",
+      ]);
+    },
+  );
+
+  it("offers only Stop when a running process's next launch requires trust", () => {
+    expect(processActions({ status: "Running", requiresTrust: true, resumable: false })).toEqual([
+      "stop",
+    ]);
+  });
+
+  it("offers no action while stopping even if the next launch requires trust", () => {
+    expect(processActions({ status: "Stopping", requiresTrust: true, resumable: false })).toEqual(
       [],
     );
   });
@@ -61,6 +91,51 @@ describe("processActions", () => {
     expect(processActions({ status: "Stopped", requiresTrust: true, resumable: true })).toEqual([
       "trust",
     ]);
+  });
+});
+
+describe("presentProcessActions", () => {
+  const actions = (kinds: Array<"start" | "stop" | "restart">) => kinds.map((kind) => ({ kind }));
+
+  it("prioritizes Restart for a running command", () => {
+    const result = presentProcessActions("Command", "Running", actions(["stop", "restart"]));
+    expect(result.primary?.kind).toBe("restart");
+    expect(result.secondary.map((action) => action.kind)).toEqual(["stop"]);
+  });
+
+  it.each(["Agent", "Terminal"] as const)("prioritizes Stop for a running %s", (kind) => {
+    const result = presentProcessActions(kind, "Running", actions(["stop", "restart"]));
+    expect(result.primary?.kind).toBe("stop");
+    expect(result.secondary.map((action) => action.kind)).toEqual(["restart"]);
+  });
+
+  it("keeps Resume ahead of Start for a resumable stopped agent", () => {
+    const result = presentProcessActions("Agent", "Stopped", [
+      { kind: "resume" as const },
+      { kind: "start" as const },
+    ]);
+    expect(result.primary?.kind).toBe("resume");
+    expect(result.secondary.map((action) => action.kind)).toEqual(["start"]);
+  });
+});
+
+describe("shouldPersistProcessActions", () => {
+  it("keeps trust and failed-process recovery visible", () => {
+    expect(
+      shouldPersistProcessActions({ status: "Stopped", requiresTrust: true, resumable: false }),
+    ).toBe(true);
+    expect(
+      shouldPersistProcessActions({ status: "Crashed", requiresTrust: false, resumable: false }),
+    ).toBe(true);
+  });
+
+  it("leaves ordinary and running controls progressively disclosed", () => {
+    expect(
+      shouldPersistProcessActions({ status: "Stopped", requiresTrust: false, resumable: false }),
+    ).toBe(false);
+    expect(
+      shouldPersistProcessActions({ status: "Running", requiresTrust: false, resumable: false }),
+    ).toBe(false);
   });
 });
 
@@ -98,5 +173,10 @@ describe("runnableProcessActions", () => {
     expect(actions.map((a) => a.kind)).toEqual(["trust"]);
     actions[0].run();
     expect(h.calls.trust).toEqual([9, "Worker"]);
+  });
+
+  it("names the two resumable-agent choices as continue versus fresh", () => {
+    const result = runnableProcessActions(process({ kind: "Agent", resumable: true }), handlers());
+    expect(result.map((action) => action.label)).toEqual(["Resume last session", "Start fresh"]);
   });
 });

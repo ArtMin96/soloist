@@ -1,14 +1,18 @@
 import { waitUntilOr } from "../harness/waitUntilOr.js";
-import { agentEntry, launchPicker, TERMINAL_ENTRY } from "../screens/LaunchPicker.js";
+import {
+  agentEntry,
+  launchPicker,
+  TERMINAL_ENTRY,
+} from "../screens/LaunchPicker.js";
 import { sidebar } from "../screens/Sidebar.js";
-import { titlebar } from "../screens/Titlebar.js";
+import { startSurface } from "../screens/StartSurface.js";
 import type { RowHandle } from "../screens/Sidebar.js";
 
 /** The label the core gives a project's first terminal — what its sidebar row and pane read. */
 export const TERMINAL_LABEL = "Terminal";
 
 /**
- * Launches an agent the way a user does: open the picker from the titlebar, pick the tool, and wait
+ * Launches an agent the way a user does: open the picker from the start surface, pick the tool, and wait
  * for its row to appear. Returns the row, so a spec can assert on what was rendered.
  *
  * With exactly one project open the picker targets it and goes straight to the entry list; with
@@ -28,7 +32,9 @@ export async function launchAgent(tool: string): Promise<RowHandle> {
  * `label` is which terminal to wait for — the first is "Terminal" and later ones are numbered
  * ("Terminal 2", …) by the core, so a spec opening several names the one it expects.
  */
-export async function openTerminal(label: string = TERMINAL_LABEL): Promise<RowHandle> {
+export async function openTerminal(
+  label: string = TERMINAL_LABEL,
+): Promise<RowHandle> {
   await openLaunchPicker();
   await launchPicker.choose(TERMINAL_ENTRY);
   await launchPicker.waitUntilClosed();
@@ -36,7 +42,7 @@ export async function openTerminal(label: string = TERMINAL_LABEL): Promise<RowH
 }
 
 /**
- * Opens the launch picker, re-clicking the titlebar action until it is actually up.
+ * Opens the launch picker, returning to the start surface and re-clicking until it is actually up.
  *
  * A single click and a single wait is not enough here: WebKitGTK under WebDriver drops a click
  * outright when the app is busy, and the picker is lazy-loaded behind a deferred overlay, so opening
@@ -50,7 +56,7 @@ export async function openLaunchPicker(): Promise<void> {
   await waitUntilOr(
     async () => {
       if (await launchPicker.isOpen()) return true;
-      await titlebar.launchAgent();
+      await startSurface.launchAgent();
       return launchPicker.isOpen();
     },
     () => "the launch picker never opened",

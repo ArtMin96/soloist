@@ -92,6 +92,7 @@ function renderSidebar(
     selectedId?: number | null;
     onSelect?: (id: number) => void;
     onRestart?: (id: number) => void;
+    onOpenStart?: () => void;
     bindings?: HotkeyBindingView[];
     lineage?: ReadonlyMap<number, number>;
   } = {},
@@ -101,6 +102,7 @@ function renderSidebar(
     selectedId = null,
     onSelect = noop,
     onRestart = noop,
+    onOpenStart = noop,
     bindings = DEFAULT_BINDINGS,
     lineage = new Map(),
   } = overrides;
@@ -122,6 +124,8 @@ function renderSidebar(
             onStartAll={noop}
             onRestartRunning={noop}
             onStopAll={noop}
+            onOpenStart={onOpenStart}
+            startActive={selectedId === null}
             onOpenSettings={noop}
             onOpenProjectSettings={noop}
             onOpenOrchestration={noop}
@@ -137,6 +141,20 @@ function renderSidebar(
 afterEach(cleanup);
 
 describe("Sidebar footer", () => {
+  it("keeps Start available when the Settings footer preference is off", () => {
+    const onOpenStart = vi.fn();
+    renderSidebar({
+      settings: { ...DEFAULT_SIDEBAR, show_settings_footer: false },
+      onOpenStart,
+    });
+
+    const start = screen.getByRole("button", { name: "Start page" });
+    expect(start.getAttribute("aria-current")).toBe("page");
+    fireEvent.click(start);
+    expect(onOpenStart).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
+  });
+
   it("shows the Settings footer button when the setting is on", () => {
     renderSidebar({ settings: { ...DEFAULT_SIDEBAR, show_settings_footer: true } });
     expect(screen.getByRole("button", { name: "Settings" })).toBeTruthy();
@@ -214,6 +232,8 @@ describe("Sidebar lineage nesting", () => {
               onStartAll={noop}
               onRestartRunning={noop}
               onStopAll={noop}
+              onOpenStart={noop}
+              startActive
               onOpenSettings={noop}
               onOpenProjectSettings={noop}
               onOpenOrchestration={noop}
@@ -240,6 +260,31 @@ describe("Sidebar lineage nesting", () => {
 });
 
 describe("Sidebar hotkeys", () => {
+  it("keeps one selected tree row in the tab order", () => {
+    renderSidebar({ selectedId: 10 });
+    expect(screen.getByRole("treeitem", { name: /claude/ }).getAttribute("tabindex")).toBe("0");
+    expect(screen.getByRole("treeitem", { name: /build/ }).getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("moves through visible rows with an unmodified ArrowDown", () => {
+    const onSelect = vi.fn();
+    renderSidebar({ selectedId: 10, onSelect });
+    const current = screen.getByRole("treeitem", { name: /claude/ });
+    current.focus();
+    fireEvent.keyDown(current, { key: "ArrowDown" });
+    expect(onSelect).toHaveBeenCalledWith(11);
+    expect(document.activeElement).toBe(screen.getByRole("treeitem", { name: /build/ }));
+  });
+
+  it("moves to the last visible row with End", () => {
+    const onSelect = vi.fn();
+    renderSidebar({ selectedId: 10, onSelect });
+    const current = screen.getByRole("treeitem", { name: /claude/ });
+    current.focus();
+    fireEvent.keyDown(current, { key: "End" });
+    expect(onSelect).toHaveBeenCalledWith(20);
+  });
+
   it("restart_selection calls onRestart with the selected id", () => {
     const onRestart = vi.fn();
     const nav = renderSidebar({ selectedId: 10, onRestart });
