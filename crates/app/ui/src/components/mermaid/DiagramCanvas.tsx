@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
   type PointerEvent,
@@ -11,7 +12,7 @@ import { MermaidDiagram } from "@/components/mermaid/MermaidDiagram";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  clampZoom,
+  fitScale,
   IDENTITY_TRANSFORM,
   MERMAID_ZOOM_STEP,
   zoomAround,
@@ -36,7 +37,8 @@ interface DiagramCanvasProps {
 // transform math is the pure `lib/mermaid/zoom` module; this component owns only the pointer/wheel
 // wiring and the measured fit. Presentational and self-contained — it holds no editing or document
 // concern, so the editor's preview and (later) the code-block NodeView can both mount it. The diagram
-// is fit to the viewport on its first render and then holds the user's view across source edits.
+// is fit to the viewport whenever its measured size changes, until the user zooms or pans — from then
+// on their view is held across re-renders rather than being yanked back.
 export function DiagramCanvas({ source, className, onParse }: DiagramCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -55,15 +57,32 @@ export function DiagramCanvas({ source, className, onParse }: DiagramCanvasProps
     const w = content.offsetWidth;
     const h = content.offsetHeight;
     if (!w || !h) return;
-    const availW = viewport.clientWidth - FIT_PADDING;
-    const availH = viewport.clientHeight - FIT_PADDING;
-    const scale = clampZoom(Math.min(availW / w, availH / h, 1));
+    const scale = fitScale(
+      w,
+      h,
+      viewport.clientWidth - FIT_PADDING,
+      viewport.clientHeight - FIT_PADDING,
+    );
     setTransform({
       scale,
       x: (viewport.clientWidth - w * scale) / 2,
       y: (viewport.clientHeight - h * scale) / 2,
     });
   }, []);
+
+  // Fit off the measured element rather than off the render callback. The renderer reports a result
+  // before React has committed the SVG, so a fit driven from that callback measures the previous
+  // content — or nothing at all on the first render. A `ResizeObserver` fires once the new diagram has
+  // actually been laid out, which is the only moment its true size is knowable.
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const observer = new ResizeObserver(() => {
+      if (!adjusted.current) fit();
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [fit]);
 
   const reset = useCallback(() => {
     adjusted.current = true;
@@ -116,15 +135,6 @@ export function DiagramCanvas({ source, className, onParse }: DiagramCanvasProps
     setPanning(false);
   }, []);
 
-  const handleParse = useCallback(
-    (ok: boolean) => {
-      onParse?.(ok);
-      // Fit the freshly rendered diagram once, only while the user has not taken over the view.
-      if (ok && !adjusted.current) requestAnimationFrame(fit);
-    },
-    [onParse, fit],
-  );
-
   return (
     <div
       ref={viewportRef}
@@ -142,7 +152,7 @@ export function DiagramCanvas({ source, className, onParse }: DiagramCanvasProps
           transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
         }}
       >
-        <MermaidDiagram source={source} onParse={handleParse} />
+        <MermaidDiagram source={source} onParse={onParse} />
       </div>
 
       <TooltipProvider>

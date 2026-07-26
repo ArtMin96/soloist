@@ -4,9 +4,11 @@
 // first time a diagram actually renders. Every caller goes through `renderDiagram`/`parseDiagram`, so
 // nothing else in the app touches Mermaid's surface.
 
-import { MERMAID_ID_PREFIX, MERMAID_SECURITY_LEVEL } from "./const";
-import { mermaidThemeConfig } from "./theme";
+import { MERMAID_FONT_SIZE, MERMAID_ID_PREFIX, MERMAID_SECURITY_LEVEL } from "./const";
+import { cacheRender, cachedRender } from "./renderCache";
+import { mermaidThemeConfig, themeSignature } from "./theme";
 import { readDiagramTheme } from "./frontmatter";
+import { withIntrinsicSize } from "./svgSize";
 
 type Mermaid = typeof import("mermaid").default;
 
@@ -16,9 +18,26 @@ let loader: Promise<Mermaid> | null = null;
 /** Monotonic counter so each render supplies a DOM id Mermaid has not seen — reuse corrupts its cache. */
 let renderCounter = 0;
 
+/**
+ * The tail of the render queue. Mermaid keeps its configuration in module-level state that
+ * `initialize` overwrites and `render` then reads asynchronously, so two overlapping renders of
+ * differently themed sources would draw each other's palette. Chaining every render onto the last one
+ * keeps configure-then-draw atomic. Renders are half-second-scale and near-always one at a time; the
+ * one real overlap is the fullscreen viewer drawing the live source while the panel draws the
+ * debounced one.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
 function loadMermaid(): Promise<Mermaid> {
   if (!loader) loader = import("mermaid").then((module) => module.default);
   return loader;
+}
+
+/** Run `work` after every render already queued, whatever their outcome. */
+function enqueue<T>(work: () => Promise<T>): Promise<T> {
+  const result = queue.then(work, work);
+  queue = result.catch(() => undefined);
+  return result;
 }
 
 /** The message from a thrown value, whether it is an `Error` or a bare string Mermaid rejected with. */
@@ -41,20 +60,16 @@ function cleanupRenderArtifacts(id: string): void {
 export type RenderResult = { svg: string } | { error: string };
 
 /**
- * Render `source` to a sanitized SVG string, or report the parse error. Initializes Mermaid with the
- * app's current theme on every call so a light/dark flip is reflected, and always runs under the strict
- * security level (DOMPurify-sanitized output, no eval, no iframe) so the SVG is safe to inject and
- * renders under the app's Content-Security-Policy.
+ * Configure Mermaid for `source` and draw it. The app palette is injected only when the diagram
+ * follows the app theme (no frontmatter override) or explicitly names the base theme those tokens
+ * target. A self-contained theme (dark/forest/neutral) is left to its own palette: Mermaid folds the
+ * base theme variables into the frontmatter theme's, so injecting them would bleed base colours onto
+ * the chosen theme. The font size is passed either way so a diagram is sized to the app's dense body
+ * type whichever palette draws it.
  */
-export async function renderDiagram(source: string): Promise<RenderResult> {
+async function draw(source: string): Promise<string> {
   const mermaid = await loadMermaid();
-  const id = `${MERMAID_ID_PREFIX}-${(renderCounter += 1)}`;
   const theme = mermaidThemeConfig();
-  // The app palette is injected only when the diagram follows the app theme (no frontmatter override)
-  // or explicitly names the base theme those tokens target. A self-contained theme (dark/forest/
-  // neutral) is left to its own palette: mermaid folds these base themeVariables into the frontmatter
-  // theme's, so injecting them would bleed base colors onto the chosen theme. The font size rides in
-  // `themeVariables` (a CSS string), so mermaid's numeric top-level `fontSize` slot stays unused.
   const declared = readDiagramTheme(source);
   const appTokened = declared === null || declared === theme.theme;
   mermaid.initialize({
@@ -62,16 +77,37 @@ export async function renderDiagram(source: string): Promise<RenderResult> {
     securityLevel: MERMAID_SECURITY_LEVEL,
     fontFamily: theme.fontFamily,
     ...(appTokened
-      ? { theme: theme.theme, darkMode: theme.darkMode, themeVariables: theme.themeVariables }
-      : {}),
+      ? { theme: theme.theme, themeVariables: theme.themeVariables }
+      : { themeVariables: { fontSize: MERMAID_FONT_SIZE } }),
   });
+  const id = `${MERMAID_ID_PREFIX}-${(renderCounter += 1)}`;
   try {
     const { svg } = await mermaid.render(id, source);
+    return withIntrinsicSize(svg);
+  } finally {
+    cleanupRenderArtifacts(id);
+  }
+}
+
+/**
+ * Render `source` to a sanitized SVG string, or report why it could not be drawn. Runs under the
+ * strict security level (DOMPurify-sanitized output, no eval, no iframe) so the SVG is safe to inject
+ * and renders under the app's Content-Security-Policy.
+ *
+ * Never rejects: a malformed diagram, a palette Mermaid refuses, and a library chunk that fails to
+ * load all resolve to an `error` a caller can show. A rejection here would leave the surfaces that
+ * await it with no result and no failure — a diagram that never arrives and never explains itself.
+ */
+export async function renderDiagram(source: string): Promise<RenderResult> {
+  const signature = themeSignature();
+  const cached = cachedRender(signature, source);
+  if (cached !== undefined) return { svg: cached };
+  try {
+    const svg = await enqueue(() => draw(source));
+    cacheRender(signature, source, svg);
     return { svg };
   } catch (cause) {
     return { error: errorMessage(cause) };
-  } finally {
-    cleanupRenderArtifacts(id);
   }
 }
 
@@ -82,8 +118,8 @@ export type ParseResult = { ok: true } | { ok: false; message: string };
  * `parse` throws on invalid input, so a caught throw becomes an `ok: false` with the reported message.
  */
 export async function parseDiagram(source: string): Promise<ParseResult> {
-  const mermaid = await loadMermaid();
   try {
+    const mermaid = await loadMermaid();
     await mermaid.parse(source);
     return { ok: true };
   } catch (cause) {

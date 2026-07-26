@@ -46,4 +46,45 @@ describe("MermaidDiagram", () => {
     expect(container.querySelector(".mermaid-error-icon")).toBeTruthy();
     await waitFor(() => expect(onParse).toHaveBeenCalledWith(false));
   });
+
+  it("keeps the drawn diagram on screen while the next render is in flight", async () => {
+    renderDiagramMock.mockResolvedValue({ svg: "<svg data-testid='first'></svg>" });
+    const { rerender, container } = render(<MermaidDiagram source="flowchart TD\n A --> B" />);
+    expect(await screen.findByTestId("first")).toBeTruthy();
+
+    // A theme pick rewrites the source; the render behind it has not resolved yet.
+    renderDiagramMock.mockReturnValue(new Promise(() => {}));
+    rerender(<MermaidDiagram source="---\nconfig:\n theme: dark\n---\nflowchart TD\n A --> B" />);
+
+    // A Mermaid render is slow enough that swapping to a placeholder reads as the diagram vanishing.
+    expect(screen.queryByTestId("mermaid-skeleton")).toBeNull();
+    expect(screen.getByTestId("first")).toBeTruthy();
+    await waitFor(() => expect(container.querySelector(".mermaid-rendered.is-stale")).toBeTruthy());
+  });
+
+  it("keeps the last diagram that drew when an edit breaks the source", async () => {
+    renderDiagramMock.mockResolvedValue({ svg: "<svg data-testid='drawn'></svg>" });
+    const { rerender, container } = render(<MermaidDiagram source="flowchart TD\n A --> B" />);
+    expect(await screen.findByTestId("drawn")).toBeTruthy();
+
+    renderDiagramMock.mockResolvedValue({ error: "Parse error on line 2" });
+    rerender(<MermaidDiagram source="flowchart TD\n A -->" />);
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    // Still there to work against, but dimmed — it no longer reflects what is in the editor.
+    expect(screen.getByTestId("drawn")).toBeTruthy();
+    expect(container.querySelector(".mermaid-rendered.is-stale")).toBeTruthy();
+  });
+
+  it("clears the stale marking once the new diagram has drawn", async () => {
+    renderDiagramMock.mockResolvedValue({ svg: "<svg data-testid='first'></svg>" });
+    const { rerender, container } = render(<MermaidDiagram source="flowchart TD\n A --> B" />);
+    expect(await screen.findByTestId("first")).toBeTruthy();
+
+    renderDiagramMock.mockResolvedValue({ svg: "<svg data-testid='second'></svg>" });
+    rerender(<MermaidDiagram source="flowchart LR\n A --> B" />);
+
+    expect(await screen.findByTestId("second")).toBeTruthy();
+    expect(container.querySelector(".mermaid-rendered.is-stale")).toBeNull();
+  });
 });

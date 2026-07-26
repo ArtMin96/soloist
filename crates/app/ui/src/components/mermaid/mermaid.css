@@ -71,8 +71,20 @@
   height: auto;
 }
 
+/* Stale: the mounted diagram no longer matches the source — a newer render is in flight, or the
+ * current source is broken. It stays on screen (a Mermaid render is slow enough that clearing to a
+ * placeholder reads as the diagram vanishing) and recedes instead, so the surface never goes blank. */
+.mermaid-rendered.is-stale {
+  opacity: 0.55;
+  transition: opacity 120ms var(--ease-out-quint);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mermaid-loading {
     animation: none;
+  }
+
+  .mermaid-rendered.is-stale {
+    transition: none;
   }
 }

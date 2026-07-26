@@ -20,14 +20,19 @@
 }
 
 /* The transform target: top-left origin so translate-then-scale matches the pointer math, and sized to
- * the diagram so a fit measures the true content bounds. */
+ * the diagram so a fit measures the true content bounds.
+ *
+ * Deliberately no `will-change: transform`. It promotes this to a compositing layer rasterized at the
+ * layer's own size, and a later `scale()` then stretches that bitmap instead of redrawing the vector —
+ * measured on WebKitGTK, a diagram at scale(3) loses 42% of its edge energy and the labels visibly
+ * soften. Zoom here is discrete (a wheel notch, a button) rather than an animation, so there is no
+ * frame budget to buy back, and the CSS spec asks that `will-change` not be left on permanently. */
 .diagram-canvas-content {
   position: absolute;
   top: 0;
   left: 0;
   transform-origin: 0 0;
   width: max-content;
-  will-change: transform;
 }
 
 /* Inside the pannable viewport the renderer must not add its own scrollbar — the canvas owns overflow. */

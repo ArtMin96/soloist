@@ -14,12 +14,17 @@ export {
   MIN_MERMAID_ZOOM,
   MAX_MERMAID_ZOOM,
   MERMAID_ZOOM_STEP,
+  MAX_FIT_ZOOM,
   MERMAID_PNG_SCALE,
+  MERMAID_RENDER_CACHE_SIZE,
 } from "./const";
 export { renderDiagram, parseDiagram, type RenderResult, type ParseResult } from "./engine";
+export { toRgb } from "./color";
+export { withIntrinsicSize } from "./svgSize";
+export { cachedRender, cacheRender, clearRenderCache } from "./renderCache";
 export { isDarkTheme, themeSignature, mermaidThemeConfig, type MermaidThemeConfig } from "./theme";
 export { useMermaidTheme } from "./useMermaidTheme";
-export { clampZoom, zoomAround, IDENTITY_TRANSFORM, type Transform } from "./zoom";
+export { clampZoom, fitScale, zoomAround, IDENTITY_TRANSFORM, type Transform } from "./zoom";
 export {
   readDiagramTheme,
   setDiagramTheme,
