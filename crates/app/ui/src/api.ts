@@ -12,6 +12,7 @@ import type {
   AppInfo,
   Binding,
   DetectedTool,
+  DiagramView,
   DomainEvent,
   HotkeyAction,
   HotkeyBindingView,
@@ -116,6 +117,44 @@ export function scratchpadRename(
   return invoke<ScratchpadView>("scratchpad_rename", { project, from, to });
 }
 
+// The full diagram to open and edit (its raw Mermaid source and revision). The core stores the source
+// verbatim and never renders it — rendering the Mermaid is the frontend's job.
+export function diagramRead(project: number, name: string): Promise<DiagramView> {
+  return invoke<DiagramView>("diagram_read", { project, name });
+}
+
+// Save the diagram's Mermaid source, revision-guarded by `expectedRevision` (null to create). A stale
+// write rejects with the conflict message for the panel to surface.
+export function diagramWrite(
+  project: number,
+  name: string,
+  source: string,
+  expectedRevision: number | null,
+): Promise<DiagramView> {
+  return invoke<DiagramView>("diagram_write", {
+    project,
+    name,
+    source,
+    expectedRevision,
+  });
+}
+
+// Archive or restore a diagram (a listing flag, not a delete). Emits the domain event the roster
+// re-reads on.
+export function diagramArchive(
+  project: number,
+  name: string,
+  archived: boolean,
+): Promise<DiagramView> {
+  return invoke<DiagramView>("diagram_archive", { project, name, archived });
+}
+
+// Rename a diagram, keeping its durable id and revision. A name already in use is rejected by the
+// core, so the caller surfaces the refusal rather than pre-empting it.
+export function diagramRename(project: number, from: string, to: string): Promise<DiagramView> {
+  return invoke<DiagramView>("diagram_rename", { project, from, to });
+}
+
 // Save a scratchpad's Markdown to a user-chosen `.md` file: the native save dialog picks the path,
 // then the backend writes the bytes there. Returns false when the user dismisses the dialog.
 export async function exportMarkdown(defaultName: string, contents: string): Promise<boolean> {
@@ -126,6 +165,26 @@ export async function exportMarkdown(defaultName: string, contents: string): Pro
   });
   if (path == null) return false;
   await invoke("export_markdown", { path, contents });
+  return true;
+}
+
+// Save a rendered diagram to a user-chosen file: the native save dialog picks the path, then the
+// backend writes the raw bytes (SVG/`.mmd` text or a PNG bitmap). Returns false when the user dismisses
+// the dialog. The `extension`/`filterLabel` come from the caller's format table so this stays a thin
+// dialog-plus-IPC hop with no export knowledge of its own.
+export async function exportDiagramFile(
+  defaultName: string,
+  extension: string,
+  filterLabel: string,
+  bytes: Uint8Array,
+): Promise<boolean> {
+  const path = await save({
+    title: "Export diagram",
+    defaultPath: `${defaultName}.${extension}`,
+    filters: [{ name: filterLabel, extensions: [extension] }],
+  });
+  if (path == null) return false;
+  await invoke("export_bytes", { path, bytes: Array.from(bytes) });
   return true;
 }
 

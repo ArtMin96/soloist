@@ -18,7 +18,7 @@ use crate::agents::{AgentLineage, Agents, IdleTracker};
 use crate::composition::CorePorts;
 use crate::config::ConfigEngine;
 use crate::configchange::{ConfigSync, TrustReviewCommand};
-use crate::coordination::{Kv, Leases, Scratchpads, Templates, Timers, Todos};
+use crate::coordination::{Diagrams, Kv, Leases, Scratchpads, Templates, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::FileWatcher;
 use crate::identity::Identity;
@@ -55,6 +55,7 @@ pub struct StatusSummary {
 mod blocking;
 mod commands;
 mod coordination;
+mod diagram;
 mod kv;
 mod link;
 mod loops;
@@ -108,6 +109,7 @@ pub struct Facade {
     leases: Leases,
     timers: Timers,
     scratchpads: Scratchpads,
+    diagrams: Diagrams,
     todos: Todos,
     templates: Arc<Templates>,
     settings: Arc<SettingsStore<(), Settings>>,
@@ -136,6 +138,7 @@ impl Facade {
             lock_repo,
             timer_repo,
             scratchpad_repo,
+            diagram_repo,
             todo_repo,
             template_repo,
             settings_repo,
@@ -152,6 +155,7 @@ impl Facade {
             timers: Timers::new(timer_repo, clock.clone(), Arc::new(Notify::new())),
             agents: Agents::new(agent_tools, version_probe, clock.clone()),
             scratchpads: Scratchpads::new(scratchpad_repo, clock.clone()),
+            diagrams: Diagrams::new(diagram_repo, clock.clone()),
             todos: Todos::new(todo_repo),
             templates: Arc::new(Templates::new(template_repo)),
             settings: Arc::new(SettingsStore::new(settings_repo)),

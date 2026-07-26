@@ -82,7 +82,7 @@ builds and runs" (§8).
 | `terminal/` | **C3 Terminal I/O** | PTY read loop, rendered+raw buffers, OSC parse, attach replay | live (P4) |
 | `agents` · `idle` | **C4 Agents & Idle** | agent-tool defs, launch, 5-state idle FSM, optional summary | **placeholder → P7** |
 | `metrics` · `portscan` | **C5 Monitoring** | CPU/mem sampling, `/proc` port discovery, readiness | **placeholder → P6** |
-| `coordination` | **C6 Coordination** | scratchpads, todos, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos); kv → P9 |
+| `coordination` | **C6 Coordination** | scratchpads, todos, diagrams, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos); kv → P9; diagrams (Mermaid source docs) mirror scratchpads (`mermaid-diagrams`) |
 | `notify` | **C7 Notifications** | crash/attention/idle toasts, unread/bell state | **placeholder → P6** |
 | `facade` · `identity` | **C8 Integration façade** | the public command/query API; MCP identity & effective scope | live (`facade`) / placeholder `identity` → P8 |
 | `events` | cross-cutting | typed `DomainEvent` + `EventBus` (broadcast) | live |
@@ -152,7 +152,7 @@ trigger that tells you to reach for it. Use a pattern when its trigger fires —
 | **Parameter Object / Builder** | `core::composition::CorePorts` + `CorePortsBuilder` — the port set for `Facade::new`; it projects `SupervisorPorts` for `Supervisor::new` | a constructor passes >4 collaborators (`too_many_arguments`) → group them in a struct/builder |
 | **Registry** | `config::detect::DETECTORS` (C1, command auto-detection); the MCP tool router composed from per-category sub-routers (`crates/mcp/src/tools/`, R8); **to add** — agent-tool defs (P7) | a growing set of "one of many" handlers → register entries, don't extend a giant `match` |
 | **Strategy** | `config::detect::Detector` — one impl per ecosystem (C1); **to add** — per-provider idle heuristics (P7), per-agent-tool launch (P7) | behavior varies by a closed set of providers → one trait, one impl per provider |
-| **Optimistic concurrency** | `core::coordination::{Scratchpads, Todos}` over their repos (P9: scratchpads + todos done — revision-guarded document writes) | concurrent writers to one durable record → revision guard, reject stale writes |
+| **Optimistic concurrency** | `core::coordination::{Scratchpads, Todos, Diagrams}` over their repos (P9: scratchpads + todos done — revision-guarded document writes; diagrams mirror the pattern) | concurrent writers to one durable record → revision guard, reject stale writes |
 | **Lease/lock** | `core::coordination::Leases` over `LockRepo` (TTL lease, P9) + `Todos` process-owned lock over `TodoRepo` (P9) | cooperative cross-agent intent → owner `ProcessId`, auto-release on close (the `LockReleaser` hook, fanned out by `CompositeLockReleaser`) |
 | **Scheduler (Observer + self-supervised loop)** | `core::coordination::TimerScheduler` over the `TimerRepo` port (P9: timers done) | deferred/conditional delivery → a `Clock`-driven, event-subscribed loop that fires due timers and delivers a body as a fresh turn; idle conditions consume the C4 `AgentActivityChanged` events |
 | **Read-through cache (TTL memo)** | `core::cache::ReadCache` (shell-env capture, agent `--version` detection) | an expensive, repeatable off-runtime read a burst of callers would each redo → one `Clock`-driven, single-flighted TTL memo; add event-invalidation only when a consumer needs it (YAGNI) |
@@ -234,7 +234,7 @@ DRY, and the dependency rule intact. These *are* the "how future sessions archit
 
 ### 5.8 Use the coordination layer — create → delegate → use (C6, Phase 9)
 
-Coordination (scratchpads, todos, timers, leases, key-value) is **durable, project-scoped state in SQLite**
+Coordination (scratchpads, todos, diagrams, timers, leases, key-value) is **durable, project-scoped state in SQLite**
 that agents share to orchestrate each other token-free — what makes Soloist a *metaharness* (`00`, `05` §1).
 It is context **C6** (`core::coordination`), built in **Phase 9**; the MCP tool *names* are cited in `05` §7,
 but their **parameter schemas are clean-room and undesigned** (`05` §12, decision D7) — design them per-tool

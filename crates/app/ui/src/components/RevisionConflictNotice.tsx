@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 
 // The documents that carry a revision and can therefore be refused a stale write. Closed, so a new
 // editor names its subject here rather than writing a fourth copy of the sentence in its own words.
-export type ConflictSubject = "scratchpad" | "todo" | "template";
+export type ConflictSubject = "scratchpad" | "todo" | "template" | "diagram";
 
 // What a refused revision-guarded save says, in one place for every editor that can meet one.
 //

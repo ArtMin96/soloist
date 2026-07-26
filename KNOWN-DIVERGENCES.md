@@ -735,3 +735,52 @@ This entry would then become ⚪ superseded.
 
 **Effect on parity:** F15 is satisfied without it — its Verify clauses cover render, missing-value
 reporting, `-32602`, and capability gating, none of which involve delivery. No row regresses.
+
+## D-20 — Diagrams are a first-class coordination document rendering Mermaid (a Soloist extension) 🟢
+
+**Introduced:** the `mermaid-diagrams` initiative, 2026-07-24 (owner-directed; `plan/02` §DG). Recorded
+here beside the todo↔scratchpad extension
+[D-18](#d-18--todos-may-carry-an-optional-link-to-a-scratchpad-a-soloist-extension-) and the unified
+Templates extension [D-7](#d-7--scratchpads-carry-an-enforced-disciplined-structure-not-free-form-markdown--superseded),
+the precedents for logging a Soloist original in both this file and `plan/05` §12.
+
+**Solo — silent, not contradicted.** ⚠️ This entry is a **strict-reading exception** to this file's
+scope. `plan/05` records **no** diagram or Mermaid capability for Solo: §7's tool catalog lists no
+`diagram_*` tool and §10's panels describe no diagram surface. But **no Solo page states that Soloist
+may not add one** — the public record is simply silent, and per `CLAUDE.md` §9 that silence *is* the
+gap, so the primary decision lives in [`plan/05` §12](plan/05-solo-reference-and-sources.md). This
+entry exists only so the extension is discoverable beside the other Soloist originals. **Nothing here
+asserts what Solo does or does not do.**
+
+**Soloist:** a **Diagram** is a first-class, project-scoped, durable coordination document — a sibling
+of scratchpads and todos — whose body is a raw **Mermaid source string** (not typed JSON, not
+free-form Markdown). It mirrors the scratchpad aggregate end to end.
+
+- **Body is source; nothing derived is stored.** `Diagram { name, source: String (≤256 KiB), tags,
+  archived, revision }`, defined once in the core; `validate()` enforces only a **non-blank `name`**
+  and the size cap — a blank source is valid. The core **never renders or validates Mermaid**
+  (rendering is a JS concern), so `DiagramView` carries **no `rendered` field** and a
+  `DiagramSummary.gist` is the first non-blank source line, with no heading-skip.
+- **Durable identity, survives restart.** A store-assigned `DiagramId` (migration **v18**,
+  `SCHEMA_VERSION` 17→18) addressed by the unique-per-project `name`; project-scoped shared content
+  (not process-owned), so launch reconciliation never clears it (G11).
+- **Revision-guarded writes**, exactly like scratchpads (G2): `expected_revision` omitted = create,
+  current = update, mismatch = `DiagramRevisionConflict { expected, actual }`. A
+  `DiagramChanged { project, name }` event (ids only) drives the live roster, mirroring
+  `ScratchpadChanged`.
+- **MCP surface — default-ON group `Diagrams`:** nine clean-room tools
+  (`diagram_list`/`_read`/`_write`/`_rename`/`_add_tags`/`_remove_tags`/`_tags_list`/`_archive`/`_delete`),
+  project-scoped and ungated by trust (content, not execution); a bound agent reaches only its
+  effective project's diagrams. `diagram_write` takes `{name, source, expected_revision}`. No template
+  seeding, no `solo://` link, no cross-project transfer and no derived children in v1 (YAGNI).
+- **Two rendering surfaces, one renderer.** The same lazy-loaded, theme-following renderer draws a
+  standalone **Diagrams tab** (roster + source-editor/live-preview + toolbox) and a ```` ```mermaid ````
+  fenced block **inside scratchpad/todo notes** (a TipTap code-block NodeView). Mermaid is dynamically
+  imported into its own code-split chunk (`CLAUDE.md` §6) and runs at `securityLevel: 'strict'`
+  (DOMPurify-sanitized, no `eval`, no iframe) under the app CSP unchanged.
+
+**Why 🟢 (settled):** the model, storage, MCP surface, gating default, and both UI surfaces were
+owner-decided (2026-07-24) and shipped together; no open question straddles the design.
+
+**Effect on parity:** a new Soloist-only section **DG** (`plan/02`) covers it; no existing row
+regresses. Full design decision: `plan/05` §12.

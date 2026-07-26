@@ -50,7 +50,7 @@ impl Facade {
 
     /// The orchestration read-model for `project`: its agent lineage tree (each managed process with
     /// its supervision status and, for agents, live idle activity) plus the coordination state agents
-    /// share — todos, timers, leases, scratchpads, and key-value. Assembled purely from existing
+    /// share — todos, timers, leases, scratchpads, diagrams, and key-value. Assembled purely from existing
     /// reads; it starts no work and mutates nothing.
     ///
     /// **Authorization is the caller's.** Like [`snapshot`](Self::snapshot) this is a local read: it
@@ -116,6 +116,7 @@ impl Facade {
             timers,
             leases: self.leases.list(project)?,
             scratchpads: self.scratchpads.list(project)?,
+            diagrams: self.diagrams.list(project)?,
             kv: self.kv.list(project)?,
         })
     }

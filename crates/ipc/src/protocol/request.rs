@@ -154,6 +154,30 @@ pub enum IpcRequest {
     /// Move the scratchpad `name` from the session's effective project to `to_project` — authorized
     /// only when the caller is authenticated to both (O10).
     ScratchpadTransfer { name: String, to_project: ProjectId },
+    /// Create or replace the diagram `name` in the session's effective project with the Mermaid
+    /// `source`, revision-guarded: `expected_revision` is omitted to create or the current revision
+    /// to update.
+    DiagramWrite {
+        name: String,
+        source: String,
+        expected_revision: Option<u64>,
+    },
+    /// The diagram `name` in the session's effective project.
+    DiagramRead { name: String },
+    /// Every diagram in the session's effective project, as one-line summaries.
+    DiagramList,
+    /// Rename the diagram `name` to `new_name` in the session's effective project.
+    DiagramRename { name: String, new_name: String },
+    /// Add `tags` to the diagram `name` in the session's effective project.
+    DiagramAddTags { name: String, tags: Vec<String> },
+    /// Remove `tags` from the diagram `name` in the session's effective project.
+    DiagramRemoveTags { name: String, tags: Vec<String> },
+    /// The distinct tags used across the session's effective project's diagrams.
+    DiagramTagsList,
+    /// Archive or restore the diagram `name` in the session's effective project.
+    DiagramArchive { name: String, archived: bool },
+    /// Delete the diagram `name` in the session's effective project.
+    DiagramDelete { name: String },
     /// Create a todo from the disciplined `doc` in the session's effective project, optionally
     /// associated with the scratchpad `scratchpad` names — the document it was derived from.
     TodoCreate {

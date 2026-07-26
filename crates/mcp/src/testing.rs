@@ -37,6 +37,7 @@ pub(crate) fn spawn_fake_app(
 pub(crate) fn all_feature_groups() -> McpToolGroups {
     McpToolGroups {
         scratchpads: true,
+        diagrams: true,
         todos: true,
         timers: true,
         key_value: true,

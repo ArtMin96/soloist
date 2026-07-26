@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { DiagramPanel } from "@/components/orchestration/DiagramPanel";
 import { OrchestrationTree } from "@/components/orchestration/OrchestrationTree";
 import { ScratchpadPanel } from "@/components/orchestration/ScratchpadPanel";
 import { TimersPanel } from "@/components/orchestration/TimersPanel";
@@ -10,12 +11,13 @@ import { useOrchestration } from "@/store/useOrchestration";
 import type { Option } from "@/lib/appearance";
 import type { ProjectView } from "@/domain";
 
-type View = "agents" | "todos" | "scratchpads" | "timers";
+type View = "agents" | "todos" | "scratchpads" | "diagrams" | "timers";
 
 const VIEW_OPTIONS: Option<View>[] = [
   { value: "agents", label: "Agents" },
   { value: "todos", label: "To-dos" },
   { value: "scratchpads", label: "Scratchpads" },
+  { value: "diagrams", label: "Diagrams" },
   { value: "timers", label: "Timers" },
 ];
 
@@ -24,7 +26,9 @@ const VIEW_OPTIONS: Option<View>[] = [
 // place here that reaches IPC — and switches the body between views. Each view is presentational
 // over the one snapshot the hook keeps live (snapshot-then-deltas).
 export function OrchestrationPane({ project }: { project: ProjectView }) {
-  const { tree, agents, todos, scratchpads, timers, error } = useOrchestration(project.id);
+  const { tree, agents, todos, scratchpads, diagrams, timers, error } = useOrchestration(
+    project.id,
+  );
   const [view, setView] = useState<View>("agents");
 
   return (
@@ -60,6 +64,7 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
         {view === "scratchpads" && (
           <ScratchpadPanel project={project.id} scratchpads={scratchpads} />
         )}
+        {view === "diagrams" && <DiagramPanel project={project.id} diagrams={diagrams} />}
         {view === "timers" && <TimersPanel timers={timers} agents={agents} project={project.id} />}
       </div>
     </section>

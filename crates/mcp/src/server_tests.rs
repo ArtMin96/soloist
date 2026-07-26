@@ -3,11 +3,11 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::ServerHandler;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, Comment, FireCond, LeaseView, LinkContent, McpToolGroups,
-    Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, PromptMode,
-    Readiness, ScratchpadId, ScratchpadLink, ScratchpadRef, ScratchpadSummary, ScratchpadView,
-    SessionId, SetWhenIdleOutcome, StartSummary, TimerId, TimerStatus, TimerView, TodoDoc, TodoId,
-    TodoStatus, TodoSummary, TodoView, Whoami,
+    AcquireOutcome, AgentKind, AgentTool, Comment, DiagramId, DiagramSummary, DiagramView,
+    FireCond, LeaseView, LinkContent, McpToolGroups, Origin, ProcStatus, ProcessId, ProcessKind,
+    ProcessView, ProjectId, ProjectRef, PromptMode, Readiness, ScratchpadId, ScratchpadLink,
+    ScratchpadRef, ScratchpadSummary, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary,
+    TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary, TodoView, Whoami,
 };
 use soloist_core::{
     FeedbackEntry, IntegrationFile, IntegrationWrite, MissingPolicy, RenderedPrompt, TemplateId,
@@ -20,7 +20,8 @@ use std::path::PathBuf;
 use crate::testing::{all_feature_groups, handler, handler_with_groups, spawn_fake_app};
 
 use crate::args::{
-    HelpArg, IntegrationFileArg, LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, PromptScopeArg,
+    DiagramArchiveArg, DiagramNameArg, DiagramTagsArg, DiagramWriteArg, HelpArg,
+    IntegrationFileArg, LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, PromptScopeArg,
     PromptTemplateCreateArg, PromptTemplateRenderArg, PromptTemplateUpdateArg, RenameArg,
     ScratchpadArchiveArg, ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg,
     SelectProjectArg, SendInputArg, SetupAgentIntegrationArg, SpawnAgentArg, SubmitFeedbackArg,
@@ -134,6 +135,16 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "scratchpad_archive",
     "scratchpad_delete",
     "scratchpad_transfer",
+    // tools/diagram.rs
+    "diagram_list",
+    "diagram_read",
+    "diagram_write",
+    "diagram_rename",
+    "diagram_add_tags",
+    "diagram_remove_tags",
+    "diagram_tags_list",
+    "diagram_archive",
+    "diagram_delete",
     // tools/todo.rs
     "todo_list",
     "todo_get",
@@ -426,6 +437,7 @@ fn prompt_template_render_is_absent_when_its_group_is_off() {
 fn disabling_a_feature_group_hides_only_its_tools() {
     let groups = McpToolGroups {
         scratchpads: false,
+        diagrams: true,
         todos: true,
         timers: true,
         key_value: false,
@@ -436,6 +448,10 @@ fn disabling_a_feature_group_hides_only_its_tools() {
     assert!(
         !served.iter().any(|name| name.starts_with("scratchpad_")),
         "the disabled group's tools are gone"
+    );
+    assert!(
+        served.contains("diagram_list"),
+        "another feature group is unaffected"
     );
     assert!(
         served.contains("todo_list"),
@@ -1620,6 +1636,190 @@ async fn scratchpad_delete_reports_whether_it_was_removed() {
         }))
         .await
         .expect("scratchpad_delete succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "deleted": true })
+    );
+}
+
+/// A sample Mermaid source for the diagram response-projection tests.
+fn sample_source() -> String {
+    "flowchart TD\n  A --> B".to_owned()
+}
+
+/// A sample diagram view for the response-projection tests.
+fn sample_diagram(name: &str) -> DiagramView {
+    DiagramView {
+        id: DiagramId::from_raw(1),
+        name: name.into(),
+        tags: vec!["arch".into()],
+        archived: false,
+        revision: 1,
+        source: sample_source(),
+    }
+}
+
+#[tokio::test]
+async fn diagram_write_forwards_the_source_and_projects_the_view() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // The handler forwards the source and an omitted revision as a create — the request matches only
+    // if it did exactly that, and the reply is projected as the bare view (no seeded_from wrapper).
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::DiagramWrite {
+            name,
+            source,
+            expected_revision: None,
+        } if name == "flow" && source == sample_source() => {
+            Ok(IpcResponse::Diagram(sample_diagram("flow")))
+        }
+        _ => Err(IpcError::Internal("unexpected write".into())),
+    });
+
+    let result = handler(socket)
+        .diagram_write(Parameters(DiagramWriteArg {
+            name: "flow".into(),
+            source: sample_source(),
+            expected_revision: None,
+        }))
+        .await
+        .expect("diagram_write succeeds");
+    let back: DiagramView = serde_json::from_value(structured_of(result)).expect("decode view");
+    assert_eq!(back.name, "flow");
+    assert_eq!(back.revision, 1);
+    assert_eq!(back.source, sample_source());
+}
+
+#[tokio::test]
+async fn diagram_read_projects_the_view() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::DiagramRead { name } if name == "flow" => {
+            Ok(IpcResponse::Diagram(sample_diagram("flow")))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .diagram_read(Parameters(DiagramNameArg {
+            name: "flow".into(),
+        }))
+        .await
+        .expect("diagram_read succeeds");
+    let back: DiagramView = serde_json::from_value(structured_of(result)).expect("decode view");
+    assert_eq!(back.source, sample_source());
+}
+
+#[tokio::test]
+async fn diagram_add_tags_threads_its_arguments_and_projects_the_view() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::DiagramAddTags { name, tags } if name == "flow" && tags == ["v1"] => {
+            Ok(IpcResponse::Diagram(sample_diagram("flow")))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .diagram_add_tags(Parameters(DiagramTagsArg {
+            name: "flow".into(),
+            tags: vec!["v1".into()],
+        }))
+        .await
+        .expect("diagram_add_tags succeeds");
+    let back: DiagramView = serde_json::from_value(structured_of(result)).expect("decode view");
+    assert_eq!(back.name, "flow");
+}
+
+#[tokio::test]
+async fn diagram_list_projects_the_summaries() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let summary = DiagramSummary {
+        id: DiagramId::from_raw(1),
+        name: "flow".into(),
+        tags: vec!["arch".into()],
+        archived: false,
+        revision: 2,
+        gist: "flowchart TD".into(),
+        updated_at: 1_700_000_000_000,
+    };
+    let canned = summary.clone();
+    spawn_fake_app(socket.clone(), move |request| match request {
+        IpcRequest::DiagramList => Ok(IpcResponse::Diagrams(vec![canned.clone()])),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .diagram_list()
+        .await
+        .expect("diagram_list succeeds");
+    let back: Vec<DiagramSummary> =
+        serde_json::from_value(structured_of(result)["diagrams"].clone()).expect("decode list");
+    assert_eq!(back, vec![summary]);
+}
+
+#[tokio::test]
+async fn diagram_tags_list_projects_the_distinct_tags() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::DiagramTagsList => {
+            Ok(IpcResponse::DiagramTags(vec!["arch".into(), "v1".into()]))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .diagram_tags_list()
+        .await
+        .expect("diagram_tags_list succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "tags": ["arch", "v1"] })
+    );
+}
+
+#[tokio::test]
+async fn diagram_archive_threads_the_flag_through() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::DiagramArchive {
+            name,
+            archived: true,
+        } if name == "flow" => Ok(IpcResponse::Diagram(sample_diagram("flow"))),
+        _ => Err(IpcError::Internal("expected an archive".into())),
+    });
+
+    handler(socket)
+        .diagram_archive(Parameters(DiagramArchiveArg {
+            name: "flow".into(),
+            archived: true,
+        }))
+        .await
+        .expect("diagram_archive succeeds");
+}
+
+#[tokio::test]
+async fn diagram_delete_reports_whether_it_was_removed() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::DiagramDelete { name } if name == "flow" => {
+            Ok(IpcResponse::DiagramDeleted(true))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .diagram_delete(Parameters(DiagramNameArg {
+            name: "flow".into(),
+        }))
+        .await
+        .expect("diagram_delete succeeds");
     assert_eq!(
         structured_of(result),
         serde_json::json!({ "deleted": true })

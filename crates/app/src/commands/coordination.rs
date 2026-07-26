@@ -10,7 +10,8 @@
 use std::sync::Arc;
 
 use soloist_core::{
-    Facade, ProjectId, ScratchpadId, ScratchpadLink, ScratchpadView, TodoDoc, TodoId, TodoView,
+    DiagramView, Facade, ProjectId, ScratchpadId, ScratchpadLink, ScratchpadView, TodoDoc, TodoId,
+    TodoView,
 };
 use tauri::State;
 
@@ -73,6 +74,69 @@ pub async fn scratchpad_rename(
 ) -> Result<ScratchpadView, String> {
     facade
         .blocking(move |f| f.scratchpad_rename_in(project, &from, &to))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// The full diagram `name` in `project` — its Mermaid source and revision — for the panel to open
+/// and edit.
+#[tauri::command]
+pub async fn diagram_read(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+    name: String,
+) -> Result<DiagramView, String> {
+    facade
+        .blocking(move |f| f.diagram_read_in(project, &name))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Saves the diagram `name` in `project` with the Mermaid `source`, revision-guarded by
+/// `expected_revision` (omit to create). A stale revision returns the conflict as an error string for
+/// the panel to surface.
+#[tauri::command]
+pub async fn diagram_write(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+    name: String,
+    source: String,
+    expected_revision: Option<u64>,
+) -> Result<DiagramView, String> {
+    facade
+        .blocking(move |f| f.diagram_write_in(project, &name, source, expected_revision))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Archives or restores the diagram `name` in `project` — a listing flag, not a delete. Routes to the
+/// one core archive behaviour the MCP surface also drives; the panel re-reads on the emitted
+/// `DiagramChanged`.
+#[tauri::command]
+pub async fn diagram_archive(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+    name: String,
+    archived: bool,
+) -> Result<DiagramView, String> {
+    facade
+        .blocking(move |f| f.diagram_archive_in(project, &name, archived))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Renames the diagram `from` to `to` in `project`, keeping its durable id and revision. Routes to
+/// the one core rename the MCP `diagram_rename` tool also drives; a name already in use comes back as
+/// an error string for the header's rename field to surface.
+#[tauri::command]
+pub async fn diagram_rename(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+    from: String,
+    to: String,
+) -> Result<DiagramView, String> {
+    facade
+        .blocking(move |f| f.diagram_rename_in(project, &from, &to))
         .await
         .map_err(|err| err.to_string())
 }

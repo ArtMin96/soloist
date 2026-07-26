@@ -1,0 +1,83 @@
+/*
+ * Chrome for the Mermaid code-block NodeView: the ```mermaid fence rendered as a framed diagram with a
+ * Preview/Source toggle in its header. It is scoped under `.tiptap-body` so the frame reuses the
+ * editor's tokens and the source `<pre>` can reset the shared code-block chrome the frame supplies. The
+ * diagram surface itself (loading/error/rendered) is styled by the reusable renderer's own stylesheet.
+ */
+
+.tiptap-body .mermaid-block {
+  margin: 0.6rem 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  overflow: hidden;
+}
+
+.tiptap-body .mermaid-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0.4rem 0.3rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--muted);
+}
+
+.tiptap-body .mermaid-block-label {
+  font-size: 0.6875rem;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.tiptap-body .mermaid-block-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.tiptap-body .mermaid-block-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out-quint),
+    background-color var(--dur-fast) var(--ease-out-quint);
+}
+
+.tiptap-body .mermaid-block-copy:hover {
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+.tiptap-body .mermaid-block-preview {
+  padding: 0.5rem 0.75rem;
+  cursor: text;
+}
+
+.tiptap-body .mermaid-block-preview:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.tiptap-body .mermaid-block-source {
+  margin: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.tiptap-body .mermaid-block-source--hidden {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tiptap-body .mermaid-block-copy {
+    transition: none;
+  }
+}

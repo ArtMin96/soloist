@@ -12,8 +12,9 @@ use std::sync::Arc;
 
 use crate::agents::{AgentToolRepo, NoopAgentToolRepo, NoopVersionProbe, VersionProbe};
 use crate::coordination::{
-    KvRepo, LockRepo, NoopKvRepo, NoopLockRepo, NoopScratchpadRepo, NoopTemplateRepo,
-    NoopTimerRepo, NoopTodoRepo, ScratchpadRepo, TemplateRepo, TimerRepo, TodoRepo,
+    DiagramRepo, KvRepo, LockRepo, NoopDiagramRepo, NoopKvRepo, NoopLockRepo, NoopScratchpadRepo,
+    NoopTemplateRepo, NoopTimerRepo, NoopTodoRepo, ScratchpadRepo, TemplateRepo, TimerRepo,
+    TodoRepo,
 };
 use crate::filewatch::{FileWatcher, NoopFileWatcher};
 use crate::ids::ProjectId;
@@ -34,8 +35,8 @@ use crate::ports::{
 /// core's constructors take one value, and adding a future port is one field here
 /// rather than another argument threaded through every call site. The required adapters
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
-/// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `todo_repo`,
-/// `kv_repo`, `template_repo`, `runtime`, `orphan_control`, `metrics`,
+/// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `diagram_repo`,
+/// `todo_repo`, `kv_repo`, `template_repo`, `runtime`, `orphan_control`, `metrics`,
 /// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`, `shell_env_probe`,
 /// `settings_repo`, `project_settings_repo`, `feedback_repo`)
 /// default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
@@ -52,6 +53,7 @@ pub struct CorePorts {
     pub(crate) lock_repo: Arc<dyn LockRepo>,
     pub(crate) timer_repo: Arc<dyn TimerRepo>,
     pub(crate) scratchpad_repo: Arc<dyn ScratchpadRepo>,
+    pub(crate) diagram_repo: Arc<dyn DiagramRepo>,
     pub(crate) todo_repo: Arc<dyn TodoRepo>,
     pub(crate) kv_repo: Arc<dyn KvRepo>,
     pub(crate) template_repo: Arc<dyn TemplateRepo>,
@@ -105,6 +107,7 @@ impl CorePorts {
                 lock_repo: Arc::new(NoopLockRepo),
                 timer_repo: Arc::new(NoopTimerRepo),
                 scratchpad_repo: Arc::new(NoopScratchpadRepo),
+                diagram_repo: Arc::new(NoopDiagramRepo),
                 todo_repo: Arc::new(NoopTodoRepo),
                 kv_repo: Arc::new(NoopKvRepo),
                 template_repo: Arc::new(NoopTemplateRepo),
@@ -160,6 +163,14 @@ impl CorePortsBuilder {
     /// a restart.
     pub fn scratchpad_repo(mut self, scratchpad_repo: Arc<dyn ScratchpadRepo>) -> Self {
         self.ports.scratchpad_repo = scratchpad_repo;
+        self
+    }
+
+    /// Overrides the durable diagram store the coordination aggregate persists to (C6; defaults to
+    /// [`NoopDiagramRepo`], which stores nothing). The real adapter is SQLite, the same store backing
+    /// every other durable repository; diagrams are durable shared content that survives a restart.
+    pub fn diagram_repo(mut self, diagram_repo: Arc<dyn DiagramRepo>) -> Self {
+        self.ports.diagram_repo = diagram_repo;
         self
     }
 

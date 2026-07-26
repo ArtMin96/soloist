@@ -2,20 +2,23 @@
 //!
 //! Durable, project-scoped state agents share to orchestrate each other — persisted via this
 //! context's repository ports and kept separate from ephemeral process state, so it
-//! outlives any one process or chat. Five aggregates live here: **leases** — project-scoped,
+//! outlives any one process or chat. Six aggregates live here: **leases** — project-scoped,
 //! process-owned signal locks with an explicit TTL, auto-released on expiry or owner close —
 //! **timers** — process-owned timers that, when they fire (at a deadline, or when the agents they
 //! watch go idle), deliver a body to their owner as a fresh turn, the token-free orchestration
 //! primitive — **scratchpads** — durable, project-scoped shared free-form Markdown documents with
-//! revision-guarded writes — **todos** — durable, project-scoped work items with a title, a
-//! free-form Markdown body, blockers that gate completion, comments, and a process-owned lock — and
-//! **kv** — a simple project-scoped JSON key-value store for small structured state, without
-//! revision guarding or process ownership. Leases and timers are process-owned, so launch
-//! reconciliation clears them (a per-run process id is recycled, so neither can be matched safely
-//! to a later run's processes); scratchpads, todos, and kv entries are durable shared content that
-//! **survives** an app restart — only a todo's process-owned *lock* is cleared on launch, never the
-//! todo itself.
+//! revision-guarded writes — **diagrams** — durable, project-scoped shared documents whose body is a
+//! raw Mermaid source string, mirroring scratchpads but never rendered or validated in the core —
+//! **todos** — durable, project-scoped work items with a title, a free-form Markdown body, blockers
+//! that gate completion, comments, and a process-owned lock — and **kv** — a simple project-scoped
+//! JSON key-value store for small structured state, without revision guarding or process ownership.
+//! Leases and timers are process-owned, so launch reconciliation clears them (a per-run process id is
+//! recycled, so neither can be matched safely to a later run's processes); scratchpads, diagrams,
+//! todos, and kv entries are durable shared content that **survives** an app restart — only a todo's
+//! process-owned *lock* is cleared on launch, never the todo itself.
 
+mod diagram;
+mod diagram_repo;
 mod kv;
 mod kv_repo;
 mod lease;
@@ -40,6 +43,14 @@ mod todo_doc;
 mod todo_releaser;
 mod todo_repo;
 
+pub use diagram::{
+    DiagramRef, DiagramSummary, DiagramView, Diagrams, RenameError as DiagramRenameError,
+    WriteError as DiagramWriteError, MAX_DIAGRAM_SOURCE_BYTES,
+};
+pub use diagram_repo::{
+    DiagramRepo, NoopDiagramRepo, RenameResult as DiagramRenameResult, StoredDiagram,
+    WriteResult as DiagramWriteResult,
+};
 pub use kv::{Kv, MAX_KV_VALUE_BYTES};
 pub use kv_repo::{KvEntry, KvRepo, NoopKvRepo};
 pub use lease::{AcquireOutcome, LeaseView, Leases};

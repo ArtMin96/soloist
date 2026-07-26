@@ -28,6 +28,7 @@ fn migrates_a_fresh_database_to_the_current_schema() {
         "project_settings",
         "feedback",
         "templates",
+        "diagrams",
     ] {
         let exists = conn
             .query_row(

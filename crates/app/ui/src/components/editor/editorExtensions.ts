@@ -6,6 +6,7 @@ import { TaskList } from "@tiptap/extension-task-list";
 import { TaskItem } from "@tiptap/extension-task-item";
 import { TableKit } from "@tiptap/extension-table";
 import { applyMarkdownEntityCorrection } from "./markdownEntities";
+import { mermaidCodeBlock } from "./extensions/mermaidCodeBlock";
 import { slashCommand } from "./extensions/slashCommand";
 import { searchExtension } from "./search/searchExtension";
 
@@ -37,8 +38,12 @@ export function buildEditorExtensions(options: EditorExtensionOptions): Extensio
       // A link is styled and typed but only followed deliberately — clicking one inside an editor
       // should place the caret, not navigate away.
       link: { openOnClick: false },
+      // Replaced by mermaidCodeBlock below, which keeps the same node and Markdown round-trip but
+      // renders a ```mermaid fence as a diagram.
+      codeBlock: false,
     }),
     Markdown.configure({ markedOptions: { gfm: true } }),
+    mermaidCodeBlock,
     TaskList,
     TaskItem.configure({ nested: true }),
     // GitHub-flavored tables — without a table node the Markdown serializer silently drops a note's

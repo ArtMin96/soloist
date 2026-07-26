@@ -17,6 +17,7 @@
 mod agents;
 mod clock;
 mod coordination;
+mod coordination_diagram;
 mod coordination_kv;
 mod coordination_scratchpad;
 mod coordination_todo;
@@ -43,6 +44,7 @@ mod template;
 pub use agents::{FakeAgentToolRepo, FakeVersionProbe};
 pub use clock::MockClock;
 pub use coordination::{FakeLockRepo, FakeTimerRepo};
+pub use coordination_diagram::FakeDiagramRepo;
 pub use coordination_kv::FakeKvRepo;
 pub use coordination_scratchpad::FakeScratchpadRepo;
 pub use coordination_todo::{FakeTodoRepo, FakeTodoRows};

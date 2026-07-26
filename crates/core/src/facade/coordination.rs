@@ -52,6 +52,24 @@ pub enum CoordinationError {
     /// A scratchpad rename targeted a name already used by another scratchpad in the project.
     #[error("a scratchpad with that name already exists")]
     ScratchpadNameTaken,
+    /// A diagram write was malformed — a blank name or an over-cap source; the message names every
+    /// problem so the caller can fix it in one revision.
+    #[error("diagram is not well-formed: {0}")]
+    InvalidDiagram(String),
+    /// A diagram write expected a different revision than the one on record — a concurrent edit
+    /// landed first, so the write was refused rather than clobbering it. `expected` is `None` for a
+    /// create; `actual` is `None` when no diagram exists under that name.
+    #[error("diagram revision conflict (expected {expected:?}, found {actual:?})")]
+    DiagramRevisionConflict {
+        expected: Option<u64>,
+        actual: Option<u64>,
+    },
+    /// A diagram action named one that does not exist in the session's effective project.
+    #[error("no diagram under that name")]
+    UnknownDiagram,
+    /// A diagram rename targeted a name already used by another diagram in the project.
+    #[error("a diagram with that name already exists")]
+    DiagramNameTaken,
     /// A todo write was malformed — a blank title or an over-cap body; the message names every
     /// problem so the caller can fix it in one revision.
     #[error("todo is not well-formed: {0}")]

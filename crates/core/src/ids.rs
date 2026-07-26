@@ -89,6 +89,16 @@ id_newtype!(
     ScratchpadId
 );
 id_newtype!(
+    /// Identifies a coordination diagram (context C6) — a durable, project-scoped shared document
+    /// whose body is a raw Mermaid source string. The store assigns it on creation and reconstructs
+    /// it via [`from_raw`](DiagramId::from_raw) when reading a row back. Like a scratchpad and unlike
+    /// a timer or lease, a diagram is **not** process-owned and is **durable**: it survives an app
+    /// restart, so its id is stable across runs. The mutable
+    /// [`name`](crate::coordination::DiagramView::name) is the handle callers address; this id is the
+    /// stable identity a rename does not change.
+    DiagramId
+);
+id_newtype!(
     /// Identifies a template (context C6) — a durable reusable document (a prompt, or a starting
     /// shape for a scratchpad or todo), global or project-scoped. The store assigns it on creation
     /// and reconstructs it via [`from_raw`](TemplateId::from_raw) when reading a row back. Like a

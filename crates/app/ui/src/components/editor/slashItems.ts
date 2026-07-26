@@ -1,4 +1,5 @@
 import type { Editor, Range } from "@tiptap/react";
+import { insertMermaidDiagram } from "./mermaidBlock";
 
 // One entry in the "/" command menu: a label, a one-line hint, extra match keywords, and the edit it
 // runs (which first deletes the typed "/query" so no trigger text is left behind). Kept as plain data
@@ -63,6 +64,12 @@ export const SLASH_ITEMS: SlashItem[] = [
     hint: "A fenced code block",
     keywords: ["code", "fence", "pre", "snippet"],
     run: (editor, range) => editor.chain().focus().deleteRange(range).toggleCodeBlock().run(),
+  },
+  {
+    title: "Mermaid diagram",
+    hint: "A flowchart or diagram",
+    keywords: ["mermaid", "diagram", "flowchart", "graph", "chart"],
+    run: (editor, range) => insertMermaidDiagram(editor, range),
   },
   {
     title: "Divider",

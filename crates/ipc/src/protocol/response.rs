@@ -5,10 +5,11 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AcquireOutcome, AgentTool, Comment, ExportedTemplate, FeedbackEntry, IntegrationWrite, KvEntry,
-    LeaseView, LinkContent, McpToolGroups, ProcessId, ProcessView, ProjectId, ProjectView,
-    RenderedPrompt, ScratchpadSummary, ScratchpadView, SetWhenIdleOutcome, StartSummary,
-    TemplateSummary, TemplateView, TimerView, TodoSummary, TodoView, Whoami,
+    AcquireOutcome, AgentTool, Comment, DiagramSummary, DiagramView, ExportedTemplate,
+    FeedbackEntry, IntegrationWrite, KvEntry, LeaseView, LinkContent, McpToolGroups, ProcessId,
+    ProcessView, ProjectId, ProjectView, RenderedPrompt, ScratchpadSummary, ScratchpadView,
+    SetWhenIdleOutcome, StartSummary, TemplateSummary, TemplateView, TimerView, TodoSummary,
+    TodoView, Whoami,
 };
 
 use crate::error::IpcError;
@@ -89,6 +90,15 @@ pub enum IpcResponse {
     ScratchpadTags(Vec<String>),
     /// Whether a scratchpad was deleted (answer to [`IpcRequest::ScratchpadDelete`]).
     ScratchpadDeleted(bool),
+    /// One diagram (answer to a write, read, rename, tag, or archive request). Reuses the core view
+    /// so the wire shape — including the raw Mermaid source — cannot drift.
+    Diagram(DiagramView),
+    /// Every diagram in scope, as one-line summaries (answer to [`IpcRequest::DiagramList`]).
+    Diagrams(Vec<DiagramSummary>),
+    /// The distinct diagram tags in scope (answer to [`IpcRequest::DiagramTagsList`]).
+    DiagramTags(Vec<String>),
+    /// Whether a diagram was deleted (answer to [`IpcRequest::DiagramDelete`]).
+    DiagramDeleted(bool),
     /// One todo (answer to a get, update, tag, blocker, or lock request). Reuses the core view so
     /// the wire shape cannot drift.
     Todo(TodoView),

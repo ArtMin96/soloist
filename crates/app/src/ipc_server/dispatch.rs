@@ -359,6 +359,55 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .scratchpad_transfer(&name, to_project)
             .map(IpcResponse::Scratchpad)
             .map_err(IpcError::from),
+        IpcRequest::DiagramWrite {
+            name,
+            source,
+            expected_revision,
+        } => facade
+            .scoped(session)
+            .diagram_write(&name, source, expected_revision)
+            .map(IpcResponse::Diagram)
+            .map_err(IpcError::from),
+        IpcRequest::DiagramRead { name } => facade
+            .scoped(session)
+            .diagram_read(&name)
+            .map(IpcResponse::Diagram)
+            .map_err(IpcError::from),
+        IpcRequest::DiagramList => facade
+            .scoped(session)
+            .diagram_list()
+            .map(IpcResponse::Diagrams)
+            .map_err(IpcError::from),
+        IpcRequest::DiagramRename { name, new_name } => facade
+            .scoped(session)
+            .diagram_rename(&name, &new_name)
+            .map(IpcResponse::Diagram)
+            .map_err(IpcError::from),
+        IpcRequest::DiagramAddTags { name, tags } => facade
+            .scoped(session)
+            .diagram_add_tags(&name, &tags)
+            .map(IpcResponse::Diagram)
+            .map_err(IpcError::from),
+        IpcRequest::DiagramRemoveTags { name, tags } => facade
+            .scoped(session)
+            .diagram_remove_tags(&name, &tags)
+            .map(IpcResponse::Diagram)
+            .map_err(IpcError::from),
+        IpcRequest::DiagramTagsList => facade
+            .scoped(session)
+            .diagram_tags_list()
+            .map(IpcResponse::DiagramTags)
+            .map_err(IpcError::from),
+        IpcRequest::DiagramArchive { name, archived } => facade
+            .scoped(session)
+            .diagram_archive(&name, archived)
+            .map(IpcResponse::Diagram)
+            .map_err(IpcError::from),
+        IpcRequest::DiagramDelete { name } => facade
+            .scoped(session)
+            .diagram_delete(&name)
+            .map(IpcResponse::DiagramDeleted)
+            .map_err(IpcError::from),
         IpcRequest::TodoCreate { doc, scratchpad } => facade
             .scoped(session)
             .todo_create(doc, scratchpad)

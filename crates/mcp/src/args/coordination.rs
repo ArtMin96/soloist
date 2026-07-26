@@ -108,6 +108,54 @@ pub(crate) struct ScratchpadTransferArg {
     pub(crate) to_project: u64,
 }
 
+/// Arguments naming a single diagram by its handle.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct DiagramNameArg {
+    /// The diagram's name handle (unique within the project), as returned by `diagram_list`.
+    pub(crate) name: String,
+}
+
+/// Arguments for writing a diagram's Mermaid source.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct DiagramWriteArg {
+    /// The diagram's name handle (unique within the project). Omit `expected_revision` to create it;
+    /// pass the current revision (from `diagram_read`) to update it.
+    pub(crate) name: String,
+    /// The diagram's Mermaid source — the whole diagram definition (e.g. a `flowchart`, `sequenceDiagram`,
+    /// or `classDiagram` block). Stored verbatim; Soloist does not render or validate it. May be empty.
+    pub(crate) source: String,
+    /// The revision you are updating from, as returned by `diagram_read`. Omit to create a new
+    /// diagram; a mismatch means someone edited it first, so re-read and retry.
+    pub(crate) expected_revision: Option<u64>,
+}
+
+/// Arguments for renaming a diagram.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct DiagramRenameArg {
+    /// The diagram's current name handle.
+    pub(crate) name: String,
+    /// The new name handle (must be unused in the project).
+    pub(crate) new_name: String,
+}
+
+/// Arguments for adding or removing a diagram's tags.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct DiagramTagsArg {
+    /// The diagram's name handle.
+    pub(crate) name: String,
+    /// The tags to add or remove.
+    pub(crate) tags: Vec<String>,
+}
+
+/// Arguments for archiving or restoring a diagram.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct DiagramArchiveArg {
+    /// The diagram's name handle.
+    pub(crate) name: String,
+    /// True to archive it (hide from the default listing), false to restore it.
+    pub(crate) archived: bool,
+}
+
 /// The lifecycle status an agent declares on a todo — a closed set, mirroring the core
 /// `TodoStatus` on the wire; the handler converts it. Distinct from the *blocker gate*: a todo is
 /// prevented from completing by its unmet blockers, not by this label.

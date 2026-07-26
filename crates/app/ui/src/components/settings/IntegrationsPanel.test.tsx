@@ -22,6 +22,7 @@ describe("Settings — Integrations", () => {
     let lastSet: { group: McpFeatureGroup; enabled: boolean } | null = null;
     const groups: McpToolGroups = {
       scratchpads: true,
+      diagrams: true,
       todos: true,
       timers: true,
       key_value: false,
@@ -52,6 +53,7 @@ describe("Settings — Integrations", () => {
       if (cmd === "mcp_tool_groups")
         return {
           scratchpads: true,
+          diagrams: true,
           todos: true,
           timers: true,
           key_value: false,
@@ -81,6 +83,7 @@ describe("Settings — Integrations", () => {
       if (cmd === "mcp_tool_groups")
         return {
           scratchpads: true,
+          diagrams: true,
           todos: true,
           timers: true,
           key_value: false,
