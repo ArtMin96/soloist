@@ -41,6 +41,14 @@
   padding: 0;
 }
 
+/* The renderer's responsive ceiling is wrong here. This container is `width: max-content`, so a diagram
+ * wider than the pane still shrinks itself against it, and the fit then measures a diagram already
+ * scaled down — the pane's zoom no longer reports the diagram's true size. Zooming is what this surface
+ * offers instead of shrinking, so the stamped intrinsic size stands and `fitScale` does the scaling. */
+.diagram-canvas-content .mermaid-rendered svg {
+  max-width: none;
+}
+
 /* The overlay controls: a slim floating cluster, top-right, above the diagram. It is the one thing here
  * that floats, so it takes a single overlay shadow. */
 .diagram-canvas-toolbar {

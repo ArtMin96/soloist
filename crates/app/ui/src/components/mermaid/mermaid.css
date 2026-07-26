@@ -76,7 +76,7 @@
  * placeholder reads as the diagram vanishing) and recedes instead, so the surface never goes blank. */
 .mermaid-rendered.is-stale {
   opacity: 0.55;
-  transition: opacity 120ms var(--ease-out-quint);
+  transition: opacity var(--dur-fast) var(--ease-out-quint);
 }
 
 @media (prefers-reduced-motion: reduce) {

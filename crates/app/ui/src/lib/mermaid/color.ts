@@ -13,6 +13,12 @@
 const OPAQUE = 255;
 
 /**
+ * Rounding divisor for the alpha channel — three decimal places, which is finer than the 1/255 a byte
+ * can express, so the round trip never loses a step while keeping the serialised value short.
+ */
+const ALPHA_PRECISION = 1000;
+
+/**
  * A colour no design token uses. `fillStyle` ignores a value it cannot parse, so seeding this before
  * each assignment turns an unparseable input into a detectable no-op rather than silently painting
  * whichever colour was converted last.
@@ -48,5 +54,5 @@ export function toRgb(raw: string): string {
   ctx.fillRect(0, 0, 1, 1);
   const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
   if (a === OPAQUE) return `rgb(${r}, ${g}, ${b})`;
-  return `rgba(${r}, ${g}, ${b}, ${Math.round((a / OPAQUE) * 1000) / 1000})`;
+  return `rgba(${r}, ${g}, ${b}, ${Math.round((a / OPAQUE) * ALPHA_PRECISION) / ALPHA_PRECISION})`;
 }

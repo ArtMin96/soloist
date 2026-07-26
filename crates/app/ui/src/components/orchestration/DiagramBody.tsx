@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { Check, CircleCheck, TriangleAlert } from "lucide-react";
 import { DiagramCanvas } from "@/components/mermaid/DiagramCanvas";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MERMAID_RENDER_DEBOUNCE_MS } from "@/lib/mermaid";
+import { useDebouncedPreview } from "@/lib/mermaid";
 import { cn } from "@/lib/utils";
 
 interface DiagramBodyProps {
@@ -27,30 +27,10 @@ interface DiagramBodyProps {
 // once; the persisted value is never pushed back, so the caret never jumps.
 export function DiagramBody({ source, onChange, saving, dirty, onFlush }: DiagramBodyProps) {
   // The preview renders a debounced copy of the draft, so a burst of keystrokes coalesces into one
-  // re-render rather than re-parsing on every character. The wait is for typing only: a discrete
-  // change — the header's theme picker rewriting the frontmatter — has nothing to coalesce, and making
-  // the user watch a debounce before a render that itself takes half a second is most of why picking a
-  // theme feels slow.
-  const [previewSource, setPreviewSource] = useState(source);
+  // re-render rather than re-parsing on every character. Only edits made here wait — a theme picked in
+  // the header rewrites the source and previews at once.
+  const [previewSource, onEdit] = useDebouncedPreview(source, onChange);
   const [valid, setValid] = useState<boolean | null>(null);
-  const typed = useRef(false);
-
-  useEffect(() => {
-    if (!typed.current) {
-      setPreviewSource(source);
-      return;
-    }
-    const id = setTimeout(() => {
-      typed.current = false;
-      setPreviewSource(source);
-    }, MERMAID_RENDER_DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [source]);
-
-  function onEdit(next: string) {
-    typed.current = true;
-    onChange(next);
-  }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {

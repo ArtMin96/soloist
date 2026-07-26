@@ -9,6 +9,9 @@ vi.mock("mermaid", () => ({ default: { initialize, render, parse: vi.fn() } }));
 /** Well-formed enough for the size stamp to act on, so a result is recognisably the drawn one. */
 const svgOf = (mark: string) => `<svg id="x" width="100%" viewBox="0 0 40 20">${mark}</svg>`;
 
+/** Let every pending continuation run, so a render that is free to start has started. */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 async function engine() {
   return import("./engine");
 }
@@ -80,33 +83,71 @@ describe("renderDiagram", () => {
     expect(render).toHaveBeenCalledTimes(2);
   });
 
-  it("never lets two renders interleave, so one cannot draw in the other's palette", async () => {
-    const order: string[] = [];
+  it("draws each diagram in its own palette when two renders overlap", async () => {
+    // Mermaid holds its configuration in module-level state, so a second render that configures while
+    // the first is still drawing changes the palette the first one draws in. Each render reports the
+    // palette that was configured at the moment it drew, which is what the diagram would come out in.
+    let dark = false;
+    let started = false;
     let releaseFirst = () => {};
+    initialize.mockImplementation((config: { themeVariables?: { darkMode?: boolean } }) => {
+      dark = config.themeVariables?.darkMode === true;
+    });
     render.mockImplementation((_id: string, source: string) => {
-      order.push(`start ${source}`);
       if (source === "slow") {
+        started = true;
         return new Promise((resolve) => {
-          releaseFirst = () => {
-            order.push("end slow");
-            resolve({ svg: svgOf("<g/>") });
-          };
+          releaseFirst = () => resolve({ svg: svgOf(`<g data-dark="${dark}"/>`) });
         });
       }
-      order.push(`end ${source}`);
-      return Promise.resolve({ svg: svgOf("<g/>") });
+      return Promise.resolve({ svg: svgOf(`<g data-dark="${dark}"/>`) });
     });
 
     const { renderDiagram } = await engine();
     const slow = renderDiagram("slow");
-    const quick = renderDiagram("quick");
-    // The library loads before the first draw begins, so wait for it rather than releasing into a
-    // handler that has not been installed yet.
-    await vi.waitFor(() => expect(order).toContain("start slow"));
-    releaseFirst();
-    await Promise.all([slow, quick]);
+    // The library loads before the first draw begins, so wait for it rather than flipping the theme
+    // into a render that has not been configured yet.
+    await vi.waitFor(() => expect(started).toBe(true));
 
-    // The second render must not have configured Mermaid while the first was still drawing.
-    expect(order).toEqual(["start slow", "end slow", "start quick", "end quick"]);
+    document.documentElement.classList.add("dark");
+    const quick = renderDiagram("quick");
+    // Give the second render every chance to configure Mermaid before the first finishes drawing.
+    // Serialized it cannot, because it is still waiting behind the first; left to overlap it
+    // reconfigures here, and the first then draws in the palette meant for the second.
+    await flush();
+    releaseFirst();
+    const [slowResult, quickResult] = await Promise.all([slow, quick]);
+    document.documentElement.classList.remove("dark");
+
+    expect(slowResult).toEqual({ svg: expect.stringContaining('data-dark="false"') });
+    expect(quickResult).toEqual({ svg: expect.stringContaining('data-dark="true"') });
+  });
+
+  it("files a render under the palette it drew in, not the one that asked for it", async () => {
+    let blocking = false;
+    let releaseBlocker = () => {};
+    render.mockImplementationOnce(() => {
+      blocking = true;
+      return new Promise((resolve) => {
+        releaseBlocker = () => resolve({ svg: svgOf("<g/>") });
+      });
+    });
+    render.mockImplementation(() => Promise.resolve({ svg: svgOf("<g id='queued'/>") }));
+
+    const { renderDiagram } = await engine();
+    const blocker = renderDiagram("blocker");
+    await vi.waitFor(() => expect(blocking).toBe(true));
+
+    // Asked for while the app is light, but it cannot draw until the blocker ahead of it finishes —
+    // and the app flips before it gets there, so it draws dark.
+    const queued = renderDiagram("queued");
+    document.documentElement.classList.add("dark");
+    releaseBlocker();
+    await Promise.all([blocker, queued]);
+    document.documentElement.classList.remove("dark");
+
+    // Back in light, the diagram that drew dark must not be handed back as the light one.
+    render.mockResolvedValue({ svg: svgOf("<g id='relit'/>") });
+    expect(await renderDiagram("queued")).toEqual({ svg: expect.stringContaining("relit") });
   });
 });

@@ -20,20 +20,16 @@ describe("themeSignature", () => {
 });
 
 describe("mermaidThemeConfig", () => {
-  it("reports dark mode inside themeVariables, which is where Mermaid reads it", () => {
+  it("tracks the app palette with the flag Mermaid derives its remaining colours from", () => {
+    // Mermaid assigns theme variables onto the theme instance before deriving the colours it was not
+    // given — scale fills, alternating row bands, surface tints — and every one of those derivations
+    // branches on this flag. Handed to Mermaid anywhere other than `themeVariables` it is ignored, and
+    // a dark diagram comes out with light-mode derived colours.
+    expect(mermaidThemeConfig().themeVariables.darkMode).toBe(false);
+
     document.documentElement.classList.add("dark");
 
-    const config = mermaidThemeConfig();
-
-    // Mermaid assigns theme variables onto the theme instance before deriving the colours it was not
-    // given, and every one of those derivations branches on this flag. At the config's top level it is
-    // ignored, and a dark diagram comes out with light-mode derived colours.
-    expect(config.themeVariables.darkMode).toBe(true);
-    expect("darkMode" in config).toBe(false);
-  });
-
-  it("reports light mode the same way", () => {
-    expect(mermaidThemeConfig().themeVariables.darkMode).toBe(false);
+    expect(mermaidThemeConfig().themeVariables.darkMode).toBe(true);
   });
 
   it("sizes every palette to the app's body type, not Mermaid's larger default", () => {

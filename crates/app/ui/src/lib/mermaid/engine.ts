@@ -22,9 +22,15 @@ let renderCounter = 0;
  * The tail of the render queue. Mermaid keeps its configuration in module-level state that
  * `initialize` overwrites and `render` then reads asynchronously, so two overlapping renders of
  * differently themed sources would draw each other's palette. Chaining every render onto the last one
- * keeps configure-then-draw atomic. Renders are half-second-scale and near-always one at a time; the
- * one real overlap is the fullscreen viewer drawing the live source while the panel draws the
- * debounced one.
+ * keeps configure-then-draw atomic.
+ *
+ * Its depth is bounded by its callers, which is the only place a superseded render can be recognised:
+ * a diagram surface keeps at most one render outstanding (`useDiagramRender`) and replaces its own
+ * pending source rather than queueing a second, and the remaining callers are one-shot user actions
+ * (copy, export). So the queue holds at most one entry per mounted surface plus the export in hand —
+ * it cannot grow with the length of an editing session. Dropping work here instead would be wrong in
+ * both directions: an export's render must always run, and the surface whose entry was evicted is not
+ * necessarily the surface that queued the newer one.
  */
 let queue: Promise<unknown> = Promise.resolve();
 
@@ -70,6 +76,11 @@ export type RenderResult = { svg: string } | { error: string };
 async function draw(source: string): Promise<string> {
   const mermaid = await loadMermaid();
   const theme = mermaidThemeConfig();
+  // Read beside the palette it names, never before the queue was joined. A signature taken at call
+  // time can be stale by the time the render reaches the front of the queue — a theme flipped in
+  // between would have this render drawn in the new palette and then filed under the old one, and the
+  // cache would serve that wrong-palette SVG for as long as the entry lived.
+  const signature = themeSignature();
   const declared = readDiagramTheme(source);
   const appTokened = declared === null || declared === theme.theme;
   mermaid.initialize({
@@ -83,7 +94,9 @@ async function draw(source: string): Promise<string> {
   const id = `${MERMAID_ID_PREFIX}-${(renderCounter += 1)}`;
   try {
     const { svg } = await mermaid.render(id, source);
-    return withIntrinsicSize(svg);
+    const sized = withIntrinsicSize(svg);
+    cacheRender(signature, source, sized);
+    return sized;
   } finally {
     cleanupRenderArtifacts(id);
   }
@@ -99,13 +112,10 @@ async function draw(source: string): Promise<string> {
  * await it with no result and no failure — a diagram that never arrives and never explains itself.
  */
 export async function renderDiagram(source: string): Promise<RenderResult> {
-  const signature = themeSignature();
-  const cached = cachedRender(signature, source);
+  const cached = cachedRender(themeSignature(), source);
   if (cached !== undefined) return { svg: cached };
   try {
-    const svg = await enqueue(() => draw(source));
-    cacheRender(signature, source, svg);
-    return { svg };
+    return { svg: await enqueue(() => draw(source)) };
   } catch (cause) {
     return { error: errorMessage(cause) };
   }
