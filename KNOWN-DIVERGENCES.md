@@ -1441,3 +1441,102 @@ but that is the only part of this capability with evidence behind it. The rest i
 been demonstrated to work, and it is the one capability here carrying an accepted security cost.
 
 **Effect on parity:** adds `plan/02` **C15**. No row regresses.
+
+---
+
+## D-29 — The terminal names the fonts Ubuntu installs, and the picker offers only those 🟢
+
+**Introduced:** Phase 4 surface, on the branch that corrects the terminal font stack.
+
+**Solo — one recorded string, no recorded fallback.** `plan/05` records that Solo's Appearance tab
+has a font-family control (I7f–I7k, read from the demo); the phase inventory notes its description
+reads "Monospace fonts installed on your system". What Solo's terminal falls back to when no family
+is chosen is not recorded anywhere. So the offered set diverges from a described Solo behavior, while
+the fallback stack is a clean-room decision with nothing to differ from.
+
+**The stack named three fonts that do not exist on the target.** It was
+`"SF Mono", Menlo, Monaco, ui-monospace, monospace`. Soloist ships Linux-only (D2), and none of SF
+Mono, Menlo or Monaco is on a stock Ubuntu box; `ui-monospace` is not implemented by the webview
+either. Every entry was therefore skipped and the terminal rendered whatever that particular machine
+resolved the bare generic `monospace` to — which is not a decision the app made, and not one it could
+predict. It is now `"Ubuntu Mono", "DejaVu Sans Mono", monospace`.
+
+**The evidence is containers, not this machine.** The development host has SF Mono, JetBrains Mono,
+Hack and a wall of Powerline fonts installed by hand, so `fc-list` here proves nothing about a user's
+box. Three clean images were probed instead:
+
+- On `ubuntu:24.04` carrying **only the app's own runtime closure** — `libwebkit2gtk-4.1-0`,
+  `libgtk-3-0t64` and `fontconfig`, installed `--no-install-recommends` — the sole monospace family
+  present is **DejaVu Sans Mono**. It arrives because `fontconfig-config` itself depends on
+  `fonts-dejavu-core | ttf-bitstream-vera | fonts-liberation | …` and apt takes the first
+  alternative. The last *named* family in the stack therefore resolves anywhere the app can run at
+  all — a promise the bare generic does not make.
+- `fonts-ubuntu` (Ubuntu Mono) and `fonts-liberation` (Liberation Mono) are reachable from
+  `ubuntu-desktop` through `Depends` alone on **20.04, 22.04 and 24.04**, the whole D2 range, and are
+  listed by the kubuntu / xubuntu / lubuntu metas too.
+- With that desktop font set installed, `fc-match` resolves Ubuntu Mono, DejaVu Sans Mono and
+  Liberation Mono to themselves, and resolves JetBrains Mono, Fira Code, Source Code Pro, Hack, SF
+  Mono, Menlo and Monaco to **Noto Sans** — a proportional face.
+
+**Ubuntu Mono leads, DejaVu Sans Mono follows.** Ubuntu Mono is the Ubuntu desktop's own monospace
+face, so on the primary target the terminal wears the platform's own typography; anything else that
+can run the app has DejaVu Sans Mono. The generic tail stays as a floor and is never expected to be
+the answer.
+
+**The picker offers only what packaging guarantees.** System default, Ubuntu Mono, DejaVu Sans Mono,
+Liberation Mono. JetBrains Mono, Fira Code, Source Code Pro and Hack are dropped: nothing is bundled,
+and on a stock desktop each resolved to a proportional face, so picking one changed nothing the user
+could see — the same shape of failure as a setting no code reads. **Noto Sans Mono is not offered
+either**, despite being the obvious fifth: it resolves on 20.04 and 24.04 but falls back to DejaVu
+Sans on 22.04, and a family that is only sometimes there is exactly the defect being removed.
+
+**No availability marker is shipped, and the probe that would have driven one is disproven.** The
+two honest options for keeping an aspirational family were a static "requires installation" label or
+a `document.fonts.check()` probe. The first is false for the developer who *does* have the font. The
+second was measured in a real WebKitGTK 2.52.3 webview and **returns `true` for a family that does
+not exist** — `document.fonts.check('12px "Totally Not A Real Font 12345"')` is `true`, exactly as it
+is for DejaVu Sans Mono. On this port it cannot distinguish an installed family from an absent one,
+so the marker it would have driven would have been a lie, which is worse than no marker at all.
+
+**Enumerating the machine's fonts, as Solo's control describes, is not available to the webview.**
+Two observations, because either alone would be weaker than it looks: the shipped WebKitGTK library
+contains no occurrence of `queryLocalFonts`, and `typeof window.queryLocalFonts` reads `undefined` in
+a live webview — that probe page has an opaque origin, so on its own it would also fit an API that is
+implemented but gated. Listing a user's real families would therefore mean reading fontconfig in the
+Rust process behind a core port. That is a new subsystem, not a picker change, and it is the reversal
+path if the fixed list proves too narrow.
+
+**`ui-monospace` is dropped with the macOS families, on measurement rather than inference.** In the
+same webview, text set in `ui-monospace` renders at *exactly* the width of text set in a nonsense
+family name, while `monospace` renders at DejaVu Sans Mono's width. The port does not implement
+`ui-monospace` as a generic — it fell through like any unknown family, which makes it dead weight
+in the stack. (`CSS.supports('font-family', 'ui-monospace')` answers `true`, but so does any
+arbitrary identifier: the CSS grammar accepts it as a custom family name, so that API cannot answer
+this question and the rendered width is what settles it.)
+
+**A family stored before the prune stays selectable.** The core keeps `font_family` as a free string,
+so a record written when the list was longer still holds e.g. `"Fira Code"`. A select handed a value
+that no item carries renders **empty** — observed under test rather than assumed — which would show
+the user's setting as unset while the terminal kept rendering it. The stored name is therefore
+appended to the offered options. It is shown plainly, with no claim either way about whether it
+resolves on that machine.
+
+**A blank stored family is read as no family.** The field is a free string, so a hand-written record
+can hold `""`. The stack already resolved that to the default, but the picker tested the stored name
+for `null` rather than for emptiness, so it appended `""` as an option — and a select item with an
+empty value is one Radix refuses by throwing, taking the whole settings panel down rather than the
+single row it could not draw. Both readers of the field now agree that a blank name is no choice.
+
+**The app shell's `--font-mono` carries the same stack.** The token that inline code, the editor and
+Mermaid read held `"SF Mono", Menlo, Monaco, ui-monospace, monospace` — the identical defect on a
+different surface. At `main` it and the terminal's stack were byte-identical, so correcting only the
+terminal would leave one requirement with two answers and nothing recording which was intended.
+**Owner decision (2026-07-28):** correct both together. The consequence is accepted rather than
+incidental — code across the whole app now renders in Ubuntu Mono where it rendered in whatever that
+machine resolved the bare generic to. `DESIGN.md`, the visual source of truth, names that face as
+well; it had named **Geist Mono**, which is not a dependency of this app and has never shipped in it.
+The stack stays one named constant per side — `--font-mono` in `index.css`, `DEFAULT_MONO_STACK` in
+`lib/appearance.ts` — because xterm is handed a concrete family string, not a CSS variable it could
+resolve.
+
+**Effect on parity:** adds `plan/02` **C16**. No row regresses.
