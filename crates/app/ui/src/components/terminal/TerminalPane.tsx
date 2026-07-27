@@ -4,6 +4,7 @@ import { ProcessControls } from "@/components/ProcessControls";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessMeta } from "@/components/sidebar/ProcessMeta";
 import { FindBar } from "@/components/terminal/FindBar";
+import { LinkTarget } from "@/components/terminal/LinkTarget";
 import { useTerminal } from "@/components/terminal/useTerminal";
 import { useTerminalChrome } from "@/components/terminal/useTerminalChrome";
 import { useTerminalHotkeys } from "@/components/terminal/useTerminalHotkeys";
@@ -50,7 +51,7 @@ export function TerminalPane({
   onTrust,
 }: TerminalPaneProps) {
   const sectionRef = useRef<HTMLElement>(null);
-  const { hostRef, state, search, clipboard } = useTerminal(process, visible);
+  const { hostRef, state, linkTarget, search, clipboard } = useTerminal(process, visible);
   const { title, ringing } = useTerminalChrome(process.id);
   const { metrics, restart, activity } = useSignal(process.id);
   const { dark } = useAppearance();
@@ -139,6 +140,7 @@ export function TerminalPane({
           style={{ backgroundColor: surface }}
           data-testid="terminal-host"
         />
+        {linkTarget && <LinkTarget uri={linkTarget} />}
         {state === "not-started" && (
           <div className="pointer-events-none absolute inset-0 flex animate-in items-center justify-center px-6 text-center fade-in-0 duration-[var(--dur-sheet)]">
             <p className="max-w-sm text-sm text-pretty text-muted-foreground">

@@ -9,6 +9,7 @@ import {
   pasteClipboard,
   type TerminalClipboard,
 } from "@/components/terminal/terminalClipboard";
+import { oscLinkHandler, webLinksAddon } from "@/components/terminal/terminalLinks";
 import { ptyAttach, ptyDetach, ptyResize, ptyWrite } from "@/api";
 import { TERMINAL_SCROLLBACK_LINES, terminalOptions } from "@/lib/appearance";
 import { isActive } from "@/lib/status";
@@ -75,6 +76,10 @@ export function useTerminal(process: ProcessView, visible = true) {
   // scrollback instead. Reset on each (re)attach and on a backend resync.
   const desyncedRef = useRef(false);
   const [state, setState] = useState<TerminalState>("attaching");
+  // The destination of the link under the pointer, or null when there is none. Fed from the link
+  // machinery rather than from the cells on screen, so an OSC 8 hyperlink that displays one thing
+  // and points at another is reported by where it goes.
+  const [linkTarget, setLinkTarget] = useState<string | null>(null);
 
   // The latest visibility, read inside the attachment's byte handler so a hidden pool pane stops
   // scheduling per-frame flushes — and the VT parsing they drive — without re-creating the
@@ -232,12 +237,16 @@ export function useTerminal(process: ProcessView, visible = true) {
     const seed = appearanceRef.current;
     const term = new Terminal({
       scrollback: TERMINAL_SCROLLBACK_LINES,
+      // Not part of `terminalOptions`: that projects the appearance document, and every option it
+      // returns has to be re-assigned on the live restyle below. A link route is neither.
+      linkHandler: oscLinkHandler(setLinkTarget),
       ...terminalOptions(seed.appearance, seed.dark),
     });
     const fit = new FitAddon();
     const search = new SearchAddon();
     term.loadAddon(fit);
     term.loadAddon(search);
+    term.loadAddon(webLinksAddon(setLinkTarget));
     term.open(host);
     termRef.current = term;
     fitRef.current = fit;
@@ -293,6 +302,9 @@ export function useTerminal(process: ProcessView, visible = true) {
       cancelAttachRef.current = null;
       renderer?.dispose();
       term.dispose();
+      // The pointer never leaves a link that is being torn down, so the readout has to be cleared
+      // here or it would outlive the emulator it was describing.
+      setLinkTarget(null);
       termRef.current = null;
       fitRef.current = null;
       searchRef.current = null;
@@ -354,7 +366,13 @@ export function useTerminal(process: ProcessView, visible = true) {
   // happened off-screen, and — when the setting allows — take keyboard focus so the user can type
   // immediately after switching.
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      // Switching away leaves the pointer wherever it was, so a link it was resting on never
+      // reports that it was left; without this the pane would come back showing a destination the
+      // pointer is no longer on.
+      setLinkTarget(null);
+      return;
+    }
     // Drain what accrued while hidden — unless the bounded backlog overflowed, in which case the
     // drained bytes would start mid-stream (a gap): re-attach and replay the core's scrollback for a
     // coherent, current view instead.
@@ -389,6 +407,7 @@ export function useTerminal(process: ProcessView, visible = true) {
   return {
     hostRef,
     state,
+    linkTarget,
     search: { findNext, findPrevious, clear: clearSearch },
     clipboard,
   };

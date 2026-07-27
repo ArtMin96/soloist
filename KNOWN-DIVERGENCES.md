@@ -1132,3 +1132,97 @@ only make `migrate()` refuse the database for an older build, in exchange for no
 covers the behavior the bump would have been ceremony for.
 
 **Effect on parity:** adds `plan/02` **C12**. No row regresses.
+
+---
+
+## D-26 — Terminal links open in the system browser, behind a two-scheme gate 🟢
+
+**Introduced:** Phase 4 surface, on the branch that adds terminal links.
+
+**Solo — silent, not contradicted.** `plan/05` records nothing about links in Solo's terminal, in
+either direction. There is no documented Solo behavior to match or to differ from, so this is a
+**clean-room addition** rather than a divergence from observed behavior, recorded here because
+`plan/05` §12 owns the decision and the parity walk reads it from this file. Nothing below asserts
+what Solo does.
+
+**The defect this closes.** A URL in terminal output was inert text. The OSC 8 case was worse than
+inert: xterm parses those hyperlinks natively, and with no `linkHandler` set it falls back to a
+blocking `confirm()` followed by `window.open()` — read from the installed `@xterm/xterm@6.0.0`
+bundle, not from memory. Under the app's CSP (`default-src 'self'`) that cannot reach a remote
+origin, so the user got a scary modal and then nothing. Claude Code and other agents emit OSC 8, so
+this was on a path the app's own supervised processes take. The app had no way to open a URL
+externally at all: no opener plugin, no shell plugin, no `xdg-open` anywhere in `crates/`.
+
+**What Soloist does.** `tauri-plugin-opener` is added to `crates/app` (never `core` — opening a URL
+is a UI-shell concern, and CI enforces that core links no app framework). Both link routes end at one
+function, `lib/opener.ts::openExternal`: the plain-text route through `@xterm/addon-web-links`, whose
+addon is constructed with our handler because **its default handler is `window.open`**, and the OSC 8
+route through `linkHandler`. One scheme guard, one call site, so the rule changes in one place.
+
+**The permission is `opener:allow-open-url` carrying its own scope — not `opener:allow-default-urls`.**
+Read from the generated `crates/app/gen/schemas/acl-manifests.json`, the two are not competing
+spellings of one thing and neither works alone. `allow-open-url` enables the `open_url` command and
+ships **no** scope; `allow-default-urls` ships a scope (`mailto:*`, `tel:*`, `http://*`, `https://*`)
+and an **empty** `commands.allow`, so it grants no command at all. The capability therefore names
+`allow-open-url` and supplies the scope inline, restricted to `http://*` and `https://*` — narrower
+than the plugin's default set, which would also admit `mailto:` and `tel:`. `open_path` and
+`reveal_item_in_dir` are deliberately left ungranted, so the webview cannot reach them. The pattern
+shape matters: the plugin compiles each `url` with the `glob` crate and matches via
+`Pattern::matches`, whose `MatchOptions::new()` sets `require_literal_separator: false` — so `*`
+crosses `/` and `https://*` matches a full URL with a path and query. Enforcement is in the Rust
+process; the webview-side guard is convenience, not the boundary.
+
+**Two schemes, and the reason for each exclusion.** `http:` and `https:` only. `file:` would hand a
+local path to the desktop on nothing more than a line of output; `javascript:` and `data:` are script
+chosen by whatever wrote that line. A URL printed by a supervised process is untrusted input.
+`allowNonHttpProtocols` is left unset — the typings warn that enabling it "may cause security issues
+such as XSS", and while it is falsy the emulator drops non-http OSC 8 links before they become
+clickable, parsing each URI and refusing to offer any whose protocol is not `http:`/`https:` (read
+from the installed `@xterm/xterm@6.0.0` bundle). The web-links addon's own regex matches http(s)
+only, so a plain-text `file://` path is never linkified either.
+
+**So neither route can currently reach `openExternal` with a scheme it should not** — on both, the
+guard is defence in depth rather than the sole gate. It is kept because the alternative is a rule
+that lives entirely in two upstream defaults, in a library the app upgrades: widening the addon's
+`urlRegex`, or setting `allowNonHttpProtocols` for a case that seems to warrant it, would each
+silently remove a filter with nothing behind it. One guard at the single call site keeps the app's
+own answer to "which schemes do we open" in the app, where it can be read and tested.
+
+**Hover reveals the destination, because OSC 8 lets the two disagree.** An OSC 8 hyperlink may
+display one string and point somewhere else entirely, which is the classic phishing shape. xterm hands
+the handler `getLinkData(id).uri` — the destination, not the displayed cells — and the pane's readout
+is fed from that value. It renders in the app's own chrome at a fixed corner of the pane rather than
+following the pointer: a program can print anything it likes into the terminal's cells, but it cannot
+paint over app chrome. The readout is `pointer-events-none`, so it never takes a click meant for the
+terminal. The pointer-cursor affordance needs no work — xterm's own stylesheet already carries
+`.xterm-cursor-pointer`.
+
+**Why `linkHandler` is not part of `terminalOptions()`.** That function projects the appearance
+document, and every option it returns must also be re-assigned in the live-restyle effect or the
+setting silently fails to reach a mounted pane. A link route is not appearance and has nothing to
+restyle, so it is passed at construction alongside `scrollback`, which is already handled that way.
+
+**No proposed API, and no CSP change.** `registerLinkProvider` is not behind
+`_checkProposedApi()` in xterm 6, so `allowProposedApi` stays off. The opener goes over IPC rather
+than a navigation, so `tauri.conf.json` is untouched.
+
+**The ACL is verified as written and parsed, never as enforced.** This is the caveat to carry out of
+this branch. What has evidence behind it is that the capability is *well-formed*: it compiles, and
+the generated `acl-manifests.json` resolves `opener:allow-open-url` to the `open_url` command. A
+scope that is well-formed but matches nothing compiles exactly the same way. Nothing here has
+observed the runtime authority admit a single real URL, because the frontend tests mock
+`@tauri-apps/plugin-opener` — they drive our handler and record what it asked for, and the plugin's
+Rust side never runs. So the failure mode to be aware of is a scope that silently refuses
+*everything*: `open_url` compares the URL against the resolved allow-list and returns
+`Error::ForbiddenUrl` when it does not match (`tauri-plugin-opener` 2.5.4, `src/commands.rs`), and a
+mis-specified pattern would take that branch for every link.
+
+That refusal is invisible twice over. No test exercises the real plugin, and `openExternal` ends in a
+`catch` that deliberately swallows the rejection so a hostile link in a process's output can never
+throw into the terminal — which means a systematically broken scope is indistinguishable, from
+inside the app, from the guard correctly dropping a link. Every link would simply do nothing. **No
+headless gate can catch this**: `just lint`, `cargo test` and the vitest suite would all stay green
+with the scope pattern wrong. Only the display walk C13 records answers it, and until that walk is
+run this capability is wiring that has not been demonstrated to work end to end.
+
+**Effect on parity:** adds `plan/02` **C13**. No row regresses.
