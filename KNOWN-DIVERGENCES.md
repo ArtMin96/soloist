@@ -932,10 +932,15 @@ theme: it is the dim-text slot, not a surface tone, so DESIGN.md's `slate-muted`
 
 **Why the floor and the palette are complementary, not redundant.** `minimumContrastRatio: 4.5` is set
 alongside the palette. It is a **top-level terminal option, not an `ITheme` field**, so it only reaches
-the emulator through `terminalOptions()`. Because our own colours already clear the bar where they are
-used as a foreground, the floor never fires on the palette — it exists for the colour we do *not*
-choose: the 256-colour and truecolor foregrounds a program picks for itself, and the two surface-end
-slots above when a program uses one as text.
+the emulator through `terminalOptions()`. It exists for the colour we do *not* choose: the 256-colour
+and truecolor foregrounds a program picks for itself, and the surface-end slots above when a program
+uses one as text. On the rest of the palette it never fires — but that is a property the palette had to
+*earn* on three backgrounds, not one. A selected cell sits on a 30% wash of the selection colour over
+the surface (xterm forces an opaque `selectionBackground` to that alpha and blends it), which costs
+every slot a little contrast. `brightBlack` — the dim slot, and the one CLI output leans on hardest —
+is the only one without the margin to absorb it, so it carries extra headroom against the bare
+background (4.99:1 light, 5.24:1 dark) in order to still clear 4.5:1 over both the active and the
+unfocused selection. Without that, dim text visibly changed colour the moment it was selected.
 
 **Why `selectionForeground` stays unset.** Reading xterm 6.0.0's shipped renderers, the minimum-contrast
 adjustment resolves against the cell's **real** background — for a selected cell that is the selection

@@ -21,6 +21,19 @@ function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+// `over` laid on `under` at `alpha`, the way the renderer resolves a translucent selection.
+function blend(under: string, over: string, alpha: number): string {
+  const channels = (hex: string) => [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
+  const [u, o] = [channels(under), channels(over)];
+  return `#${o
+    .map((v, i) =>
+      Math.round(u[i] + (v - u[i]) * alpha)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
+
 // The slots whose ANSI role *is* the near-background tone of their own theme, so demanding
 // 4.5:1 of them would invert what the slot means (`\e[47m` on the light theme has to paint a
 // pale panel). Named here rather than imported, so widening the palette's exemptions in the
@@ -75,6 +88,26 @@ describe("terminalColors", () => {
           `${slot} ${colors[slot]} ${contrast(colors[slot], colors.background).toFixed(2)}:1`,
       );
       expect(failures).toEqual([]);
+    },
+  );
+
+  it.each(THEMES)(
+    "clears AA over a $name selection too, not just the bare surface",
+    ({ name, dark }) => {
+      const colors = terminalColors(dark);
+      // xterm forces an opaque `selectionBackground` to 30% and blends it over the terminal
+      // background, so a selected cell sits on this — not on the raw selection hex. Every slot
+      // loses a little contrast there, which is where the dim slot would otherwise dip under the
+      // bar and get visibly recoloured the moment a user drags across it.
+      for (const selection of [colors.selectionBackground, colors.selectionInactiveBackground]) {
+        const behind = blend(colors.background, selection, 0.3);
+        const failures = ANSI_COLOR_NAMES.filter(
+          (slot) =>
+            !SURFACE_END[name].includes(slot) &&
+            contrast(colors[slot], behind) < TERMINAL_MINIMUM_CONTRAST_RATIO,
+        ).map((slot) => `${slot} ${colors[slot]} ${contrast(colors[slot], behind).toFixed(2)}:1`);
+        expect(failures, behind).toEqual([]);
+      }
     },
   );
 

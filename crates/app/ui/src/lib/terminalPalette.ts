@@ -65,6 +65,12 @@ export const TERMINAL_MINIMUM_CONTRAST_RATIO = 4.5;
 // Bright is the more emphatic set, not merely the lighter one: `drawBoldTextInBrightColors`
 // defaults on, so bold output renders here and must never be less legible than its normal twin.
 // The achromatic pair is the exception ANSI itself fixes — `brightBlack` is the dim slot.
+//
+// `brightBlack` carries extra headroom against the terminal background because it is measured
+// against the *selection* background too. A selection is a 30% wash of the selection colour over
+// the surface, which costs every slot a little contrast; the dim slot is the one with no margin
+// to spare, and it is also the slot CLI output leans on hardest. Holding it above the floor on
+// all three backgrounds keeps dim text from visibly shifting colour the moment it is selected.
 const LIGHT_ANSI: Record<AnsiColorName, string> = {
   black: "#20242a",
   red: "#be433c",
@@ -74,7 +80,7 @@ const LIGHT_ANSI: Record<AnsiColorName, string> = {
   magenta: "#a04d9e",
   cyan: "#00797f",
   white: "#c7c9cd",
-  brightBlack: "#6b7077",
+  brightBlack: "#686e74",
   brightRed: "#af0b15",
   brightGreen: "#00652c",
   brightYellow: "#7b4c00",
@@ -93,7 +99,7 @@ const DARK_ANSI: Record<AnsiColorName, string> = {
   magenta: "#d27dd0",
   cyan: "#1eacb2",
   white: "#cfd2d7",
-  brightBlack: "#858b91",
+  brightBlack: "#8b9197",
   brightRed: "#ffa89d",
   brightGreen: "#7fd091",
   brightYellow: "#eeb46e",
