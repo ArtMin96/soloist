@@ -3,15 +3,110 @@
 // kept apart from the appearance mappings so the palette can carry a full ANSI set without
 // crowding the file that maps every other closed Appearance enum to its concrete value.
 
-// xterm's ITheme is structural; we set the fields that make program output follow the app
-// surface, so a minimal shape keeps the dependency off the emulator's full type.
-export interface TerminalColors {
+// The ANSI slots xterm renders program colour into, in the order the wire protocol numbers
+// them (0-7 normal, 8-15 bright). One list so the palette, the settings preview and the
+// contrast checks all walk the same set.
+export const ANSI_COLOR_NAMES = [
+  "black",
+  "red",
+  "green",
+  "yellow",
+  "blue",
+  "magenta",
+  "cyan",
+  "white",
+  "brightBlack",
+  "brightRed",
+  "brightGreen",
+  "brightYellow",
+  "brightBlue",
+  "brightMagenta",
+  "brightCyan",
+  "brightWhite",
+] as const;
+
+export type AnsiColorName = (typeof ANSI_COLOR_NAMES)[number];
+
+// The surface colours, distinct from the ANSI set: they dress the emulator itself rather than
+// carrying program output.
+interface TerminalSurfaceColors {
   background: string;
   foreground: string;
   cursor: string;
   cursorAccent: string;
   selectionBackground: string;
+  selectionInactiveBackground: string;
+  scrollbarSliderBackground: string;
+  scrollbarSliderHoverBackground: string;
+  scrollbarSliderActiveBackground: string;
 }
+
+// xterm's ITheme is structural; we set the fields that make program output follow the app
+// surface, so a minimal shape keeps the dependency off the emulator's full type.
+export type TerminalColors = TerminalSurfaceColors & Record<AnsiColorName, string>;
+
+// The floor xterm lifts a foreground to when the program's own colour would be unreadable on
+// the cell behind it. It is the runtime backstop for colour we do not choose: 256-colour and
+// truecolor output, and the two ANSI slots whose role is the surface end of their own theme
+// (below). The renderer measures against the cell's real background, including a selection.
+export const TERMINAL_MINIMUM_CONTRAST_RATIO = 4.5;
+
+// Each hue is the app's own signal hue, so the terminal reads as one of the instruments rather
+// than a foreign surface: red is the crashed red, amber the transition amber, green the running
+// green, blue the azure accent. Cyan bridges green to azure; magenta sits clear of the violet
+// band the design system rejects. Black and white ride the cool-slate neutral.
+//
+// Every slot clears 4.5:1 against its own background except the one that *is* the surface end of
+// its theme — light `white`/`brightWhite`, dark `black`. Those exist to be the near-background
+// tone (`\e[47m` must paint a pale panel, not a mid-grey one), so forcing them to 4.5:1 would
+// invert what the slot means. `TERMINAL_MINIMUM_CONTRAST_RATIO` covers them when a program uses
+// one as a foreground.
+//
+// Bright is the more emphatic set, not merely the lighter one: `drawBoldTextInBrightColors`
+// defaults on, so bold output renders here and must never be less legible than its normal twin.
+// The achromatic pair is the exception ANSI itself fixes — `brightBlack` is the dim slot.
+const LIGHT_ANSI: Record<AnsiColorName, string> = {
+  black: "#20242a",
+  red: "#be433c",
+  green: "#1e7d3e",
+  yellow: "#996000",
+  blue: "#0c71b2",
+  magenta: "#a04d9e",
+  cyan: "#00797f",
+  white: "#c7c9cd",
+  brightBlack: "#6b7077",
+  brightRed: "#af0b15",
+  brightGreen: "#00652c",
+  brightYellow: "#7b4c00",
+  brightBlue: "#005a91",
+  brightMagenta: "#8f2a8f",
+  brightCyan: "#006166",
+  brightWhite: "#ffffff",
+};
+
+const DARK_ANSI: Record<AnsiColorName, string> = {
+  black: "#30353c",
+  red: "#f57469",
+  green: "#54ad6a",
+  yellow: "#cc8f40",
+  blue: "#4ba2e5",
+  magenta: "#d27dd0",
+  cyan: "#1eacb2",
+  white: "#cfd2d7",
+  brightBlack: "#858b91",
+  brightRed: "#ffa89d",
+  brightGreen: "#7fd091",
+  brightYellow: "#eeb46e",
+  brightBlue: "#7fc5ff",
+  brightMagenta: "#f1a5ee",
+  brightCyan: "#61cfd4",
+  brightWhite: "#ffffff",
+};
+
+// xterm paints its own scrollbar slider from the theme rather than through CSS, so these are
+// what keep the terminal's scrollbar on the app's overlay rail (22% / 38% of the ink) instead
+// of xterm's own 20% / 40% default. The pressed step keeps the emulator's 50%.
+const SLIDER_ALPHA = { rest: "38", hover: "61", active: "80" };
 
 // The terminal's own surface palette, tracking the app light/dark theme. This is a surface
 // distinct from the app `--background` tokens (DESIGN.md). The cursor's contrast colour is
@@ -23,12 +118,30 @@ export function terminalColors(dark: boolean): TerminalColors {
         foreground: "#e6e8ec",
         cursor: "#8ab4f8",
         selectionBackground: "#33405a",
+        // The unemphasized selection: the same tone with the azure taken out, so an unfocused
+        // window's selection reads as a neutral wash.
+        selectionInactiveBackground: "#3e4043",
       }
     : {
         background: "#fbfbfd",
         foreground: "#23262c",
         cursor: "#3b6fd4",
         selectionBackground: "#cfdcf5",
+        selectionInactiveBackground: "#d9dcdf",
       };
-  return { ...surface, cursorAccent: surface.background };
+  const ansi = dark ? DARK_ANSI : LIGHT_ANSI;
+  return {
+    ...surface,
+    ...ansi,
+    cursorAccent: surface.background,
+    scrollbarSliderBackground: `${surface.foreground}${SLIDER_ALPHA.rest}`,
+    scrollbarSliderHoverBackground: `${surface.foreground}${SLIDER_ALPHA.hover}`,
+    scrollbarSliderActiveBackground: `${surface.foreground}${SLIDER_ALPHA.active}`,
+  };
+}
+
+// "brightBlack" → "Bright black", naming a swatch in the settings palette preview.
+export function ansiColorLabel(name: AnsiColorName): string {
+  const spaced = name.replace(/([A-Z])/g, " $1").toLowerCase();
+  return spaced[0].toUpperCase() + spaced.slice(1);
 }

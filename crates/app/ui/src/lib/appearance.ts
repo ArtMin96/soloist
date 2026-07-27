@@ -5,7 +5,7 @@
 // values from here — no magic numbers scattered across components.
 
 import type { Appearance, FontScale, FontWeight, LetterSpacing, LineHeight, Theme } from "@/domain";
-import { terminalColors } from "@/lib/terminalPalette";
+import { TERMINAL_MINIMUM_CONTRAST_RATIO, terminalColors } from "@/lib/terminalPalette";
 
 // Terminal font size (px) per step — xterm takes a px size directly.
 const TERMINAL_FONT_PX: Record<FontScale, number> = {
@@ -206,6 +206,7 @@ export function terminalOptions(appearance: Appearance, dark: boolean) {
     lineHeight: lineHeightValue(t.line_height),
     letterSpacing: letterSpacingPx(t.letter_spacing),
     theme: terminalColors(dark),
+    minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
     // The end-to-end build turns on xterm's screen-reader mode so the WebDriver harness can read the
     // terminal's content: the default GPU (WebGL) renderer draws to a canvas the DOM cannot read, and
     // screen-reader mode mirrors the live viewport into the accessibility DOM. Gated to the e2e build,

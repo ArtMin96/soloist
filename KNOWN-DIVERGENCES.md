@@ -891,3 +891,59 @@ fallback (`plan/05` §12). The peek needed no change to follow it, because both 
 template-CRUD MCP tools for the Scratchpad/Todo kinds in v1" now reads as *no authoring* rather than
 *no access*. `plan/02` **F15** carries the same amendment — its "resolved decision 4 … stands" clause
 named the wider restriction — and **I13** records the per-project move. No row regresses.
+
+---
+
+## D-23 — The terminal's full ANSI palette is authored per theme, with a runtime readability floor 🟢
+
+**Introduced:** Phase 4 surface, built on the branch that themes the emulator.
+
+**Solo — silent, not contradicted.** `plan/05` records nothing about Solo's terminal colours beyond
+OSC title and bell handling. There is no documented Solo palette to match or to differ from, so this
+is a **clean-room addition** rather than a divergence from observed behavior, recorded here because
+`plan/05` §12 owns the decision and this file is where the parity walk reads it. Nothing below
+asserts what Solo does.
+
+**The defect this closes.** `terminalColors()` set 5 of xterm 6's ~26 `ITheme` fields. All 16 ANSI
+slots were therefore left to xterm's built-in defaults, which are tuned for a dark terminal — so in
+the Light theme program colour rendered against a near-white `#fbfbfd` surface with no relationship
+to the app at all.
+
+**What Soloist does.** Both themes carry the full ANSI set plus the unfocused-selection tone and the
+three scrollbar-slider colours. Each hue is the app's own signal hue, so the terminal reads as one of
+the instruments rather than a foreign surface: red is DESIGN.md's crashed red (27), amber the
+transition amber (70), green the running green (150), blue the azure accent (245); cyan bridges green
+to azure at 200 and magenta sits at 328, deliberately clear of the 264-300 violet band DESIGN.md
+rejects as the "purple tell". Black and white ride the cool-slate neutral. The palette is authored in
+OKLCH and **emitted as hex** — xterm.js cannot parse `oklch()`.
+
+**Bright is the more emphatic set, not merely the lighter one.** `drawBoldTextInBrightColors` defaults
+to `true`, so bold output renders in the bright half. On the light theme bright is therefore *darker*
+and more saturated than its normal twin; on dark it is lighter. It is never less legible than the
+normal slot — bold that reads worse than plain text would be a defect the ANSI convention hides.
+
+**The contrast rule, and its two honest exemptions.** Every slot clears 4.5:1 against its own
+background **except the one whose ANSI role is the surface end of that theme** — `white` and
+`brightWhite` on light, `black` on dark. Demanding 4.5:1 of those would invert what the slot means:
+`\e[47m` has to paint a pale panel and `\e[40m` a dark one, and a "white" that is really a mid-grey
+breaks every `\e[3x;4ym` pairing that uses it as a background. `brightBlack` is *not* exempt in either
+theme: it is the dim-text slot, not a surface tone, so DESIGN.md's `slate-muted` rule ("verified
+≥ 4.5:1 on Cool White; never lighter, no 'elegant' pale gray") applies to it unchanged.
+
+**Why the floor and the palette are complementary, not redundant.** `minimumContrastRatio: 4.5` is set
+alongside the palette. It is a **top-level terminal option, not an `ITheme` field**, so it only reaches
+the emulator through `terminalOptions()`. Because our own colours already clear the bar where they are
+used as a foreground, the floor never fires on the palette — it exists for the colour we do *not*
+choose: the 256-colour and truecolor foregrounds a program picks for itself, and the two surface-end
+slots above when a program uses one as text.
+
+**Why `selectionForeground` stays unset.** Reading xterm 6.0.0's shipped renderers, the minimum-contrast
+adjustment resolves against the cell's **real** background — for a selected cell that is the selection
+background (the DOM row factory passes it as the background override; the WebGL cell resolver writes it
+into the cell's background before the atlas lookup). Selected text is therefore already guaranteed
+readable, so pinning `selectionForeground` would only flatten a coloured selection to one tone and lose
+information, and would depart from the emulators a user already knows.
+
+**Effect on parity:** adds `plan/02` **C10**. **C2** ("Full ANSI / color") is unchanged and still ✅ —
+it covers whether ANSI renders at all; C10 covers whether the 16 colours are ours and follow the theme.
+No row regresses.

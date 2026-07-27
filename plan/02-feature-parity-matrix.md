@@ -46,7 +46,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | ID | Feature | Src | Phase | Target | Verify |
 |----|---------|-----|------:|--------|--------|
 | C1 | Real PTY per process | ✅ | 4 | v1 | `vim`/agent TUI render & accept input |
-| C2 | Full ANSI / color | ✅ | 4 | v1 | `ls --color` shows color |
+| C2 | Full ANSI / color | ✅ | 4 | v1 | `ls --color` shows color. Whether the 16 colours track the app theme is **C10**, not this row. |
 | C3 | Interactive input (text + raw control bytes) | ✅ | 4 | v1 | Answer a `read`/agent prompt |
 | C4 | Rendered output buffer | ✅ | 4 | v1 | Rendered screen text retrievable |
 | C5 | Raw output buffer (control sequences) | ✅ | 4 | v1 | Raw stream retrievable |
@@ -54,6 +54,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | C7 | OSC parsing (title, bell) | ✅ | 4 | v1 | OSC title updates; bell detected |
 | C8 | GPU/smooth rendering | 🟡 | 4 | later | webgl renderer; **DOM fallback** (xterm v6 removed canvas, D-10). **Delivered ahead of schedule (user request):** `@xterm/addon-webgl` lazy-loaded + activated after the terminal opens, reverting to the built-in DOM renderer when WebGL2 is unavailable or its context is lost (`onContextLoss`). Selection logic single-sourced in `ui/src/lib/terminalRenderer.ts` (5 vitest). Bundle: addon is its own ~123 kB/~35 kB-gzip on-demand chunk; main bundle +1.6 kB. Headless evidence: `lib/terminalRenderer.test.ts` (fallback-on-failure, context-loss-disposes, handle-dispose). Runtime FPS/visual = user-only walk (no display in CI). Gap in `plan/05 §12`. |
 | C9 | Detach/attach with scrollback replay | ❓ | 4 | v1 | Reattach replays recent screen |
+| C10 | Themed ANSI palette | ❓ | 4 | v1 | Headless: `terminalColors()` returns all 16 ANSI slots per theme, each clearing 4.5:1 against its own background bar the documented surface-end slots, bright never below normal, and the Settings preview's swatch row repaints on the theme flip. Display walk (not yet run): toggle Light/Dark with `ls --color` and a bold-coloured agent line on screen. **Clean-room addition, no Solo equivalent** (`plan/05` §12, [D-23](../KNOWN-DIVERGENCES.md#d-23--the-terminals-full-ansi-palette-is-authored-per-theme-with-a-runtime-readability-floor-)). C2 covers whether ANSI renders *at all*; this row covers whether the 16 colours are *ours*. Both palettes are authored from DESIGN.md's signal hues and emitted as hex (xterm cannot parse `oklch()`); every slot clears 4.5:1 against its own background except the one that is the surface end of its theme (light `white`/`brightWhite`, dark `black`), which `minimumContrastRatio: 4.5` covers at draw time. Headless evidence: `lib/terminalPalette.test.ts` (9), `lib/appearance.test.ts` (floor), `components/settings/TerminalPreview.test.tsx` (2). Palette appearance on a real display = user-only walk. |
 
 ## D. Monitoring & self-healing (Phase 6)
 
