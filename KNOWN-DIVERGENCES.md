@@ -1402,4 +1402,11 @@ it as an oversight and quietly narrow it; reversing it is one custom `IClipboard
 separate from the keyboard copy/paste path of [D-25](#d-25), which acts for the user at the keyboard —
 this acts for the program at the other end of the PTY. Both reach the same system clipboard.
 
+**The round trip is unverified.** Nothing in the test suite exercises OSC 52: the shared terminal
+fake's `loadAddon` is a no-op, so the clipboard addon never activates under test, and no case drives a
+read or a write through the escape sequence. Its *release* is safe by construction — xterm registers
+its `AddonManager` as a disposable of the terminal, so `term.dispose()` disposes every loaded addon —
+but that is the only part of this capability with evidence behind it. The rest is wiring that has not
+been demonstrated to work, and it is the one capability here carrying an accepted security cost.
+
 **Effect on parity:** adds `plan/02` **C15**. No row regresses.
