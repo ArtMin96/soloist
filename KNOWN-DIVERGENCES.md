@@ -825,7 +825,10 @@ is *legal*.
 
 ## D-22 — MCP callers may read the seed template for a kind, but never author one 🟢
 
-**Introduced:** owner decision 2026-07-27. Recorded here beside the unified Templates extension
+**Introduced:** proposed by the implementing session and **decided by the owner on 2026-07-27**, who
+reviewed the reversal of `plan/05` §12's resolved decision 4 and approved widening it from *no access*
+to *no authoring*. The reversal is the owner's, not the implementer's; this entry records it rather
+than authorizing it. Recorded here beside the unified Templates extension
 [D-7](#d-7--scratchpads-carry-an-enforced-disciplined-structure-not-free-form-markdown--superseded),
 which it refines.
 
@@ -840,17 +843,17 @@ to guess the shape or reverse-engineer it from existing documents, and both drif
 `ScopedFacade` pins every `prompt_template_*` action to `TemplateKind::Prompt`, so the two seed kinds
 were invisible to it.
 
-**What Soloist does.** `ScopedFacade::seed_template(kind)` is a **read-only** peek returning the
-template a new empty document of that kind would be seeded from, or nothing when the local user has
-selected no default. Two MCP tools expose it — `scratchpad_template` and `todo_template`, neither
-taking arguments.
+**What Soloist does.** `ScopedFacade::seed_template(kind)` is a **read-only** peek returning
+`SeedTemplate { name, body }` — what seeding a new empty document of that kind would apply — or
+nothing when the local user has selected no default. Two MCP tools expose it —
+`scratchpad_template` and `todo_template`, neither taking arguments.
 
-**Why read-only access rather than none.** The seed body was **already reachable** by any scoped
-caller: an empty `scratchpad_write` seeds the body and returns the written view, and `IpcResponse`
-carries the core `ScratchpadView` (body included) verbatim. The peek therefore discloses nothing new —
-it removes the junk document the disclosure used to cost. Confidentiality of the template body was
-never a property of this design, so withholding the read bought no security and charged the user a
-stray note per lookup. It also matches the pull model
+**Why read-only access rather than none.** Both fields were **already reachable** by any scoped
+caller: an empty `scratchpad_write` seeds the body and returns the written view — `IpcResponse`
+carries the core `ScratchpadView`, body included, verbatim — and the same reply names the template in
+`seeded_from`. The peek therefore discloses nothing new — it removes the junk document the disclosure
+used to cost. Confidentiality of the template body was never a property of this design, so
+withholding the read bought no security and charged the user a stray note per lookup. It also matches the pull model
 [D-19](#d-19--a-rendered-prompt-is-returned-to-its-caller-never-applied-to-a-running-process-) records
 for prompts: an agent reaches a template by pulling it.
 
@@ -859,7 +862,7 @@ for a seed kind remain on `Facade`, driven by Settings → Templates. `ScopedFac
 no writes, so `CLAUDE.md` §16's "scope is a type" holds: the scope-limited caller still cannot reach an
 ungated door.
 
-**Two deliberate narrowings.**
+**Three deliberate narrowings.**
 
 - **The selection, not the library.** The peek answers "what would seed a create", so it returns the
   *selected default* and takes no name. A template the user authored but did not select is not shown,
@@ -868,9 +871,15 @@ ungated door.
   `Todos`), not in `PromptTemplates`. Turn a group off and both the create *and* its peek disappear —
   so the peek is available exactly where the write that already exposed the body is available, and
   never widens reachability in any settings configuration.
+- **What a create applies, not what the template is.** The answer is `SeedTemplate { name, body }`,
+  the two fields the seeding path consumes — never the full `TemplateView`. The template's authoring
+  metadata stays off the wire: its `description` above all, which is prose the user wrote for the
+  Settings manager and which no create has ever disclosed. Narrowing at `Facade::seed_template`
+  rather than at either caller means the peek cannot drift wider than the create it describes, and
+  makes "discloses nothing new" true field by field rather than approximately.
 
-Both resolve through the same `Facade::seed_template` the create path uses, so a caller is never shown
-a shape a create would not actually apply.
+All three resolve through the same `Facade::seed_template` the create path uses, so a caller is never
+shown a shape a create would not actually apply.
 
 **Why 🟢 (settled):** owner-decided and shipped together. The one open question it surfaced — that the
 default *selection* was global-only, which left the owner's own project-scoped templates unselectable and
@@ -880,4 +889,5 @@ fallback (`plan/05` §12). The peek needed no change to follow it, because both 
 
 **Effect on parity:** refines the "Unified Templates" row in `plan/05` §12, whose "no agent-facing
 template-CRUD MCP tools for the Scratchpad/Todo kinds in v1" now reads as *no authoring* rather than
-*no access*. No row regresses.
+*no access*. `plan/02` **F15** carries the same amendment — its "resolved decision 4 … stands" clause
+named the wider restriction — and **I13** records the per-project move. No row regresses.

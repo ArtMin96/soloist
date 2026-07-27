@@ -2,7 +2,11 @@ import { SettingRow } from "@/components/settings/controls/SettingRow";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { NullableSelect } from "@/components/settings/controls/NullableSelect";
 import { TemplateScopeGroup } from "@/components/settings/templates/TemplateScopeGroup";
-import { TEMPLATE_KIND_DESCRIPTION, TEMPLATE_KIND_LABEL } from "@/lib/templates";
+import {
+  TEMPLATE_DEFAULT_NEEDS_PROJECT,
+  TEMPLATE_KIND_DESCRIPTION,
+  TEMPLATE_KIND_LABEL,
+} from "@/lib/templates";
 import type { TemplateScopeLists } from "@/store/useTemplates";
 import type { TemplateKind, TemplateScope } from "@/domain";
 
@@ -18,6 +22,8 @@ interface TemplateKindSectionProps {
   templates: TemplateScopeLists;
   /** The scopes to show, in order — the project half is absent while no project is open. */
   scopes: readonly TemplateScope[];
+  /** Whether a project is open, which is what a seed default needs to be chosen at all. */
+  projectOpen: boolean;
   /** Present only for seedable kinds — renders the "Default template" selector row. */
   seedDefault?: SeedDefault;
   onOpen: (scope: TemplateScope, name: string) => void;
@@ -33,6 +39,7 @@ export function TemplateKindSection({
   kind,
   templates,
   scopes,
+  projectOpen,
   seedDefault,
   onOpen,
   onDuplicate,
@@ -47,20 +54,13 @@ export function TemplateKindSection({
       ? String(seedDefault.id)
       : null;
 
-  // The project scope is listed exactly while a project is open, and a default is chosen from that
-  // scope — so the same condition decides whether the selection can be made at all. With none open,
-  // say why rather than leaving the row's absence to be read as a missing setting.
-  const projectOpen = scopes.includes("project");
-
   return (
     <SettingsSection
       title={TEMPLATE_KIND_LABEL[kind]}
       description={TEMPLATE_KIND_DESCRIPTION[kind]}
     >
       {seedDefault && !projectOpen && (
-        <p className="py-3 text-xs text-muted-foreground">
-          Open a project to choose its default template.
-        </p>
+        <p className="py-3 text-xs text-muted-foreground">{TEMPLATE_DEFAULT_NEEDS_PROJECT}</p>
       )}
 
       {seedDefault && templates.project.length > 0 && (

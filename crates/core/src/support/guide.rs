@@ -189,6 +189,9 @@ not forcibly block a write."
             body: "- Scratchpads are durable, project-scoped shared documents — a free-form \
 Markdown note addressed by its name. Write whatever structure the work needs; a project template \
 can seed a starting shape.\n\
+- `scratchpad_template` shows that shape. Seeding only fills a create you leave empty, so when you \
+write real content read the template first and follow it yourself. It returns nothing when the user \
+has selected no default. Templates are the user's to author, in Soloist's settings.\n\
 - `scratchpad_read` returns the body *and* its revision; pass that revision back to \
 `scratchpad_write` to update it. A revision mismatch means someone edited first — re-read and \
 retry, never clobber."
@@ -201,6 +204,9 @@ retry, never clobber."
             body: "- Todos are the shared task list. Claim one with `todo_lock` before working it \
 so two agents do not duplicate the effort, comment progress as you go, and `todo_complete` only \
 once its blockers are done.\n\
+- `todo_template` shows the shape the user expects a todo body to follow. Seeding only fills a \
+create you leave empty, so when you write a real body read the template first and follow it \
+yourself. It returns nothing when the user has selected no default.\n\
 - A todo lock is owned by your process and releases when it closes, so an abandoned claim frees \
 itself."
                 .to_string(),
@@ -232,7 +238,10 @@ nothing; a longer run pairs off, with an odd one left over escaping.\n\
 - Render with a `values` map. A placeholder you supply no value for is left in the text as-is and \
 named in `unfilled`; a value naming no placeholder is named in `unknown`. Substituted text is \
 never rescanned, so a value containing `{{a}}` stays literal. This group is off by default and \
-enabled under Integrations in Soloist's settings."
+enabled under Integrations in Soloist's settings.\n\
+- Scratchpads and todos have templates too, but you only read them: `scratchpad_template` and \
+`todo_template` show the shape a new document of that kind is seeded with. They belong to their own \
+tool groups, so they work even with this one off. Authoring any template is the user's, in settings."
                 .to_string(),
         },
         GuideTopic {

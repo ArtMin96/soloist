@@ -85,6 +85,28 @@ impl TemplateView {
     }
 }
 
+/// What seeding a new empty document actually applies: the body it starts from, and the name the
+/// create's reply reports it was seeded from.
+///
+/// Deliberately narrower than [`TemplateView`]. The seeding path consumes these two fields and no
+/// others, so a caller that reads this reads exactly what a create of its kind would do to it —
+/// never the authoring metadata (a description, a revision, an id) that belongs to managing the
+/// template rather than to following it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeedTemplate {
+    pub name: String,
+    pub body: String,
+}
+
+impl From<TemplateView> for SeedTemplate {
+    fn from(template: TemplateView) -> Self {
+        Self {
+            name: template.name,
+            body: template.body,
+        }
+    }
+}
+
 /// A template's one-line listing: everything but the body.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TemplateSummary {

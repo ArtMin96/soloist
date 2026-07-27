@@ -17,7 +17,8 @@
 
 use super::Facade;
 use crate::coordination::{
-    RenderError, RenderRequest, RenderedPrompt, TemplateSummary, TemplateView, TemplateWriteError,
+    RenderError, RenderRequest, RenderedPrompt, SeedTemplate, TemplateSummary, TemplateView,
+    TemplateWriteError,
 };
 use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
@@ -174,19 +175,23 @@ impl Facade {
     /// The one resolution both the seeding path above and the session-scoped
     /// [`seed_template`](crate::ScopedFacade::seed_template) peek read, so a caller shown a shape is
     /// shown the shape a create would actually apply, and a change to how the default is chosen
-    /// moves both at once.
+    /// moves both at once. It narrows to [`SeedTemplate`] here rather than at either caller, so the
+    /// peek cannot widen to the authoring metadata the seeding path has no use for.
     pub(crate) fn seed_template(
         &self,
         kind: TemplateKind,
         project: ProjectId,
-    ) -> Result<Option<TemplateView>, CoordinationError> {
+    ) -> Result<Option<SeedTemplate>, CoordinationError> {
         let Some(default) = self.template_defaults(project)?.get(kind) else {
             return Ok(None);
         };
         // The selection names one of the project's own templates, so it resolves in that library
         // and nowhere else: a global template never seeds, and a stale id (its template was
         // deleted) resolves to nothing.
-        Ok(self.templates.resolve(kind, Some(project), default)?)
+        Ok(self
+            .templates
+            .resolve(kind, Some(project), default)?
+            .map(SeedTemplate::from))
     }
 }
 

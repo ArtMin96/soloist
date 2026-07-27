@@ -7,10 +7,12 @@
 //! [`Facade`](crate::Facade) and are not reachable from here.
 //!
 //! The peek resolves through the same [`Facade::seed_template`](crate::Facade::seed_template) the
-//! create path uses, so a caller is never shown a shape a create would not actually apply.
+//! create path uses, so a caller is never shown a shape a create would not actually apply — and it
+//! answers with [`SeedTemplate`], the two fields seeding consumes, so it cannot show more of the
+//! template than a create already does.
 
 use super::scoped::ScopedFacade;
-use crate::coordination::TemplateView;
+use crate::coordination::SeedTemplate;
 use crate::facade::CoordinationError;
 use crate::template::TemplateKind;
 
@@ -24,7 +26,7 @@ impl ScopedFacade<'_> {
     pub fn seed_template(
         &self,
         kind: TemplateKind,
-    ) -> Result<Option<TemplateView>, CoordinationError> {
+    ) -> Result<Option<SeedTemplate>, CoordinationError> {
         let project = self.coordination_scope()?;
         self.inner.seed_template(kind, project)
     }

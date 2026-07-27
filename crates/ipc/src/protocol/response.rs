@@ -8,8 +8,8 @@ use soloist_core::{
     AcquireOutcome, AgentTool, Comment, DiagramSummary, DiagramView, ExportedTemplate,
     FeedbackEntry, IntegrationWrite, KvEntry, LeaseView, LinkContent, McpToolGroups, ProcessId,
     ProcessView, ProjectId, ProjectView, RenderedPrompt, ScratchpadSummary, ScratchpadView,
-    SetWhenIdleOutcome, StartSummary, TemplateSummary, TemplateView, TimerView, TodoSummary,
-    TodoView, Whoami,
+    SeedTemplate, SetWhenIdleOutcome, StartSummary, TemplateSummary, TemplateView, TimerView,
+    TodoSummary, TodoView, Whoami,
 };
 
 use crate::error::IpcError;
@@ -149,9 +149,10 @@ pub enum IpcResponse {
     /// cannot drift.
     PromptTemplateRendered(RenderedPrompt),
     /// The template a new document would be seeded from, or `None` when the local user has selected
-    /// no default for that kind (answer to [`IpcRequest::SeedTemplateRead`]). Reuses the core view
-    /// so the wire shape cannot drift.
-    SeedTemplate(Option<TemplateView>),
+    /// no default for that kind (answer to [`IpcRequest::SeedTemplateRead`]). Reuses the core seed
+    /// projection — the body and the name a create applies, not the template's authoring metadata —
+    /// so the wire shape cannot drift from what seeding does.
+    SeedTemplate(Option<SeedTemplate>),
     /// What a guide write did (answer to [`IpcRequest::SetupAgentIntegration`]). Reuses the core
     /// type so the wire shape cannot drift.
     IntegrationWritten(IntegrationWrite),

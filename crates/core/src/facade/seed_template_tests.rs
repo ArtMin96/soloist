@@ -10,7 +10,6 @@ use crate::composition::CorePorts;
 use crate::facade::Facade;
 use crate::ids::{ProjectId, SessionId};
 use crate::ports::{ProjectRepo, TokioClock};
-use crate::template::TemplateScope;
 use crate::testing::{
     FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTemplateRepo, FakeTrustRepo,
 };
@@ -135,55 +134,37 @@ fn a_peek_with_no_project_in_scope_is_refused() {
 }
 
 #[test]
-fn a_scoped_caller_cannot_write_a_seed_kind_template() {
-    let (facade, session, _project) = facade();
-    facade
+fn the_peek_carries_only_what_a_create_applies() {
+    let (facade, session, project) = facade();
+    let created = facade
         .template_create(
             TemplateKind::Scratchpad,
-            None,
-            "house-style",
-            None,
+            Some(project),
+            "daily",
+            Some("how we run a standup"),
             "## Plan",
         )
-        .expect("the user authors the scratchpad template");
-
-    // The only template write a session-scoped caller has addresses the prompt library, so the
-    // same name there is a different template and the scratchpad one is untouched.
+        .expect("author the template");
     facade
+        .set_default_template(TemplateKind::Scratchpad, project, Some(created.id))
+        .expect("select it as the default");
+
+    let peeked = facade
         .scoped(session)
-        .prompt_template_create(TemplateScope::Global, "house-style", None, "hijacked")
-        .expect("the prompt library has no template of that name, so this creates one");
+        .seed_template(TemplateKind::Scratchpad)
+        .expect("peek")
+        .expect("a default is selected");
 
-    assert_eq!(
-        facade
-            .template_read(TemplateKind::Scratchpad, None, "house-style")
-            .expect("the scratchpad template still exists")
-            .body,
-        "## Plan",
-    );
-}
-
-#[test]
-fn a_scoped_caller_cannot_delete_a_seed_kind_template() {
-    let (facade, session, _project) = facade();
-    facade
-        .template_create(
-            TemplateKind::Scratchpad,
-            None,
-            "house-style",
-            None,
-            "## Plan",
-        )
-        .expect("the user authors the scratchpad template");
-
-    assert!(
-        !facade
-            .scoped(session)
-            .prompt_template_delete(TemplateScope::Global, "house-style")
-            .expect("the delete is answered, not refused"),
-        "the name exists only in the scratchpad library, which this caller cannot address",
-    );
-    assert!(facade
-        .template_read(TemplateKind::Scratchpad, None, "house-style")
-        .is_ok());
+    // Seeding applies a body and reports a name, so those are the whole of what a scoped caller may
+    // learn here. The template's authoring metadata — its description above all, which is prose the
+    // user wrote for the Settings manager and no create ever discloses — stays off this answer.
+    let disclosed = serde_json::to_value(&peeked).expect("the peek serializes to the wire");
+    let mut keys: Vec<_> = disclosed
+        .as_object()
+        .expect("an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["body", "name"]);
 }

@@ -11,8 +11,7 @@ use std::sync::Arc;
 
 use soloist_core::{
     Appearance, Binding, Facade, HotkeyAction, HotkeyBindingView, Integrations, McpFeatureGroup,
-    McpToolGroups, Notifications, ProjectId, Sidebar, TemplateDefaults, TemplateId, TemplateKind,
-    ToolDefaults,
+    McpToolGroups, Notifications, Sidebar, ToolDefaults,
 };
 use tauri::State;
 
@@ -207,34 +206,6 @@ pub async fn set_mcp_tool_group(
 ) -> Result<McpToolGroups, String> {
     facade
         .blocking(move |f| f.set_mcp_tool_group(group, enabled))
-        .await
-        .map_err(|err| err.to_string())
-}
-
-/// One project's default-template selection per kind — which of that project's templates each
-/// free-form kind seeds a new document from. Absent settings read as none selected.
-#[tauri::command]
-pub async fn template_defaults(
-    project: ProjectId,
-    facade: State<'_, Arc<Facade>>,
-) -> Result<TemplateDefaults, String> {
-    facade
-        .blocking(move |f| f.template_defaults(project))
-        .await
-        .map_err(|err| err.to_string())
-}
-
-/// Selects (or clears, with a null `template`) `project`'s default template for `kind`
-/// (auto-save), returning the updated selection. `Prompt` has no seed default and is a no-op.
-#[tauri::command]
-pub async fn set_default_template(
-    kind: TemplateKind,
-    project: ProjectId,
-    template: Option<TemplateId>,
-    facade: State<'_, Arc<Facade>>,
-) -> Result<TemplateDefaults, String> {
-    facade
-        .blocking(move |f| f.set_default_template(kind, project, template))
         .await
         .map_err(|err| err.to_string())
 }
