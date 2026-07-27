@@ -1020,3 +1020,115 @@ covering these three asserts against the emulator instance that was mounted *bef
 option wired only into construction reddens it.
 
 **Effect on parity:** adds `plan/02` **C11**. No row regresses.
+
+---
+
+## D-25 — Keyboard copy/paste, copy-on-select, and a focus setting that finally does something 🟢
+
+**Introduced:** Phase 4 surface, on the branch that adds terminal copy/paste.
+
+**Solo — silent, not contradicted.** `plan/05` records nothing about copying or pasting in Solo's
+terminal, nor about how a pane takes keyboard focus. There is no documented Solo behavior to match or
+to differ from, so this is a **clean-room addition** rather than a divergence from observed behavior,
+recorded here because `plan/05` §12 owns the decision and the parity walk reads it from this file.
+Nothing below asserts what Solo does.
+
+**The defect this closes.** xterm ships a `copy` listener, `paste` listeners with bracketed-paste
+handling, a `contextmenu` handler that pre-fills its hidden textarea, and — on Linux — middle-click
+primary-selection paste. It ships **no keyboard binding for copy**: that is the embedder's job, and
+Soloist had not done it, so there was no way to copy terminal output from the keyboard at all.
+Separately, `focus_on_click` was a **dead setting** — declared in the appearance document, defaulted,
+mirrored in `domain.ts`, with a live switch in the Appearance panel, and read by no code anywhere. It
+persisted, its switch moved, and it changed nothing.
+
+**What Soloist does.** Two actions join the closed `HotkeyAction` set in the Terminal scope,
+`CopySelection` and `PasteClipboard`, defaulting to **Ctrl+Shift+C** and **Ctrl+Shift+V**. The Shift is
+load-bearing: bare Ctrl+C and Ctrl+V belong to the program on the PTY (an interrupt, and a literal
+`^V`), and the terminal's capture-phase key handler claims only the Shift chords, so both bare chords
+still reach the emulator untouched. The keymap holds **one binding per action**, so the traditional
+Ctrl+Insert / Shift+Insert aliases are **not** shipped; adding them would mean reshaping the keymap to
+carry alternates, which is a larger change than the aliases are worth. Copy is a no-op without a
+selection — an empty write would replace whatever the user had on the clipboard with a blank. Paste
+goes through `term.paste`, which normalizes newlines and applies bracketed-paste markers only when the
+running program enabled that mode, then emits the result as ordinary input, so no new IPC is involved.
+
+**`copy_on_select`, default off.** A new boolean on the terminal appearance document, driven from
+xterm's `onSelectionChange`. Off by default (owner decision): the explicit hotkey stays the primary
+path, and Linux middle-click primary-selection paste already works natively either way. The event
+fires as a selection is *cleared* as well as made, so an emptiness guard is what keeps a deselect from
+wiping the clipboard.
+
+**`focus_on_click` now governs programmatic focus, and its default flips to `true`.** The setting
+decides whether selecting a process hands its terminal the keyboard focus; off, the pane is shown and
+focus stays where it was, so a click into the terminal is what starts typing. xterm focuses its own
+textarea on `mousedown` unconditionally, so clicking the terminal surface always focuses it regardless
+— the setting governs the only focus Soloist itself performs. **Both** of the app's focus calls are
+gated: the one when a pane is created and the one when a pooled pane becomes visible again. Gating
+only the first would leave the setting exactly as dead as it was, because the visible path also runs on
+mount. The default moves from `false` to `true` on the same reasoning that kept `cursor_blink` at
+`true` in [D-24](#d-24--the-terminal-cursors-shape-and-blink-are-user-settings-not-constants-): the app
+has always focused a terminal as its pane was selected, and a fresh install must not silently lose
+that. An existing record that already carries `focus_on_click: false` now takes effect, which is the
+intended consequence of fixing a setting that was being ignored.
+
+**`rightClickSelectsWord` is turned on.** xterm derives this option's default from "are we on macOS",
+read from the installed bundle rather than from memory, so it arrives **off** on our only target. A
+right click would then open the context menu over an empty selection, which is the one thing that menu
+exists to act on.
+
+**Clipboard access sits behind one seam, backed by the native plugin.** `lib/clipboard.ts` is the
+single place the terminal's clipboard is read and written. It goes through
+`tauri-plugin-clipboard-manager` rather than the webview's async Clipboard API: WebKitGTK gates
+`navigator.clipboard.readText()` behind a user gesture it does not credit a capture-phase key handler
+with, so the paste chord could not rely on a webview read. The plugin's commands run in the app
+process, where no such gate applies. Neither function rejects: a refused clipboard degrades — a write
+is dropped, a read yields no text — so the key handler and the selection listener can never take an
+exception.
+
+The grant is the two text commands and nothing else. `capabilities/default.json` carries
+`clipboard-manager:allow-read-text` and `clipboard-manager:allow-write-text`, which the generated
+`gen/schemas/acl-manifests.json` shows mapping to exactly `read_text` and `write_text`. Image, HTML,
+and clear stay ungranted, and `clipboard-manager:default` is deliberately not used — that set is
+empty, because the plugin ships no capability enabled by default.
+
+**What this costs and what is still unverified.** The plugin pulls `arboard`, whose `image-data`
+feature is on by default and is not switchable from the plugin, so the `image` decode tree compiles
+for a text-only use — accounted for in the dependency note below. And the plugin's **runtime
+behavior in a real window is still unwalked**: the frontend tests mock the plugin module, so they
+prove the seam's wiring and its degradation contract, not that WebKitGTK and the runtime authority
+let the call through. That remains the user-only display walk C12 records. Separately, the app's
+other copy buttons (scratchpads, project settings, code blocks, Mermaid export) still use
+`navigator.clipboard.writeText` — writing is the direction WebKitGTK does permit, and migrating them
+was out of scope for the terminal branch.
+
+**What it adds to the dependency graph.** `Cargo.lock` goes from **731 to 757 entries — 26 added,
+none removed**: 24 crates that were not present before, plus second versions of `nom` and
+`quick-xml`. By what pulls them in, the 26 split into **16 for the Linux clipboard backend**
+(`wl-clipboard-rs` with its six `wayland-*` crates, `tree_magic_mini`, `quick-xml`, `nom`,
+`os_pipe`, `petgraph`, `fixedbitset`; and `x11rb`, `x11rb-protocol`, `gethostname`), **6 for the
+`image-data` decode tree** (`tiff`, `weezl`, `fax`, `half`, `crunchy`, `quick-error`), **2 that
+never build on this target** (`clipboard-win` and `error-code`, Windows-only), and **2 for
+`arboard` and the plugin themselves**. The bulk of the lockfile cost is therefore the X11 and
+Wayland backend — which is the feature, not overhead — and only the 6-crate decode tree is paid
+for nothing.
+
+That decode tree is also the only part that is newly *compiled*. `image`, `moxcms`, and `pxfm` were
+already lockfile entries at the base, but reachable only through `tauri-plugin-mcp-bridge`, which is
+`optional` and absent from `default = ["mcp", "http"]`, so a default build did not compile them and
+now does. `png` and `bytemuck` are **not** new cost — a default build already reached `png` through
+`tauri` → `tray-icon`/`muda` and `bytemuck` through `tauri-runtime-wry` → `softbuffer`. The
+**compiled-size delta is unmeasured**: bundle size is measured against the real `.deb`/`.AppImage` in
+the packaging phase, and a number that was not taken is not recorded here.
+
+On the frontend side the plugin is small. `@tauri-apps/plugin-clipboard-manager` is **14.6 kB on
+disk** (`dist-js` 10.4 kB, of which the ESM entry the bundler actually pulls is 3,605 B), and its one
+dependency, `@tauri-apps/api`, is already a direct dependency of the UI.
+
+**Why there is no schema migration.** `SCHEMA_VERSION` stays **18**, on the same "add a field, not a
+store" recipe D-24 records: the settings row persists as one JSON document parsed straight into
+`Settings`, whose containers carry `#[serde(default)]` and set no `deny_unknown_fields`, so a new
+boolean needs no DDL and a record written before it existed reads back with the default. A bump would
+only make `migrate()` refuse the database for an older build, in exchange for no DDL. A store test
+covers the behavior the bump would have been ceremony for.
+
+**Effect on parity:** adds `plan/02` **C12**. No row regresses.

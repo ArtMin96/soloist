@@ -34,7 +34,8 @@ fn fully_populated() -> Settings {
             theme: Theme::Dark,
             interface_font_scale: FontScale::Large,
             terminal: TerminalAppearance {
-                focus_on_click: true,
+                focus_on_click: false,
+                copy_on_select: true,
                 font_family: Some("JetBrains Mono".into()),
                 font_weight: FontWeight::W500,
                 bold_font_weight: FontWeight::W700,
@@ -159,6 +160,40 @@ fn a_record_without_the_cursor_fields_reads_back_with_the_documented_defaults() 
     );
     // The fields the older build did write are untouched by the defaulting.
     assert_eq!(terminal.font_scale, FontScale::Large);
+}
+
+#[test]
+fn a_record_without_the_terminal_behavior_fields_reads_back_with_the_documented_defaults() {
+    // The two terminal behavior booleans are read by the emulator, so their defaults decide what a
+    // user who never touched them gets. A record an older build wrote simply lacks them, and the
+    // defaults that apply must be the ones that leave the terminal behaving as it always has:
+    // selecting a process focuses it, and a selection is copied only on the explicit hotkey.
+    let store = SqliteStore::open_in_memory().expect("in-memory store");
+    store
+        .lock()
+        .execute(
+            "INSERT INTO settings (id, doc) VALUES (1, ?1)",
+            (r#"{"appearance":{"terminal":{"letter_spacing":"wide"}}}"#,),
+        )
+        .expect("seed a settings record written before the terminal behavior fields existed");
+
+    let terminal = store
+        .load(&())
+        .expect("an older record still parses")
+        .expect("the seeded record is found")
+        .appearance
+        .terminal;
+
+    assert!(
+        terminal.focus_on_click,
+        "selecting a process keeps focusing its terminal on upgrade"
+    );
+    assert!(
+        !terminal.copy_on_select,
+        "a selection is not copied until the user opts in"
+    );
+    // The field the older build did write is untouched by the defaulting.
+    assert_eq!(terminal.letter_spacing, LetterSpacing::Wide);
 }
 
 #[test]

@@ -26,6 +26,15 @@ export default {
         rules: ["react-doctor/exhaustive-deps"],
       },
       {
+        // A ref written during render and never read during it — the latest-value idiom, used so a
+        // subscription that must be installed exactly once can still see current values. The rule's
+        // "capture it at effect start" fix is what would break it: `useTerminalHotkeys` attaches its
+        // key listener once per mount (deps are the container ref alone), so a captured bindings
+        // object would leave every rebound key dispatching to the action it had at mount.
+        files: ["src/components/terminal/useTerminalHotkeys.ts"],
+        rules: ["react-doctor/no-ref-current-in-render"],
+      },
+      {
         // These effects react to EXTERNAL backend `ProcessStatusChanged` domain events (routed
         // through useProcesses), not a local event handler — there is nowhere to "move the handler".
         // Line 203 is a guarded imperative attach(), not derived state; the attach lifecycle

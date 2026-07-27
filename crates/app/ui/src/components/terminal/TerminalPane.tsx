@@ -50,7 +50,7 @@ export function TerminalPane({
   onTrust,
 }: TerminalPaneProps) {
   const sectionRef = useRef<HTMLElement>(null);
-  const { hostRef, state, search } = useTerminal(process, visible);
+  const { hostRef, state, search, clipboard } = useTerminal(process, visible);
   const { title, ringing } = useTerminalChrome(process.id);
   const { metrics, restart, activity } = useSignal(process.id);
   const { dark } = useAppearance();
@@ -86,7 +86,14 @@ export function TerminalPane({
     [search],
   );
 
-  useTerminalHotkeys(sectionRef, processes, process.id, onSelectProcess, openFind);
+  useTerminalHotkeys({
+    containerRef: sectionRef,
+    processes,
+    processId: process.id,
+    onSelectProcess,
+    onOpenSearch: openFind,
+    clipboard,
+  });
 
   return (
     <section

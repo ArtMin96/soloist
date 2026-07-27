@@ -68,12 +68,22 @@ export function AppearancePanel() {
       <SettingsSection title="Terminal">
         <SettingRow
           label="Focus on click"
-          description="Single-click the terminal to focus it instead of double-click."
+          description="Give the terminal keyboard focus when you select its process."
         >
           <Switch
             checked={t.focus_on_click}
             onCheckedChange={(focus_on_click) => setTerminal({ focus_on_click })}
             aria-label="Focus on click"
+          />
+        </SettingRow>
+        <SettingRow
+          label="Copy on select"
+          description="Copy selected terminal text to the clipboard as soon as it is selected."
+        >
+          <Switch
+            checked={t.copy_on_select}
+            onCheckedChange={(copy_on_select) => setTerminal({ copy_on_select })}
+            aria-label="Copy on select"
           />
         </SettingRow>
         <SettingRow label="Font family" description="The monospace font used in the terminal.">

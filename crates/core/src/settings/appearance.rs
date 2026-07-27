@@ -101,8 +101,12 @@ pub enum CursorInactiveStyle {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TerminalAppearance {
-    /// Focus the terminal on a single click instead of a double click.
+    /// Whether selecting a process hands its terminal the keyboard focus. Off, the pane is shown
+    /// but focus stays where it was, so the user clicks into the terminal to type.
     pub focus_on_click: bool,
+    /// Whether selecting text in the terminal copies it to the clipboard immediately. Off, the
+    /// selection is copied only on the explicit copy hotkey.
+    pub copy_on_select: bool,
     /// The monospace font family, or `None` to use the app default. The frontend offers the system's
     /// installed monospace fonts; the core only stores the chosen name.
     pub font_family: Option<String>,
@@ -127,7 +131,10 @@ pub struct TerminalAppearance {
 impl Default for TerminalAppearance {
     fn default() -> Self {
         Self {
-            focus_on_click: false,
+            // The app has always focused a terminal as its pane was selected, so `true` keeps an
+            // upgrade from silently taking that away.
+            focus_on_click: true,
+            copy_on_select: false,
             font_family: None,
             font_weight: FontWeight::W400,
             bold_font_weight: FontWeight::W600,

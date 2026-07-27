@@ -56,6 +56,8 @@ pub enum HotkeyAction {
     NextProcess,
     IncreaseTerminalFontSize,
     DecreaseTerminalFontSize,
+    CopySelection,
+    PasteClipboard,
     // Scratchpad — active while the scratchpad panel is focused.
     ArchiveScratchpad,
 }
@@ -120,7 +122,7 @@ impl Binding {
 
 impl HotkeyAction {
     /// Every action, in display order — the single list the document and UI iterate.
-    pub const ALL: [HotkeyAction; 23] = [
+    pub const ALL: [HotkeyAction; 25] = [
         HotkeyAction::OpenCommandPalette,
         HotkeyAction::QuickActions,
         HotkeyAction::QuickJump,
@@ -143,6 +145,8 @@ impl HotkeyAction {
         HotkeyAction::NextProcess,
         HotkeyAction::IncreaseTerminalFontSize,
         HotkeyAction::DecreaseTerminalFontSize,
+        HotkeyAction::CopySelection,
+        HotkeyAction::PasteClipboard,
         HotkeyAction::ArchiveScratchpad,
     ];
 
@@ -159,7 +163,9 @@ impl HotkeyAction {
             | PreviousProcess
             | NextProcess
             | IncreaseTerminalFontSize
-            | DecreaseTerminalFontSize => HotkeyScope::Terminal,
+            | DecreaseTerminalFontSize
+            | CopySelection
+            | PasteClipboard => HotkeyScope::Terminal,
             ArchiveScratchpad => HotkeyScope::Scratchpad,
         }
     }
@@ -190,6 +196,10 @@ impl HotkeyAction {
             NextProcess => Binding::ctrl("ArrowDown"),
             IncreaseTerminalFontSize => Binding::ctrl("="),
             DecreaseTerminalFontSize => Binding::ctrl("-"),
+            // The Shift variants are the Linux terminal convention, and the only ones free: bare
+            // Ctrl+C / Ctrl+V belong to the process on the PTY (interrupt, and a literal `^V`).
+            CopySelection => Binding::ctrl_shift("C"),
+            PasteClipboard => Binding::ctrl_shift("V"),
             ArchiveScratchpad => Binding::ctrl_shift("W"),
         }
     }

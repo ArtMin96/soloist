@@ -3,6 +3,12 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import {
+  copyOnSelect,
+  copySelection,
+  pasteClipboard,
+  type TerminalClipboard,
+} from "@/components/terminal/terminalClipboard";
 import { ptyAttach, ptyDetach, ptyResize, ptyWrite } from "@/api";
 import { TERMINAL_SCROLLBACK_LINES, terminalOptions } from "@/lib/appearance";
 import { isActive } from "@/lib/status";
@@ -83,6 +89,14 @@ export function useTerminal(process: ProcessView, visible = true) {
   appearanceRef.current = { appearance, dark };
 
   const id = process.id;
+
+  // Hand the pane keyboard focus, but only if the user wants selecting a process to do that —
+  // otherwise the pane is shown and focus stays where it was, so a click into the terminal is what
+  // starts typing. Read live rather than captured at mount, so toggling the setting takes effect on
+  // the next selection instead of waiting for a remount.
+  const focusIfEnabled = useCallback(() => {
+    if (appearanceRef.current.appearance.terminal.focus_on_click) termRef.current?.focus();
+  }, []);
 
   const attach = useCallback(() => {
     const term = termRef.current;
@@ -259,17 +273,22 @@ export function useTerminal(process: ProcessView, visible = true) {
     }
 
     const onData = term.onData((input) => void ptyWrite(id, input).catch(() => {}));
+    const onSelection = copyOnSelect(
+      term,
+      () => appearanceRef.current.appearance.terminal.copy_on_select,
+    );
     const observer = new ResizeObserver(() => syncSize());
     observer.observe(host);
 
     attach();
     syncSize();
-    term.focus();
+    focusIfEnabled();
 
     return () => {
       tornDown = true;
       observer.disconnect();
       onData.dispose();
+      onSelection.dispose();
       cancelAttachRef.current?.();
       cancelAttachRef.current = null;
       renderer?.dispose();
@@ -279,7 +298,7 @@ export function useTerminal(process: ProcessView, visible = true) {
       searchRef.current = null;
       attachedRef.current = false;
     };
-  }, [id, attach, syncSize]);
+  }, [id, attach, syncSize, focusIfEnabled]);
 
   // Restyle the live emulator when the theme or terminal appearance changes — set on the
   // existing instance, then re-fit since the font metrics moved (so the PTY winsize tracks the
@@ -332,7 +351,8 @@ export function useTerminal(process: ProcessView, visible = true) {
   // Refit, drain, and focus when this pane becomes visible again. In the keep-alive pool a hidden
   // terminal stays mounted (display:none) with its stream live but its parsing paused and its host
   // unmeasurable; on show, parse the bytes it accrued while hidden, reconcile any size change that
-  // happened off-screen, and take keyboard focus so the user can type immediately after switching.
+  // happened off-screen, and — when the setting allows — take keyboard focus so the user can type
+  // immediately after switching.
   useEffect(() => {
     if (!visible) return;
     // Drain what accrued while hidden — unless the bounded backlog overflowed, in which case the
@@ -341,8 +361,8 @@ export function useTerminal(process: ProcessView, visible = true) {
     if (desyncedRef.current) reattach();
     else resumeRef.current?.();
     syncSize();
-    termRef.current?.focus();
-  }, [visible, reattach, syncSize]);
+    focusIfEnabled();
+  }, [visible, reattach, syncSize, focusIfEnabled]);
 
   // Stable search callbacks — backed by the SearchAddon ref so callers don't need to
   // re-subscribe when the terminal remounts (stable reference, latest addon via ref).
@@ -360,5 +380,16 @@ export function useTerminal(process: ProcessView, visible = true) {
     searchRef.current?.clearDecorations();
   }, []);
 
-  return { hostRef, state, search: { findNext, findPrevious, clear: clearSearch } };
+  // Stable clipboard callbacks, backed by the emulator ref for the same reason the search ones are:
+  // a caller keeps one reference across remounts.
+  const copy = useCallback(() => copySelection(termRef), []);
+  const paste = useCallback(() => pasteClipboard(termRef), []);
+  const clipboard: TerminalClipboard = { copySelection: copy, paste };
+
+  return {
+    hostRef,
+    state,
+    search: { findNext, findPrevious, clear: clearSearch },
+    clipboard,
+  };
 }

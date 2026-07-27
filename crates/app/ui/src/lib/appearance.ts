@@ -86,7 +86,8 @@ export const DEFAULT_APPEARANCE: Appearance = {
   theme: "system",
   interface_font_scale: "medium",
   terminal: {
-    focus_on_click: false,
+    focus_on_click: true,
+    copy_on_select: false,
     font_family: null,
     font_weight: "w400",
     bold_font_weight: "w600",
@@ -226,6 +227,10 @@ export function terminalOptions(appearance: Appearance, dark: boolean) {
     cursorBlink: t.cursor_blink,
     theme: terminalColors(dark),
     minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+    // xterm defaults this to "are we on macOS", so it is off on our only target. Right-clicking a
+    // word with nothing selected otherwise opens the context menu over an empty selection, and the
+    // menu's whole purpose is to act on one.
+    rightClickSelectsWord: true,
     // The end-to-end build turns on xterm's screen-reader mode so the WebDriver harness can read the
     // terminal's content: the default GPU (WebGL) renderer draws to a canvas the DOM cannot read, and
     // screen-reader mode mirrors the live viewport into the accessibility DOM. Gated to the e2e build,

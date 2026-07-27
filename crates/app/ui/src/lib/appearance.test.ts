@@ -15,6 +15,14 @@ describe("terminalOptions", () => {
     );
   });
 
+  it("selects the word under a right click", () => {
+    // xterm derives this option's default from "are we on macOS", so it arrives off on our only
+    // target — a right click would then open the context menu over an empty selection, which is
+    // the one thing that menu exists to act on.
+    expect(terminalOptions(DEFAULT_APPEARANCE, false).rightClickSelectsWord).toBe(true);
+    expect(terminalOptions(DEFAULT_APPEARANCE, true).rightClickSelectsWord).toBe(true);
+  });
+
   it("keeps xterm's screen-reader mode off in a shipped build", () => {
     // Screen-reader mode maintains an accessibility DOM tree mirroring the viewport — an end-to-end
     // affordance (the WebDriver harness reads the terminal through it, since the GPU renderer draws
