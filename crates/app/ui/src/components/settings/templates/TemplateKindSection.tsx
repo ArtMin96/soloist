@@ -2,7 +2,11 @@ import { SettingRow } from "@/components/settings/controls/SettingRow";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { NullableSelect } from "@/components/settings/controls/NullableSelect";
 import { TemplateScopeGroup } from "@/components/settings/templates/TemplateScopeGroup";
-import { TEMPLATE_KIND_DESCRIPTION, TEMPLATE_KIND_LABEL } from "@/lib/templates";
+import {
+  TEMPLATE_DEFAULT_NEEDS_PROJECT,
+  TEMPLATE_KIND_DESCRIPTION,
+  TEMPLATE_KIND_LABEL,
+} from "@/lib/templates";
 import type { TemplateScopeLists } from "@/store/useTemplates";
 import type { TemplateKind, TemplateScope } from "@/domain";
 
@@ -18,6 +22,8 @@ interface TemplateKindSectionProps {
   templates: TemplateScopeLists;
   /** The scopes to show, in order — the project half is absent while no project is open. */
   scopes: readonly TemplateScope[];
+  /** Whether a project is open, which is what a seed default needs to be chosen at all. */
+  projectOpen: boolean;
   /** Present only for seedable kinds — renders the "Default template" selector row. */
   seedDefault?: SeedDefault;
   onOpen: (scope: TemplateScope, name: string) => void;
@@ -26,23 +32,25 @@ interface TemplateKindSectionProps {
 }
 
 // One kind's group in the template manager: its explanation, an optional default-template selector
-// (seedable kinds only), and one list per scope — the global library and, while a project is open,
-// that project's. Pure presentation; grouping, the default, and every write live in the panel and the
-// core.
+// (seedable kinds only, replaced by a line naming what a selection needs while no project is open),
+// and one list per scope — the global library and, while a project is open, that project's. Pure
+// presentation; grouping, the default, and every write live in the panel and the core.
 export function TemplateKindSection({
   kind,
   templates,
   scopes,
+  projectOpen,
   seedDefault,
   onOpen,
   onDuplicate,
   onNew,
 }: TemplateKindSectionProps) {
-  // A seed default is global-only, so it is chosen from — and only offered alongside — the global
-  // library. A default that points at a since-deleted template resolves to nothing; show it as unset
-  // rather than a dangling value the select can't render.
+  // A seed default belongs to the project it seeds in, so it is chosen from — and only offered
+  // alongside — that project's own library. A default that points at a template outside it (since
+  // deleted, or global) resolves to nothing; show it as unset rather than a dangling value the
+  // select can't render.
   const selected =
-    seedDefault && templates.global.some((template) => template.id === seedDefault.id)
+    seedDefault && templates.project.some((template) => template.id === seedDefault.id)
       ? String(seedDefault.id)
       : null;
 
@@ -51,16 +59,20 @@ export function TemplateKindSection({
       title={TEMPLATE_KIND_LABEL[kind]}
       description={TEMPLATE_KIND_DESCRIPTION[kind]}
     >
-      {seedDefault && templates.global.length > 0 && (
+      {seedDefault && !projectOpen && (
+        <p className="py-3 text-xs text-muted-foreground">{TEMPLATE_DEFAULT_NEEDS_PROJECT}</p>
+      )}
+
+      {seedDefault && templates.project.length > 0 && (
         <SettingRow
           label="Default template"
-          description="New documents created empty are seeded from this template. Global templates only."
+          description="New documents created empty are seeded from this template. This project's templates only."
         >
           <NullableSelect
             value={selected}
             options={[
               { value: null, label: "None" },
-              ...templates.global.map((template) => ({
+              ...templates.project.map((template) => ({
                 value: String(template.id),
                 label: template.name,
               })),

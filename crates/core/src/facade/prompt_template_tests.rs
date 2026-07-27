@@ -329,6 +329,61 @@ fn a_name_held_in_both_scopes_lists_its_global_row_first() {
     );
 }
 
+#[test]
+fn a_scoped_create_addresses_only_the_prompt_library() {
+    let (facade, session) = scoped_facade();
+    facade
+        .template_create(
+            TemplateKind::Scratchpad,
+            None,
+            "house-style",
+            None,
+            "## Plan",
+        )
+        .expect("the user authors a scratchpad template");
+
+    // Every template write this surface offers is pinned to the prompt kind, so the same name in
+    // another kind's library is a different template: the create lands in the prompt library and
+    // the scratchpad one keeps its body.
+    facade
+        .scoped(session)
+        .prompt_template_create(TemplateScope::Global, "house-style", None, "hijacked")
+        .expect("the prompt library has no template of that name, so this creates one");
+
+    assert_eq!(
+        facade
+            .template_read(TemplateKind::Scratchpad, None, "house-style")
+            .expect("the scratchpad template still exists")
+            .body,
+        "## Plan",
+    );
+}
+
+#[test]
+fn a_scoped_delete_addresses_only_the_prompt_library() {
+    let (facade, session) = scoped_facade();
+    facade
+        .template_create(
+            TemplateKind::Scratchpad,
+            None,
+            "house-style",
+            None,
+            "## Plan",
+        )
+        .expect("the user authors a scratchpad template");
+
+    assert!(
+        !facade
+            .scoped(session)
+            .prompt_template_delete(TemplateScope::Global, "house-style")
+            .expect("the delete is answered, not refused"),
+        "the name exists only in the scratchpad library, which this surface cannot address",
+    );
+    assert!(facade
+        .template_read(TemplateKind::Scratchpad, None, "house-style")
+        .is_ok());
+}
+
 /// A render of `name` with one value supplied, at the caller's chosen scope.
 fn render_request(name: &str, value: (&str, &str)) -> RenderRequest {
     RenderRequest {

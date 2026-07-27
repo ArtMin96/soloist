@@ -54,6 +54,11 @@ export const TEMPLATE_SCOPE_EMPTY: Record<TemplateScope, string> = {
   project: "No templates in this project yet.",
 };
 
+// What stands in for the default-template selector while no project is open. A seed default belongs
+// to the project it seeds in, so with none open there is nothing to choose from — say that, rather
+// than leaving the row's absence to read as a missing setting.
+export const TEMPLATE_DEFAULT_NEEDS_PROJECT = "Open a project to choose its default template.";
+
 // What the preview surface says. The prompt an agent receives is the point of a prompt template, so
 // the section explains itself in those terms rather than as a developer's "render" step.
 export const TEMPLATE_PREVIEW_DESCRIPTION =

@@ -1,4 +1,4 @@
-use soloist_core::{ProjectId, ProjectSettings, SettingsRepo};
+use soloist_core::{ProjectId, ProjectSettings, SettingsRepo, TemplateDefaults, TemplateId};
 use tempfile::tempdir;
 
 use crate::SqliteStore;
@@ -29,6 +29,10 @@ fn non_default() -> ProjectSettings {
         auto_trust_command_changes: true,
         editor_override: Some("zed".into()),
         crash_exit_alerts: false,
+        template_defaults: TemplateDefaults {
+            scratchpad: Some(TemplateId::from_raw(3)),
+            todo: None,
+        },
         ..Default::default()
     }
 }

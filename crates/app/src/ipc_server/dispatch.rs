@@ -553,6 +553,11 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .setup_agent_integration(file)
             .map(IpcResponse::IntegrationWritten)
             .map_err(IpcError::from),
+        IpcRequest::SeedTemplateRead { kind } => facade
+            .scoped(session)
+            .seed_template(kind)
+            .map(IpcResponse::SeedTemplate)
+            .map_err(IpcError::from),
         IpcRequest::PromptTemplateList { scope } => facade
             .scoped(session)
             .prompt_template_list(scope)

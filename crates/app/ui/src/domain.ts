@@ -61,8 +61,9 @@ export interface RenderedPrompt {
   unknown: string[];
 }
 
-// The selected default template per seedable kind (mirrors core::settings::TemplateDefaults).
-// Global-only in v1; `null` means "seed an empty document". Prompt has no seed default.
+// One project's selected default template per seedable kind (mirrors
+// core::settings::TemplateDefaults). Each project chooses from its own library; `null` means "seed
+// an empty document". Prompt has no seed default.
 export interface TemplateDefaults {
   scratchpad: number | null;
   todo: number | null;

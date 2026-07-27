@@ -148,7 +148,6 @@ pub struct Settings {
     pub integrations: Integrations,
     pub notifications: Notifications,
     pub mcp_tool_groups: McpToolGroups,
-    pub template_defaults: TemplateDefaults,
 }
 
 /// Durable settings repository: loads and saves a document `D` keyed by `K`. `load` returns `None`

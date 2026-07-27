@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    IntegrationFile, MissingPolicy, ProcessId, ProjectId, ScratchpadLink, TemplateScope, TimerId,
-    TodoDoc, TodoId,
+    IntegrationFile, MissingPolicy, ProcessId, ProjectId, ScratchpadLink, TemplateKind,
+    TemplateScope, TimerId, TodoDoc, TodoId,
 };
 
 /// A request from an IPC client to the running app. The server resolves identity and
@@ -289,6 +289,10 @@ pub enum IpcRequest {
         values: BTreeMap<String, String>,
         policy: MissingPolicy,
     },
+    /// The template a new empty document of `kind` would be seeded from, or nothing when the local
+    /// user has selected no default for it. Read-only: a session-scoped caller reads the shape its
+    /// own create would apply, and can neither author templates nor change the selection.
+    SeedTemplateRead { kind: TemplateKind },
     /// Write the agent guide into the session's effective project root as a managed section.
     SetupAgentIntegration { file: IntegrationFile },
 }

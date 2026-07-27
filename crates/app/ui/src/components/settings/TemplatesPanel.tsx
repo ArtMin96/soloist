@@ -45,9 +45,12 @@ export function TemplatesPanel({ project }: SettingsPanelProps) {
   const [writeError, setWriteError] = useState<string | null>(null);
 
   // Without a project open there is no "this project" library to show, so the kind sections carry the
-  // global group alone rather than a group that could never hold anything.
-  const scopes =
-    project == null ? TEMPLATE_SCOPES.filter((scope) => scope !== "project") : TEMPLATE_SCOPES;
+  // global group alone rather than a group that could never hold anything — and a seed default, which
+  // belongs to the project it seeds in, cannot be chosen at all. One fact decides both.
+  const projectOpen = project != null;
+  const scopes = projectOpen
+    ? TEMPLATE_SCOPES
+    : TEMPLATE_SCOPES.filter((scope) => scope !== "project");
 
   const closeEditor = () => {
     setWriteError(null);
@@ -153,6 +156,7 @@ export function TemplatesPanel({ project }: SettingsPanelProps) {
             kind={kind}
             templates={lists[kind]}
             scopes={scopes}
+            projectOpen={projectOpen}
             seedDefault={seedDefaultFor(kind)}
             onOpen={open(kind)}
             onDuplicate={(scope, name) => {

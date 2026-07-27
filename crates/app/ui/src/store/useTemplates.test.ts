@@ -186,6 +186,36 @@ describe("useTemplates", () => {
     expect(result.current.lists.scratchpad.project).toHaveLength(0);
   });
 
+  // A default belongs to a project, so with none open there is nothing to read — and the read that
+  // asks anyway is refused, putting a load error over a panel whose only problem is that nothing is
+  // open.
+  it("holds no default, and reports no error, while no project is open", async () => {
+    setup([summary(1, "daily", "scratchpad")], []);
+    defaults.mockRejectedValue("a default belongs to a project");
+    const { result } = renderHook(() => useTemplates(null));
+
+    // The global read landing is the barrier: it is dispatched alongside the defaults read, so once
+    // it has settled a defaults read would have had its chance to settle too.
+    await waitFor(() => expect(result.current.lists.scratchpad.global).toHaveLength(1));
+    expect(result.current.defaults).toEqual({ scratchpad: null, todo: null });
+    expect(result.current.error).toBeNull();
+  });
+
+  // Nothing offers the selection with no project open, but a stray one must not leave a default on
+  // screen that no project holds and no seeding will ever use.
+  it("records no default while no project is open", async () => {
+    setup([summary(1, "daily", "scratchpad")], []);
+    // Stubbed so that a selection which did go through would settle on a stored value, rather than
+    // failing on an unstubbed write — the default landing on screen is what must not happen.
+    setDefault.mockResolvedValue({ scratchpad: 3, todo: null });
+    const { result } = renderHook(() => useTemplates(null));
+    await waitFor(() => expect(result.current.lists.scratchpad.global).toHaveLength(1));
+
+    act(() => result.current.setDefault("scratchpad", 3));
+
+    expect(result.current.defaults).toEqual({ scratchpad: null, todo: null });
+  });
+
   it("shows a selected default at once, then settles on what the core stored", async () => {
     setup();
     // The core clamps the selection: `prompt` has no seed default, so the write echoes back a

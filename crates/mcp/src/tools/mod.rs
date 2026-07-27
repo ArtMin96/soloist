@@ -16,6 +16,7 @@ pub(crate) mod project;
 pub(crate) mod prompt_template;
 pub(crate) mod reply;
 pub(crate) mod scratchpad;
+pub(crate) mod seed_template;
 pub(crate) mod services;
 pub(crate) mod setup;
 pub(crate) mod timer;

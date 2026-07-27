@@ -15,18 +15,19 @@ use crate::testing::{
 };
 use crate::TodoStatus;
 
-/// A façade over in-memory fakes with one project loaded, a template store, and a settings store —
-/// everything the seeding seam reads. The sole loaded project gives an unbound session the
-/// single-project default scope.
-fn facade() -> (Facade, SessionId) {
+/// A façade over in-memory fakes with one project loaded, a template store, and both settings
+/// stores — everything the seeding seam reads. The sole loaded project gives an unbound session the
+/// single-project default scope, and is returned so a test can select that project's default.
+fn facade() -> (Facade, SessionId, ProjectId) {
     let projects = Arc::new(FakeProjectRepo::new());
-    projects
+    let project = projects
         .upsert(
             Path::new("/tmp/soloist-template-seed-test"),
             Some("p"),
             None,
         )
-        .expect("seed one project");
+        .expect("seed one project")
+        .id;
     let facade = Facade::new(
         CorePorts::builder(
             Arc::new(FakeSpawner::exits_on_terminate()),
@@ -36,10 +37,11 @@ fn facade() -> (Facade, SessionId) {
         )
         .template_repo(Arc::new(FakeTemplateRepo::new()))
         .settings_repo(Arc::new(FakeSettingsRepo::new()))
+        .project_settings_repo(Arc::new(FakeSettingsRepo::new()))
         .build(),
     );
     let session = facade.open_session(PeerCredentials::unauthenticated());
-    (facade, session)
+    (facade, session, project)
 }
 
 /// A façade over the same fakes with **two** distinct projects loaded, returned with both ids —
@@ -64,6 +66,7 @@ fn facade_with_two_projects() -> (Facade, ProjectId, ProjectId) {
         )
         .template_repo(Arc::new(FakeTemplateRepo::new()))
         .settings_repo(Arc::new(FakeSettingsRepo::new()))
+        .project_settings_repo(Arc::new(FakeSettingsRepo::new()))
         .build(),
     );
     (facade, first, second)
@@ -79,24 +82,32 @@ fn listed_names(facade: &Facade, kind: TemplateKind, project: Option<ProjectId>)
         .collect()
 }
 
-/// Seeds a global template of `kind` and selects it as the default, returning its id.
-fn default_template(facade: &Facade, kind: TemplateKind, name: &str, body: &str) -> TemplateId {
+/// Seeds a template of `kind` in `project`'s own library and selects it as that project's default,
+/// returning its id.
+fn default_template(
+    facade: &Facade,
+    kind: TemplateKind,
+    project: ProjectId,
+    name: &str,
+    body: &str,
+) -> TemplateId {
     let created = facade
         .templates
-        .create(kind, None, name, None, body)
+        .create(kind, Some(project), name, None, body)
         .expect("create the template");
     facade
-        .set_default_template(kind, Some(created.id))
+        .set_default_template(kind, project, Some(created.id))
         .expect("select the default");
     created.id
 }
 
 #[test]
 fn creating_an_empty_scratchpad_seeds_the_default_template_body() {
-    let (facade, session) = facade();
+    let (facade, session, project) = facade();
     default_template(
         &facade,
         TemplateKind::Scratchpad,
+        project,
         "daily",
         "## Plan\n\n- [ ] first",
     );
@@ -116,10 +127,11 @@ fn creating_an_empty_scratchpad_seeds_the_default_template_body() {
 
 #[test]
 fn creating_an_empty_todo_seeds_the_default_template_body() {
-    let (facade, session) = facade();
+    let (facade, session, project) = facade();
     default_template(
         &facade,
         TemplateKind::Todo,
+        project,
         "chore",
         "## Steps\n\n- [ ] do it",
     );
@@ -142,7 +154,7 @@ fn creating_an_empty_todo_seeds_the_default_template_body() {
 
 #[test]
 fn with_no_default_selected_an_empty_creation_stays_empty() {
-    let (facade, session) = facade();
+    let (facade, session, _project) = facade();
 
     let written = facade
         .scoped(session)
@@ -155,8 +167,14 @@ fn with_no_default_selected_an_empty_creation_stays_empty() {
 
 #[test]
 fn a_nonempty_body_is_written_verbatim_and_never_seeded() {
-    let (facade, session) = facade();
-    default_template(&facade, TemplateKind::Scratchpad, "daily", "seed body");
+    let (facade, session, project) = facade();
+    default_template(
+        &facade,
+        TemplateKind::Scratchpad,
+        project,
+        "daily",
+        "seed body",
+    );
 
     let written = facade
         .scoped(session)
@@ -169,8 +187,14 @@ fn a_nonempty_body_is_written_verbatim_and_never_seeded() {
 
 #[test]
 fn an_update_is_never_seeded_even_with_an_empty_body() {
-    let (facade, session) = facade();
-    default_template(&facade, TemplateKind::Scratchpad, "daily", "seed body");
+    let (facade, session, project) = facade();
+    default_template(
+        &facade,
+        TemplateKind::Scratchpad,
+        project,
+        "daily",
+        "seed body",
+    );
     let created = facade
         .scoped(session)
         .scratchpad_write("today", "original".into(), None)
@@ -188,12 +212,18 @@ fn an_update_is_never_seeded_even_with_an_empty_body() {
 
 #[test]
 fn a_deleted_default_template_falls_back_to_an_empty_body() {
-    let (facade, session) = facade();
-    default_template(&facade, TemplateKind::Scratchpad, "daily", "seed body");
+    let (facade, session, project) = facade();
+    default_template(
+        &facade,
+        TemplateKind::Scratchpad,
+        project,
+        "daily",
+        "seed body",
+    );
     // The selected default is deleted after selection — a stale id resolves to nothing.
     assert!(facade
         .templates
-        .delete(TemplateKind::Scratchpad, None, "daily")
+        .delete(TemplateKind::Scratchpad, Some(project), "daily")
         .expect("delete"));
 
     let written = facade
@@ -206,8 +236,63 @@ fn a_deleted_default_template_falls_back_to_an_empty_body() {
 }
 
 #[test]
+fn a_projects_default_seeds_only_that_projects_creates() {
+    let (facade, first, second) = facade_with_two_projects();
+    default_template(
+        &facade,
+        TemplateKind::Scratchpad,
+        first,
+        "daily",
+        "the first project's shape",
+    );
+
+    let seeded = facade
+        .write_scratchpad(first, "today", String::new(), None)
+        .expect("write in the selecting project");
+    assert_eq!(seeded.view.body, "the first project's shape");
+    assert_eq!(seeded.seeded_from.as_deref(), Some("daily"));
+
+    // A selection belongs to the project that made it: the sibling chose nothing, so its create
+    // starts blank rather than inheriting a shape from a project it has nothing to do with.
+    let sibling = facade
+        .write_scratchpad(second, "today", String::new(), None)
+        .expect("write in the sibling project");
+    assert_eq!(sibling.view.body, "");
+    assert_eq!(sibling.seeded_from, None);
+}
+
+#[test]
+fn a_global_template_is_never_seeded_into_a_project() {
+    let (facade, session, project) = facade();
+    let global = facade
+        .template_create(TemplateKind::Scratchpad, None, "house", None, "global body")
+        .expect("author a global template");
+
+    // Nothing falls back to the global library: with no selection an empty create stays empty even
+    // though a template of that kind exists there.
+    let unselected = facade
+        .scoped(session)
+        .scratchpad_write("today", String::new(), None)
+        .expect("write");
+    assert_eq!(unselected.view.body, "");
+    assert_eq!(unselected.seeded_from, None);
+
+    // Nor can a global template become a project's default: the selection is resolved in the
+    // project's own library, which does not hold that id.
+    facade
+        .set_default_template(TemplateKind::Scratchpad, project, Some(global.id))
+        .expect("point the selection at the global template");
+    let selected = facade
+        .scoped(session)
+        .scratchpad_write("tomorrow", String::new(), None)
+        .expect("write");
+    assert_eq!(selected.view.body, "");
+    assert_eq!(selected.seeded_from, None);
+}
+
+#[test]
 fn the_manager_creates_reads_lists_and_updates_a_global_template() {
-    let (facade, _session) = facade();
+    let (facade, _session, _project) = facade();
 
     let created = facade
         .template_create(
@@ -248,7 +333,7 @@ fn the_manager_creates_reads_lists_and_updates_a_global_template() {
 
 #[test]
 fn a_taken_template_name_and_a_stale_update_are_refused() {
-    let (facade, _session) = facade();
+    let (facade, _session, _project) = facade();
     let created = facade
         .template_create(TemplateKind::Todo, None, "chore", None, "body")
         .expect("create");
@@ -272,47 +357,65 @@ fn a_taken_template_name_and_a_stale_update_are_refused() {
 
 #[test]
 fn deleting_a_template_that_is_the_selected_default_clears_the_selection() {
-    let (facade, _session) = facade();
+    let (facade, _session, project) = facade();
     let created = facade
-        .template_create(TemplateKind::Scratchpad, None, "daily", None, "seed body")
+        .template_create(
+            TemplateKind::Scratchpad,
+            Some(project),
+            "daily",
+            None,
+            "seed body",
+        )
         .expect("create");
     facade
-        .set_default_template(TemplateKind::Scratchpad, Some(created.id))
+        .set_default_template(TemplateKind::Scratchpad, project, Some(created.id))
         .expect("select the default");
 
     // Deleting the selected default through the manager path clears the dangling selection in core,
     // so the settings surface reflects the removal at once (not just at resolve time).
     assert!(facade
-        .template_delete(TemplateKind::Scratchpad, None, "daily")
+        .template_delete(TemplateKind::Scratchpad, Some(project), "daily")
         .expect("delete"));
     assert_eq!(
         facade
-            .template_defaults()
+            .template_defaults(project)
             .expect("read defaults")
             .get(TemplateKind::Scratchpad),
         None,
     );
     assert!(facade
-        .templates(TemplateKind::Scratchpad, None)
+        .templates(TemplateKind::Scratchpad, Some(project))
         .expect("list")
         .is_empty());
 }
 
 #[test]
 fn deleting_a_non_default_template_leaves_another_kinds_default_untouched() {
-    let (facade, _session) = facade();
-    let scratch_default = default_template(&facade, TemplateKind::Scratchpad, "daily", "seed body");
+    let (facade, _session, project) = facade();
+    let scratch_default = default_template(
+        &facade,
+        TemplateKind::Scratchpad,
+        project,
+        "daily",
+        "seed body",
+    );
     facade
-        .template_create(TemplateKind::Todo, None, "chore", None, "chore body")
+        .template_create(
+            TemplateKind::Todo,
+            Some(project),
+            "chore",
+            None,
+            "chore body",
+        )
         .expect("create a todo template");
 
     // Deleting the todo template must not clear the unrelated scratchpad default.
     assert!(facade
-        .template_delete(TemplateKind::Todo, None, "chore")
+        .template_delete(TemplateKind::Todo, Some(project), "chore")
         .expect("delete"));
     assert_eq!(
         facade
-            .template_defaults()
+            .template_defaults(project)
             .expect("read defaults")
             .get(TemplateKind::Scratchpad),
         Some(scratch_default),
@@ -321,18 +424,18 @@ fn deleting_a_non_default_template_leaves_another_kinds_default_untouched() {
 
 #[test]
 fn the_default_selection_round_trips_and_prompt_has_no_seed_default() {
-    let (facade, _session) = facade();
+    let (facade, _session, project) = facade();
     let id = TemplateId::from_raw(7);
 
     let defaults = facade
-        .set_default_template(TemplateKind::Todo, Some(id))
+        .set_default_template(TemplateKind::Todo, project, Some(id))
         .expect("set todo default");
     assert_eq!(defaults.todo, Some(id));
     assert_eq!(defaults.scratchpad, None);
 
     // A prompt has no seed default — the setter is a no-op, so nothing is stored for it.
     let after_prompt = facade
-        .set_default_template(TemplateKind::Prompt, Some(TemplateId::from_raw(9)))
+        .set_default_template(TemplateKind::Prompt, project, Some(TemplateId::from_raw(9)))
         .expect("set prompt default");
     assert_eq!(after_prompt.get(TemplateKind::Prompt), None);
     assert_eq!(after_prompt.todo, Some(id), "the todo default is untouched");
@@ -340,7 +443,7 @@ fn the_default_selection_round_trips_and_prompt_has_no_seed_default() {
     // The read-per-call getter reflects the persisted selection.
     assert_eq!(
         facade
-            .template_defaults()
+            .template_defaults(project)
             .expect("read defaults")
             .get(TemplateKind::Todo),
         Some(id)
@@ -349,7 +452,7 @@ fn the_default_selection_round_trips_and_prompt_has_no_seed_default() {
 
 #[test]
 fn the_local_render_fills_a_template_at_the_scope_it_names() {
-    let (facade, _) = facade();
+    let (facade, _session, _project) = facade();
     facade
         .template_create(
             TemplateKind::Prompt,

@@ -568,17 +568,19 @@ export function templateRender(
   return invoke<RenderedPrompt>("template_render", { project, name, values });
 }
 
-// The default-template selection per kind (global-only).
-export function templateDefaults(): Promise<TemplateDefaults> {
-  return invoke<TemplateDefaults>("template_defaults");
+// One project's default-template selection per kind.
+export function templateDefaults(project: number): Promise<TemplateDefaults> {
+  return invoke<TemplateDefaults>("template_defaults", { project });
 }
 
-// Select (or clear, with null) the default template for `kind`. Prompt has no seed default.
+// Select (or clear, with null) `project`'s default template for `kind`, from that project's own
+// library. Prompt has no seed default.
 export function setDefaultTemplate(
   kind: TemplateKind,
+  project: number,
   template: number | null,
 ): Promise<TemplateDefaults> {
-  return invoke<TemplateDefaults>("set_default_template", { kind, template });
+  return invoke<TemplateDefaults>("set_default_template", { kind, project, template });
 }
 
 // ── Per-project settings ──────────────────────────────────────────────────────

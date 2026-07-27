@@ -7,11 +7,12 @@
 use std::collections::HashMap;
 
 use super::Facade;
-use crate::ids::ProjectId;
+use crate::ids::{ProjectId, TemplateId};
 use crate::ports::StoreError;
 use crate::process::ProcStatus;
 use crate::projects::{ConfigStatus, ProjectCommandView, ProjectSettingsPage, Visibility};
-use crate::settings::ProjectSettings;
+use crate::settings::{ProjectSettings, TemplateDefaults};
+use crate::template::TemplateKind;
 
 impl Facade {
     /// One project's local settings. Absent settings read as the documented defaults (auto-start
@@ -87,6 +88,30 @@ impl Facade {
         self.project_settings.update(&project, |s| {
             s.command_terminal_alerts.insert(command, enabled);
         })
+    }
+
+    /// This project's default-template selection per kind — which of its own templates each
+    /// free-form kind seeds a new document from. Read per call (never cached alongside the template
+    /// list), so a change takes effect on the next creation. Absent settings read as the documented
+    /// defaults (none selected).
+    pub fn template_defaults(&self, project: ProjectId) -> Result<TemplateDefaults, StoreError> {
+        Ok(self.project_settings.get(&project)?.template_defaults)
+    }
+
+    /// Selects (or clears, with `None`) this project's default template for `kind` and persists it,
+    /// returning the updated selection. The template is one of this project's own — a global one
+    /// resolves to nothing at seeding time — and [`TemplateKind::Prompt`] has no seed default, so a
+    /// set for it is a no-op.
+    pub fn set_default_template(
+        &self,
+        kind: TemplateKind,
+        project: ProjectId,
+        template: Option<TemplateId>,
+    ) -> Result<TemplateDefaults, StoreError> {
+        Ok(self
+            .project_settings
+            .update(&project, |s| s.template_defaults.set(kind, template))?
+            .template_defaults)
     }
 
     /// The assembled per-project settings page — one read the settings page renders directly: the

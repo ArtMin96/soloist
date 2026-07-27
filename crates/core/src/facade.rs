@@ -67,6 +67,7 @@ mod scoped;
 mod scoped_process;
 mod scoped_todo;
 mod scratchpad;
+mod seed_template;
 mod session;
 mod settings;
 mod support;

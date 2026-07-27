@@ -1,17 +1,17 @@
-//! Templates settings (global Templates tab): the default template each free-form kind seeds a new
-//! document from.
+//! Template defaults: the template each free-form kind seeds a new document from.
 //!
-//! Global-only in v1 (a per-project override lands later, like the editor resolver). `None` means
+//! Held per project — a project selects from its own template library, so a template in the global
+//! library can never be a default and a project without a selection seeds nothing. `None` means
 //! "seed an empty document"; a stale id — its template was since deleted — also seeds empty, since
-//! the seeding read resolves the id off the live cache and finds nothing. Prompts are applied by
-//! name, never seeded, so they have no default here.
+//! the seeding read resolves the id off the project's live cache and finds nothing. Prompts are
+//! applied by name, never seeded, so they have no default here.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ids::TemplateId;
 use crate::template::TemplateKind;
 
-/// The Templates tab document: the selected default template per seedable kind.
+/// One project's selected default template per seedable kind.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TemplateDefaults {

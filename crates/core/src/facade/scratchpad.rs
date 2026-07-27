@@ -53,7 +53,7 @@ impl Facade {
         expected: Option<u64>,
     ) -> Result<ScratchpadWrite, CoordinationError> {
         let Seeded { body, from } = if expected.is_none() {
-            self.seed_body(TemplateKind::Scratchpad, body)?
+            self.seed_body(TemplateKind::Scratchpad, project, body)?
         } else {
             Seeded { body, from: None }
         };

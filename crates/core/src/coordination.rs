@@ -68,9 +68,9 @@ pub use scratchpad_repo::{
     TransferredScratchpad, WriteResult,
 };
 pub use template::{
-    placeholders, ExportedTemplate, TemplateSummary, TemplateView, TemplateWriteError, Templates,
-    MAX_PLACEHOLDERS_PER_BODY, MAX_RENDERED_PROMPT, MAX_TEMPLATES_PER_SCOPE, MAX_TEMPLATE_BODY,
-    MAX_TEMPLATE_DESCRIPTION, MAX_TEMPLATE_NAME,
+    placeholders, ExportedTemplate, SeedTemplate, TemplateSummary, TemplateView,
+    TemplateWriteError, Templates, MAX_PLACEHOLDERS_PER_BODY, MAX_RENDERED_PROMPT,
+    MAX_TEMPLATES_PER_SCOPE, MAX_TEMPLATE_BODY, MAX_TEMPLATE_DESCRIPTION, MAX_TEMPLATE_NAME,
 };
 pub use template_evictor::TemplateEvictor;
 pub use template_render::{MissingPolicy, RenderError, RenderRequest, RenderedPrompt};
