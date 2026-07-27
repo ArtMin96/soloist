@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { lineageEdges, onDomainEvent } from "@/api";
 import { useReconcile } from "@/store/useReconcile";
-import type { DomainEvent } from "@/domain";
+import type { DomainEvent, ProcessView } from "@/domain";
 
 // Domain events that can change the lineage map: a spawn records an edge, a removal drops one,
 // and a status change is the settle signal that follows a spawn (the edge is recorded just after
@@ -67,4 +67,25 @@ export function useLineage(): ReadonlyMap<number, number> {
   useReconcile(refresh);
 
   return parents;
+}
+
+/**
+ * How many agents `lead` spawned are still registered — the workers that outlive it.
+ *
+ * Removing a lead reaps only its own process group; a worker is a separate managed process in its
+ * own group, so it keeps running and re-roots as a top-level row. Counted against the live process
+ * list rather than the raw map because an edge whose child has already left the registry is not a
+ * live worker (the same rule the tree nesting applies).
+ */
+export function liveWorkerCount(
+  lineage: ReadonlyMap<number, number>,
+  processes: ProcessView[],
+  lead: number,
+): number {
+  const live = new Set(processes.map((process) => process.id));
+  let count = 0;
+  for (const [child, parent] of lineage) {
+    if (parent === lead && live.has(child)) count += 1;
+  }
+  return count;
 }

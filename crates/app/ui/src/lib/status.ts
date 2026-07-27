@@ -112,3 +112,14 @@ export function canStop(status: ProcStatus): boolean {
 export function canRestart(status: ProcStatus): boolean {
   return status === "Running" || status === "Crashed" || status === "RestartExhausted";
 }
+
+/**
+ * Remove is offered from every state but an in-flight stop. The core reaps before forgetting, so
+ * removing a *running* process is safe and needs no Stop first — but while one is already stopping
+ * it is the only action left, which would put a destructive one-click control in the pixel the Stop
+ * button just vacated, seconds before Start lands there. The teardown is transient; withholding it
+ * keeps a trash icon from flashing under a cursor that just clicked Stop.
+ */
+export function canRemove(status: ProcStatus): boolean {
+  return status !== "Stopping";
+}

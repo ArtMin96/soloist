@@ -14,6 +14,7 @@ interface ProcessNodeProps {
   onStop: (id: number) => void;
   onRestart: (id: number) => void;
   onResume: (id: number) => void;
+  onRemove: (id: number) => void;
   onTrust: (id: number) => void;
 }
 
@@ -32,6 +33,7 @@ export function ProcessNode({
   onStop,
   onRestart,
   onResume,
+  onRemove,
   onTrust,
 }: ProcessNodeProps) {
   const { process, children } = node;
@@ -47,6 +49,7 @@ export function ProcessNode({
       onStop={() => onStop(process.id)}
       onRestart={() => onRestart(process.id)}
       onResume={() => onResume(process.id)}
+      onRemove={() => onRemove(process.id)}
       onTrust={() => onTrust(process.id)}
       depth={depth}
       treeColumn={treeColumn}
@@ -78,6 +81,7 @@ export function ProcessNode({
             onStop={onStop}
             onRestart={onRestart}
             onResume={onResume}
+            onRemove={onRemove}
             onTrust={onTrust}
           />
         ))}

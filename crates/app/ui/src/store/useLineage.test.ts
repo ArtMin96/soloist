@@ -12,8 +12,8 @@ vi.mock("@/api", () => ({
 }));
 
 import { lineageEdges, onDomainEvent, onResync } from "@/api";
-import type { DomainEvent } from "@/domain";
-import { useLineage } from "@/store/useLineage";
+import type { DomainEvent, ProcessView } from "@/domain";
+import { liveWorkerCount, useLineage } from "@/store/useLineage";
 
 const read = vi.mocked(lineageEdges);
 const subscribe = vi.mocked(onDomainEvent);
@@ -69,5 +69,46 @@ describe("useLineage", () => {
     if (!handler) throw new Error("no resync subscriber registered");
     act(() => handler());
     await waitFor(() => expect(result.current.size).toBe(0));
+  });
+});
+
+describe("liveWorkerCount", () => {
+  const process = (id: number): ProcessView => ({
+    id,
+    project: 1,
+    kind: "Agent",
+    label: `Agent ${id}`,
+    status: "Running",
+    exit_code: null,
+    requires_trust: false,
+    resumable: false,
+    ports: [],
+    ready: "Ungated",
+  });
+
+  it("counts the workers a lead spawned", () => {
+    const lineage = new Map([
+      [2, 1],
+      [3, 1],
+    ]);
+    expect(liveWorkerCount(lineage, [process(1), process(2), process(3)], 1)).toBe(2);
+  });
+
+  it("counts none for a lead that spawned nothing", () => {
+    expect(liveWorkerCount(new Map([[2, 1]]), [process(1), process(2)], 2)).toBe(0);
+  });
+
+  it("ignores a worker that has already left the registry", () => {
+    // An edge whose child is gone is not a live worker — the same rule the tree nesting applies,
+    // and the reason the count is taken against the process list rather than the raw map.
+    expect(liveWorkerCount(new Map([[2, 1]]), [process(1)], 1)).toBe(0);
+  });
+
+  it("does not count another lead's workers", () => {
+    const lineage = new Map([
+      [3, 1],
+      [4, 2],
+    ]);
+    expect(liveWorkerCount(lineage, [process(1), process(2), process(3), process(4)], 1)).toBe(1);
   });
 });

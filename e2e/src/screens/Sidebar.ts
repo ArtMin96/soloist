@@ -1,5 +1,6 @@
 import type { ProcStatus } from "@domain";
 import { $, browser } from "@wdio/globals";
+import { waitUntilOr } from "../harness/waitUntilOr.js";
 import { WAIT } from "../harness/waits.js";
 import { ROW_ACTIVITY, ROW_STATUS, ROW_TEXT } from "./indicatorRow.js";
 import { trustDialog } from "./TrustDialog.js";
@@ -21,7 +22,8 @@ type RowControl =
   | "Resume last session"
   | "Start"
   | "Stop"
-  | "Restart";
+  | "Restart"
+  | "Remove";
 
 /** One process row as the sidebar renders it. */
 export interface RowHandle {
@@ -163,6 +165,20 @@ export const sidebar = {
     }
   },
 
+  /**
+   * Moves keyboard focus onto the row labelled `label`, selecting it first.
+   *
+   * Selecting a terminal hands focus to its xterm pane, whose hidden textarea consumes
+   * command-modifier chords before they reach the app's window-level hotkey handler — so a spec
+   * that selects a terminal and then presses an app hotkey is really typing into the shell.
+   * Focusing the row puts the keyboard back where a sidebar user has it.
+   */
+  async focusRow(label: string): Promise<void> {
+    await this.select(label);
+    const row = await this.rowElement(label);
+    await browser.execute((element: HTMLElement) => element.focus(), row);
+  },
+
   /** Clicks the row labelled `label`, selecting its process. */
   async select(label: string): Promise<void> {
     // First prove the row is rendered at all — that failure names the rows that are — so a
@@ -202,6 +218,26 @@ export const sidebar = {
   /** Clicks Restart on the row's control cluster. */
   async restart(label: string): Promise<void> {
     await this.clickControl(label, "Restart");
+  },
+
+  /**
+   * Clicks Remove on the row's control cluster. Only raises the confirmation when the process is
+   * still live; a resting one is removed outright, so callers decide which they are driving.
+   */
+  async remove(label: string): Promise<void> {
+    await this.clickControl(label, "Remove");
+  },
+
+  /** Waits until no row labelled `label` is rendered — the process was forgotten, not just stopped. */
+  async waitForRowGone(label: string): Promise<void> {
+    let seen: string[] = [];
+    await waitUntilOr(
+      async () => {
+        seen = (await this.rows()).map((row) => row.label);
+        return !seen.includes(label);
+      },
+      () => `sidebar row "${label}" never left; rendered rows: ${JSON.stringify(seen)}`,
+    );
   },
 
   /**

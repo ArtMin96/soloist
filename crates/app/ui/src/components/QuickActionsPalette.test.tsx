@@ -28,6 +28,7 @@ function renderActions(props: Partial<Parameters<typeof QuickActionsPalette>[0]>
     onRestart: vi.fn(),
     onResume: vi.fn(),
     onTrust: vi.fn(),
+    onRemove: vi.fn(),
   };
   const onOpenChange = vi.fn();
   render(

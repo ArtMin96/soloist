@@ -35,6 +35,7 @@ function renderRow(process: ProcessView, signals: SignalState = EMPTY_SIGNALS) {
           onStop={noop}
           onRestart={noop}
           onResume={noop}
+          onRemove={noop}
           onTrust={noop}
         />
       </SignalsContext>
@@ -105,6 +106,7 @@ describe("ProcessRow as a tree row", () => {
             onStop={noop}
             onRestart={noop}
             onResume={noop}
+            onRemove={noop}
             onTrust={noop}
             treeColumn
             hasChildren
@@ -135,6 +137,7 @@ describe("ProcessRow as a tree row", () => {
             onStop={noop}
             onRestart={noop}
             onResume={noop}
+            onRemove={noop}
             onTrust={noop}
             treeColumn
             hasChildren
@@ -164,6 +167,7 @@ describe("ProcessRow as a tree row", () => {
             onStop={noop}
             onRestart={noop}
             onResume={noop}
+            onRemove={noop}
             onTrust={noop}
             treeColumn
             hasChildren
@@ -189,6 +193,7 @@ describe("ProcessRow as a tree row", () => {
             onStop={noop}
             onRestart={noop}
             onResume={noop}
+            onRemove={noop}
             onTrust={noop}
             treeColumn
             hasChildren
@@ -216,6 +221,7 @@ describe("ProcessRow as a tree row", () => {
             onStop={noop}
             onRestart={noop}
             onResume={noop}
+            onRemove={noop}
             onTrust={noop}
             depth={1}
             treeColumn

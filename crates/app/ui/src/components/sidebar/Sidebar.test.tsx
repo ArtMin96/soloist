@@ -120,6 +120,7 @@ function renderSidebar(
             onStop={noop}
             onRestart={onRestart}
             onResume={noop}
+            onRemove={noop}
             onTrust={noop}
             onStartAll={noop}
             onRestartRunning={noop}
@@ -228,6 +229,7 @@ describe("Sidebar lineage nesting", () => {
               onStop={noop}
               onRestart={noop}
               onResume={noop}
+              onRemove={noop}
               onTrust={noop}
               onStartAll={noop}
               onRestartRunning={noop}

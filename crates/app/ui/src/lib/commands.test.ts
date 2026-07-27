@@ -41,6 +41,7 @@ function context(overrides: Partial<CommandContext> = {}): CommandContext {
       onStart: vi.fn(),
       onStop: vi.fn(),
       onRestart: vi.fn(),
+      onRemove: vi.fn(),
     },
     ...overrides,
   };

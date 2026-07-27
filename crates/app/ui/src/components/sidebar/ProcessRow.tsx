@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
-import { ACTION_ICONS, ProcessControls } from "@/components/ProcessControls";
+import { ACTION_ICONS, ACTION_VARIANTS, ProcessControls } from "@/components/ProcessControls";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessMeta } from "@/components/sidebar/ProcessMeta";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,7 @@ interface ProcessRowProps {
   onRestart: () => void;
   onResume: () => void;
   onTrust: () => void;
+  onRemove: () => void;
   /** The row's lineage depth within its group; roots sit at 0. */
   depth?: number;
   /** Whether the row's group reserves a disclosure column (some row in it has workers). */
@@ -63,6 +64,7 @@ export function ProcessRow({
   onRestart,
   onResume,
   onTrust,
+  onRemove,
   depth = 0,
   treeColumn = false,
   hasChildren = false,
@@ -77,12 +79,14 @@ export function ProcessRow({
     onStart: () => onStart(),
     onStop: () => onStop(),
     onRestart: () => onRestart(),
+    onRemove: () => onRemove(),
   };
   // Selected rows and attention-worthy canonical actions stay visible. Ordinary controls reveal
   // on hover/focus, replacing the at-rest telemetry.
   const showControls =
     selected ||
     shouldPersistProcessActions({
+      kind: process.kind,
       status: process.status,
       requiresTrust: process.requires_trust,
       resumable: process.resumable,
@@ -212,7 +216,11 @@ function ProcessRowContextMenu({
           {actions.map((action) => {
             const Icon = ACTION_ICONS[action.kind];
             return (
-              <ContextMenuItem key={action.kind} onSelect={action.run}>
+              <ContextMenuItem
+                key={action.kind}
+                variant={ACTION_VARIANTS[action.kind]}
+                onSelect={action.run}
+              >
                 <Icon aria-hidden />
                 {action.label}
               </ContextMenuItem>

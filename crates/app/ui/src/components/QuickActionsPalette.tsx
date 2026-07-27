@@ -18,6 +18,7 @@ interface QuickActionsPaletteProps {
   onStop: (id: number) => void;
   onRestart: (id: number) => void;
   onResume: (id: number) => void;
+  onRemove: (id: number) => void;
   onTrust: (project: number, name: string) => void;
 }
 
@@ -41,10 +42,18 @@ export function QuickActionsPalette({
   onStop,
   onRestart,
   onResume,
+  onRemove,
   onTrust,
 }: QuickActionsPaletteProps) {
   const run = useCommandAction(onOpenChange);
-  const handlers: ProcessActionHandlers = { onTrust, onResume, onStart, onStop, onRestart };
+  const handlers: ProcessActionHandlers = {
+    onTrust,
+    onResume,
+    onStart,
+    onStop,
+    onRestart,
+    onRemove,
+  };
 
   const trees = groupByProject(processes, projects, false);
   const activeTree = activeProjectId

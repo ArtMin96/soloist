@@ -28,6 +28,7 @@ interface SidebarProps {
   onStop: (id: number) => void;
   onRestart: (id: number) => void;
   onResume: (id: number) => void;
+  onRemove: (id: number) => void;
   onTrust: (id: number) => void;
   onStartAll: (project: number) => void;
   onRestartRunning: (project: number) => void;
@@ -55,6 +56,7 @@ export function Sidebar({
   onStop,
   onRestart,
   onResume,
+  onRemove,
   onTrust,
   onStartAll,
   onRestartRunning,
@@ -124,6 +126,7 @@ export function Sidebar({
               onStop={onStop}
               onRestart={onRestart}
               onResume={onResume}
+              onRemove={onRemove}
               onTrust={onTrust}
               onStartAll={() => onStartAll(tree.project.id)}
               onRestartRunning={() => onRestartRunning(tree.project.id)}

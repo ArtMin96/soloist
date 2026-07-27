@@ -275,6 +275,7 @@ function Gallery() {
                 onStop={() => {}}
                 onRestart={() => {}}
                 onResume={() => {}}
+                onRemove={() => {}}
                 onTrust={() => {}}
               />
             ))}
@@ -438,6 +439,7 @@ function AuditView() {
                 onStop={() => {}}
                 onRestart={() => {}}
                 onResume={() => {}}
+                onRemove={() => {}}
                 onTrust={() => {}}
               />
             ))}
@@ -553,6 +555,7 @@ function SidebarStateColumn({ title, width }: { title: string; width: string }) 
           onStop={() => {}}
           onRestart={() => {}}
           onResume={() => {}}
+          onRemove={() => {}}
           onTrust={() => {}}
           onStartAll={() => {}}
           onRestartRunning={() => {}}
@@ -581,6 +584,7 @@ function SidebarStateColumn({ title, width }: { title: string; width: string }) 
                   onStop={() => {}}
                   onRestart={() => {}}
                   onResume={() => {}}
+                  onRemove={() => {}}
                   onTrust={() => {}}
                 />
               ))}

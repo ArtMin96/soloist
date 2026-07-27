@@ -1,4 +1,4 @@
-import { History, MoreHorizontal, Play, RotateCw, ShieldCheck, Square } from "lucide-react";
+import { History, MoreHorizontal, Play, RotateCw, ShieldCheck, Square, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -31,7 +31,20 @@ const ACTION_ICONS = {
   start: Play,
   stop: Square,
   restart: RotateCw,
+  remove: Trash2,
 } satisfies Record<ProcessActionKind, typeof Play>;
+
+// Which actions the menus tint as destructive. Only Remove discards something the user cannot
+// get back (the process and its output); every other action changes a run state that can be
+// changed again. One source, so the row menu and the control menu never disagree about it.
+const ACTION_VARIANTS = {
+  trust: "default",
+  resume: "default",
+  start: "default",
+  stop: "default",
+  restart: "default",
+  remove: "destructive",
+} satisfies Record<ProcessActionKind, "default" | "destructive">;
 
 // A dense projection of the canonical runnable-action list. Exactly one action stays one-click;
 // secondary actions move into a menu, and unavailable actions do not exist in the DOM. The same
@@ -99,11 +112,15 @@ function ActionButton({ action, size }: { action: RunnableProcessAction; size: C
 function ActionMenuItem({ action }: { action: RunnableProcessAction }) {
   const Icon = ACTION_ICONS[action.kind];
   return (
-    <DropdownMenuItem onClick={(event) => event.stopPropagation()} onSelect={action.run}>
+    <DropdownMenuItem
+      variant={ACTION_VARIANTS[action.kind]}
+      onClick={(event) => event.stopPropagation()}
+      onSelect={action.run}
+    >
       <Icon aria-hidden />
       {action.label}
     </DropdownMenuItem>
   );
 }
 
-export { ACTION_ICONS };
+export { ACTION_ICONS, ACTION_VARIANTS };

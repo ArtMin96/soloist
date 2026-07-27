@@ -204,6 +204,19 @@ pub async fn proc_restart(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(),
         .map_err(|err| err.to_string())
 }
 
+/// Stops one process and removes it from the project entirely, discarding its scrollback —
+/// unlike [`proc_stop`], which leaves it resting and listed. The core reaps the process group
+/// before forgetting the entry, so no child is abandoned. Awaits that reap directly rather than
+/// through the blocking pool, which is only for the synchronous façade.
+#[tauri::command]
+pub async fn proc_close(id: u64, facade: State<'_, Arc<Facade>>) -> Result<(), String> {
+    facade
+        .supervisor()
+        .close(ProcessId::from_raw(id))
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Resumes a stopped agent's last session ("Resume last session"): relaunches it with its
 /// provider's resume command instead of starting fresh. Errors if the process has no last
 /// session to resume (a command, terminal, or unsupported-provider agent).
