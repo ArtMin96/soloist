@@ -83,16 +83,25 @@ const PROJECT = { id: 1, name: "storefront", root: "/p", icon: null };
 // Stand in for the Tauri backend: answer the snapshot/identity/project commands with a
 // fixture and let every other command (the event listener, the pty channel) resolve to
 // undefined.
-function mockBackend(processes: ProcessView[], projects = [PROJECT]) {
-  mockIPC((cmd) => {
-    if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
-    if (cmd === "proc_list") return processes;
-    if (cmd === "project_list") return projects;
-    if (cmd === "appearance") return DEFAULT_APPEARANCE;
-    if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
-    if (cmd === "hotkeys") return [];
-    return undefined;
-  });
+function mockBackend(
+  processes: ProcessView[],
+  projects = [PROJECT],
+  observe: (cmd: string, args: unknown) => void = () => {},
+  shouldMockEvents = false,
+) {
+  mockIPC(
+    (cmd, args) => {
+      observe(cmd, args);
+      if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
+      if (cmd === "proc_list") return processes;
+      if (cmd === "project_list") return projects;
+      if (cmd === "appearance") return DEFAULT_APPEARANCE;
+      if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
+      if (cmd === "hotkeys") return [];
+      return undefined;
+    },
+    { shouldMockEvents },
+  );
 }
 
 function row(id: number): HTMLElement {
@@ -163,6 +172,240 @@ describe("App dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start page" }));
     expect(screen.getByRole("heading", { name: "Start in Soloist" })).toBeTruthy();
     expect(row(1).getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("returns to the previously selected process when stopping the current terminal", async () => {
+    const stopped: number[] = [];
+    mockBackend(STACK, [PROJECT], (cmd, args) => {
+      if (cmd === "proc_stop") stopped.push((args as { id: number }).id);
+    });
+    render(<App />);
+    await screen.findAllByRole("treeitem");
+
+    fireEvent.click(row(1));
+    fireEvent.click(row(2));
+    expect(row(2).getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(within(row(2)).getByLabelText("Stop"));
+    expect(row(1).getAttribute("aria-selected")).toBe("true");
+    expect(stopped).toEqual([2]);
+  });
+
+  it("returns to an explicitly stopped terminal when the user starts it again", async () => {
+    const started: number[] = [];
+    mockBackend(
+      STACK,
+      [PROJECT],
+      (cmd, args) => {
+        if (cmd === "proc_start") started.push((args as { id: number }).id);
+      },
+      true,
+    );
+    render(<App />);
+    await screen.findAllByRole("treeitem");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    fireEvent.click(row(1));
+    fireEvent.click(row(2));
+    fireEvent.click(within(row(2)).getByLabelText("Stop"));
+    expect(row(1).getAttribute("aria-selected")).toBe("true");
+
+    await act(async () => {
+      await emit("domain-event", {
+        type: "ProcessStatusChanged",
+        id: 2,
+        from: "Running",
+        to: "Stopped",
+        exit_code: 0,
+      });
+    });
+    fireEvent.click(within(row(2)).getByLabelText("Start"));
+
+    expect(started).toEqual([2]);
+    expect(row(2).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("returns to the target when restarting it after Stop navigated away", async () => {
+    const restarted: number[] = [];
+    mockBackend(
+      STACK,
+      [PROJECT],
+      (cmd, args) => {
+        if (cmd === "proc_restart") restarted.push((args as { id: number }).id);
+      },
+      true,
+    );
+    render(<App />);
+    await screen.findAllByRole("treeitem");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    fireEvent.click(row(1));
+    fireEvent.click(row(2));
+    fireEvent.click(within(row(2)).getByLabelText("Stop"));
+    await act(async () => {
+      await emit("domain-event", {
+        type: "ProcessStatusChanged",
+        id: 2,
+        from: "Running",
+        to: "Crashed",
+        exit_code: 1,
+      });
+    });
+    fireEvent.click(within(row(2)).getByLabelText("Restart"));
+
+    expect(restarted).toEqual([2]);
+    expect(row(2).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("returns to the target when resuming it after Stop navigated away", async () => {
+    const target: ProcessView = {
+      ...STACK[0],
+      id: 5,
+      label: "resumable agent",
+      status: "Running",
+      resumable: true,
+    };
+    const resumed: number[] = [];
+    mockBackend(
+      [...STACK, target],
+      [PROJECT],
+      (cmd, args) => {
+        if (cmd === "agent_resume") resumed.push((args as { id: number }).id);
+      },
+      true,
+    );
+    render(<App />);
+    await screen.findAllByRole("treeitem");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    fireEvent.click(row(1));
+    fireEvent.click(row(5));
+    fireEvent.click(within(row(5)).getByLabelText("Stop"));
+    await act(async () => {
+      await emit("domain-event", {
+        type: "ProcessStatusChanged",
+        id: 5,
+        from: "Running",
+        to: "Stopped",
+        exit_code: 0,
+      });
+    });
+    fireEvent.click(within(row(5)).getByLabelText("Resume last session"));
+
+    expect(resumed).toEqual([5]);
+    expect(row(5).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("returns to Start when the stopped process has no activation predecessor", async () => {
+    mockBackend(STACK);
+    render(<App />);
+    await screen.findAllByRole("treeitem");
+
+    fireEvent.click(row(2));
+    fireEvent.click(within(row(2)).getByLabelText("Stop"));
+    expect(screen.getByRole("heading", { name: "Start in Soloist" })).toBeTruthy();
+  });
+
+  it("does not revisit a non-selected process that the user already stopped", async () => {
+    const secondTerminal: ProcessView = { ...STACK[1], id: 5, label: "shell 2" };
+    mockBackend([...STACK, secondTerminal]);
+    render(<App />);
+    await screen.findAllByRole("treeitem");
+
+    fireEvent.click(row(2));
+    fireEvent.click(row(5));
+    fireEvent.click(within(row(2)).getByLabelText("Stop"));
+    expect(row(5).getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(within(row(5)).getByLabelText("Stop"));
+    expect(screen.getByRole("heading", { name: "Start in Soloist" })).toBeTruthy();
+  });
+
+  it("keeps a naturally exited command selected but falls back when it is removed externally", async () => {
+    mockBackend(STACK, [PROJECT], () => {}, true);
+    render(<App />);
+    await screen.findAllByRole("treeitem");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    fireEvent.click(row(1));
+    fireEvent.click(row(4));
+    await act(async () => {
+      await emit("domain-event", {
+        type: "ProcessStatusChanged",
+        id: 4,
+        from: "Running",
+        to: "Stopped",
+        exit_code: 0,
+      });
+    });
+    expect(row(4).getAttribute("aria-selected")).toBe("true");
+
+    await act(async () => {
+      await emit("domain-event", { type: "ProcessRemoved", id: 4 });
+    });
+    expect(row(1).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("navigates only after live removal is confirmed, not when it opens or is dismissed", async () => {
+    const closed: number[] = [];
+    mockBackend(STACK, [PROJECT], (cmd, args) => {
+      if (cmd === "proc_close") closed.push((args as { id: number }).id);
+    });
+    render(<App />);
+    await screen.findAllByRole("treeitem");
+
+    fireEvent.click(row(1));
+    fireEvent.click(row(2));
+    fireEvent.pointerDown(within(row(2)).getByLabelText("More actions for shell"), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
+    expect(await screen.findByRole("heading", { name: "Remove “shell”?" })).toBeTruthy();
+    expect(row(2).getAttribute("aria-selected")).toBe("true");
+    expect(closed).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(row(2).getAttribute("aria-selected")).toBe("true");
+    expect(closed).toEqual([]);
+
+    fireEvent.pointerDown(within(row(2)).getByLabelText("More actions for shell"), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+    expect(row(1).getAttribute("aria-selected")).toBe("true");
+    expect(closed).toEqual([2]);
+  });
+
+  it("navigates when removal executes immediately for a resting process", async () => {
+    const closed: number[] = [];
+    mockBackend(STACK, [PROJECT], (cmd, args) => {
+      if (cmd === "proc_close") closed.push((args as { id: number }).id);
+    });
+    render(<App />);
+    await screen.findAllByRole("treeitem");
+
+    fireEvent.click(row(2));
+    fireEvent.click(row(1));
+    fireEvent.pointerDown(within(row(1)).getByLabelText("More actions for assistant"), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
+
+    expect(row(2).getAttribute("aria-selected")).toBe("true");
+    expect(closed).toEqual([1]);
+    expect(screen.queryByRole("heading", { name: "Remove “assistant”?" })).toBeNull();
   });
 
   it("shows the no-config empty state when the stack is empty", async () => {
