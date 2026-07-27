@@ -38,6 +38,7 @@ function renderPane() {
         onStop={noop}
         onRestart={noop}
         onResume={noop}
+        onRemove={noop}
         onTrust={noop}
       />
     </TooltipProvider>,

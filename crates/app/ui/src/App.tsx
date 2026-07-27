@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { DeferredOverlay } from "@/components/DeferredOverlay";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { OrphanDialog } from "@/components/OrphanDialog";
+import { RemoveProcessDialog } from "@/components/RemoveProcessDialog";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { StartSurface } from "@/components/StartSurface";
 import { Titlebar } from "@/components/titlebar/Titlebar";
@@ -14,8 +15,9 @@ import { useAgents } from "@/store/useAgents";
 import { useAppInfo } from "@/store/useAppInfo";
 import { useGlobalHotkeys } from "@/store/useGlobalHotkeys";
 import { useOrphans } from "@/store/useOrphans";
-import { useLineage } from "@/store/useLineage";
+import { liveWorkerCount, useLineage } from "@/store/useLineage";
 import { useProcesses } from "@/store/useProcesses";
+import { useProcessRemoval } from "@/store/useProcessRemoval";
 import { TERMINAL_POOL_CAP, useTerminalPool } from "@/store/useTerminalPool";
 import { useProjects } from "@/store/projects";
 import { SignalsProvider } from "@/store/SignalsProvider";
@@ -70,6 +72,7 @@ export default function App() {
   useWindowActive();
   const info = useAppInfo();
   const store = useProcesses();
+  const removal = useProcessRemoval(store.processes, store.close);
   const lineage = useLineage();
   const projects = useProjects(store.reportError);
   const trust = useTrust(store.refresh, store.reportError);
@@ -217,6 +220,7 @@ export default function App() {
                     onRestart={store.restart}
                     onResume={store.resume}
                     onTrust={reviewById}
+                    onRemove={removal.request}
                     onStartAll={store.startAll}
                     onRestartRunning={store.restartRunning}
                     onStopAll={store.stopAll}
@@ -245,6 +249,7 @@ export default function App() {
                           onRestart={() => store.restart(process.id)}
                           onResume={() => store.resume(process.id)}
                           onTrust={() => reviewById(process.id)}
+                          onRemove={() => removal.request(process.id)}
                         />
                       ))}
                       {!selected &&
@@ -279,6 +284,16 @@ export default function App() {
                   }}
                   onTrustAll={trust.trustAll}
                   onDismiss={trust.dismiss}
+                />
+                <RemoveProcessDialog
+                  process={removal.pending}
+                  workers={
+                    removal.pending
+                      ? liveWorkerCount(lineage, store.processes, removal.pending.id)
+                      : 0
+                  }
+                  onConfirm={removal.confirm}
+                  onDismiss={removal.dismiss}
                 />
                 <DeferredOverlay open={pickerOpen}>
                   <LaunchPicker
@@ -319,6 +334,7 @@ export default function App() {
                     onRestart={store.restart}
                     onResume={store.resume}
                     onTrust={trust.requestReview}
+                    onRemove={removal.request}
                   />
                 </DeferredOverlay>
                 <DeferredOverlay open={commandPaletteOpen}>
@@ -342,6 +358,7 @@ export default function App() {
                       onStart: store.start,
                       onStop: store.stop,
                       onRestart: store.restart,
+                      onRemove: removal.request,
                     }}
                   />
                 </DeferredOverlay>

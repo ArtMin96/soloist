@@ -1,12 +1,14 @@
-import { canRestart, canStart, canStop, isActive } from "@/lib/status";
+import { canRemove, canRestart, canStart, canStop, isActive } from "@/lib/status";
 import type { ProcessKind, ProcessView, ProcStatus } from "@/domain";
 
 /** A control action that can be run on a process. The closed set the control cluster and the
- *  palettes share, in canonical offer order (trust first, then the launch/stop verbs). */
-export type ProcessActionKind = "trust" | "resume" | "start" | "stop" | "restart";
+ *  palettes share, in canonical offer order (trust first, the launch/stop verbs, then remove —
+ *  the one action that forgets the process rather than changing its run state). */
+export type ProcessActionKind = "trust" | "resume" | "start" | "stop" | "restart" | "remove";
 
-/** The status-derived inputs that decide which actions are currently available. */
+/** The inputs that decide which actions are currently available. */
 export interface ProcessActionState {
+  kind: ProcessKind;
   status: ProcStatus;
   requiresTrust: boolean;
   resumable: boolean;
@@ -19,6 +21,20 @@ const PROCESS_ACTION_LABELS: Record<ProcessActionKind, string> = {
   start: "Start",
   stop: "Stop",
   restart: "Restart",
+  remove: "Remove",
+};
+
+// Which kinds are worth offering Remove on. A command is declared in `solo.yml` or the local
+// overlay, so forgetting its process would only drop the row until the next config sync or
+// launch re-registered it from the declaration that still exists — deleting a command is the
+// command editor's job, not a row control. Agents and terminals have no declaration behind
+// them: the process *is* the thing, so removing it is the only way to clear a finished one out
+// of the sidebar. An exhaustive Record rather than a comparison so a new kind stops the build
+// here until it is answered for, instead of silently defaulting to unremovable.
+const REMOVABLE: Record<ProcessKind, boolean> = {
+  Command: false,
+  Agent: true,
+  Terminal: true,
 };
 
 // The actions currently runnable on a process, derived once from the status FSM (lib/status)
@@ -26,7 +42,20 @@ const PROCESS_ACTION_LABELS: Record<ProcessActionKind, string> = {
 // and the action palettes read, so "what can I do to this process" lives in exactly one place. An
 // untrusted command offers only Trust until trusted — start/resume are withheld because the core
 // trust gate would refuse them regardless of which surface asked.
+//
+// Remove is offered last, and on a running process as readily as a resting one: the core stops
+// and reaps before forgetting, so it needs no separate Stop first and a surface offering it on a
+// live process is offering something safe. Surfaces confirm that case with the user; nothing here
+// decides that, exactly as nothing here decides prominence.
 export function processActions(state: ProcessActionState): ProcessActionKind[] {
+  const actions = runStateActions(state);
+  if (REMOVABLE[state.kind] && canRemove(state.status)) actions.push("remove");
+  return actions;
+}
+
+// The actions that change a process's run state — everything except Remove. Split out so the
+// two early returns below stay readable while Remove is still appended to every path.
+function runStateActions(state: ProcessActionState): ProcessActionKind[] {
   const { status, requiresTrust, resumable } = state;
   const actions: ProcessActionKind[] = [];
 
@@ -64,6 +93,8 @@ export interface ProcessActionHandlers {
   onStart: (id: number) => void;
   onStop: (id: number) => void;
   onRestart: (id: number) => void;
+  /** Stop and forget the process, dropping its row. Confirming a live one is the handler's call. */
+  onRemove: (id: number) => void;
 }
 
 /** One runnable action bound to its callback — what the palettes list and dispatch. */
@@ -104,6 +135,7 @@ export function runnableProcessActions(
   handlers: ProcessActionHandlers,
 ): RunnableProcessAction[] {
   return processActions({
+    kind: process.kind,
     status: process.status,
     requiresTrust: process.requires_trust,
     resumable: process.resumable,
@@ -136,5 +168,7 @@ function runFor(
       return () => handlers.onStop(process.id);
     case "restart":
       return () => handlers.onRestart(process.id);
+    case "remove":
+      return () => handlers.onRemove(process.id);
   }
 }

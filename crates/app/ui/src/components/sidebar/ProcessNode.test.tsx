@@ -48,6 +48,7 @@ function renderNode(node: Node, collapsedLeads: ToggleSet = expandedLeads) {
           onStop={noop}
           onRestart={noop}
           onResume={noop}
+          onRemove={noop}
           onTrust={noop}
         />
       </SignalsContext>

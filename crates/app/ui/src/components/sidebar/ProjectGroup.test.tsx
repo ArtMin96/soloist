@@ -29,6 +29,7 @@ function renderGroup() {
         onStop={noop}
         onRestart={noop}
         onResume={noop}
+        onRemove={noop}
         onTrust={noop}
         onStartAll={noop}
         onRestartRunning={noop}

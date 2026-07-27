@@ -30,6 +30,7 @@ interface TerminalPaneProps {
   onStop: () => void;
   onRestart: () => void;
   onResume: () => void;
+  onRemove: () => void;
   onTrust: () => void;
 }
 
@@ -45,6 +46,7 @@ export function TerminalPane({
   onStop,
   onRestart,
   onResume,
+  onRemove,
   onTrust,
 }: TerminalPaneProps) {
   const sectionRef = useRef<HTMLElement>(null);
@@ -58,6 +60,7 @@ export function TerminalPane({
   const processActionHandlers: ProcessActionHandlers = {
     onTrust: () => onTrust(),
     onResume: () => onResume(),
+    onRemove: () => onRemove(),
     onStart: () => onStart(),
     onStop: () => onStop(),
     onRestart: () => onRestart(),

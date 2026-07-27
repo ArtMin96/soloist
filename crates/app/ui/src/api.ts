@@ -350,6 +350,12 @@ export function procRestart(id: number): Promise<void> {
   return invoke<void>("proc_restart", { id });
 }
 
+// Stops a process and removes it from the project entirely, discarding its scrollback — unlike
+// procStop, which leaves it resting and listed. The row leaves via the ProcessRemoved event.
+export function procClose(id: number): Promise<void> {
+  return invoke<void>("proc_close", { id });
+}
+
 // Resumes a stopped agent's last session: relaunches it with its provider's resume command
 // instead of starting fresh. Only meaningful for a resumable agent (ProcessView.resumable).
 export function agentResume(id: number): Promise<void> {

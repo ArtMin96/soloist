@@ -390,6 +390,7 @@ pub fn run() {
             commands::proc_start,
             commands::proc_stop,
             commands::proc_restart,
+            commands::proc_close,
             commands::agent_resume,
             commands::stack_start,
             commands::stack_stop,

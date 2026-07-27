@@ -784,3 +784,39 @@ owner-decided (2026-07-24) and shipped together; no open question straddles the 
 
 **Effect on parity:** a new Soloist-only section **DG** (`plan/02`) covers it; no existing row
 regresses. Full design decision: `plan/05` §12.
+
+---
+
+## D-21 — Agents and terminals can be removed from the sidebar; commands cannot 🟢
+
+**Introduced:** parity row **B11**, 2026-07-27 (owner decision). Recorded here for the same reason as
+[D-20](#d-20--diagrams-are-a-first-class-coordination-document-rendering-mermaid-a-soloist-extension-):
+the public record is silent, and per `CLAUDE.md` §9 that silence is the gap.
+
+**Solo — silent, not contradicted.** `plan/05` records Solo's `close_process` MCP tool (§7) and the
+ordinary Stop affordance, but **no Solo page describes a UI control that forgets a process**, nor what
+such a control would do to a `solo.yml` command. Nothing is fabricated about Solo's behavior here.
+
+**What Soloist does.** A row for an **agent** or a **terminal** offers **Remove**, which routes to the
+existing `Supervisor::close` — stop, reap the process group, drop the registry entry, publish
+`ProcessRemoved` — the same core behavior MCP `close_process` and the HTTP/CLI dispatch already reach.
+A **command** never offers it.
+
+**Why the split.** A command's identity lives in its `solo.yml` (or app-local overlay) declaration, not
+in its process. Forgetting the process would drop the row only until the next config sync or app launch
+re-registered it from the declaration that still exists, so the control would silently undo itself.
+Deleting a command is therefore the command editor's job. An agent or terminal is declared nowhere: the
+process *is* the thing, so removal is the only way to clear a finished one out of a sidebar that
+otherwise grows for the whole app session.
+
+**Scope of the divergence.** UI-only, and additive. The core's `close` is unchanged and still accepts
+any kind, so **MCP `close_process` behavior is untouched** — a scoped agent may still close a command in
+its project exactly as before. The kind restriction is presentation policy in the frontend's
+`processActions`, beside `canStart`/`canStop`, per the existing split between what is *offered* and what
+is *legal*.
+
+**Why 🟢 (settled):** kinds, statuses, and the confirmation rule were owner-decided together
+(2026-07-27) and shipped in one change; no open question straddles it.
+
+**Effect on parity:** new row **B11** (`plan/02`); no existing row regresses. Full decision:
+`plan/05` §12.

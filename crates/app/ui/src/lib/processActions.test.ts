@@ -26,71 +26,138 @@ function process(overrides: Partial<ProcessView> = {}): ProcessView {
 
 describe("processActions", () => {
   it("offers Start (only) for a trusted resting command", () => {
-    expect(processActions({ status: "Stopped", requiresTrust: false, resumable: false })).toEqual([
-      "start",
-    ]);
+    expect(
+      processActions({
+        kind: "Command",
+        status: "Stopped",
+        requiresTrust: false,
+        resumable: false,
+      }),
+    ).toEqual(["start"]);
   });
 
   it("offers Resume before Start for a resting resumable agent", () => {
-    expect(processActions({ status: "Stopped", requiresTrust: false, resumable: true })).toEqual([
-      "resume",
-      "start",
-    ]);
+    expect(
+      processActions({ kind: "Command", status: "Stopped", requiresTrust: false, resumable: true }),
+    ).toEqual(["resume", "start"]);
   });
 
   it("offers Stop and Restart for a running process, never Start", () => {
-    expect(processActions({ status: "Running", requiresTrust: false, resumable: false })).toEqual([
-      "stop",
-      "restart",
-    ]);
+    expect(
+      processActions({
+        kind: "Command",
+        status: "Running",
+        requiresTrust: false,
+        resumable: false,
+      }),
+    ).toEqual(["stop", "restart"]);
   });
 
   it.each(["Starting", "Restarting"] as const)(
     "offers only Stop while %s so the in-flight launch can be cancelled",
     (status) => {
-      expect(processActions({ status, requiresTrust: false, resumable: false })).toEqual(["stop"]);
+      expect(
+        processActions({ kind: "Command", status, requiresTrust: false, resumable: false }),
+      ).toEqual(["stop"]);
     },
   );
 
   it("offers only Stop while stopping (no restart of an in-flight stop)", () => {
-    expect(processActions({ status: "Stopping", requiresTrust: false, resumable: false })).toEqual(
-      [],
-    );
+    expect(
+      processActions({
+        kind: "Command",
+        status: "Stopping",
+        requiresTrust: false,
+        resumable: false,
+      }),
+    ).toEqual([]);
   });
 
   it.each(["Crashed", "RestartExhausted"] as const)(
     "offers Restart rather than Start for %s recovery",
     (status) => {
-      expect(processActions({ status, requiresTrust: false, resumable: false })).toEqual([
-        "restart",
-      ]);
+      expect(
+        processActions({ kind: "Command", status, requiresTrust: false, resumable: false }),
+      ).toEqual(["restart"]);
     },
   );
 
   it("offers only Stop when a running process's next launch requires trust", () => {
-    expect(processActions({ status: "Running", requiresTrust: true, resumable: false })).toEqual([
-      "stop",
-    ]);
+    expect(
+      processActions({ kind: "Command", status: "Running", requiresTrust: true, resumable: false }),
+    ).toEqual(["stop"]);
   });
 
   it("offers no action while stopping even if the next launch requires trust", () => {
-    expect(processActions({ status: "Stopping", requiresTrust: true, resumable: false })).toEqual(
-      [],
-    );
+    expect(
+      processActions({
+        kind: "Command",
+        status: "Stopping",
+        requiresTrust: true,
+        resumable: false,
+      }),
+    ).toEqual([]);
   });
 
   it("offers only Trust for an untrusted command, withholding Start", () => {
-    expect(processActions({ status: "Stopped", requiresTrust: true, resumable: false })).toEqual([
-      "trust",
-    ]);
+    expect(
+      processActions({ kind: "Command", status: "Stopped", requiresTrust: true, resumable: false }),
+    ).toEqual(["trust"]);
+  });
+
+  it.each(["Agent", "Terminal"] as const)("offers Remove on a resting %s", (kind) => {
+    expect(
+      processActions({ kind, status: "Stopped", requiresTrust: false, resumable: false }),
+    ).toEqual(["start", "remove"]);
+  });
+
+  it.each(["Agent", "Terminal"] as const)(
+    "offers Remove on a running %s too — the core reaps it before forgetting it",
+    (kind) => {
+      expect(
+        processActions({ kind, status: "Running", requiresTrust: false, resumable: false }),
+      ).toEqual(["stop", "restart", "remove"]);
+    },
+  );
+
+  it("withholds Remove while a terminal is stopping, so no trash icon replaces Stop", () => {
+    // Mid-stop it would be the only action, making it the one-click control in the pixel Stop
+    // just vacated — a destructive button appearing under a cursor that clicked a safe one.
+    expect(
+      processActions({
+        kind: "Terminal",
+        status: "Stopping",
+        requiresTrust: false,
+        resumable: false,
+      }),
+    ).toEqual([]);
+  });
+
+  it.each(["Stopped", "Running", "Crashed", "RestartExhausted"] as const)(
+    "never offers Remove on a %s command — its declaration outlives the process",
+    (status) => {
+      expect(
+        processActions({ kind: "Command", status, requiresTrust: false, resumable: false }),
+      ).not.toContain("remove");
+    },
+  );
+
+  it("orders Remove last, after every run-state action", () => {
+    const actions = processActions({
+      kind: "Agent",
+      status: "Stopped",
+      requiresTrust: false,
+      resumable: true,
+    });
+    expect(actions).toEqual(["resume", "start", "remove"]);
   });
 
   it("withholds Resume from an untrusted resumable agent until it is trusted", () => {
     // The trust gate blocks resume just as it blocks start, so an untrusted process offers only
     // Trust — never an enabled Resume the core would refuse.
-    expect(processActions({ status: "Stopped", requiresTrust: true, resumable: true })).toEqual([
-      "trust",
-    ]);
+    expect(
+      processActions({ kind: "Command", status: "Stopped", requiresTrust: true, resumable: true }),
+    ).toEqual(["trust"]);
   });
 });
 
@@ -122,19 +189,39 @@ describe("presentProcessActions", () => {
 describe("shouldPersistProcessActions", () => {
   it("keeps trust and failed-process recovery visible", () => {
     expect(
-      shouldPersistProcessActions({ status: "Stopped", requiresTrust: true, resumable: false }),
+      shouldPersistProcessActions({
+        kind: "Command",
+        status: "Stopped",
+        requiresTrust: true,
+        resumable: false,
+      }),
     ).toBe(true);
     expect(
-      shouldPersistProcessActions({ status: "Crashed", requiresTrust: false, resumable: false }),
+      shouldPersistProcessActions({
+        kind: "Command",
+        status: "Crashed",
+        requiresTrust: false,
+        resumable: false,
+      }),
     ).toBe(true);
   });
 
   it("leaves ordinary and running controls progressively disclosed", () => {
     expect(
-      shouldPersistProcessActions({ status: "Stopped", requiresTrust: false, resumable: false }),
+      shouldPersistProcessActions({
+        kind: "Command",
+        status: "Stopped",
+        requiresTrust: false,
+        resumable: false,
+      }),
     ).toBe(false);
     expect(
-      shouldPersistProcessActions({ status: "Running", requiresTrust: false, resumable: false }),
+      shouldPersistProcessActions({
+        kind: "Command",
+        status: "Running",
+        requiresTrust: false,
+        resumable: false,
+      }),
     ).toBe(false);
   });
 });
@@ -149,6 +236,7 @@ describe("runnableProcessActions", () => {
       onStart: vi.fn((id) => (calls.start = [id])),
       onStop: vi.fn((id) => (calls.stop = [id])),
       onRestart: vi.fn((id) => (calls.restart = [id])),
+      onRemove: vi.fn((id) => (calls.remove = [id])),
     };
   }
 
@@ -175,8 +263,24 @@ describe("runnableProcessActions", () => {
     expect(h.calls.trust).toEqual([9, "Worker"]);
   });
 
+  it("binds Remove to the process's own id", () => {
+    const h = handlers();
+    const actions = runnableProcessActions(
+      process({ id: 12, kind: "Terminal", label: "Terminal 2" }),
+      h,
+    );
+    const remove = actions.find((a) => a.kind === "remove");
+    expect(remove?.label).toBe("Remove");
+    remove?.run();
+    expect(h.calls.remove).toEqual([12]);
+  });
+
   it("names the two resumable-agent choices as continue versus fresh", () => {
     const result = runnableProcessActions(process({ kind: "Agent", resumable: true }), handlers());
-    expect(result.map((action) => action.label)).toEqual(["Resume last session", "Start fresh"]);
+    expect(result.map((action) => action.label)).toEqual([
+      "Resume last session",
+      "Start fresh",
+      "Remove",
+    ]);
   });
 });

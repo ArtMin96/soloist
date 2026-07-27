@@ -42,6 +42,7 @@ interface ProjectGroupProps {
   onStop: (id: number) => void;
   onRestart: (id: number) => void;
   onResume: (id: number) => void;
+  onRemove: (id: number) => void;
   onTrust: (id: number) => void;
   onStartAll: () => void;
   onRestartRunning: () => void;
@@ -69,6 +70,7 @@ export function ProjectGroup({
   onStop,
   onRestart,
   onResume,
+  onRemove,
   onTrust,
   onStartAll,
   onRestartRunning,
@@ -229,6 +231,7 @@ export function ProjectGroup({
                 onStop={onStop}
                 onRestart={onRestart}
                 onResume={onResume}
+                onRemove={onRemove}
                 onTrust={onTrust}
               />
             ))

@@ -13,6 +13,7 @@ const handlers: ProcessActionHandlers = {
   onStart: noop,
   onStop: noop,
   onRestart: noop,
+  onRemove: noop,
 };
 
 function process(overrides: Partial<ProcessView> = {}): ProcessView {
@@ -64,8 +65,42 @@ describe("ProcessControls", () => {
   });
 
   it("renders no conflicting controls while stopping", () => {
+    const { container } = renderControls({
+      kind: "Command",
+      status: "Stopping",
+      resumable: true,
+    });
+    expect(container.querySelector("button")).toBeNull();
+  });
+
+  it("renders nothing at all while an agent is stopping, Remove included", () => {
+    // Remove would otherwise be the only action, so it would take the one-click slot Stop just
+    // vacated — a destructive control landing under the cursor that clicked a safe one.
     const { container } = renderControls({ status: "Stopping", resumable: true });
     expect(container.querySelector("button")).toBeNull();
+  });
+
+  it("discloses Remove behind the menu rather than as the one-click action", () => {
+    renderControls({ status: "Stopped" });
+    expect(screen.getByLabelText("Start")).toBeTruthy();
+    expect(screen.queryByLabelText("Remove")).toBeNull();
+    expect(screen.getByLabelText("More actions for Claude")).toBeTruthy();
+  });
+
+  it("never offers Remove on a command, whose declaration outlives the process", () => {
+    renderControls({ kind: "Command", status: "Running" });
+    expect(screen.queryByLabelText("Remove")).toBeNull();
+  });
+
+  it("never gives Remove the one-click slot — it stays behind the menu", () => {
+    // Across every state a removable process can be in, the visible control is never the
+    // destructive one; reaching Remove is always a deliberate second step.
+    for (const status of ["Stopped", "Running", "Crashed", "RestartExhausted"] as const) {
+      cleanup();
+      renderControls({ status });
+      expect(screen.queryByLabelText("Remove")).toBeNull();
+      expect(screen.getByLabelText("More actions for Claude")).toBeTruthy();
+    }
   });
 
   it("prioritizes Restart for a running command", () => {

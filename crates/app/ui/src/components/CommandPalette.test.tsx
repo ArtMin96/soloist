@@ -45,6 +45,7 @@ function renderPalette(props: Partial<Parameters<typeof CommandPalette>[0]> = {}
         onStart: vi.fn(),
         onStop: vi.fn(),
         onRestart: vi.fn(),
+        onRemove: vi.fn(),
       }}
       {...wiring}
       {...props}

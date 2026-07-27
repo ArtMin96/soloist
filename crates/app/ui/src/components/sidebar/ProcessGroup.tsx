@@ -15,6 +15,7 @@ interface ProcessGroupProps {
   onStop: (id: number) => void;
   onRestart: (id: number) => void;
   onResume: (id: number) => void;
+  onRemove: (id: number) => void;
   onTrust: (id: number) => void;
 }
 
@@ -34,6 +35,7 @@ export function ProcessGroup({
   onStop,
   onRestart,
   onResume,
+  onRemove,
   onTrust,
 }: ProcessGroupProps) {
   const treeColumn = group.roots.some((root) => root.children.length > 0);
@@ -66,6 +68,7 @@ export function ProcessGroup({
               onStop={onStop}
               onRestart={onRestart}
               onResume={onResume}
+              onRemove={onRemove}
               onTrust={onTrust}
             />
           ))}

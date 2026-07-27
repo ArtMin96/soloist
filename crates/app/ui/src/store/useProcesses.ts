@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   agentResume,
   onDomainEvent,
+  procClose,
   procList,
   procRestart,
   procStart,
@@ -32,6 +33,8 @@ export interface ProcessStore {
   restart: (id: number) => void;
   /** Resume a stopped resumable agent's last session (vs `start`, which begins fresh). */
   resume: (id: number) => void;
+  /** Stop and forget a process, dropping its row (vs `stop`, which leaves it listed). */
+  close: (id: number) => void;
   /**
    * Opens a terminal in `project`, resolving to the new process id — or `null` if it failed
    * (the error is surfaced on the shared banner), so the caller can no-op.
@@ -86,6 +89,7 @@ export function useProcesses(): ProcessStore {
   const stop = useCallback((id: number) => void procStop(id).catch(fail), [fail]);
   const restart = useCallback((id: number) => void procRestart(id).catch(fail), [fail]);
   const resume = useCallback((id: number) => void agentResume(id).catch(fail), [fail]);
+  const close = useCallback((id: number) => void procClose(id).catch(fail), [fail]);
   // Resolves the new id (unlike the lifecycle actions above) so the caller can focus the
   // terminal it just opened; the row itself still arrives via `ProcessSpawned`.
   const createTerminal = useCallback(
@@ -148,6 +152,7 @@ export function useProcesses(): ProcessStore {
     stop,
     restart,
     resume,
+    close,
     createTerminal,
     startAll,
     stopAll,
