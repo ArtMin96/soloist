@@ -4,7 +4,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { ptyAttach, ptyDetach, ptyResize, ptyWrite } from "@/api";
-import { terminalOptions } from "@/lib/appearance";
+import { TERMINAL_SCROLLBACK_LINES, terminalOptions } from "@/lib/appearance";
 import { isActive } from "@/lib/status";
 import { activateTerminalRenderer, type RendererHandle } from "@/lib/terminalRenderer";
 import { useAppearance } from "@/store/appearanceContext";
@@ -217,8 +217,7 @@ export function useTerminal(process: ProcessView, visible = true) {
 
     const seed = appearanceRef.current;
     const term = new Terminal({
-      cursorBlink: true,
-      scrollback: 5000,
+      scrollback: TERMINAL_SCROLLBACK_LINES,
       ...terminalOptions(seed.appearance, seed.dark),
     });
     const fit = new FitAddon();
@@ -282,9 +281,11 @@ export function useTerminal(process: ProcessView, visible = true) {
     };
   }, [id, attach, syncSize]);
 
-  // Restyle the live emulator when the theme or terminal typography changes — set on the
+  // Restyle the live emulator when the theme or terminal appearance changes — set on the
   // existing instance, then re-fit since the font metrics moved (so the PTY winsize tracks the
-  // new cell size). One assignment per change; no recreation, no per-keystroke work.
+  // new cell size). One assignment per change; no recreation, no per-keystroke work. Every option
+  // `terminalOptions` produces must be assigned here, or the setting applies only to panes opened
+  // afterwards and silently does nothing to the one the user is looking at.
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
@@ -295,6 +296,9 @@ export function useTerminal(process: ProcessView, visible = true) {
     term.options.fontWeightBold = options.fontWeightBold;
     term.options.lineHeight = options.lineHeight;
     term.options.letterSpacing = options.letterSpacing;
+    term.options.cursorStyle = options.cursorStyle;
+    term.options.cursorInactiveStyle = options.cursorInactiveStyle;
+    term.options.cursorBlink = options.cursorBlink;
     term.options.theme = options.theme;
     // Cell metrics moved with the font change, so re-fit and track the PTY winsize.
     syncSize();

@@ -8,6 +8,8 @@ import { SizeStepper } from "@/components/settings/controls/SizeStepper";
 import { TerminalPreview } from "@/components/settings/TerminalPreview";
 import { Switch } from "@/components/ui/switch";
 import {
+  CURSOR_INACTIVE_STYLE_OPTIONS,
+  CURSOR_STYLE_OPTIONS,
   FONT_WEIGHT_OPTIONS,
   LETTER_SPACING_OPTIONS,
   LINE_HEIGHT_OPTIONS,
@@ -17,6 +19,8 @@ import {
 import { useAppearance } from "@/store/appearanceContext";
 import type {
   Appearance,
+  CursorInactiveStyle,
+  CursorStyle,
   FontWeight,
   LetterSpacing,
   LineHeight,
@@ -122,6 +126,42 @@ export function AppearancePanel() {
             onValueChange={(value) => setTerminal({ letter_spacing: value as LetterSpacing })}
             ariaLabel="Letter spacing"
             className="w-28"
+          />
+        </SettingRow>
+        <SettingRow
+          label="Cursor style"
+          description="The cursor shape while the terminal has focus."
+        >
+          <SettingSelect
+            value={t.cursor_style}
+            options={CURSOR_STYLE_OPTIONS}
+            onValueChange={(value) => setTerminal({ cursor_style: value as CursorStyle })}
+            ariaLabel="Cursor style"
+            className="w-32"
+          />
+        </SettingRow>
+        <SettingRow
+          label="Cursor when unfocused"
+          description="The cursor shape while the terminal does not have focus."
+        >
+          <SettingSelect
+            value={t.cursor_inactive_style}
+            options={CURSOR_INACTIVE_STYLE_OPTIONS}
+            onValueChange={(value) =>
+              setTerminal({ cursor_inactive_style: value as CursorInactiveStyle })
+            }
+            ariaLabel="Cursor when unfocused"
+            className="w-32"
+          />
+        </SettingRow>
+        <SettingRow
+          label="Blink cursor"
+          description="Blink the terminal cursor instead of showing it solid."
+        >
+          <Switch
+            checked={t.cursor_blink}
+            onCheckedChange={(cursor_blink) => setTerminal({ cursor_blink })}
+            aria-label="Blink cursor"
           />
         </SettingRow>
       </SettingsSection>

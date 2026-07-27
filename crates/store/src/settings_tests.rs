@@ -1,7 +1,8 @@
 use soloist_core::{
-    Appearance, Binding, FontScale, FontWeight, HotkeyAction, Hotkeys, Integrations, LetterSpacing,
-    LineHeight, McpFeatureGroup, McpToolGroups, Notifications, ProcessCpuThreshold,
-    ProcessMemThreshold, Settings, SettingsRepo, Sidebar, TerminalAppearance, Theme, ToolDefaults,
+    Appearance, Binding, CursorInactiveStyle, CursorStyle, FontScale, FontWeight, HotkeyAction,
+    Hotkeys, Integrations, LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups,
+    Notifications, ProcessCpuThreshold, ProcessMemThreshold, Settings, SettingsRepo, Sidebar,
+    TerminalAppearance, Theme, ToolDefaults,
 };
 use tempfile::tempdir;
 
@@ -40,6 +41,9 @@ fn fully_populated() -> Settings {
                 font_scale: FontScale::Small,
                 line_height: LineHeight::Comfortable,
                 letter_spacing: LetterSpacing::Wide,
+                cursor_style: CursorStyle::Bar,
+                cursor_inactive_style: CursorInactiveStyle::None,
+                cursor_blink: false,
             },
         },
         sidebar: Sidebar {
@@ -123,6 +127,38 @@ fn a_fully_populated_document_round_trips_through_the_real_store() {
     let settings = fully_populated();
     store.save(&(), &settings).unwrap();
     assert_eq!(store.load(&()).unwrap(), Some(settings));
+}
+
+#[test]
+fn a_record_without_the_cursor_fields_reads_back_with_the_documented_defaults() {
+    // The settings document is stored as JSON, so a record an older build wrote simply lacks the
+    // fields that build did not know about. Reading it must apply the documented defaults rather
+    // than failing the parse — and the defaults must be the ones that preserve today's behavior,
+    // so nobody's terminal changes shape on upgrade.
+    let store = SqliteStore::open_in_memory().expect("in-memory store");
+    store
+        .lock()
+        .execute(
+            "INSERT INTO settings (id, doc) VALUES (1, ?1)",
+            (r#"{"appearance":{"theme":"dark","terminal":{"font_scale":"large"}}}"#,),
+        )
+        .expect("seed a settings record written before the cursor fields existed");
+
+    let terminal = store
+        .load(&())
+        .expect("an older record still parses")
+        .expect("the seeded record is found")
+        .appearance
+        .terminal;
+
+    assert_eq!(terminal.cursor_style, CursorStyle::Block);
+    assert_eq!(terminal.cursor_inactive_style, CursorInactiveStyle::Outline);
+    assert!(
+        terminal.cursor_blink,
+        "the cursor keeps blinking on upgrade — xterm defaults this off, the app never has"
+    );
+    // The fields the older build did write are untouched by the defaulting.
+    assert_eq!(terminal.font_scale, FontScale::Large);
 }
 
 #[test]

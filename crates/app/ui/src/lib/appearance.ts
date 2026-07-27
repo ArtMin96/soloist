@@ -4,7 +4,16 @@
 // settings behavior contract), so the app tokens and the xterm.js renderer read the same
 // values from here — no magic numbers scattered across components.
 
-import type { Appearance, FontScale, FontWeight, LetterSpacing, LineHeight, Theme } from "@/domain";
+import type {
+  Appearance,
+  CursorInactiveStyle,
+  CursorStyle,
+  FontScale,
+  FontWeight,
+  LetterSpacing,
+  LineHeight,
+  Theme,
+} from "@/domain";
 import { TERMINAL_MINIMUM_CONTRAST_RATIO, terminalColors } from "@/lib/terminalPalette";
 
 // Terminal font size (px) per step — xterm takes a px size directly.
@@ -59,6 +68,30 @@ const LETTER_SPACING_PX: Record<LetterSpacing, number> = {
   wider: 1.3,
 };
 
+// The xterm cursor option value sets. Literal unions (not bare strings) so a mapped value is
+// assignable to xterm's own `cursorStyle` / `cursorInactiveStyle` options, whose types are the
+// same closed sets — and so adding a domain variant fails to compile until it is given a value.
+export type TerminalCursorStyle = "block" | "underline" | "bar";
+export type TerminalCursorInactiveStyle = "outline" | "block" | "bar" | "underline" | "none";
+
+const CURSOR_STYLE_VALUE: Record<CursorStyle, TerminalCursorStyle> = {
+  block: "block",
+  underline: "underline",
+  bar: "bar",
+};
+
+const CURSOR_INACTIVE_STYLE_VALUE: Record<CursorInactiveStyle, TerminalCursorInactiveStyle> = {
+  outline: "outline",
+  block: "block",
+  bar: "bar",
+  underline: "underline",
+  none: "none",
+};
+
+// Lines of terminal scrollback the emulator retains, matching the core's log ring so the pane and
+// the core hold the same depth of history — a resync replays the core's buffer into this one.
+export const TERMINAL_SCROLLBACK_LINES = 5000;
+
 // The terminal follows the same native-family policy as the app shell. SF Mono is used on macOS;
 // the remaining faces are platform fallbacks, not bundled web fonts.
 const DEFAULT_MONO_STACK = '"SF Mono", Menlo, Monaco, ui-monospace, monospace';
@@ -80,6 +113,9 @@ export const DEFAULT_APPEARANCE: Appearance = {
     font_scale: "medium",
     line_height: "default",
     letter_spacing: "default",
+    cursor_style: "block",
+    cursor_inactive_style: "outline",
+    cursor_blink: true,
   },
 };
 
@@ -205,6 +241,9 @@ export function terminalOptions(appearance: Appearance, dark: boolean) {
     fontWeightBold: fontWeightValue(t.bold_font_weight),
     lineHeight: lineHeightValue(t.line_height),
     letterSpacing: letterSpacingPx(t.letter_spacing),
+    cursorStyle: CURSOR_STYLE_VALUE[t.cursor_style],
+    cursorInactiveStyle: CURSOR_INACTIVE_STYLE_VALUE[t.cursor_inactive_style],
+    cursorBlink: t.cursor_blink,
     theme: terminalColors(dark),
     minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
     // The end-to-end build turns on xterm's screen-reader mode so the WebDriver harness can read the
@@ -277,6 +316,21 @@ export const LINE_HEIGHT_OPTIONS: Option<LineHeight>[] = [
   { value: "default", label: "Default" },
   { value: "comfortable", label: "Comfortable" },
   { value: "spacious", label: "Spacious" },
+];
+
+export const CURSOR_STYLE_OPTIONS: Option<CursorStyle>[] = [
+  { value: "block", label: "Block" },
+  { value: "underline", label: "Underline" },
+  { value: "bar", label: "Bar" },
+];
+
+// "Hidden" rather than "None": the label says what the user will see, not what xterm calls it.
+export const CURSOR_INACTIVE_STYLE_OPTIONS: Option<CursorInactiveStyle>[] = [
+  { value: "outline", label: "Outline" },
+  { value: "block", label: "Block" },
+  { value: "underline", label: "Underline" },
+  { value: "bar", label: "Bar" },
+  { value: "none", label: "Hidden" },
 ];
 
 export const LETTER_SPACING_OPTIONS: Option<LetterSpacing>[] = [

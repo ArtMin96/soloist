@@ -968,3 +968,52 @@ information, and would depart from the emulators a user already knows.
 **Effect on parity:** adds `plan/02` **C10**. **C2** ("Full ANSI / color") is unchanged and still ✅ —
 it covers whether ANSI renders at all; C10 covers whether the 16 colours are ours and follow the theme.
 No row regresses.
+
+## D-24 — The terminal cursor's shape and blink are user settings, not constants 🟢
+
+**Introduced:** Phase 4 surface, on the branch that promotes the cursor to Settings.
+
+**Solo — silent, not contradicted.** `plan/05` records nothing about Solo's terminal cursor: not its
+shape, not whether it blinks, not whether either is configurable. There is no documented Solo behavior
+to match or to differ from, so this is a **clean-room addition** rather than a divergence from observed
+behavior, recorded here because `plan/05` §12 owns the decision and the parity walk reads it from this
+file. Nothing below asserts what Solo does.
+
+**The defect this closes.** `cursorBlink: true` was hardcoded at the emulator's construction and
+`cursorStyle` / `cursorInactiveStyle` sat at xterm's defaults, with no way for a user to change any of
+the three.
+
+**What Soloist does.** The appearance document carries two closed enums and a boolean —
+`CursorStyle { Block, Underline, Bar }`, `CursorInactiveStyle { Outline, Block, Bar, Underline, None }`
+and `cursor_blink` — mirrored once in `domain.ts` and mapped to their concrete xterm values in
+`lib/appearance.ts`, beside the font and line-height maps. The permitted sets are xterm's own, read
+from the installed typings rather than from memory: `@xterm/xterm@6.0.0`'s `xterm.d.ts` declares
+`cursorStyle?: 'block' | 'underline' | 'bar'` and
+`cursorInactiveStyle?: 'outline' | 'block' | 'bar' | 'underline' | 'none'`. The map is deliberately
+kept even though the serialized enum strings already equal xterm's: it is the one place the domain set
+is proven to cover the emulator's, so adding a variant fails to compile until it is given a value.
+
+**Defaults `Block` / `Outline` / `true`, and why blink departs from xterm.** The first two are xterm's
+own defaults. `cursor_blink` does not follow xterm's `false`: the app has always run a blinking cursor,
+so `true` is what keeps an upgrade from silently changing the terminal under an existing user. That is
+the whole reason the default is stated rather than inherited. `Outline` is kept as the unfocused
+default in preference to `None` — hiding the cursor is a legitimate choice, offered in the picker as
+"Hidden", but a poor default, because an unfocused pane then reads as having no cursor position at all.
+
+**Why there is no schema migration.** `SCHEMA_VERSION` stays **18**. The settings row persists as a
+single JSON document (`settings.doc`) parsed straight into `Settings`, whose containers carry
+`#[serde(default)]` and set no `deny_unknown_fields` — so three new struct fields need no DDL, and a
+record written before they existed reads back with the defaults above. This is the same "add a field,
+not a store" recipe the per-project seed-template defaults already follow. A bump would be worse than
+merely redundant: `migrate()` refuses any database whose `user_version` exceeds the running build's, so
+bumping to 19 would make a database this build has touched unopenable by an older one, in exchange for
+no DDL at all. A store test covers the behavior the bump would have been ceremony for.
+
+**Why the live-restyle path is the point.** Each option is assigned to the mounted emulator when the
+setting changes, not only when a pane is created — a change applies to the terminal the user is looking
+at, with no remount and so no scrollback loss or re-attach. This is the failure mode `focus_on_click`
+already demonstrates: a setting that persists, moves its switch, and is read by nothing. The vitest
+covering these three asserts against the emulator instance that was mounted *before* the edit, so an
+option wired only into construction reddens it.
+
+**Effect on parity:** adds `plan/02` **C11**. No row regresses.

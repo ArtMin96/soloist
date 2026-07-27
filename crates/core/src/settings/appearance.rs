@@ -73,6 +73,30 @@ pub enum LetterSpacing {
     Wider,
 }
 
+/// The shape of the terminal cursor while the pane has focus.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorStyle {
+    #[default]
+    Block,
+    Underline,
+    Bar,
+}
+
+/// The shape of the terminal cursor while the pane does not have focus. `None` hides it entirely,
+/// which is a legitimate choice but a poor default — an unfocused pane then looks like it has no
+/// cursor position at all, so the default outlines the cell instead.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorInactiveStyle {
+    #[default]
+    Outline,
+    Block,
+    Bar,
+    Underline,
+    None,
+}
+
 /// Terminal typography — the xterm.js renderer is restyled from these.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -92,6 +116,12 @@ pub struct TerminalAppearance {
     pub line_height: LineHeight,
     /// Spacing between terminal characters.
     pub letter_spacing: LetterSpacing,
+    /// The cursor shape while the pane has focus.
+    pub cursor_style: CursorStyle,
+    /// The cursor shape while the pane does not have focus.
+    pub cursor_inactive_style: CursorInactiveStyle,
+    /// Whether the cursor blinks.
+    pub cursor_blink: bool,
 }
 
 impl Default for TerminalAppearance {
@@ -104,6 +134,11 @@ impl Default for TerminalAppearance {
             font_scale: FontScale::default(),
             line_height: LineHeight::default(),
             letter_spacing: LetterSpacing::default(),
+            cursor_style: CursorStyle::default(),
+            cursor_inactive_style: CursorInactiveStyle::default(),
+            // xterm's own default is `false`; the app has always run a blinking cursor, so `true`
+            // keeps an upgrade from silently changing the terminal.
+            cursor_blink: true,
         }
     }
 }

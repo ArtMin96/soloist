@@ -515,6 +515,13 @@ export type LineHeight = "compact" | "default" | "comfortable" | "spacious";
 // Terminal letter spacing — horizontal spacing between characters (mirrors core::LetterSpacing).
 export type LetterSpacing = "tight" | "default" | "wide" | "wider";
 
+// The cursor shape while the pane has focus (mirrors core::CursorStyle).
+export type CursorStyle = "block" | "underline" | "bar";
+
+// The cursor shape while the pane does not have focus (mirrors core::CursorInactiveStyle).
+// "none" hides it entirely.
+export type CursorInactiveStyle = "outline" | "block" | "bar" | "underline" | "none";
+
 // Terminal typography (mirrors core::TerminalAppearance) — the xterm.js renderer is restyled
 // from these. `font_family` is null to use the app default.
 export interface TerminalAppearance {
@@ -525,6 +532,9 @@ export interface TerminalAppearance {
   font_scale: FontScale;
   line_height: LineHeight;
   letter_spacing: LetterSpacing;
+  cursor_style: CursorStyle;
+  cursor_inactive_style: CursorInactiveStyle;
+  cursor_blink: boolean;
 }
 
 // The Appearance tab document (mirrors core::Appearance).
