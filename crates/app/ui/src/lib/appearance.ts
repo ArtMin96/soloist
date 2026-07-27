@@ -5,16 +5,7 @@
 // values from here — no magic numbers scattered across components.
 
 import type { Appearance, FontScale, FontWeight, LetterSpacing, LineHeight, Theme } from "@/domain";
-
-// xterm's ITheme is structural; we only set the few colors that follow the app surface, so a
-// minimal shape keeps the dependency off the emulator's full type.
-export interface TerminalColors {
-  background: string;
-  foreground: string;
-  cursor: string;
-  cursorAccent: string;
-  selectionBackground: string;
-}
+import { terminalColors } from "@/lib/terminalPalette";
 
 // Terminal font size (px) per step — xterm takes a px size directly.
 const TERMINAL_FONT_PX: Record<FontScale, number> = {
@@ -201,29 +192,6 @@ export function watchSystemDark(onChange: (dark: boolean) => void): () => void {
   const handler = (event: MediaQueryListEvent) => onChange(event.matches);
   media.addEventListener("change", handler);
   return () => media.removeEventListener("change", handler);
-}
-
-// The terminal's own surface palette, tracking the app light/dark theme. Program output keeps
-// its own ANSI; only the chrome (background/foreground/cursor/selection) follows the theme.
-// This is the one place the terminal chrome colors live — a surface distinct from the app
-// `--background` tokens (DESIGN.md), kept as concrete hex because xterm.js cannot parse the
-// OKLCH design tokens. The cursor's contrast color is always the surface behind it, so it is
-// derived from the background rather than restated.
-export function terminalColors(dark: boolean): TerminalColors {
-  const surface = dark
-    ? {
-        background: "#1b1e25",
-        foreground: "#e6e8ec",
-        cursor: "#8ab4f8",
-        selectionBackground: "#33405a",
-      }
-    : {
-        background: "#fbfbfd",
-        foreground: "#23262c",
-        cursor: "#3b6fd4",
-        selectionBackground: "#cfdcf5",
-      };
-  return { ...surface, cursorAccent: surface.background };
 }
 
 // The xterm.js options derived from the appearance document — applied at creation and pushed

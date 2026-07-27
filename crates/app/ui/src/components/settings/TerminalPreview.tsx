@@ -2,10 +2,10 @@ import {
   fontWeightValue,
   letterSpacingPx,
   lineHeightValue,
-  terminalColors,
   terminalFontFamily,
   terminalFontPx,
 } from "@/lib/appearance";
+import { terminalColors } from "@/lib/terminalPalette";
 import { useAppearance } from "@/store/appearanceContext";
 
 // A live sample of the terminal typography and theme — the same mappings the real xterm.js
