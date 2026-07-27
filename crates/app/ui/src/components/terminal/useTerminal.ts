@@ -404,11 +404,16 @@ export function useTerminal(process: ProcessView, visible = true) {
   const paste = useCallback(() => pasteClipboard(termRef), []);
   const clipboard: TerminalClipboard = { copySelection: copy, paste };
 
+  // Put text in at the cursor as though it had been pasted, so bracketed-paste mode is honored and
+  // the bytes take the same route to the PTY that typing does. Inert once the pane is torn down.
+  const insert = useCallback((text: string) => termRef.current?.paste(text), []);
+
   return {
     hostRef,
     state,
     linkTarget,
     search: { findNext, findPrevious, clear: clearSearch },
     clipboard,
+    insert,
   };
 }

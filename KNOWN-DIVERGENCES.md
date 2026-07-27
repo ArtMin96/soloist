@@ -1226,3 +1226,86 @@ with the scope pattern wrong. Only the display walk C13 records answers it, and 
 run this capability is wiring that has not been demonstrated to work end to end.
 
 **Effect on parity:** adds `plan/02` **C13**. No row regresses.
+
+---
+
+## D-27 — A file dropped on the terminal inserts its path, quoted, and runs nothing 🟢
+
+**Introduced:** Phase 4 surface, on the branch that adds terminal file drag-and-drop.
+
+**Solo — silent, not contradicted.** `plan/05` records nothing about dragging a file onto Solo's
+terminal, in either direction: not whether a drop is accepted, not what a drop does, not whether
+anything is inserted. There is no documented Solo behavior to match or to differ from, so this is a
+**clean-room addition** rather than a divergence from observed behavior, recorded here because
+`plan/05` §12 owns the decision and the parity walk reads it from this file. Nothing below asserts
+what Solo does.
+
+**The defect this closes.** Dragging a file onto a pane did nothing at all — there was no
+drag-and-drop listener anywhere in the app. Every desktop terminal (GNOME Terminal, iTerm2, Kitty)
+answers a drop by writing the file's path at the cursor, and it is the gesture that makes handing a
+screenshot to a coding agent a drag rather than a `find`. Soloist's whole purpose is running those
+agents, so the pane most likely to be dropped on was the one that ignored it.
+
+**The drop is taken from the OS, not from the DOM.** The window's `drag_drop_enabled` is left at
+Tauri's default of `true` — read from the pinned `tauri-utils-2.9.2` `src/config.rs`, "Whether the
+drag and drop is enabled or not on the webview. By default it is enabled." With it enabled the
+webview handles the drop natively and `getCurrentWebview().onDragDropEvent` hands back **real
+filesystem paths**. HTML5 drag-and-drop is not an alternative here and is deliberately not used: a
+file dropped through the DOM arrives as a `File` object carrying no path at all, so recovering one
+would mean reading the bytes back out to a temporary file to learn where the original already was.
+
+**No new IPC command and no capability change — verified, not assumed.** `onDragDropEvent` is
+implemented purely over `this.listen(TauriEvent.DRAG_ENTER | DRAG_OVER | DRAG_DROP | DRAG_LEAVE)`,
+read from the installed `@tauri-apps/api@2.11.0` `webview.js` rather than from the docs site. The
+capability already grants `core:default`, which resolves through `core:event:default` to
+`allow-listen` and `allow-unlisten` in the generated `crates/app/gen/schemas/acl-manifests.json`.
+Delivery is `term.paste`, the same route the paste hotkey takes: it emits the text as ordinary input
+through `onData` → the existing `pty_write`, so bracketed-paste mode is honored and no separate write
+path exists to keep in step.
+
+**One window-wide subscription, not one per pane.** The event belongs to the window, not to an
+element — it carries the position it happened at and nothing else identifying a target. Subscribing
+per pane would mean six listeners each filtering the same stream, so the app shell owns the single
+subscription and routes each event by hit-testing its position against the registered hosts. The
+subscription is disposed on unmount; undisposed it would outlive the app's whole session.
+
+**The position is physical, the box is CSS.** `PhysicalPosition` is in real screen pixels while
+`getBoundingClientRect()` is in CSS pixels, so the two are converted through
+`PhysicalPosition.toLogical(window.devicePixelRatio)` before being compared. Unconverted, the routing
+is silently wrong on every HiDPI display — the class of bug that never appears on the developer's
+machine. Their **origins** need no correction: the app's title bar is drawn inside the webview
+(`decorations: false`) and the shell fills it with no page scroll, so the webview's top-left is the
+viewport's.
+
+**A box is half-open, and that is what protects the hidden panes.** Up to six terminals stay mounted
+in the keep-alive pool with five of them `display: none`. Containment excludes a box's right and
+bottom edges, so a zero-size box — exactly what a `display: none` pane reports — contains no point at
+all, and a drop can only ever reach the pane the user can see. This is the mechanism rather than a
+guard: an explicit "skip empty boxes" test could not be made to fail on its own, so it is not there.
+
+**Nothing is executed.** No newline is appended. Dragging a file is a request to *refer* to it, not a
+decision to run a command with it; auto-submitting a command line the user assembled by accident is
+not recoverable, and the alternative costs them one keystroke. Several files insert as several
+arguments, separated by a single space.
+
+**Quoting is POSIX single-quoting, in one place.** Each path is wrapped in single quotes, inside
+which a shell performs no expansion and honours no escape character — so a space, a newline, a
+backslash, a double quote, `$`, a backtick, a glob and a `;` all survive as literal bytes. The single quote is the one
+character a quoted run cannot contain, and is spelled by closing the run, emitting `\'`, and
+reopening: `'` becomes `'\''`.
+
+**The affordance is a tint and an inset ring, and no label.** While a drag is over the pane it is
+marked, and the mark clears on both `leave` and `drop`. Which pane will receive the drop is the only
+thing in doubt during the drag; the result — a quoted path at the cursor — explains itself the moment
+it lands, and a label would sit over the very output the file is being dropped into. It is
+`pointer-events-none`: the drop is handled by the OS rather than by DOM pointer events, so the
+overlay never needs to receive one and must never take a click meant for the terminal.
+
+**A pane also gives the mark up as it stops being shown**, which is not the same event as the drag
+ending. A pooled pane stays mounted while hidden, so nothing re-runs on the way back to re-derive the
+mark; and a drag it was under can end anywhere — over another window, cancelled, dropped somewhere
+else — with none of those events addressed to a pane that is no longer on screen. Without giving the
+mark up on the way out, the pane comes back marked for a drag that ended long ago. This is the same
+shape as the stale hover readout the link work closed, arrived at independently on the drop side.
+
+**Effect on parity:** adds `plan/02` **C14**. No row regresses.
