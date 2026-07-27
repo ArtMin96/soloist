@@ -1309,3 +1309,97 @@ mark up on the way out, the pane comes back marked for a drag that ended long ag
 shape as the stale hover readout the link work closed, arrived at independently on the drop side.
 
 **Effect on parity:** adds `plan/02` **C14**. No row regresses.
+
+## D-28 — The terminal decorates and counts search matches, clusters graphemes, draws inline images, and honors OSC 52 both ways 🟢
+
+**Introduced:** Phase 4 surface, on the branch that adds the search decorations, unicode and image addons.
+
+**Solo — silent, not contradicted.** `plan/05` records nothing about how Solo's terminal searches
+beyond the existence of a find affordance, and nothing whatever about character widths, inline
+images, or the clipboard escape sequence. There is no documented Solo behavior to match or to differ
+from, so this is a **clean-room addition** rather than a divergence from observed behavior, recorded
+here because `plan/05` §12 owns the decision and the parity walk reads it from this file. Nothing
+below asserts what Solo does.
+
+**The gate everything else hangs off.** `allowProposedApi` defaults to `false` in xterm 6, and it is
+not advisory: reading `terminal.unicode` or calling `registerDecoration` **throws** while it is
+unset. Read from the installed `@xterm/xterm@6.0.0` bundle rather than from memory, and asserted
+through the emulator rather than the option object — a terminal built from the app's options must be
+able to reach those APIs, or the addons silently do nothing. Turning it on widens the surface the app
+depends on; only three gated APIs are used, all long-shipped upstream, and this is the recorded
+decision to accept that.
+
+**Highlight-all and the match counter are one feature, not two.** The search addon's `_fireResults`
+calls `fireResultsChanged(!!searchOptions.decorations)`, and that method returns early on a falsy
+argument — so `onDidChangeResults` never fires for a search that decorates nothing. The find bar was
+never missing a listener; it was missing the option that makes the event exist. This was verified by
+measurement, not inference: with the `decorations` object removed the counter stops updating in every
+case that exercises it.
+
+**Clearing the decorations does not report that the matches are gone.** `clearDecorations` drops the
+highlights and the tracked results without firing the event, so the count is reset explicitly
+alongside it. Without that, closing the find bar and reopening it would show the tally from the
+previous query over an empty input.
+
+**Decorating also arms a debounced re-search that was previously dead.** The addon's `_updateMatches`
+is guarded on the last search having asked for decorations, so before this change it never ran. With
+the find bar open it now re-runs the query 200 ms after the buffer changes, which is what keeps the
+tally honest as a live process writes — the count would otherwise describe output that has since
+scrolled. It is bounded twice over: debounced, and capped by the explicit `highlightLimit`. What it
+costs under a genuinely chatty process is a **real-window question that has not been measured**; it
+cannot be characterized headlessly.
+
+**The active match is told apart by its border, not its fill.** Both washes are deliberately quiet —
+each is the faintest tint that still reads against the terminal surface — because they tint live
+output rather than replacing it. Distinguishing active from inactive by fill alone would mean making
+one of them heavy, or leaning on hue, which a colour-blind reader and a grayscale screenshot both
+lose. So the accent border carries it, clearing its own fill by 3:1 in both themes. The colours reuse
+the app's two existing roles (slate for a found thing, azure for the selected one), which keeps
+saturated colour meaning process status and nothing else. A decoration replaces the cell's background
+*before* the renderer's contrast pass, so `minimumContrastRatio` still governs program colour drawn
+over a match; the fills are nonetheless chosen so the ordinary foreground clears 4.5:1 unaided.
+
+**The overview ruler is given the width the scrollbar already held.** The emulator renders no ruler
+at all until a width is set. The fit calculation subtracts the ruler's width *instead of* the
+scrollbar's — `overviewRuler?.width || 14` in the installed `@xterm/addon-fit@0.11.0` — so setting it
+to exactly 14 leaves the pane's column count, and therefore the PTY winsize, unchanged. Any other
+value would silently reflow every pane. `overviewRulerBorder` is set in both themes because xterm
+leaves it **black** when unset, which on the light surface draws a hard rule down the pane's edge.
+
+**The unicode addon activates itself; the embedder does not.**
+`@xterm/addon-unicode-graphemes@0.4.0` sets `unicode.activeVersion` inside its own `activate()` and
+restores the previous version on `dispose()` — read from its shipped source. The widely-assumed extra
+assignment by the embedder is therefore not written, because it would be dead code duplicating the
+addon's own constant. What is guarded instead is the observable outcome: a ZWJ sequence occupies one
+double-width cell rather than three, which is the failure that shears a TUI's columns.
+
+**The image addon's own limits would not fit the budget.** Its defaults are `storageLimit: 128` MB and
+`pixelLimit: 16777216`, read from the shipped bundle — its typings' prose claims "2^16", which
+contradicts the value the code actually uses and is simply wrong. Both are **per terminal instance**,
+and up to six panes stay mounted in the keep-alive pool, so inherited they would permit far more than
+the app's whole runtime footprint. Ours are `storageLimit: 16` MB and `pixelLimit: 2048 × 2048`.
+**Both are proposals, not measurements.** Confirming them needs `storageUsage` sampled in the nightly
+soak with a full pool and images loaded, which requires a real display and **has not been run** — so
+no figure for actual usage is recorded here. The addon reaches into ten private `_core.*` internals,
+so it is pinned exactly; that those internals still line up with xterm 6.0.0 is confirmed by
+activating the real addon against a real terminal under test rather than assumed, and must be
+re-confirmed on every xterm upgrade.
+
+**Addon loads degrade; they do not throw.** Both heavy addons are fetched with a dynamic `import()`
+so each lands in its own bundle chunk, following the renderer addon's existing shape. A chunk that
+cannot be fetched, or an addon whose activation throws, leaves a terminal without that one capability
+and nothing else — the two are independent, and the pane still renders its output. Their disposers
+run before the emulator's, because both reach back into it as they let go.
+
+**OSC 52 is granted in both directions, deliberately.** The clipboard addon ships with its default
+`BrowserClipboardProvider`, so a program running in a pane can both set the system clipboard and
+**read** it — including something the user copied for an entirely unrelated purpose, such as a
+password. The emulator offers no way to allow writes while refusing reads short of replacing the
+provider outright. This is an **owner decision** (2026-07-27), taken because the panes run commands
+the user configured and trusted and the capability is what makes a remote editor or multiplexer yank
+into the desktop clipboard at all. It is recorded here specifically so a later session does not read
+it as an oversight and quietly narrow it; reversing it is one custom `IClipboardProvider`. This is
+separate from the keyboard copy/paste path of [D-25](#d-25), which acts for the user at the keyboard —
+this acts for the program at the other end of the PTY. Both reach the same system clipboard.
+
+**Effect on parity:** adds `plan/02` **C15**. No row regresses.

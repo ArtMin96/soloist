@@ -72,6 +72,18 @@ const LETTER_SPACING_PX: Record<LetterSpacing, number> = {
 // the core hold the same depth of history — a resync replays the core's buffer into this one.
 export const TERMINAL_SCROLLBACK_LINES = 5000;
 
+// Width of the overview ruler, the strip down the pane's edge that marks where search matches sit
+// in the whole scrollback rather than only in the visible screen. Set to the width the emulator
+// already reserves for its scrollbar: the fit calculation subtracts the ruler width *instead of*
+// the scrollbar's, so matching them leaves the usable column count unchanged.
+export const TERMINAL_OVERVIEW_RULER_WIDTH = 14;
+
+// Ceiling on how many matches the search addon decorates at once. Each match costs a marker and a
+// decoration, and a query is re-run on every keystroke against the full scrollback, so this is the
+// bound that keeps a one-character query over a long buffer from allocating without limit. It is
+// the addon's own default, named here so it is a decision rather than an inherited accident.
+export const TERMINAL_SEARCH_HIGHLIGHT_LIMIT = 1000;
+
 // The terminal follows the same native-family policy as the app shell. SF Mono is used on macOS;
 // the remaining faces are platform fallbacks, not bundled web fonts.
 const DEFAULT_MONO_STACK = '"SF Mono", Menlo, Monaco, ui-monospace, monospace';
@@ -227,6 +239,13 @@ export function terminalOptions(appearance: Appearance, dark: boolean) {
     cursorBlink: t.cursor_blink,
     theme: terminalColors(dark),
     minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+    // Off by default in the emulator, and the gate on three APIs this app depends on: the unicode
+    // tables the grapheme addon registers, the decorations the search addon paints matches with,
+    // and the markers those decorations anchor to. Reading any of them throws while it is unset.
+    allowProposedApi: true,
+    // Gives search-match decorations somewhere to draw outside the visible screen. The ruler is
+    // only rendered once a width is set.
+    overviewRuler: { width: TERMINAL_OVERVIEW_RULER_WIDTH },
     // xterm defaults this to "are we on macOS", so it is off on our only target. Right-clicking a
     // word with nothing selected otherwise opens the context menu over an empty selection, and the
     // menu's whole purpose is to act on one.

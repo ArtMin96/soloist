@@ -5,6 +5,7 @@
 // torn down finds a null and stops, instead of touching a disposed terminal.
 
 import type { RefObject } from "react";
+import { ClipboardAddon } from "@xterm/addon-clipboard";
 import type { IDisposable, Terminal } from "@xterm/xterm";
 import { readClipboard, writeClipboard } from "@/lib/clipboard";
 
@@ -14,6 +15,24 @@ export interface TerminalClipboard {
   copySelection: () => void;
   /** Insert the clipboard through the emulator, so bracketed-paste mode is honored. */
   paste: () => void;
+}
+
+/**
+ * Lets a program running in the pane set and read the system clipboard through the terminal's own
+ * escape sequence, which is how a remote editor or a multiplexer yanks into the desktop clipboard.
+ *
+ * This is the other direction from the entry points below: those act for the user at the keyboard,
+ * this acts for the program at the other end of the PTY. Both reach the same system clipboard.
+ *
+ * The read half is granted deliberately. A supervised program can ask for the clipboard's current
+ * contents and receive them — including something the user copied for an unrelated purpose — and
+ * the emulator offers no way to allow writes while refusing reads short of replacing its clipboard
+ * provider outright. The capability is worth more than the exposure here because the panes run
+ * commands the user configured and trusted, but it is a real widening of what a supervised process
+ * can observe.
+ */
+export function osc52Clipboard(): ClipboardAddon {
+  return new ClipboardAddon();
 }
 
 /**
