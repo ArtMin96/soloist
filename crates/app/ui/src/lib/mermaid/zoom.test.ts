@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MAX_MERMAID_ZOOM, MIN_MERMAID_ZOOM } from "./const";
-import { clampZoom, IDENTITY_TRANSFORM, zoomAround } from "./zoom";
+import { MAX_FIT_ZOOM, MAX_MERMAID_ZOOM, MERMAID_DEFAULT_ZOOM, MIN_MERMAID_ZOOM } from "./const";
+import { clampZoom, fitScale, IDENTITY_TRANSFORM, zoomAround } from "./zoom";
 
 describe("clampZoom", () => {
   it("holds a scale inside the range unchanged", () => {
@@ -10,6 +10,33 @@ describe("clampZoom", () => {
   it("clamps to the bounds past either end", () => {
     expect(clampZoom(MAX_MERMAID_ZOOM * 10)).toBe(MAX_MERMAID_ZOOM);
     expect(clampZoom(MIN_MERMAID_ZOOM / 10)).toBe(MIN_MERMAID_ZOOM);
+  });
+});
+
+describe("fitScale", () => {
+  it("shrinks a diagram larger than the pane until it fits", () => {
+    // Height is the tighter axis here, so it is the one that decides.
+    expect(fitScale(1206, 1949, 661, 832)).toBeCloseTo(832 / 1949);
+  });
+
+  it("enlarges a diagram smaller than the pane instead of leaving it marooned", () => {
+    expect(fitScale(150, 180, 661, 832)).toBeGreaterThan(1);
+  });
+
+  it("never enlarges past the ceiling, however much room there is", () => {
+    expect(fitScale(10, 10, 4000, 4000)).toBe(MAX_FIT_ZOOM);
+  });
+
+  it("fills the axis that runs out first, never overflowing the other", () => {
+    const scale = fitScale(400, 100, 800, 800);
+    expect(400 * scale).toBeLessThanOrEqual(800);
+    expect(100 * scale).toBeLessThanOrEqual(800);
+    expect(scale).toBeCloseTo(2);
+  });
+
+  it("stays at the unzoomed scale when a dimension has not been measured", () => {
+    expect(fitScale(0, 0, 800, 600)).toBe(MERMAID_DEFAULT_ZOOM);
+    expect(fitScale(400, 300, 0, 0)).toBe(MERMAID_DEFAULT_ZOOM);
   });
 });
 

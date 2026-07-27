@@ -1,9 +1,9 @@
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { Check, CircleCheck, TriangleAlert } from "lucide-react";
 import { DiagramCanvas } from "@/components/mermaid/DiagramCanvas";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MERMAID_RENDER_DEBOUNCE_MS } from "@/lib/mermaid";
+import { useDebouncedPreview } from "@/lib/mermaid";
 import { cn } from "@/lib/utils";
 
 interface DiagramBodyProps {
@@ -27,14 +27,10 @@ interface DiagramBodyProps {
 // once; the persisted value is never pushed back, so the caret never jumps.
 export function DiagramBody({ source, onChange, saving, dirty, onFlush }: DiagramBodyProps) {
   // The preview renders a debounced copy of the draft, so a burst of keystrokes coalesces into one
-  // re-render rather than re-parsing on every character.
-  const [previewSource, setPreviewSource] = useState(source);
+  // re-render rather than re-parsing on every character. Only edits made here wait — a theme picked in
+  // the header rewrites the source and previews at once.
+  const [previewSource, onEdit] = useDebouncedPreview(source, onChange);
   const [valid, setValid] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    const id = setTimeout(() => setPreviewSource(source), MERMAID_RENDER_DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [source]);
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
@@ -50,7 +46,7 @@ export function DiagramBody({ source, onChange, saving, dirty, onFlush }: Diagra
       <div className="flex min-h-0 flex-1 flex-col gap-2 @2xl/diagram:flex-row">
         <Textarea
           value={source}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => onEdit(event.target.value)}
           onKeyDown={onKeyDown}
           onBlur={onFlush}
           spellCheck={false}

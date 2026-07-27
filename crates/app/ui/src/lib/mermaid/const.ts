@@ -37,6 +37,20 @@ export const MAX_MERMAID_ZOOM = 4;
 /** Fraction a single zoom-in/out step (a wheel notch or a button press) changes the scale by. */
 export const MERMAID_ZOOM_STEP = 0.15;
 
+/**
+ * The largest scale fit-to-view may enlarge a diagram to. A fit that could only ever shrink leaves a
+ * small diagram marooned in the middle of a large pane; enlarging without a ceiling turns a two-node
+ * flowchart into a wall of pixels on a wide monitor. Two is the compromise.
+ */
+export const MAX_FIT_ZOOM = 2;
+
+/**
+ * How many rendered diagrams are held for reuse. Each entry is one SVG string keyed by palette and
+ * source, so this bounds the memory a long editing session can accumulate. Deep enough to cover
+ * stepping through a handful of diagrams and every theme of the open one.
+ */
+export const MERMAID_RENDER_CACHE_SIZE = 12;
+
 /** Supersampling factor when rasterizing an SVG to PNG, so the exported bitmap is not soft. */
 export const MERMAID_PNG_SCALE = 2;
 
@@ -63,6 +77,9 @@ export const MERMAID_THEME_TOKENS: Record<string, string> = {
   edgeLabelBackground: "--muted",
   actorBorder: "--primary",
   actorBkg: "--accent",
-  noteBkg: "--muted",
-  noteBorder: "--border",
+  // Note colours carry the `Color` suffix in Mermaid's vocabulary; the unsuffixed spellings are not
+  // theme variables at all, and a note falls back to Mermaid's yellow-on-grey sticky if they are used.
+  noteBkgColor: "--muted",
+  noteBorderColor: "--border",
+  noteTextColor: "--foreground",
 };

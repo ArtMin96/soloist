@@ -14,12 +14,15 @@ export {
   MIN_MERMAID_ZOOM,
   MAX_MERMAID_ZOOM,
   MERMAID_ZOOM_STEP,
+  MAX_FIT_ZOOM,
   MERMAID_PNG_SCALE,
 } from "./const";
 export { renderDiagram, parseDiagram, type RenderResult, type ParseResult } from "./engine";
 export { isDarkTheme, themeSignature, mermaidThemeConfig, type MermaidThemeConfig } from "./theme";
 export { useMermaidTheme } from "./useMermaidTheme";
-export { clampZoom, zoomAround, IDENTITY_TRANSFORM, type Transform } from "./zoom";
+export { useDebouncedPreview } from "./useDebouncedPreview";
+export { useDiagramRender, type DiagramRender } from "./useDiagramRender";
+export { clampZoom, fitScale, zoomAround, IDENTITY_TRANSFORM, type Transform } from "./zoom";
 export {
   readDiagramTheme,
   setDiagramTheme,

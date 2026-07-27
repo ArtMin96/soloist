@@ -2,7 +2,7 @@
 // clamping and zoom-to-cursor arithmetic can be unit-tested without a DOM; the canvas component owns
 // only the pointer/wheel wiring and reads its transform from here.
 
-import { MAX_MERMAID_ZOOM, MERMAID_DEFAULT_ZOOM, MIN_MERMAID_ZOOM } from "./const";
+import { MAX_FIT_ZOOM, MAX_MERMAID_ZOOM, MERMAID_DEFAULT_ZOOM, MIN_MERMAID_ZOOM } from "./const";
 
 /** A 2-D affine view: a uniform `scale` about the origin, then a `x`/`y` translation, in px. */
 export interface Transform {
@@ -17,6 +17,25 @@ export const IDENTITY_TRANSFORM: Transform = { scale: MERMAID_DEFAULT_ZOOM, x: 0
 /** Constrain a scale to the allowed zoom range, so no gesture can drive it past the bounds. */
 export function clampZoom(scale: number): number {
   return Math.min(MAX_MERMAID_ZOOM, Math.max(MIN_MERMAID_ZOOM, scale));
+}
+
+/**
+ * The scale that shows a `contentW` x `contentH` diagram inside an `availW` x `availH` area: whichever
+ * axis runs out first decides, and a diagram smaller than the area is enlarged to fill it — up to
+ * {@link MAX_FIT_ZOOM}, so a two-node flowchart on a wide monitor does not become a wall of pixels.
+ * Degenerate inputs (a zero dimension, an unmeasured element) yield the unzoomed scale rather than an
+ * infinity or a NaN.
+ */
+export function fitScale(
+  contentW: number,
+  contentH: number,
+  availW: number,
+  availH: number,
+): number {
+  if (!(contentW > 0) || !(contentH > 0) || !(availW > 0) || !(availH > 0)) {
+    return MERMAID_DEFAULT_ZOOM;
+  }
+  return clampZoom(Math.min(availW / contentW, availH / contentH, MAX_FIT_ZOOM));
 }
 
 /**
