@@ -132,9 +132,12 @@ export function useProcessActivationNavigation(
 
   const projectStopped = useCallback(
     (projectId: number) => {
-      const stoppedIds = processesRef.current
-        .filter((process) => process.project === projectId && isActive(process.status))
-        .map((process) => process.id);
+      const stoppedIds: number[] = [];
+      for (const process of processesRef.current) {
+        if (process.project === projectId && isActive(process.status)) {
+          stoppedIds.push(process.id);
+        }
+      }
       navigateAfterLifecycle(stoppedIds);
     },
     [navigateAfterLifecycle, processesRef],
