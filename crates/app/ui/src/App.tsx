@@ -1,5 +1,15 @@
-import { lazy, Suspense, useCallback, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
 import { DeferredOverlay } from "@/components/DeferredOverlay";
+import {
+  CommandPalette,
+  LaunchPicker,
+  OrchestrationPane,
+  ProjectSettingsPane,
+  QuickActionsPalette,
+  QuickJumpPalette,
+  SettingsOverlay,
+  TerminalPane,
+} from "@/components/deferredAppComponents";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { OrphanDialog } from "@/components/OrphanDialog";
 import { RemoveProcessDialog } from "@/components/RemoveProcessDialog";
@@ -18,45 +28,13 @@ import { useOrphans } from "@/store/useOrphans";
 import { liveWorkerCount, useLineage } from "@/store/useLineage";
 import { useProcesses } from "@/store/useProcesses";
 import { useProcessRemoval } from "@/store/useProcessRemoval";
+import { useProcessActivationNavigation } from "@/store/useProcessActivationNavigation";
 import { TERMINAL_POOL_CAP, useTerminalPool } from "@/store/useTerminalPool";
 import { useProjects } from "@/store/projects";
 import { SignalsProvider } from "@/store/SignalsProvider";
 import { useTrust } from "@/store/useTrust";
 import { useWindowActive } from "@/store/useWindowActive";
 import type { HotkeyAction, ProcessView } from "@/domain";
-
-// The main-area panes and the overlays are code-split: each loads its own chunk the first time it
-// is shown, keeping the heaviest dependencies (the xterm.js emulator behind the terminal, cmdk and
-// the settings primitives behind the palettes) out of the initial bundle. The shell — sidebar,
-// titlebar, empty state, and the safety-critical trust/orphan dialogs — stays eager.
-const TerminalPane = lazy(() =>
-  import("@/components/terminal/TerminalPane").then((m) => ({ default: m.TerminalPane })),
-);
-const ProjectSettingsPane = lazy(() =>
-  import("@/components/project-settings/ProjectSettingsPane").then((m) => ({
-    default: m.ProjectSettingsPane,
-  })),
-);
-const OrchestrationPane = lazy(() =>
-  import("@/components/orchestration/OrchestrationPane").then((m) => ({
-    default: m.OrchestrationPane,
-  })),
-);
-const SettingsOverlay = lazy(() =>
-  import("@/components/settings/SettingsOverlay").then((m) => ({ default: m.SettingsOverlay })),
-);
-const LaunchPicker = lazy(() =>
-  import("@/components/LaunchPicker").then((m) => ({ default: m.LaunchPicker })),
-);
-const QuickJumpPalette = lazy(() =>
-  import("@/components/QuickJumpPalette").then((m) => ({ default: m.QuickJumpPalette })),
-);
-const QuickActionsPalette = lazy(() =>
-  import("@/components/QuickActionsPalette").then((m) => ({ default: m.QuickActionsPalette })),
-);
-const CommandPalette = lazy(() =>
-  import("@/components/CommandPalette").then((m) => ({ default: m.CommandPalette })),
-);
 
 // Binds the live keymap to the app's actions; rendered inside HotkeysProvider so it reads the
 // keymap the settings panel edits. Returns nothing — it only installs the global key listener.
@@ -73,12 +51,12 @@ export default function App() {
   const info = useAppInfo();
   const store = useProcesses();
   const removal = useProcessRemoval(store.processes, store.close);
+  const { pending: pendingRemoval, request: requestRemoval, confirm: confirmRemoval } = removal;
   const lineage = useLineage();
   const projects = useProjects(store.reportError);
   const trust = useTrust(store.refresh, store.reportError);
   const orphans = useOrphans(store.reportError);
   const agents = useAgents(store.reportError);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [orchestrationProjectId, setOrchestrationProjectId] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -86,6 +64,31 @@ export default function App() {
   const [quickJumpOpen, setQuickJumpOpen] = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const { stop, stopAll } = store;
+
+  const clearAlternativeView = useCallback(() => {
+    setSelectedProjectId(null);
+    setOrchestrationProjectId(null);
+  }, []);
+  const {
+    selectedId,
+    selectProcess,
+    deselectProcess,
+    openStart,
+    getSelectedId,
+    processStopped,
+    startProcess,
+    restartProcess,
+    resumeProcess,
+    projectStopped,
+    removalRequested,
+    processRemoved,
+  } = useProcessActivationNavigation(store.processes, {
+    onClearAlternativeView: clearAlternativeView,
+    onStart: store.start,
+    onRestart: store.restart,
+    onResume: store.resume,
+  });
 
   const selected = store.processes.find((process) => process.id === selectedId) ?? null;
   const selectedProject = projects.projects.find((p) => p.id === selectedProjectId) ?? null;
@@ -96,29 +99,53 @@ export default function App() {
   // has a terminal open, or the settings / orchestration pane open.
   const activeProjectId = selected?.project ?? selectedProjectId ?? orchestrationProjectId ?? null;
 
-  // The main pane shows one of: a process terminal, a project's settings, its orchestration tree,
-  // or the empty state. The three selections are mutually exclusive, so opening one clears the
-  // others and exactly one view is active.
-  const selectProcess = useCallback((id: number) => {
-    setSelectedId(id);
-    setSelectedProjectId(null);
-    setOrchestrationProjectId(null);
-  }, []);
-  const openProjectSettings = useCallback((projectId: number) => {
-    setSelectedProjectId(projectId);
-    setSelectedId(null);
-    setOrchestrationProjectId(null);
-  }, []);
-  const openOrchestration = useCallback((projectId: number) => {
-    setOrchestrationProjectId(projectId);
-    setSelectedId(null);
-    setSelectedProjectId(null);
-  }, []);
-  const openStart = useCallback(() => {
-    setSelectedId(null);
-    setSelectedProjectId(null);
-    setOrchestrationProjectId(null);
-  }, []);
+  // Project views deselect the process without erasing its MRU lifecycle history.
+  const openProjectSettings = useCallback(
+    (projectId: number) => {
+      deselectProcess();
+      setSelectedProjectId(projectId);
+      setOrchestrationProjectId(null);
+    },
+    [deselectProcess],
+  );
+  const openOrchestration = useCallback(
+    (projectId: number) => {
+      deselectProcess();
+      setOrchestrationProjectId(projectId);
+      setSelectedProjectId(null);
+    },
+    [deselectProcess],
+  );
+
+  const stopProcess = useCallback(
+    (id: number) => {
+      stop(id);
+      processStopped(id);
+    },
+    [stop, processStopped],
+  );
+
+  const stopProject = useCallback(
+    (projectId: number) => {
+      stopAll(projectId);
+      projectStopped(projectId);
+    },
+    [stopAll, projectStopped],
+  );
+
+  const requestProcessRemoval = useCallback(
+    (id: number) => {
+      requestRemoval(id);
+      removalRequested(id);
+    },
+    [requestRemoval, removalRequested],
+  );
+
+  const confirmProcessRemoval = useCallback(() => {
+    const id = pendingRemoval?.id ?? null;
+    confirmRemoval();
+    if (id !== null) processRemoved(id);
+  }, [pendingRemoval, confirmRemoval, processRemoved]);
 
   // Review a command by id: the row/header carries the project and name, and the review
   // shows what trusting it would run — the row itself shows only a name the solo.yml chose.
@@ -137,27 +164,22 @@ export default function App() {
     setPickerOpen(true);
   }, [reloadAgents]);
 
-  // Stable ref so the hotkey closure always sees the latest selection without re-creating
-  // the handlers object (and re-binding the global listener) on every process click.
-  const selectedIdRef = useRef(selectedId);
-  selectedIdRef.current = selectedId;
-
   // The keyboard-first paths run through the remappable keymap (the Hotkeys settings tab): a
   // pressed General chord dispatches its action's handler here. Wiring a new action is one
   // more entry; an action with no handler yet is simply inert.
-  const { stop } = store;
   const hotkeyHandlers = useMemo<Partial<Record<HotkeyAction, () => void>>>(
     () => ({
       open_command_palette: () => setCommandPaletteOpen(true),
       new_agent_or_terminal: openPicker,
       open_settings: () => setSettingsOpen(true),
       close_agent_or_terminal: () => {
-        if (selectedIdRef.current !== null) stop(selectedIdRef.current);
+        const id = getSelectedId();
+        if (id !== null) stopProcess(id);
       },
       quick_jump: () => setQuickJumpOpen(true),
       quick_actions: () => setQuickActionsOpen(true),
     }),
-    [openPicker, stop],
+    [getSelectedId, openPicker, stopProcess],
   );
 
   // Launch an agent and focus its new terminal, so the user lands on the running agent.
@@ -215,15 +237,15 @@ export default function App() {
                     lineage={lineage}
                     selectedId={selectedId}
                     onSelect={selectProcess}
-                    onStart={store.start}
-                    onStop={store.stop}
-                    onRestart={store.restart}
-                    onResume={store.resume}
+                    onStart={startProcess}
+                    onStop={stopProcess}
+                    onRestart={restartProcess}
+                    onResume={resumeProcess}
                     onTrust={reviewById}
-                    onRemove={removal.request}
+                    onRemove={requestProcessRemoval}
                     onStartAll={store.startAll}
                     onRestartRunning={store.restartRunning}
-                    onStopAll={store.stopAll}
+                    onStopAll={stopProject}
                     onOpenStart={openStart}
                     startActive={!selected && !selectedProject && !orchestrationProject}
                     onOpenSettings={() => setSettingsOpen(true)}
@@ -244,12 +266,12 @@ export default function App() {
                           visible={process.id === selectedId}
                           processes={store.processes}
                           onSelectProcess={selectProcess}
-                          onStart={() => store.start(process.id)}
-                          onStop={() => store.stop(process.id)}
-                          onRestart={() => store.restart(process.id)}
-                          onResume={() => store.resume(process.id)}
+                          onStart={() => startProcess(process.id)}
+                          onStop={() => stopProcess(process.id)}
+                          onRestart={() => restartProcess(process.id)}
+                          onResume={() => resumeProcess(process.id)}
                           onTrust={() => reviewById(process.id)}
-                          onRemove={() => removal.request(process.id)}
+                          onRemove={() => requestProcessRemoval(process.id)}
                         />
                       ))}
                       {!selected &&
@@ -286,13 +308,13 @@ export default function App() {
                   onDismiss={trust.dismiss}
                 />
                 <RemoveProcessDialog
-                  process={removal.pending}
+                  process={pendingRemoval}
                   workers={
-                    removal.pending
-                      ? liveWorkerCount(lineage, store.processes, removal.pending.id)
+                    pendingRemoval
+                      ? liveWorkerCount(lineage, store.processes, pendingRemoval.id)
                       : 0
                   }
-                  onConfirm={removal.confirm}
+                  onConfirm={confirmProcessRemoval}
                   onDismiss={removal.dismiss}
                 />
                 <DeferredOverlay open={pickerOpen}>
@@ -329,12 +351,12 @@ export default function App() {
                     processes={store.processes}
                     projects={projects.projects}
                     activeProjectId={activeProjectId}
-                    onStart={store.start}
-                    onStop={store.stop}
-                    onRestart={store.restart}
-                    onResume={store.resume}
+                    onStart={startProcess}
+                    onStop={stopProcess}
+                    onRestart={restartProcess}
+                    onResume={resumeProcess}
                     onTrust={trust.requestReview}
-                    onRemove={removal.request}
+                    onRemove={requestProcessRemoval}
                   />
                 </DeferredOverlay>
                 <DeferredOverlay open={commandPaletteOpen}>
@@ -350,15 +372,15 @@ export default function App() {
                     openProjectSettings={openProjectSettings}
                     openOrchestration={openOrchestration}
                     startAll={store.startAll}
-                    stopAll={store.stopAll}
+                    stopAll={stopProject}
                     restartRunning={store.restartRunning}
                     process={{
                       onTrust: trust.requestReview,
-                      onResume: store.resume,
-                      onStart: store.start,
-                      onStop: store.stop,
-                      onRestart: store.restart,
-                      onRemove: removal.request,
+                      onResume: resumeProcess,
+                      onStart: startProcess,
+                      onStop: stopProcess,
+                      onRestart: restartProcess,
+                      onRemove: requestProcessRemoval,
                     }}
                   />
                 </DeferredOverlay>
