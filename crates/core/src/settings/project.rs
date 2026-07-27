@@ -1,7 +1,8 @@
 //! Per-project local settings — a per-project surface over the one settings base. The durable
 //! preference record for a single project: its auto-start gate, editor override, notification
-//! toggles, and per-command alert overrides. These are **app-local** preferences, stored apart from
-//! the project's shared `solo.yml` config (C1, [`Visibility::Shared`](crate::projects::Visibility)) and never
+//! toggles, per-command alert overrides, and default templates. These are **app-local**
+//! preferences, stored apart from the project's shared `solo.yml` config (C1,
+//! [`Visibility::Shared`](crate::projects::Visibility)) and never
 //! written to it. The same [`SettingsStore`](crate::settings::SettingsStore) base serves this
 //! surface with `K = ProjectId`, so adding a field stays one `#[serde(default)]` field plus one
 //! façade getter/setter — never a new store.
@@ -11,7 +12,7 @@ use std::collections::BTreeMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use super::ToolDefaults;
+use super::{TemplateDefaults, ToolDefaults};
 use crate::config::ProcessSpec;
 
 /// The per-project local settings document. Every field carries a serde default so a record an
@@ -47,6 +48,9 @@ pub struct ProjectSettings {
     /// order. The "Make local" / "Save to solo.yml" move transfers a command between this overlay
     /// and the shared config; the two stores never hold the same command at once after a move.
     pub local_commands: IndexMap<String, ProcessSpec>,
+    /// The template a new empty document of each seedable kind starts from, selected from **this
+    /// project's** template library. Nothing selected (the default) seeds an empty document.
+    pub template_defaults: TemplateDefaults,
 }
 
 impl Default for ProjectSettings {
@@ -59,6 +63,7 @@ impl Default for ProjectSettings {
             terminal_alerts: true,
             command_terminal_alerts: BTreeMap::new(),
             local_commands: IndexMap::new(),
+            template_defaults: TemplateDefaults::default(),
         }
     }
 }

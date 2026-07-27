@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use soloist_core::{
     Appearance, Binding, Facade, HotkeyAction, HotkeyBindingView, Integrations, McpFeatureGroup,
-    McpToolGroups, Notifications, Sidebar, TemplateDefaults, TemplateId, TemplateKind,
+    McpToolGroups, Notifications, ProjectId, Sidebar, TemplateDefaults, TemplateId, TemplateKind,
     ToolDefaults,
 };
 use tauri::State;
@@ -211,26 +211,30 @@ pub async fn set_mcp_tool_group(
         .map_err(|err| err.to_string())
 }
 
-/// The default-template selection per kind — which template each free-form kind seeds a new
-/// document from (global-only in v1). Absent settings read as none selected.
+/// One project's default-template selection per kind — which of that project's templates each
+/// free-form kind seeds a new document from. Absent settings read as none selected.
 #[tauri::command]
-pub async fn template_defaults(facade: State<'_, Arc<Facade>>) -> Result<TemplateDefaults, String> {
+pub async fn template_defaults(
+    project: ProjectId,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<TemplateDefaults, String> {
     facade
-        .blocking(|f| f.template_defaults())
+        .blocking(move |f| f.template_defaults(project))
         .await
         .map_err(|err| err.to_string())
 }
 
-/// Selects (or clears, with a null `template`) the default template for `kind` (auto-save),
-/// returning the updated selection. `Prompt` has no seed default and is a no-op.
+/// Selects (or clears, with a null `template`) `project`'s default template for `kind`
+/// (auto-save), returning the updated selection. `Prompt` has no seed default and is a no-op.
 #[tauri::command]
 pub async fn set_default_template(
     kind: TemplateKind,
+    project: ProjectId,
     template: Option<TemplateId>,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<TemplateDefaults, String> {
     facade
-        .blocking(move |f| f.set_default_template(kind, template))
+        .blocking(move |f| f.set_default_template(kind, project, template))
         .await
         .map_err(|err| err.to_string())
 }

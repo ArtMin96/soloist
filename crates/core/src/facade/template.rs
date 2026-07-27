@@ -12,8 +12,8 @@
 //!   that actually moved.
 //! - **Seeding** ([`seed_body`](Facade::seed_body)) is the one core path both the local UI and MCP
 //!   create paths route through, so no adapter grows a domain `if`. The default selection is read per
-//!   call from settings (never cached alongside the template list, so a changed default takes effect
-//!   at once); the template body is resolved off the aggregate's in-memory cache.
+//!   call from the creating project's settings (never cached alongside the template list, so a changed
+//!   default takes effect at once); the template body is resolved off the aggregate's in-memory cache.
 
 use super::Facade;
 use crate::coordination::{
@@ -99,10 +99,11 @@ impl Facade {
     }
 
     /// Removes the template `name` of `kind` from `project`'s scope, returning whether one existed.
-    /// A deleted template can no longer be a default, so a selection pointing at it is cleared here
-    /// — the seeding read already falls back to an empty body for a stale id, but the settings
-    /// surface should reflect the removal at once rather than dangle. Announces the change on
-    /// removal.
+    /// A deleted template can no longer be a default, so that project's selection pointing at it is
+    /// cleared here — the seeding read already falls back to an empty body for a stale id, but the
+    /// settings surface should reflect the removal at once rather than dangle. A default is always
+    /// one of the project's own templates, so a global delete has no selection to clear. Announces
+    /// the change on removal.
     pub fn template_delete(
         &self,
         kind: TemplateKind,
@@ -116,9 +117,9 @@ impl Facade {
             .map(|view| view.id);
         let removed = self.templates.delete(kind, project, name)?;
         if removed {
-            if let Some(id) = doomed {
-                if self.template_defaults()?.get(kind) == Some(id) {
-                    self.set_default_template(kind, None)?;
+            if let (Some(project), Some(id)) = (project, doomed) {
+                if self.template_defaults(project)?.get(kind) == Some(id) {
+                    self.set_default_template(kind, project, None)?;
                 }
             }
             self.bus
@@ -142,30 +143,50 @@ impl Facade {
         self.templates.render(project, request)
     }
 
-    /// The body a new document of `kind` should be created with: the caller's `body` when it has
-    /// content, otherwise the selected default template's body (global scope), or the empty body
-    /// when no default is set or it no longer exists (a blank document is valid). `Seeded::from`
-    /// names the seeding template so a create response can report it.
+    /// The body a new document of `kind` should be created with in `project`: the caller's `body`
+    /// when it has content, otherwise the body of `project`'s selected default template, or the
+    /// empty body when it has selected no default or the selection no longer exists (a blank
+    /// document is valid). `Seeded::from` names the seeding template so a create response can
+    /// report it.
     pub(crate) fn seed_body(
         &self,
         kind: TemplateKind,
+        project: ProjectId,
         body: String,
     ) -> Result<Seeded, CoordinationError> {
         if !body.trim().is_empty() {
             return Ok(Seeded { body, from: None });
         }
-        let Some(default) = self.template_defaults()?.get(kind) else {
-            return Ok(Seeded { body, from: None });
-        };
-        // Defaults are global-only in v1; resolve the selected id off the global cache. A stale id
-        // (its template was deleted) resolves to nothing and falls back to the empty body.
-        match self.templates.resolve(kind, None, default)? {
+        match self.seed_template(kind, project)? {
             Some(template) => Ok(Seeded {
                 body: template.body,
                 from: Some(template.name),
             }),
             None => Ok(Seeded { body, from: None }),
         }
+    }
+
+    /// The template a new empty document of `kind` would be seeded from in `project` — that
+    /// project's selected default, resolved to its current content — or `None` when it has selected
+    /// no default or the selection no longer exists (a create then starts from an empty body, which
+    /// is valid).
+    ///
+    /// The one resolution both the seeding path above and the session-scoped
+    /// [`seed_template`](crate::ScopedFacade::seed_template) peek read, so a caller shown a shape is
+    /// shown the shape a create would actually apply, and a change to how the default is chosen
+    /// moves both at once.
+    pub(crate) fn seed_template(
+        &self,
+        kind: TemplateKind,
+        project: ProjectId,
+    ) -> Result<Option<TemplateView>, CoordinationError> {
+        let Some(default) = self.template_defaults(project)?.get(kind) else {
+            return Ok(None);
+        };
+        // The selection names one of the project's own templates, so it resolves in that library
+        // and nowhere else: a global template never seeds, and a stale id (its template was
+        // deleted) resolves to nothing.
+        Ok(self.templates.resolve(kind, Some(project), default)?)
     }
 }
 

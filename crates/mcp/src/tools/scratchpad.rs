@@ -10,7 +10,7 @@
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
-use soloist_core::{is_link, ProjectId};
+use soloist_core::{is_link, ProjectId, TemplateKind};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
@@ -84,6 +84,13 @@ impl SoloistMcp {
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }
+    }
+
+    #[tool(
+        description = "Read the template a new scratchpad is seeded from — the shape the user expects scratchpads to follow. Read it before writing so your content matches, since seeding only fills a create you leave empty: a scratchpad you write with real content keeps that shape only if you follow it yourself. Returns null when no default scratchpad template is selected. Read-only — templates are authored by the user in Settings."
+    )]
+    pub(crate) async fn scratchpad_template(&self) -> Result<CallToolResult, ErrorData> {
+        self.seed_template(TemplateKind::Scratchpad).await
     }
 
     #[tool(

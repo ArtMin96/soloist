@@ -26,9 +26,9 @@ interface TemplateKindSectionProps {
 }
 
 // One kind's group in the template manager: its explanation, an optional default-template selector
-// (seedable kinds only), and one list per scope — the global library and, while a project is open,
-// that project's. Pure presentation; grouping, the default, and every write live in the panel and the
-// core.
+// (seedable kinds only, replaced by a line naming what a selection needs while no project is open),
+// and one list per scope — the global library and, while a project is open, that project's. Pure
+// presentation; grouping, the default, and every write live in the panel and the core.
 export function TemplateKindSection({
   kind,
   templates,
@@ -38,29 +38,41 @@ export function TemplateKindSection({
   onDuplicate,
   onNew,
 }: TemplateKindSectionProps) {
-  // A seed default is global-only, so it is chosen from — and only offered alongside — the global
-  // library. A default that points at a since-deleted template resolves to nothing; show it as unset
-  // rather than a dangling value the select can't render.
+  // A seed default belongs to the project it seeds in, so it is chosen from — and only offered
+  // alongside — that project's own library. A default that points at a template outside it (since
+  // deleted, or global) resolves to nothing; show it as unset rather than a dangling value the
+  // select can't render.
   const selected =
-    seedDefault && templates.global.some((template) => template.id === seedDefault.id)
+    seedDefault && templates.project.some((template) => template.id === seedDefault.id)
       ? String(seedDefault.id)
       : null;
+
+  // The project scope is listed exactly while a project is open, and a default is chosen from that
+  // scope — so the same condition decides whether the selection can be made at all. With none open,
+  // say why rather than leaving the row's absence to be read as a missing setting.
+  const projectOpen = scopes.includes("project");
 
   return (
     <SettingsSection
       title={TEMPLATE_KIND_LABEL[kind]}
       description={TEMPLATE_KIND_DESCRIPTION[kind]}
     >
-      {seedDefault && templates.global.length > 0 && (
+      {seedDefault && !projectOpen && (
+        <p className="py-3 text-xs text-muted-foreground">
+          Open a project to choose its default template.
+        </p>
+      )}
+
+      {seedDefault && templates.project.length > 0 && (
         <SettingRow
           label="Default template"
-          description="New documents created empty are seeded from this template. Global templates only."
+          description="New documents created empty are seeded from this template. This project's templates only."
         >
           <NullableSelect
             value={selected}
             options={[
               { value: null, label: "None" },
-              ...templates.global.map((template) => ({
+              ...templates.project.map((template) => ({
                 value: String(template.id),
                 label: template.name,
               })),

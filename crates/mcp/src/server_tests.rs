@@ -128,6 +128,7 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "scratchpad_list",
     "scratchpad_read",
     "scratchpad_write",
+    "scratchpad_template",
     "scratchpad_rename",
     "scratchpad_add_tags",
     "scratchpad_remove_tags",
@@ -149,6 +150,7 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "todo_list",
     "todo_get",
     "todo_create",
+    "todo_template",
     "todo_update",
     "todo_complete",
     "todo_delete",
@@ -462,6 +464,28 @@ fn disabling_a_feature_group_hides_only_its_tools() {
         "another feature group is unaffected"
     );
     assert!(served.contains("whoami"), "core tools stay regardless");
+}
+
+/// Each seed-template peek is served only where the create it describes is served. The peek exists
+/// so a caller can follow the shape a create would apply, so it belongs to that kind's group and
+/// must never outlive it — turning a kind off leaves no way to read its template.
+#[test]
+fn a_seed_template_peek_is_gated_with_its_own_kind() {
+    let without_scratchpads = served_tools(&handler_with_groups(McpToolGroups {
+        scratchpads: false,
+        todos: true,
+        ..McpToolGroups::default()
+    }));
+    assert!(!without_scratchpads.contains("scratchpad_template"));
+    assert!(without_scratchpads.contains("todo_template"));
+
+    let without_todos = served_tools(&handler_with_groups(McpToolGroups {
+        scratchpads: true,
+        todos: false,
+        ..McpToolGroups::default()
+    }));
+    assert!(without_todos.contains("scratchpad_template"));
+    assert!(!without_todos.contains("todo_template"));
 }
 
 #[tokio::test]

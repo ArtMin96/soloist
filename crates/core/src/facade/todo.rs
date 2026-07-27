@@ -72,7 +72,7 @@ impl Facade {
         scratchpad: Option<ScratchpadId>,
     ) -> Result<TodoCreation, CoordinationError> {
         self.guard_scratchpad(project, scratchpad)?;
-        let Seeded { body, from } = self.seed_body(TemplateKind::Todo, doc.body)?;
+        let Seeded { body, from } = self.seed_body(TemplateKind::Todo, project, doc.body)?;
         doc.body = body;
         let view = self.emit_todo(
             project,

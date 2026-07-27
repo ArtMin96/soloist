@@ -30,7 +30,7 @@ const NO_DEFAULTS: TemplateDefaults = { scratchpad: null, todo: null };
 export interface TemplatesStore {
   /** Every template grouped by kind and scope, refreshed live on `TemplateChanged`. */
   lists: TemplateLists;
-  /** The selected default template per seedable kind (global-only). */
+  /** The open project's selected default template per seedable kind; none while no project is open. */
   defaults: TemplateDefaults;
   /** A load or default-selection failure, or null. */
   error: string | null;
@@ -46,16 +46,17 @@ export interface TemplatesStore {
   remove: (kind: TemplateKind, scope: TemplateScope, name: string) => Promise<void>;
   /** Copy a template within its scope under a free `<name> copy` handle; rejects on failure. */
   duplicate: (kind: TemplateKind, scope: TemplateScope, name: string) => Promise<void>;
-  /** Select (or clear, with null) the default template for a seedable kind — optimistic, reconciled. */
+  /** Select (or clear, with null) the open project's default for a seedable kind — optimistic, reconciled. */
   setDefault: (kind: TemplateKind, id: number | null) => void;
 }
 
 // The Settings template-manager read model: both template libraries — the global one and the open
-// project's — grouped by kind and scope, plus the default selection. Loads every (kind, scope) once,
-// then re-reads the one a `TemplateChanged` names, and the defaults, which a delete may have cleared
-// in core. A change in some *other* project is ignored: it belongs to a library this panel is not
-// showing. Holds no business logic; kind grouping, name uniqueness, and clearing a deleted default
-// all live in the core, and this projects the result and routes writes to the one façade.
+// project's — grouped by kind and scope, plus that project's default selection. Loads every
+// (kind, scope) once, then re-reads the one a `TemplateChanged` names, and the defaults, which a
+// delete may have cleared in core. A change in some *other* project is ignored: it belongs to a
+// library this panel is not showing. Holds no business logic; kind grouping, name uniqueness, and
+// clearing a deleted default all live in the core, and this projects the result and routes writes to
+// the one façade.
 export function useTemplates(project: number | null): TemplatesStore {
   const [lists, setLists] = useState<TemplateLists>(EMPTY_LISTS);
   const [defaults, setDefaults] = useState<TemplateDefaults>(NO_DEFAULTS);
@@ -85,9 +86,15 @@ export function useTemplates(project: number | null): TemplatesStore {
     [fail, idOf, project],
   );
 
+  // A default belongs to a project, so with none open there is nothing to read — and asking anyway
+  // would fail the call and report a load error over a panel that is simply projectless.
   const loadDefaults = useCallback(() => {
-    templateDefaults().then(setDefaults).catch(fail);
-  }, [fail]);
+    if (project == null) {
+      setDefaults(NO_DEFAULTS);
+      return;
+    }
+    templateDefaults(project).then(setDefaults).catch(fail);
+  }, [fail, project]);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,10 +169,18 @@ export function useTemplates(project: number | null): TemplatesStore {
     [idOf, listsRef],
   );
 
-  const setDefault = useCallback((kind: TemplateKind, id: number | null) => {
-    setDefaults((prev) => ({ ...prev, [kind]: id }));
-    persistThenReconcile(setDefaultTemplate(kind, id), templateDefaults, setDefaults);
-  }, []);
+  const setDefault = useCallback(
+    (kind: TemplateKind, id: number | null) => {
+      if (project == null) return;
+      setDefaults((prev) => ({ ...prev, [kind]: id }));
+      persistThenReconcile(
+        setDefaultTemplate(kind, project, id),
+        () => templateDefaults(project),
+        setDefaults,
+      );
+    },
+    [project],
+  );
 
   return { lists, defaults, error, create, remove, duplicate, setDefault };
 }

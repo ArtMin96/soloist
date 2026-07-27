@@ -47,6 +47,12 @@ const OTHER_PROJECT = 8;
 const GLOBAL_GROUP = "Global scratchpad templates";
 const PROJECT_GROUP = "Scratchpad templates in this project";
 
+// The scratchpad kind's default-template selector, addressed by the name the section gives it.
+const DEFAULT_PICKER = "Default scratchpad template";
+
+// What stands in for the selector while no project is open.
+const NO_PROJECT_DEFAULT = "Open a project to choose its default template.";
+
 const DAILY = {
   id: 1,
   kind: "scratchpad" as const,
@@ -105,7 +111,7 @@ afterEach(() => {
 
 describe("TemplatesPanel", () => {
   it("groups templates by kind and shows a default selector only for seedable kinds with templates", async () => {
-    seed();
+    seed([summary(1, "daily", "scratchpad")], [summary(2, "sprint", "scratchpad")]);
     render(<TemplatesPanel project={OPEN_PROJECT} />);
 
     // The row is a real button (the Radix default selector is a combobox, excluded by role).
@@ -114,9 +120,58 @@ describe("TemplatesPanel", () => {
     expect(screen.getByRole("heading", { name: "Prompt" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Scratchpad" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Todo" })).toBeTruthy();
-    // The default selector appears for the scratchpad kind (it has a template), not for the empty
-    // todo kind and never for prompts.
+    // The default selector appears for the scratchpad kind (this project holds one), not for the
+    // empty todo kind and never for prompts.
     expect(screen.getAllByText("Default template")).toHaveLength(1);
+  });
+
+  it("chooses the default from the open project's library", async () => {
+    seed([summary(1, "daily", "scratchpad")], [summary(2, "sprint", "scratchpad")]);
+    defaults.mockResolvedValue({ scratchpad: 2, todo: null });
+    render(<TemplatesPanel project={OPEN_PROJECT} />);
+
+    const picker = await screen.findByRole("combobox", { name: DEFAULT_PICKER });
+    expect(picker.textContent).toBe("sprint");
+  });
+
+  // A global template is no longer a candidate, so one still recorded as the default must read as no
+  // selection — not be shown, and silently kept, as what this project seeds from.
+  it("does not offer a global template as the default", async () => {
+    seed([summary(1, "daily", "scratchpad")], [summary(2, "sprint", "scratchpad")]);
+    defaults.mockResolvedValue({ scratchpad: 1, todo: null });
+    render(<TemplatesPanel project={OPEN_PROJECT} />);
+
+    const picker = await screen.findByRole("combobox", { name: DEFAULT_PICKER });
+    expect(picker.textContent).toBe("None");
+  });
+
+  it("offers no default selector while the project library is empty", async () => {
+    seed([summary(1, "daily", "scratchpad")], []);
+    render(<TemplatesPanel project={OPEN_PROJECT} />);
+    await screen.findByRole("button", { name: "Duplicate daily" });
+
+    expect(screen.queryByText("Default template")).toBeNull();
+  });
+
+  // Without a project the selector cannot be offered at all, and its bare absence reads as a setting
+  // that went missing. Only the seedable kinds have a default to explain — a prompt has none, so the
+  // line belongs to scratchpad and todo and nowhere else.
+  it("says what a default needs while no project is open, for the seedable kinds only", async () => {
+    seed([summary(1, "daily", "scratchpad")], []);
+    render(<TemplatesPanel project={null} />);
+    await screen.findByRole("button", { name: "Duplicate daily" });
+
+    expect(screen.getAllByText(NO_PROJECT_DEFAULT)).toHaveLength(2);
+  });
+
+  // A project whose library is simply empty is a different state: the user can author a template
+  // there, so telling them to open a project would be wrong.
+  it("does not explain a missing project to a project that has no templates yet", async () => {
+    seed([summary(1, "daily", "scratchpad")], []);
+    render(<TemplatesPanel project={OPEN_PROJECT} />);
+    await screen.findByRole("button", { name: "Duplicate daily" });
+
+    expect(screen.queryByText(NO_PROJECT_DEFAULT)).toBeNull();
   });
 
   // The whole point of the split: an MCP caller writes to the project scope by default, so the user

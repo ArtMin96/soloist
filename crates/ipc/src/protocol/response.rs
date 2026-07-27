@@ -148,6 +148,10 @@ pub enum IpcResponse {
     /// the wire shape — the text, the target it was rendered for, and both advisory reports —
     /// cannot drift.
     PromptTemplateRendered(RenderedPrompt),
+    /// The template a new document would be seeded from, or `None` when the local user has selected
+    /// no default for that kind (answer to [`IpcRequest::SeedTemplateRead`]). Reuses the core view
+    /// so the wire shape cannot drift.
+    SeedTemplate(Option<TemplateView>),
     /// What a guide write did (answer to [`IpcRequest::SetupAgentIntegration`]). Reuses the core
     /// type so the wire shape cannot drift.
     IntegrationWritten(IntegrationWrite),
