@@ -89,6 +89,35 @@ async fn arriving_at_the_window_does_not_clear_unread() {
 }
 
 #[tokio::test]
+async fn a_presence_report_announces_itself_and_is_readable() {
+    let facade = facade();
+    let mut events = facade.subscribe();
+
+    facade.set_presence(here_looking_at(WEB));
+
+    // The badge draws from where the user is, not only from what is unread, so walking to or from
+    // the window has to reach the bus even when nothing unread changed — and be readable when it
+    // gets there.
+    assert!(drain(&mut events)
+        .iter()
+        .any(|event| matches!(event, DomainEvent::PresenceChanged)));
+    assert_eq!(facade.presence(), here_looking_at(WEB));
+}
+
+#[tokio::test]
+async fn repeating_a_presence_report_announces_nothing() {
+    let facade = facade();
+    facade.set_presence(here_looking_at(WEB));
+    let mut events = facade.subscribe();
+
+    facade.set_presence(here_looking_at(WEB));
+
+    // A report that moved nobody would otherwise wake every surface to re-read an identical
+    // presence.
+    assert!(drain(&mut events).is_empty());
+}
+
+#[tokio::test]
 async fn looking_at_a_process_clears_only_that_process() {
     let facade = facade();
     // Both alerted while the user was away, so both went to the desktop and both are unread.

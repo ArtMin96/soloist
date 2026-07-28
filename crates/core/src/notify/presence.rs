@@ -44,10 +44,15 @@ impl PresenceCell {
         Self::default()
     }
 
-    /// Records where the user now is. Last write wins: an observation is only ever the newest
-    /// truth, so an older one has nothing to merge.
-    pub fn set(&self, presence: Presence) {
-        *lock(&self.presence) = presence;
+    /// Records where the user now is, reporting whether it differs from the last observation.
+    /// Last write wins: an observation is only ever the newest truth, so an older one has nothing
+    /// to merge. The caller announces a change on the bus, so a report that moved nobody must say
+    /// so rather than waking every surface to re-read an identical presence.
+    pub fn set(&self, presence: Presence) -> bool {
+        let mut current = lock(&self.presence);
+        let changed = *current != presence;
+        *current = presence;
+        changed
     }
 
     /// Where the user was when the shell last reported.

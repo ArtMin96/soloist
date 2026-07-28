@@ -315,7 +315,11 @@ export type DomainEvent =
     }
   // The set of processes with unread attention changed. Payload-free by the same convention as the
   // other change-notifications: a surface re-reads attentionSnapshot().
-  | { type: "AttentionChanged" };
+  | { type: "AttentionChanged" }
+  // Where the user is changed: the window gained or lost focus, or it now shows a different
+  // process. Payload-free by the same convention: a surface re-reads presence. The app-icon badge
+  // is the surface that needs it — what it draws turns on whether the user is at the window.
+  | { type: "PresenceChanged" };
 
 export interface AppInfo {
   name: string;
