@@ -152,6 +152,17 @@ impl Supervisor {
         self.registry.view(id)
     }
 
+    /// Whether `id` declares `auto_restart` — i.e. the crash policy will try to relaunch it
+    /// rather than leave it crashed. `false` for a process no longer registered, and for
+    /// terminals and agents, which never auto-restart. The notification reactor reads it to keep
+    /// a self-healing command's retries silent; eligibility for an actual relaunch is decided by
+    /// [`Supervisor::auto_restart_after_crash`], which re-checks trust and the rate limit.
+    pub(crate) fn auto_restarts(&self, id: ProcessId) -> bool {
+        self.registry
+            .describe(id)
+            .is_some_and(|info| info.auto_restart)
+    }
+
     /// The managed process whose live OS group leader is `pgid`, if any — the home process of
     /// a caller whose connecting peer runs in that group. The identity gate uses it to
     /// authenticate a session's binding and project scope against the kernel-reported peer

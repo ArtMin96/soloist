@@ -3,12 +3,14 @@
 //!
 //! It subscribes to the event bus and, for each attention-worthy event, resolves the originating
 //! process's project and label from the supervisor read model, then consults the settings before
-//! composing a [`Notification`] for the [`Notifier`] port. Three gates apply, all read live from the
+//! composing a [`Notification`] for the [`Notifier`] port. Two of the gates read live from the
 //! durable settings so a toggle takes effect at once: the global master switch (global settings),
 //! then the per-project switch for that kind of alert — crash/exit alerts for a crash or exhausted
 //! restart, terminal alerts (with the per-command override) for a bell or an agent asking for
-//! attention. It holds a [`Weak`] reference to the supervisor so it never keeps the app alive, and
-//! ends when the bus closes (app shutdown), mirroring the other reactors.
+//! attention. The third reads the crashed command's own restart policy: a command that heals itself
+//! retries silently, so only its giving up is announced. It holds a [`Weak`] reference to the
+//! supervisor so it never keeps the app alive, and ends when the bus closes (app shutdown),
+//! mirroring the other reactors.
 
 use std::sync::{Arc, Weak};
 
@@ -71,16 +73,20 @@ impl NotificationReactor {
     }
 
     /// The toast a given event warrants, or `None` if it needs none or a gate silences it. A
-    /// non-attention event, a globally-disabled notifier, a process gone from the registry, or the
-    /// relevant per-project switch being off each yields no toast. Settings read as their documented
-    /// defaults (alerts on) on a read error, so a transient store failure never swallows a crash
-    /// alert.
+    /// non-attention event, a globally-disabled notifier, a process gone from the registry, a crash
+    /// the command's own restart policy will retry, or the relevant per-project switch being off
+    /// each yields no toast. Settings read as their documented defaults (alerts on) on a read
+    /// error, so a transient store failure never swallows a crash alert.
     fn compose(&self, event: &DomainEvent) -> Option<Notification> {
         let (id, attention) = Attention::classify(event)?;
         if !self.globally_enabled() {
             return None;
         }
-        let view = self.supervisor.upgrade()?.view(id)?;
+        let supervisor = self.supervisor.upgrade()?;
+        let view = supervisor.view(id)?;
+        if !attention.survives_retry_policy(supervisor.auto_restarts(id)) {
+            return None;
+        }
         let settings = self.project_settings.get(&view.project).unwrap_or_default();
         attention
             .permitted_by(&settings, &view.label)
@@ -129,6 +135,21 @@ impl Attention {
             } => Some((*id, Attention::Error)),
             DomainEvent::TerminalBell { id } => Some((*id, Attention::Bell)),
             _ => None,
+        }
+    }
+
+    /// Whether this alert survives the crashed command's restart policy. An `auto_restart` command
+    /// is relaunched after each crash, so announcing those crashes would fire one toast per attempt
+    /// — up to the rate limit — for a command that is healing itself; the user learns of it once,
+    /// when the policy gives up ([`Attention::Exhausted`]). The gate reads the declared policy, not
+    /// the process's current state: at the moment a crash is classified nothing is scheduled yet,
+    /// because the actor publishes the crash before the self-healing loop consults the policy.
+    fn survives_retry_policy(self, auto_restart: bool) -> bool {
+        match self {
+            Attention::Crashed => !auto_restart,
+            Attention::Exhausted | Attention::Permission | Attention::Error | Attention::Bell => {
+                true
+            }
         }
     }
 
