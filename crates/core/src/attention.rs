@@ -36,6 +36,8 @@ pub enum AttentionKind {
     AgentError,
     /// A terminal rang the bell.
     TerminalBell,
+    /// A process raised a notification of its own from its output, in its own words.
+    TerminalNotification,
 }
 
 impl AttentionKind {
@@ -47,7 +49,7 @@ impl AttentionKind {
             Self::Crashed | Self::RestartExhausted | Self::AgentPermission | Self::AgentError => {
                 Severity::Important
             }
-            Self::TerminalBell => Severity::Terminal,
+            Self::TerminalBell | Self::TerminalNotification => Severity::Terminal,
         }
     }
 }

@@ -392,6 +392,9 @@ fn publish_output(recorder: &Recorder, id: ProcessId, bus: &EventBus, chunk: Vec
         let event = match signal {
             TerminalSignal::Title(title) => DomainEvent::TerminalTitleChanged { id, title },
             TerminalSignal::Bell => DomainEvent::TerminalBell { id },
+            TerminalSignal::Notify { title, body } => {
+                DomainEvent::TerminalNotification { id, title, body }
+            }
         };
         bus.publish(event);
     }

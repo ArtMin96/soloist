@@ -29,8 +29,16 @@ pub enum Visibility {
 /// One command on the settings page. Its spec fields are flattened so they are always present in
 /// JSON (a [`ProcessSpec`] omits fields left at their defaults); [`visibility`](Self::visibility)
 /// is where it lives; [`notification_level`](Self::notification_level) is its own level override,
-/// `None` when it inherits the project's; and [`status`](Self::status) is the live [`ProcStatus`]
-/// when a process of that name is registered, else `None`.
+/// `None` when it inherits the project's;
+/// [`effective_notification_level`](Self::effective_notification_level) is what that resolves to
+/// against the project; and [`status`](Self::status) is the live [`ProcStatus`] when a process of
+/// that name is registered, else `None`.
+///
+/// The override and the resolved level are carried separately on purpose. A control edits the
+/// override, so binding it to the resolved level would turn every touch of that control into a
+/// silent conversion of an inheriting command into a pinned one; a surface that wants to *show*
+/// what the command actually notifies about reads the resolved field instead of recombining the
+/// pair itself.
 #[derive(Clone, Debug, Serialize)]
 pub struct ProjectCommandView {
     pub name: String,
@@ -42,21 +50,21 @@ pub struct ProjectCommandView {
     pub env: BTreeMap<String, String>,
     pub visibility: Visibility,
     pub notification_level: Option<NotificationLevel>,
+    pub effective_notification_level: NotificationLevel,
     pub status: Option<ProcStatus>,
 }
 
 impl ProjectCommandView {
     /// Projects a named command's spec into the flattened page view, tagging its visibility, its
-    /// own notification-level override, and its live status (if any).
+    /// own notification-level override resolved against `settings`, and its live status (if any).
     pub fn new(
         name: String,
         spec: &ProcessSpec,
         visibility: Visibility,
-        notification_level: Option<NotificationLevel>,
+        settings: &ProjectSettings,
         status: Option<ProcStatus>,
     ) -> Self {
         Self {
-            name,
             command: spec.command.clone(),
             working_dir: spec
                 .working_dir
@@ -67,8 +75,10 @@ impl ProjectCommandView {
             restart_when_changed: spec.restart_when_changed.clone(),
             env: spec.env.clone(),
             visibility,
-            notification_level,
+            notification_level: settings.command_notification_levels.get(&name).copied(),
+            effective_notification_level: settings.effective_level_for(&name),
             status,
+            name,
         }
     }
 }

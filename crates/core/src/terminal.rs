@@ -76,11 +76,15 @@ pub struct TerminalActivity {
 
 /// A semantic event extracted from the PTY byte stream, surfaced for the owning actor
 /// to publish as a domain event.
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum TerminalSignal {
     /// An OSC title set (the window/icon title).
     Title(String),
     /// A bell (`BEL`).
     Bell,
+    /// A notification the process raised for itself, in its own words. `title` is `None` when the
+    /// sequence carried only a message, leaving the surface to name the process instead.
+    Notify { title: Option<String>, body: String },
 }
 
 /// A request routed from a viewer to a running process's owning actor.

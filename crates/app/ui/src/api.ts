@@ -10,6 +10,7 @@ import type {
   AgentTool,
   Appearance,
   AppInfo,
+  AttentionSnapshot,
   Binding,
   DetectedTool,
   DiagramView,
@@ -24,6 +25,7 @@ import type {
   NotificationLevel,
   Notifications,
   OrchestrationSnapshot,
+  Presence,
   ProcessSpec,
   ProcessView,
   ProjectId,
@@ -485,6 +487,32 @@ export function notificationSettings(): Promise<Notifications> {
 
 export function setNotificationSettings(notifications: Notifications): Promise<Notifications> {
   return invoke<Notifications>("set_notification_settings", { notifications });
+}
+
+// Reports where the user is: whether the window has focus, and which process it shows. A command
+// with an effect, not a setter — seeing a process is what clears its unread mark, and the core
+// decides which sighting clears what.
+export function setPresence(presence: Presence): Promise<void> {
+  return invoke<void>("set_presence", { presence });
+}
+
+// Everything currently unread — the snapshot half of snapshot-then-deltas for attention, paired
+// with the `AttentionChanged` event.
+export function attentionSnapshot(): Promise<AttentionSnapshot> {
+  return invoke<AttentionSnapshot>("attention_snapshot");
+}
+
+export function clearAttention(process: number): Promise<void> {
+  return invoke<void>("clear_attention", { process });
+}
+
+export function clearAllAttention(): Promise<void> {
+  return invoke<void>("clear_all_attention");
+}
+
+// Shows a sample desktop notification, so a user can tell whether alerts reach them at all.
+export function sendTestNotification(): Promise<void> {
+  return invoke<void>("send_test_notification");
 }
 
 export function mcpToolGroups(): Promise<McpToolGroups> {

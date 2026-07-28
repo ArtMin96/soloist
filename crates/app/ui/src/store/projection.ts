@@ -64,6 +64,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "ConfigChanged":
     case "TerminalTitleChanged":
     case "TerminalBell":
+    case "TerminalNotification":
     case "AgentActivityChanged":
     case "OrphansFound":
     case "TodoChanged":
@@ -77,6 +78,11 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "DiagramChanged":
     case "KvChanged":
     case "TemplateChanged":
+    case "NotificationRaised":
+    case "AttentionChanged":
+      // Each of these belongs to a read model of its own — the orchestration snapshot, the
+      // attention snapshot, a terminal's own stream — and none of them changes which processes
+      // exist or what state they are in.
       return processes;
   }
 }

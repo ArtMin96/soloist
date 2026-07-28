@@ -128,6 +128,7 @@ function command(over: Partial<ProjectCommandView> & { name: string }): ProjectC
     env: {},
     visibility: "shared",
     notification_level: null,
+    effective_notification_level: "all",
     status: null,
     ...over,
   };
@@ -342,6 +343,7 @@ function Gallery() {
               command({ name: "API", command: "cargo run", status: "Crashed" }),
               command({ name: "Worker", command: "node worker.js", visibility: "local" }),
             ]}
+            projectLevel="all"
             ops={NOOP_OPS}
           />
         </div>
