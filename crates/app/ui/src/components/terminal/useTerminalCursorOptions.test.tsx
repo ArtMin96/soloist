@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
-import { DEFAULT_APPEARANCE } from "@/lib/appearance";
+import { DEFAULT_APPEARANCE, terminalOptions } from "@/lib/appearance";
 import { FakeTerminal } from "@/test/fakeTerminal";
 import type { Appearance, CursorInactiveStyle, CursorStyle, ProcessView } from "@/domain";
 
@@ -18,24 +18,22 @@ vi.mock("@xterm/addon-fit", () => ({
     fit() {}
   },
 }));
-vi.mock("@xterm/addon-search", () => ({
-  SearchAddon: class {
-    findNext() {}
-    findPrevious() {}
-    clearDecorations() {}
-  },
+vi.mock("@xterm/addon-search", async () => ({
+  SearchAddon: (await import("@/test/fakeSearchAddon")).FakeSearchAddon,
 }));
 vi.mock("@/lib/terminalRenderer", () => ({
   activateTerminalRenderer: vi.fn().mockResolvedValue({ renderer: "dom", dispose() {} }),
 }));
 
 // The appearance the hook sees, swapped between renders so a test can edit a setting the way the
-// Appearance panel does and watch the mounted emulator restyle.
-const { appearanceRef } = vi.hoisted(() => ({
+// Appearance panel does and watch the mounted emulator restyle. The resolved theme is swappable for
+// the same reason: it is the one input to the projection that is not a field of the document.
+const { appearanceRef, darkRef } = vi.hoisted(() => ({
   appearanceRef: { current: null as unknown as Appearance },
+  darkRef: { current: true },
 }));
 vi.mock("@/store/appearanceContext", () => ({
-  useAppearance: () => ({ appearance: appearanceRef.current, dark: true }),
+  useAppearance: () => ({ appearance: appearanceRef.current, dark: darkRef.current }),
 }));
 
 import { useTerminal } from "@/components/terminal/useTerminal";
@@ -93,13 +91,16 @@ function otherThan<T>(set: readonly T[], value: T): T {
 async function mountThenEdit(
   seed: Partial<Appearance["terminal"]>,
   edit: Partial<Appearance["terminal"]>,
+  themes: { seed: boolean; edit: boolean } = { seed: true, edit: true },
 ) {
   appearanceRef.current = withTerminal(seed);
+  darkRef.current = themes.seed;
   const view = render(<Probe />);
   await settle();
   const mounted = liveTerminal();
 
   appearanceRef.current = withTerminal(edit);
+  darkRef.current = themes.edit;
   await act(async () => {
     view.rerender(<Probe />);
   });
@@ -111,6 +112,7 @@ async function mountThenEdit(
 beforeEach(() => {
   FakeTerminal.instances = [];
   appearanceRef.current = DEFAULT_APPEARANCE;
+  darkRef.current = true;
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -191,5 +193,65 @@ describe("terminal cursor settings reach the live emulator", () => {
     expect(term.disposed).toBe(false);
     expect(liveTerminal()).toBe(term);
     expect(FakeTerminal.instances).toHaveLength(1);
+  });
+});
+
+// Two appearances that disagree about everything the projection derives — including the theme,
+// which is why the pair flips `dark` too. Written as whole documents rather than as a diff so the
+// disagreement is visible, and checked below rather than trusted.
+const PLAIN: Partial<Appearance["terminal"]> = {
+  font_family: null,
+  font_scale: "small",
+  font_weight: "w300",
+  bold_font_weight: "w500",
+  line_height: "compact",
+  letter_spacing: "tight",
+  cursor_style: "block",
+  cursor_inactive_style: "outline",
+  cursor_blink: true,
+};
+
+const ELABORATE: Partial<Appearance["terminal"]> = {
+  font_family: "Fira Code",
+  font_scale: "large",
+  font_weight: "w600",
+  bold_font_weight: "w800",
+  line_height: "spacious",
+  letter_spacing: "wider",
+  cursor_style: "bar",
+  cursor_inactive_style: "none",
+  cursor_blink: false,
+};
+
+const THEMES = { seed: true, edit: false };
+
+const projected = (terminal: Partial<Appearance["terminal"]>, dark: boolean) =>
+  terminalOptions(withTerminal(terminal), dark) as Record<string, unknown>;
+
+// The guarantee the whole appearance surface rests on, stated once over the projection's own keys
+// rather than as a list anyone has to remember to extend: an option added to `terminalOptions` and
+// forgotten in the restyle effect is a setting that works on the next pane the user opens and does
+// nothing to the one in front of them — the dead-setting defect, arriving by omission.
+describe("the live restyle re-applies the whole appearance projection", () => {
+  // The fixture's own precondition. If a future option is derived from a field these two documents
+  // happen to agree on, the emulator would already hold the right value from construction and the
+  // case below would pass while that option was never re-assigned at all. Reddening here is how
+  // that key gets covered instead of silently slipping through.
+  it("moves every derived option, so none can be right by accident", () => {
+    const before = projected(PLAIN, THEMES.seed);
+    const after = projected(ELABORATE, THEMES.edit);
+
+    for (const key of Object.keys(after)) {
+      expect(before[key], `${key} must differ between the two appearances`).not.toEqual(after[key]);
+    }
+  });
+
+  it("assigns each of them to the emulator already on screen", async () => {
+    const term = await mountThenEdit(PLAIN, ELABORATE, THEMES);
+    const after = projected(ELABORATE, THEMES.edit);
+
+    for (const [key, value] of Object.entries(after)) {
+      expect(term.options[key], `${key} never reached the mounted emulator`).toEqual(value);
+    }
   });
 });

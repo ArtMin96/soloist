@@ -28,10 +28,16 @@ export default {
       {
         // A ref written during render and never read during it — the latest-value idiom, used so a
         // subscription that must be installed exactly once can still see current values. The rule's
-        // "capture it at effect start" fix is what would break it: `useTerminalHotkeys` attaches its
-        // key listener once per mount (deps are the container ref alone), so a captured bindings
-        // object would leave every rebound key dispatching to the action it had at mount.
-        files: ["src/components/terminal/useTerminalHotkeys.ts"],
+        // "capture it at effect start" fix is what would break them: `useTerminalHotkeys` attaches
+        // its key listener once per mount (deps are the container ref alone), so a captured bindings
+        // object would leave every rebound key dispatching to the action it had at mount; the search
+        // callbacks are `useCallback` with empty deps so a caller keeps one reference across
+        // remounts, and a captured theme would paint every later match in whichever palette was
+        // current when the pane opened — the very staleness `terminalSearch` exists to avoid.
+        files: [
+          "src/components/terminal/useTerminalHotkeys.ts",
+          "src/components/terminal/terminalSearch.ts",
+        ],
         rules: ["react-doctor/no-ref-current-in-render"],
       },
       {

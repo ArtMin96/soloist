@@ -5,8 +5,10 @@ import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessMeta } from "@/components/sidebar/ProcessMeta";
 import { FindBar } from "@/components/terminal/FindBar";
 import { LinkTarget } from "@/components/terminal/LinkTarget";
+import { TerminalDropTarget } from "@/components/terminal/TerminalDropTarget";
 import { useTerminal } from "@/components/terminal/useTerminal";
 import { useTerminalChrome } from "@/components/terminal/useTerminalChrome";
+import { useTerminalFileDrop } from "@/components/terminal/useTerminalFileDrop";
 import { useTerminalHotkeys } from "@/components/terminal/useTerminalHotkeys";
 import type { ProcessActionHandlers } from "@/lib/processActions";
 import { terminalColors } from "@/lib/terminalPalette";
@@ -51,7 +53,8 @@ export function TerminalPane({
   onTrust,
 }: TerminalPaneProps) {
   const sectionRef = useRef<HTMLElement>(null);
-  const { hostRef, state, linkTarget, search, clipboard } = useTerminal(process, visible);
+  const { hostRef, state, linkTarget, search, clipboard, insert } = useTerminal(process, visible);
+  const dropping = useTerminalFileDrop(hostRef, insert, visible);
   const { title, ringing } = useTerminalChrome(process.id);
   const { metrics, restart, activity } = useSignal(process.id);
   const { dark } = useAppearance();
@@ -128,6 +131,7 @@ export function TerminalPane({
         {findOpen && (
           <FindBar
             query={findQuery}
+            matches={search.matches}
             onChange={handleFindChange}
             onFindNext={() => findQuery && search.findNext(findQuery)}
             onFindPrevious={() => findQuery && search.findPrevious(findQuery)}
@@ -140,6 +144,7 @@ export function TerminalPane({
           style={{ backgroundColor: surface }}
           data-testid="terminal-host"
         />
+        {dropping && <TerminalDropTarget />}
         {linkTarget && <LinkTarget uri={linkTarget} />}
         {state === "not-started" && (
           <div className="pointer-events-none absolute inset-0 flex animate-in items-center justify-center px-6 text-center fade-in-0 duration-[var(--dur-sheet)]">

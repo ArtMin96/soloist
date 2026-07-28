@@ -39,6 +39,7 @@ interface TerminalSurfaceColors {
   scrollbarSliderBackground: string;
   scrollbarSliderHoverBackground: string;
   scrollbarSliderActiveBackground: string;
+  overviewRulerBorder: string;
 }
 
 // xterm's ITheme is structural; we set the fields that make program output follow the app
@@ -127,6 +128,9 @@ export function terminalColors(dark: boolean): TerminalColors {
         // The unemphasized selection: the same tone with the azure taken out, so an unfocused
         // window's selection reads as a neutral wash.
         selectionInactiveBackground: "#3e4043",
+        // Separates the overview ruler from the output it summarizes. xterm leaves this black
+        // when unset, which on the light surface draws a hard rule down the pane's edge.
+        overviewRulerBorder: "#2b2f38",
       }
     : {
         background: "#fbfbfd",
@@ -134,6 +138,7 @@ export function terminalColors(dark: boolean): TerminalColors {
         cursor: "#3b6fd4",
         selectionBackground: "#cfdcf5",
         selectionInactiveBackground: "#d9dcdf",
+        overviewRulerBorder: "#e2e4e9",
       };
   const ansi = dark ? DARK_ANSI : LIGHT_ANSI;
   return {
@@ -144,6 +149,55 @@ export function terminalColors(dark: boolean): TerminalColors {
     scrollbarSliderHoverBackground: `${surface.foreground}${SLIDER_ALPHA.hover}`,
     scrollbarSliderActiveBackground: `${surface.foreground}${SLIDER_ALPHA.active}`,
   };
+}
+
+// The colours the search addon paints every match in, and the one match currently stepped to.
+// Passing them is also what makes the addon report its match counts at all — it suppresses its
+// results event whenever the caller asks for no decorations.
+export interface SearchDecorationColors {
+  matchBackground: string;
+  matchBorder: string;
+  matchOverviewRuler: string;
+  activeMatchBackground: string;
+  activeMatchBorder: string;
+  activeMatchColorOverviewRuler: string;
+}
+
+// A match is a found thing and the active match is the selected one, so the set stays inside the
+// app's two colour roles: an unemphasized slate wash for every match, the azure accent for the one
+// the user is standing on. No third hue is introduced, which keeps saturated colour meaning process
+// status and nothing else.
+//
+// The two washes are deliberately quiet — each is the faintest tint that still reads against the
+// terminal surface — because they tint live output rather than replacing it. What separates active
+// from inactive is therefore the border, not the fill: the accent border clears its own fill by 3:1
+// in both themes, so the active match stays identifiable in a grayscale screenshot and to a
+// colour-blind reader, where the two fills alone differ by little. Every colour is emitted as hex
+// because the emulator cannot parse the app's OKLCH tokens.
+//
+// The decoration replaces the cell's background before the renderer's contrast pass, so
+// `TERMINAL_MINIMUM_CONTRAST_RATIO` still governs program colour drawn over a match; these
+// values are chosen so the default foreground clears 4.5:1 without needing that backstop.
+const LIGHT_SEARCH: SearchDecorationColors = {
+  matchBackground: "#d3d8e0",
+  matchBorder: "#667994",
+  matchOverviewRuler: "#8493a9",
+  activeMatchBackground: "#a8c3ef",
+  activeMatchBorder: "#2456ad",
+  activeMatchColorOverviewRuler: "#2456ad",
+};
+
+const DARK_SEARCH: SearchDecorationColors = {
+  matchBackground: "#2f3741",
+  matchBorder: "#6f819b",
+  matchOverviewRuler: "#596a81",
+  activeMatchBackground: "#18468f",
+  activeMatchBorder: "#8ab4f8",
+  activeMatchColorOverviewRuler: "#8ab4f8",
+};
+
+export function searchDecorationColors(dark: boolean): SearchDecorationColors {
+  return dark ? DARK_SEARCH : LIGHT_SEARCH;
 }
 
 // "brightBlack" → "Bright black", naming a swatch in the settings palette preview.

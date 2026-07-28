@@ -41,7 +41,7 @@ typography:
     lineHeight: 1.2
     letterSpacing: "0.01em"
   data:
-    fontFamily: "Geist Mono Variable, ui-monospace, monospace"
+    fontFamily: "Ubuntu Mono, DejaVu Sans Mono, monospace"
     fontSize: "0.8125rem"
     fontWeight: 400
     lineHeight: 1.4
@@ -198,12 +198,14 @@ they are the only saturated colour in the app that does not mean `ProcStatus`.
 ## 3. Typography
 
 **Body / UI Font:** Geist Variable (with `system-ui, sans-serif`)
-**Terminal / Data Font:** Geist Mono Variable (with `ui-monospace, monospace`)
+**Terminal / Data Font:** Ubuntu Mono (with `"DejaVu Sans Mono", monospace`)
 
 **Character:** One technical, neutral grotesque carries every UI role — headings, labels,
-body, controls — at multiple weights; its monospace sibling carries the terminal pane and all
+body, controls — at multiple weights; one monospace face carries the terminal pane and all
 tabular data (PIDs, ports, CPU/RSS, durations). Sans + mono is a *functional* pairing, not a
-decorative one: mono appears only where character alignment matters.
+decorative one: mono appears only where character alignment matters. Nothing is bundled, so the
+mono stack may name only families Ubuntu's own packaging installs — the terminal and the app
+shell's `--font-mono` read the same one.
 
 ### Hierarchy
 A compact, **fixed rem scale** (ratio ~1.15) — never fluid `clamp()`; this is dense product
@@ -217,7 +219,7 @@ UI viewed at a consistent DPI, not a hero page.
 - **Label** (550, 0.6875rem/11px, tracking 0.01em, **sentence case**): Sidebar group headers
   ("Agents", "Terminals", "Commands"), metadata captions, status labels. Small and quiet —
   **not** an all-caps tracked eyebrow.
-- **Data** (400, 0.8125rem/13px, Geist Mono): Terminal output, PIDs, ports, metrics, durations,
+- **Data** (400, 0.8125rem/13px, Ubuntu Mono): Terminal output, PIDs, ports, metrics, durations,
   any value where digits must align.
 
 ### Named Rules
@@ -334,7 +336,7 @@ unmistakably mac-native while keeping the status vocabulary and density rules ab
   native-desktop signal, never heavy browser chrome.
 
 ### Terminal Pane (signature component)
-- The interactive PTY (xterm.js) on Cool Surface chrome, Geist Mono, generous internal padding,
+- The interactive PTY (xterm.js) on Cool Surface chrome, Ubuntu Mono, generous internal padding,
   full-bleed scrollback. A compact header strip names the selected process (Title type) with its
   Status Indicator and the same one-primary-action plus overflow controls used by the sidebar. A
   "Terminal | Logs" segmented control
@@ -375,7 +377,7 @@ bordered cards.
   grayscale screenshot — the color-blind-safe encoding confirmed for Phase 5.
 - **Do** keep the azure accent to ≤10% of a screen and to one meaning: focused / selected / primary.
 - **Do** draw structure with 1px hairlines and tonal layering; keep resting surfaces flat.
-- **Do** use Geist Mono *only* for terminal output and aligned data (PIDs, ports, metrics).
+- **Do** use Ubuntu Mono *only* for terminal output and aligned data (PIDs, ports, metrics).
 - **Do** omit unavailable lifecycle controls; Starting/Restarting may show only Stop cancellation,
   and Stopping shows none. Keep the trailing intent zone stable so a row never reflows.
 - **Do** give every control a visible 2px Azure focus ring and full keyboard operability.
