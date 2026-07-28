@@ -68,26 +68,6 @@ const LETTER_SPACING_PX: Record<LetterSpacing, number> = {
   wider: 1.3,
 };
 
-// The xterm cursor option value sets. Literal unions (not bare strings) so a mapped value is
-// assignable to xterm's own `cursorStyle` / `cursorInactiveStyle` options, whose types are the
-// same closed sets — and so adding a domain variant fails to compile until it is given a value.
-export type TerminalCursorStyle = "block" | "underline" | "bar";
-export type TerminalCursorInactiveStyle = "outline" | "block" | "bar" | "underline" | "none";
-
-const CURSOR_STYLE_VALUE: Record<CursorStyle, TerminalCursorStyle> = {
-  block: "block",
-  underline: "underline",
-  bar: "bar",
-};
-
-const CURSOR_INACTIVE_STYLE_VALUE: Record<CursorInactiveStyle, TerminalCursorInactiveStyle> = {
-  outline: "outline",
-  block: "block",
-  bar: "bar",
-  underline: "underline",
-  none: "none",
-};
-
 // Lines of terminal scrollback the emulator retains, matching the core's log ring so the pane and
 // the core hold the same depth of history — a resync replays the core's buffer into this one.
 export const TERMINAL_SCROLLBACK_LINES = 5000;
@@ -241,8 +221,8 @@ export function terminalOptions(appearance: Appearance, dark: boolean) {
     fontWeightBold: fontWeightValue(t.bold_font_weight),
     lineHeight: lineHeightValue(t.line_height),
     letterSpacing: letterSpacingPx(t.letter_spacing),
-    cursorStyle: CURSOR_STYLE_VALUE[t.cursor_style],
-    cursorInactiveStyle: CURSOR_INACTIVE_STYLE_VALUE[t.cursor_inactive_style],
+    cursorStyle: t.cursor_style,
+    cursorInactiveStyle: t.cursor_inactive_style,
     cursorBlink: t.cursor_blink,
     theme: terminalColors(dark),
     minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
@@ -318,20 +298,32 @@ export const LINE_HEIGHT_OPTIONS: Option<LineHeight>[] = [
   { value: "spacious", label: "Spacious" },
 ];
 
-export const CURSOR_STYLE_OPTIONS: Option<CursorStyle>[] = [
-  { value: "block", label: "Block" },
-  { value: "underline", label: "Underline" },
-  { value: "bar", label: "Bar" },
-];
+// The cursor pickers derive their options from a label record rather than listing them, so the
+// closed set is covered by construction: `Record<CursorStyle, string>` refuses to compile until a
+// new domain variant is given a label, where a hand-written array would silently omit it from the
+// picker. Key order is the order the picker offers them in.
+const CURSOR_STYLE_LABELS: Record<CursorStyle, string> = {
+  block: "Block",
+  underline: "Underline",
+  bar: "Bar",
+};
 
 // "Hidden" rather than "None": the label says what the user will see, not what xterm calls it.
-export const CURSOR_INACTIVE_STYLE_OPTIONS: Option<CursorInactiveStyle>[] = [
-  { value: "outline", label: "Outline" },
-  { value: "block", label: "Block" },
-  { value: "underline", label: "Underline" },
-  { value: "bar", label: "Bar" },
-  { value: "none", label: "Hidden" },
-];
+const CURSOR_INACTIVE_STYLE_LABELS: Record<CursorInactiveStyle, string> = {
+  outline: "Outline",
+  block: "Block",
+  underline: "Underline",
+  bar: "Bar",
+  none: "Hidden",
+};
+
+export const CURSOR_STYLE_OPTIONS: Option<CursorStyle>[] = (
+  Object.keys(CURSOR_STYLE_LABELS) as CursorStyle[]
+).map((value) => ({ value, label: CURSOR_STYLE_LABELS[value] }));
+
+export const CURSOR_INACTIVE_STYLE_OPTIONS: Option<CursorInactiveStyle>[] = (
+  Object.keys(CURSOR_INACTIVE_STYLE_LABELS) as CursorInactiveStyle[]
+).map((value) => ({ value, label: CURSOR_INACTIVE_STYLE_LABELS[value] }));
 
 export const LETTER_SPACING_OPTIONS: Option<LetterSpacing>[] = [
   { value: "tight", label: "Tight" },

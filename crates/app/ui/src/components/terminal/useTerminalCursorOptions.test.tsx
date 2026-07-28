@@ -3,39 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { DEFAULT_APPEARANCE } from "@/lib/appearance";
+import { FakeTerminal } from "@/test/fakeTerminal";
 import type { Appearance, CursorInactiveStyle, CursorStyle, ProcessView } from "@/domain";
 
-// jsdom has no emulator surface, so the terminal is an options-recording fake. It seeds `options`
+// jsdom has no emulator surface, so the terminal is the shared recording fake. It seeds `options`
 // from the constructor argument exactly as a real xterm does, which is what makes this suite able
 // to tell the creation path from the live-restyle path: a cursor option that only ever reaches the
 // constructor still leaves the mounted emulator unchanged when the setting is edited.
-const { FakeTerminal } = vi.hoisted(() => {
-  class FakeTerminal {
-    static instances: FakeTerminal[] = [];
-    options: Record<string, unknown>;
-    disposed = false;
-    cols = 80;
-    rows = 24;
-    constructor(options: Record<string, unknown>) {
-      this.options = { ...options };
-      FakeTerminal.instances.push(this);
-    }
-    loadAddon() {}
-    open() {}
-    focus() {}
-    reset() {}
-    write() {}
-    dispose() {
-      this.disposed = true;
-    }
-    onData() {
-      return { dispose() {} };
-    }
-  }
-  return { FakeTerminal };
-});
-
-vi.mock("@xterm/xterm", () => ({ Terminal: FakeTerminal }));
+vi.mock("@xterm/xterm", async () => ({
+  Terminal: (await import("@/test/fakeTerminal")).FakeTerminal,
+}));
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
     fit() {}
@@ -81,9 +58,13 @@ function Probe() {
   return <div ref={hostRef} />;
 }
 
+// Long enough for the mount's async work — the renderer activation and the font-ready re-fit — to
+// resolve before a test asserts on the emulator.
+const EFFECTS_SETTLE_MS = 20;
+
 async function settle() {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, EFFECTS_SETTLE_MS));
   });
 }
 
@@ -93,19 +74,32 @@ function liveTerminal() {
   return term as InstanceType<typeof FakeTerminal>;
 }
 
-// Mounts a pane, then edits the terminal appearance the way the settings panel does and lets the
-// hook react. Returns the emulator that was mounted *before* the edit, so a caller can assert both
-// what its options became and that it is still the same instance.
-async function mountThenEdit(patch: Partial<Appearance["terminal"]>) {
-  appearanceRef.current = DEFAULT_APPEARANCE;
+function withTerminal(patch: Partial<Appearance["terminal"]>): Appearance {
+  return { ...DEFAULT_APPEARANCE, terminal: { ...DEFAULT_APPEARANCE.terminal, ...patch } };
+}
+
+// Any member of a closed set other than the one under test. A case that starts from its own target
+// edits the value to itself, so the constructor alone satisfies it and it can no longer tell a live
+// restyle from no restyle at all — every case below starts somewhere else.
+function otherThan<T>(set: readonly T[], value: T): T {
+  const alternative = set.find((candidate) => candidate !== value);
+  if (alternative === undefined) throw new Error(`no alternative to ${String(value)}`);
+  return alternative;
+}
+
+// Mounts a pane holding `seed`, then edits the terminal appearance to `edit` the way the settings
+// panel does and lets the hook react. Returns the emulator that was mounted *before* the edit, so a
+// caller can assert both what its options became and that it is still the same instance.
+async function mountThenEdit(
+  seed: Partial<Appearance["terminal"]>,
+  edit: Partial<Appearance["terminal"]>,
+) {
+  appearanceRef.current = withTerminal(seed);
   const view = render(<Probe />);
   await settle();
   const mounted = liveTerminal();
 
-  appearanceRef.current = {
-    ...DEFAULT_APPEARANCE,
-    terminal: { ...DEFAULT_APPEARANCE.terminal, ...patch },
-  };
+  appearanceRef.current = withTerminal(edit);
   await act(async () => {
     view.rerender(<Probe />);
   });
@@ -150,12 +144,15 @@ describe("terminal cursor settings reach the live emulator", () => {
   // Every value of the closed set must actually reach `term.options` — the assertion the dead
   // `focus_on_click` setting never had. Editing the setting must restyle the emulator the user is
   // already looking at, so these assert against the instance mounted *before* the change: an option
-  // applied only at construction would leave it untouched and redden every case here.
+  // applied only at construction would leave it holding the seed and redden every case here.
   const CURSOR_STYLES: CursorStyle[] = ["block", "underline", "bar"];
   it.each(CURSOR_STYLES)(
     "applies cursor style %s to the mounted emulator",
     async (cursor_style) => {
-      const term = await mountThenEdit({ cursor_style });
+      const term = await mountThenEdit(
+        { cursor_style: otherThan(CURSOR_STYLES, cursor_style) },
+        { cursor_style },
+      );
       expect(term.options.cursorStyle).toBe(cursor_style);
     },
   );
@@ -170,7 +167,10 @@ describe("terminal cursor settings reach the live emulator", () => {
   it.each(CURSOR_INACTIVE_STYLES)(
     "applies unfocused cursor style %s to the mounted emulator",
     async (cursor_inactive_style) => {
-      const term = await mountThenEdit({ cursor_inactive_style });
+      const term = await mountThenEdit(
+        { cursor_inactive_style: otherThan(CURSOR_INACTIVE_STYLES, cursor_inactive_style) },
+        { cursor_inactive_style },
+      );
       expect(term.options.cursorInactiveStyle).toBe(cursor_inactive_style);
     },
   );
@@ -178,7 +178,7 @@ describe("terminal cursor settings reach the live emulator", () => {
   it.each([false, true])(
     "applies cursor blink %s to the mounted emulator",
     async (cursor_blink) => {
-      const term = await mountThenEdit({ cursor_blink });
+      const term = await mountThenEdit({ cursor_blink: !cursor_blink }, { cursor_blink });
       expect(term.options.cursorBlink).toBe(cursor_blink);
     },
   );
@@ -186,7 +186,7 @@ describe("terminal cursor settings reach the live emulator", () => {
   // Restyling must not recreate the terminal: a remount would drop the emulator's scrollback and
   // force a re-attach. Instance identity is the headless half of that guarantee.
   it("restyles the same emulator instance rather than recreating it", async () => {
-    const term = await mountThenEdit({ cursor_style: "bar" });
+    const term = await mountThenEdit({ cursor_style: "block" }, { cursor_style: "bar" });
 
     expect(term.disposed).toBe(false);
     expect(liveTerminal()).toBe(term);

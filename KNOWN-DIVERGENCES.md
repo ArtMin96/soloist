@@ -985,13 +985,16 @@ the three.
 
 **What Soloist does.** The appearance document carries two closed enums and a boolean —
 `CursorStyle { Block, Underline, Bar }`, `CursorInactiveStyle { Outline, Block, Bar, Underline, None }`
-and `cursor_blink` — mirrored once in `domain.ts` and mapped to their concrete xterm values in
-`lib/appearance.ts`, beside the font and line-height maps. The permitted sets are xterm's own, read
-from the installed typings rather than from memory: `@xterm/xterm@6.0.0`'s `xterm.d.ts` declares
-`cursorStyle?: 'block' | 'underline' | 'bar'` and
-`cursorInactiveStyle?: 'outline' | 'block' | 'bar' | 'underline' | 'none'`. The map is deliberately
-kept even though the serialized enum strings already equal xterm's: it is the one place the domain set
-is proven to cover the emulator's, so adding a variant fails to compile until it is given a value.
+and `cursor_blink` — mirrored once in `domain.ts` and handed to xterm unchanged. The permitted sets are
+xterm's own, read from the installed typings rather than from memory: `@xterm/xterm@6.0.0`'s
+`xterm.d.ts` declares `cursorStyle?: 'block' | 'underline' | 'bar'` and
+`cursorInactiveStyle?: 'outline' | 'block' | 'bar' | 'underline' | 'none'`. Because the serialized enum
+strings already *are* those values, nothing translates between the two — unlike the font weight and
+line height beside them in `lib/appearance.ts`, whose domain steps carry no xterm meaning of their own.
+The two sets are still held to each other at compile time: the value flows into `new Terminal({…})` and
+into `term.options.cursorStyle`, both typed by xterm, so a domain variant the emulator does not accept
+fails to build. The pickers that offer the three are derived from label records keyed by the same
+enums, so a variant xterm *would* accept still cannot ship without a label to show for it.
 
 **Defaults `Block` / `Outline` / `true`, and why blink departs from xterm.** The first two are xterm's
 own defaults. `cursor_blink` does not follow xterm's `false`: the app has always run a blinking cursor,
