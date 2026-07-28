@@ -1540,3 +1540,162 @@ The stack stays one named constant per side — `--font-mono` in `index.css`, `D
 resolve.
 
 **Effect on parity:** adds `plan/02` **C16**. No row regresses.
+
+---
+
+## D-30 — An agent waiting on you is Important-class, which widens Solo's documented Important set 🟢
+
+**Introduced:** the notifications initiative, recorded ahead of the code that implements it.
+
+**Solo (ref [notifications/indicators](https://soloterm.com/docs/notifications/indicators)):** alerts
+are gated by a three-level model — **All / Important / None** — set per-project *and* per-process and
+combined by taking the **more restrictive**. The levels are documented as: `All` admits "terminal
+alerts plus important process alerts"; **`Important` admits "crashes and auto-restart exhaustion, but
+not terminal BEL/OSC alerts"**; `None` "suppresses both terminal alerts and important process alerts
+for that scope". The owner approved adopting this model on **2026-07-27**.
+
+**The gap this closes.** Solo's published record never says where an agent *asking for permission*
+sits. It names crashes and auto-restart exhaustion as Important and terminal BEL/OSC as All, and stops
+there — so an agent blocked on a permission prompt is classified by no documented rule.
+
+**Soloist (owner decision 2026-07-28).** `AgentActivity::Permission` and `AgentActivity::Error` both
+map to `Severity::Important`. Both therefore survive at level `Important` and are silenced only by
+`None`. Because the documented `Important` set reads as a closed pair — crashes and auto-restart
+exhaustion — admitting a third, agent-sourced kind is an **observable widening of that set**, which is
+why this sits here and not only in the gap log. That it is *also* a gap in Solo's record is recorded in
+`plan/05` §12; this entry owns the divergence half.
+
+**This changes Soloist's own current behaviour.** Today both kinds are gated by the per-project
+`terminal_alerts` boolean (`crates/core/src/notify/reactor.rs`, `Attention::permitted_by`) — that is,
+terminal-class. Under the level model they move up a class, so a user on `Important` starts receiving
+alerts that a user on today's "terminal alerts off" would not have received.
+
+**Rationale.** A blocked agent is the alert whose loss costs most: it is a state a human must clear
+before anything proceeds, so a missed one stalls work indefinitely rather than merely going unobserved.
+Crashes are self-evidencing after the fact; a silent permission prompt is not.
+
+**What was rejected, and the argument that lost.** Terminal-class was rejected because a user on
+`Important` would silently stop learning that an agent is waiting on them — the exact failure the
+setting's name promises to avoid. A split making `Error` Important but `Permission` terminal was
+rejected as more precise but unsupported by any soloterm.com page, adding a third divergence for no
+proven gain. **The counter-argument that lost is alert fatigue** — agents ask for permission far more
+often than processes crash, so an Important-class permission prompt is the notification most likely to
+push a user to disable notifications wholesale. It is recorded rather than dismissed: if fatigue shows
+up in real use, this entry is the thing to reopen, and the cheap remedy is the rejected split.
+
+**Effect on parity:** revises what `plan/02` **D8** delivers (native desktop notifications, crash and
+attention). No row regresses. Unimplemented as of this entry — nothing here has been observed working.
+
+---
+
+## D-31 — The legacy alert booleans upgrade to a level, and one combination cannot survive it intact 🟢
+
+**Introduced:** the notifications initiative, recorded ahead of the code that implements it.
+
+**Solo — silent, and necessarily so.** The per-project `crash_exit_alerts` / `terminal_alerts` booleans
+are **Soloist's own construct**, not Solo's; Solo has only the three-level model. No Solo page describes
+this upgrade because Solo never had the thing being upgraded. Nothing below asserts what Solo does. This
+entry exists because the migration silently rewrites a user's persisted, deliberately-chosen settings,
+which is an observable behaviour change that a later session must not quietly re-decide.
+
+**The problem.** Two booleans express four states; three levels express three. The pair
+`crash_exit_alerts: off` + `terminal_alerts: on` means "bells but not crashes", and **no level expresses
+it** — `Important` admits crashes and drops bells, `All` admits both, `None` admits neither. Whichever
+level is chosen, one of the user's two explicit choices is inverted.
+
+**Soloist (owner decision 2026-07-28).** The serde upgrade shim
+(`legacy_booleans_upgrade_to_a_level`) pins the full mapping:
+
+| `crash_exit_alerts` | `terminal_alerts` | level |
+| --- | --- | --- |
+| on | on | `All` |
+| on | off | `Important` |
+| off | off | `None` |
+| off | on | **`All`** — the lossy case |
+
+**Rationale for the lossy case.** Over-notifying is one click for the user to fix, and it is
+self-announcing — the unwanted alert arrives and the user changes the setting. Silently dropping crash
+alerts is neither: it is not recoverable, and it is not noticed until the moment it matters, when a
+process has already died unobserved. Given a forced error, the decision takes the one the user can see
+and undo.
+
+**What was rejected.** `Important` was rejected because it inverts *both* of the user's choices at once
+— it admits the crashes they turned off *and* drops the bells they turned on — which is strictly worse
+than inverting one. `None` was rejected because it silences a user who deliberately turned bells on,
+and is the same unrecoverable-silence failure in a broader form.
+
+**Effect on parity:** revises `plan/02` **I7c** (project notifications), which still describes the
+boolean pair and is rewritten by the PR that ships the level model — not by this entry. `plan/05`'s
+per-project settings row is superseded the same way and on the same schedule. Unimplemented as of this
+entry.
+
+---
+
+## D-32 — OSC 99 notifications are one-shot only; a multipart payload is ignored, never half-assembled 🟡
+
+**Introduced:** the notifications initiative, recorded ahead of the code that implements it.
+
+**Solo (ref [notifications/triggering-from-scripts](https://soloterm.com/docs/notifications/triggering-from-scripts)):**
+Solo accepts three escape sequences for script-triggered notifications — **OSC 9** (iTerm2-compatible),
+**OSC 777** (libnotify-compatible), and **OSC 99** (Kitty-compatible). For OSC 99 the page states that
+"Solo accepts one-shot payloads and multipart payloads with an `i=<id>` parameter", and that "payloads
+can be plain text or base64 when `e=1`". Multipart support is therefore **documented Solo behaviour**,
+not merely a capability of the underlying protocol.
+
+**Soloist — a constraint on the parser, which does not exist yet.** Today
+`crates/core/src/terminal/parser.rs` handles OSC 0/1/2 and `0x07` only, so **none** of these three
+sequences is recognised and `printf '\e]777;notify;Build;done\a'` is silently dropped. When the parser
+gains them it must accept OSC 99 **one-shot payloads in both encodings** — plain text and base64 under
+`e=1` — and **treat multipart as out of scope**: a payload carrying an `i=<id>` chunk is **ignored
+outright** rather than partially assembled. It must **not** introduce a reassembly buffer, a per-id
+table, or a timeout reaping half-finished notifications.
+
+**Rationale.** Chunking exists for payloads too large for a single escape sequence — long bodies and
+embedded icons. Nothing in the alerting Soloist actually delivers needs it: a notification is a title
+and a short body, and both fit one sequence. Against that, reassembly is exactly the shape the
+longevity rules bound most tightly — a keyed buffer, fed by **arbitrary process output**, needing a
+cap on both chunk count and total size plus a timeout to reap abandoned ids, or it is an unbounded
+buffer any chatty process could grow. Ignoring a chunk is the honest bounded behaviour; assembling
+half a notification and showing it would be worse than showing none.
+
+**Why 🟡 rather than settled.** This is a scope decision, not a judgement that multipart is wrong. If a
+real payload turns up that needs it, the entry reopens — the work is a bounded per-id buffer with the
+caps named above.
+
+**Effect on parity:** the OSC script-notification row is added to `plan/02` by the PR that builds the
+parser; this entry constrains it in advance. No existing row regresses. Unimplemented as of this entry.
+
+---
+
+## D-33 — The unread badge rides on `libunity` and silently shows nothing where it is absent 🟡
+
+**Introduced:** the notifications initiative, recorded ahead of the code that implements it.
+
+**Solo (ref [notifications/indicators](https://soloterm.com/docs/notifications/indicators), `plan/05` §10):**
+unread attention surfaces in four places — an unread marker on process rows, a dot on the project
+header, a title-bar attention count, and an **app-icon badge count**, "capped at `99+`". Solo qualifies
+the badge itself as available "on supported platforms"; on its own macOS target it is simply always
+there, since the Dock badge is a first-party API.
+
+**Soloist — a constraint on indicators that are not built yet.** The first three are ours to render and
+will work everywhere. The fourth will not: Linux has no first-party taskbar-badge API. A badge must be
+set through the **Unity launcher D-Bus protocol**, which requires `libunity` present and a shell that
+consumes it (GNOME does so via `dash-to-dock` or a comparable extension). Where either is missing the
+badge call is a **silent no-op** — no error, no fallback, nothing drawn — and that is accepted rather
+than worked around.
+
+**Rationale, and what keeps this honest.** The badge is treated as **additive, never the primary cue**.
+The **title-bar count is the always-works indicator**, and every piece of information the badge carries
+is reachable from the in-window indicators, so a user on a shell without `libunity` loses redundancy
+rather than the signal itself. The alternative — a tray-icon fallback drawing our own badge — was not
+taken: it introduces a second attention surface with its own state to keep in sync, for an environment
+that already shows the count in the window.
+
+**Why 🟡.** The dependency is environmental, so the behaviour differs across otherwise-identical
+installs of our one supported target. It stays flagged until the Phase 13 walk records what the badge
+actually does on a stock GNOME session; `libunity.so.9` and `com.canonical.Unity` were both found
+present on the development machine, which is **not** evidence about a default Ubuntu install.
+
+**Effect on parity:** constrains `plan/02` **D10** (attention bell + unified unread), promoted to `v1`
+alongside this entry. No row regresses. Unimplemented as of this entry — the badge has never been
+observed rendering.
