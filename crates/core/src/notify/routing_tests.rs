@@ -3,7 +3,7 @@
 //! inputs — an example-per-case suite would leave holes, and this is the contract every surface
 //! that renders an alert reads.
 
-use crate::attention::{AttentionKind, Severity};
+use crate::attention::AttentionKind;
 use crate::ids::ProcessId;
 use crate::settings::NotificationLevel;
 
@@ -68,11 +68,14 @@ fn presences() -> [(&'static str, Presence); 4] {
 /// implementation: the level decides whether the signal survives at all, then presence decides
 /// where it goes.
 fn expected(kind: AttentionKind, presence: Presence, level: NotificationLevel) -> Delivery {
-    let admitted = match (level, kind.severity()) {
+    // Named kind by kind rather than derived from `severity()`, which is the function `route`
+    // itself calls: a table that asked the implementation what it admits could not disagree with it.
+    let admitted = match (level, kind) {
         (NotificationLevel::None, _) => false,
         (NotificationLevel::All, _) => true,
-        (NotificationLevel::Important, Severity::Terminal) => false,
-        (NotificationLevel::Important, Severity::Important) => true,
+        (NotificationLevel::Important, AttentionKind::TerminalBell)
+        | (NotificationLevel::Important, AttentionKind::TerminalNotification) => false,
+        (NotificationLevel::Important, _) => true,
     };
     if !admitted {
         return Delivery::Suppressed;
