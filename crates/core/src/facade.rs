@@ -24,7 +24,7 @@ use crate::filewatch::FileWatcher;
 use crate::identity::Identity;
 use crate::ids::{ProcessId, ProjectId};
 use crate::metrics::MetricsProbe;
-use crate::notify::Notifier;
+use crate::notify::{AttentionRegistry, Notifier, PresenceCell};
 use crate::ports::{Clock, SpawnSpec, StoreError};
 use crate::portscan::{self, PortProbe, WaitForPortError};
 use crate::process::{ProcStatus, ProcessKind, ProcessView};
@@ -52,6 +52,7 @@ pub struct StatusSummary {
     pub running: usize,
 }
 
+mod attention;
 mod blocking;
 mod commands;
 mod coordination;
@@ -97,6 +98,10 @@ pub struct Facade {
     port_probe: Arc<dyn PortProbe>,
     file_watcher: Arc<dyn FileWatcher>,
     notifier: Arc<dyn Notifier>,
+    // The notification reactor shares both beyond `&self`: it reads presence to route an alert and
+    // records what it delivered as unread.
+    presence: Arc<PresenceCell>,
+    attention: Arc<AttentionRegistry>,
     supervisor: Arc<Supervisor>,
     // `Arc`, like the supervisor: the config watch reactor shares them beyond `&self`.
     projects: Arc<Projects>,
@@ -167,6 +172,8 @@ impl Facade {
             port_probe,
             file_watcher,
             notifier,
+            presence: Arc::new(PresenceCell::new()),
+            attention: Arc::new(AttentionRegistry::new()),
             projects: Arc::new(Projects::new(projects)),
             trust: TrustStore::new(trust.clone()),
             config: Arc::new(ConfigEngine::new(trust, bus.clone())),

@@ -21,9 +21,8 @@ const settings: ProjectSettings = {
   auto_start_gate: false,
   auto_trust_command_changes: false,
   editor_override: null,
-  crash_exit_alerts: true,
-  terminal_alerts: true,
-  command_terminal_alerts: {},
+  notification_level: "all",
+  command_notification_levels: {},
   local_commands: {},
 };
 
@@ -36,7 +35,8 @@ const webCommand: ProjectCommandView = {
   restart_when_changed: [],
   env: {},
   visibility: "shared",
-  terminal_alerts: true,
+  notification_level: null,
+  effective_notification_level: "all",
   status: "Running",
 };
 

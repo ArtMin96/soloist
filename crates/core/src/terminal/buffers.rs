@@ -217,7 +217,7 @@ impl TerminalBuffers {
         // Retain the latest title so a poll can read it without replaying the stream.
         if let Some(title) = signals.iter().rev().find_map(|signal| match signal {
             TerminalSignal::Title(title) => Some(title.clone()),
-            TerminalSignal::Bell => None,
+            TerminalSignal::Bell | TerminalSignal::Notify { .. } => None,
         }) {
             self.last_title = Some(title);
         }

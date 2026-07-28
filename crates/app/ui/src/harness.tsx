@@ -127,7 +127,8 @@ function command(over: Partial<ProjectCommandView> & { name: string }): ProjectC
     restart_when_changed: [],
     env: {},
     visibility: "shared",
-    terminal_alerts: true,
+    notification_level: null,
+    effective_notification_level: "all",
     status: null,
     ...over,
   };
@@ -137,7 +138,7 @@ function command(over: Partial<ProjectCommandView> & { name: string }): ProjectC
 const NOOP_OPS = {
   edit: () => {},
   rename: () => {},
-  setTerminalAlerts: () => {},
+  setNotificationLevel: () => {},
   toggleStorage: () => {},
   remove: () => {},
   add: () => Promise.resolve(),
@@ -342,6 +343,7 @@ function Gallery() {
               command({ name: "API", command: "cargo run", status: "Crashed" }),
               command({ name: "Worker", command: "node worker.js", visibility: "local" }),
             ]}
+            projectLevel="all"
             ops={NOOP_OPS}
           />
         </div>

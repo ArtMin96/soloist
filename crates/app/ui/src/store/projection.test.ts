@@ -142,6 +142,23 @@ describe("applyEvent", () => {
     ]);
   });
 
+  it("leaves the process list untouched for attention events (the attention snapshot owns them)", () => {
+    const attention: DomainEvent[] = [
+      {
+        type: "NotificationRaised",
+        process: 1,
+        kind: "crashed",
+        title: "web crashed",
+        body: "The process exited unexpectedly.",
+        sound: null,
+      },
+      { type: "AttentionChanged" },
+    ];
+    for (const event of attention) {
+      expect(applyEvent([starting], event)).toEqual([starting]);
+    }
+  });
+
   it("leaves the process list untouched for coordination events (the orchestration snapshot owns them)", () => {
     const coordination: DomainEvent[] = [
       { type: "TodoChanged", project: 1, id: 7 },

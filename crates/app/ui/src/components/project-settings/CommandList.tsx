@@ -7,16 +7,18 @@ import { Button } from "@/components/ui/button";
 import { STATUS } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { CommandOps } from "@/components/project-settings/commands";
-import type { ProcStatus, ProjectCommandView } from "@/domain";
+import type { NotificationLevel, ProcStatus, ProjectCommandView } from "@/domain";
 
 // The project's commands: each row shows its name, command line, an AUTO badge when it starts on
 // open, a storage badge (the shared solo.yml vs an app-local command), and a live status dot. A row
 // expands to its editor; new commands are added through the modal.
 export function CommandList({
   commands,
+  projectLevel,
   ops,
 }: {
   commands: ProjectCommandView[];
+  projectLevel: NotificationLevel;
   ops: CommandOps;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -69,7 +71,9 @@ export function CommandList({
                     {command.visibility === "shared" ? "solo.yml" : "Local"}
                   </Badge>
                 </button>
-                {isOpen && <CommandEditor command={command} ops={ops} />}
+                {isOpen && (
+                  <CommandEditor command={command} projectLevel={projectLevel} ops={ops} />
+                )}
               </li>
             );
           })}

@@ -266,6 +266,15 @@ export type DomainEvent =
     }
   | { type: "TerminalTitleChanged"; id: number; title: string }
   | { type: "TerminalBell"; id: number }
+  // A process raised a notification of its own from its output (an OSC 9, 777, or 99 escape
+  // sequence), carrying the words it chose. `title` is null when the sequence carried only a
+  // message, leaving the surface to name the process instead.
+  | {
+      type: "TerminalNotification";
+      id: number;
+      title: string | null;
+      body: string;
+    }
   // An agent's activity changed (the five-state idle FSM). Edge-triggered (only on a
   // transition), so the agent's row updates without polling; Permission/Error raise attention.
   | { type: "AgentActivityChanged"; id: number; state: AgentActivity }
@@ -290,7 +299,23 @@ export type DomainEvent =
   // — null for the global library, an id for that project's — because the two are separate lists a
   // surface reads separately. A templates surface re-reads that (kind, scope) list (coalesced); the
   // selected default is read separately.
-  | { type: "TemplateChanged"; kind: TemplateKind; project: number | null };
+  | { type: "TemplateChanged"; kind: TemplateKind; project: number | null }
+  // An alert for a user who is looking at Soloist but not at the process that raised it, so it
+  // belongs in an in-app toast. The core has already applied the master switch, the notification
+  // level, and the focus rules — a surface renders this and decides nothing. Unlike the
+  // change-notifications above it carries its text, because a notification is transient: there is
+  // nothing to re-query, and composing the same sentence again here would make it two sources.
+  | {
+      type: "NotificationRaised";
+      process: number;
+      kind: AttentionKind;
+      title: string;
+      body: string;
+      sound: string | null;
+    }
+  // The set of processes with unread attention changed. Payload-free by the same convention as the
+  // other change-notifications: a surface re-reads attentionSnapshot().
+  | { type: "AttentionChanged" };
 
 export interface AppInfo {
   name: string;
@@ -686,22 +711,65 @@ export interface ProcessSpec {
   env?: Record<string, string>;
 }
 
+// How much a scope notifies (mirrors core::NotificationLevel). A project and a single command each
+// carry one; the two combine to the more restrictive of the pair, so a command can go quieter than
+// its project but never louder.
+export type NotificationLevel = "all" | "important" | "none";
+
+// What a signal is asking of the user (mirrors core::AttentionKind). Which of these warrant an
+// alert, and where that alert goes, is decided in the core — a surface renders the kind it is
+// handed and never re-derives it.
+export type AttentionKind =
+  | "crashed"
+  | "restart_exhausted"
+  | "agent_permission"
+  | "agent_error"
+  | "terminal_bell"
+  | "terminal_notification";
+
+// What one process has waiting for the user (mirrors core::ProcessAttention), oldest kind first.
+export interface ProcessAttention {
+  process: number;
+  kinds: AttentionKind[];
+}
+
+// Everything unread (mirrors core::AttentionSnapshot). The single source every unread surface
+// renders from — the process row's marker, the project header's dot, the title-bar count, and the
+// app-icon badge — so no surface keeps a count of its own. `total` counts alerts rather than
+// processes and is never truncated; a display cap such as "99+" belongs to whatever renders it.
+export interface AttentionSnapshot {
+  processes: ProcessAttention[];
+  total: number;
+}
+
+// Where the user is (mirrors core::Presence), reported to the core by the shell: whether the window
+// has focus, and which process it shows. Reporting it is what clears unread — arriving at the
+// window clears everything, and the process on screen clears its own.
+export interface Presence {
+  focused: boolean;
+  viewing: number | null;
+}
+
 // One project's local settings (mirrors core::ProjectSettings) — the auto-start gate, the
-// auto-trust-command-changes toggle, editor override, alert toggles, per-command alert overrides,
-// and app-local commands.
+// auto-trust-command-changes toggle, editor override, notification level, per-command level
+// overrides, and app-local commands.
 export interface ProjectSettings {
   auto_start_gate: boolean;
   auto_trust_command_changes: boolean;
   editor_override: string | null;
-  crash_exit_alerts: boolean;
-  terminal_alerts: boolean;
-  command_terminal_alerts: Record<string, boolean>;
+  notification_level: NotificationLevel;
+  command_notification_levels: Record<string, NotificationLevel>;
   local_commands: Record<string, ProcessSpec>;
 }
 
 // One command on the settings page (mirrors core::ProjectCommandView). The spec fields are flattened
 // so they are always present; `visibility` is where it lives; `status` is its live state, or null
 // when no process of that name is registered.
+//
+// `notification_level` is the command's own override — null meaning it inherits — and is what a
+// level control edits; `effective_notification_level` is what that resolves to against the project,
+// which is what the command actually notifies about. A surface shows the resolved value from here
+// rather than combining the pair, because which of two levels wins is the core's decision.
 export interface ProjectCommandView {
   name: string;
   command: string;
@@ -711,7 +779,8 @@ export interface ProjectCommandView {
   restart_when_changed: string[];
   env: Record<string, string>;
   visibility: Visibility;
-  terminal_alerts: boolean;
+  notification_level: NotificationLevel | null;
+  effective_notification_level: NotificationLevel;
   status: ProcStatus | null;
 }
 

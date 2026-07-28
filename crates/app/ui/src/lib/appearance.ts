@@ -269,6 +269,12 @@ export interface Option<T> {
   label: string;
 }
 
+// An option that also carries a line saying what choosing it means — for a setting whose choices
+// cannot be told apart by name, where the description belongs to the option rather than the group.
+export interface Choice<T extends string> extends Option<T> {
+  description: string;
+}
+
 export const THEME_OPTIONS: Option<Theme>[] = [
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },

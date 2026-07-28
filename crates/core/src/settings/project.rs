@@ -1,6 +1,6 @@
 //! Per-project local settings — a per-project surface over the one settings base. The durable
 //! preference record for a single project: its auto-start gate, editor override, notification
-//! toggles, per-command alert overrides, and default templates. These are **app-local**
+//! level, per-command level overrides, and default templates. These are **app-local**
 //! preferences, stored apart from the project's shared `solo.yml` config (C1,
 //! [`Visibility::Shared`](crate::projects::Visibility)) and never
 //! written to it. The same [`SettingsStore`](crate::settings::SettingsStore) base serves this
@@ -12,14 +12,15 @@ use std::collections::BTreeMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use super::{TemplateDefaults, ToolDefaults};
+use super::{NotificationLevel, TemplateDefaults, ToolDefaults};
 use crate::config::ProcessSpec;
 
 /// The per-project local settings document. Every field carries a serde default so a record an
-/// older build wrote still deserializes after a field is added. Stored app-local, keyed by
-/// `ProjectId`; never part of `solo.yml`.
+/// older build wrote still deserializes after a field is added, and it reads through
+/// [`StoredProjectSettings`] so a record written before the notification level existed upgrades to
+/// one. Stored app-local, keyed by `ProjectId`; never part of `solo.yml`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(from = "StoredProjectSettings")]
 pub struct ProjectSettings {
     /// When engaged (`true`), suppresses auto-start for this project: none of its commands start
     /// automatically when the project opens, regardless of each command's own `auto_start`. Off by
@@ -35,14 +36,14 @@ pub struct ProjectSettings {
     /// Editor launch name overriding the global Tools default for this project. `None` falls back
     /// to the global default (see [`Self::resolved_editor`]).
     pub editor_override: Option<String>,
-    /// Notify when a command crashes or exits unexpectedly. On by default.
-    pub crash_exit_alerts: bool,
-    /// Notify when a command rings the terminal bell or requests attention. On by default
-    /// project-wide; a single command can be silenced via [`Self::command_terminal_alerts`].
-    pub terminal_alerts: bool,
-    /// Per-command terminal-alert overrides, keyed by command name. An absent command uses the
-    /// project default (on); only commands the user has toggled away from the default are stored.
-    pub command_terminal_alerts: BTreeMap<String, bool>,
+    /// How much this project notifies. [`All`](NotificationLevel::All) by default, so a fresh
+    /// project raises every alert; a single command can be quietened via
+    /// [`Self::command_notification_levels`].
+    pub notification_level: NotificationLevel,
+    /// Per-command level overrides, keyed by command name. An absent command inherits the project
+    /// level; a present one combines with it, so an override can only tighten (see
+    /// [`Self::effective_level_for`]).
+    pub command_notification_levels: BTreeMap<String, NotificationLevel>,
     /// App-local commands — managed processes kept on this machine only, **never** written to
     /// `solo.yml` (`Visibility::Local`). Same shape as a shared command, keyed by name in display
     /// order. The "Make local" / "Save to solo.yml" move transfers a command between this overlay
@@ -59,9 +60,8 @@ impl Default for ProjectSettings {
             auto_start_gate: false,
             auto_trust_command_changes: false,
             editor_override: None,
-            crash_exit_alerts: true,
-            terminal_alerts: true,
-            command_terminal_alerts: BTreeMap::new(),
+            notification_level: NotificationLevel::All,
+            command_notification_levels: BTreeMap::new(),
             local_commands: IndexMap::new(),
             template_defaults: TemplateDefaults::default(),
         }
@@ -78,13 +78,77 @@ impl ProjectSettings {
             .or(global.default_editor.as_deref())
     }
 
-    /// Whether a command's terminal alerts are on: its per-command override when set, otherwise the
-    /// project-wide [`terminal_alerts`](Self::terminal_alerts) default.
-    pub fn terminal_alerts_for(&self, command: &str) -> bool {
-        self.command_terminal_alerts
+    /// How much a single command notifies: its own override combined with the project level,
+    /// taking the more restrictive of the two, so a command can go quieter than its project but
+    /// never louder. An unoverridden command is exactly as loud as its project.
+    pub fn effective_level_for(&self, command: &str) -> NotificationLevel {
+        self.command_notification_levels
             .get(command)
             .copied()
-            .unwrap_or(self.terminal_alerts)
+            .map_or(self.notification_level, |command_level| {
+                self.notification_level.most_restrictive(command_level)
+            })
+    }
+}
+
+/// The stored shape of [`ProjectSettings`], read on the way in so an older record upgrades. It
+/// carries the retired `crash_exit_alerts` / `terminal_alerts` pair alongside the level that
+/// replaced them; a record holding only the booleans is mapped by [`level_from_legacy_alerts`].
+/// The document's serde defaults live here, because `#[serde(from)]` bypasses them on
+/// [`ProjectSettings`] itself.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct StoredProjectSettings {
+    auto_start_gate: bool,
+    auto_trust_command_changes: bool,
+    editor_override: Option<String>,
+    notification_level: Option<NotificationLevel>,
+    command_notification_levels: BTreeMap<String, NotificationLevel>,
+    crash_exit_alerts: Option<bool>,
+    terminal_alerts: Option<bool>,
+    command_terminal_alerts: BTreeMap<String, bool>,
+    local_commands: IndexMap<String, ProcessSpec>,
+    template_defaults: TemplateDefaults,
+}
+
+impl From<StoredProjectSettings> for ProjectSettings {
+    fn from(stored: StoredProjectSettings) -> Self {
+        let crash_exit_alerts = stored.crash_exit_alerts.unwrap_or(true);
+        let terminal_alerts = stored.terminal_alerts.unwrap_or(true);
+        let notification_level = stored
+            .notification_level
+            .unwrap_or_else(|| level_from_legacy_alerts(crash_exit_alerts, terminal_alerts));
+
+        let mut command_notification_levels = stored.command_notification_levels;
+        for (command, command_terminal_alerts) in stored.command_terminal_alerts {
+            command_notification_levels
+                .entry(command)
+                .or_insert_with(|| {
+                    level_from_legacy_alerts(crash_exit_alerts, command_terminal_alerts)
+                });
+        }
+
+        Self {
+            auto_start_gate: stored.auto_start_gate,
+            auto_trust_command_changes: stored.auto_trust_command_changes,
+            editor_override: stored.editor_override,
+            notification_level,
+            command_notification_levels,
+            local_commands: stored.local_commands,
+            template_defaults: stored.template_defaults,
+        }
+    }
+}
+
+/// The level a retired pair of alert booleans becomes. Three of the four combinations have an exact
+/// equivalent; "crashes off, bells on" has none, and resolves to the louder side — an unwanted
+/// alert is one click for the user to undo, while a crash that never announced itself is neither
+/// noticed nor recoverable.
+fn level_from_legacy_alerts(crash_exit_alerts: bool, terminal_alerts: bool) -> NotificationLevel {
+    match (crash_exit_alerts, terminal_alerts) {
+        (true, true) | (false, true) => NotificationLevel::All,
+        (true, false) => NotificationLevel::Important,
+        (false, false) => NotificationLevel::None,
     }
 }
 

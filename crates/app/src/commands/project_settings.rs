@@ -12,8 +12,8 @@
 use std::sync::Arc;
 
 use soloist_core::{
-    Facade, ProcessSpec, ProjectId, ProjectSettings, ProjectSettingsPage, TemplateDefaults,
-    TemplateId, TemplateKind, TrustReviewCommand,
+    Facade, NotificationLevel, ProcessSpec, ProjectId, ProjectSettings, ProjectSettingsPage,
+    TemplateDefaults, TemplateId, TemplateKind, TrustReviewCommand,
 };
 use tauri::State;
 
@@ -83,42 +83,30 @@ pub async fn set_project_editor_override(
         .map_err(|err| err.to_string())
 }
 
-/// Toggles crash/exit alerts for this project (auto-save).
+/// Sets how much this project notifies (auto-save).
 #[tauri::command]
-pub async fn set_project_crash_exit_alerts(
+pub async fn set_project_notification_level(
     project: ProjectId,
-    enabled: bool,
+    level: NotificationLevel,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .blocking(move |f| f.set_project_crash_exit_alerts(project, enabled))
+        .blocking(move |f| f.set_project_notification_level(project, level))
         .await
         .map_err(|err| err.to_string())
 }
 
-/// Toggles project-wide terminal alerts (auto-save).
+/// Overrides one command's notification level for this project, or clears it with `null` so the
+/// command inherits the project again (auto-save).
 #[tauri::command]
-pub async fn set_project_terminal_alerts(
-    project: ProjectId,
-    enabled: bool,
-    facade: State<'_, Arc<Facade>>,
-) -> Result<ProjectSettings, String> {
-    facade
-        .blocking(move |f| f.set_project_terminal_alerts(project, enabled))
-        .await
-        .map_err(|err| err.to_string())
-}
-
-/// Overrides one command's terminal alerts for this project (auto-save).
-#[tauri::command]
-pub async fn set_command_terminal_alerts(
+pub async fn set_command_notification_level(
     project: ProjectId,
     command: String,
-    enabled: bool,
+    level: Option<NotificationLevel>,
     facade: State<'_, Arc<Facade>>,
 ) -> Result<ProjectSettings, String> {
     facade
-        .blocking(move |f| f.set_command_terminal_alerts(project, &command, enabled))
+        .blocking(move |f| f.set_command_notification_level(project, &command, level))
         .await
         .map_err(|err| err.to_string())
 }

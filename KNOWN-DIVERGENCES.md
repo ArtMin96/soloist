@@ -1584,7 +1584,10 @@ push a user to disable notifications wholesale. It is recorded rather than dismi
 up in real use, this entry is the thing to reopen, and the cheap remedy is the rejected split.
 
 **Effect on parity:** revises what `plan/02` **D8** delivers (native desktop notifications, crash and
-attention). No row regresses. Unimplemented as of this entry — nothing here has been observed working.
+attention). No row regresses. **Implemented** in `AttentionKind::severity`
+(`crates/core/src/attention.rs`), pinned by `level_important_keeps_an_agent_asking_for_attention` and
+`level_none_silences_an_agent_asking_for_attention`. Delivery itself is still unobserved — D8's
+outstanding runtime walk covers that, not this entry.
 
 ---
 
@@ -1624,10 +1627,22 @@ and undo.
 than inverting one. `None` was rejected because it silences a user who deliberately turned bells on,
 and is the same unrecoverable-silence failure in a broader form.
 
-**Effect on parity:** revises `plan/02` **I7c** (project notifications), which still describes the
-boolean pair and is rewritten by the PR that ships the level model — not by this entry. `plan/05`'s
-per-project settings row is superseded the same way and on the same schedule. Unimplemented as of this
-entry.
+**A second loss, in the per-command overrides.** The table maps a project's pair; each stored
+`command_terminal_alerts` entry is mapped by the same rule, pairing that command's boolean with the
+*project's* crash setting. Under the booleans a per-command override **won outright**, so a command
+could be louder than its project; under the level model project and command combine to the more
+restrictive of the two, so an override can only ever tighten. A user who had project alerts off and one
+command's bells explicitly on therefore loses that command's bells: project `None` clamps it. That is
+the level model working as approved, not a bug — but it is a distinct user-visible loss from the
+project-level lossy case above, and it is why
+`a_per_command_terminal_override_can_re_enable_a_silenced_project` was replaced by
+`command_override_tightens_but_cannot_loosen`, which asserts the opposite.
+
+**Effect on parity:** revises `plan/02` **I7c** (project notifications) and `plan/05`'s per-project
+settings row, both rewritten to the level model. **Implemented** as the serde upgrade shim on
+`ProjectSettings` (`crates/core/src/settings/project.rs`), with the full mapping pinned by
+`legacy_booleans_upgrade_to_a_level`. The upgrade has been proven against hand-written legacy JSON
+only; it has not been run against a real pre-upgrade data directory.
 
 ---
 
@@ -1642,13 +1657,28 @@ Solo accepts three escape sequences for script-triggered notifications — **OSC
 can be plain text or base64 when `e=1`". Multipart support is therefore **documented Solo behaviour**,
 not merely a capability of the underlying protocol.
 
-**Soloist — a constraint on the parser, which does not exist yet.** Today
-`crates/core/src/terminal/parser.rs` handles OSC 0/1/2 and `0x07` only, so **none** of these three
-sequences is recognised and `printf '\e]777;notify;Build;done\a'` is silently dropped. When the parser
-gains them it must accept OSC 99 **one-shot payloads in both encodings** — plain text and base64 under
-`e=1` — and **treat multipart as out of scope**: a payload carrying an `i=<id>` chunk is **ignored
-outright** rather than partially assembled. It must **not** introduce a reassembly buffer, a per-id
-table, or a timeout reaping half-finished notifications.
+**Soloist — a constraint on the parser, now implemented under it.**
+`crates/core/src/terminal/parser.rs` accepts all three sequences, and OSC 99 **one-shot payloads in
+both encodings** — plain text and base64 under `e=1`. **Multipart is out of scope**: a payload carrying
+an `i=<id>` chunk is **ignored outright** rather than partially assembled, and so is one carrying `d=0`,
+which the Kitty protocol defines as "incomplete, more chunks follow" — the same half-a-notification this
+entry exists to prevent, reached without an identifier. There is no reassembly buffer, no per-id table,
+and no timeout reaping half-finished notifications.
+
+**Two further readings this constraint forced, recorded here so they are not silently inherited.**
+
+_An unlabelled one-shot payload is read as the message, not the title._ Kitty defaults `p` to `title`, and
+composing a notification with both parts requires the multipart form this entry rules out. Under the
+literal default, Kitty's canonical one-shot `printf '\e]99;;Hello\a'` would yield a title with no message
+and be dropped, since a notification with nothing to say is not raised. Soloist reads a one-shot payload
+as the message either way and lets the surface supply the title from the process's own label — so both
+Solo's documented `p=body` example and Kitty's bare form reach the user. Nothing is lost by this: the
+alternative silently discards one of the two.
+
+_A payload that is not the notification's text is ignored._ `p=icon` is base64 image bytes, and `p=close`
+and `p=buttons` carry no message at all; rendering any of them as notification text would put binary or
+control data on screen. Metadata keys Soloist does not recognise are ignored rather than treated as a
+reason to drop the message, as the protocol prescribes, so a newer sequence still gets through.
 
 **Rationale.** Chunking exists for payloads too large for a single escape sequence — long bodies and
 embedded icons. Nothing in the alerting Soloist actually delivers needs it: a notification is a title
@@ -1662,8 +1692,8 @@ half a notification and showing it would be worse than showing none.
 real payload turns up that needs it, the entry reopens — the work is a bounded per-id buffer with the
 caps named above.
 
-**Effect on parity:** the OSC script-notification row is added to `plan/02` by the PR that builds the
-parser; this entry constrains it in advance. No existing row regresses. Unimplemented as of this entry.
+**Effect on parity:** `plan/02` row C17 covers the sequences that are implemented; C7 keeps its narrower
+meaning (title and bell) rather than being widened to imply this. No existing row regresses.
 
 ---
 

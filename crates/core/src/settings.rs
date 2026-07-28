@@ -24,6 +24,7 @@ use crate::ports::StoreError;
 mod appearance;
 mod hotkeys;
 mod integrations;
+mod level;
 mod notifications;
 mod project;
 mod sidebar;
@@ -36,6 +37,7 @@ pub use appearance::{
 };
 pub use hotkeys::{Binding, HotkeyAction, HotkeyBindingView, HotkeyScope, Hotkeys};
 pub use integrations::Integrations;
+pub use level::NotificationLevel;
 pub use notifications::Notifications;
 pub use project::ProjectSettings;
 pub use sidebar::{ProcessCpuThreshold, ProcessMemThreshold, Sidebar};
