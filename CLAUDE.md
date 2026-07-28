@@ -287,6 +287,7 @@ A session that wrote code but didn't update `PROGRESS.md` has **failed its hando
 
 **Task runner (`just`):**
 - `just dev` — Vite + Tauri with hot reload.
+- `just dev-alongside` — dev mode next to an **installed** Soloist. Use whenever one is running; plain `just dev` hijacks its MCP socket, focuses its window, and exits without opening a dev window.
 - `just test` — `cargo test --workspace` + `vitest`.
 - `just lint` — `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `tsc --noEmit`, ESLint/Prettier, dependency-direction guard.
 - `just fmt` — auto-format Rust + UI.

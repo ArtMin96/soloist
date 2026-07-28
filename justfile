@@ -9,6 +9,15 @@ default:
 dev:
     cd {{app}} && cargo tauri dev
 
+# Run dev mode while an *installed* Soloist keeps running, untouched. Both overrides are
+# load-bearing. The data dir, because the IPC server unlinks and rebinds the socket on start:
+# sharing one dir silently steals the installed app's MCP clients. The identifier, because
+# single-instance keys its DBus name on it: matching, the dev build hands its arguments to the
+# installed app, focuses *that* window, and exits 0 — so no dev window ever opens.
+[doc("Run dev mode alongside an installed Soloist, leaving it untouched.")]
+dev-alongside:
+    cd {{app}} && SOLOIST_APP_DATA_DIR="$HOME/.local/share/soloist-dev" cargo tauri dev --config '{"identifier":"dev.soloist.devmode"}'
+
 # Run dev with CrabNebula DevTools — a viewer opens showing IPC command timings, events, and
 # spans. Dev-only; the `devtools` feature is never in a release build.
 devtools:
