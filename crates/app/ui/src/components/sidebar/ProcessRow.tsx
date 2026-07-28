@@ -18,7 +18,9 @@ import {
   type ProcessActionHandlers,
   type RunnableProcessAction,
 } from "@/lib/processActions";
+import { ATTENTION_LABEL } from "@/lib/attention";
 import { cn } from "@/lib/utils";
+import { useUnreadProcess } from "@/store/attentionContext";
 import { useSignal } from "@/store/signalsContext";
 import { useSidebarSettings } from "@/store/sidebarSettingsContext";
 import type { ProcessView } from "@/domain";
@@ -26,6 +28,13 @@ import type { ProcessView } from "@/domain";
 /** The row's base left padding; each lineage level indents one step further. */
 const ROW_BASE_PADDING_PX = 10;
 const ROW_INDENT_STEP_PX = 16;
+
+// The unread marker's inset from the row's leading edge. It sits in the row's own padding, before
+// the disclosure and status columns, so it costs no layout and can never be mistaken for the status
+// glyph beside it: an agent awaiting permission already wears the same attention hue, and the two
+// are told apart by where they sit and what shape they are, not by color. It indents with the row
+// so a nested worker's marker stays attached to its own level.
+const ROW_MARKER_LEFT_PX = 3;
 
 interface ProcessRowProps {
   process: ProcessView;
@@ -72,6 +81,7 @@ export function ProcessRow({
   onToggleExpand,
 }: ProcessRowProps) {
   const { metrics, restart, activity } = useSignal(process.id);
+  const unread = useUnreadProcess(process.id);
   const { sidebar } = useSidebarSettings();
   const handlers: ProcessActionHandlers = {
     onTrust: () => onTrust(),
@@ -123,6 +133,14 @@ export function ProcessRow({
           : "hover:bg-sidebar-accent focus-visible:bg-sidebar-accent",
       )}
     >
+      {unread && (
+        <span
+          role="img"
+          aria-label={ATTENTION_LABEL}
+          className="pointer-events-none absolute top-1/2 size-[5px] -translate-y-1/2 rounded-full bg-status-attention"
+          style={{ left: `${ROW_MARKER_LEFT_PX + depth * ROW_INDENT_STEP_PX}px` }}
+        />
+      )}
       {treeColumn &&
         (hasChildren ? (
           <Button

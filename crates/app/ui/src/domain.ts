@@ -743,8 +743,9 @@ export interface AttentionSnapshot {
 }
 
 // Where the user is (mirrors core::Presence), reported to the core by the shell: whether the window
-// has focus, and which process it shows. Reporting it is what clears unread — arriving at the
-// window clears everything, and the process on screen clears its own.
+// has focus, and which process it shows. Reporting it is what clears unread, and only for the
+// process on screen: arriving at the window clears nothing, so an alert raised while the user was
+// away is still there to be found once they are back.
 export interface Presence {
   focused: boolean;
   viewing: number | null;
