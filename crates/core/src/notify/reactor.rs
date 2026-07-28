@@ -119,7 +119,8 @@ impl NotificationReactor {
     /// defaults (level `All`) on a read error, so a transient store failure never swallows a crash
     /// alert.
     fn decide(&self, event: &DomainEvent) -> Option<Alert> {
-        let (id, kind) = classify(event)?;
+        let (id, trigger) = classify(event)?;
+        let kind = trigger.kind();
         if !self.globally_enabled() {
             return None;
         }
@@ -134,7 +135,7 @@ impl NotificationReactor {
             process: id,
             kind,
             delivery: route(id, kind, self.presence.get(), level),
-            notification: notification(kind, &view.label),
+            notification: trigger.notification(&view.label)?,
         })
     }
 
@@ -166,25 +167,102 @@ struct Alert {
     notification: Notification,
 }
 
-/// The attention kind a raw event carries, with the process it concerns — or `None` when the
+/// What an event is asking of the user, and where the words for it come from.
+///
+/// A process that raises its own notification says what it wants said; every other signal is one
+/// Soloist recognised, and Soloist writes the words. Keeping the two apart is what lets each
+/// [`AttentionKind`] be handed text that is true of it, rather than a shared arm inventing a
+/// sentence for a message the script already wrote.
+enum Trigger {
+    /// A signal Soloist recognised, whose text follows from the kind alone.
+    Recognised(AttentionKind),
+    /// A notification a process raised for itself, in its own words. `title` is `None` when the
+    /// escape sequence carried only a message.
+    Script { title: Option<String>, body: String },
+}
+
+impl Trigger {
+    /// The attention kind this trigger raises — the vocabulary routing, severity, and the unread
+    /// registry all speak.
+    fn kind(&self) -> AttentionKind {
+        match self {
+            Self::Recognised(kind) => *kind,
+            Self::Script { .. } => AttentionKind::TerminalNotification,
+        }
+    }
+
+    /// The alert text for the named process — the one place a title and a body are written,
+    /// whichever surface ends up rendering them.
+    ///
+    /// `None` only for a kind that has no text of its own to write:
+    /// [`AttentionKind::TerminalNotification`] is always raised as [`Self::Script`], carrying the
+    /// words the process chose, so there is nothing to say about one that arrived without them.
+    fn notification(self, label: &str) -> Option<Notification> {
+        let (title, body) = match self {
+            // The process wrote its own words; the label only stands in for a title it omitted.
+            Self::Script { title, body } => (title.unwrap_or_else(|| label.to_owned()), body),
+            Self::Recognised(kind) => {
+                let (title, body) = match kind {
+                    AttentionKind::Crashed => (
+                        format!("{label} crashed"),
+                        "The process exited unexpectedly.",
+                    ),
+                    AttentionKind::RestartExhausted => (
+                        format!("{label} stopped"),
+                        "Auto-restart gave up after too many crashes.",
+                    ),
+                    AttentionKind::AgentPermission => (
+                        format!("{label} needs your input"),
+                        "The agent is waiting for permission.",
+                    ),
+                    AttentionKind::AgentError => (
+                        format!("{label} hit an error"),
+                        "The agent reported an error.",
+                    ),
+                    AttentionKind::TerminalBell => (
+                        format!("{label} rang the bell"),
+                        "The terminal signalled for your attention.",
+                    ),
+                    AttentionKind::TerminalNotification => return None,
+                };
+                (title, body.to_owned())
+            }
+        };
+        Some(Notification {
+            title,
+            body,
+            sound: None,
+        })
+    }
+}
+
+/// What a raw event is asking of the user, with the process it concerns — or `None` when the
 /// event warrants no notification.
-fn classify(event: &DomainEvent) -> Option<(ProcessId, AttentionKind)> {
+fn classify(event: &DomainEvent) -> Option<(ProcessId, Trigger)> {
+    let recognised = |id: &ProcessId, kind| Some((*id, Trigger::Recognised(kind)));
     match event {
         DomainEvent::ProcessStatusChanged {
             id,
             to: ProcStatus::Crashed,
             ..
-        } => Some((*id, AttentionKind::Crashed)),
-        DomainEvent::RestartExhausted { id } => Some((*id, AttentionKind::RestartExhausted)),
+        } => recognised(id, AttentionKind::Crashed),
+        DomainEvent::RestartExhausted { id } => recognised(id, AttentionKind::RestartExhausted),
         DomainEvent::AgentActivityChanged {
             id,
             state: AgentActivity::Permission,
-        } => Some((*id, AttentionKind::AgentPermission)),
+        } => recognised(id, AttentionKind::AgentPermission),
         DomainEvent::AgentActivityChanged {
             id,
             state: AgentActivity::Error,
-        } => Some((*id, AttentionKind::AgentError)),
-        DomainEvent::TerminalBell { id } => Some((*id, AttentionKind::TerminalBell)),
+        } => recognised(id, AttentionKind::AgentError),
+        DomainEvent::TerminalBell { id } => recognised(id, AttentionKind::TerminalBell),
+        DomainEvent::TerminalNotification { id, title, body } => Some((
+            *id,
+            Trigger::Script {
+                title: title.clone(),
+                body: body.clone(),
+            },
+        )),
         _ => None,
     }
 }
@@ -201,39 +279,8 @@ fn survives_retry_policy(kind: AttentionKind, auto_restart: bool) -> bool {
         AttentionKind::RestartExhausted
         | AttentionKind::AgentPermission
         | AttentionKind::AgentError
-        | AttentionKind::TerminalBell => true,
-    }
-}
-
-/// The alert text this kind shows for the named process — the one place a title and body are
-/// written, whichever surface ends up rendering them.
-fn notification(kind: AttentionKind, label: &str) -> Notification {
-    let (title, body) = match kind {
-        AttentionKind::Crashed => (
-            format!("{label} crashed"),
-            "The process exited unexpectedly.",
-        ),
-        AttentionKind::RestartExhausted => (
-            format!("{label} stopped"),
-            "Auto-restart gave up after too many crashes.",
-        ),
-        AttentionKind::AgentPermission => (
-            format!("{label} needs your input"),
-            "The agent is waiting for permission.",
-        ),
-        AttentionKind::AgentError => (
-            format!("{label} hit an error"),
-            "The agent reported an error.",
-        ),
-        AttentionKind::TerminalBell => (
-            format!("{label} rang the bell"),
-            "The terminal signalled for your attention.",
-        ),
-    };
-    Notification {
-        title,
-        body: body.into(),
-        sound: None,
+        | AttentionKind::TerminalBell
+        | AttentionKind::TerminalNotification => true,
     }
 }
 

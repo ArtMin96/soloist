@@ -3,7 +3,7 @@
 //! inputs — an example-per-case suite would leave holes, and this is the contract every surface
 //! that renders an alert reads.
 
-use crate::attention::AttentionKind;
+use crate::attention::{AttentionKind, Severity};
 use crate::ids::ProcessId;
 use crate::settings::NotificationLevel;
 
@@ -14,12 +14,13 @@ const SUBJECT: ProcessId = ProcessId::from_raw(1);
 /// Some other process the user may be looking at instead.
 const ELSEWHERE: ProcessId = ProcessId::from_raw(2);
 
-const KINDS: [AttentionKind; 5] = [
+const KINDS: [AttentionKind; 6] = [
     AttentionKind::Crashed,
     AttentionKind::RestartExhausted,
     AttentionKind::AgentPermission,
     AttentionKind::AgentError,
     AttentionKind::TerminalBell,
+    AttentionKind::TerminalNotification,
 ];
 
 const LEVELS: [NotificationLevel; 3] = [
@@ -67,11 +68,11 @@ fn presences() -> [(&'static str, Presence); 4] {
 /// implementation: the level decides whether the signal survives at all, then presence decides
 /// where it goes.
 fn expected(kind: AttentionKind, presence: Presence, level: NotificationLevel) -> Delivery {
-    let admitted = match (level, kind) {
+    let admitted = match (level, kind.severity()) {
         (NotificationLevel::None, _) => false,
         (NotificationLevel::All, _) => true,
-        (NotificationLevel::Important, AttentionKind::TerminalBell) => false,
-        (NotificationLevel::Important, _) => true,
+        (NotificationLevel::Important, Severity::Terminal) => false,
+        (NotificationLevel::Important, Severity::Important) => true,
     };
     if !admitted {
         return Delivery::Suppressed;

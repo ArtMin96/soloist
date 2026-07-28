@@ -64,6 +64,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "ConfigChanged":
     case "TerminalTitleChanged":
     case "TerminalBell":
+    case "TerminalNotification":
     case "AgentActivityChanged":
     case "OrphansFound":
     case "TodoChanged":

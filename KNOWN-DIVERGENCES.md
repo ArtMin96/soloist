@@ -1657,13 +1657,28 @@ Solo accepts three escape sequences for script-triggered notifications — **OSC
 can be plain text or base64 when `e=1`". Multipart support is therefore **documented Solo behaviour**,
 not merely a capability of the underlying protocol.
 
-**Soloist — a constraint on the parser, which does not exist yet.** Today
-`crates/core/src/terminal/parser.rs` handles OSC 0/1/2 and `0x07` only, so **none** of these three
-sequences is recognised and `printf '\e]777;notify;Build;done\a'` is silently dropped. When the parser
-gains them it must accept OSC 99 **one-shot payloads in both encodings** — plain text and base64 under
-`e=1` — and **treat multipart as out of scope**: a payload carrying an `i=<id>` chunk is **ignored
-outright** rather than partially assembled. It must **not** introduce a reassembly buffer, a per-id
-table, or a timeout reaping half-finished notifications.
+**Soloist — a constraint on the parser, now implemented under it.**
+`crates/core/src/terminal/parser.rs` accepts all three sequences, and OSC 99 **one-shot payloads in
+both encodings** — plain text and base64 under `e=1`. **Multipart is out of scope**: a payload carrying
+an `i=<id>` chunk is **ignored outright** rather than partially assembled, and so is one carrying `d=0`,
+which the Kitty protocol defines as "incomplete, more chunks follow" — the same half-a-notification this
+entry exists to prevent, reached without an identifier. There is no reassembly buffer, no per-id table,
+and no timeout reaping half-finished notifications.
+
+**Two further readings this constraint forced, recorded here so they are not silently inherited.**
+
+_An unlabelled one-shot payload is read as the message, not the title._ Kitty defaults `p` to `title`, and
+composing a notification with both parts requires the multipart form this entry rules out. Under the
+literal default, Kitty's canonical one-shot `printf '\e]99;;Hello\a'` would yield a title with no message
+and be dropped, since a notification with nothing to say is not raised. Soloist reads a one-shot payload
+as the message either way and lets the surface supply the title from the process's own label — so both
+Solo's documented `p=body` example and Kitty's bare form reach the user. Nothing is lost by this: the
+alternative silently discards one of the two.
+
+_A payload that is not the notification's text is ignored._ `p=icon` is base64 image bytes, and `p=close`
+and `p=buttons` carry no message at all; rendering any of them as notification text would put binary or
+control data on screen. Metadata keys Soloist does not recognise are ignored rather than treated as a
+reason to drop the message, as the protocol prescribes, so a newer sequence still gets through.
 
 **Rationale.** Chunking exists for payloads too large for a single escape sequence — long bodies and
 embedded icons. Nothing in the alerting Soloist actually delivers needs it: a notification is a title
@@ -1677,8 +1692,8 @@ half a notification and showing it would be worse than showing none.
 real payload turns up that needs it, the entry reopens — the work is a bounded per-id buffer with the
 caps named above.
 
-**Effect on parity:** the OSC script-notification row is added to `plan/02` by the PR that builds the
-parser; this entry constrains it in advance. No existing row regresses. Unimplemented as of this entry.
+**Effect on parity:** `plan/02` row C17 covers the sequences that are implemented; C7 keeps its narrower
+meaning (title and bell) rather than being widened to imply this. No existing row regresses.
 
 ---
 

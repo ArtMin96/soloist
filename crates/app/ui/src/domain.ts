@@ -266,6 +266,15 @@ export type DomainEvent =
     }
   | { type: "TerminalTitleChanged"; id: number; title: string }
   | { type: "TerminalBell"; id: number }
+  // A process raised a notification of its own from its output (an OSC 9, 777, or 99 escape
+  // sequence), carrying the words it chose. `title` is null when the sequence carried only a
+  // message, leaving the surface to name the process instead.
+  | {
+      type: "TerminalNotification";
+      id: number;
+      title: string | null;
+      body: string;
+    }
   // An agent's activity changed (the five-state idle FSM). Edge-triggered (only on a
   // transition), so the agent's row updates without polling; Permission/Error raise attention.
   | { type: "AgentActivityChanged"; id: number; state: AgentActivity }
@@ -715,7 +724,8 @@ export type AttentionKind =
   | "restart_exhausted"
   | "agent_permission"
   | "agent_error"
-  | "terminal_bell";
+  | "terminal_bell"
+  | "terminal_notification";
 
 // What one process has waiting for the user (mirrors core::ProcessAttention), oldest kind first.
 export interface ProcessAttention {
