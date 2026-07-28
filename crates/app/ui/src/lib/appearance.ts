@@ -78,9 +78,12 @@ export const TERMINAL_SCROLLBACK_LINES = 5000;
 // the scrollbar's, so matching them leaves the usable column count unchanged.
 export const TERMINAL_OVERVIEW_RULER_WIDTH = 14;
 
-// The terminal follows the same native-family policy as the app shell. SF Mono is used on macOS;
-// the remaining faces are platform fallbacks, not bundled web fonts.
-const DEFAULT_MONO_STACK = '"SF Mono", Menlo, Monaco, ui-monospace, monospace';
+// The app bundles no font, so the stack may only name families the target platform already has.
+// Ubuntu Mono is the Ubuntu desktop's own monospace face; DejaVu Sans Mono is the one behind it,
+// carried by fontconfig's own font dependency and so present wherever the app runs at all. The
+// generic tail is the floor rather than the answer: a family named here renders the same width on
+// every box, where `monospace` is whatever that machine happens to resolve it to.
+const DEFAULT_MONO_STACK = '"Ubuntu Mono", "DejaVu Sans Mono", monospace';
 
 const ROOT_FONT_PX = 16;
 
@@ -132,8 +135,8 @@ export function letterSpacingPx(spacing: LetterSpacing): number {
   return LETTER_SPACING_PX[spacing];
 }
 
-// The CSS font-family stack for the terminal: the chosen family ahead of the bundled
-// fallback, or the bundled stack alone when none is chosen.
+// The CSS font-family stack for the terminal: the chosen family ahead of the default stack,
+// or that stack alone when none is chosen.
 export function terminalFontFamily(family: string | null): string {
   return family ? `"${family}", ${DEFAULT_MONO_STACK}` : DEFAULT_MONO_STACK;
 }
@@ -357,15 +360,23 @@ export const LETTER_SPACING_OPTIONS: Option<LetterSpacing>[] = [
   { value: "wider", label: "Wider" },
 ];
 
-// A curated set of common Linux monospace families; an uninstalled family falls back through
-// the stack. `null` keeps the app's bundled default. (Probing actually-installed fonts is a
-// later, separate concern; the core only stores the chosen name.)
-export const MONO_FONT_OPTIONS: Option<string | null>[] = [
+// Only families the platform's own packaging guarantees, because nothing is bundled and the
+// webview offers no way to ask which fonts are installed: an entry that cannot be promised to
+// resolve is a control that silently does nothing when it is picked. `null` keeps the stack above.
+const MONO_FONT_OPTIONS: Option<string | null>[] = [
   { value: null, label: "System default" },
-  { value: "JetBrains Mono", label: "JetBrains Mono" },
-  { value: "Fira Code", label: "Fira Code" },
-  { value: "Source Code Pro", label: "Source Code Pro" },
   { value: "Ubuntu Mono", label: "Ubuntu Mono" },
   { value: "DejaVu Sans Mono", label: "DejaVu Sans Mono" },
-  { value: "Hack", label: "Hack" },
+  { value: "Liberation Mono", label: "Liberation Mono" },
 ];
+
+// The picker's options for the family currently stored, which is not always one of the offered
+// set — a name chosen before the set was narrowed still persists, and a select handed a value no
+// item carries renders empty. Appending it keeps that choice visible and re-selectable, and claims
+// nothing about whether it resolves. A blank name is read as no choice, the way the stack reads it:
+// appended it would be a select item with an empty value, which Radix refuses outright.
+export function monoFontOptions(family: string | null): Option<string | null>[] {
+  return family && !MONO_FONT_OPTIONS.some((option) => option.value === family)
+    ? [...MONO_FONT_OPTIONS, { value: family, label: family }]
+    : MONO_FONT_OPTIONS;
+}

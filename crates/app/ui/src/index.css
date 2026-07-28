@@ -6,15 +6,18 @@
 
 @theme inline {
   /*
-   * AppKit typography is owned here, rather than repeated in individual components. On macOS,
-   * `-apple-system` resolves to San Francisco, Apple's current system UI family. The remaining
-   * stack keeps the app equally legible on the Linux platforms Soloist supports.
+   * Typography is owned here, rather than repeated in individual components. The sans stack names
+   * Apple's UI families first, after the AppKit idiom the interface is drawn to. The mono token
+   * does not follow it: nothing is bundled, and naming a family the target platform has no copy of
+   * leaves inline code, the editor and Mermaid rendering whatever that box resolves the generic to.
+   * It names what Ubuntu's own packaging carries, which is the terminal's stack — the two are one
+   * requirement, so they may not answer it differently.
    */
   --font-heading: var(--font-sans);
   --font-sans:
     "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial,
     sans-serif;
-  --font-mono: "SF Mono", Menlo, Monaco, ui-monospace, monospace;
+  --font-mono: "Ubuntu Mono", "DejaVu Sans Mono", monospace;
 
   /*
    * Motion easings. macOS animates with springs ({duration, bounce} → stiffness/damping,

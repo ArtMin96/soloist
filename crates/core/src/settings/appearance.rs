@@ -107,8 +107,9 @@ pub struct TerminalAppearance {
     /// Whether selecting text in the terminal copies it to the clipboard immediately. Off, the
     /// selection is copied only on the explicit copy hotkey.
     pub copy_on_select: bool,
-    /// The monospace font family, or `None` to use the app default. The frontend offers the system's
-    /// installed monospace fonts; the core only stores the chosen name.
+    /// The monospace font family, or `None` to use the app default. The frontend offers a fixed set
+    /// of families the target platform's own packaging carries, since the webview cannot enumerate
+    /// what a machine has installed; the core only stores the chosen name.
     pub font_family: Option<String>,
     /// Weight for regular terminal text (demo default 400).
     pub font_weight: FontWeight,
