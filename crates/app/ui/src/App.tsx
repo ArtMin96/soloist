@@ -11,6 +11,7 @@ import {
   TerminalPane,
 } from "@/components/deferredAppComponents";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { NotificationToasts } from "@/components/NotificationToasts";
 import { OrphanDialog } from "@/components/OrphanDialog";
 import { RemoveProcessDialog } from "@/components/RemoveProcessDialog";
 import { Sidebar } from "@/components/sidebar/Sidebar";
@@ -302,6 +303,7 @@ export default function App() {
                       </Suspense>
                     </main>
                   </div>
+                  <NotificationToasts processes={store.processes} onSelectProcess={selectProcess} />
                   <OrphanDialog
                     orphans={orphans.orphans}
                     onKillOne={orphans.killOne}
