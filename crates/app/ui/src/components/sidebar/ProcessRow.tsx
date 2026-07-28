@@ -30,11 +30,11 @@ const ROW_BASE_PADDING_PX = 10;
 const ROW_INDENT_STEP_PX = 16;
 
 // The unread marker's inset from the row's leading edge. It sits in the row's own padding, before
-// the disclosure and status columns, so it costs no layout and can never be mistaken for the status
-// glyph beside it: an agent awaiting permission already wears the same attention hue, and the two
-// are told apart by where they sit and what shape they are, not by color. It indents with the row
-// so a nested worker's marker stays attached to its own level.
-const ROW_MARKER_LEFT_PX = 3;
+// the disclosure and status columns, so it costs no layout. Kept hard against that edge to leave
+// the widest gap the padding allows before the status glyph: an agent awaiting permission wears
+// the same attention hue, so the two are told apart by shape and by the space between them rather
+// than by color. It indents with the row, keeping a nested worker's marker on its own level.
+const ROW_MARKER_LEFT_PX = 1;
 
 interface ProcessRowProps {
   process: ProcessView;
