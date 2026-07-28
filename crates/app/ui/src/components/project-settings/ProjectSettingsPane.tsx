@@ -164,7 +164,13 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
                   }
                 />
               )}
-              {active === "commands" && <CommandList commands={page.commands} ops={ops} />}
+              {active === "commands" && (
+                <CommandList
+                  commands={page.commands}
+                  projectLevel={page.settings.notification_level}
+                  ops={ops}
+                />
+              )}
             </>
           )}
         </div>

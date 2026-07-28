@@ -153,7 +153,7 @@ impl Facade {
                 name.clone(),
                 spec,
                 Visibility::Shared,
-                settings.command_notification_levels.get(name).copied(),
+                &settings,
                 statuses.get(name).copied(),
             ));
         }
@@ -162,7 +162,7 @@ impl Facade {
                 name.clone(),
                 spec,
                 Visibility::Local,
-                settings.command_notification_levels.get(name).copied(),
+                &settings,
                 statuses.get(name).copied(),
             ));
         }

@@ -222,6 +222,49 @@ fn the_settings_page_assembles_root_validity_counts_and_shared_commands() {
 }
 
 #[test]
+fn the_settings_page_resolves_each_commands_effective_level() {
+    let (facade, project, _root, _dir) = project_with_yaml(
+        "processes:\n  Web:\n    command: npm run dev\n  Api:\n    command: npm run api\n",
+    );
+    facade
+        .set_project_notification_level(project, NotificationLevel::Important)
+        .expect("project level");
+    facade
+        .set_command_notification_level(project, "Web", Some(NotificationLevel::All))
+        .expect("command override");
+
+    let page = facade
+        .project_settings_page(project)
+        .expect("page assembles");
+    let web = page
+        .commands
+        .iter()
+        .find(|c| c.name == "Web")
+        .expect("Web present");
+    let api = page
+        .commands
+        .iter()
+        .find(|c| c.name == "Api")
+        .expect("Api present");
+
+    assert_eq!(
+        web.notification_level,
+        Some(NotificationLevel::All),
+        "the override travels verbatim, so a control bound to it edits what is stored"
+    );
+    assert_eq!(
+        web.effective_notification_level,
+        NotificationLevel::Important,
+        "the project holds a louder override down to its own level"
+    );
+    assert_eq!(
+        api.effective_notification_level,
+        NotificationLevel::Important,
+        "a command with no override of its own resolves to the project level"
+    );
+}
+
+#[test]
 fn the_settings_page_lists_local_commands_as_local() {
     let (facade, project, _root, _dir) =
         project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");

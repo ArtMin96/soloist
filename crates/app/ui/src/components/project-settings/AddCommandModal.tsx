@@ -10,10 +10,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { SettingChoice } from "@/components/settings/controls/SettingChoice";
 import { Input } from "@/components/ui/input";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { cn } from "@/lib/utils";
+import type { Choice } from "@/components/settings/controls/SettingChoice";
 import type { ProcessSpec, Visibility } from "@/domain";
+
+// Where a new command is stored. Neither name says what it costs — the shared file is committed and
+// visible to everyone, the local one never leaves this machine — so each carries a line that does.
+const STORE_CHOICES: Choice<Visibility>[] = [
+  {
+    value: "shared",
+    label: "Save to solo.yml",
+    description: "Committed with the project and shared with everyone.",
+  },
+  {
+    value: "local",
+    label: "Store locally only",
+    description: "Kept on this machine; never written to solo.yml.",
+  },
+];
 
 // Create a command: its name, command line, working directory (empty = the project root), start /
 // restart defaults, file-watch globs, and where it is stored (the shared solo.yml or this machine
@@ -143,24 +158,12 @@ export function AddCommandModal({
             <legend className="mb-1.5 text-[0.6875rem] font-medium tracking-[0.01em] text-muted-foreground">
               Where to save
             </legend>
-            <RadioGroup
+            <SettingChoice
               value={visibility}
-              onValueChange={(v) => setVisibility(v as Visibility)}
-              aria-label="Where to save"
-            >
-              <StoreOption
-                value="shared"
-                current={visibility}
-                title="Save to solo.yml"
-                description="Committed with the project and shared with everyone."
-              />
-              <StoreOption
-                value="local"
-                current={visibility}
-                title="Store locally only"
-                description="Kept on this machine; never written to solo.yml."
-              />
-            </RadioGroup>
+              choices={STORE_CHOICES}
+              onChange={setVisibility}
+              ariaLabel="Where to save"
+            />
           </fieldset>
 
           {error && <p className="text-xs text-destructive">{error}</p>}
@@ -176,36 +179,5 @@ export function AddCommandModal({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-// One storage choice: a full-bordered selectable row (the border, not a side stripe, marks the
-// current pick) wrapping its radio so the whole row and its label text select it.
-function StoreOption({
-  value,
-  current,
-  title,
-  description,
-}: {
-  value: Visibility;
-  current: Visibility;
-  title: string;
-  description: string;
-}) {
-  const id = `add-command-store-${value}`;
-  return (
-    <label
-      htmlFor={id}
-      className={cn(
-        "flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2.5 transition-colors",
-        current === value ? "border-primary bg-muted/50" : "border-border hover:bg-muted/40",
-      )}
-    >
-      <RadioGroupItem id={id} value={value} className="mt-0.5" />
-      <span className="flex flex-col gap-0.5">
-        <span className="text-[0.8125rem] font-medium text-foreground">{title}</span>
-        <span className="text-xs text-muted-foreground">{description}</span>
-      </span>
-    </label>
   );
 }
