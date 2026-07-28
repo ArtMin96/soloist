@@ -125,6 +125,18 @@ pub enum DomainEvent {
     TerminalTitleChanged { id: ProcessId, title: String },
     /// A process rang the terminal bell (`BEL`). Drives attention notifications.
     TerminalBell { id: ProcessId },
+    /// A process raised a notification of its own from its output, via one of the escape
+    /// sequences that carry notification text (OSC 9, 777, or 99).
+    ///
+    /// Unlike the change-notifications around it this carries the words the script chose,
+    /// deliberately: they exist nowhere else, so there is no read model to re-query for them.
+    /// `title` is `None` when the sequence carried only a message, leaving the surface to name
+    /// the process instead.
+    TerminalNotification {
+        id: ProcessId,
+        title: Option<String>,
+        body: String,
+    },
     /// An agent process's activity changed (the five-state idle FSM). Emitted only on a
     /// transition (edge-triggered), so adapters update the agent's row without polling.
     /// `Permission` and `Error` are attention states and raise a notification.

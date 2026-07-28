@@ -36,6 +36,7 @@ const webCommand: ProjectCommandView = {
   env: {},
   visibility: "shared",
   notification_level: null,
+  effective_notification_level: "all",
   status: "Running",
 };
 

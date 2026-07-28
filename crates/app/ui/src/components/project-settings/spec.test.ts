@@ -12,6 +12,7 @@ const view = (over: Partial<ProjectCommandView> = {}): ProjectCommandView => ({
   restart_when_changed: [],
   visibility: "shared",
   notification_level: null,
+  effective_notification_level: "all",
   status: null,
   env: {},
   ...over,

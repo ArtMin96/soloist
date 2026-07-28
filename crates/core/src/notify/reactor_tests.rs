@@ -302,6 +302,66 @@ async fn a_terminal_bell_shows_a_toast() {
     assert_eq!(shown[0].title, "Web rang the bell");
 }
 
+/// A notification a script raised for itself, with the words it chose.
+fn script_notification(id: ProcessId, title: Option<&str>, body: &str) -> DomainEvent {
+    DomainEvent::TerminalNotification {
+        id,
+        title: title.map(str::to_owned),
+        body: body.to_owned(),
+    }
+}
+
+#[tokio::test]
+async fn terminal_notification_uses_the_scripts_own_text() {
+    let s = setup();
+    let web = register(&s, "Web");
+    spawn_reactor(&s);
+
+    s.bus
+        .publish(script_notification(web, Some("Build"), "done"));
+
+    // The whole point of the feature: the script said what it wanted said, so nothing here may
+    // replace it with a sentence Soloist wrote about a process ringing a bell.
+    let shown = expect_shown(&s, 1).await;
+    assert_eq!(shown[0].title, "Build");
+    assert_eq!(shown[0].body, "done");
+}
+
+#[tokio::test]
+async fn a_titleless_notification_falls_back_to_the_process_label() {
+    let s = setup();
+    let web = register(&s, "Web");
+    spawn_reactor(&s);
+
+    // OSC 9 carries a message and no title, so the process's own name is the heading.
+    s.bus.publish(script_notification(web, None, "done"));
+
+    let shown = expect_shown(&s, 1).await;
+    assert_eq!(shown[0].title, "Web");
+    assert_eq!(shown[0].body, "done");
+}
+
+#[tokio::test]
+async fn level_important_silences_a_terminal_notification() {
+    let s = setup();
+    let web = register(&s, "Web");
+    s.projects
+        .update(&PROJECT, |p| {
+            p.notification_level = NotificationLevel::Important
+        })
+        .unwrap();
+    spawn_reactor(&s);
+
+    s.bus
+        .publish(script_notification(web, Some("Build"), "done"));
+    yield_many().await;
+
+    assert!(
+        s.notifier.shown().is_empty(),
+        "a script's own notification is terminal-class, so level Important drops it",
+    );
+}
+
 #[tokio::test]
 async fn a_busy_agent_shows_nothing() {
     let s = setup();

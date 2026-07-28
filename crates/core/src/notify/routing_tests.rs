@@ -14,12 +14,13 @@ const SUBJECT: ProcessId = ProcessId::from_raw(1);
 /// Some other process the user may be looking at instead.
 const ELSEWHERE: ProcessId = ProcessId::from_raw(2);
 
-const KINDS: [AttentionKind; 5] = [
+const KINDS: [AttentionKind; 6] = [
     AttentionKind::Crashed,
     AttentionKind::RestartExhausted,
     AttentionKind::AgentPermission,
     AttentionKind::AgentError,
     AttentionKind::TerminalBell,
+    AttentionKind::TerminalNotification,
 ];
 
 const LEVELS: [NotificationLevel; 3] = [
@@ -67,10 +68,13 @@ fn presences() -> [(&'static str, Presence); 4] {
 /// implementation: the level decides whether the signal survives at all, then presence decides
 /// where it goes.
 fn expected(kind: AttentionKind, presence: Presence, level: NotificationLevel) -> Delivery {
+    // Named kind by kind rather than derived from `severity()`, which is the function `route`
+    // itself calls: a table that asked the implementation what it admits could not disagree with it.
     let admitted = match (level, kind) {
         (NotificationLevel::None, _) => false,
         (NotificationLevel::All, _) => true,
-        (NotificationLevel::Important, AttentionKind::TerminalBell) => false,
+        (NotificationLevel::Important, AttentionKind::TerminalBell)
+        | (NotificationLevel::Important, AttentionKind::TerminalNotification) => false,
         (NotificationLevel::Important, _) => true,
     };
     if !admitted {

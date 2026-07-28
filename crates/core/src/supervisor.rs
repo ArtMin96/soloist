@@ -895,6 +895,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_notification_sequence_is_published_and_kept_out_of_the_rendered_line() {
+        let chunk = b"\x1b]777;notify;Build;done\x07hello\n".to_vec();
+        let mut h = harness(FakeSpawner::streams_then_exits(vec![chunk.clone()]));
+        let id = terminal(&h.sup, "agent");
+        h.sup.start(id).expect("start");
+
+        let mut raised = None;
+        loop {
+            match h.rx.recv().await {
+                Ok(DomainEvent::TerminalNotification {
+                    id: got,
+                    title,
+                    body,
+                }) if got == id => raised = Some((title, body)),
+                Ok(DomainEvent::ProcessStatusChanged { id: got, to, .. })
+                    if got == id && to == ProcStatus::Stopped =>
+                {
+                    break
+                }
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => panic!("event bus closed"),
+            }
+        }
+
+        assert_eq!(
+            raised,
+            Some((Some("Build".to_string()), "done".to_string()))
+        );
+        // The rendered line has the sequence stripped, so a notification never surfaces as
+        // garbage in the pane; the raw scrollback still keeps every byte for the emulator.
+        assert_eq!(
+            h.sup.rendered(id).expect("rendered").lines,
+            vec!["hello".to_string()]
+        );
+        assert_eq!(h.sup.pty_scrollback(id).expect("scrollback"), chunk);
+    }
+
+    #[tokio::test]
     async fn attach_replays_the_scrollback_of_a_finished_process() {
         let chunk = b"output line\n".to_vec();
         let mut h = harness(FakeSpawner::streams_then_exits(vec![chunk.clone()]));
