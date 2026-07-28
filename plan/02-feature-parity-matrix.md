@@ -74,8 +74,8 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | D6 | File-watch restart (debounced, recursive, trusted-only) | ✅ | 6 | v1 | Touch watched file → 1 restart |
 | D7 | File-watch default ignores (`.git`,`node_modules`,…) | ❓ | 6 | v1 | Editing ignored path → no restart |
 | D8 | Native desktop notifications (crash/attention) | ✅ | 6 | v1 | Crash → libnotify toast |
-| D9 | In-app toasts | 🟡 | 6 | later | In-app notification surface |
-| D10 | Attention bell + unified unread (sidebar/title/dock) | 🟡 | 6 | later | Bell lights; click opens terminal |
+| D9 | In-app toasts | 🟡 | 6 | **v1** | In-app notification surface. **Promoted `later` → `v1` (owner scope approval 2026-07-27)** with the notifications initiative. Verify: an alert for a process the user is *not* currently viewing raises a toast; clicking a process-linked toast selects that process; an alert for the process already on screen raises none. Not built. |
+| D10 | Attention bell + unified unread (sidebar/title/dock) | 🟡 | 6 | **v1** | Bell lights; click opens terminal. **Promoted `later` → `v1` (owner scope approval 2026-07-27)** with the notifications initiative. Verify: unread marker on the process row, dot on the project header, title-bar count, and app-icon badge capped at `99+`; cleared on window focus, on selecting the process, and by clear-all. The badge rides on `libunity` and silently no-ops without it, so the **title-bar count is the always-works indicator** (`KNOWN-DIVERGENCES.md` D-33). Not built. |
 | D11 | Auto-restart disabled during app shutdown | ✅ | 6 | v1 | Quit doesn't trigger restarts |
 | D12 | Tracked descendant/child subprocess stats (CPU/mem/ports of spawned children) | 🟡 | 6 | later | A process's child shows its own CPU/RSS/port |
 
@@ -221,7 +221,7 @@ Source confidence per `05`: ✅ documented · 🟡 stated elsewhere · ❓ gap (
 | I7i | Global **Agents** (tool registry detect/add/edit/enable; auto-summarization tool+model, **OFF by default**) | ✅ | 11b | v1 | Registry edits persist; summarization stays opt-in |
 | I7j | Global **Tools** (default editor, default terminal; editor overridable per-project) | ✅ | 11b | v1 | Defaults persist; project override wins |
 | I7k | Global **Integrations** (MCP enablement + per-group toggles + setup snippet [stdio, D4]; HTTP API toggle + endpoint list [`24678`, H1]) | ✅ | 11b | v1 | MCP group toggle changes the served tool surface (reuses G10); HTTP toggle reflects Phase 10 |
-| I7l | Global **Notifications** tab | ❓ | 11b | v1 | **NOT SHOWN in source — decide from `plan/05`/docs before building; do not invent** |
+| I7l | Global **Notifications** tab | ✅ | 11b | v1 | Documented after all — the tab was never opened on camera, but soloterm.com defines it: a **System notifications** status row (with Enable / Open System Settings), a **Send test** button, and a **Bell sound** picker with its own Test, default **Ping** ([macos-permissions](https://soloterm.com/docs/notifications/macos-permissions), [bell-sounds](https://soloterm.com/docs/notifications/bell-sounds)). Verify: the status row reports this machine's **real notification daemon** (no Linux permission concept — the row reports daemon availability, not permission), **Send test** produces a visible notification and reports only "Sent" (delivery is not confirmable through the plugin), and the bell maps to the freedesktop `sound-name` hint. Port decisions in `plan/05 §12` |
 | I7m | Global **Account** tab | ❓ | 11b | later | **NOT SHOWN; N/A under D3 (no licensing). Proposed: app info / data dir / reset — needs decision** |
 
 ## O. Orchestrator (track `orch-00`–`orch-05`)
