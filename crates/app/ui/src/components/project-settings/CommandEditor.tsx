@@ -2,23 +2,39 @@ import { useState } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 import { Field, ToggleRow } from "@/components/project-settings/fields";
 import { specOf } from "@/components/project-settings/spec";
-import { SettingSelect } from "@/components/settings/controls/SettingSelect";
+import { SettingChoice } from "@/components/settings/controls/SettingChoice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  COMMAND_LEVEL_OPTIONS,
+  commandLevelChoices,
   commandLevelFromValue,
   commandLevelValue,
+  levelLabel,
 } from "@/lib/notifications";
 import type { CommandOps } from "@/components/project-settings/commands";
-import type { ProcessSpec, ProjectCommandView } from "@/domain";
+import type { NotificationLevel, ProcessSpec, ProjectCommandView } from "@/domain";
 
 // The expanded editing form for one command: its command line, name, start / restart toggles, its
 // notification level, file-watch globs, where it is stored, and delete. Text fields commit on blur or Enter;
 // toggles persist on change. Each edit rebuilds the spec from the command's current fields so only
 // the changed field moves; the pane reloads the page after every mutation.
-export function CommandEditor({ command, ops }: { command: ProjectCommandView; ops: CommandOps }) {
+export function CommandEditor({
+  command,
+  projectLevel,
+  ops,
+}: {
+  command: ProjectCommandView;
+  projectLevel: NotificationLevel;
+  ops: CommandOps;
+}) {
   const [newGlob, setNewGlob] = useState("");
+
+  // The core resolved this command against its project and can only have quietened it. Saying so
+  // where they differ is the difference between the rule looking deliberate and looking broken;
+  // the comparison is of two values the core handed down, never a re-decision of which one wins.
+  const heldDown =
+    command.notification_level !== null &&
+    command.notification_level !== command.effective_notification_level;
 
   const editField = (patch: Partial<ProcessSpec>) =>
     ops.edit(command, { ...specOf(command), ...patch });
@@ -80,18 +96,23 @@ export function CommandEditor({ command, ops }: { command: ProjectCommandView; o
         />
       </div>
 
-      <Field
-        label="Notify me about"
-        hint="A command can be quieter than its project, never louder."
-      >
-        <SettingSelect
+      <fieldset className="flex flex-col">
+        <legend className="mb-1.5 text-[0.6875rem] font-medium tracking-[0.01em] text-muted-foreground">
+          Notify me about
+        </legend>
+        <SettingChoice
           value={commandLevelValue(command.notification_level)}
-          options={COMMAND_LEVEL_OPTIONS}
-          onValueChange={(value) => ops.setNotificationLevel(command, commandLevelFromValue(value))}
+          choices={commandLevelChoices(projectLevel)}
+          onChange={(value) => ops.setNotificationLevel(command, commandLevelFromValue(value))}
           ariaLabel="Notify me about"
-          className="w-full"
         />
-      </Field>
+        {heldDown && (
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            The project setting holds this command to{" "}
+            {levelLabel(command.effective_notification_level)}.
+          </p>
+        )}
+      </fieldset>
 
       <Field label="Restart when files change">
         <div className="flex flex-col gap-1.5">
