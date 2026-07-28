@@ -71,3 +71,10 @@ vi.mock("@/lib/window", () => ({
   isWindowMaximized: () => Promise.resolve(false),
   onWindowResized: () => Promise.resolve(() => {}),
 }));
+
+// The same for the OS drag-and-drop stream, which the app subscribes to at its root: reaching the
+// webview to subscribe needs a Tauri runtime jsdom does not have. A suite that is about drops
+// replaces this with a stream it can drive.
+vi.mock("@/lib/fileDrop", () => ({
+  onFileDrop: () => Promise.resolve(() => {}),
+}));
