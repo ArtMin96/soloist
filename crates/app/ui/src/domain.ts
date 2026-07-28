@@ -290,7 +290,23 @@ export type DomainEvent =
   // — null for the global library, an id for that project's — because the two are separate lists a
   // surface reads separately. A templates surface re-reads that (kind, scope) list (coalesced); the
   // selected default is read separately.
-  | { type: "TemplateChanged"; kind: TemplateKind; project: number | null };
+  | { type: "TemplateChanged"; kind: TemplateKind; project: number | null }
+  // An alert for a user who is looking at Soloist but not at the process that raised it, so it
+  // belongs in an in-app toast. The core has already applied the master switch, the notification
+  // level, and the focus rules — a surface renders this and decides nothing. Unlike the
+  // change-notifications above it carries its text, because a notification is transient: there is
+  // nothing to re-query, and composing the same sentence again here would make it two sources.
+  | {
+      type: "NotificationRaised";
+      process: number;
+      kind: AttentionKind;
+      title: string;
+      body: string;
+      sound: string | null;
+    }
+  // The set of processes with unread attention changed. Payload-free by the same convention as the
+  // other change-notifications: a surface re-reads attentionSnapshot().
+  | { type: "AttentionChanged" };
 
 export interface AppInfo {
   name: string;
@@ -690,6 +706,39 @@ export interface ProcessSpec {
 // carry one; the two combine to the more restrictive of the pair, so a command can go quieter than
 // its project but never louder.
 export type NotificationLevel = "all" | "important" | "none";
+
+// What a signal is asking of the user (mirrors core::AttentionKind). Which of these warrant an
+// alert, and where that alert goes, is decided in the core — a surface renders the kind it is
+// handed and never re-derives it.
+export type AttentionKind =
+  | "crashed"
+  | "restart_exhausted"
+  | "agent_permission"
+  | "agent_error"
+  | "terminal_bell";
+
+// What one process has waiting for the user (mirrors core::ProcessAttention), oldest kind first.
+export interface ProcessAttention {
+  process: number;
+  kinds: AttentionKind[];
+}
+
+// Everything unread (mirrors core::AttentionSnapshot). The single source every unread surface
+// renders from — the process row's marker, the project header's dot, the title-bar count, and the
+// app-icon badge — so no surface keeps a count of its own. `total` counts alerts rather than
+// processes and is never truncated; a display cap such as "99+" belongs to whatever renders it.
+export interface AttentionSnapshot {
+  processes: ProcessAttention[];
+  total: number;
+}
+
+// Where the user is (mirrors core::Presence), reported to the core by the shell: whether the window
+// has focus, and which process it shows. Reporting it is what clears unread — arriving at the
+// window clears everything, and the process on screen clears its own.
+export interface Presence {
+  focused: boolean;
+  viewing: number | null;
+}
 
 // One project's local settings (mirrors core::ProjectSettings) — the auto-start gate, the
 // auto-trust-command-changes toggle, editor override, notification level, per-command level

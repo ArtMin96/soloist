@@ -94,7 +94,10 @@ pub use ids::{
     PROCESS_ID_ENV,
 };
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
-pub use notify::{NoopNotifier, Notification, NotificationReactor, Notifier, NotifierStatus};
+pub use notify::{
+    AttentionSnapshot, NoopNotifier, Notification, NotificationReactor, Notifier, NotifierStatus,
+    Presence, ProcessAttention,
+};
 pub use orchestration::{AgentNode, AgentSignal, LineageEdge, OrchestrationSnapshot};
 pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{

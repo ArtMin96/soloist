@@ -12,6 +12,7 @@
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+use crate::attention::AttentionKind;
 use crate::configchange::{ConfigSync, TrustReviewCommand};
 use crate::idle::AgentActivity;
 use crate::ids::{ProcessId, ProjectId, TimerId, TodoId};
@@ -163,6 +164,29 @@ pub enum DomainEvent {
     DiagramChanged { project: ProjectId, name: String },
     /// A coordination key-value entry `key` in `project` changed (set or deleted).
     KvChanged { project: ProjectId, key: String },
+    /// An alert was raised for a user who is looking at Soloist but not at the process that
+    /// raised it, so it belongs in an in-app toast rather than a desktop notification. The
+    /// notification reactor has already applied the master switch, the notification level, and
+    /// the focus rules ([`crate::notify::route`]); a surface renders this and decides nothing.
+    ///
+    /// Unlike the change-notifications around it this carries its composed text, deliberately.
+    /// A notification is transient — there is no record to re-query once it has been raised —
+    /// and composing the same title and body once in Rust for the desktop and again in
+    /// TypeScript for the toast would make one sentence two sources of truth.
+    NotificationRaised {
+        process: ProcessId,
+        kind: AttentionKind,
+        title: String,
+        body: String,
+        /// A sound for the surface to play, or `None` to show silently. A hint only — see
+        /// [`crate::notify::Notification::sound`].
+        sound: Option<String>,
+    },
+    /// The set of processes with unread attention changed. Payload-free by the same convention as
+    /// the other change-notifications: a consumer re-reads
+    /// [`Facade::attention_snapshot`](crate::facade::Facade::attention_snapshot), so the several
+    /// surfaces that render unread cannot drift apart by projecting a payload differently.
+    AttentionChanged,
     /// A template of `kind` was created, updated, or deleted. `project` names the scope it
     /// changed in — `None` for the global library, `Some` for that project's — because the two
     /// scopes are separate libraries a surface reads separately: without it a project-scoped

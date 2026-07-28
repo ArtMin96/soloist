@@ -11,6 +11,7 @@
 //! The durable-settings commands live in the [`settings`] submodule and are re-exported, so
 //! the whole command surface stays under one `commands::` namespace in the invoke handler.
 
+mod attention;
 mod coordination;
 mod export;
 mod orchestration;
@@ -18,6 +19,7 @@ mod project_settings;
 mod settings;
 mod templates;
 mod timers;
+pub use attention::*;
 pub use coordination::*;
 pub use export::*;
 pub use orchestration::*;

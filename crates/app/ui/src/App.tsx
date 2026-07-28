@@ -34,6 +34,7 @@ import { useProjects } from "@/store/projects";
 import { FileDropProvider } from "@/store/FileDropProvider";
 import { SignalsProvider } from "@/store/SignalsProvider";
 import { useTrust } from "@/store/useTrust";
+import { usePresence } from "@/store/usePresence";
 import { useWindowActive } from "@/store/useWindowActive";
 import type { HotkeyAction, ProcessView } from "@/domain";
 
@@ -90,6 +91,7 @@ export default function App() {
     onRestart: store.restart,
     onResume: store.resume,
   });
+  usePresence(selectedId);
 
   const selected = store.processes.find((process) => process.id === selectedId) ?? null;
   const selectedProject = projects.projects.find((p) => p.id === selectedProjectId) ?? null;

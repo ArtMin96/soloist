@@ -10,8 +10,14 @@
 //! `notify` filesystem-watch crate, which the core never imports (it lives only in the
 //! `crates/sys` file-watch adapter — the dependency-direction guard enforces the separation).
 
+mod attention;
 mod notifier;
+mod presence;
 mod reactor;
+mod routing;
 
+pub use attention::{AttentionRegistry, AttentionSnapshot, ProcessAttention};
 pub use notifier::{NoopNotifier, Notification, Notifier, NotifierStatus};
+pub use presence::{Presence, PresenceCell};
 pub use reactor::NotificationReactor;
+pub use routing::{route, Delivery};

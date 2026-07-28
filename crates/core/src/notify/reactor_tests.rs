@@ -9,6 +9,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tokio::sync::broadcast;
+
 use crate::agents::AgentActivity;
 use crate::composition::CorePorts;
 use crate::config::ProcessSpec;
@@ -18,10 +20,11 @@ use crate::process::ProcStatus;
 use crate::settings::{NotificationLevel, ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor};
 use crate::testing::{
-    FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo, MockClock, RecordingNotifier,
+    drain, next_matching, FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo, MockClock,
+    RecordingNotifier,
 };
 
-use super::{Notification, NotificationReactor};
+use crate::notify::{AttentionRegistry, Notification, NotificationReactor, Presence, PresenceCell};
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);
 const OTHER: ProjectId = ProjectId::from_raw(2);
@@ -36,6 +39,8 @@ struct Setup {
     notifier: RecordingNotifier,
     global: Arc<SettingsStore<(), Settings>>,
     projects: Arc<SettingsStore<ProjectId, ProjectSettings>>,
+    presence: Arc<PresenceCell>,
+    attention: Arc<AttentionRegistry>,
 }
 
 fn setup() -> Setup {
@@ -54,6 +59,8 @@ fn setup() -> Setup {
         notifier: RecordingNotifier::new(),
         global: Arc::new(SettingsStore::new(Arc::new(FakeSettingsRepo::new()))),
         projects: Arc::new(SettingsStore::new(Arc::new(FakeSettingsRepo::new()))),
+        presence: Arc::new(PresenceCell::new()),
+        attention: Arc::new(AttentionRegistry::new()),
     }
 }
 
@@ -94,18 +101,29 @@ fn register_auto_restarting(s: &Setup, name: &str) -> ProcessId {
     ))
 }
 
-/// Spawns the reactor over the spy notifier and the settings stores.
+/// Spawns the reactor over the spy notifier, the settings stores, and the presence and unread
+/// state it routes by.
 fn spawn_reactor(s: &Setup) {
     tokio::spawn(
         NotificationReactor::new(
             Arc::new(s.notifier.clone()),
             s.global.clone(),
             s.projects.clone(),
+            s.presence.clone(),
+            s.attention.clone(),
             &s.bus,
             Arc::downgrade(&s.sup),
         )
         .run(),
     );
+}
+
+/// Reports the user as looking at Soloist, showing `viewing`.
+fn user_is_here(s: &Setup, viewing: Option<ProcessId>) {
+    s.presence.set(Presence {
+        focused: true,
+        viewing,
+    });
 }
 
 async fn yield_many() {
@@ -122,6 +140,37 @@ async fn expect_shown(s: &Setup, n: usize) -> Vec<Notification> {
     tokio::time::timeout(WAIT_FOR_TOAST, s.notifier.wait_until_shown(n))
         .await
         .expect("the expected toasts were never shown")
+}
+
+/// Awaits the toast the reactor should have put on the bus and returns it, giving up rather than
+/// waiting forever. Bounded for the same reason [`expect_shown`] is: a regression that stops the
+/// toast being emitted must redden this test, not block the suite in a way that reads as slowness.
+async fn expect_toast(events: &mut broadcast::Receiver<DomainEvent>) -> DomainEvent {
+    tokio::time::timeout(
+        WAIT_FOR_TOAST,
+        next_matching(events, |event| {
+            matches!(event, DomainEvent::NotificationRaised { .. })
+        }),
+    )
+    .await
+    .expect("the expected toast never reached the bus")
+}
+
+/// Waits for the unread total to reach `expected`, giving up rather than waiting forever. The
+/// reactor records unread *after* it delivers, so waiting on a toast does not mean the unread
+/// state has caught up yet — a test that read the snapshot straight after would race it.
+async fn expect_unread(s: &Setup, expected: usize) {
+    let settled = tokio::time::timeout(WAIT_FOR_TOAST, async {
+        while s.attention.snapshot().total != expected {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(
+        settled.is_ok(),
+        "the unread total never reached {expected}; it was {}",
+        s.attention.snapshot().total,
+    );
 }
 
 fn crashed(id: ProcessId) -> DomainEvent {
@@ -442,6 +491,150 @@ async fn the_global_master_switch_silences_everything() {
     assert!(
         s.notifier.shown().is_empty(),
         "the global master switch off silences every toast",
+    );
+}
+
+#[tokio::test]
+async fn unfocused_calls_the_notifier_not_a_toast() {
+    let s = setup();
+    let web = register(&s, "Web");
+    let mut events = s.bus.subscribe();
+    spawn_reactor(&s);
+
+    // No presence was ever reported, which is what every headless caller looks like. Getting this
+    // default wrong would route their alerts to a toast surface that does not exist.
+    s.bus.publish(crashed(web));
+
+    let shown = expect_shown(&s, 1).await;
+    assert_eq!(shown[0].title, "Web crashed");
+    assert!(!drain(&mut events)
+        .iter()
+        .any(|event| matches!(event, DomainEvent::NotificationRaised { .. })));
+}
+
+#[tokio::test]
+async fn focused_elsewhere_emits_a_toast_not_a_native_notification() {
+    let s = setup();
+    let web = register(&s, "Web");
+    let api = register(&s, "Api");
+    let mut events = s.bus.subscribe();
+    user_is_here(&s, Some(api));
+    spawn_reactor(&s);
+
+    s.bus.publish(crashed(web));
+
+    match expect_toast(&mut events).await {
+        DomainEvent::NotificationRaised {
+            process,
+            title,
+            body,
+            ..
+        } => {
+            assert_eq!(process, web);
+            // The toast carries the composed text, so the desktop and the in-app surface can
+            // never word the same event differently.
+            assert_eq!(title, "Web crashed");
+            assert_eq!(body, "The process exited unexpectedly.");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+    yield_many().await;
+    assert!(
+        s.notifier.shown().is_empty(),
+        "a user looking at the app gets a toast, never a desktop notification",
+    );
+}
+
+#[tokio::test]
+async fn a_delivered_alert_is_marked_unread() {
+    let s = setup();
+    let web = register(&s, "Web");
+    spawn_reactor(&s);
+
+    s.bus.publish(crashed(web));
+    expect_unread(&s, 1).await;
+
+    assert_eq!(s.attention.snapshot().processes[0].process, web);
+}
+
+#[tokio::test]
+async fn viewing_the_process_suppresses_everything() {
+    let s = setup();
+    let web = register(&s, "Web");
+    let mut events = s.bus.subscribe();
+    user_is_here(&s, Some(web));
+    spawn_reactor(&s);
+
+    s.bus.publish(crashed(web));
+    yield_many().await;
+
+    assert!(
+        s.notifier.shown().is_empty(),
+        "the user watched it happen, so no desktop notification fires",
+    );
+    assert!(
+        !drain(&mut events)
+            .iter()
+            .any(|event| matches!(event, DomainEvent::NotificationRaised { .. })),
+        "nor a toast",
+    );
+    assert_eq!(
+        s.attention.snapshot().total,
+        0,
+        "nor an unread mark: suppression means nothing at all, not a silent alert left to dismiss",
+    );
+}
+
+#[tokio::test]
+async fn a_suppressed_alert_leaves_earlier_unread_alone() {
+    let s = setup();
+    let web = register(&s, "Web");
+    let api = register(&s, "Api");
+    spawn_reactor(&s);
+
+    s.bus.publish(crashed(api));
+    expect_unread(&s, 1).await;
+    user_is_here(&s, Some(web));
+    s.bus.publish(crashed(web));
+    yield_many().await;
+
+    // Suppressing an alert is not clearing the unread state; only seeing a process clears it.
+    assert_eq!(s.attention.snapshot().total, 1);
+}
+
+#[tokio::test]
+async fn attention_does_not_leak_across_a_start_stop_cycle() {
+    let s = setup();
+    spawn_reactor(&s);
+
+    // Each process crashes, is marked unread, then leaves the registry. Nothing can visit a
+    // process that no longer exists, so a stranded entry would sit in the count forever.
+    for n in 0..5 {
+        let id = register(&s, &format!("Worker{n}"));
+        s.bus.publish(crashed(id));
+        expect_unread(&s, 1).await;
+        s.bus.publish(DomainEvent::ProcessRemoved { id });
+        expect_unread(&s, 0).await;
+    }
+
+    assert_eq!(s.attention.snapshot().total, 0);
+}
+
+#[tokio::test]
+async fn a_removed_process_with_nothing_unread_announces_nothing() {
+    let s = setup();
+    let web = register(&s, "Web");
+    let mut events = s.bus.subscribe();
+    spawn_reactor(&s);
+
+    s.bus.publish(DomainEvent::ProcessRemoved { id: web });
+    yield_many().await;
+
+    assert!(
+        !drain(&mut events)
+            .iter()
+            .any(|event| matches!(event, DomainEvent::AttentionChanged)),
+        "every surface re-reads the snapshot on this event, so it must mark a real change",
     );
 }
 
