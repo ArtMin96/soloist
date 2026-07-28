@@ -131,6 +131,7 @@ export function TerminalPane({
         {findOpen && (
           <FindBar
             query={findQuery}
+            matches={search.matches}
             onChange={handleFindChange}
             onFindNext={() => findQuery && search.findNext(findQuery)}
             onFindPrevious={() => findQuery && search.findPrevious(findQuery)}

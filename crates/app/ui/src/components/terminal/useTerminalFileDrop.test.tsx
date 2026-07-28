@@ -17,12 +17,8 @@ vi.mock("@xterm/addon-fit", () => ({
     fit() {}
   },
 }));
-vi.mock("@xterm/addon-search", () => ({
-  SearchAddon: class {
-    findNext() {}
-    findPrevious() {}
-    clearDecorations() {}
-  },
+vi.mock("@xterm/addon-search", async () => ({
+  SearchAddon: (await import("@/test/fakeSearchAddon")).FakeSearchAddon,
 }));
 vi.mock("@xterm/addon-web-links", () => ({ WebLinksAddon: class {} }));
 vi.mock("@/lib/terminalRenderer", () => ({

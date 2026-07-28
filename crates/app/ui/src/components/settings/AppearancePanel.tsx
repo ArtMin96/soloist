@@ -13,7 +13,7 @@ import {
   FONT_WEIGHT_OPTIONS,
   LETTER_SPACING_OPTIONS,
   LINE_HEIGHT_OPTIONS,
-  MONO_FONT_OPTIONS,
+  monoFontOptions,
   THEME_OPTIONS,
 } from "@/lib/appearance";
 import { useAppearance } from "@/store/appearanceContext";
@@ -86,10 +86,13 @@ export function AppearancePanel() {
             aria-label="Copy on select"
           />
         </SettingRow>
-        <SettingRow label="Font family" description="The monospace font used in the terminal.">
+        <SettingRow
+          label="Font family"
+          description="The terminal's monospace face. The families Ubuntu installs are always listed."
+        >
           <NullableSelect<string>
             value={t.font_family}
-            options={MONO_FONT_OPTIONS}
+            options={monoFontOptions(t.font_family)}
             onValueChange={(font_family) => setTerminal({ font_family })}
             ariaLabel="Font family"
             className="w-44"
