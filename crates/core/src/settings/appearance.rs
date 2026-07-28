@@ -73,14 +73,43 @@ pub enum LetterSpacing {
     Wider,
 }
 
+/// The shape of the terminal cursor while the pane has focus.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorStyle {
+    #[default]
+    Block,
+    Underline,
+    Bar,
+}
+
+/// The shape of the terminal cursor while the pane does not have focus. `None` hides it entirely,
+/// which is a legitimate choice but a poor default — an unfocused pane then looks like it has no
+/// cursor position at all, so the default outlines the cell instead.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorInactiveStyle {
+    #[default]
+    Outline,
+    Block,
+    Bar,
+    Underline,
+    None,
+}
+
 /// Terminal typography — the xterm.js renderer is restyled from these.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TerminalAppearance {
-    /// Focus the terminal on a single click instead of a double click.
+    /// Whether selecting a process hands its terminal the keyboard focus. Off, the pane is shown
+    /// but focus stays where it was, so the user clicks into the terminal to type.
     pub focus_on_click: bool,
-    /// The monospace font family, or `None` to use the app default. The frontend offers the system's
-    /// installed monospace fonts; the core only stores the chosen name.
+    /// Whether selecting text in the terminal copies it to the clipboard immediately. Off, the
+    /// selection is copied only on the explicit copy hotkey.
+    pub copy_on_select: bool,
+    /// The monospace font family, or `None` to use the app default. The frontend offers a fixed set
+    /// of families the target platform's own packaging carries, since the webview cannot enumerate
+    /// what a machine has installed; the core only stores the chosen name.
     pub font_family: Option<String>,
     /// Weight for regular terminal text (demo default 400).
     pub font_weight: FontWeight,
@@ -92,18 +121,32 @@ pub struct TerminalAppearance {
     pub line_height: LineHeight,
     /// Spacing between terminal characters.
     pub letter_spacing: LetterSpacing,
+    /// The cursor shape while the pane has focus.
+    pub cursor_style: CursorStyle,
+    /// The cursor shape while the pane does not have focus.
+    pub cursor_inactive_style: CursorInactiveStyle,
+    /// Whether the cursor blinks.
+    pub cursor_blink: bool,
 }
 
 impl Default for TerminalAppearance {
     fn default() -> Self {
         Self {
-            focus_on_click: false,
+            // The app has always focused a terminal as its pane was selected, so `true` keeps an
+            // upgrade from silently taking that away.
+            focus_on_click: true,
+            copy_on_select: false,
             font_family: None,
             font_weight: FontWeight::W400,
             bold_font_weight: FontWeight::W600,
             font_scale: FontScale::default(),
             line_height: LineHeight::default(),
             letter_spacing: LetterSpacing::default(),
+            cursor_style: CursorStyle::default(),
+            cursor_inactive_style: CursorInactiveStyle::default(),
+            // xterm's own default is `false`; the app has always run a blinking cursor, so `true`
+            // keeps an upgrade from silently changing the terminal.
+            cursor_blink: true,
         }
     }
 }

@@ -41,7 +41,7 @@ typography:
     lineHeight: 1.2
     letterSpacing: "0.01em"
   data:
-    fontFamily: "Geist Mono Variable, ui-monospace, monospace"
+    fontFamily: "Ubuntu Mono, DejaVu Sans Mono, monospace"
     fontSize: "0.8125rem"
     fontWeight: 400
     lineHeight: 1.4
@@ -186,18 +186,26 @@ do not introduce a parallel status vocabulary.)*
 border, button, icon, or background is saturated and it is not reporting `ProcStatus`, it is
 wrong — desaturate it to slate or make it the azure accent.
 
+*The one exemption: the terminal's ANSI palette and the Settings swatch row that previews it.*
+There the colour is not the app reporting anything — it is program output the terminal is
+obliged to render, and a preview whose whole subject is that palette. The 16 slots reuse the
+status hues so the emulator reads as one of the instruments rather than a foreign surface, and
+they are the only saturated colour in the app that does not mean `ProcStatus`.
+
 **The One-Accent Rule.** Azure covers ≤10% of any screen and means exactly one thing:
 "focused / selected / primary." Two azure things competing for "primary" on one screen is a bug.
 
 ## 3. Typography
 
 **Body / UI Font:** Geist Variable (with `system-ui, sans-serif`)
-**Terminal / Data Font:** Geist Mono Variable (with `ui-monospace, monospace`)
+**Terminal / Data Font:** Ubuntu Mono (with `"DejaVu Sans Mono", monospace`)
 
 **Character:** One technical, neutral grotesque carries every UI role — headings, labels,
-body, controls — at multiple weights; its monospace sibling carries the terminal pane and all
+body, controls — at multiple weights; one monospace face carries the terminal pane and all
 tabular data (PIDs, ports, CPU/RSS, durations). Sans + mono is a *functional* pairing, not a
-decorative one: mono appears only where character alignment matters.
+decorative one: mono appears only where character alignment matters. Nothing is bundled, so the
+mono stack may name only families Ubuntu's own packaging installs — the terminal and the app
+shell's `--font-mono` read the same one.
 
 ### Hierarchy
 A compact, **fixed rem scale** (ratio ~1.15) — never fluid `clamp()`; this is dense product
@@ -211,7 +219,7 @@ UI viewed at a consistent DPI, not a hero page.
 - **Label** (550, 0.6875rem/11px, tracking 0.01em, **sentence case**): Sidebar group headers
   ("Agents", "Terminals", "Commands"), metadata captions, status labels. Small and quiet —
   **not** an all-caps tracked eyebrow.
-- **Data** (400, 0.8125rem/13px, Geist Mono): Terminal output, PIDs, ports, metrics, durations,
+- **Data** (400, 0.8125rem/13px, Ubuntu Mono): Terminal output, PIDs, ports, metrics, durations,
   any value where digits must align.
 
 ### Named Rules
@@ -328,12 +336,17 @@ unmistakably mac-native while keeping the status vocabulary and density rules ab
   native-desktop signal, never heavy browser chrome.
 
 ### Terminal Pane (signature component)
-- The interactive PTY (xterm.js) on Cool Surface chrome, Geist Mono, generous internal padding,
+- The interactive PTY (xterm.js) on Cool Surface chrome, Ubuntu Mono, generous internal padding,
   full-bleed scrollback. A compact header strip names the selected process (Title type) with its
   Status Indicator and the same one-primary-action plus overflow controls used by the sidebar. A
   "Terminal | Logs" segmented control
-  switches the rendered-logs view. The terminal background follows theme; output color is the
-  PTY's own ANSI, untouched.
+  switches the rendered-logs view. The terminal surface and the full 16-slot ANSI palette both
+  follow theme: the palette is authored per theme from the status hues (the Spent-on-Status
+  exemption above) and emitted as hex, since xterm cannot parse `oklch()`. Every slot clears
+  4.5:1 on its own background bar the one whose ANSI role *is* that theme's surface tone —
+  light `white`/`brightWhite`, dark `black`. Colour the palette does not choose (256-colour and
+  truecolor output) is left as the PTY sent it, with a 4.5:1 readability floor the renderer
+  applies against the cell actually behind it.
 
 ### Inputs / Fields
 - **Style:** 1px Hairline border, Cool White fill, `rounded.md`, `6px 10px`, body type.
@@ -364,7 +377,7 @@ bordered cards.
   grayscale screenshot — the color-blind-safe encoding confirmed for Phase 5.
 - **Do** keep the azure accent to ≤10% of a screen and to one meaning: focused / selected / primary.
 - **Do** draw structure with 1px hairlines and tonal layering; keep resting surfaces flat.
-- **Do** use Geist Mono *only* for terminal output and aligned data (PIDs, ports, metrics).
+- **Do** use Ubuntu Mono *only* for terminal output and aligned data (PIDs, ports, metrics).
 - **Do** omit unavailable lifecycle controls; Starting/Restarting may show only Stop cancellation,
   and Stopping shows none. Keep the trailing intent zone stable so a row never reflows.
 - **Do** give every control a visible 2px Azure focus ring and full keyboard operability.

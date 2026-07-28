@@ -31,6 +31,7 @@ import { useProcessRemoval } from "@/store/useProcessRemoval";
 import { useProcessActivationNavigation } from "@/store/useProcessActivationNavigation";
 import { TERMINAL_POOL_CAP, useTerminalPool } from "@/store/useTerminalPool";
 import { useProjects } from "@/store/projects";
+import { FileDropProvider } from "@/store/FileDropProvider";
 import { SignalsProvider } from "@/store/SignalsProvider";
 import { useTrust } from "@/store/useTrust";
 import { useWindowActive } from "@/store/useWindowActive";
@@ -225,168 +226,175 @@ export default function App() {
       <SidebarSettingsProvider>
         <HotkeysProvider>
           <GlobalHotkeys handlers={hotkeyHandlers} />
-          <SignalsProvider>
-            <TooltipProvider delayDuration={400}>
-              <div className="flex h-screen flex-col bg-background text-foreground">
-                <Titlebar appName={info?.name ?? "Soloist"} appVersion={info?.version} />
-                {store.error && <ErrorBanner message={store.error} onDismiss={store.clearError} />}
-                <div className="flex min-h-0 flex-1">
-                  <Sidebar
-                    projects={projects.projects}
-                    processes={store.processes}
-                    lineage={lineage}
-                    selectedId={selectedId}
-                    onSelect={selectProcess}
-                    onStart={startProcess}
-                    onStop={stopProcess}
-                    onRestart={restartProcess}
-                    onResume={resumeProcess}
-                    onTrust={reviewById}
-                    onRemove={requestProcessRemoval}
-                    onStartAll={store.startAll}
-                    onRestartRunning={store.restartRunning}
-                    onStopAll={stopProject}
-                    onOpenStart={openStart}
-                    startActive={!selected && !selectedProject && !orchestrationProject}
-                    onOpenSettings={() => setSettingsOpen(true)}
-                    onOpenProjectSettings={openProjectSettings}
-                    onOpenOrchestration={openOrchestration}
-                    onRemoveProject={projects.remove}
-                  />
-                  <main className="min-w-0 flex-1">
-                    <Suspense fallback={<div className="h-full w-full bg-background" />}>
-                      {/* Keep-alive pool: every recently-viewed process keeps its terminal mounted
+          <FileDropProvider>
+            <SignalsProvider>
+              <TooltipProvider delayDuration={400}>
+                <div className="flex h-screen flex-col bg-background text-foreground">
+                  <Titlebar appName={info?.name ?? "Soloist"} appVersion={info?.version} />
+                  {store.error && (
+                    <ErrorBanner message={store.error} onDismiss={store.clearError} />
+                  )}
+                  <div className="flex min-h-0 flex-1">
+                    <Sidebar
+                      projects={projects.projects}
+                      processes={store.processes}
+                      lineage={lineage}
+                      selectedId={selectedId}
+                      onSelect={selectProcess}
+                      onStart={startProcess}
+                      onStop={stopProcess}
+                      onRestart={restartProcess}
+                      onResume={resumeProcess}
+                      onTrust={reviewById}
+                      onRemove={requestProcessRemoval}
+                      onStartAll={store.startAll}
+                      onRestartRunning={store.restartRunning}
+                      onStopAll={stopProject}
+                      onOpenStart={openStart}
+                      startActive={!selected && !selectedProject && !orchestrationProject}
+                      onOpenSettings={() => setSettingsOpen(true)}
+                      onOpenProjectSettings={openProjectSettings}
+                      onOpenOrchestration={openOrchestration}
+                      onRemoveProject={projects.remove}
+                    />
+                    <main className="min-w-0 flex-1">
+                      <Suspense fallback={<div className="h-full w-full bg-background" />}>
+                        {/* Keep-alive pool: every recently-viewed process keeps its terminal mounted
                           (xterm + live stream) so switching back is instant; only the selected one
                           is visible, the rest sit hidden with both their renderer and their byte
                           parsing paused, so a hidden pane costs no per-frame main-thread work. */}
-                      {poolProcesses.map((process) => (
-                        <TerminalPane
-                          key={process.id}
-                          process={process}
-                          visible={process.id === selectedId}
-                          processes={store.processes}
-                          onSelectProcess={selectProcess}
-                          onStart={() => startProcess(process.id)}
-                          onStop={() => stopProcess(process.id)}
-                          onRestart={() => restartProcess(process.id)}
-                          onResume={() => resumeProcess(process.id)}
-                          onTrust={() => reviewById(process.id)}
-                          onRemove={() => requestProcessRemoval(process.id)}
-                        />
-                      ))}
-                      {!selected &&
-                        (selectedProject ? (
-                          <ProjectSettingsPane key={selectedProject.id} project={selectedProject} />
-                        ) : orchestrationProject ? (
-                          <OrchestrationPane
-                            key={orchestrationProject.id}
-                            project={orchestrationProject}
-                          />
-                        ) : (
-                          <StartSurface
-                            hasProjects={projects.projects.length > 0}
-                            onOpenProject={projects.open}
-                            onLaunchAgent={openPicker}
-                            notice={projects.notice}
+                        {poolProcesses.map((process) => (
+                          <TerminalPane
+                            key={process.id}
+                            process={process}
+                            visible={process.id === selectedId}
+                            processes={store.processes}
+                            onSelectProcess={selectProcess}
+                            onStart={() => startProcess(process.id)}
+                            onStop={() => stopProcess(process.id)}
+                            onRestart={() => restartProcess(process.id)}
+                            onResume={() => resumeProcess(process.id)}
+                            onTrust={() => reviewById(process.id)}
+                            onRemove={() => requestProcessRemoval(process.id)}
                           />
                         ))}
-                    </Suspense>
-                  </main>
-                </div>
-                <OrphanDialog
-                  orphans={orphans.orphans}
-                  onKillOne={orphans.killOne}
-                  onKillAll={orphans.killAll}
-                  onLeave={orphans.leave}
-                />
-                <TrustDialog
-                  review={trust.review}
-                  onTrustCommand={(name) => {
-                    if (trust.review) trust.trust(trust.review.project, name);
-                  }}
-                  onTrustAll={trust.trustAll}
-                  onDismiss={trust.dismiss}
-                />
-                <RemoveProcessDialog
-                  process={pendingRemoval}
-                  workers={
-                    pendingRemoval
-                      ? liveWorkerCount(lineage, store.processes, pendingRemoval.id)
-                      : 0
-                  }
-                  onConfirm={confirmProcessRemoval}
-                  onDismiss={removal.dismiss}
-                />
-                <DeferredOverlay open={pickerOpen}>
-                  <LaunchPicker
-                    open={pickerOpen}
-                    onOpenChange={setPickerOpen}
-                    tools={agents.tools}
-                    projects={projects.projects}
-                    onLaunch={onLaunchAgent}
-                    onCreateTerminal={onCreateTerminal}
+                        {!selected &&
+                          (selectedProject ? (
+                            <ProjectSettingsPane
+                              key={selectedProject.id}
+                              project={selectedProject}
+                            />
+                          ) : orchestrationProject ? (
+                            <OrchestrationPane
+                              key={orchestrationProject.id}
+                              project={orchestrationProject}
+                            />
+                          ) : (
+                            <StartSurface
+                              hasProjects={projects.projects.length > 0}
+                              onOpenProject={projects.open}
+                              onLaunchAgent={openPicker}
+                              notice={projects.notice}
+                            />
+                          ))}
+                      </Suspense>
+                    </main>
+                  </div>
+                  <OrphanDialog
+                    orphans={orphans.orphans}
+                    onKillOne={orphans.killOne}
+                    onKillAll={orphans.killAll}
+                    onLeave={orphans.leave}
                   />
-                </DeferredOverlay>
-                <DeferredOverlay open={settingsOpen}>
-                  <SettingsOverlay
-                    open={settingsOpen}
-                    onOpenChange={setSettingsOpen}
-                    project={activeProjectId}
-                  />
-                </DeferredOverlay>
-                <DeferredOverlay open={quickJumpOpen}>
-                  <QuickJumpPalette
-                    open={quickJumpOpen}
-                    onOpenChange={setQuickJumpOpen}
-                    processes={store.processes}
-                    projects={projects.projects}
-                    onSelectProcess={selectProcess}
-                    onSelectProject={openProjectSettings}
-                  />
-                </DeferredOverlay>
-                <DeferredOverlay open={quickActionsOpen}>
-                  <QuickActionsPalette
-                    open={quickActionsOpen}
-                    onOpenChange={setQuickActionsOpen}
-                    processes={store.processes}
-                    projects={projects.projects}
-                    activeProjectId={activeProjectId}
-                    onStart={startProcess}
-                    onStop={stopProcess}
-                    onRestart={restartProcess}
-                    onResume={resumeProcess}
-                    onTrust={trust.requestReview}
-                    onRemove={requestProcessRemoval}
-                  />
-                </DeferredOverlay>
-                <DeferredOverlay open={commandPaletteOpen}>
-                  <CommandPalette
-                    open={commandPaletteOpen}
-                    onOpenChange={setCommandPaletteOpen}
-                    processes={store.processes}
-                    projects={projects.projects}
-                    newAgentOrTerminal={openPicker}
-                    openProject={projects.open}
-                    openSettings={() => setSettingsOpen(true)}
-                    selectProcess={selectProcess}
-                    openProjectSettings={openProjectSettings}
-                    openOrchestration={openOrchestration}
-                    startAll={store.startAll}
-                    stopAll={stopProject}
-                    restartRunning={store.restartRunning}
-                    process={{
-                      onTrust: trust.requestReview,
-                      onResume: resumeProcess,
-                      onStart: startProcess,
-                      onStop: stopProcess,
-                      onRestart: restartProcess,
-                      onRemove: requestProcessRemoval,
+                  <TrustDialog
+                    review={trust.review}
+                    onTrustCommand={(name) => {
+                      if (trust.review) trust.trust(trust.review.project, name);
                     }}
+                    onTrustAll={trust.trustAll}
+                    onDismiss={trust.dismiss}
                   />
-                </DeferredOverlay>
-              </div>
-            </TooltipProvider>
-          </SignalsProvider>
+                  <RemoveProcessDialog
+                    process={pendingRemoval}
+                    workers={
+                      pendingRemoval
+                        ? liveWorkerCount(lineage, store.processes, pendingRemoval.id)
+                        : 0
+                    }
+                    onConfirm={confirmProcessRemoval}
+                    onDismiss={removal.dismiss}
+                  />
+                  <DeferredOverlay open={pickerOpen}>
+                    <LaunchPicker
+                      open={pickerOpen}
+                      onOpenChange={setPickerOpen}
+                      tools={agents.tools}
+                      projects={projects.projects}
+                      onLaunch={onLaunchAgent}
+                      onCreateTerminal={onCreateTerminal}
+                    />
+                  </DeferredOverlay>
+                  <DeferredOverlay open={settingsOpen}>
+                    <SettingsOverlay
+                      open={settingsOpen}
+                      onOpenChange={setSettingsOpen}
+                      project={activeProjectId}
+                    />
+                  </DeferredOverlay>
+                  <DeferredOverlay open={quickJumpOpen}>
+                    <QuickJumpPalette
+                      open={quickJumpOpen}
+                      onOpenChange={setQuickJumpOpen}
+                      processes={store.processes}
+                      projects={projects.projects}
+                      onSelectProcess={selectProcess}
+                      onSelectProject={openProjectSettings}
+                    />
+                  </DeferredOverlay>
+                  <DeferredOverlay open={quickActionsOpen}>
+                    <QuickActionsPalette
+                      open={quickActionsOpen}
+                      onOpenChange={setQuickActionsOpen}
+                      processes={store.processes}
+                      projects={projects.projects}
+                      activeProjectId={activeProjectId}
+                      onStart={startProcess}
+                      onStop={stopProcess}
+                      onRestart={restartProcess}
+                      onResume={resumeProcess}
+                      onTrust={trust.requestReview}
+                      onRemove={requestProcessRemoval}
+                    />
+                  </DeferredOverlay>
+                  <DeferredOverlay open={commandPaletteOpen}>
+                    <CommandPalette
+                      open={commandPaletteOpen}
+                      onOpenChange={setCommandPaletteOpen}
+                      processes={store.processes}
+                      projects={projects.projects}
+                      newAgentOrTerminal={openPicker}
+                      openProject={projects.open}
+                      openSettings={() => setSettingsOpen(true)}
+                      selectProcess={selectProcess}
+                      openProjectSettings={openProjectSettings}
+                      openOrchestration={openOrchestration}
+                      startAll={store.startAll}
+                      stopAll={stopProject}
+                      restartRunning={store.restartRunning}
+                      process={{
+                        onTrust: trust.requestReview,
+                        onResume: resumeProcess,
+                        onStart: startProcess,
+                        onStop: stopProcess,
+                        onRestart: restartProcess,
+                        onRemove: requestProcessRemoval,
+                      }}
+                    />
+                  </DeferredOverlay>
+                </div>
+              </TooltipProvider>
+            </SignalsProvider>
+          </FileDropProvider>
         </HotkeysProvider>
       </SidebarSettingsProvider>
     </AppearanceProvider>

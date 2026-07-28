@@ -110,11 +110,11 @@ pub use projects::{
     ReloadError, RemoveProjectError, Visibility,
 };
 pub use settings::{
-    Appearance, Binding, FontScale, FontWeight, HotkeyAction, HotkeyBindingView, HotkeyScope,
-    Hotkeys, Integrations, LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups,
-    NoopSettingsRepo, Notifications, ProcessCpuThreshold, ProcessMemThreshold, ProjectSettings,
-    Settings, SettingsRepo, SettingsStore, Sidebar, TemplateDefaults, TerminalAppearance, Theme,
-    ToolDefaults,
+    Appearance, Binding, CursorInactiveStyle, CursorStyle, FontScale, FontWeight, HotkeyAction,
+    HotkeyBindingView, HotkeyScope, Hotkeys, Integrations, LetterSpacing, LineHeight,
+    McpFeatureGroup, McpToolGroups, NoopSettingsRepo, Notifications, ProcessCpuThreshold,
+    ProcessMemThreshold, ProjectSettings, Settings, SettingsRepo, SettingsStore, Sidebar,
+    TemplateDefaults, TerminalAppearance, Theme, ToolDefaults,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError, SupervisorPorts};

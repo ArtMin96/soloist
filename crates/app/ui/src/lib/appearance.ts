@@ -4,17 +4,17 @@
 // settings behavior contract), so the app tokens and the xterm.js renderer read the same
 // values from here — no magic numbers scattered across components.
 
-import type { Appearance, FontScale, FontWeight, LetterSpacing, LineHeight, Theme } from "@/domain";
-
-// xterm's ITheme is structural; we only set the few colors that follow the app surface, so a
-// minimal shape keeps the dependency off the emulator's full type.
-export interface TerminalColors {
-  background: string;
-  foreground: string;
-  cursor: string;
-  cursorAccent: string;
-  selectionBackground: string;
-}
+import type {
+  Appearance,
+  CursorInactiveStyle,
+  CursorStyle,
+  FontScale,
+  FontWeight,
+  LetterSpacing,
+  LineHeight,
+  Theme,
+} from "@/domain";
+import { TERMINAL_MINIMUM_CONTRAST_RATIO, terminalColors } from "@/lib/terminalPalette";
 
 // Terminal font size (px) per step — xterm takes a px size directly.
 const TERMINAL_FONT_PX: Record<FontScale, number> = {
@@ -68,9 +68,22 @@ const LETTER_SPACING_PX: Record<LetterSpacing, number> = {
   wider: 1.3,
 };
 
-// The terminal follows the same native-family policy as the app shell. SF Mono is used on macOS;
-// the remaining faces are platform fallbacks, not bundled web fonts.
-const DEFAULT_MONO_STACK = '"SF Mono", Menlo, Monaco, ui-monospace, monospace';
+// Lines of terminal scrollback the emulator retains, matching the core's log ring so the pane and
+// the core hold the same depth of history — a resync replays the core's buffer into this one.
+export const TERMINAL_SCROLLBACK_LINES = 5000;
+
+// Width of the overview ruler, the strip down the pane's edge that marks where search matches sit
+// in the whole scrollback rather than only in the visible screen. Set to the width the emulator
+// already reserves for its scrollbar: the fit calculation subtracts the ruler width *instead of*
+// the scrollbar's, so matching them leaves the usable column count unchanged.
+export const TERMINAL_OVERVIEW_RULER_WIDTH = 14;
+
+// The app bundles no font, so the stack may only name families the target platform already has.
+// Ubuntu Mono is the Ubuntu desktop's own monospace face; DejaVu Sans Mono is the one behind it,
+// carried by fontconfig's own font dependency and so present wherever the app runs at all. The
+// generic tail is the floor rather than the answer: a family named here renders the same width on
+// every box, where `monospace` is whatever that machine happens to resolve it to.
+const DEFAULT_MONO_STACK = '"Ubuntu Mono", "DejaVu Sans Mono", monospace';
 
 const ROOT_FONT_PX = 16;
 
@@ -82,13 +95,17 @@ export const DEFAULT_APPEARANCE: Appearance = {
   theme: "system",
   interface_font_scale: "medium",
   terminal: {
-    focus_on_click: false,
+    focus_on_click: true,
+    copy_on_select: false,
     font_family: null,
     font_weight: "w400",
     bold_font_weight: "w600",
     font_scale: "medium",
     line_height: "default",
     letter_spacing: "default",
+    cursor_style: "block",
+    cursor_inactive_style: "outline",
+    cursor_blink: true,
   },
 };
 
@@ -118,8 +135,8 @@ export function letterSpacingPx(spacing: LetterSpacing): number {
   return LETTER_SPACING_PX[spacing];
 }
 
-// The CSS font-family stack for the terminal: the chosen family ahead of the bundled
-// fallback, or the bundled stack alone when none is chosen.
+// The CSS font-family stack for the terminal: the chosen family ahead of the default stack,
+// or that stack alone when none is chosen.
 export function terminalFontFamily(family: string | null): string {
   return family ? `"${family}", ${DEFAULT_MONO_STACK}` : DEFAULT_MONO_STACK;
 }
@@ -203,28 +220,29 @@ export function watchSystemDark(onChange: (dark: boolean) => void): () => void {
   return () => media.removeEventListener("change", handler);
 }
 
-// The terminal's own surface palette, tracking the app light/dark theme. Program output keeps
-// its own ANSI; only the chrome (background/foreground/cursor/selection) follows the theme.
-// This is the one place the terminal chrome colors live — a surface distinct from the app
-// `--background` tokens (DESIGN.md), kept as concrete hex because xterm.js cannot parse the
-// OKLCH design tokens. The cursor's contrast color is always the surface behind it, so it is
-// derived from the background rather than restated.
-export function terminalColors(dark: boolean): TerminalColors {
-  const surface = dark
-    ? {
-        background: "#1b1e25",
-        foreground: "#e6e8ec",
-        cursor: "#8ab4f8",
-        selectionBackground: "#33405a",
-      }
-    : {
-        background: "#fbfbfd",
-        foreground: "#23262c",
-        cursor: "#3b6fd4",
-        selectionBackground: "#cfdcf5",
-      };
-  return { ...surface, cursorAccent: surface.background };
-}
+// The xterm.js options a pane is opened with once and never revisits: they answer to the build and
+// to what the emulator's own defaults get wrong, never to anything the user can change. Kept out of
+// `terminalOptions` so that projection holds only what a live restyle has to re-apply, which is what
+// lets the restyle be checked against it.
+export const TERMINAL_FIXED_OPTIONS = {
+  minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+  // Off by default in the emulator, and the gate on three APIs this app depends on: the unicode
+  // tables the grapheme addon registers, the decorations the search addon paints matches with,
+  // and the markers those decorations anchor to. Reading any of them throws while it is unset.
+  allowProposedApi: true,
+  // Gives search-match decorations somewhere to draw outside the visible screen. The ruler is
+  // only rendered once a width is set.
+  overviewRuler: { width: TERMINAL_OVERVIEW_RULER_WIDTH },
+  // xterm defaults this to "are we on macOS", so it is off on our only target. Right-clicking a
+  // word with nothing selected otherwise opens the context menu over an empty selection, and the
+  // menu's whole purpose is to act on one.
+  rightClickSelectsWord: true,
+  // The end-to-end build turns on xterm's screen-reader mode so the WebDriver harness can read the
+  // terminal's content: the default GPU (WebGL) renderer draws to a canvas the DOM cannot read, and
+  // screen-reader mode mirrors the live viewport into the accessibility DOM. Gated to the e2e build,
+  // so a shipped build keeps the GPU renderer with no accessibility-tree overhead.
+  screenReaderMode: Boolean(import.meta.env.VITE_E2E),
+};
 
 // The xterm.js options derived from the appearance document — applied at creation and pushed
 // live on every change. `dark` is resolved separately (it depends on the OS preference).
@@ -237,12 +255,10 @@ export function terminalOptions(appearance: Appearance, dark: boolean) {
     fontWeightBold: fontWeightValue(t.bold_font_weight),
     lineHeight: lineHeightValue(t.line_height),
     letterSpacing: letterSpacingPx(t.letter_spacing),
+    cursorStyle: t.cursor_style,
+    cursorInactiveStyle: t.cursor_inactive_style,
+    cursorBlink: t.cursor_blink,
     theme: terminalColors(dark),
-    // The end-to-end build turns on xterm's screen-reader mode so the WebDriver harness can read the
-    // terminal's content: the default GPU (WebGL) renderer draws to a canvas the DOM cannot read, and
-    // screen-reader mode mirrors the live viewport into the accessibility DOM. Gated to the e2e build,
-    // so a shipped build keeps the GPU renderer with no accessibility-tree overhead.
-    screenReaderMode: Boolean(import.meta.env.VITE_E2E),
   };
 }
 
@@ -310,6 +326,33 @@ export const LINE_HEIGHT_OPTIONS: Option<LineHeight>[] = [
   { value: "spacious", label: "Spacious" },
 ];
 
+// The cursor pickers derive their options from a label record rather than listing them, so the
+// closed set is covered by construction: `Record<CursorStyle, string>` refuses to compile until a
+// new domain variant is given a label, where a hand-written array would silently omit it from the
+// picker. Key order is the order the picker offers them in.
+const CURSOR_STYLE_LABELS: Record<CursorStyle, string> = {
+  block: "Block",
+  underline: "Underline",
+  bar: "Bar",
+};
+
+// "Hidden" rather than "None": the label says what the user will see, not what xterm calls it.
+const CURSOR_INACTIVE_STYLE_LABELS: Record<CursorInactiveStyle, string> = {
+  outline: "Outline",
+  block: "Block",
+  underline: "Underline",
+  bar: "Bar",
+  none: "Hidden",
+};
+
+export const CURSOR_STYLE_OPTIONS: Option<CursorStyle>[] = (
+  Object.keys(CURSOR_STYLE_LABELS) as CursorStyle[]
+).map((value) => ({ value, label: CURSOR_STYLE_LABELS[value] }));
+
+export const CURSOR_INACTIVE_STYLE_OPTIONS: Option<CursorInactiveStyle>[] = (
+  Object.keys(CURSOR_INACTIVE_STYLE_LABELS) as CursorInactiveStyle[]
+).map((value) => ({ value, label: CURSOR_INACTIVE_STYLE_LABELS[value] }));
+
 export const LETTER_SPACING_OPTIONS: Option<LetterSpacing>[] = [
   { value: "tight", label: "Tight" },
   { value: "default", label: "Default" },
@@ -317,15 +360,23 @@ export const LETTER_SPACING_OPTIONS: Option<LetterSpacing>[] = [
   { value: "wider", label: "Wider" },
 ];
 
-// A curated set of common Linux monospace families; an uninstalled family falls back through
-// the stack. `null` keeps the app's bundled default. (Probing actually-installed fonts is a
-// later, separate concern; the core only stores the chosen name.)
-export const MONO_FONT_OPTIONS: Option<string | null>[] = [
+// Only families the platform's own packaging guarantees, because nothing is bundled and the
+// webview offers no way to ask which fonts are installed: an entry that cannot be promised to
+// resolve is a control that silently does nothing when it is picked. `null` keeps the stack above.
+const MONO_FONT_OPTIONS: Option<string | null>[] = [
   { value: null, label: "System default" },
-  { value: "JetBrains Mono", label: "JetBrains Mono" },
-  { value: "Fira Code", label: "Fira Code" },
-  { value: "Source Code Pro", label: "Source Code Pro" },
   { value: "Ubuntu Mono", label: "Ubuntu Mono" },
   { value: "DejaVu Sans Mono", label: "DejaVu Sans Mono" },
-  { value: "Hack", label: "Hack" },
+  { value: "Liberation Mono", label: "Liberation Mono" },
 ];
+
+// The picker's options for the family currently stored, which is not always one of the offered
+// set — a name chosen before the set was narrowed still persists, and a select handed a value no
+// item carries renders empty. Appending it keeps that choice visible and re-selectable, and claims
+// nothing about whether it resolves. A blank name is read as no choice, the way the stack reads it:
+// appended it would be a select item with an empty value, which Radix refuses outright.
+export function monoFontOptions(family: string | null): Option<string | null>[] {
+  return family && !MONO_FONT_OPTIONS.some((option) => option.value === family)
+    ? [...MONO_FONT_OPTIONS, { value: family, label: family }]
+    : MONO_FONT_OPTIONS;
+}

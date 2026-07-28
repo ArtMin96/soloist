@@ -56,10 +56,12 @@ soloist-store = { path = "../store" }
 soloist-sys = { path = "../sys" }
 tauri = { version = "2.11.2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
+tauri-plugin-clipboard-manager = "2"
 tauri-plugin-devtools = { version = "2.1", optional = true }
 tauri-plugin-dialog = "2"
 tauri-plugin-mcp-bridge = { version = "0.11", optional = true }
 tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-store = "2"
 tauri-plugin-updater = "2"
