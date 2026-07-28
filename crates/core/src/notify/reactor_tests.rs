@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::agents::AgentActivity;
 use crate::composition::CorePorts;
@@ -25,6 +26,9 @@ use super::NotificationReactor;
 const PROJECT: ProjectId = ProjectId::from_raw(1);
 const OTHER: ProjectId = ProjectId::from_raw(2);
 const ROOT: &str = "/project";
+/// How long a test waits for a toast it expects before calling it never shown. Generous — it
+/// bounds a failure, and is never reached on the passing path.
+const WAIT_FOR_TOAST: Duration = Duration::from_secs(10);
 
 struct Setup {
     sup: Arc<Supervisor>,
@@ -53,12 +57,12 @@ fn setup() -> Setup {
     }
 }
 
-fn command_spec() -> ProcessSpec {
+fn command_spec(auto_restart: bool) -> ProcessSpec {
     ProcessSpec {
         command: "sleep 60".into(),
         working_dir: None,
         auto_start: false,
-        auto_restart: false,
+        auto_restart,
         restart_when_changed: Vec::new(),
         env: BTreeMap::new(),
     }
@@ -70,13 +74,24 @@ fn register_in(s: &Setup, project: ProjectId, name: &str) -> ProcessId {
         project,
         Path::new(ROOT),
         name,
-        &command_spec(),
+        &command_spec(false),
     ))
 }
 
 /// Registers a command under the default project.
 fn register(s: &Setup, name: &str) -> ProcessId {
     register_in(s, PROJECT, name)
+}
+
+/// Registers a command the crash policy will relaunch — the self-healing case whose per-attempt
+/// crashes are silent.
+fn register_auto_restarting(s: &Setup, name: &str) -> ProcessId {
+    s.sup.register(Registration::command(
+        PROJECT,
+        Path::new(ROOT),
+        name,
+        &command_spec(true),
+    ))
 }
 
 /// Spawns the reactor over the spy notifier and the settings stores.
@@ -97,6 +112,14 @@ async fn yield_many() {
     for _ in 0..32 {
         tokio::task::yield_now().await;
     }
+}
+
+/// Awaits `n` toasts, giving up rather than waiting forever, so a regression that silences a toast
+/// that should fire reddens the test instead of hanging the suite.
+async fn expect_shown(s: &Setup, n: usize) {
+    tokio::time::timeout(WAIT_FOR_TOAST, s.notifier.wait_until_shown(n))
+        .await
+        .expect("the expected toasts were never shown");
 }
 
 fn crashed(id: ProcessId) -> DomainEvent {
@@ -130,6 +153,60 @@ async fn an_exhausted_auto_restart_shows_a_toast() {
 
     let shown = s.notifier.wait_until_shown(1).await;
     assert_eq!(shown[0].title, "Worker stopped");
+}
+
+#[tokio::test]
+async fn crash_of_an_auto_restart_command_is_not_notified() {
+    let s = setup();
+    let worker = register_auto_restarting(&s, "Worker");
+    spawn_reactor(&s);
+
+    // A command that heals itself retries silently, so a crash loop cannot raise one toast per
+    // attempt — only giving up is worth the user's attention.
+    s.bus.publish(crashed(worker));
+    yield_many().await;
+
+    assert!(
+        s.notifier.shown().is_empty(),
+        "a crash the restart policy will retry warrants no notification",
+    );
+}
+
+#[tokio::test]
+async fn restart_exhausted_notifies_once() {
+    let s = setup();
+    let worker = register_auto_restarting(&s, "Worker");
+    spawn_reactor(&s);
+
+    s.bus.publish(DomainEvent::RestartExhausted { id: worker });
+    expect_shown(&s, 1).await;
+    yield_many().await;
+
+    // Silencing the retries must leave the one alert that says the retries are over.
+    let shown = s.notifier.shown();
+    assert_eq!(shown.len(), 1, "giving up toasts exactly once");
+    assert_eq!(shown[0].title, "Worker stopped");
+}
+
+#[tokio::test]
+async fn crash_without_auto_restart_still_notifies() {
+    let s = setup();
+    let web = register(&s, "Web");
+    spawn_reactor(&s);
+
+    // Nothing will relaunch this command, so its crash is the user's only signal — the retry
+    // gate reads the command's policy, never the state it happens to be in.
+    s.bus.publish(crashed(web));
+    expect_shown(&s, 1).await;
+    yield_many().await;
+
+    let shown = s.notifier.shown();
+    assert_eq!(
+        shown.len(),
+        1,
+        "a crash nothing will retry toasts exactly once"
+    );
+    assert_eq!(shown[0].title, "Web crashed");
 }
 
 #[tokio::test]
