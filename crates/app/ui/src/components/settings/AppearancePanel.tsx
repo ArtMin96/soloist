@@ -13,7 +13,7 @@ import {
   FONT_WEIGHT_OPTIONS,
   LETTER_SPACING_OPTIONS,
   LINE_HEIGHT_OPTIONS,
-  MONO_FONT_OPTIONS,
+  monoFontOptions,
   THEME_OPTIONS,
 } from "@/lib/appearance";
 import { useAppearance } from "@/store/appearanceContext";
@@ -68,7 +68,7 @@ export function AppearancePanel() {
       <SettingsSection title="Terminal">
         <SettingRow
           label="Focus on click"
-          description="Single-click the terminal to focus it instead of double-click."
+          description="Give the terminal keyboard focus when you select its process."
         >
           <Switch
             checked={t.focus_on_click}
@@ -76,10 +76,23 @@ export function AppearancePanel() {
             aria-label="Focus on click"
           />
         </SettingRow>
-        <SettingRow label="Font family" description="The monospace font used in the terminal.">
+        <SettingRow
+          label="Copy on select"
+          description="Copy selected terminal text to the clipboard as soon as it is selected."
+        >
+          <Switch
+            checked={t.copy_on_select}
+            onCheckedChange={(copy_on_select) => setTerminal({ copy_on_select })}
+            aria-label="Copy on select"
+          />
+        </SettingRow>
+        <SettingRow
+          label="Font family"
+          description="The terminal's monospace face. The families Ubuntu installs are always listed."
+        >
           <NullableSelect<string>
             value={t.font_family}
-            options={MONO_FONT_OPTIONS}
+            options={monoFontOptions(t.font_family)}
             onValueChange={(font_family) => setTerminal({ font_family })}
             ariaLabel="Font family"
             className="w-44"

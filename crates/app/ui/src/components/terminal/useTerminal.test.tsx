@@ -19,12 +19,8 @@ vi.mock("@xterm/addon-fit", () => ({
     fit() {}
   },
 }));
-vi.mock("@xterm/addon-search", () => ({
-  SearchAddon: class {
-    findNext() {}
-    findPrevious() {}
-    clearDecorations() {}
-  },
+vi.mock("@xterm/addon-search", async () => ({
+  SearchAddon: (await import("@/test/fakeSearchAddon")).FakeSearchAddon,
 }));
 // A controllable renderer activation so a test can hold it pending and resolve it deliberately —
 // the async cell re-measure the hook must re-fit against once it lands.

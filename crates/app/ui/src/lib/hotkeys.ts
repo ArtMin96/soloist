@@ -46,6 +46,8 @@ export const HOTKEY_ACTION_LABELS: Record<HotkeyAction, string> = {
   next_process: "Next process",
   increase_terminal_font_size: "Increase terminal font size",
   decrease_terminal_font_size: "Decrease terminal font size",
+  copy_selection: "Copy selection",
+  paste_clipboard: "Paste from clipboard",
   archive_scratchpad: "Archive scratchpad",
 };
 

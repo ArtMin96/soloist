@@ -526,6 +526,7 @@ export type CursorInactiveStyle = "outline" | "block" | "bar" | "underline" | "n
 // from these. `font_family` is null to use the app default.
 export interface TerminalAppearance {
   focus_on_click: boolean;
+  copy_on_select: boolean;
   font_family: string | null;
   font_weight: FontWeight;
   bold_font_weight: FontWeight;
@@ -586,6 +587,8 @@ export type HotkeyAction =
   | "next_process"
   | "increase_terminal_font_size"
   | "decrease_terminal_font_size"
+  | "copy_selection"
+  | "paste_clipboard"
   | "archive_scratchpad";
 
 // A key chord (mirrors core::Binding): the modifier flags plus the main key (a
