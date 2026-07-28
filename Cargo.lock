@@ -5272,6 +5272,7 @@ version = "0.9.8"
 dependencies = [
  "console-subscriber",
  "nix 0.29.0",
+ "notify-rust",
  "serde",
  "serde_json",
  "soloist-core",

@@ -13,5 +13,5 @@
 mod notifier;
 mod reactor;
 
-pub use notifier::{NoopNotifier, Notification, Notifier};
+pub use notifier::{NoopNotifier, Notification, Notifier, NotifierStatus};
 pub use reactor::NotificationReactor;
