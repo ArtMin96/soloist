@@ -12,8 +12,8 @@ import {
 } from "@/components/ui/dialog";
 import { SettingChoice } from "@/components/settings/controls/SettingChoice";
 import { Input } from "@/components/ui/input";
-import type { Choice } from "@/components/settings/controls/SettingChoice";
 import type { ProcessSpec, Visibility } from "@/domain";
+import type { Choice } from "@/lib/appearance";
 
 // Where a new command is stored. Neither name says what it costs — the shared file is committed and
 // visible to everyone, the local one never leaves this machine — so each carries a line that does.

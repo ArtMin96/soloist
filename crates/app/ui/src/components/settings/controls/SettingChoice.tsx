@@ -1,15 +1,7 @@
 import { useId } from "react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
-
-// One option: what it stores, what it is called, and one line saying exactly what choosing it
-// means. The description is part of the option, not a footnote about the group, because the whole
-// point of this control is that the names alone do not separate the choices.
-export interface Choice<T extends string> {
-  value: T;
-  label: string;
-  description: string;
-}
+import type { Choice } from "@/lib/appearance";
 
 // A vertical list of mutually exclusive choices, each carrying its own description. The affordance
 // for a setting whose options cannot be told apart by name — every description stays on screen, so

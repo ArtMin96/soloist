@@ -1,5 +1,5 @@
-import type { Choice } from "@/components/settings/controls/SettingChoice";
 import type { NotificationLevel, Notifications } from "@/domain";
+import type { Choice } from "@/lib/appearance";
 
 // The master switch defaults on (mirrors soloist_core::Notifications::default); the facade's stored
 // value supersedes this the moment it loads.
