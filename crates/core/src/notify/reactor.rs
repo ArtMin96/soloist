@@ -192,6 +192,7 @@ impl Attention {
         Notification {
             title,
             body: body.into(),
+            sound: None,
         }
     }
 }

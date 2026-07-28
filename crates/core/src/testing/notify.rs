@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::Notify;
 
-use crate::notify::{Notification, Notifier};
+use crate::notify::{Notification, Notifier, NotifierStatus};
 use crate::sync::lock;
 
 /// A [`Notifier`] that records every notification it was handed, in order.
@@ -13,11 +13,21 @@ use crate::sync::lock;
 pub struct RecordingNotifier {
     shown: Arc<Mutex<Vec<Notification>>>,
     recorded: Arc<Notify>,
+    status: NotifierStatus,
 }
 
 impl RecordingNotifier {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A fake reporting `status` instead of the default [`NotifierStatus::Unavailable`], so a
+    /// test can drive a surface that renders a live notification backend without needing one.
+    pub fn with_status(status: NotifierStatus) -> Self {
+        Self {
+            status,
+            ..Self::default()
+        }
     }
 
     /// The notifications shown so far, in order.
@@ -48,5 +58,9 @@ impl Notifier for RecordingNotifier {
     fn notify(&self, notification: Notification) {
         lock(&self.shown).push(notification);
         self.recorded.notify_one();
+    }
+
+    fn status(&self) -> NotifierStatus {
+        self.status.clone()
     }
 }
