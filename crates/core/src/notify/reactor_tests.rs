@@ -1,6 +1,6 @@
 //! Behavioural tests for [`NotificationReactor`]: it composes the right toast for the
 //! attention-worthy events, resolves the process label, and honours the global master switch and
-//! the per-project alert switches. They drive a real [`Supervisor`] over fakes (for the label read
+//! the notification level in force for the command. They drive a real [`Supervisor`] over fakes (for the label read
 //! model) and publish events on the bus directly, so the reactor's own logic is tested without the
 //! crash machinery (covered in the restart policy's tests).
 
@@ -15,7 +15,7 @@ use crate::config::ProcessSpec;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
 use crate::process::ProcStatus;
-use crate::settings::{ProjectSettings, Settings, SettingsStore};
+use crate::settings::{NotificationLevel, ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor};
 use crate::testing::{
     FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo, MockClock, RecordingNotifier,
@@ -271,11 +271,11 @@ async fn a_busy_agent_shows_nothing() {
 }
 
 #[tokio::test]
-async fn crash_alerts_off_silences_a_crash() {
+async fn level_none_silences_a_crash() {
     let s = setup();
     let web = register(&s, "Web");
     s.projects
-        .update(&PROJECT, |p| p.crash_exit_alerts = false)
+        .update(&PROJECT, |p| p.notification_level = NotificationLevel::None)
         .unwrap();
     spawn_reactor(&s);
 
@@ -284,18 +284,18 @@ async fn crash_alerts_off_silences_a_crash() {
 
     assert!(
         s.notifier.shown().is_empty(),
-        "with crash & exit alerts off, a crash raises no toast",
+        "at level None, a crash raises no toast",
     );
 }
 
 #[tokio::test]
 async fn crash_alerts_are_scoped_to_the_crashing_process_project() {
     let s = setup();
-    // Off for PROJECT, on (default) for OTHER — a crash in each must respect its own project.
+    // Silent for PROJECT, default for OTHER — a crash in each must respect its own project.
     let hushed = register_in(&s, PROJECT, "Hushed");
     let loud = register_in(&s, OTHER, "Loud");
     s.projects
-        .update(&PROJECT, |p| p.crash_exit_alerts = false)
+        .update(&PROJECT, |p| p.notification_level = NotificationLevel::None)
         .unwrap();
     spawn_reactor(&s);
 
@@ -312,11 +312,13 @@ async fn crash_alerts_are_scoped_to_the_crashing_process_project() {
 }
 
 #[tokio::test]
-async fn terminal_alerts_off_silences_a_bell() {
+async fn level_important_silences_a_bell() {
     let s = setup();
     let web = register(&s, "Web");
     s.projects
-        .update(&PROJECT, |p| p.terminal_alerts = false)
+        .update(&PROJECT, |p| {
+            p.notification_level = NotificationLevel::Important
+        })
         .unwrap();
     spawn_reactor(&s);
 
@@ -325,20 +327,41 @@ async fn terminal_alerts_off_silences_a_bell() {
 
     assert!(
         s.notifier.shown().is_empty(),
-        "with terminal alerts off, a bell raises no toast",
+        "at level Important a bell is terminal-class, so it raises no toast",
     );
 }
 
 #[tokio::test]
-async fn terminal_alerts_off_silences_an_agent_asking_for_attention() {
+async fn level_important_keeps_an_agent_asking_for_attention() {
     let s = setup();
     let agent = register(&s, "Claude");
     s.projects
-        .update(&PROJECT, |p| p.terminal_alerts = false)
+        .update(&PROJECT, |p| {
+            p.notification_level = NotificationLevel::Important
+        })
         .unwrap();
     spawn_reactor(&s);
 
-    // "Terminal alerts" gates both the bell and an agent asking for attention.
+    // A blocked agent is a state a human must clear before anything proceeds, so it ranks with the
+    // crashes rather than with the bells and survives everything but silence.
+    s.bus.publish(DomainEvent::AgentActivityChanged {
+        id: agent,
+        state: AgentActivity::Permission,
+    });
+
+    expect_shown(&s, 1).await;
+    assert_eq!(s.notifier.shown()[0].title, "Claude needs your input");
+}
+
+#[tokio::test]
+async fn level_none_silences_an_agent_asking_for_attention() {
+    let s = setup();
+    let agent = register(&s, "Claude");
+    s.projects
+        .update(&PROJECT, |p| p.notification_level = NotificationLevel::None)
+        .unwrap();
+    spawn_reactor(&s);
+
     s.bus.publish(DomainEvent::AgentActivityChanged {
         id: agent,
         state: AgentActivity::Permission,
@@ -347,19 +370,20 @@ async fn terminal_alerts_off_silences_an_agent_asking_for_attention() {
 
     assert!(
         s.notifier.shown().is_empty(),
-        "with terminal alerts off, an agent permission prompt raises no toast",
+        "level None is the one setting that silences an agent waiting on the user",
     );
 }
 
 #[tokio::test]
-async fn a_per_command_terminal_override_wins_over_the_project_default() {
+async fn a_per_command_override_quietens_one_command() {
     let s = setup();
     let web = register(&s, "Web");
     let api = register(&s, "Api");
-    // Project default on, but "Web" is individually silenced.
+    // The project admits everything, but "Web" is individually held to the important ones.
     s.projects
         .update(&PROJECT, |p| {
-            p.command_terminal_alerts.insert("Web".into(), false);
+            p.command_notification_levels
+                .insert("Web".into(), NotificationLevel::Important);
         })
         .unwrap();
     spawn_reactor(&s);
@@ -371,28 +395,32 @@ async fn a_per_command_terminal_override_wins_over_the_project_default() {
     assert_eq!(
         shown.len(),
         1,
-        "the silenced command rings no toast; the other still does",
+        "the quietened command rings no toast; the other still does",
     );
     assert_eq!(shown[0].title, "Api rang the bell");
 }
 
 #[tokio::test]
-async fn a_per_command_terminal_override_can_re_enable_a_silenced_project() {
+async fn command_override_tightens_but_cannot_loosen() {
     let s = setup();
     let web = register(&s, "Web");
-    // Project default off, but "Web" is individually re-enabled — the override wins either way.
     s.projects
         .update(&PROJECT, |p| {
-            p.terminal_alerts = false;
-            p.command_terminal_alerts.insert("Web".into(), true);
+            p.notification_level = NotificationLevel::Important;
+            p.command_notification_levels
+                .insert("Web".into(), NotificationLevel::All);
         })
         .unwrap();
     spawn_reactor(&s);
 
     s.bus.publish(DomainEvent::TerminalBell { id: web });
+    yield_many().await;
 
-    let shown = s.notifier.wait_until_shown(1).await;
-    assert_eq!(shown[0].title, "Web rang the bell");
+    assert!(
+        s.notifier.shown().is_empty(),
+        "the project and the command combine to the more restrictive of the two, so a looser \
+         command setting cannot re-admit what the project silenced",
+    );
 }
 
 #[tokio::test]
@@ -404,7 +432,7 @@ async fn the_global_master_switch_silences_everything() {
         .unwrap();
     spawn_reactor(&s);
 
-    // Off globally: neither a crash (crash/exit alerts on per project) nor a bell fires.
+    // Off globally: neither a crash nor a bell fires, whatever the project level admits.
     s.bus.publish(crashed(web));
     s.bus.publish(DomainEvent::TerminalBell { id: web });
     yield_many().await;

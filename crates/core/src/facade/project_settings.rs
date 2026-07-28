@@ -11,7 +11,7 @@ use crate::ids::{ProjectId, TemplateId};
 use crate::ports::StoreError;
 use crate::process::ProcStatus;
 use crate::projects::{ConfigStatus, ProjectCommandView, ProjectSettingsPage, Visibility};
-use crate::settings::{ProjectSettings, TemplateDefaults};
+use crate::settings::{NotificationLevel, ProjectSettings, TemplateDefaults};
 use crate::template::TemplateKind;
 
 impl Facade {
@@ -56,37 +56,33 @@ impl Facade {
             .update(&project, |s| s.editor_override = editor)
     }
 
-    /// Toggles crash/exit alerts for this project and persists it.
-    pub fn set_project_crash_exit_alerts(
+    /// Sets how much this project notifies and persists it.
+    pub fn set_project_notification_level(
         &self,
         project: ProjectId,
-        enabled: bool,
+        level: NotificationLevel,
     ) -> Result<ProjectSettings, StoreError> {
         self.project_settings
-            .update(&project, |s| s.crash_exit_alerts = enabled)
+            .update(&project, |s| s.notification_level = level)
     }
 
-    /// Toggles project-wide terminal (bell/attention) alerts and persists it.
-    pub fn set_project_terminal_alerts(
-        &self,
-        project: ProjectId,
-        enabled: bool,
-    ) -> Result<ProjectSettings, StoreError> {
-        self.project_settings
-            .update(&project, |s| s.terminal_alerts = enabled)
-    }
-
-    /// Overrides one command's terminal alerts for this project and persists it. The command is
-    /// keyed by name; an unoverridden command follows the project-wide default.
-    pub fn set_command_terminal_alerts(
+    /// Overrides one command's notification level for this project and persists it, or drops the
+    /// override with `None` so the command inherits the project again. The command is keyed by
+    /// name; an override only ever tightens what the project already admits.
+    pub fn set_command_notification_level(
         &self,
         project: ProjectId,
         command: &str,
-        enabled: bool,
+        level: Option<NotificationLevel>,
     ) -> Result<ProjectSettings, StoreError> {
         let command = command.to_owned();
-        self.project_settings.update(&project, |s| {
-            s.command_terminal_alerts.insert(command, enabled);
+        self.project_settings.update(&project, |s| match level {
+            Some(level) => {
+                s.command_notification_levels.insert(command, level);
+            }
+            None => {
+                s.command_notification_levels.remove(&command);
+            }
         })
     }
 
@@ -116,7 +112,7 @@ impl Facade {
 
     /// The assembled per-project settings page — one read the settings page renders directly: the
     /// project's root, whether its `solo.yml` currently loads, the shared and app-local command
-    /// roster (each with its live status and resolved terminal-alert state), the live running/total
+    /// roster (each with its live status and its own notification-level override), the live running/total
     /// counts, the local settings, and the resolved editor. One assembly behind the façade, so every
     /// front renders the same page from the same source.
     pub fn project_settings_page(
@@ -157,7 +153,7 @@ impl Facade {
                 name.clone(),
                 spec,
                 Visibility::Shared,
-                settings.terminal_alerts_for(name),
+                settings.command_notification_levels.get(name).copied(),
                 statuses.get(name).copied(),
             ));
         }
@@ -166,7 +162,7 @@ impl Facade {
                 name.clone(),
                 spec,
                 Visibility::Local,
-                settings.terminal_alerts_for(name),
+                settings.command_notification_levels.get(name).copied(),
                 statuses.get(name).copied(),
             ));
         }

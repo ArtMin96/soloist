@@ -1584,7 +1584,10 @@ push a user to disable notifications wholesale. It is recorded rather than dismi
 up in real use, this entry is the thing to reopen, and the cheap remedy is the rejected split.
 
 **Effect on parity:** revises what `plan/02` **D8** delivers (native desktop notifications, crash and
-attention). No row regresses. Unimplemented as of this entry — nothing here has been observed working.
+attention). No row regresses. **Implemented** in `AttentionKind::severity`
+(`crates/core/src/attention.rs`), pinned by `level_important_keeps_an_agent_asking_for_attention` and
+`level_none_silences_an_agent_asking_for_attention`. Delivery itself is still unobserved — D8's
+outstanding runtime walk covers that, not this entry.
 
 ---
 
@@ -1624,10 +1627,22 @@ and undo.
 than inverting one. `None` was rejected because it silences a user who deliberately turned bells on,
 and is the same unrecoverable-silence failure in a broader form.
 
-**Effect on parity:** revises `plan/02` **I7c** (project notifications), which still describes the
-boolean pair and is rewritten by the PR that ships the level model — not by this entry. `plan/05`'s
-per-project settings row is superseded the same way and on the same schedule. Unimplemented as of this
-entry.
+**A second loss, in the per-command overrides.** The table maps a project's pair; each stored
+`command_terminal_alerts` entry is mapped by the same rule, pairing that command's boolean with the
+*project's* crash setting. Under the booleans a per-command override **won outright**, so a command
+could be louder than its project; under the level model project and command combine to the more
+restrictive of the two, so an override can only ever tighten. A user who had project alerts off and one
+command's bells explicitly on therefore loses that command's bells: project `None` clamps it. That is
+the level model working as approved, not a bug — but it is a distinct user-visible loss from the
+project-level lossy case above, and it is why
+`a_per_command_terminal_override_can_re_enable_a_silenced_project` was replaced by
+`command_override_tightens_but_cannot_loosen`, which asserts the opposite.
+
+**Effect on parity:** revises `plan/02` **I7c** (project notifications) and `plan/05`'s per-project
+settings row, both rewritten to the level model. **Implemented** as the serde upgrade shim on
+`ProjectSettings` (`crates/core/src/settings/project.rs`), with the full mapping pinned by
+`legacy_booleans_upgrade_to_a_level`. The upgrade has been proven against hand-written legacy JSON
+only; it has not been run against a real pre-upgrade data directory.
 
 ---
 

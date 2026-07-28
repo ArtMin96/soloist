@@ -4,13 +4,12 @@
 //! It subscribes to the event bus and, for each attention-worthy event, resolves the originating
 //! process's project and label from the supervisor read model, then consults the settings before
 //! composing a [`Notification`] for the [`Notifier`] port. Two of the gates read live from the
-//! durable settings so a toggle takes effect at once: the global master switch (global settings),
-//! then the per-project switch for that kind of alert — crash/exit alerts for a crash or exhausted
-//! restart, terminal alerts (with the per-command override) for a bell or an agent asking for
-//! attention. The third reads the crashed command's own restart policy: a command that heals itself
-//! retries silently, so only its giving up is announced. It holds a [`Weak`] reference to the
-//! supervisor so it never keeps the app alive, and ends when the bus closes (app shutdown),
-//! mirroring the other reactors.
+//! durable settings so a change takes effect at once: the global master switch (global settings),
+//! then the notification level in force for that command — the project's, tightened by any
+//! per-command override — which admits the signal or drops it by its severity. The third reads the
+//! crashed command's own restart policy: a command that heals itself retries silently, so only its
+//! giving up is announced. It holds a [`Weak`] reference to the supervisor so it never keeps the
+//! app alive, and ends when the bus closes (app shutdown), mirroring the other reactors.
 
 use std::sync::{Arc, Weak};
 
@@ -18,6 +17,7 @@ use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::agents::AgentActivity;
+use crate::attention::AttentionKind;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
 use crate::process::ProcStatus;
@@ -74,23 +74,21 @@ impl NotificationReactor {
 
     /// The toast a given event warrants, or `None` if it needs none or a gate silences it. A
     /// non-attention event, a globally-disabled notifier, a process gone from the registry, a crash
-    /// the command's own restart policy will retry, or the relevant per-project switch being off
-    /// each yields no toast. Settings read as their documented defaults (alerts on) on a read
-    /// error, so a transient store failure never swallows a crash alert.
+    /// the command's own restart policy will retry, or a notification level that does not admit the
+    /// signal's severity each yields no toast. Settings read as their documented defaults (level
+    /// `All`) on a read error, so a transient store failure never swallows a crash alert.
     fn compose(&self, event: &DomainEvent) -> Option<Notification> {
-        let (id, attention) = Attention::classify(event)?;
+        let (id, kind) = classify(event)?;
         if !self.globally_enabled() {
             return None;
         }
         let supervisor = self.supervisor.upgrade()?;
         let view = supervisor.view(id)?;
-        if !attention.survives_retry_policy(supervisor.auto_restarts(id)) {
+        if !survives_retry_policy(kind, supervisor.auto_restarts(id)) {
             return None;
         }
         let settings = self.project_settings.get(&view.project).unwrap_or_default();
-        attention
-            .permitted_by(&settings, &view.label)
-            .then(|| attention.notification(&view.label))
+        permitted_by(kind, &settings, &view.label).then(|| notification(kind, &view.label))
     }
 
     /// Whether the global master switch is on. Reads the durable global settings live so a change
@@ -103,97 +101,79 @@ impl NotificationReactor {
     }
 }
 
-/// The kinds of event that warrant a toast. Each maps to the per-project switch that gates it and
-/// the toast it composes, so adding a kind is one variant plus its arm in each exhaustive match.
-#[derive(Clone, Copy)]
-enum Attention {
-    Crashed,
-    Exhausted,
-    Permission,
-    Error,
-    Bell,
+/// The attention kind a raw event carries, with the process it concerns — or `None` when the
+/// event warrants no notification.
+fn classify(event: &DomainEvent) -> Option<(ProcessId, AttentionKind)> {
+    match event {
+        DomainEvent::ProcessStatusChanged {
+            id,
+            to: ProcStatus::Crashed,
+            ..
+        } => Some((*id, AttentionKind::Crashed)),
+        DomainEvent::RestartExhausted { id } => Some((*id, AttentionKind::RestartExhausted)),
+        DomainEvent::AgentActivityChanged {
+            id,
+            state: AgentActivity::Permission,
+        } => Some((*id, AttentionKind::AgentPermission)),
+        DomainEvent::AgentActivityChanged {
+            id,
+            state: AgentActivity::Error,
+        } => Some((*id, AttentionKind::AgentError)),
+        DomainEvent::TerminalBell { id } => Some((*id, AttentionKind::TerminalBell)),
+        _ => None,
+    }
 }
 
-impl Attention {
-    /// The attention kind a raw event carries, with the process it concerns — or `None` when the
-    /// event warrants no notification.
-    fn classify(event: &DomainEvent) -> Option<(ProcessId, Attention)> {
-        match event {
-            DomainEvent::ProcessStatusChanged {
-                id,
-                to: ProcStatus::Crashed,
-                ..
-            } => Some((*id, Attention::Crashed)),
-            DomainEvent::RestartExhausted { id } => Some((*id, Attention::Exhausted)),
-            DomainEvent::AgentActivityChanged {
-                id,
-                state: AgentActivity::Permission,
-            } => Some((*id, Attention::Permission)),
-            DomainEvent::AgentActivityChanged {
-                id,
-                state: AgentActivity::Error,
-            } => Some((*id, Attention::Error)),
-            DomainEvent::TerminalBell { id } => Some((*id, Attention::Bell)),
-            _ => None,
-        }
+/// Whether this alert survives the crashed command's restart policy. An `auto_restart` command is
+/// relaunched after each crash, so announcing those crashes would fire one toast per attempt — up
+/// to the rate limit — for a command that is healing itself; the user learns of it once, when the
+/// policy gives up ([`AttentionKind::RestartExhausted`]). The gate reads the declared policy, not
+/// the process's current state: at the moment a crash is classified nothing is scheduled yet,
+/// because the actor publishes the crash before the self-healing loop consults the policy.
+fn survives_retry_policy(kind: AttentionKind, auto_restart: bool) -> bool {
+    match kind {
+        AttentionKind::Crashed => !auto_restart,
+        AttentionKind::RestartExhausted
+        | AttentionKind::AgentPermission
+        | AttentionKind::AgentError
+        | AttentionKind::TerminalBell => true,
     }
+}
 
-    /// Whether this alert survives the crashed command's restart policy. An `auto_restart` command
-    /// is relaunched after each crash, so announcing those crashes would fire one toast per attempt
-    /// — up to the rate limit — for a command that is healing itself; the user learns of it once,
-    /// when the policy gives up ([`Attention::Exhausted`]). The gate reads the declared policy, not
-    /// the process's current state: at the moment a crash is classified nothing is scheduled yet,
-    /// because the actor publishes the crash before the self-healing loop consults the policy.
-    fn survives_retry_policy(self, auto_restart: bool) -> bool {
-        match self {
-            Attention::Crashed => !auto_restart,
-            Attention::Exhausted | Attention::Permission | Attention::Error | Attention::Bell => {
-                true
-            }
-        }
-    }
+/// Whether this project's settings permit this alert: the level in force for the command — the
+/// project's, tightened by any per-command override — decides by the kind's severity.
+fn permitted_by(kind: AttentionKind, settings: &ProjectSettings, label: &str) -> bool {
+    settings.effective_level_for(label).admits(kind.severity())
+}
 
-    /// Whether this project's settings permit this alert: crash/exit alerts gate a crash or an
-    /// exhausted restart; terminal alerts (with the per-command override) gate a bell or an agent
-    /// asking for attention — the same split the settings UI presents.
-    fn permitted_by(self, settings: &ProjectSettings, label: &str) -> bool {
-        match self {
-            Attention::Crashed | Attention::Exhausted => settings.crash_exit_alerts,
-            Attention::Permission | Attention::Error | Attention::Bell => {
-                settings.terminal_alerts_for(label)
-            }
-        }
-    }
-
-    /// The toast this kind shows for the named process.
-    fn notification(self, label: &str) -> Notification {
-        let (title, body) = match self {
-            Attention::Crashed => (
-                format!("{label} crashed"),
-                "The process exited unexpectedly.",
-            ),
-            Attention::Exhausted => (
-                format!("{label} stopped"),
-                "Auto-restart gave up after too many crashes.",
-            ),
-            Attention::Permission => (
-                format!("{label} needs your input"),
-                "The agent is waiting for permission.",
-            ),
-            Attention::Error => (
-                format!("{label} hit an error"),
-                "The agent reported an error.",
-            ),
-            Attention::Bell => (
-                format!("{label} rang the bell"),
-                "The terminal signalled for your attention.",
-            ),
-        };
-        Notification {
-            title,
-            body: body.into(),
-            sound: None,
-        }
+/// The toast this kind shows for the named process.
+fn notification(kind: AttentionKind, label: &str) -> Notification {
+    let (title, body) = match kind {
+        AttentionKind::Crashed => (
+            format!("{label} crashed"),
+            "The process exited unexpectedly.",
+        ),
+        AttentionKind::RestartExhausted => (
+            format!("{label} stopped"),
+            "Auto-restart gave up after too many crashes.",
+        ),
+        AttentionKind::AgentPermission => (
+            format!("{label} needs your input"),
+            "The agent is waiting for permission.",
+        ),
+        AttentionKind::AgentError => (
+            format!("{label} hit an error"),
+            "The agent reported an error.",
+        ),
+        AttentionKind::TerminalBell => (
+            format!("{label} rang the bell"),
+            "The terminal signalled for your attention.",
+        ),
+    };
+    Notification {
+        title,
+        body: body.into(),
+        sound: None,
     }
 }
 

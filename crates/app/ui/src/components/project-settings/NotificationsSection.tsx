@@ -1,39 +1,29 @@
 import { SettingRow } from "@/components/settings/controls/SettingRow";
+import { SettingSelect } from "@/components/settings/controls/SettingSelect";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
-import { Switch } from "@/components/ui/switch";
-import type { ProjectSettings } from "@/domain";
+import { NOTIFICATION_LEVEL_OPTIONS } from "@/lib/notifications";
+import type { NotificationLevel, ProjectSettings } from "@/domain";
 
-// The project's notification toggles: crash/exit alerts and terminal-bell alerts. Both persist on
-// change; a single command can still be silenced from the Commands tab.
+// How much the project notifies. Persists on change; a single command can still be held quieter
+// than the project from the Commands tab.
 export function NotificationsSection({
   settings,
-  onCrashExitAlerts,
-  onTerminalAlerts,
+  onNotificationLevel,
 }: {
   settings: ProjectSettings;
-  onCrashExitAlerts: (enabled: boolean) => void;
-  onTerminalAlerts: (enabled: boolean) => void;
+  onNotificationLevel: (level: NotificationLevel) => void;
 }) {
   return (
     <SettingsSection title="Notifications">
       <SettingRow
-        label="Crash & exit alerts"
-        description="Notify when a command crashes or exits unexpectedly."
+        label="Notify me about"
+        description="All: terminal bells as well as crashes and agents waiting on you. Important only: crashes and agents waiting on you. None: nothing."
       >
-        <Switch
-          checked={settings.crash_exit_alerts}
-          onCheckedChange={onCrashExitAlerts}
-          aria-label="Crash and exit alerts"
-        />
-      </SettingRow>
-      <SettingRow
-        label="Terminal alerts"
-        description="Notify when a command rings the terminal bell or asks for attention."
-      >
-        <Switch
-          checked={settings.terminal_alerts}
-          onCheckedChange={onTerminalAlerts}
-          aria-label="Terminal alerts"
+        <SettingSelect
+          value={settings.notification_level}
+          options={NOTIFICATION_LEVEL_OPTIONS}
+          onValueChange={(value) => onNotificationLevel(value as NotificationLevel)}
+          ariaLabel="Notify me about"
         />
       </SettingRow>
     </SettingsSection>

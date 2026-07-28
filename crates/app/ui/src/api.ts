@@ -21,6 +21,7 @@ import type {
   McpFeatureGroup,
   McpSetupInfo,
   McpToolGroups,
+  NotificationLevel,
   Notifications,
   OrchestrationSnapshot,
   ProcessSpec,
@@ -619,26 +620,19 @@ export function setProjectEditorOverride(
   return invoke<ProjectSettings>("set_project_editor_override", { project, editor });
 }
 
-export function setProjectCrashExitAlerts(
+export function setProjectNotificationLevel(
   project: ProjectId,
-  enabled: boolean,
+  level: NotificationLevel,
 ): Promise<ProjectSettings> {
-  return invoke<ProjectSettings>("set_project_crash_exit_alerts", { project, enabled });
+  return invoke<ProjectSettings>("set_project_notification_level", { project, level });
 }
 
-export function setProjectTerminalAlerts(
-  project: ProjectId,
-  enabled: boolean,
-): Promise<ProjectSettings> {
-  return invoke<ProjectSettings>("set_project_terminal_alerts", { project, enabled });
-}
-
-export function setCommandTerminalAlerts(
+export function setCommandNotificationLevel(
   project: ProjectId,
   command: string,
-  enabled: boolean,
+  level: NotificationLevel | null,
 ): Promise<ProjectSettings> {
-  return invoke<ProjectSettings>("set_command_terminal_alerts", { project, command, enabled });
+  return invoke<ProjectSettings>("set_command_notification_level", { project, command, level });
 }
 
 export function addSharedCommand(

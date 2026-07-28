@@ -686,16 +686,20 @@ export interface ProcessSpec {
   env?: Record<string, string>;
 }
 
+// How much a scope notifies (mirrors core::NotificationLevel). A project and a single command each
+// carry one; the two combine to the more restrictive of the pair, so a command can go quieter than
+// its project but never louder.
+export type NotificationLevel = "all" | "important" | "none";
+
 // One project's local settings (mirrors core::ProjectSettings) — the auto-start gate, the
-// auto-trust-command-changes toggle, editor override, alert toggles, per-command alert overrides,
-// and app-local commands.
+// auto-trust-command-changes toggle, editor override, notification level, per-command level
+// overrides, and app-local commands.
 export interface ProjectSettings {
   auto_start_gate: boolean;
   auto_trust_command_changes: boolean;
   editor_override: string | null;
-  crash_exit_alerts: boolean;
-  terminal_alerts: boolean;
-  command_terminal_alerts: Record<string, boolean>;
+  notification_level: NotificationLevel;
+  command_notification_levels: Record<string, NotificationLevel>;
   local_commands: Record<string, ProcessSpec>;
 }
 
@@ -711,7 +715,7 @@ export interface ProjectCommandView {
   restart_when_changed: string[];
   env: Record<string, string>;
   visibility: Visibility;
-  terminal_alerts: boolean;
+  notification_level: NotificationLevel | null;
   status: ProcStatus | null;
 }
 

@@ -11,13 +11,12 @@ import {
   renameLocalCommand,
   renameSharedCommand,
   saveCommandToYaml,
-  setCommandTerminalAlerts,
+  setCommandNotificationLevel,
   setProjectAutoStartGate,
   setProjectAutoTrustCommandChanges,
-  setProjectCrashExitAlerts,
   setProjectEditorOverride,
   setProjectIcon,
-  setProjectTerminalAlerts,
+  setProjectNotificationLevel,
 } from "@/api";
 import { CommandList } from "@/components/project-settings/CommandList";
 import { NotificationsSection } from "@/components/project-settings/NotificationsSection";
@@ -88,8 +87,8 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
             to,
           ),
         ),
-      setTerminalAlerts: (cmd, enabled) =>
-        mutate(() => setCommandTerminalAlerts(id, cmd.name, enabled)),
+      setNotificationLevel: (cmd, level) =>
+        mutate(() => setCommandNotificationLevel(id, cmd.name, level)),
       toggleStorage: (cmd) =>
         mutate(() =>
           cmd.visibility === "shared"
@@ -160,8 +159,9 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
               {active === "notifications" && (
                 <NotificationsSection
                   settings={page.settings}
-                  onCrashExitAlerts={(v) => mutate(() => setProjectCrashExitAlerts(id, v))}
-                  onTerminalAlerts={(v) => mutate(() => setProjectTerminalAlerts(id, v))}
+                  onNotificationLevel={(level) =>
+                    mutate(() => setProjectNotificationLevel(id, level))
+                  }
                 />
               )}
               {active === "commands" && <CommandList commands={page.commands} ops={ops} />}

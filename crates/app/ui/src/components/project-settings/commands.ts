@@ -1,4 +1,4 @@
-import type { ProcessSpec, ProjectCommandView, Visibility } from "@/domain";
+import type { NotificationLevel, ProcessSpec, ProjectCommandView, Visibility } from "@/domain";
 
 // The command mutations the list and editor raise. The pane binds each to a core command and
 // reloads the page afterwards; the visibility-dispatched calls (edit, rename, remove, the storage
@@ -9,8 +9,9 @@ export interface CommandOps {
   edit: (command: ProjectCommandView, spec: ProcessSpec) => void;
   // Rename a command in place.
   rename: (command: ProjectCommandView, to: string) => void;
-  // Override the command's terminal-alert state (kept apart from its spec).
-  setTerminalAlerts: (command: ProjectCommandView, enabled: boolean) => void;
+  // Override the command's notification level, or clear it with `null` so it inherits the
+  // project's (kept apart from its spec).
+  setNotificationLevel: (command: ProjectCommandView, level: NotificationLevel | null) => void;
   // Move a command between the shared `solo.yml` and the app-local overlay.
   toggleStorage: (command: ProjectCommandView) => void;
   // Delete a command from wherever it lives.

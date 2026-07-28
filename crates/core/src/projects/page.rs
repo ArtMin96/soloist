@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::ProcessSpec;
 use crate::ids::ProjectId;
 use crate::process::ProcStatus;
-use crate::settings::ProjectSettings;
+use crate::settings::{NotificationLevel, ProjectSettings};
 
 /// Where a command lives: in the shared `solo.yml` ([`Shared`](Visibility::Shared), committed) or in
 /// the app-local overlay ([`Local`](Visibility::Local), this machine only). A closed enum, so every
@@ -28,9 +28,9 @@ pub enum Visibility {
 
 /// One command on the settings page. Its spec fields are flattened so they are always present in
 /// JSON (a [`ProcessSpec`] omits fields left at their defaults); [`visibility`](Self::visibility)
-/// is where it lives; [`terminal_alerts`](Self::terminal_alerts) is its resolved alert state; and
-/// [`status`](Self::status) is the live [`ProcStatus`] when a process of that name is registered,
-/// else `None`.
+/// is where it lives; [`notification_level`](Self::notification_level) is its own level override,
+/// `None` when it inherits the project's; and [`status`](Self::status) is the live [`ProcStatus`]
+/// when a process of that name is registered, else `None`.
 #[derive(Clone, Debug, Serialize)]
 pub struct ProjectCommandView {
     pub name: String,
@@ -41,18 +41,18 @@ pub struct ProjectCommandView {
     pub restart_when_changed: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub visibility: Visibility,
-    pub terminal_alerts: bool,
+    pub notification_level: Option<NotificationLevel>,
     pub status: Option<ProcStatus>,
 }
 
 impl ProjectCommandView {
     /// Projects a named command's spec into the flattened page view, tagging its visibility, its
-    /// resolved terminal-alert state, and its live status (if any).
+    /// own notification-level override, and its live status (if any).
     pub fn new(
         name: String,
         spec: &ProcessSpec,
         visibility: Visibility,
-        terminal_alerts: bool,
+        notification_level: Option<NotificationLevel>,
         status: Option<ProcStatus>,
     ) -> Self {
         Self {
@@ -67,7 +67,7 @@ impl ProjectCommandView {
             restart_when_changed: spec.restart_when_changed.clone(),
             env: spec.env.clone(),
             visibility,
-            terminal_alerts,
+            notification_level,
             status,
         }
     }

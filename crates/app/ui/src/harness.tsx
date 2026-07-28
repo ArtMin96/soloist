@@ -127,7 +127,7 @@ function command(over: Partial<ProjectCommandView> & { name: string }): ProjectC
     restart_when_changed: [],
     env: {},
     visibility: "shared",
-    terminal_alerts: true,
+    notification_level: null,
     status: null,
     ...over,
   };
@@ -137,7 +137,7 @@ function command(over: Partial<ProjectCommandView> & { name: string }): ProjectC
 const NOOP_OPS = {
   edit: () => {},
   rename: () => {},
-  setTerminalAlerts: () => {},
+  setNotificationLevel: () => {},
   toggleStorage: () => {},
   remove: () => {},
   add: () => Promise.resolve(),

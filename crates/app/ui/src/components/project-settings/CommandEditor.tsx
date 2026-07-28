@@ -2,13 +2,19 @@ import { useState } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 import { Field, ToggleRow } from "@/components/project-settings/fields";
 import { specOf } from "@/components/project-settings/spec";
+import { SettingSelect } from "@/components/settings/controls/SettingSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  COMMAND_LEVEL_OPTIONS,
+  commandLevelFromValue,
+  commandLevelValue,
+} from "@/lib/notifications";
 import type { CommandOps } from "@/components/project-settings/commands";
 import type { ProcessSpec, ProjectCommandView } from "@/domain";
 
-// The expanded editing form for one command: its command line, name, start / restart / alert
-// toggles, file-watch globs, where it is stored, and delete. Text fields commit on blur or Enter;
+// The expanded editing form for one command: its command line, name, start / restart toggles, its
+// notification level, file-watch globs, where it is stored, and delete. Text fields commit on blur or Enter;
 // toggles persist on change. Each edit rebuilds the spec from the command's current fields so only
 // the changed field moves; the pane reloads the page after every mutation.
 export function CommandEditor({ command, ops }: { command: ProjectCommandView; ops: CommandOps }) {
@@ -72,12 +78,20 @@ export function CommandEditor({ command, ops }: { command: ProjectCommandView; o
           checked={command.auto_restart}
           onChange={(v) => editField({ auto_restart: v })}
         />
-        <ToggleRow
-          label="Terminal alerts"
-          checked={command.terminal_alerts}
-          onChange={(v) => ops.setTerminalAlerts(command, v)}
-        />
       </div>
+
+      <Field
+        label="Notify me about"
+        hint="A command can be quieter than its project, never louder."
+      >
+        <SettingSelect
+          value={commandLevelValue(command.notification_level)}
+          options={COMMAND_LEVEL_OPTIONS}
+          onValueChange={(value) => ops.setNotificationLevel(command, commandLevelFromValue(value))}
+          ariaLabel="Notify me about"
+          className="w-full"
+        />
+      </Field>
 
       <Field label="Restart when files change">
         <div className="flex flex-col gap-1.5">

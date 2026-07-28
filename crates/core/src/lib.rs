@@ -18,6 +18,7 @@
 )]
 
 pub mod agents;
+pub mod attention;
 pub mod composition;
 pub mod config;
 pub mod configchange;
@@ -112,9 +113,9 @@ pub use projects::{
 pub use settings::{
     Appearance, Binding, CursorInactiveStyle, CursorStyle, FontScale, FontWeight, HotkeyAction,
     HotkeyBindingView, HotkeyScope, Hotkeys, Integrations, LetterSpacing, LineHeight,
-    McpFeatureGroup, McpToolGroups, NoopSettingsRepo, Notifications, ProcessCpuThreshold,
-    ProcessMemThreshold, ProjectSettings, Settings, SettingsRepo, SettingsStore, Sidebar,
-    TemplateDefaults, TerminalAppearance, Theme, ToolDefaults,
+    McpFeatureGroup, McpToolGroups, NoopSettingsRepo, NotificationLevel, Notifications,
+    ProcessCpuThreshold, ProcessMemThreshold, ProjectSettings, Settings, SettingsRepo,
+    SettingsStore, Sidebar, TemplateDefaults, TerminalAppearance, Theme, ToolDefaults,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError, SupervisorPorts};
