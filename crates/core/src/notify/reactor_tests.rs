@@ -21,7 +21,7 @@ use crate::testing::{
     FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo, MockClock, RecordingNotifier,
 };
 
-use super::NotificationReactor;
+use super::{Notification, NotificationReactor};
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);
 const OTHER: ProjectId = ProjectId::from_raw(2);
@@ -114,12 +114,14 @@ async fn yield_many() {
     }
 }
 
-/// Awaits `n` toasts, giving up rather than waiting forever, so a regression that silences a toast
-/// that should fire reddens the test instead of hanging the suite.
-async fn expect_shown(s: &Setup, n: usize) {
+/// Awaits `n` toasts and returns them, giving up rather than waiting forever, so a regression that
+/// silences a toast that should fire reddens the test instead of hanging the suite. Every wait in
+/// this file goes through here: an unbounded one turns a suppressed notification into a permanent
+/// block, which reads as a slow run rather than a failure.
+async fn expect_shown(s: &Setup, n: usize) -> Vec<Notification> {
     tokio::time::timeout(WAIT_FOR_TOAST, s.notifier.wait_until_shown(n))
         .await
-        .expect("the expected toasts were never shown");
+        .expect("the expected toasts were never shown")
 }
 
 fn crashed(id: ProcessId) -> DomainEvent {
@@ -139,7 +141,7 @@ async fn a_crash_shows_a_toast_naming_the_process() {
 
     s.bus.publish(crashed(web));
 
-    let shown = s.notifier.wait_until_shown(1).await;
+    let shown = expect_shown(&s, 1).await;
     assert_eq!(shown[0].title, "Web crashed");
 }
 
@@ -151,7 +153,7 @@ async fn an_exhausted_auto_restart_shows_a_toast() {
 
     s.bus.publish(DomainEvent::RestartExhausted { id: worker });
 
-    let shown = s.notifier.wait_until_shown(1).await;
+    let shown = expect_shown(&s, 1).await;
     assert_eq!(shown[0].title, "Worker stopped");
 }
 
@@ -220,7 +222,7 @@ async fn an_agent_awaiting_permission_shows_a_toast() {
         state: AgentActivity::Permission,
     });
 
-    let shown = s.notifier.wait_until_shown(1).await;
+    let shown = expect_shown(&s, 1).await;
     assert_eq!(shown[0].title, "Claude needs your input");
 }
 
@@ -235,7 +237,7 @@ async fn an_agent_error_shows_a_toast() {
         state: AgentActivity::Error,
     });
 
-    let shown = s.notifier.wait_until_shown(1).await;
+    let shown = expect_shown(&s, 1).await;
     assert_eq!(shown[0].title, "Gemini hit an error");
 }
 
@@ -247,7 +249,7 @@ async fn a_terminal_bell_shows_a_toast() {
 
     s.bus.publish(DomainEvent::TerminalBell { id: web });
 
-    let shown = s.notifier.wait_until_shown(1).await;
+    let shown = expect_shown(&s, 1).await;
     assert_eq!(shown[0].title, "Web rang the bell");
 }
 
@@ -302,7 +304,7 @@ async fn crash_alerts_are_scoped_to_the_crashing_process_project() {
     s.bus.publish(crashed(hushed));
     s.bus.publish(crashed(loud));
 
-    let shown = s.notifier.wait_until_shown(1).await;
+    let shown = expect_shown(&s, 1).await;
     assert_eq!(
         shown.len(),
         1,
@@ -349,8 +351,8 @@ async fn level_important_keeps_an_agent_asking_for_attention() {
         state: AgentActivity::Permission,
     });
 
-    expect_shown(&s, 1).await;
-    assert_eq!(s.notifier.shown()[0].title, "Claude needs your input");
+    let shown = expect_shown(&s, 1).await;
+    assert_eq!(shown[0].title, "Claude needs your input");
 }
 
 #[tokio::test]
@@ -391,7 +393,7 @@ async fn a_per_command_override_quietens_one_command() {
     s.bus.publish(DomainEvent::TerminalBell { id: web });
     s.bus.publish(DomainEvent::TerminalBell { id: api });
 
-    let shown = s.notifier.wait_until_shown(1).await;
+    let shown = expect_shown(&s, 1).await;
     assert_eq!(
         shown.len(),
         1,
