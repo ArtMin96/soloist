@@ -1,7 +1,8 @@
 use soloist_core::{
-    Appearance, Binding, FontScale, FontWeight, HotkeyAction, Hotkeys, Integrations, LetterSpacing,
-    LineHeight, McpFeatureGroup, McpToolGroups, Notifications, ProcessCpuThreshold,
-    ProcessMemThreshold, Settings, SettingsRepo, Sidebar, TerminalAppearance, Theme, ToolDefaults,
+    Appearance, Binding, CursorInactiveStyle, CursorStyle, FontScale, FontWeight, HotkeyAction,
+    Hotkeys, Integrations, LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups,
+    Notifications, ProcessCpuThreshold, ProcessMemThreshold, Settings, SettingsRepo, Sidebar,
+    TerminalAppearance, Theme, ToolDefaults,
 };
 use tempfile::tempdir;
 
@@ -33,13 +34,17 @@ fn fully_populated() -> Settings {
             theme: Theme::Dark,
             interface_font_scale: FontScale::Large,
             terminal: TerminalAppearance {
-                focus_on_click: true,
+                focus_on_click: false,
+                copy_on_select: true,
                 font_family: Some("JetBrains Mono".into()),
                 font_weight: FontWeight::W500,
                 bold_font_weight: FontWeight::W700,
                 font_scale: FontScale::Small,
                 line_height: LineHeight::Comfortable,
                 letter_spacing: LetterSpacing::Wide,
+                cursor_style: CursorStyle::Bar,
+                cursor_inactive_style: CursorInactiveStyle::None,
+                cursor_blink: false,
             },
         },
         sidebar: Sidebar {
@@ -123,6 +128,72 @@ fn a_fully_populated_document_round_trips_through_the_real_store() {
     let settings = fully_populated();
     store.save(&(), &settings).unwrap();
     assert_eq!(store.load(&()).unwrap(), Some(settings));
+}
+
+#[test]
+fn a_record_without_the_cursor_fields_reads_back_with_the_documented_defaults() {
+    // The settings document is stored as JSON, so a record an older build wrote simply lacks the
+    // fields that build did not know about. Reading it must apply the documented defaults rather
+    // than failing the parse — and the defaults must be the ones that preserve today's behavior,
+    // so nobody's terminal changes shape on upgrade.
+    let store = SqliteStore::open_in_memory().expect("in-memory store");
+    store
+        .lock()
+        .execute(
+            "INSERT INTO settings (id, doc) VALUES (1, ?1)",
+            (r#"{"appearance":{"theme":"dark","terminal":{"font_scale":"large"}}}"#,),
+        )
+        .expect("seed a settings record written before the cursor fields existed");
+
+    let terminal = store
+        .load(&())
+        .expect("an older record still parses")
+        .expect("the seeded record is found")
+        .appearance
+        .terminal;
+
+    assert_eq!(terminal.cursor_style, CursorStyle::Block);
+    assert_eq!(terminal.cursor_inactive_style, CursorInactiveStyle::Outline);
+    assert!(
+        terminal.cursor_blink,
+        "the cursor keeps blinking on upgrade — xterm defaults this off, the app never has"
+    );
+    // The fields the older build did write are untouched by the defaulting.
+    assert_eq!(terminal.font_scale, FontScale::Large);
+}
+
+#[test]
+fn a_record_without_the_terminal_behavior_fields_reads_back_with_the_documented_defaults() {
+    // The two terminal behavior booleans are read by the emulator, so their defaults decide what a
+    // user who never touched them gets. A record an older build wrote simply lacks them, and the
+    // defaults that apply must be the ones that leave the terminal behaving as it always has:
+    // selecting a process focuses it, and a selection is copied only on the explicit hotkey.
+    let store = SqliteStore::open_in_memory().expect("in-memory store");
+    store
+        .lock()
+        .execute(
+            "INSERT INTO settings (id, doc) VALUES (1, ?1)",
+            (r#"{"appearance":{"terminal":{"letter_spacing":"wide"}}}"#,),
+        )
+        .expect("seed a settings record written before the terminal behavior fields existed");
+
+    let terminal = store
+        .load(&())
+        .expect("an older record still parses")
+        .expect("the seeded record is found")
+        .appearance
+        .terminal;
+
+    assert!(
+        terminal.focus_on_click,
+        "selecting a process keeps focusing its terminal on upgrade"
+    );
+    assert!(
+        !terminal.copy_on_select,
+        "a selection is not copied until the user opts in"
+    );
+    // The field the older build did write is untouched by the defaulting.
+    assert_eq!(terminal.letter_spacing, LetterSpacing::Wide);
 }
 
 #[test]

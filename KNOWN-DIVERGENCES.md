@@ -968,3 +968,575 @@ information, and would depart from the emulators a user already knows.
 **Effect on parity:** adds `plan/02` **C10**. **C2** ("Full ANSI / color") is unchanged and still ✅ —
 it covers whether ANSI renders at all; C10 covers whether the 16 colours are ours and follow the theme.
 No row regresses.
+
+## D-24 — The terminal cursor's shape and blink are user settings, not constants 🟢
+
+**Introduced:** Phase 4 surface, on the branch that promotes the cursor to Settings.
+
+**Solo — silent, not contradicted.** `plan/05` records nothing about Solo's terminal cursor: not its
+shape, not whether it blinks, not whether either is configurable. There is no documented Solo behavior
+to match or to differ from, so this is a **clean-room addition** rather than a divergence from observed
+behavior, recorded here because `plan/05` §12 owns the decision and the parity walk reads it from this
+file. Nothing below asserts what Solo does.
+
+**The defect this closes.** `cursorBlink: true` was hardcoded at the emulator's construction and
+`cursorStyle` / `cursorInactiveStyle` sat at xterm's defaults, with no way for a user to change any of
+the three.
+
+**What Soloist does.** The appearance document carries two closed enums and a boolean —
+`CursorStyle { Block, Underline, Bar }`, `CursorInactiveStyle { Outline, Block, Bar, Underline, None }`
+and `cursor_blink` — mirrored once in `domain.ts` and handed to xterm unchanged. The permitted sets are
+xterm's own, read from the installed typings rather than from memory: `@xterm/xterm@6.0.0`'s
+`xterm.d.ts` declares `cursorStyle?: 'block' | 'underline' | 'bar'` and
+`cursorInactiveStyle?: 'outline' | 'block' | 'bar' | 'underline' | 'none'`. Because the serialized enum
+strings already *are* those values, nothing translates between the two — unlike the font weight and
+line height beside them in `lib/appearance.ts`, whose domain steps carry no xterm meaning of their own.
+The two sets are still held to each other at compile time: the value flows into `new Terminal({…})` and
+into `term.options.cursorStyle`, both typed by xterm, so a domain variant the emulator does not accept
+fails to build. The pickers that offer the three are derived from label records keyed by the same
+enums, so a variant xterm *would* accept still cannot ship without a label to show for it.
+
+**Defaults `Block` / `Outline` / `true`, and why blink departs from xterm.** The first two are xterm's
+own defaults. `cursor_blink` does not follow xterm's `false`: the app has always run a blinking cursor,
+so `true` is what keeps an upgrade from silently changing the terminal under an existing user. That is
+the whole reason the default is stated rather than inherited. `Outline` is kept as the unfocused
+default in preference to `None` — hiding the cursor is a legitimate choice, offered in the picker as
+"Hidden", but a poor default, because an unfocused pane then reads as having no cursor position at all.
+
+**Why there is no schema migration.** `SCHEMA_VERSION` stays **18**. The settings row persists as a
+single JSON document (`settings.doc`) parsed straight into `Settings`, whose containers carry
+`#[serde(default)]` and set no `deny_unknown_fields` — so three new struct fields need no DDL, and a
+record written before they existed reads back with the defaults above. This is the same "add a field,
+not a store" recipe the per-project seed-template defaults already follow. A bump would be worse than
+merely redundant: `migrate()` refuses any database whose `user_version` exceeds the running build's, so
+bumping to 19 would make a database this build has touched unopenable by an older one, in exchange for
+no DDL at all. A store test covers the behavior the bump would have been ceremony for.
+
+**Why the live-restyle path is the point.** Each option is assigned to the mounted emulator when the
+setting changes, not only when a pane is created — a change applies to the terminal the user is looking
+at, with no remount and so no scrollback loss or re-attach. This is the failure mode `focus_on_click`
+already demonstrates: a setting that persists, moves its switch, and is read by nothing. The vitest
+covering these three asserts against the emulator instance that was mounted *before* the edit, so an
+option wired only into construction reddens it.
+
+**Effect on parity:** adds `plan/02` **C11**. No row regresses.
+
+---
+
+## D-25 — Keyboard copy/paste, copy-on-select, and a focus setting that finally does something 🟢
+
+**Introduced:** Phase 4 surface, on the branch that adds terminal copy/paste.
+
+**Solo — silent, not contradicted.** `plan/05` records nothing about copying or pasting in Solo's
+terminal, nor about how a pane takes keyboard focus. There is no documented Solo behavior to match or
+to differ from, so this is a **clean-room addition** rather than a divergence from observed behavior,
+recorded here because `plan/05` §12 owns the decision and the parity walk reads it from this file.
+Nothing below asserts what Solo does.
+
+**The defect this closes.** xterm ships a `copy` listener, `paste` listeners with bracketed-paste
+handling, a `contextmenu` handler that pre-fills its hidden textarea, and — on Linux — middle-click
+primary-selection paste. It ships **no keyboard binding for copy**: that is the embedder's job, and
+Soloist had not done it, so there was no way to copy terminal output from the keyboard at all.
+Separately, `focus_on_click` was a **dead setting** — declared in the appearance document, defaulted,
+mirrored in `domain.ts`, with a live switch in the Appearance panel, and read by no code anywhere. It
+persisted, its switch moved, and it changed nothing.
+
+**What Soloist does.** Two actions join the closed `HotkeyAction` set in the Terminal scope,
+`CopySelection` and `PasteClipboard`, defaulting to **Ctrl+Shift+C** and **Ctrl+Shift+V**. The Shift is
+load-bearing: bare Ctrl+C and Ctrl+V belong to the program on the PTY (an interrupt, and a literal
+`^V`), and the terminal's capture-phase key handler claims only the Shift chords, so both bare chords
+still reach the emulator untouched. The keymap holds **one binding per action**, so the traditional
+Ctrl+Insert / Shift+Insert aliases are **not** shipped; adding them would mean reshaping the keymap to
+carry alternates, which is a larger change than the aliases are worth. Copy is a no-op without a
+selection — an empty write would replace whatever the user had on the clipboard with a blank. Paste
+goes through `term.paste`, which normalizes newlines and applies bracketed-paste markers only when the
+running program enabled that mode, then emits the result as ordinary input, so no new IPC is involved.
+
+**`copy_on_select`, default off.** A new boolean on the terminal appearance document, driven from
+xterm's `onSelectionChange`. Off by default (owner decision): the explicit hotkey stays the primary
+path, and Linux middle-click primary-selection paste already works natively either way. The event
+fires as a selection is *cleared* as well as made, so an emptiness guard is what keeps a deselect from
+wiping the clipboard.
+
+**`focus_on_click` now governs programmatic focus, and its default flips to `true`.** The setting
+decides whether selecting a process hands its terminal the keyboard focus; off, the pane is shown and
+focus stays where it was, so a click into the terminal is what starts typing. xterm focuses its own
+textarea on `mousedown` unconditionally, so clicking the terminal surface always focuses it regardless
+— the setting governs the only focus Soloist itself performs. **Both** of the app's focus calls are
+gated: the one when a pane is created and the one when a pooled pane becomes visible again. Gating
+only the first would leave the setting exactly as dead as it was, because the visible path also runs on
+mount. The default moves from `false` to `true` on the same reasoning that kept `cursor_blink` at
+`true` in [D-24](#d-24--the-terminal-cursors-shape-and-blink-are-user-settings-not-constants-): the app
+has always focused a terminal as its pane was selected, and a fresh install must not silently lose
+that. An existing record that already carries `focus_on_click: false` now takes effect, which is the
+intended consequence of fixing a setting that was being ignored.
+
+**`rightClickSelectsWord` is turned on.** xterm derives this option's default from "are we on macOS",
+read from the installed bundle rather than from memory, so it arrives **off** on our only target. A
+right click would then open the context menu over an empty selection, which is the one thing that menu
+exists to act on.
+
+**Clipboard access sits behind one seam, backed by the native plugin.** `lib/clipboard.ts` is the
+single place the terminal's clipboard is read and written. It goes through
+`tauri-plugin-clipboard-manager` rather than the webview's async Clipboard API: WebKitGTK gates
+`navigator.clipboard.readText()` behind a user gesture it does not credit a capture-phase key handler
+with, so the paste chord could not rely on a webview read. The plugin's commands run in the app
+process, where no such gate applies. Neither function rejects: a refused clipboard degrades — a write
+is dropped, a read yields no text — so the key handler and the selection listener can never take an
+exception.
+
+The grant is the two text commands and nothing else. `capabilities/default.json` carries
+`clipboard-manager:allow-read-text` and `clipboard-manager:allow-write-text`, which the generated
+`gen/schemas/acl-manifests.json` shows mapping to exactly `read_text` and `write_text`. Image, HTML,
+and clear stay ungranted, and `clipboard-manager:default` is deliberately not used — that set is
+empty, because the plugin ships no capability enabled by default.
+
+**What this costs and what is still unverified.** The plugin pulls `arboard`, whose `image-data`
+feature is on by default and is not switchable from the plugin, so the `image` decode tree compiles
+for a text-only use — accounted for in the dependency note below. And the plugin's **runtime
+behavior in a real window is still unwalked**: the frontend tests mock the plugin module, so they
+prove the seam's wiring and its degradation contract, not that WebKitGTK and the runtime authority
+let the call through. That remains the user-only display walk C12 records. Separately, the app's
+other copy buttons (scratchpads, project settings, code blocks, Mermaid export) still use
+`navigator.clipboard.writeText` — writing is the direction WebKitGTK does permit, and migrating them
+was out of scope for the terminal branch.
+
+**What it adds to the dependency graph.** `Cargo.lock` goes from **731 to 757 entries — 26 added,
+none removed**: 24 crates that were not present before, plus second versions of `nom` and
+`quick-xml`. By what pulls them in, the 26 split into **16 for the Linux clipboard backend**
+(`wl-clipboard-rs` with its six `wayland-*` crates, `tree_magic_mini`, `quick-xml`, `nom`,
+`os_pipe`, `petgraph`, `fixedbitset`; and `x11rb`, `x11rb-protocol`, `gethostname`), **6 for the
+`image-data` decode tree** (`tiff`, `weezl`, `fax`, `half`, `crunchy`, `quick-error`), **2 that
+never build on this target** (`clipboard-win` and `error-code`, Windows-only), and **2 for
+`arboard` and the plugin themselves**. The bulk of the lockfile cost is therefore the X11 and
+Wayland backend — which is the feature, not overhead — and only the 6-crate decode tree is paid
+for nothing.
+
+That decode tree is also the only part that is newly *compiled*. `image`, `moxcms`, and `pxfm` were
+already lockfile entries at the base, but reachable only through `tauri-plugin-mcp-bridge`, which is
+`optional` and absent from `default = ["mcp", "http"]`, so a default build did not compile them and
+now does. `png` and `bytemuck` are **not** new cost — a default build already reached `png` through
+`tauri` → `tray-icon`/`muda` and `bytemuck` through `tauri-runtime-wry` → `softbuffer`. The
+**compiled-size delta is unmeasured**: bundle size is measured against the real `.deb`/`.AppImage` in
+the packaging phase, and a number that was not taken is not recorded here.
+
+On the frontend side the plugin is small. `@tauri-apps/plugin-clipboard-manager` is **14.6 kB on
+disk** (`dist-js` 10.4 kB, of which the ESM entry the bundler actually pulls is 3,605 B), and its one
+dependency, `@tauri-apps/api`, is already a direct dependency of the UI.
+
+**Why there is no schema migration.** `SCHEMA_VERSION` stays **18**, on the same "add a field, not a
+store" recipe D-24 records: the settings row persists as one JSON document parsed straight into
+`Settings`, whose containers carry `#[serde(default)]` and set no `deny_unknown_fields`, so a new
+boolean needs no DDL and a record written before it existed reads back with the default. A bump would
+only make `migrate()` refuse the database for an older build, in exchange for no DDL. A store test
+covers the behavior the bump would have been ceremony for.
+
+**Effect on parity:** adds `plan/02` **C12**. No row regresses.
+
+---
+
+## D-26 — Terminal links open in the system browser, behind a two-scheme gate 🟢
+
+**Introduced:** Phase 4 surface, on the branch that adds terminal links.
+
+**Solo — silent, not contradicted.** `plan/05` records nothing about links in Solo's terminal, in
+either direction. There is no documented Solo behavior to match or to differ from, so this is a
+**clean-room addition** rather than a divergence from observed behavior, recorded here because
+`plan/05` §12 owns the decision and the parity walk reads it from this file. Nothing below asserts
+what Solo does.
+
+**The defect this closes.** A URL in terminal output was inert text. The OSC 8 case was worse than
+inert: xterm parses those hyperlinks natively, and with no `linkHandler` set it falls back to a
+blocking `confirm()` followed by `window.open()` — read from the installed `@xterm/xterm@6.0.0`
+bundle, not from memory. Under the app's CSP (`default-src 'self'`) that cannot reach a remote
+origin, so the user got a scary modal and then nothing. Claude Code and other agents emit OSC 8, so
+this was on a path the app's own supervised processes take. The app had no way to open a URL
+externally at all: no opener plugin, no shell plugin, no `xdg-open` anywhere in `crates/`.
+
+**What Soloist does.** `tauri-plugin-opener` is added to `crates/app` (never `core` — opening a URL
+is a UI-shell concern, and CI enforces that core links no app framework). Both link routes end at one
+function, `lib/opener.ts::openExternal`: the plain-text route through `@xterm/addon-web-links`, whose
+addon is constructed with our handler because **its default handler is `window.open`**, and the OSC 8
+route through `linkHandler`. One scheme guard, one call site, so the rule changes in one place.
+
+**The permission is `opener:allow-open-url` carrying its own scope — not `opener:allow-default-urls`.**
+Read from the generated `crates/app/gen/schemas/acl-manifests.json`, the two are not competing
+spellings of one thing and neither works alone. `allow-open-url` enables the `open_url` command and
+ships **no** scope; `allow-default-urls` ships a scope (`mailto:*`, `tel:*`, `http://*`, `https://*`)
+and an **empty** `commands.allow`, so it grants no command at all. The capability therefore names
+`allow-open-url` and supplies the scope inline, restricted to `http://*` and `https://*` — narrower
+than the plugin's default set, which would also admit `mailto:` and `tel:`. `open_path` and
+`reveal_item_in_dir` are deliberately left ungranted, so the webview cannot reach them. The pattern
+shape matters: the plugin compiles each `url` with the `glob` crate and matches via
+`Pattern::matches`, whose `MatchOptions::new()` sets `require_literal_separator: false` — so `*`
+crosses `/` and `https://*` matches a full URL with a path and query. Enforcement is in the Rust
+process; the webview-side guard is convenience, not the boundary.
+
+**Two schemes, and the reason for each exclusion.** `http:` and `https:` only. `file:` would hand a
+local path to the desktop on nothing more than a line of output; `javascript:` and `data:` are script
+chosen by whatever wrote that line. A URL printed by a supervised process is untrusted input.
+`allowNonHttpProtocols` is left unset — the typings warn that enabling it "may cause security issues
+such as XSS", and while it is falsy the emulator drops non-http OSC 8 links before they become
+clickable, parsing each URI and refusing to offer any whose protocol is not `http:`/`https:` (read
+from the installed `@xterm/xterm@6.0.0` bundle). The web-links addon's own regex matches http(s)
+only, so a plain-text `file://` path is never linkified either.
+
+**So neither route can currently reach `openExternal` with a scheme it should not** — on both, the
+guard is defence in depth rather than the sole gate. It is kept because the alternative is a rule
+that lives entirely in two upstream defaults, in a library the app upgrades: widening the addon's
+`urlRegex`, or setting `allowNonHttpProtocols` for a case that seems to warrant it, would each
+silently remove a filter with nothing behind it. One guard at the single call site keeps the app's
+own answer to "which schemes do we open" in the app, where it can be read and tested.
+
+**Hover reveals the destination, because OSC 8 lets the two disagree.** An OSC 8 hyperlink may
+display one string and point somewhere else entirely, which is the classic phishing shape. xterm hands
+the handler `getLinkData(id).uri` — the destination, not the displayed cells — and the pane's readout
+is fed from that value. It renders in the app's own chrome at a fixed corner of the pane rather than
+following the pointer: a program can print anything it likes into the terminal's cells, but it cannot
+paint over app chrome. The readout is `pointer-events-none`, so it never takes a click meant for the
+terminal. The pointer-cursor affordance needs no work — xterm's own stylesheet already carries
+`.xterm-cursor-pointer`.
+
+**Why `linkHandler` is not part of `terminalOptions()`.** That function projects the appearance
+document, and every option it returns must also be re-assigned in the live-restyle effect or the
+setting silently fails to reach a mounted pane. A link route is not appearance and has nothing to
+restyle, so it is passed at construction alongside `scrollback`, which is already handled that way.
+
+**No proposed API, and no CSP change.** `registerLinkProvider` is not behind
+`_checkProposedApi()` in xterm 6, so `allowProposedApi` stays off. The opener goes over IPC rather
+than a navigation, so `tauri.conf.json` is untouched.
+
+**The ACL is verified as written and parsed, never as enforced.** This is the caveat to carry out of
+this branch. What has evidence behind it is that the capability is *well-formed*: it compiles, and
+the generated `acl-manifests.json` resolves `opener:allow-open-url` to the `open_url` command. A
+scope that is well-formed but matches nothing compiles exactly the same way. Nothing here has
+observed the runtime authority admit a single real URL, because the frontend tests mock
+`@tauri-apps/plugin-opener` — they drive our handler and record what it asked for, and the plugin's
+Rust side never runs. So the failure mode to be aware of is a scope that silently refuses
+*everything*: `open_url` compares the URL against the resolved allow-list and returns
+`Error::ForbiddenUrl` when it does not match (`tauri-plugin-opener` 2.5.4, `src/commands.rs`), and a
+mis-specified pattern would take that branch for every link.
+
+That refusal is invisible twice over. No test exercises the real plugin, and `openExternal` ends in a
+`catch` that deliberately swallows the rejection so a hostile link in a process's output can never
+throw into the terminal — which means a systematically broken scope is indistinguishable, from
+inside the app, from the guard correctly dropping a link. Every link would simply do nothing. **No
+headless gate can catch this**: `just lint`, `cargo test` and the vitest suite would all stay green
+with the scope pattern wrong. Only the display walk C13 records answers it, and until that walk is
+run this capability is wiring that has not been demonstrated to work end to end.
+
+**Effect on parity:** adds `plan/02` **C13**. No row regresses.
+
+---
+
+## D-27 — A file dropped on the terminal inserts its path, quoted, and runs nothing 🟢
+
+**Introduced:** Phase 4 surface, on the branch that adds terminal file drag-and-drop.
+
+**Solo — silent, not contradicted.** `plan/05` records nothing about dragging a file onto Solo's
+terminal, in either direction: not whether a drop is accepted, not what a drop does, not whether
+anything is inserted. There is no documented Solo behavior to match or to differ from, so this is a
+**clean-room addition** rather than a divergence from observed behavior, recorded here because
+`plan/05` §12 owns the decision and the parity walk reads it from this file. Nothing below asserts
+what Solo does.
+
+**The defect this closes.** Dragging a file onto a pane did nothing at all — there was no
+drag-and-drop listener anywhere in the app. Every desktop terminal (GNOME Terminal, iTerm2, Kitty)
+answers a drop by writing the file's path at the cursor, and it is the gesture that makes handing a
+screenshot to a coding agent a drag rather than a `find`. Soloist's whole purpose is running those
+agents, so the pane most likely to be dropped on was the one that ignored it.
+
+**The drop is taken from the OS, not from the DOM.** The window's `drag_drop_enabled` is left at
+Tauri's default of `true` — read from the pinned `tauri-utils-2.9.2` `src/config.rs`, "Whether the
+drag and drop is enabled or not on the webview. By default it is enabled." With it enabled the
+webview handles the drop natively and `getCurrentWebview().onDragDropEvent` hands back **real
+filesystem paths**. HTML5 drag-and-drop is not an alternative here and is deliberately not used: a
+file dropped through the DOM arrives as a `File` object carrying no path at all, so recovering one
+would mean reading the bytes back out to a temporary file to learn where the original already was.
+
+**No new IPC command and no capability change — verified, not assumed.** `onDragDropEvent` is
+implemented purely over `this.listen(TauriEvent.DRAG_ENTER | DRAG_OVER | DRAG_DROP | DRAG_LEAVE)`,
+read from the installed `@tauri-apps/api@2.11.0` `webview.js` rather than from the docs site. The
+capability already grants `core:default`, which resolves through `core:event:default` to
+`allow-listen` and `allow-unlisten` in the generated `crates/app/gen/schemas/acl-manifests.json`.
+Delivery is `term.paste`, the same route the paste hotkey takes: it emits the text as ordinary input
+through `onData` → the existing `pty_write`, so bracketed-paste mode is honored and no separate write
+path exists to keep in step.
+
+**One window-wide subscription, not one per pane.** The event belongs to the window, not to an
+element — it carries the position it happened at and nothing else identifying a target. Subscribing
+per pane would mean six listeners each filtering the same stream, so the app shell owns the single
+subscription and routes each event by hit-testing its position against the registered hosts. The
+subscription is disposed on unmount; undisposed it would outlive the app's whole session.
+
+**The position is physical, the box is CSS.** `PhysicalPosition` is in real screen pixels while
+`getBoundingClientRect()` is in CSS pixels, so the two are converted through
+`PhysicalPosition.toLogical(window.devicePixelRatio)` before being compared. Unconverted, the routing
+is silently wrong on every HiDPI display — the class of bug that never appears on the developer's
+machine. Their **origins** need no correction: the app's title bar is drawn inside the webview
+(`decorations: false`) and the shell fills it with no page scroll, so the webview's top-left is the
+viewport's.
+
+**A box is half-open, and that is what protects the hidden panes.** Up to six terminals stay mounted
+in the keep-alive pool with five of them `display: none`. Containment excludes a box's right and
+bottom edges, so a zero-size box — exactly what a `display: none` pane reports — contains no point at
+all, and a drop can only ever reach the pane the user can see. This is the mechanism rather than a
+guard: an explicit "skip empty boxes" test could not be made to fail on its own, so it is not there.
+
+**Nothing is executed.** No newline is appended. Dragging a file is a request to *refer* to it, not a
+decision to run a command with it; auto-submitting a command line the user assembled by accident is
+not recoverable, and the alternative costs them one keystroke. Several files insert as several
+arguments, separated by a single space.
+
+**Quoting is POSIX single-quoting, in one place.** Each path is wrapped in single quotes, inside
+which a shell performs no expansion and honours no escape character — so a space, a newline, a
+backslash, a double quote, `$`, a backtick, a glob and a `;` all survive as literal bytes. The single quote is the one
+character a quoted run cannot contain, and is spelled by closing the run, emitting `\'`, and
+reopening: `'` becomes `'\''`.
+
+**The affordance is a tint and an inset ring, and no label.** While a drag is over the pane it is
+marked, and the mark clears on both `leave` and `drop`. Which pane will receive the drop is the only
+thing in doubt during the drag; the result — a quoted path at the cursor — explains itself the moment
+it lands, and a label would sit over the very output the file is being dropped into. It is
+`pointer-events-none`: the drop is handled by the OS rather than by DOM pointer events, so the
+overlay never needs to receive one and must never take a click meant for the terminal.
+
+**A pane also gives the mark up as it stops being shown**, which is not the same event as the drag
+ending. A pooled pane stays mounted while hidden, so nothing re-runs on the way back to re-derive the
+mark; and a drag it was under can end anywhere — over another window, cancelled, dropped somewhere
+else — with none of those events addressed to a pane that is no longer on screen. Without giving the
+mark up on the way out, the pane comes back marked for a drag that ended long ago. This is the same
+shape as the stale hover readout the link work closed, arrived at independently on the drop side.
+
+**Effect on parity:** adds `plan/02` **C14**. No row regresses.
+
+## D-28 — The terminal decorates and counts search matches, clusters graphemes, draws inline images, and honors OSC 52 both ways 🟢
+
+**Introduced:** Phase 4 surface, on the branch that adds the search decorations, unicode and image addons.
+
+**Solo — silent, not contradicted.** `plan/05` records nothing about how Solo's terminal searches
+beyond the existence of a find affordance, and nothing whatever about character widths, inline
+images, or the clipboard escape sequence. There is no documented Solo behavior to match or to differ
+from, so this is a **clean-room addition** rather than a divergence from observed behavior, recorded
+here because `plan/05` §12 owns the decision and the parity walk reads it from this file. Nothing
+below asserts what Solo does.
+
+**The gate everything else hangs off.** `allowProposedApi` defaults to `false` in xterm 6, and it is
+not advisory: reading `terminal.unicode` or calling `registerDecoration` **throws** while it is
+unset. Read from the installed `@xterm/xterm@6.0.0` bundle rather than from memory, and asserted
+through the emulator rather than the option object — a terminal built from the app's options must be
+able to reach those APIs, or the addons silently do nothing. Turning it on widens the surface the app
+depends on; only three gated APIs are used, all long-shipped upstream, and this is the recorded
+decision to accept that.
+
+**Highlight-all and the match counter are one feature, not two.** The search addon's `_fireResults`
+calls `fireResultsChanged(!!searchOptions.decorations)`, and that method returns early on a falsy
+argument — so `onDidChangeResults` never fires for a search that decorates nothing. The find bar was
+never missing a listener; it was missing the option that makes the event exist. This was verified by
+measurement, not inference: with the `decorations` object removed the counter stops updating in every
+case that exercises it.
+
+**Clearing the decorations does not report that the matches are gone.** `clearDecorations` drops the
+highlights and the tracked results without firing the event, so the count is reset explicitly
+alongside it. Without that, closing the find bar and reopening it would show the tally from the
+previous query over an empty input.
+
+**Decorating also arms a debounced re-search that was previously dead.** The addon's `_updateMatches`
+is guarded on the last search having asked for decorations, so before this change it never ran. With
+the find bar open it now re-runs the query 200 ms after the buffer changes, which is what keeps the
+tally honest as a live process writes — the count would otherwise describe output that has since
+scrolled. It is bounded twice over: debounced, and capped by the explicit `highlightLimit`. What it
+costs under a genuinely chatty process is a **real-window question that has not been measured**; it
+cannot be characterized headlessly.
+
+**The active match is told apart by its border, not its fill.** Both washes are deliberately quiet —
+each is the faintest tint that still reads against the terminal surface — because they tint live
+output rather than replacing it. Distinguishing active from inactive by fill alone would mean making
+one of them heavy, or leaning on hue, which a colour-blind reader and a grayscale screenshot both
+lose. So the accent border carries it, clearing its own fill by 3:1 in both themes. The colours reuse
+the app's two existing roles (slate for a found thing, azure for the selected one), which keeps
+saturated colour meaning process status and nothing else. A decoration replaces the cell's background
+*before* the renderer's contrast pass, so `minimumContrastRatio` still governs program colour drawn
+over a match; the fills are nonetheless chosen so the ordinary foreground clears 4.5:1 unaided.
+
+**A theme flip repaints the matches already on screen.** The addon takes its decoration colours as
+an argument to a search and offers no way to restyle what it has drawn, so highlights would otherwise
+keep the palette of whichever theme was current when the user last typed — the find bar open over a
+Light/Dark toggle, or a "System" theme following the OS. The repaint reissues the last query, which
+needs the decorations dropped first: given the same query and the same matching options the addon
+treats its highlights as current and re-creates only the active one. It reissues through
+`findPrevious`, which with that comparison cleared resumes from the *start* of the current selection
+and so lands back on the match the user was standing on rather than stepping past it. The addon also
+scrolls a match back into view, which a repaint nobody asked for must not do, so the viewport row is
+captured and restored around the reissue. **That last guarantee is display-walk-only**: xterm's
+viewport does not scroll under jsdom at all — `scrollLines`, `scrollToLine` and the addon's own
+scroll are each inert without a measurable surface — so a headless test of it could never fail and
+none is written. What *is* asserted headlessly is the repaint itself and the user's place: the border
+colour of every decoration on the pane flips to the other palette while the reported match index and
+the emulator's selection both stay put.
+
+**The appearance projection and the fixed options were separated so the restyle rule could be checked.** `terminalOptions` had grown five options that never follow the appearance document — the proposed-API gate, the contrast floor, the ruler width, right-click-selects-word and the e2e screen-reader flag — while the comment above the live-restyle effect claimed every option it returns is re-assigned to the mounted emulator. Nothing was dead, because all five are constants, but the rule was false exactly where the next appearance-derived option would quietly become a setting that works on the next pane opened and does nothing to the one in front of the user, which is the defect [D-25](#d-25)'s `focus_on_click` was. They move to `TERMINAL_FIXED_OPTIONS`, spread at construction, and the rule holds again — and is now asserted rather than asserted-in-prose: the test iterates the projection's own keys, so a key added later is covered without anyone remembering to extend a list, over a pair of appearances that is first asserted to disagree about every one of them (including the theme, which is why the pair flips `dark` too) so no option can pass by already holding the right value from construction.
+
+**The overview ruler is given the width the scrollbar already held.** The emulator renders no ruler
+at all until a width is set. The fit calculation subtracts the ruler's width *instead of* the
+scrollbar's — `overviewRuler?.width || 14` in the installed `@xterm/addon-fit@0.11.0` — so setting it
+to exactly 14 leaves the pane's column count, and therefore the PTY winsize, unchanged. Any other
+value would silently reflow every pane. `overviewRulerBorder` is set in both themes because xterm
+leaves it **black** when unset, which on the light surface draws a hard rule down the pane's edge.
+
+**The unicode addon activates itself; the embedder does not.**
+`@xterm/addon-unicode-graphemes@0.4.0` sets `unicode.activeVersion` inside its own `activate()` and
+restores the previous version on `dispose()` — read from its shipped source. The widely-assumed extra
+assignment by the embedder is therefore not written, because it would be dead code duplicating the
+addon's own constant. What is guarded instead is the observable outcome: a ZWJ sequence occupies one
+double-width cell rather than three, which is the failure that shears a TUI's columns.
+
+**The image addon's own limits would not fit the budget.** Its defaults are `storageLimit: 128` MB and
+`pixelLimit: 16777216`, read from the shipped bundle — its typings' prose claims "2^16", which
+contradicts the value the code actually uses and is simply wrong. Both are **per terminal instance**,
+and up to six panes stay mounted in the keep-alive pool, so inherited they would permit far more than
+the app's whole runtime footprint. Ours are `storageLimit: 16` MB and `pixelLimit: 2048 × 2048`. The
+storage figure is not written as a bare 16: it is a 96 MB budget for the whole pool divided by the
+pool cap, taken from the constant that sets the cap, so widening the pool tightens each pane instead
+of silently raising the app's ceiling. The pixel limit has no accessor to read back, but it is not
+unobservable either — a program asking the terminal for the largest graphics geometry it accepts is
+answered with the largest square inside the limit, which is 2048 × 2048 for ours against the addon's
+own 4096 × 4096.
+**Both are proposals, not measurements.** Confirming them needs `storageUsage` sampled in the nightly
+soak with a full pool and images loaded, which requires a real display and **has not been run** — so
+no figure for actual usage is recorded here. The addon reaches into ten private `_core.*` internals,
+so it is pinned exactly; that those internals still line up with xterm 6.0.0 is confirmed by
+activating the real addon against a real terminal under test rather than assumed, and must be
+re-confirmed on every xterm upgrade.
+
+**Addon loads degrade; they do not throw.** Both heavy addons are fetched with a dynamic `import()`
+so each lands in its own bundle chunk, following the renderer addon's existing shape. A chunk that
+cannot be fetched, or an addon whose activation throws, leaves a terminal without that one capability
+and nothing else — the two are independent, and the pane still renders its output. Their disposers
+run before the emulator's, because both reach back into it as they let go.
+
+**The clipboard addon is the deliberate exception to that shape.** It is imported statically, so it
+is eager where the grapheme and image addons are code-split. The reason is ordering, not size: it has
+to be parsing before the first bytes reach the emulator, and the raw scrollback a pane replays as it
+opens can already carry an OSC 52 sequence — a chunk still in flight would miss it, and the miss would
+be silent. It is also the smallest of the three. The deviation is recorded here so a later session
+reading the two lazy loads beside it does not take the static import for an oversight and "fix" it.
+
+**OSC 52 is granted in both directions, deliberately.** The clipboard addon ships with its default
+`BrowserClipboardProvider`, so a program running in a pane can both set the system clipboard and
+**read** it — including something the user copied for an entirely unrelated purpose, such as a
+password. The emulator offers no way to allow writes while refusing reads short of replacing the
+provider outright. This is an **owner decision** (2026-07-27), taken because the panes run commands
+the user configured and trusted and the capability is what makes a remote editor or multiplexer yank
+into the desktop clipboard at all. It is recorded here specifically so a later session does not read
+it as an oversight and quietly narrow it; reversing it is one custom `IClipboardProvider`. This is
+separate from the keyboard copy/paste path of [D-25](#d-25), which acts for the user at the keyboard —
+this acts for the program at the other end of the PTY. Both reach the same system clipboard.
+
+**The round trip is unverified.** Nothing in the test suite exercises OSC 52: the shared terminal
+fake's `loadAddon` is a no-op, so the clipboard addon never activates under test, and no case drives a
+read or a write through the escape sequence. Its *release* is safe by construction — xterm registers
+its `AddonManager` as a disposable of the terminal, so `term.dispose()` disposes every loaded addon —
+but that is the only part of this capability with evidence behind it. The rest is wiring that has not
+been demonstrated to work, and it is the one capability here carrying an accepted security cost.
+
+**Effect on parity:** adds `plan/02` **C15**. No row regresses.
+
+---
+
+## D-29 — The terminal names the fonts Ubuntu installs, and the picker offers only those 🟢
+
+**Introduced:** Phase 4 surface, on the branch that corrects the terminal font stack.
+
+**Solo — one recorded string, no recorded fallback.** `plan/05` records that Solo's Appearance tab
+has a font-family control (I7f–I7k, read from the demo); the phase inventory notes its description
+reads "Monospace fonts installed on your system". What Solo's terminal falls back to when no family
+is chosen is not recorded anywhere. So the offered set diverges from a described Solo behavior, while
+the fallback stack is a clean-room decision with nothing to differ from.
+
+**The stack named three fonts that do not exist on the target.** It was
+`"SF Mono", Menlo, Monaco, ui-monospace, monospace`. Soloist ships Linux-only (D2), and none of SF
+Mono, Menlo or Monaco is on a stock Ubuntu box; `ui-monospace` is not implemented by the webview
+either. Every entry was therefore skipped and the terminal rendered whatever that particular machine
+resolved the bare generic `monospace` to — which is not a decision the app made, and not one it could
+predict. It is now `"Ubuntu Mono", "DejaVu Sans Mono", monospace`.
+
+**The evidence is containers, not this machine.** The development host has SF Mono, JetBrains Mono,
+Hack and a wall of Powerline fonts installed by hand, so `fc-list` here proves nothing about a user's
+box. Three clean images were probed instead:
+
+- On `ubuntu:24.04` carrying **only the app's own runtime closure** — `libwebkit2gtk-4.1-0`,
+  `libgtk-3-0t64` and `fontconfig`, installed `--no-install-recommends` — the sole monospace family
+  present is **DejaVu Sans Mono**. It arrives because `fontconfig-config` itself depends on
+  `fonts-dejavu-core | ttf-bitstream-vera | fonts-liberation | …` and apt takes the first
+  alternative. The last *named* family in the stack therefore resolves anywhere the app can run at
+  all — a promise the bare generic does not make.
+- `fonts-ubuntu` (Ubuntu Mono) and `fonts-liberation` (Liberation Mono) are reachable from
+  `ubuntu-desktop` through `Depends` alone on **20.04, 22.04 and 24.04**, the whole D2 range, and are
+  listed by the kubuntu / xubuntu / lubuntu metas too.
+- With that desktop font set installed, `fc-match` resolves Ubuntu Mono, DejaVu Sans Mono and
+  Liberation Mono to themselves, and resolves JetBrains Mono, Fira Code, Source Code Pro, Hack, SF
+  Mono, Menlo and Monaco to **Noto Sans** — a proportional face.
+
+**Ubuntu Mono leads, DejaVu Sans Mono follows.** Ubuntu Mono is the Ubuntu desktop's own monospace
+face, so on the primary target the terminal wears the platform's own typography; anything else that
+can run the app has DejaVu Sans Mono. The generic tail stays as a floor and is never expected to be
+the answer.
+
+**The picker offers only what packaging guarantees.** System default, Ubuntu Mono, DejaVu Sans Mono,
+Liberation Mono. JetBrains Mono, Fira Code, Source Code Pro and Hack are dropped: nothing is bundled,
+and on a stock desktop each resolved to a proportional face, so picking one changed nothing the user
+could see — the same shape of failure as a setting no code reads. **Noto Sans Mono is not offered
+either**, despite being the obvious fifth: it resolves on 20.04 and 24.04 but falls back to DejaVu
+Sans on 22.04, and a family that is only sometimes there is exactly the defect being removed.
+
+**No availability marker is shipped, and the probe that would have driven one is disproven.** The
+two honest options for keeping an aspirational family were a static "requires installation" label or
+a `document.fonts.check()` probe. The first is false for the developer who *does* have the font. The
+second was measured in a real WebKitGTK 2.52.3 webview and **returns `true` for a family that does
+not exist** — `document.fonts.check('12px "Totally Not A Real Font 12345"')` is `true`, exactly as it
+is for DejaVu Sans Mono. On this port it cannot distinguish an installed family from an absent one,
+so the marker it would have driven would have been a lie, which is worse than no marker at all.
+
+**Enumerating the machine's fonts, as Solo's control describes, is not available to the webview.**
+Two observations, because either alone would be weaker than it looks: the shipped WebKitGTK library
+contains no occurrence of `queryLocalFonts`, and `typeof window.queryLocalFonts` reads `undefined` in
+a live webview — that probe page has an opaque origin, so on its own it would also fit an API that is
+implemented but gated. Listing a user's real families would therefore mean reading fontconfig in the
+Rust process behind a core port. That is a new subsystem, not a picker change, and it is the reversal
+path if the fixed list proves too narrow.
+
+**`ui-monospace` is dropped with the macOS families, on measurement rather than inference.** In the
+same webview, text set in `ui-monospace` renders at *exactly* the width of text set in a nonsense
+family name, while `monospace` renders at DejaVu Sans Mono's width. The port does not implement
+`ui-monospace` as a generic — it fell through like any unknown family, which makes it dead weight
+in the stack. (`CSS.supports('font-family', 'ui-monospace')` answers `true`, but so does any
+arbitrary identifier: the CSS grammar accepts it as a custom family name, so that API cannot answer
+this question and the rendered width is what settles it.)
+
+**A family stored before the prune stays selectable.** The core keeps `font_family` as a free string,
+so a record written when the list was longer still holds e.g. `"Fira Code"`. A select handed a value
+that no item carries renders **empty** — observed under test rather than assumed — which would show
+the user's setting as unset while the terminal kept rendering it. The stored name is therefore
+appended to the offered options. It is shown plainly, with no claim either way about whether it
+resolves on that machine.
+
+**A blank stored family is read as no family.** The field is a free string, so a hand-written record
+can hold `""`. The stack already resolved that to the default, but the picker tested the stored name
+for `null` rather than for emptiness, so it appended `""` as an option — and a select item with an
+empty value is one Radix refuses by throwing, taking the whole settings panel down rather than the
+single row it could not draw. Both readers of the field now agree that a blank name is no choice.
+
+**The app shell's `--font-mono` carries the same stack.** The token that inline code, the editor and
+Mermaid read held `"SF Mono", Menlo, Monaco, ui-monospace, monospace` — the identical defect on a
+different surface. At `main` it and the terminal's stack were byte-identical, so correcting only the
+terminal would leave one requirement with two answers and nothing recording which was intended.
+**Owner decision (2026-07-28):** correct both together. The consequence is accepted rather than
+incidental — code across the whole app now renders in Ubuntu Mono where it rendered in whatever that
+machine resolved the bare generic to. `DESIGN.md`, the visual source of truth, names that face as
+well; it had named **Geist Mono**, which is not a dependency of this app and has never shipped in it.
+The stack stays one named constant per side — `--font-mono` in `index.css`, `DEFAULT_MONO_STACK` in
+`lib/appearance.ts` — because xterm is handed a concrete family string, not a CSS variable it could
+resolve.
+
+**Effect on parity:** adds `plan/02` **C16**. No row regresses.

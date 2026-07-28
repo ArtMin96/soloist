@@ -6,54 +6,21 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import type { Channel } from "@tauri-apps/api/core";
 import type { ProcessView } from "@/domain";
 import { PTY_FRAME_CHUNK, PTY_FRAME_RESYNC } from "@/api";
+import { FakeTerminal } from "@/test/fakeTerminal";
 
-// jsdom has no emulator surface, so the terminal is a write-recording fake; the hook's real
+// jsdom has no emulator surface, so the terminal is the shared recording fake; the hook's real
 // attach / coalesce / flush logic is what runs. Instances accumulate so a test can tell the
 // StrictMode-disposed terminal from the live one.
-const { FakeTerminal } = vi.hoisted(() => {
-  class FakeTerminal {
-    static instances: FakeTerminal[] = [];
-    writes: Array<string | Uint8Array> = [];
-    disposed = false;
-    options = {};
-    cols = 80;
-    rows = 24;
-    constructor() {
-      FakeTerminal.instances.push(this);
-    }
-    loadAddon() {}
-    open() {}
-    focus() {}
-    dispose() {
-      this.disposed = true;
-    }
-    reset() {
-      // A real xterm reset clears the screen and scrollback; mirror that by dropping recorded
-      // writes so a test sees only what is replayed after the reset.
-      this.writes = [];
-    }
-    write(data: string | Uint8Array) {
-      this.writes.push(data);
-    }
-    onData() {
-      return { dispose() {} };
-    }
-  }
-  return { FakeTerminal };
-});
-
-vi.mock("@xterm/xterm", () => ({ Terminal: FakeTerminal }));
+vi.mock("@xterm/xterm", async () => ({
+  Terminal: (await import("@/test/fakeTerminal")).FakeTerminal,
+}));
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
     fit() {}
   },
 }));
-vi.mock("@xterm/addon-search", () => ({
-  SearchAddon: class {
-    findNext() {}
-    findPrevious() {}
-    clearDecorations() {}
-  },
+vi.mock("@xterm/addon-search", async () => ({
+  SearchAddon: (await import("@/test/fakeSearchAddon")).FakeSearchAddon,
 }));
 // A controllable renderer activation so a test can hold it pending and resolve it deliberately —
 // the async cell re-measure the hook must re-fit against once it lands.

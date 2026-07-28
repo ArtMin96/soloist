@@ -92,7 +92,7 @@ fn set_appearance_persists_through_the_facade_and_leaves_other_tabs_untouched() 
     let appearance = Appearance {
         theme: Theme::Dark,
         terminal: TerminalAppearance {
-            focus_on_click: true,
+            focus_on_click: false,
             ..Default::default()
         },
         ..Default::default()

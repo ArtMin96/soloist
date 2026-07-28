@@ -31,7 +31,8 @@ mod templates;
 mod tools;
 
 pub use appearance::{
-    Appearance, FontScale, FontWeight, LetterSpacing, LineHeight, TerminalAppearance, Theme,
+    Appearance, CursorInactiveStyle, CursorStyle, FontScale, FontWeight, LetterSpacing, LineHeight,
+    TerminalAppearance, Theme,
 };
 pub use hotkeys::{Binding, HotkeyAction, HotkeyBindingView, HotkeyScope, Hotkeys};
 pub use integrations::Integrations;

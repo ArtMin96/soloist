@@ -1,6 +1,8 @@
 //! Unit tests for the hotkey registry — code-defined defaults (Solo `⌘`/`⌥` remapped to Ctrl/Alt),
 //! override-only persistence, reset, disable, cross-scope sharing, and within-scope conflict report.
 
+use std::collections::BTreeSet;
+
 use super::*;
 
 #[test]
@@ -40,6 +42,24 @@ fn terminal_search_is_a_terminal_scope_action() {
 }
 
 #[test]
+fn copy_and_paste_are_terminal_scope_shift_chords() {
+    // Both are dispatched by the terminal-focused key handler, so they must be Terminal-scoped —
+    // that handler filters to its own scope and would never receive the chord otherwise.
+    assert_eq!(HotkeyAction::CopySelection.scope(), HotkeyScope::Terminal);
+    assert_eq!(HotkeyAction::PasteClipboard.scope(), HotkeyScope::Terminal);
+    // The Shift is what keeps them clear of bare Ctrl+C / Ctrl+V, which belong to the program on
+    // the PTY — an interrupt, and a literal `^V`.
+    assert_eq!(
+        HotkeyAction::CopySelection.default_binding(),
+        Binding::ctrl_shift("C")
+    );
+    assert_eq!(
+        HotkeyAction::PasteClipboard.default_binding(),
+        Binding::ctrl_shift("V")
+    );
+}
+
+#[test]
 fn archive_scratchpad_is_a_scratchpad_scope_action() {
     // Ctrl+Shift+W is dispatched by the scratchpad-panel key handler, so it must be
     // Scratchpad-scoped — not General — or that handler (which filters to its own scope) never
@@ -57,6 +77,60 @@ fn archive_scratchpad_is_a_scratchpad_scope_action() {
         HotkeyAction::CloseAgentOrTerminal.default_binding(),
         "archive (Ctrl+Shift+W) must not collide with close (Ctrl+W)"
     );
+}
+
+// A tripwire, not a check: the match is exhaustive, so adding an action to the enum stops this file
+// compiling until the action is named here — which is the point, because the reader is then in the
+// test that says `ALL` is what an action must also be added to, and an action missing from `ALL`
+// reaches neither the settings document nor the Hotkeys tab.
+//
+// What it does not do is catch an action named here and still absent from `ALL`; nothing can, short
+// of a derive macro that enumerates the enum. The call below exists to give this a caller.
+fn named_action(action: HotkeyAction) {
+    match action {
+        HotkeyAction::OpenCommandPalette
+        | HotkeyAction::QuickActions
+        | HotkeyAction::QuickJump
+        | HotkeyAction::NewAgentOrTerminal
+        | HotkeyAction::OpenSettings
+        | HotkeyAction::CloseAgentOrTerminal
+        | HotkeyAction::NextProjectGroup
+        | HotkeyAction::PrevProjectGroup
+        | HotkeyAction::NextSection
+        | HotkeyAction::PrevSection
+        | HotkeyAction::JumpToAgents
+        | HotkeyAction::JumpToCommands
+        | HotkeyAction::JumpToTerminals
+        | HotkeyAction::CollapseOrSection
+        | HotkeyAction::JumpToParentProject
+        | HotkeyAction::ExpandProject
+        | HotkeyAction::RestartSelection
+        | HotkeyAction::OpenTerminalSearch
+        | HotkeyAction::PreviousProcess
+        | HotkeyAction::NextProcess
+        | HotkeyAction::IncreaseTerminalFontSize
+        | HotkeyAction::DecreaseTerminalFontSize
+        | HotkeyAction::CopySelection
+        | HotkeyAction::PasteClipboard
+        | HotkeyAction::ArchiveScratchpad => {}
+    }
+}
+
+#[test]
+fn all_lists_no_action_twice() {
+    // `a_fresh_keymap_is_all_defaults` measures a keymap against `ALL.len()` — the list compared
+    // against itself, so a repeated entry would pad the count and hide an action left out. `ALL` is
+    // free to run in whatever order the Hotkeys tab wants to display; it just may not repeat.
+    let distinct: BTreeSet<HotkeyAction> = HotkeyAction::ALL.into_iter().collect();
+    assert_eq!(
+        distinct.len(),
+        HotkeyAction::ALL.len(),
+        "ALL must list each action once — a repeat pads `ALL.len()` and hides an omission"
+    );
+
+    for action in HotkeyAction::ALL {
+        named_action(action);
+    }
 }
 
 #[test]

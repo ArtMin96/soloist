@@ -209,6 +209,14 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // The system clipboard the terminal copies from and pastes into, reached through the OS
+        // rather than the webview's async Clipboard API — WebKitGTK gates a read behind a user
+        // gesture the capture-phase key handler cannot supply.
+        .plugin(tauri_plugin_clipboard_manager::init())
+        // Hands a URL to the desktop's default browser. The webview itself must never navigate to
+        // one: the app's CSP confines it to its own origin, so a link activated in a terminal pane
+        // is only openable out-of-process. The capability restricts it to http and https.
+        .plugin(tauri_plugin_opener::init())
         // The auto-updater, disabled by default: it never checks on its own. The tray's
         // "Check for Updates…" item is the only trigger, and each update is verified against
         // the bundled public key before it installs.

@@ -1,10 +1,24 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
-import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { ClipboardAddon } from "@xterm/addon-clipboard";
+import type { IDisposable } from "@xterm/xterm";
+import { activateTerminalAddons } from "@/components/terminal/terminalAddons";
+import {
+  copyOnSelect,
+  copySelection,
+  pasteClipboard,
+  type TerminalClipboard,
+} from "@/components/terminal/terminalClipboard";
+import { oscLinkHandler, webLinksAddon } from "@/components/terminal/terminalLinks";
+import { useTerminalSearch } from "@/components/terminal/terminalSearch";
 import { ptyAttach, ptyDetach, ptyResize, ptyWrite } from "@/api";
-import { terminalOptions } from "@/lib/appearance";
+import {
+  TERMINAL_FIXED_OPTIONS,
+  TERMINAL_SCROLLBACK_LINES,
+  terminalOptions,
+} from "@/lib/appearance";
 import { isActive } from "@/lib/status";
 import { activateTerminalRenderer, type RendererHandle } from "@/lib/terminalRenderer";
 import { useAppearance } from "@/store/appearanceContext";
@@ -28,13 +42,6 @@ const PENDING_CAP_BYTES = 512 * 1024;
 // waiting for a status change that may never arrive.
 const ATTACH_RETRY_MS = 120;
 
-/** Stable API for in-terminal text search — backed by SearchAddon once mounted. */
-export interface TerminalSearch {
-  findNext: (query: string) => void;
-  findPrevious: (query: string) => void;
-  clear: () => void;
-}
-
 // Owns one xterm.js instance bound to the selected process: it replays the raw scrollback
 // then streams live PTY bytes (coalesced per animation frame so a chatty process can't
 // thrash the main thread), routes keystrokes back via `pty_write`, and keeps the PTY
@@ -49,7 +56,6 @@ export function useTerminal(process: ProcessView, visible = true) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const searchRef = useRef<SearchAddon | null>(null);
   const attachedRef = useRef(false);
   // Cancels the current attachment: drops its queued chunks and pending frame, discards its
   // late-arriving bytes, and detaches its backend forwarder by token. Unmount calls it before
@@ -69,6 +75,10 @@ export function useTerminal(process: ProcessView, visible = true) {
   // scrollback instead. Reset on each (re)attach and on a backend resync.
   const desyncedRef = useRef(false);
   const [state, setState] = useState<TerminalState>("attaching");
+  // The destination of the link under the pointer, or null when there is none. Fed from the link
+  // machinery rather than from the cells on screen, so an OSC 8 hyperlink that displays one thing
+  // and points at another is reported by where it goes.
+  const [linkTarget, setLinkTarget] = useState<string | null>(null);
 
   // The latest visibility, read inside the attachment's byte handler so a hidden pool pane stops
   // scheduling per-frame flushes — and the VT parsing they drive — without re-creating the
@@ -82,7 +92,17 @@ export function useTerminal(process: ProcessView, visible = true) {
   const appearanceRef = useRef({ appearance, dark });
   appearanceRef.current = { appearance, dark };
 
+  const { attach: attachSearch, search } = useTerminalSearch(dark);
+
   const id = process.id;
+
+  // Hand the pane keyboard focus, but only if the user wants selecting a process to do that —
+  // otherwise the pane is shown and focus stays where it was, so a click into the terminal is what
+  // starts typing. Read live rather than captured at mount, so toggling the setting takes effect on
+  // the next selection instead of waiting for a remount.
+  const focusIfEnabled = useCallback(() => {
+    if (appearanceRef.current.appearance.terminal.focus_on_click) termRef.current?.focus();
+  }, []);
 
   const attach = useCallback(() => {
     const term = termRef.current;
@@ -217,18 +237,29 @@ export function useTerminal(process: ProcessView, visible = true) {
 
     const seed = appearanceRef.current;
     const term = new Terminal({
-      cursorBlink: true,
-      scrollback: 5000,
+      scrollback: TERMINAL_SCROLLBACK_LINES,
+      // Neither of these is part of `terminalOptions`: that projects the appearance document, and
+      // every option it returns has to be re-assigned on the live restyle below. A link route and
+      // the fixed set are settled when the pane opens and never move again.
+      linkHandler: oscLinkHandler(setLinkTarget),
+      ...TERMINAL_FIXED_OPTIONS,
       ...terminalOptions(seed.appearance, seed.dark),
     });
     const fit = new FitAddon();
-    const search = new SearchAddon();
     term.loadAddon(fit);
-    term.loadAddon(search);
+    term.loadAddon(webLinksAddon(setLinkTarget));
+    // OSC 52 — what lets a program running in the pane put text on the system clipboard and take it
+    // back off, which is how a remote editor or a multiplexer yanks into the desktop. The read half
+    // is granted deliberately: a supervised program can ask for whatever the user last copied, and
+    // the emulator offers no way to allow writes while refusing reads short of replacing its
+    // clipboard provider outright. Loaded statically rather than on demand like the two addons
+    // below, because it has to be parsing before the first bytes land — the scrollback a pane
+    // replays as it opens can already carry the sequence, and a chunk still in flight would miss it.
+    term.loadAddon(new ClipboardAddon());
+    const detachSearch = attachSearch(term);
     term.open(host);
     termRef.current = term;
     fitRef.current = fit;
-    searchRef.current = search;
     attachedRef.current = false;
 
     // Swap in the GPU (WebGL) renderer now that the terminal is in the DOM. The load is
@@ -250,6 +281,17 @@ export function useTerminal(process: ProcessView, visible = true) {
       syncSize();
     });
 
+    // Grapheme widths and inline images arrive the same way, on their own chunks. Both resolve
+    // after the pane is already usable, and either can resolve after teardown — dispose then.
+    let addons: IDisposable | null = null;
+    void activateTerminalAddons(term).then((handle) => {
+      if (tornDown) {
+        handle.dispose();
+        return;
+      }
+      addons = handle;
+    });
+
     // The monospace web font can resolve after the first fit, shifting the cell width; re-fit once
     // it's ready (same blind spot as the renderer swap above). Resolves immediately once loaded, so
     // later mounts just re-fit on the next microtask. Guarded so it can't touch a torn-down pane.
@@ -260,31 +302,43 @@ export function useTerminal(process: ProcessView, visible = true) {
     }
 
     const onData = term.onData((input) => void ptyWrite(id, input).catch(() => {}));
+    const onSelection = copyOnSelect(
+      term,
+      () => appearanceRef.current.appearance.terminal.copy_on_select,
+    );
     const observer = new ResizeObserver(() => syncSize());
     observer.observe(host);
 
     attach();
     syncSize();
-    term.focus();
+    focusIfEnabled();
 
     return () => {
       tornDown = true;
       observer.disconnect();
       onData.dispose();
+      onSelection.dispose();
       cancelAttachRef.current?.();
       cancelAttachRef.current = null;
+      detachSearch();
+      // Released before the emulator they decorate: both reach back into it as they let go.
+      addons?.dispose();
       renderer?.dispose();
       term.dispose();
+      // The pointer never leaves a link that is being torn down, so the readout has to be cleared
+      // here or it would outlive the emulator it was describing.
+      setLinkTarget(null);
       termRef.current = null;
       fitRef.current = null;
-      searchRef.current = null;
       attachedRef.current = false;
     };
-  }, [id, attach, syncSize]);
+  }, [id, attach, syncSize, focusIfEnabled, attachSearch]);
 
-  // Restyle the live emulator when the theme or terminal typography changes — set on the
+  // Restyle the live emulator when the theme or terminal appearance changes — set on the
   // existing instance, then re-fit since the font metrics moved (so the PTY winsize tracks the
-  // new cell size). One assignment per change; no recreation, no per-keystroke work.
+  // new cell size). One assignment per change; no recreation, no per-keystroke work. Every option
+  // `terminalOptions` produces must be assigned here, or the setting applies only to panes opened
+  // afterwards and silently does nothing to the one the user is looking at.
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
@@ -295,6 +349,9 @@ export function useTerminal(process: ProcessView, visible = true) {
     term.options.fontWeightBold = options.fontWeightBold;
     term.options.lineHeight = options.lineHeight;
     term.options.letterSpacing = options.letterSpacing;
+    term.options.cursorStyle = options.cursorStyle;
+    term.options.cursorInactiveStyle = options.cursorInactiveStyle;
+    term.options.cursorBlink = options.cursorBlink;
     term.options.theme = options.theme;
     // Cell metrics moved with the font change, so re-fit and track the PTY winsize.
     syncSize();
@@ -328,33 +385,41 @@ export function useTerminal(process: ProcessView, visible = true) {
   // Refit, drain, and focus when this pane becomes visible again. In the keep-alive pool a hidden
   // terminal stays mounted (display:none) with its stream live but its parsing paused and its host
   // unmeasurable; on show, parse the bytes it accrued while hidden, reconcile any size change that
-  // happened off-screen, and take keyboard focus so the user can type immediately after switching.
+  // happened off-screen, and — when the setting allows — take keyboard focus so the user can type
+  // immediately after switching.
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      // Switching away leaves the pointer wherever it was, so a link it was resting on never
+      // reports that it was left; without this the pane would come back showing a destination the
+      // pointer is no longer on.
+      setLinkTarget(null);
+      return;
+    }
     // Drain what accrued while hidden — unless the bounded backlog overflowed, in which case the
     // drained bytes would start mid-stream (a gap): re-attach and replay the core's scrollback for a
     // coherent, current view instead.
     if (desyncedRef.current) reattach();
     else resumeRef.current?.();
     syncSize();
-    termRef.current?.focus();
-  }, [visible, reattach, syncSize]);
+    focusIfEnabled();
+  }, [visible, reattach, syncSize, focusIfEnabled]);
 
-  // Stable search callbacks — backed by the SearchAddon ref so callers don't need to
-  // re-subscribe when the terminal remounts (stable reference, latest addon via ref).
-  const findNext = useCallback((query: string) => {
-    searchRef.current?.findNext(query, { incremental: true, caseSensitive: false, regex: false });
-  }, []);
+  // Stable clipboard callbacks, backed by the emulator ref for the same reason the search ones are:
+  // a caller keeps one reference across remounts.
+  const copy = useCallback(() => copySelection(termRef), []);
+  const paste = useCallback(() => pasteClipboard(termRef), []);
+  const clipboard: TerminalClipboard = { copySelection: copy, paste };
 
-  const findPrevious = useCallback((query: string) => {
-    // No `incremental` here: the addon expands the current selection only for `findNext`; on
-    // `findPrevious` it must step to the prior match, so the flag is deliberately omitted.
-    searchRef.current?.findPrevious(query, { caseSensitive: false, regex: false });
-  }, []);
+  // Put text in at the cursor as though it had been pasted, so bracketed-paste mode is honored and
+  // the bytes take the same route to the PTY that typing does. Inert once the pane is torn down.
+  const insert = useCallback((text: string) => termRef.current?.paste(text), []);
 
-  const clearSearch = useCallback(() => {
-    searchRef.current?.clearDecorations();
-  }, []);
-
-  return { hostRef, state, search: { findNext, findPrevious, clear: clearSearch } };
+  return {
+    hostRef,
+    state,
+    linkTarget,
+    search,
+    clipboard,
+    insert,
+  };
 }

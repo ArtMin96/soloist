@@ -4,6 +4,7 @@ import {
   TERMINAL_MINIMUM_CONTRAST_RATIO,
   type AnsiColorName,
   type TerminalColors,
+  searchDecorationColors,
   terminalColors,
 } from "./terminalPalette";
 
@@ -139,5 +140,74 @@ describe("terminalColors", () => {
       const colors = terminalColors(dark);
       expect(colors.selectionInactiveBackground).not.toBe(colors.selectionBackground);
     }
+  });
+
+  it.each(THEMES)(
+    "gives the $name overview ruler a border off xterm's black default",
+    ({ dark }) => {
+      // Unset, the emulator draws this rule in black, which on the light surface is a hard line
+      // down the pane's edge.
+      const colors = terminalColors(dark);
+      expect(colors.overviewRulerBorder).toMatch(/^#[0-9a-f]{6}$/);
+      expect(contrast(colors.overviewRulerBorder, colors.background)).toBeLessThan(2);
+    },
+  );
+});
+
+describe("searchDecorationColors", () => {
+  it.each(THEMES)("emits every slot the $name decorations need as parseable hex", ({ dark }) => {
+    // The emulator documents the two fills as needing full six-digit hex specifically, and the
+    // ruler colours are required rather than optional — a missing one is a silently unmarked match.
+    const search = searchDecorationColors(dark);
+    for (const [slot, value] of Object.entries(search)) {
+      expect(value, slot).toMatch(/^#[0-9a-f]{6}$/);
+    }
+  });
+
+  it.each(THEMES)("keeps $name output readable on top of a highlighted match", ({ dark }) => {
+    // A match tints the cell behind live output rather than replacing it, so the ordinary
+    // foreground has to clear AA on both fills without leaning on the renderer's contrast floor.
+    const colors = terminalColors(dark);
+    const search = searchDecorationColors(dark);
+    for (const fill of [search.matchBackground, search.activeMatchBackground]) {
+      expect(contrast(colors.foreground, fill), fill).toBeGreaterThanOrEqual(
+        TERMINAL_MINIMUM_CONTRAST_RATIO,
+      );
+    }
+  });
+
+  it.each(THEMES)("makes a $name match visible against the terminal surface", ({ dark }) => {
+    const colors = terminalColors(dark);
+    const search = searchDecorationColors(dark);
+    for (const fill of [search.matchBackground, search.activeMatchBackground]) {
+      expect(contrast(fill, colors.background), fill).toBeGreaterThanOrEqual(1.35);
+    }
+  });
+
+  it.each(THEMES)("tells the active $name match apart without relying on hue", ({ dark }) => {
+    // The two fills are deliberately quiet, so what separates them is the border: the accent one
+    // has to stand off its own fill for the active match to survive a grayscale screenshot or a
+    // colour-blind reader, who cannot use the azure-versus-slate cue at all.
+    const search = searchDecorationColors(dark);
+    expect(contrast(search.matchBorder, search.matchBackground)).toBeGreaterThanOrEqual(3);
+    expect(contrast(search.activeMatchBorder, search.activeMatchBackground)).toBeGreaterThanOrEqual(
+      3,
+    );
+    expect(contrast(search.activeMatchBackground, search.matchBackground)).toBeGreaterThanOrEqual(
+      1.25,
+    );
+  });
+
+  it.each(THEMES)("marks $name matches legibly in the overview ruler", ({ dark }) => {
+    // The ruler marks are small and carry no border, so they need graphical contrast against the
+    // surface on their own, and enough separation to say which mark is the current one.
+    const colors = terminalColors(dark);
+    const search = searchDecorationColors(dark);
+    for (const mark of [search.matchOverviewRuler, search.activeMatchColorOverviewRuler]) {
+      expect(contrast(mark, colors.background), mark).toBeGreaterThanOrEqual(3);
+    }
+    expect(
+      contrast(search.activeMatchColorOverviewRuler, search.matchOverviewRuler),
+    ).toBeGreaterThanOrEqual(1.4);
   });
 });
