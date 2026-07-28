@@ -2,21 +2,23 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import {
-  activateTerminalAddons,
-  type TerminalAddonsHandle,
-} from "@/components/terminal/terminalAddons";
+import { ClipboardAddon } from "@xterm/addon-clipboard";
+import type { IDisposable } from "@xterm/xterm";
+import { activateTerminalAddons } from "@/components/terminal/terminalAddons";
 import {
   copyOnSelect,
   copySelection,
-  osc52Clipboard,
   pasteClipboard,
   type TerminalClipboard,
 } from "@/components/terminal/terminalClipboard";
 import { oscLinkHandler, webLinksAddon } from "@/components/terminal/terminalLinks";
 import { useTerminalSearch } from "@/components/terminal/terminalSearch";
 import { ptyAttach, ptyDetach, ptyResize, ptyWrite } from "@/api";
-import { TERMINAL_SCROLLBACK_LINES, terminalOptions } from "@/lib/appearance";
+import {
+  TERMINAL_FIXED_OPTIONS,
+  TERMINAL_SCROLLBACK_LINES,
+  terminalOptions,
+} from "@/lib/appearance";
 import { isActive } from "@/lib/status";
 import { activateTerminalRenderer, type RendererHandle } from "@/lib/terminalRenderer";
 import { useAppearance } from "@/store/appearanceContext";
@@ -90,7 +92,7 @@ export function useTerminal(process: ProcessView, visible = true) {
   const appearanceRef = useRef({ appearance, dark });
   appearanceRef.current = { appearance, dark };
 
-  const { attach: attachSearch, search } = useTerminalSearch(() => appearanceRef.current.dark);
+  const { attach: attachSearch, search } = useTerminalSearch(dark);
 
   const id = process.id;
 
@@ -236,15 +238,24 @@ export function useTerminal(process: ProcessView, visible = true) {
     const seed = appearanceRef.current;
     const term = new Terminal({
       scrollback: TERMINAL_SCROLLBACK_LINES,
-      // Not part of `terminalOptions`: that projects the appearance document, and every option it
-      // returns has to be re-assigned on the live restyle below. A link route is neither.
+      // Neither of these is part of `terminalOptions`: that projects the appearance document, and
+      // every option it returns has to be re-assigned on the live restyle below. A link route and
+      // the fixed set are settled when the pane opens and never move again.
       linkHandler: oscLinkHandler(setLinkTarget),
+      ...TERMINAL_FIXED_OPTIONS,
       ...terminalOptions(seed.appearance, seed.dark),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(webLinksAddon(setLinkTarget));
-    term.loadAddon(osc52Clipboard());
+    // OSC 52 — what lets a program running in the pane put text on the system clipboard and take it
+    // back off, which is how a remote editor or a multiplexer yanks into the desktop. The read half
+    // is granted deliberately: a supervised program can ask for whatever the user last copied, and
+    // the emulator offers no way to allow writes while refusing reads short of replacing its
+    // clipboard provider outright. Loaded statically rather than on demand like the two addons
+    // below, because it has to be parsing before the first bytes land — the scrollback a pane
+    // replays as it opens can already carry the sequence, and a chunk still in flight would miss it.
+    term.loadAddon(new ClipboardAddon());
     const detachSearch = attachSearch(term);
     term.open(host);
     termRef.current = term;
@@ -272,7 +283,7 @@ export function useTerminal(process: ProcessView, visible = true) {
 
     // Grapheme widths and inline images arrive the same way, on their own chunks. Both resolve
     // after the pane is already usable, and either can resolve after teardown — dispose then.
-    let addons: TerminalAddonsHandle | null = null;
+    let addons: IDisposable | null = null;
     void activateTerminalAddons(term).then((handle) => {
       if (tornDown) {
         handle.dispose();

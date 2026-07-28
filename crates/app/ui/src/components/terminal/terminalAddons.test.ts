@@ -4,6 +4,7 @@ import type { IImageAddonOptions, ImageAddon } from "@xterm/addon-image";
 import { Terminal } from "@xterm/xterm";
 import {
   activateTerminalAddons,
+  TERMINAL_IMAGE_PIXEL_LIMIT,
   TERMINAL_IMAGE_STORAGE_LIMIT_MB,
   type ImageModule,
   type TerminalAddonLoaders,
@@ -87,6 +88,22 @@ describe("activateTerminalAddons", () => {
     // The addon only reports a limit once it has been activated against a terminal, so this also
     // says the addon really attached rather than merely being constructed.
     expect(captured.image?.storageLimit).toBe(TERMINAL_IMAGE_STORAGE_LIMIT_MB);
+  });
+
+  it("answers a program asking how large an image it may send with our ceiling", async () => {
+    const term = terminal();
+    await activateTerminalAddons(term, realLoaders().loaders);
+    const replies: string[] = [];
+    term.onData((reply) => replies.push(reply));
+
+    // The pixel limit has no accessor, but it is not private either: a program can ask the terminal
+    // for the largest graphics geometry it accepts, and the addon answers with the largest square
+    // that fits inside the limit. So this reads our ceiling back out of the protocol rather than off
+    // the option object — and the addon's own default would answer twice this on each side.
+    await write(term, "\x1b[?2;4S");
+
+    const side = Math.floor(Math.sqrt(TERMINAL_IMAGE_PIXEL_LIMIT));
+    expect(replies).toEqual([`\x1b[?2;0;${side};${side}S`]);
   });
 
   it("still loads the image addon when the unicode chunk fails, and the reverse", async () => {

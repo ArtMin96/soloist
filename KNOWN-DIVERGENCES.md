@@ -1359,6 +1359,24 @@ saturated colour meaning process status and nothing else. A decoration replaces 
 *before* the renderer's contrast pass, so `minimumContrastRatio` still governs program colour drawn
 over a match; the fills are nonetheless chosen so the ordinary foreground clears 4.5:1 unaided.
 
+**A theme flip repaints the matches already on screen.** The addon takes its decoration colours as
+an argument to a search and offers no way to restyle what it has drawn, so highlights would otherwise
+keep the palette of whichever theme was current when the user last typed — the find bar open over a
+Light/Dark toggle, or a "System" theme following the OS. The repaint reissues the last query, which
+needs the decorations dropped first: given the same query and the same matching options the addon
+treats its highlights as current and re-creates only the active one. It reissues through
+`findPrevious`, which with that comparison cleared resumes from the *start* of the current selection
+and so lands back on the match the user was standing on rather than stepping past it. The addon also
+scrolls a match back into view, which a repaint nobody asked for must not do, so the viewport row is
+captured and restored around the reissue. **That last guarantee is display-walk-only**: xterm's
+viewport does not scroll under jsdom at all — `scrollLines`, `scrollToLine` and the addon's own
+scroll are each inert without a measurable surface — so a headless test of it could never fail and
+none is written. What *is* asserted headlessly is the repaint itself and the user's place: the border
+colour of every decoration on the pane flips to the other palette while the reported match index and
+the emulator's selection both stay put.
+
+**The appearance projection and the fixed options were separated so the restyle rule could be checked.** `terminalOptions` had grown five options that never follow the appearance document — the proposed-API gate, the contrast floor, the ruler width, right-click-selects-word and the e2e screen-reader flag — while the comment above the live-restyle effect claimed every option it returns is re-assigned to the mounted emulator. Nothing was dead, because all five are constants, but the rule was false exactly where the next appearance-derived option would quietly become a setting that works on the next pane opened and does nothing to the one in front of the user, which is the defect [D-25](#d-25)'s `focus_on_click` was. They move to `TERMINAL_FIXED_OPTIONS`, spread at construction, and the rule holds again — and is now asserted rather than asserted-in-prose: the test iterates the projection's own keys, so a key added later is covered without anyone remembering to extend a list, over a pair of appearances that is first asserted to disagree about every one of them (including the theme, which is why the pair flips `dark` too) so no option can pass by already holding the right value from construction.
+
 **The overview ruler is given the width the scrollbar already held.** The emulator renders no ruler
 at all until a width is set. The fit calculation subtracts the ruler's width *instead of* the
 scrollbar's — `overviewRuler?.width || 14` in the installed `@xterm/addon-fit@0.11.0` — so setting it
@@ -1377,7 +1395,13 @@ double-width cell rather than three, which is the failure that shears a TUI's co
 `pixelLimit: 16777216`, read from the shipped bundle — its typings' prose claims "2^16", which
 contradicts the value the code actually uses and is simply wrong. Both are **per terminal instance**,
 and up to six panes stay mounted in the keep-alive pool, so inherited they would permit far more than
-the app's whole runtime footprint. Ours are `storageLimit: 16` MB and `pixelLimit: 2048 × 2048`.
+the app's whole runtime footprint. Ours are `storageLimit: 16` MB and `pixelLimit: 2048 × 2048`. The
+storage figure is not written as a bare 16: it is a 96 MB budget for the whole pool divided by the
+pool cap, taken from the constant that sets the cap, so widening the pool tightens each pane instead
+of silently raising the app's ceiling. The pixel limit has no accessor to read back, but it is not
+unobservable either — a program asking the terminal for the largest graphics geometry it accepts is
+answered with the largest square inside the limit, which is 2048 × 2048 for ours against the addon's
+own 4096 × 4096.
 **Both are proposals, not measurements.** Confirming them needs `storageUsage` sampled in the nightly
 soak with a full pool and images loaded, which requires a real display and **has not been run** — so
 no figure for actual usage is recorded here. The addon reaches into ten private `_core.*` internals,
@@ -1390,6 +1414,13 @@ so each lands in its own bundle chunk, following the renderer addon's existing s
 cannot be fetched, or an addon whose activation throws, leaves a terminal without that one capability
 and nothing else — the two are independent, and the pane still renders its output. Their disposers
 run before the emulator's, because both reach back into it as they let go.
+
+**The clipboard addon is the deliberate exception to that shape.** It is imported statically, so it
+is eager where the grapheme and image addons are code-split. The reason is ordering, not size: it has
+to be parsing before the first bytes reach the emulator, and the raw scrollback a pane replays as it
+opens can already carry an OSC 52 sequence — a chunk still in flight would miss it, and the miss would
+be silent. It is also the smallest of the three. The deviation is recorded here so a later session
+reading the two lazy loads beside it does not take the static import for an oversight and "fix" it.
 
 **OSC 52 is granted in both directions, deliberately.** The clipboard addon ships with its default
 `BrowserClipboardProvider`, so a program running in a pane can both set the system clipboard and

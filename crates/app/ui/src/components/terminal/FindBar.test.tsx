@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { FindBar } from "@/components/terminal/FindBar";
-import { NO_MATCHES } from "@/components/terminal/terminalSearch";
+import { NO_ACTIVE_MATCH, NO_MATCHES } from "@/components/terminal/terminalSearch";
 
 afterEach(cleanup);
 
@@ -64,12 +64,12 @@ describe("FindBar", () => {
   });
 
   it("says so when the query matches nothing", () => {
-    renderBar({ query: "nowhere", matches: { index: -1, count: 0 } });
+    renderBar({ query: "nowhere", matches: { index: NO_ACTIVE_MATCH, count: 0 } });
     expect(tally()).toBe("No results");
   });
 
   it("reports the total without a position once no match is current", () => {
-    renderBar({ query: "e", matches: { index: -1, count: 1000 } });
+    renderBar({ query: "e", matches: { index: NO_ACTIVE_MATCH, count: 1000 } });
     expect(tally()).toBe("1000 matches");
   });
 

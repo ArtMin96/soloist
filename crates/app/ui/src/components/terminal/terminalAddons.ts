@@ -9,13 +9,26 @@
 // into the main bundle — the runtime loads stay code-split chunks.
 import type { IImageAddonOptions, ImageAddon } from "@xterm/addon-image";
 import type { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
-import type { Terminal } from "@xterm/xterm";
+import type { IDisposable, Terminal } from "@xterm/xterm";
+import { TERMINAL_POOL_CAP } from "@/store/useTerminalPool";
 
-// Megabytes of decoded image the emulator keeps per terminal before evicting the oldest. The
-// addon's own default is 128 MB, which is a per-instance figure: with a full keep-alive pool of
-// panes it would allow more than the whole app's memory budget. This holds the pool's worst case
-// to a fraction of that, trading a shorter image history for a footprint that stays in budget.
-export const TERMINAL_IMAGE_STORAGE_LIMIT_MB = 16;
+// Where the terminal's bounds live: a limit an addon's constructor takes is stated beside the
+// module that constructs that addon, as these two are; a limit that is an xterm option belongs with
+// the rest of the emulator's option surface in `lib/appearance`.
+
+// Megabytes of decoded image the whole keep-alive pool may hold. The emulator's limit is per
+// terminal — 128 MB by default — so the figure that decides the app's footprint is this one, and a
+// per-pane number stated on its own would let the ceiling move silently the next time the pool
+// grows. Held to a fraction of the runtime budget, trading a shorter image history for a footprint
+// that stays inside it.
+const TERMINAL_IMAGE_POOL_BUDGET_MB = 96;
+
+// Megabytes of decoded image one terminal keeps before evicting the oldest: the pool's budget
+// shared out, floored so the panes together never exceed it. Widening the pool therefore tightens
+// each pane rather than raising the total.
+export const TERMINAL_IMAGE_STORAGE_LIMIT_MB = Math.floor(
+  TERMINAL_IMAGE_POOL_BUDGET_MB / TERMINAL_POOL_CAP,
+);
 
 // Ceiling on the pixels a single image may decode to; anything larger is discarded rather than
 // drawn. Bounds the transient cost of decoding, which the addon documents as up to this many
@@ -27,11 +40,6 @@ const IMAGE_OPTIONS: IImageAddonOptions = {
   storageLimit: TERMINAL_IMAGE_STORAGE_LIMIT_MB,
   pixelLimit: TERMINAL_IMAGE_PIXEL_LIMIT,
 };
-
-/** Releases the addons a terminal loaded; called by the terminal lifecycle before disposal. */
-export interface TerminalAddonsHandle {
-  dispose(): void;
-}
 
 export type UnicodeModule = { UnicodeGraphemesAddon: new () => UnicodeGraphemesAddon };
 export type ImageModule = { ImageAddon: new (options?: IImageAddonOptions) => ImageAddon };
@@ -90,7 +98,7 @@ async function activate<T>(
 export async function activateTerminalAddons(
   term: Terminal,
   loaders: TerminalAddonLoaders = DEFAULT_LOADERS,
-): Promise<TerminalAddonsHandle> {
+): Promise<IDisposable> {
   const disposers = await Promise.all([
     activate(term, loaders.unicode, (module) => new module.UnicodeGraphemesAddon()),
     activate(term, loaders.image, (module) => new module.ImageAddon(IMAGE_OPTIONS)),

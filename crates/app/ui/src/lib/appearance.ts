@@ -78,12 +78,6 @@ export const TERMINAL_SCROLLBACK_LINES = 5000;
 // the scrollbar's, so matching them leaves the usable column count unchanged.
 export const TERMINAL_OVERVIEW_RULER_WIDTH = 14;
 
-// Ceiling on how many matches the search addon decorates at once. Each match costs a marker and a
-// decoration, and a query is re-run on every keystroke against the full scrollback, so this is the
-// bound that keeps a one-character query over a long buffer from allocating without limit. It is
-// the addon's own default, named here so it is a decision rather than an inherited accident.
-export const TERMINAL_SEARCH_HIGHLIGHT_LIMIT = 1000;
-
 // The terminal follows the same native-family policy as the app shell. SF Mono is used on macOS;
 // the remaining faces are platform fallbacks, not bundled web fonts.
 const DEFAULT_MONO_STACK = '"SF Mono", Menlo, Monaco, ui-monospace, monospace';
@@ -223,6 +217,30 @@ export function watchSystemDark(onChange: (dark: boolean) => void): () => void {
   return () => media.removeEventListener("change", handler);
 }
 
+// The xterm.js options a pane is opened with once and never revisits: they answer to the build and
+// to what the emulator's own defaults get wrong, never to anything the user can change. Kept out of
+// `terminalOptions` so that projection holds only what a live restyle has to re-apply, which is what
+// lets the restyle be checked against it.
+export const TERMINAL_FIXED_OPTIONS = {
+  minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+  // Off by default in the emulator, and the gate on three APIs this app depends on: the unicode
+  // tables the grapheme addon registers, the decorations the search addon paints matches with,
+  // and the markers those decorations anchor to. Reading any of them throws while it is unset.
+  allowProposedApi: true,
+  // Gives search-match decorations somewhere to draw outside the visible screen. The ruler is
+  // only rendered once a width is set.
+  overviewRuler: { width: TERMINAL_OVERVIEW_RULER_WIDTH },
+  // xterm defaults this to "are we on macOS", so it is off on our only target. Right-clicking a
+  // word with nothing selected otherwise opens the context menu over an empty selection, and the
+  // menu's whole purpose is to act on one.
+  rightClickSelectsWord: true,
+  // The end-to-end build turns on xterm's screen-reader mode so the WebDriver harness can read the
+  // terminal's content: the default GPU (WebGL) renderer draws to a canvas the DOM cannot read, and
+  // screen-reader mode mirrors the live viewport into the accessibility DOM. Gated to the e2e build,
+  // so a shipped build keeps the GPU renderer with no accessibility-tree overhead.
+  screenReaderMode: Boolean(import.meta.env.VITE_E2E),
+};
+
 // The xterm.js options derived from the appearance document — applied at creation and pushed
 // live on every change. `dark` is resolved separately (it depends on the OS preference).
 export function terminalOptions(appearance: Appearance, dark: boolean) {
@@ -238,23 +256,6 @@ export function terminalOptions(appearance: Appearance, dark: boolean) {
     cursorInactiveStyle: t.cursor_inactive_style,
     cursorBlink: t.cursor_blink,
     theme: terminalColors(dark),
-    minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
-    // Off by default in the emulator, and the gate on three APIs this app depends on: the unicode
-    // tables the grapheme addon registers, the decorations the search addon paints matches with,
-    // and the markers those decorations anchor to. Reading any of them throws while it is unset.
-    allowProposedApi: true,
-    // Gives search-match decorations somewhere to draw outside the visible screen. The ruler is
-    // only rendered once a width is set.
-    overviewRuler: { width: TERMINAL_OVERVIEW_RULER_WIDTH },
-    // xterm defaults this to "are we on macOS", so it is off on our only target. Right-clicking a
-    // word with nothing selected otherwise opens the context menu over an empty selection, and the
-    // menu's whole purpose is to act on one.
-    rightClickSelectsWord: true,
-    // The end-to-end build turns on xterm's screen-reader mode so the WebDriver harness can read the
-    // terminal's content: the default GPU (WebGL) renderer draws to a canvas the DOM cannot read, and
-    // screen-reader mode mirrors the live viewport into the accessibility DOM. Gated to the e2e build,
-    // so a shipped build keeps the GPU renderer with no accessibility-tree overhead.
-    screenReaderMode: Boolean(import.meta.env.VITE_E2E),
   };
 }
 
