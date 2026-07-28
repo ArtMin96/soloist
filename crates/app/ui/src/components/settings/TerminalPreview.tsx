@@ -8,6 +8,12 @@ import {
 import { ANSI_COLOR_NAMES, ansiColorLabel, terminalColors } from "@/lib/terminalPalette";
 import { useAppearance } from "@/store/appearanceContext";
 
+// Hairlines drawn in the terminal's own ink rather than a design token, because they sit on the
+// terminal surface and have to hold whichever theme it is in: 12% of the ink to divide the sample
+// from the swatch row, 15% to outline a swatch.
+const DIVIDER_ALPHA = "1f";
+const SWATCH_OUTLINE_ALPHA = "26";
+
 // A live sample of the terminal typography and theme — the same mappings the real xterm.js
 // renderer reads, so what the panel shows is what the terminal becomes. Not an emulator: a
 // styled sample, cheap to repaint on every change.
@@ -38,12 +44,10 @@ export function TerminalPreview() {
             <span style={{ color: colors.cursor }}>➜</span> Local: http://localhost:5173/
           </div>
         </div>
-        {/* The swatches are the one place saturated colour is not reporting status: here the
-            palette itself is the subject, so the sample has to show it rather than describe it. */}
         <ul
           aria-label="ANSI palette"
           className="grid grid-cols-8 gap-1 p-3"
-          style={{ borderTop: `1px solid ${colors.foreground}1f` }}
+          style={{ borderTop: `1px solid ${colors.foreground}${DIVIDER_ALPHA}` }}
         >
           {ANSI_COLOR_NAMES.map((name) => (
             <li
@@ -55,7 +59,7 @@ export function TerminalPreview() {
               // `brightWhite`, dark `black` — readable as a shape rather than a gap in the row.
               style={{
                 backgroundColor: colors[name],
-                boxShadow: `inset 0 0 0 1px ${colors.foreground}26`,
+                boxShadow: `inset 0 0 0 1px ${colors.foreground}${SWATCH_OUTLINE_ALPHA}`,
               }}
             />
           ))}

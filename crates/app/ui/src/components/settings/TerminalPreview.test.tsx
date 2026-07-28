@@ -16,16 +16,21 @@ function renderPreview(dark: boolean) {
   );
 }
 
-// jsdom normalises an inline colour to `rgb(...)`, so compare renders against each other rather
-// than against the source hex.
+// jsdom normalises an inline colour to `rgb(...)`, so the palette's hex has to be converted before
+// it can be held against what a swatch actually painted.
 const swatchColor = (name: string) => screen.getByTitle(name).style.backgroundColor;
+const rgb = (hex: string) =>
+  `rgb(${[1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
 
 describe("Settings — terminal preview", () => {
   it("shows a swatch for every ANSI slot", () => {
     renderPreview(false);
     expect(screen.getByRole("list", { name: "ANSI palette" })).toBeTruthy();
+    const colors = terminalColors(false);
+    // Per slot, not merely "something was painted": a row that rendered one colour sixteen times
+    // would satisfy the weaker check while showing the user nothing about the palette.
     for (const name of ANSI_COLOR_NAMES) {
-      expect(swatchColor(ansiColorLabel(name)), name).not.toBe("");
+      expect(swatchColor(ansiColorLabel(name)), name).toBe(rgb(colors[name]));
     }
     // A literal, because every other lookup here names a swatch through the same helper the
     // component names it with — so a helper that stopped rewriting the slot name would satisfy

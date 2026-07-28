@@ -115,8 +115,8 @@ const DARK_ANSI: Record<AnsiColorName, string> = {
 const SLIDER_ALPHA = { rest: "38", hover: "61", active: "80" };
 
 // The terminal's own surface palette, tracking the app light/dark theme. This is a surface
-// distinct from the app `--background` tokens (DESIGN.md). The cursor's contrast colour is
-// always the surface behind it, so it is derived from the background rather than restated.
+// distinct from the app `--background` tokens. The cursor's contrast colour is always the
+// surface behind it, so it is derived from the background rather than restated.
 export function terminalColors(dark: boolean): TerminalColors {
   const surface = dark
     ? {

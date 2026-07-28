@@ -186,6 +186,12 @@ do not introduce a parallel status vocabulary.)*
 border, button, icon, or background is saturated and it is not reporting `ProcStatus`, it is
 wrong — desaturate it to slate or make it the azure accent.
 
+*The one exemption: the terminal's ANSI palette and the Settings swatch row that previews it.*
+There the colour is not the app reporting anything — it is program output the terminal is
+obliged to render, and a preview whose whole subject is that palette. The 16 slots reuse the
+status hues so the emulator reads as one of the instruments rather than a foreign surface, and
+they are the only saturated colour in the app that does not mean `ProcStatus`.
+
 **The One-Accent Rule.** Azure covers ≤10% of any screen and means exactly one thing:
 "focused / selected / primary." Two azure things competing for "primary" on one screen is a bug.
 
@@ -332,8 +338,13 @@ unmistakably mac-native while keeping the status vocabulary and density rules ab
   full-bleed scrollback. A compact header strip names the selected process (Title type) with its
   Status Indicator and the same one-primary-action plus overflow controls used by the sidebar. A
   "Terminal | Logs" segmented control
-  switches the rendered-logs view. The terminal background follows theme; output color is the
-  PTY's own ANSI, untouched.
+  switches the rendered-logs view. The terminal surface and the full 16-slot ANSI palette both
+  follow theme: the palette is authored per theme from the status hues (the Spent-on-Status
+  exemption above) and emitted as hex, since xterm cannot parse `oklch()`. Every slot clears
+  4.5:1 on its own background bar the one whose ANSI role *is* that theme's surface tone —
+  light `white`/`brightWhite`, dark `black`. Colour the palette does not choose (256-colour and
+  truecolor output) is left as the PTY sent it, with a 4.5:1 readability floor the renderer
+  applies against the cell actually behind it.
 
 ### Inputs / Fields
 - **Style:** 1px Hairline border, Cool White fill, `rounded.md`, `6px 10px`, body type.

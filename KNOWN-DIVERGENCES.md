@@ -917,6 +917,13 @@ to azure at 200 and magenta sits at 328, deliberately clear of the 264-300 viole
 rejects as the "purple tell". Black and white ride the cool-slate neutral. The palette is authored in
 OKLCH and **emitted as hex** — xterm.js cannot parse `oklch()`.
 
+**This is the one exemption from DESIGN.md's Spent-on-Status Rule** ("saturated color is forbidden
+except on a status indicator"), and the rule now records it. Sixteen saturated slots are not the app
+reporting `ProcStatus` — they are program output the emulator is obliged to render, and reusing the
+status hues for them is what keeps the terminal reading as one of the instruments. The Settings
+swatch row is covered by the same exemption: its whole subject is the palette. Nothing else in the
+app may borrow a status hue on this precedent.
+
 **Bright is the more emphatic set, not merely the lighter one.** `drawBoldTextInBrightColors` defaults
 to `true`, so bold output renders in the bright half. On the light theme bright is therefore *darker*
 and more saturated than its normal twin; on dark it is lighter. It is never less legible than the
@@ -941,6 +948,15 @@ every slot a little contrast. `brightBlack` — the dim slot, and the one CLI ou
 is the only one without the margin to absorb it, so it carries extra headroom against the bare
 background (4.99:1 light, 5.24:1 dark) in order to still clear 4.5:1 over both the active and the
 unfocused selection. Without that, dim text visibly changed colour the moment it was selected.
+
+**How narrowly it clears — read this before retuning any of the three.** Behind the selection
+`brightBlack` measures 4.600:1 light / 4.635:1 dark on the active selection and 4.605:1 light /
+4.627:1 dark on the unfocused one. That is ~0.10 of margin over the 4.5:1 floor — roughly one 8-bit
+quantization step. `brightBlack`, `selectionBackground`, `selectionInactiveBackground` and the
+terminal `background` are therefore a coupled set: nudging any one of them by a single hex step can
+put the dim slot under the bar, at which point the runtime floor starts recolouring selected dim
+text. `terminalPalette.test.ts` fails loudly if it does; retune until it passes rather than adding
+the slot to that file's `SURFACE_END` exemptions, which exist for a different reason entirely.
 
 **Why `selectionForeground` stays unset.** Reading xterm 6.0.0's shipped renderers, the minimum-contrast
 adjustment resolves against the cell's **real** background — for a selected cell that is the selection

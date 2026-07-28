@@ -3,6 +3,7 @@ import {
   ANSI_COLOR_NAMES,
   TERMINAL_MINIMUM_CONTRAST_RATIO,
   type AnsiColorName,
+  type TerminalColors,
   terminalColors,
 } from "./terminalPalette";
 
@@ -54,6 +55,19 @@ const THEMES = [
   { name: "dark" as const, dark: true },
 ];
 
+// The AA check, run against whichever colour is really behind the cell. Reports the offending
+// slots with their measured ratio so a red says which hue moved and by how much.
+function failuresAgainst(
+  colors: TerminalColors,
+  behind: string,
+  exempt: readonly AnsiColorName[],
+): string[] {
+  return ANSI_COLOR_NAMES.filter(
+    (slot) =>
+      !exempt.includes(slot) && contrast(colors[slot], behind) < TERMINAL_MINIMUM_CONTRAST_RATIO,
+  ).map((slot) => `${slot} ${colors[slot]} ${contrast(colors[slot], behind).toFixed(2)}:1`);
+}
+
 describe("terminalColors", () => {
   it.each(THEMES)("exposes every ANSI slot in the $name theme", ({ dark }) => {
     const colors = terminalColors(dark);
@@ -79,15 +93,7 @@ describe("terminalColors", () => {
     "clears AA against the $name background on every slot but its surface end",
     ({ name, dark }) => {
       const colors = terminalColors(dark);
-      const failures = ANSI_COLOR_NAMES.filter(
-        (slot) =>
-          !SURFACE_END[name].includes(slot) &&
-          contrast(colors[slot], colors.background) < TERMINAL_MINIMUM_CONTRAST_RATIO,
-      ).map(
-        (slot) =>
-          `${slot} ${colors[slot]} ${contrast(colors[slot], colors.background).toFixed(2)}:1`,
-      );
-      expect(failures).toEqual([]);
+      expect(failuresAgainst(colors, colors.background, SURFACE_END[name])).toEqual([]);
     },
   );
 
@@ -101,12 +107,7 @@ describe("terminalColors", () => {
       // bar and get visibly recoloured the moment a user drags across it.
       for (const selection of [colors.selectionBackground, colors.selectionInactiveBackground]) {
         const behind = blend(colors.background, selection, 0.3);
-        const failures = ANSI_COLOR_NAMES.filter(
-          (slot) =>
-            !SURFACE_END[name].includes(slot) &&
-            contrast(colors[slot], behind) < TERMINAL_MINIMUM_CONTRAST_RATIO,
-        ).map((slot) => `${slot} ${colors[slot]} ${contrast(colors[slot], behind).toFixed(2)}:1`);
-        expect(failures, behind).toEqual([]);
+        expect(failuresAgainst(colors, behind, SURFACE_END[name]), behind).toEqual([]);
       }
     },
   );
