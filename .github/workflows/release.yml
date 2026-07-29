@@ -23,7 +23,7 @@ jobs:
     outputs:
       appVersion: ${{ steps.tauri.outputs.appVersion }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install system dependencies
         run: |
@@ -35,11 +35,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -86,7 +86,7 @@ jobs:
         run: gh release upload "v${{ steps.tauri.outputs.appVersion }}" SHA256SUMS --clobber
 
       - name: Upload the AppImage for the clean-22.04 smoke
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: soloist-appimage
           path: target/release/bundle/appimage/*.AppImage
@@ -97,7 +97,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Download the AppImage artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: soloist-appimage
           path: appimage

@@ -19,7 +19,7 @@ jobs:
     # Matches the CI floor and the supported runtime target, Ubuntu 22.04+.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The Tauri build deps, plus xvfb for the display. Deliberately NOT webkit2gtk-driver and NOT
       # `cargo install tauri-driver`: the embedded provider runs the WebDriver server inside the app,
@@ -38,7 +38,7 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --locked
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11
 
@@ -46,7 +46,7 @@ jobs:
       # `engines.node`, which caps below 26: WebdriverIO 9.29.1 sets Content-Length/Connection
       # headers that Node 26's undici rejects, so no session can start
       # (webdriverio/webdriverio#15265 — fixed upstream, not yet released).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: e2e/.nvmrc
           cache: pnpm
@@ -74,7 +74,7 @@ jobs:
 
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-logs
           path: e2e/logs/
