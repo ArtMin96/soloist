@@ -442,6 +442,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b25655df2c3cdd83c5e5b293b88acd880332b2ddadd7c30ac43144fdc0033da9"
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3194,9 +3200,9 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.29.0"
+version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
 dependencies = [
  "bitflags 2.13.1",
  "cfg-if",
@@ -5223,7 +5229,7 @@ name = "soloist-app"
 version = "0.10.0"
 dependencies = [
  "console-subscriber",
- "nix 0.29.0",
+ "nix 0.31.3",
  "notify-rust",
  "serde",
  "serde_json",
@@ -5274,7 +5280,7 @@ name = "soloist-core"
 version = "0.10.0"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.0",
  "globset",
  "indexmap 2.14.0",
  "schemars 1.2.2",
@@ -5303,14 +5309,14 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower 0.5.3",
- "tower-http 0.6.11",
+ "tower-http 0.7.0",
 ]
 
 [[package]]
 name = "soloist-ipc"
 version = "0.10.0"
 dependencies = [
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "hex",
  "serde",
  "serde_json",
@@ -5338,7 +5344,7 @@ name = "soloist-pty"
 version = "0.10.0"
 dependencies = [
  "async-trait",
- "nix 0.29.0",
+ "nix 0.31.3",
  "portable-pty",
  "soloist-core",
  "tempfile",
@@ -5361,7 +5367,7 @@ name = "soloist-sys"
 version = "0.10.0"
 dependencies = [
  "libc",
- "nix 0.29.0",
+ "nix 0.31.3",
  "notify",
  "soloist-core",
  "tempfile",
@@ -5848,9 +5854,9 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-mcp-bridge"
-version = "0.11.2"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c97bb0d4c68e94ef4d132b6d572416b9d9144144ab185fe3c421f02340fee96e"
+checksum = "ee9c726f2293f54dc9a61739886967a75c9f1701d17a3dcb8a4544f7353d4861"
 dependencies = [
  "base64 0.22.1",
  "block2 0.5.1",
@@ -6677,6 +6683,21 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "url",
+]
+
+[[package]]
+name = "tower-http"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b11f75e912b0c2be01b63d8cf8057b8c3f97cf34abb3d431a3a4c8675498e233"
+dependencies = [
+ "bitflags 2.13.1",
+ "bytes",
+ "http 1.5.0",
+ "percent-encoding",
+ "pin-project-lite",
+ "tower-layer",
+ "tower-service",
 ]
 
 [[package]]
