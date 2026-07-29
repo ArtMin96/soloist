@@ -86,7 +86,7 @@ jobs:
         run: gh release upload "v${{ steps.tauri.outputs.appVersion }}" SHA256SUMS --clobber
 
       - name: Upload the AppImage for the clean-22.04 smoke
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: soloist-appimage
           path: target/release/bundle/appimage/*.AppImage
