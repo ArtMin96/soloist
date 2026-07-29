@@ -17,6 +17,11 @@ const META = '[data-testid="process-meta"]';
 const RUNNING: ProcStatus = "Running";
 const STOPPED: ProcStatus = "Stopped";
 
+// How many times Start is asked for before the harness calls it a refusal rather than a dropped
+// click. More than one because a click can be swallowed; few, because a start the core refuses
+// will not take however often it is asked.
+const START_ATTEMPTS = 3;
+
 /** The per-row control cluster's actions, by their accessible names. */
 type RowControl =
   | "Trust"
@@ -248,9 +253,38 @@ export const sidebar = {
     await trustDialog.waitUntilClosed();
   },
 
-  /** Clicks Start on the row's control cluster. */
+  /**
+   * Starts the row's process, asking again if the row is still resting.
+   *
+   * The failure a repeat answers is a dropped click, not a refused start: WebKitGTK under
+   * WebDriver swallows one outright when the app is busy, and Start is offered right up until the
+   * process runs, so asking twice is only ever the same intent asked twice. A start the core
+   * actually refuses is unmoved by any number of asks and still fails here.
+   */
   async start(label: string): Promise<void> {
-    await this.clickControl(label, "Start");
+    for (let attempt = 1; attempt <= START_ATTEMPTS; attempt += 1) {
+      await this.clickControl(label, "Start");
+      const moved = await this.leftStopped(label);
+      if (moved) return;
+    }
+    throw new Error(
+      `Start was clicked ${START_ATTEMPTS} times on sidebar row "${label}" and it never left ${STOPPED}`,
+    );
+  },
+
+  /** Whether the row leaves Stopped within a local render — how a click is seen to have landed. */
+  async leftStopped(label: string): Promise<boolean> {
+    try {
+      await waitUntilOr(
+        async () =>
+          (await this.rows()).find((candidate) => candidate.label === label)?.status !== STOPPED,
+        () => "",
+        WAIT.render,
+      );
+      return true;
+    } catch {
+      return false;
+    }
   },
 
   /** Clicks Stop on the row's control cluster. */

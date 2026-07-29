@@ -79,8 +79,14 @@ process.env.XDG_DATA_HOME = path.join(xdgDataRoot, "unassigned");
 const APP_EXIT_GRACE_MS = 5_000;
 
 /**
- * Runs one cargo build the suite depends on, failing the whole run loudly if the build errors or
- * the binary it was meant to produce did not appear where the harness will look for it.
+ * Runs one cargo build the suite depends on, ending the whole run if the build errors or the
+ * binary it was meant to produce did not appear where the harness will look for it.
+ *
+ * It ends the process rather than throwing. A rejected `onPrepare` is logged as a hook error and
+ * the run **carries on**, driving whatever binary happens to be in `target/e2e` from a previous
+ * run — so a build that failed reports on an app that no longer exists in the tree. Observed: a
+ * type error in a mutation left the frontend build failing and a full suite still ran, green
+ * except where the *previous* run's binary differed, which reads as a result and is not one.
  */
 function buildBinary(
   what: string,
@@ -98,11 +104,20 @@ function buildBinary(
 
   const build = spawnSync("cargo", args, { stdio: "inherit", ...options, env });
   if (build.status !== 0) {
-    throw new Error(`Failed to build ${what} for e2e (exit ${build.status})`);
+    // A build killed by a signal reports no exit status at all — most often the machine running
+    // out of memory under a parallel cargo — so name the signal rather than printing "exit null".
+    const how = build.signal === null ? `exit ${build.status}` : `killed by ${build.signal}`;
+    abort(`Failed to build ${what} for e2e (${how})`);
   }
   if (!existsSync(binary)) {
-    throw new Error(`Built ${what} not found at ${binary}`);
+    abort(`Built ${what} not found at ${binary}`);
   }
+}
+
+/** Reports why the suite cannot run and ends it, leaving no chance of a stale-binary result. */
+function abort(reason: string): never {
+  console.error(`\ne2e: ${reason}\nRefusing to run against a stale build.\n`);
+  process.exit(1);
 }
 
 export const config: WebdriverIO.Config = {

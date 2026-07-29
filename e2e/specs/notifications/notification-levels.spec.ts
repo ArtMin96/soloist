@@ -5,7 +5,7 @@ import {
   showCommandNotificationLevel,
 } from "../../src/flows/projectNotifications.js";
 import { startInBackground } from "../../src/flows/startInBackground.js";
-import { CUE, give, withdraw } from "../../src/harness/cues.js";
+import { CUE, give } from "../../src/harness/cues.js";
 import { requireWindowFocus } from "../../src/harness/windowFocus.js";
 import { attentionControl } from "../../src/screens/AttentionControl.js";
 import { projectSettingsPane } from "../../src/screens/ProjectSettingsPane.js";
@@ -14,12 +14,14 @@ import { toastStack } from "../../src/screens/ToastStack.js";
 
 const ECHO = "Echo";
 const FAULTY = "Faulty";
+const SIGNALLER = "Signaller";
 const FAULTY_COMMAND = "./bin/cued-crasher.sh";
+const SIGNALLER_COMMAND = "./bin/signaller.sh";
 
-const RUNNING: ProcStatus = "Running";
 const CRASHED: ProcStatus = "Crashed";
 
-const CRASH_ALERT = `${FAULTY} crashed`;
+// What the Signaller writes for itself in its OSC 777 sequence.
+const SCRIPT_ALERT = "Build";
 
 // The levels as the user reads them. "Same as project" is not a fourth level but the absence of a
 // command's own — the distinction the second walk exists for.
@@ -40,6 +42,7 @@ describe("choosing how much a project notifies", () => {
   });
 
   after(async () => {
+    await sidebar.stopIfRunning(SIGNALLER);
     await sidebar.stopIfRunning(FAULTY);
   });
 
@@ -63,33 +66,35 @@ describe("choosing how much a project notifies", () => {
     expect(await projectSettingsPane.chosenLevel()).toBe(INHERIT);
   });
 
-  // Runs after the walk above, which leaves nothing on screen: the crash alert this one raises
-  // stays until it is acted on, and it lands over the settings pane's own section switch.
-  it("drops a crash while the project is set to None, and reports the same crash once it is All", async () => {
+  // Runs after the walk above, which leaves nothing on screen: the alerts this one raises land
+  // over the settings pane's own section switch.
+  it("drops a crash while the project is set to None, and reports a signal once it is All", async () => {
     await setProjectNotificationLevel(project.name, NONE);
-
     await startInBackground(FAULTY, FAULTY_COMMAND, ECHO);
+    await startInBackground(SIGNALLER, SIGNALLER_COMMAND, ECHO);
+
     give(project.root, CUE.crash);
     await sidebar.waitForRowStatus(FAULTY, CRASHED);
 
-    // The same crash again at All. It is the pair that proves the first half: an alert here is
-    // what shows the window could have rendered one all along, and both crashes word themselves
-    // identically — so one alert on screen means exactly one of the two was reported.
+    // Nothing is waiting on the user yet. Read on its own this could simply be early, so it is not
+    // what proves the crash was refused — the unread list at the end is, since nothing clears a
+    // mark once it is made. This is here so a level that gated nothing fails on the state it got
+    // wrong, rather than further down on an alert standing over the settings pane's own controls.
+    expect(await attentionControl.count()).toBe(null);
+
     await setProjectNotificationLevel(project.name, ALL);
-    withdraw(project.root, CUE.crash);
-    await sidebar.restart(FAULTY);
-    await sidebar.waitForRowStatus(FAULTY, RUNNING);
-    await sidebar.select(ECHO);
-    give(project.root, CUE.crash);
-    await sidebar.waitForRowStatus(FAULTY, CRASHED);
 
-    await toastStack.waitForToast(CRASH_ALERT);
+    // A signal from the other process, now that the project admits one. Its alert is what shows
+    // the window could have reported the crash all along, so the silence over that crash was a
+    // decision and not an incapacity.
+    give(project.root, CUE.notify);
+    await toastStack.waitForToast(SCRIPT_ALERT);
     await requireWindowFocus();
 
-    const reported = (await toastStack.toasts()).filter((toast) => toast.title === CRASH_ALERT);
-    expect(reported).toHaveLength(1);
-    // Nor did the dropped crash leave anything waiting: a level of None is refused outright,
-    // before the question of which surface would have shown it ever arises.
-    expect(await attentionControl.count()).toBe(1);
+    // Only the admitted signal is waiting on the user. The refused crash left no mark at all —
+    // None is refused outright, before the question of which surface would have shown it arises —
+    // and nothing has looked at the crashed process since, so a mark it made would still be here.
+    await attentionControl.open();
+    expect(await attentionControl.entries()).toEqual([SIGNALLER]);
   });
 });
