@@ -46,7 +46,7 @@ jobs:
       # `engines.node`, which caps below 26: WebdriverIO 9.29.1 sets Content-Length/Connection
       # headers that Node 26's undici rejects, so no session can start
       # (webdriverio/webdriverio#15265 — fixed upstream, not yet released).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: e2e/.nvmrc
           cache: pnpm
