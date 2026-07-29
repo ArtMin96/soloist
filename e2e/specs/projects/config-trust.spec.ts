@@ -21,6 +21,12 @@ processes:
   Listener:
     command: ./bin/listener.sh
     auto_start: false
+  Faulty:
+    command: ./bin/cued-crasher.sh
+    auto_start: false
+  Signaller:
+    command: ./bin/signaller.sh
+    auto_start: false
 `;
 
 // The trust-review walk: editing an open project's solo.yml outside the app — an editor, a

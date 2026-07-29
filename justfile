@@ -51,8 +51,14 @@ test:
 
 # Real-window end-to-end tests: builds the app with the `wdio` feature (an in-app WebDriver server,
 # never in a release build) and drives the actual window through WebdriverIO. A separate, slower gate
-# than `just test` — it compiles and launches the app. Needs a display; on a headless box install
-# xvfb and WebdriverIO uses it automatically. One-time setup: `pnpm -C e2e install`.
+# than `just test` — it compiles and launches the app. One-time setup: `pnpm -C e2e install`.
+#
+# On a display of its own, which is also how CI runs it. The window has to end up focused: the core
+# routes an alert to the desktop rather than to an in-app toast for a user who is not looking, so on
+# a shared desktop the notification walks assert against a window nobody is at. Measured on a
+# GNOME/Wayland session, the app is refused focus outright — through Tauri's own `set_focus` as
+# readily as through xdotool or wmctrl — because Mutter owns focus for XWayland clients. A display
+# with nothing else on it always grants it.
 e2e:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -67,8 +73,13 @@ e2e:
       echo "yet released). Switch to the pinned LTS, which e2e/.nvmrc records:  fnm use  (in e2e/)" >&2
       exit 1
     fi
+    if ! command -v xvfb-run >/dev/null 2>&1; then
+      echo "error: e2e runs on a display of its own (see the comment above this recipe)." >&2
+      echo "Install it:  sudo apt install xvfb" >&2
+      exit 1
+    fi
     pnpm -C e2e typecheck
-    pnpm -C e2e test
+    xvfb-run -a pnpm -C e2e test
 
 # Regenerate solo.schema.json (the editor JSON Schema for solo.yml) from the SoloYml model.
 # Run after changing the config model; the drift guard in `just lint` fails if it is stale.

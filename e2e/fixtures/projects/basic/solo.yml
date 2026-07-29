@@ -9,3 +9,9 @@ processes:
   Listener:
     command: ./bin/listener.sh
     auto_start: false
+  Faulty:
+    command: ./bin/cued-crasher.sh
+    auto_start: false
+  Signaller:
+    command: ./bin/signaller.sh
+    auto_start: false
