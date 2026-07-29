@@ -20,6 +20,6 @@
     "@wdio/spec-reporter": "^9",
     "@wdio/tauri-service": "^1",
     "tsx": "^4",
-    "typescript": "^5"
+    "typescript": "^7"
   }
 }
