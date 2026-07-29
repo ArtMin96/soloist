@@ -555,6 +555,60 @@ async fn the_global_master_switch_silences_everything() {
 }
 
 #[tokio::test]
+async fn no_bell_is_configured_by_default_so_an_alert_is_silent() {
+    let s = setup();
+    let web = register(&s, "Web");
+    spawn_reactor(&s);
+
+    s.bus.publish(crashed(web));
+
+    let shown = expect_shown(&s, 1).await;
+    assert_eq!(
+        shown[0].sound, None,
+        "a fresh install asks for no sound, so nothing plays that the user never chose",
+    );
+}
+
+#[tokio::test]
+async fn the_configured_bell_rides_on_a_desktop_notification() {
+    let s = setup();
+    let web = register(&s, "Web");
+    s.global
+        .update(&(), |g| g.notifications.bell = Some("message".into()))
+        .unwrap();
+    spawn_reactor(&s);
+
+    s.bus.publish(crashed(web));
+
+    let shown = expect_shown(&s, 1).await;
+    assert_eq!(shown[0].sound, Some("message".into()));
+}
+
+#[tokio::test]
+async fn the_configured_bell_rides_on_an_in_app_toast() {
+    let s = setup();
+    let web = register(&s, "Web");
+    let api = register(&s, "Api");
+    let mut events = s.bus.subscribe();
+    user_is_here(&s, Some(api));
+    s.global
+        .update(&(), |g| g.notifications.bell = Some("message".into()))
+        .unwrap();
+    spawn_reactor(&s);
+
+    s.bus.publish(crashed(web));
+
+    // The toast surface has no settings of its own to consult, so an alert that reached it without
+    // the sound could never be heard — the in-app bell has no other source.
+    match expect_toast(&mut events).await {
+        DomainEvent::NotificationRaised { sound, .. } => {
+            assert_eq!(sound, Some("message".into()));
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn unfocused_calls_the_notifier_not_a_toast() {
     let s = setup();
     let web = register(&s, "Web");

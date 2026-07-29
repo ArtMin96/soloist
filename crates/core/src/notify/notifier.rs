@@ -4,6 +4,8 @@
 //! the adapter only renders the toast. The real adapter lives in the Tauri shell (it shows
 //! the toast via the desktop notification plugin), never in the pure core.
 
+use serde::Serialize;
+
 /// A desktop notification to show: a short title line and a longer body line. The domain
 /// composes these from a [`crate::events::DomainEvent`]; the adapter just renders them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,7 +23,8 @@ pub struct Notification {
 /// This describes the channel, never an individual toast: the channel is fire-and-forget, so
 /// whether a notification actually reached the user is not observable and must never be
 /// presented as confirmed. `Available` means something is listening — no more than that.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum NotifierStatus {
     /// Nothing is listening, so a toast goes nowhere. The default, because until a probe says
     /// otherwise the safe answer is that the channel cannot deliver rather than that it can.

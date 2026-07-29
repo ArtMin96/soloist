@@ -2,7 +2,8 @@ import type { ProcStatus } from "@domain";
 import { $, browser } from "@wdio/globals";
 import { waitUntilOr } from "../harness/waitUntilOr.js";
 import { WAIT } from "../harness/waits.js";
-import { ROW_ACTIVITY, ROW_STATUS, ROW_TEXT } from "./indicatorRow.js";
+import { ATTENTION_MARKER } from "./attention.js";
+import { ROW_ACTIVITY, ROW_MARKER, ROW_STATUS, ROW_TEXT } from "./indicatorRow.js";
 import { trustDialog } from "./TrustDialog.js";
 
 const NAV = 'nav[aria-label="Projects"]';
@@ -15,6 +16,11 @@ const META = '[data-testid="process-meta"]';
 // never default it, or a status assertion could pass against a row that reports nothing.
 const RUNNING: ProcStatus = "Running";
 const STOPPED: ProcStatus = "Stopped";
+
+// How many times Start is asked for before the harness calls it a refusal rather than a dropped
+// click. More than one because a click can be swallowed; few, because a start the core refuses
+// will not take however often it is asked.
+const START_ATTEMPTS = 3;
 
 /** The per-row control cluster's actions, by their accessible names. */
 type RowControl =
@@ -32,6 +38,8 @@ export interface RowHandle {
   selected: boolean;
   /** The first discovered port the row's telemetry shows, or `null` while it shows none. */
   port: number | null;
+  /** Whether the row wears the unread marker — something happened here nobody has looked at. */
+  unread: boolean;
 }
 
 /** What one row's DOM carries, before the status/activity markers are resolved to a status. */
@@ -41,6 +49,7 @@ interface RowSnapshot {
   hasActivity: boolean;
   selected: boolean;
   meta: string | null;
+  unread: boolean;
 }
 
 // The telemetry read-out formats a discovered port as `:1234` (see the UI's formatPorts).
@@ -77,6 +86,7 @@ export const sidebar = {
         status: string,
         activity: string,
         meta: string,
+        marker: string,
       ) => {
         const tree = document.querySelector(nav);
         if (!tree) return [];
@@ -92,6 +102,7 @@ export const sidebar = {
           // textContent rather than innerText: the read-out hides under the controls while the
           // row is selected or hovered, and a hidden element's innerText reads empty.
           meta: node.querySelector(meta)?.textContent ?? null,
+          unread: node.querySelector(marker) !== null,
         }));
       },
       NAV,
@@ -100,8 +111,9 @@ export const sidebar = {
       ROW_STATUS,
       ROW_ACTIVITY,
       META,
+      ROW_MARKER,
     );
-    return snapshots.map(({ label, status, hasActivity, selected, meta }) => {
+    return snapshots.map(({ label, status, hasActivity, selected, meta, unread }) => {
       if (status === null && !hasActivity) {
         throw new Error(
           `sidebar row "${label}" renders neither data-status nor data-activity — ` +
@@ -115,6 +127,7 @@ export const sidebar = {
         status: status === null ? RUNNING : (status as ProcStatus),
         selected,
         port: portOf(meta),
+        unread,
       };
     });
   },
@@ -165,6 +178,19 @@ export const sidebar = {
     }
   },
 
+  /** Waits until the row labelled `label` is the selected one. */
+  async waitForRowSelected(label: string): Promise<void> {
+    let selected: string[] = [];
+    await waitUntilOr(
+      async () => {
+        const rows = await this.rows();
+        selected = rows.filter((row) => row.selected).map((row) => row.label);
+        return selected.includes(label);
+      },
+      () => `sidebar row "${label}" never became the selected one; selected: ${JSON.stringify(selected)}`,
+    );
+  },
+
   /**
    * Moves keyboard focus onto the row labelled `label`, selecting it first.
    *
@@ -179,14 +205,36 @@ export const sidebar = {
     await browser.execute((element: HTMLElement) => element.focus(), row);
   },
 
-  /** Clicks the row labelled `label`, selecting its process. */
+  /**
+   * Selects the process labelled `label`, clicking its row and making sure the selection took.
+   *
+   * One click attempts a selection; it does not make one. WebKitGTK under WebDriver drops a click
+   * outright when the app is busy, and a menu that has just closed leaves the page refusing
+   * pointer events for a beat — so the click is repeated until the row reports itself selected,
+   * which is safe because selecting sets rather than toggles. Nothing is clicked at all when the
+   * row is already the selected one. Observed as a lost selection after a project's ••• menu, in a
+   * full-suite run where the same walk passed alone.
+   */
   async select(label: string): Promise<void> {
     // First prove the row is rendered at all — that failure names the rows that are — so a
     // clickability timeout below can only mean the row exists and something obscures it.
     await this.waitForRow(label);
     const row = await this.rowElement(label);
     await row.waitForClickable({ timeout: WAIT.render });
-    await row.click();
+    let selected: string[] = [];
+    await waitUntilOr(
+      async () => {
+        selected = (await this.rows())
+          .filter((candidate) => candidate.selected)
+          .map((candidate) => candidate.label);
+        if (selected.includes(label)) return true;
+        await row.click();
+        return false;
+      },
+      () =>
+        `clicking sidebar row "${label}" never made it the selected one; selected: ${JSON.stringify(selected)}`,
+      WAIT.render,
+    );
   },
 
   /** Reviews the exact command shown by the row's Trust affordance, then grants it. */
@@ -205,9 +253,38 @@ export const sidebar = {
     await trustDialog.waitUntilClosed();
   },
 
-  /** Clicks Start on the row's control cluster. */
+  /**
+   * Starts the row's process, asking again if the row is still resting.
+   *
+   * The failure a repeat answers is a dropped click, not a refused start: WebKitGTK under
+   * WebDriver swallows one outright when the app is busy, and Start is offered right up until the
+   * process runs, so asking twice is only ever the same intent asked twice. A start the core
+   * actually refuses is unmoved by any number of asks and still fails here.
+   */
   async start(label: string): Promise<void> {
-    await this.clickControl(label, "Start");
+    for (let attempt = 1; attempt <= START_ATTEMPTS; attempt += 1) {
+      await this.clickControl(label, "Start");
+      const moved = await this.leftStopped(label);
+      if (moved) return;
+    }
+    throw new Error(
+      `Start was clicked ${START_ATTEMPTS} times on sidebar row "${label}" and it never left ${STOPPED}`,
+    );
+  },
+
+  /** Whether the row leaves Stopped within a local render — how a click is seen to have landed. */
+  async leftStopped(label: string): Promise<boolean> {
+    try {
+      await waitUntilOr(
+        async () =>
+          (await this.rows()).find((candidate) => candidate.label === label)?.status !== STOPPED,
+        () => "",
+        WAIT.render,
+      );
+      return true;
+    } catch {
+      return false;
+    }
   },
 
   /** Clicks Stop on the row's control cluster. */
@@ -293,8 +370,50 @@ export const sidebar = {
   },
 
   /**
-   * Opens a project's orchestration pane the way a keyboard user does — reveal the project row's
-   * ••• actions button, open its menu, and choose the Orchestration view.
+   * Whether the project's own header wears the unread marker — the dot that says something under
+   * this project wants the user, whether or not the row that raised it is on screen.
+   *
+   * Read from the header's disclosure control, which is what holds both the project's name and its
+   * dot; a header that cannot be found at all throws rather than reporting "no dot", so a markup
+   * change can never answer a negative assertion for the app.
+   */
+  async projectUnread(name: string): Promise<boolean> {
+    const marked: boolean | null = await browser.execute(
+      (nav: string, project: string, marker: string) => {
+        const tree = document.querySelector(nav);
+        if (!tree) return null;
+        const label = [...tree.querySelectorAll("span")].find(
+          (span) => span.textContent?.trim() === project,
+        );
+        const header = label?.closest("button");
+        if (!header) return null;
+        return header.querySelector(marker) !== null;
+      },
+      NAV,
+      name,
+      ATTENTION_MARKER,
+    );
+    if (marked === null) {
+      throw new Error(
+        `no sidebar header found for project "${name}" — the harness cannot read its unread marker`,
+      );
+    }
+    return marked;
+  },
+
+  /** Shows a project's orchestration pane, chosen from the project's own ••• menu. */
+  async openOrchestration(project: string): Promise<void> {
+    await this.chooseProjectAction(project, "Orchestration");
+  },
+
+  /** Shows a project's settings pane, chosen from the project's own ••• menu. */
+  async openProjectSettings(project: string): Promise<void> {
+    await this.chooseProjectAction(project, "Project settings");
+  },
+
+  /**
+   * Runs one of a project's own actions the way a keyboard user does — reveal the project row's
+   * ••• actions button, open its menu, and choose the item.
    *
    * Two WebKitGTK-under-classic-WebDriver realities shape this: the button is `opacity-0` until the
    * row is hovered or focused, and the synthetic pointer neither reliably triggers `:hover` nor
@@ -308,7 +427,7 @@ export const sidebar = {
    * the menu is actually displayed. The re-press is skipped once the menu is open, so a menu that has
    * opened is never toggled shut.
    */
-  async openOrchestration(project: string): Promise<void> {
+  async chooseProjectAction(project: string, action: string): Promise<void> {
     const actions = await $(`aria/Actions for ${project}`);
     await actions.waitForExist({ timeout: WAIT.render });
 
@@ -329,11 +448,11 @@ export const sidebar = {
       },
     );
 
-    // Scoped to the open menu rather than looked up globally: the pane this opens also carries an
-    // accessible "Orchestration views" name once rendered, so a global name lookup could mis-target
-    // on a re-open. Exact text keeps the match on the one menu item — the menu's wrapper holds
-    // every label's text, so it can never match exactly.
-    const item = await menu.$("div=Orchestration");
+    // Scoped to the open menu rather than looked up globally: a pane this opens can carry the same
+    // name once rendered (the orchestration one names its own view switch "Orchestration views"),
+    // so a global lookup could mis-target on a re-open. Exact text keeps the match on the one menu
+    // item — the menu's wrapper holds every label's text, so it can never match exactly.
+    const item = await menu.$(`div=${action}`);
     await item.waitForClickable({ timeout: WAIT.render });
     await item.click();
   },

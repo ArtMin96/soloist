@@ -499,4 +499,34 @@ describe("App dashboard", () => {
     expect(screen.getByText("Trust changed commands")).toBeTruthy();
     expect(screen.getByText("cargo run")).toBeTruthy();
   });
+
+  it("opens the process an in-app alert came from when its toast is clicked", async () => {
+    mockBackend(STACK, [PROJECT], () => {}, true);
+    render(<App />);
+    await screen.findAllByRole("treeitem");
+    // Let the alert listener register before emitting — events have no replay.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    fireEvent.click(row(1));
+    expect(row(4).getAttribute("aria-selected")).toBe("false");
+
+    await act(async () => {
+      await emit("domain-event", {
+        type: "NotificationRaised",
+        process: 4,
+        kind: "crashed",
+        title: "web crashed",
+        body: "The process exited unexpectedly.",
+        sound: null,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    fireEvent.click(screen.getByText("web crashed"));
+
+    expect(row(4).getAttribute("aria-selected")).toBe("true");
+    expect(row(1).getAttribute("aria-selected")).toBe("false");
+  });
 });

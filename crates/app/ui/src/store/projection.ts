@@ -80,6 +80,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "TemplateChanged":
     case "NotificationRaised":
     case "AttentionChanged":
+    case "PresenceChanged":
       // Each of these belongs to a read model of its own — the orchestration snapshot, the
       // attention snapshot, a terminal's own stream — and none of them changes which processes
       // exist or what state they are in.

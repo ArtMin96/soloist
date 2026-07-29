@@ -63,7 +63,10 @@ fn fully_populated() -> Settings {
             mcp_enabled: false,
             http_api_enabled: false,
         },
-        notifications: Notifications { enabled: false },
+        notifications: Notifications {
+            enabled: false,
+            bell: Some("bell".into()),
+        },
         mcp_tool_groups,
     }
 }

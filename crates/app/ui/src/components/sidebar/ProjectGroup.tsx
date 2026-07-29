@@ -25,6 +25,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ATTENTION_LABEL } from "@/lib/attention";
+import { useUnreadProject } from "@/store/attentionContext";
 import { monogram, type ProjectTree } from "@/store/projects";
 import type { ToggleSet } from "@/store/useToggleSet";
 import type { ProcessKind } from "@/domain";
@@ -80,6 +82,7 @@ export function ProjectGroup({
   onRemoveProject,
 }: ProjectGroupProps) {
   const { project, kinds, count } = tree;
+  const unread = useUnreadProject(project.id);
   // The menus only *open* the confirm; the removal itself runs solely from the dialog's
   // destructive action, so a destructive menu click can never remove anything by itself.
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -102,10 +105,22 @@ export function ProjectGroup({
                 aria-hidden
                 className="size-3 shrink-0 text-muted-foreground transition-transform duration-[var(--dur-control)] ease-spring-settle group-data-[state=open]/trigger:rotate-90"
               />
-              <Avatar>
-                {project.icon && <AvatarImage src={project.icon} alt="" />}
-                <AvatarFallback>{monogram(project.name)}</AvatarFallback>
-              </Avatar>
+              {/* The dot badges the project's own icon rather than riding the trailing cell,
+                  which swaps the running count for the ••• menu on hover — a marker there would
+                  vanish exactly when the pointer arrived. */}
+              <span className="relative shrink-0">
+                <Avatar>
+                  {project.icon && <AvatarImage src={project.icon} alt="" />}
+                  <AvatarFallback>{monogram(project.name)}</AvatarFallback>
+                </Avatar>
+                {unread && (
+                  <span
+                    role="img"
+                    aria-label={ATTENTION_LABEL}
+                    className="absolute -top-0.5 -right-0.5 size-[7px] rounded-full bg-status-attention ring-2 ring-sidebar"
+                  />
+                )}
+              </span>
               <span className="min-w-0 flex-1 truncate text-[0.9375rem] font-[550] tracking-[-0.005em] text-foreground">
                 {project.name}
               </span>

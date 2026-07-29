@@ -18,7 +18,9 @@ import {
   type ProcessActionHandlers,
   type RunnableProcessAction,
 } from "@/lib/processActions";
+import { ATTENTION_LABEL } from "@/lib/attention";
 import { cn } from "@/lib/utils";
+import { useUnreadProcess } from "@/store/attentionContext";
 import { useSignal } from "@/store/signalsContext";
 import { useSidebarSettings } from "@/store/sidebarSettingsContext";
 import type { ProcessView } from "@/domain";
@@ -26,6 +28,13 @@ import type { ProcessView } from "@/domain";
 /** The row's base left padding; each lineage level indents one step further. */
 const ROW_BASE_PADDING_PX = 10;
 const ROW_INDENT_STEP_PX = 16;
+
+// The unread marker's inset from the row's leading edge. It sits in the row's own padding, before
+// the disclosure and status columns, so it costs no layout. Kept hard against that edge to leave
+// the widest gap the padding allows before the status glyph: an agent awaiting permission wears
+// the same attention hue, so the two are told apart by shape and by the space between them rather
+// than by color. It indents with the row, keeping a nested worker's marker on its own level.
+const ROW_MARKER_LEFT_PX = 1;
 
 interface ProcessRowProps {
   process: ProcessView;
@@ -72,6 +81,7 @@ export function ProcessRow({
   onToggleExpand,
 }: ProcessRowProps) {
   const { metrics, restart, activity } = useSignal(process.id);
+  const unread = useUnreadProcess(process.id);
   const { sidebar } = useSidebarSettings();
   const handlers: ProcessActionHandlers = {
     onTrust: () => onTrust(),
@@ -123,6 +133,14 @@ export function ProcessRow({
           : "hover:bg-sidebar-accent focus-visible:bg-sidebar-accent",
       )}
     >
+      {unread && (
+        <span
+          role="img"
+          aria-label={ATTENTION_LABEL}
+          className="pointer-events-none absolute top-1/2 size-[5px] -translate-y-1/2 rounded-full bg-status-attention"
+          style={{ left: `${ROW_MARKER_LEFT_PX + depth * ROW_INDENT_STEP_PX}px` }}
+        />
+      )}
       {treeColumn &&
         (hasChildren ? (
           <Button

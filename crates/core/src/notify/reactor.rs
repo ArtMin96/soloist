@@ -25,7 +25,7 @@ use crate::attention::AttentionKind;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
 use crate::process::ProcStatus;
-use crate::settings::{ProjectSettings, Settings, SettingsStore};
+use crate::settings::{Notifications, ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::Supervisor;
 
 use super::attention::AttentionRegistry;
@@ -121,7 +121,8 @@ impl NotificationReactor {
     fn decide(&self, event: &DomainEvent) -> Option<Alert> {
         let (id, trigger) = classify(event)?;
         let kind = trigger.kind();
-        if !self.globally_enabled() {
+        let notifications = self.notification_settings();
+        if !notifications.enabled {
             return None;
         }
         let supervisor = self.supervisor.upgrade()?;
@@ -135,7 +136,7 @@ impl NotificationReactor {
             process: id,
             kind,
             delivery: route(id, kind, self.presence.get(), level),
-            notification: trigger.notification(&view.label)?,
+            notification: trigger.notification(&view.label, notifications.bell)?,
         })
     }
 
@@ -147,13 +148,14 @@ impl NotificationReactor {
         }
     }
 
-    /// Whether the global master switch is on. Reads the durable global settings live so a change
-    /// takes effect at once; a read error defaults to on (notifications remain a best-effort signal).
-    fn globally_enabled(&self) -> bool {
+    /// The global Notifications document — the master switch and the sound every alert asks for.
+    /// Read live so a change takes effect at once; a read error reads as the documented defaults
+    /// (on, silent), so a transient store failure never swallows a crash alert.
+    fn notification_settings(&self) -> Notifications {
         self.global_settings
             .get(&())
-            .map(|s| s.notifications.enabled)
-            .unwrap_or(true)
+            .map(|s| s.notifications)
+            .unwrap_or_default()
     }
 }
 
@@ -192,12 +194,15 @@ impl Trigger {
     }
 
     /// The alert text for the named process — the one place a title and a body are written,
-    /// whichever surface ends up rendering them.
+    /// whichever surface ends up rendering them — asking for `sound`.
+    ///
+    /// The sound is the user's one global choice rather than anything the trigger knows: which
+    /// alert this is decides the words, never how loud it is.
     ///
     /// `None` only for a kind that has no text of its own to write:
     /// [`AttentionKind::TerminalNotification`] is always raised as [`Self::Script`], carrying the
     /// words the process chose, so there is nothing to say about one that arrived without them.
-    fn notification(self, label: &str) -> Option<Notification> {
+    fn notification(self, label: &str, sound: Option<String>) -> Option<Notification> {
         let (title, body) = match self {
             // The process wrote its own words; the label only stands in for a title it omitted.
             Self::Script { title, body } => (title.unwrap_or_else(|| label.to_owned()), body),
@@ -228,11 +233,7 @@ impl Trigger {
                 (title, body.to_owned())
             }
         };
-        Some(Notification {
-            title,
-            body,
-            sound: None,
-        })
+        Some(Notification { title, body, sound })
     }
 }
 

@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use soloist_core::{AttentionSnapshot, Facade, Presence, ProcessId};
+use soloist_core::{AttentionSnapshot, Facade, NotifierStatus, Presence, ProcessId};
 use tauri::State;
 
 /// Reports where the user is. Called when the window gains or loses focus and when the selected
@@ -49,8 +49,24 @@ pub async fn clear_all_attention(facade: State<'_, Arc<Facade>>) -> Result<(), S
 }
 
 /// Shows a sample desktop notification, so a user can tell whether alerts reach them at all.
+///
+/// Routed through the blocking pool because composing it reads the stored bell from the durable
+/// settings; showing the notification itself is fire-and-forget.
 #[tauri::command]
 pub async fn send_test_notification(facade: State<'_, Arc<Facade>>) -> Result<(), String> {
-    facade.send_test_notification();
+    let facade = Arc::clone(&facade);
+    facade.blocking(|f| f.send_test_notification()).await;
     Ok(())
+}
+
+/// What the desktop notification channel can currently do on this machine. Probed on the user's
+/// action (opening the Notifications settings, or asking again), never on an interval.
+///
+/// Routed through the blocking pool because the probe is two synchronous D-Bus round trips: a
+/// session bus that is slow or wedged would otherwise park a runtime worker, stalling the commands
+/// scheduled behind it for a question nobody is waiting on.
+#[tauri::command]
+pub async fn notifier_status(facade: State<'_, Arc<Facade>>) -> Result<NotifierStatus, String> {
+    let facade = Arc::clone(&facade);
+    Ok(facade.blocking(|f| f.notifier_status()).await)
 }

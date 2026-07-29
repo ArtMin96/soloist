@@ -199,6 +199,14 @@ pub enum DomainEvent {
     /// [`Facade::attention_snapshot`](crate::facade::Facade::attention_snapshot), so the several
     /// surfaces that render unread cannot drift apart by projecting a payload differently.
     AttentionChanged,
+    /// Where the user is changed: the window gained or lost focus, or it now shows a different
+    /// process. Payload-free by the same convention as the other change-notifications: a consumer
+    /// re-reads [`Facade::presence`](crate::facade::Facade::presence).
+    ///
+    /// The app-icon badge is the surface that needs this. What it draws turns on whether the user
+    /// is at the window, so it has to be told about a walk away from a stack of unread that
+    /// changed nothing about the unread itself.
+    PresenceChanged,
     /// A template of `kind` was created, updated, or deleted. `project` names the scope it
     /// changed in — `None` for the global library, `Some` for that project's — because the two
     /// scopes are separate libraries a surface reads separately: without it a project-scoped

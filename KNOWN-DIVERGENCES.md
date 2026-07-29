@@ -1729,3 +1729,35 @@ present on the development machine, which is **not** evidence about a default Ub
 **Effect on parity:** constrains `plan/02` **D10** (attention bell + unified unread), promoted to `v1`
 alongside this entry. No row regresses. Unimplemented as of this entry — the badge has never been
 observed rendering.
+
+## D-34 — The alert sound works on Linux, where Solo's is macOS-only 🟢
+
+**Introduced:** the notifications initiative, with the global Notifications tab.
+
+**Solo (ref [notifications/bell-sounds](https://soloterm.com/docs/notifications/bell-sounds), `plan/05` §10):**
+the bell-sound picker is documented as **macOS-only** — it selects from the system alert sounds that
+platform exposes, and the feature has no counterpart on Solo's other targets because Solo has none.
+
+**Soloist — the same affordance, working on our one supported target.** The picker offers names from the
+**freedesktop Sound Naming Specification** and stores one on the global Notifications document
+(`bell: Option<String>`, `None` = silent). The name travels as the `sound-name` hint on the D-Bus
+notification, and the desktop's own notification service resolves it against the user's sound theme.
+**No audio ships**, and the domain never validates the name against what the backend advertises.
+
+**Why this is a divergence in our favour, and not parity.** Solo's picker cannot work on Linux and ours
+cannot work the way Solo's does: there is no system-alert-sound enumeration to offer, and no API that
+plays a chosen file for a notification. The freedesktop hint is the platform's own mechanism for the
+same intent, so this is the Linux-native form of a macOS-only feature rather than a port of it.
+
+**What the name is, and is not.** It is a **hint**, not a file reference. The spec's lookup truncates an
+unfound name at its last `-` and tries again, falling through the theme's parents to `freedesktop`, so
+`bell-terminal` reaches a plain `bell` on a theme carrying only that. A theme that resolves none of it
+plays nothing **and still shows the notification** — degradation, never failure. The offered set is
+therefore grounded in the specification rather than in one machine's installed files, which would make
+the list that machine's accident.
+
+**One thing it deliberately does not claim.** A daemon advertising the `sound` capability is not a
+promise that a sound is produced: volume, sink state and the user's theme all sit past the point where
+Soloist can observe anything. The status row reports what the daemon advertises and nothing beyond it.
+
+**Effect on parity:** satisfies `plan/02` **I7l** (global Notifications tab). No row regresses.
