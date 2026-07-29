@@ -282,6 +282,59 @@ byte-clean:
 Surgical because no other spec opens a template — and the notice is the one thing in the preview no other
 assertion reads.
 
+The notification walks (`specs/notifications/`, three files) cover what only the window can say about an
+alert: that it reaches the screen, that the app really tells the core where the user is looking, that the
+unread indicators render and clear together, and that a level chosen in the settings pane is what the core
+stored. Two cue-driven stubs join the `basic` fixture — a crasher and a signaller that act on a file the
+spec drops — because starting a process from its row selects it, and the core suppresses an alert about the
+process being watched: a signal that has to reach the user must land *after* the spec has looked elsewhere.
+
+**Window focus is the precondition, and it is asserted rather than arranged.** `route()` sends an alert to
+the desktop instead of a toast whenever the window is unfocused, so "no toast appeared" is exactly what a
+lost focus produces — the one shape of green a mutation pass cannot catch, on the walk that matters most.
+`harness/windowFocus.ts` therefore reads the real window and fails with an explanation. Nothing tries to
+take focus, because nothing can: measured on a GNOME/Wayland session, the app is refused focus through
+Tauri's own `set_focus` as readily as through `xdotool` or `wmctrl`, since Mutter owns focus for XWayland
+clients. A display with nothing else on it always grants it, which is why `just e2e` now runs under
+`xvfb-run` — the way CI already ran it. The suppression walk carries a second discriminator for the same
+reason: it asserts the row is **not** marked unread, which separates real suppression (the reactor returns
+before raising) from an alert that merely went to the desktop (which still marks it).
+
+Its product-mutation pass is done — eight mutations, each reverted byte-clean, `git diff --stat crates/`
+empty after each:
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Drop the `presence.viewing == Some(process)` branch in `routing.rs` — a watched process's alert is no longer suppressed | only "says nothing about a crash the user watched happen" fails | exactly that: `Received array: ["Build", "Faulty crashed"]` where the crash must not appear. All 13 other spec files passed — the other walks watch a different process, so nothing else depends on the branch |
+| Drop the `!level.admits(kind.severity())` guard in `routing.rs` — the level gates nothing | only "drops a crash while the project is set to None…" fails | exactly that: `Expected: null, Received: 1` — the refused crash had left something waiting. Every other file passed; the other walks run at `All`, where the guard admits anyway |
+| Remove the `b"777"` arm from `terminal/parser.rs` — a process's own notification is not recognised | the script-alert walk fails, and with it the three assertions that use that alert | `no alert titled "Build" appeared; on screen: ["Faulty crashed"]` — the crash alert still rendered, so the mutation is pinned to the OSC arm rather than to alerting. The cascade is owned: the unread-count walk and both negative walks use that alert as their sentinel, by design |
+| Remove the unread dot from `ProjectGroup.tsx` — a project no longer shows its processes need attention | only "marks the crashed process's row and its project as unread" fails, at its project half | exactly that (`Expected: true, Received: false` at the project assertion); the row half and every other file passed |
+| Invert the row marker in `ProcessRow.tsx` (`!unread`) — every row is marked except the ones that should be | the row-marker assertions fail | the marker walk failed at its row half, the clear-all walk found every row marked, and the suppression walk's "nothing else is marked" failed (37 marked rows against an expected none). Cascades across every assertion that reads a row marker, which is the honest scope of one marker |
+| `AttentionRegistry::clear_all` returns `false` — clearing announces nothing, so no surface re-reads | only "clears every indicator at once" fails | exactly that: `the title bar still showed 2 unread`. Surgical — nothing else clears |
+| Drop `select.current(process)` in `NotificationToasts.tsx` — acting on a toast no longer goes anywhere | only "takes the user to the process when its toast is acted on" fails | exactly that: `sidebar row "Faulty" never became the selected one; selected: ["Echo"]` |
+| Store `NotificationLevel::None` where `set_command_notification_level` removes the entry — inheriting becomes silence | only the level-persistence walk fails | exactly that: `choosing "Same as project" left "None" chosen`. The two states that read most alike on screen are the two most easily confused in storage, and this is the assertion that tells them apart |
+
+**Harness findings (fixed here, none a product defect).** Four, each of which had been quietly costing runs:
+
+- **The unread marker had broken the sidebar's row read.** The marker is the row's first child span and
+  carries no text, so `ROW_TEXT` matched it first and every marked row's label read back empty — the row
+  then vanished from every lookup by name. `indicatorRow.ts` now excludes any span carrying a role.
+- **A failed `onPrepare` build ran the suite against the previous run's binary.** WebdriverIO logs a
+  rejected hook and carries on, so a broken build reports on an app that no longer exists in the tree —
+  observed when a mutation left a type error and a full suite still ran, green except where the *stale*
+  binary differed. `buildBinary` now ends the process instead of throwing.
+- **A single click is an attempt, not an intent.** WebKitGTK under WebDriver drops a click outright when
+  the app is busy; observed on a row select after a project's ••• menu, and on Start. `sidebar.select` and
+  `sidebar.start` now repeat until the row reports the intended state, both bounded, and neither can mask a
+  refusal — a start the core refuses is unmoved however often it is asked.
+- **A failed screenshot took the page source down with it.** On a virtual display WebKitGTK can refuse a
+  snapshot, and the throwing `afterTest` replaced the real failure with a hook error. Each capture is now
+  independent and reports rather than throws.
+
+**Not covered here, and not coverable:** the native desktop notification, whether a chosen bell is audible,
+and the app-icon badge. All three are window-system or audio surfaces outside the page, so no WebdriverIO
+assertion can reach them; a green `just e2e` is not full notification coverage.
+
 **Harness finding (fixed here, not a product defect):** opening the agent picker was a single click and a
 single 10 s wait, and it intermittently never opened — observed on `launch-agent` in one run and on
 `timers-wake-cycle` in another, each time as `element ("[cmdk-root]") still not displayed`. WebKitGTK under
