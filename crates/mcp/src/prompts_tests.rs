@@ -1,5 +1,5 @@
 use super::*;
-use rmcp::model::{Content, ErrorCode, PromptMessageContent};
+use rmcp::model::{ContentBlock, ErrorCode};
 use soloist_core::{
     placeholders, McpToolGroups, RenderedPrompt, TemplateId, TemplateKind, TemplateScope,
 };
@@ -95,9 +95,9 @@ fn message_text(result: &GetPromptResult) -> &str {
     let [message] = result.messages.as_slice() else {
         panic!("expected exactly one message, got {:?}", result.messages);
     };
-    assert_eq!(message.role, PromptMessageRole::User);
+    assert_eq!(message.role, Role::User);
     match &message.content {
-        PromptMessageContent::Text { text } => text,
+        ContentBlock::Text(text) => &text.text,
         other => panic!("expected text content, got {other:?}"),
     }
 }
@@ -438,7 +438,7 @@ fn the_delete_result_key_is_part_of_the_tool_contract() {
 /// A refused write changed nothing, and a tool that does not touch templates never does.
 #[test]
 fn a_failed_or_unrelated_call_reports_no_prompt_list_change() {
-    let failed = CallToolResult::error(vec![Content::text("refused")]);
+    let failed = CallToolResult::error(vec![ContentBlock::text("refused")]);
 
     assert!(!changed_prompt_list("prompt_template_create", &failed));
     assert!(!changed_prompt_list(

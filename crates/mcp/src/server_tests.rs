@@ -375,12 +375,9 @@ fn prompts_are_not_advertised_while_prompt_templates_are_off() {
 fn prompts_are_advertised_with_list_changed_when_prompt_templates_are_on() {
     let info = handler_with_groups(all_feature_groups()).get_info();
 
-    assert_eq!(
-        info.capabilities.prompts,
-        Some(PromptsCapability {
-            list_changed: Some(true)
-        })
-    );
+    let mut expected = PromptsCapability::default();
+    expected.list_changed = Some(true);
+    assert_eq!(info.capabilities.prompts, Some(expected));
 }
 
 /// Tools stay advertised either way — gating prompts must not cost the baseline every client has.

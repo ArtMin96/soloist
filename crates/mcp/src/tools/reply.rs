@@ -2,7 +2,7 @@
 //! category. Single-sourced here so the structured-result shape and the error model stay
 //! identical across categories.
 
-use rmcp::model::{CallToolResult, Content, ErrorData};
+use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
 use serde::Serialize;
 
 use crate::client::ClientError;
@@ -35,7 +35,9 @@ pub(crate) fn acked() -> Result<CallToolResult, ErrorData> {
 pub(crate) fn app_error(err: &ClientError) -> Result<CallToolResult, ErrorData> {
     match err {
         ClientError::App(app) if app.is_request_error() => {
-            Ok(CallToolResult::error(vec![Content::text(app.to_string())]))
+            Ok(CallToolResult::error(vec![ContentBlock::text(
+                app.to_string(),
+            )]))
         }
         _ => Err(ErrorData::internal_error(err.to_string(), None)),
     }

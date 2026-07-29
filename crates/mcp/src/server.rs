@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams, GetPromptResult,
-    Implementation, ListPromptsResult, ListToolsResult, PaginatedRequestParams, PromptsCapability,
-    ServerCapabilities, ServerInfo, Tool,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetPromptRequestParams,
+    GetPromptResponse, Implementation, ListPromptsResult, ListToolsResult, PaginatedRequestParams,
+    PromptsCapability, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{tool_handler, ErrorData, RoleServer, ServerHandler};
@@ -118,11 +118,11 @@ impl SoloistMcp {
     fn capabilities(&self) -> ServerCapabilities {
         let capabilities = ServerCapabilities::builder().enable_tools();
         match self.prompts_enabled() {
-            true => capabilities
-                .enable_prompts_with(PromptsCapability {
-                    list_changed: Some(true),
-                })
-                .build(),
+            true => {
+                let mut prompts = PromptsCapability::default();
+                prompts.list_changed = Some(true);
+                capabilities.enable_prompts_with(prompts).build()
+            }
             false => capabilities.build(),
         }
     }
@@ -178,7 +178,9 @@ impl SoloistMcp {
     fn with_suggestion(&self, tool: &str, mut result: CallToolResult) -> CallToolResult {
         if result.is_error != Some(true) {
             if let Some(hint) = self.suggestions.take(tool) {
-                result.content.push(Content::text(format!("Next: {hint}")));
+                result
+                    .content
+                    .push(ContentBlock::text(format!("Next: {hint}")));
             }
         }
         result
@@ -338,8 +340,8 @@ impl ServerHandler for SoloistMcp {
         &self,
         request: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<GetPromptResult, ErrorData> {
-        self.prompt_get(request).await
+    ) -> Result<GetPromptResponse, ErrorData> {
+        self.prompt_get(request).await.map(Into::into)
     }
 
     /// Serves `tools/list` with the featured tools first (see [`SoloistMcp::featured_tool_list`])
@@ -351,11 +353,7 @@ impl ServerHandler for SoloistMcp {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult {
-            tools: self.featured_tool_list(),
-            meta: None,
-            next_cursor: None,
-        })
+        Ok(ListToolsResult::with_all_items(self.featured_tool_list()))
     }
 
     /// Routes a tool call to the composed router (as the `#[tool_handler]` macro's default would),
@@ -370,15 +368,18 @@ impl ServerHandler for SoloistMcp {
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         let tool = request.name.clone();
         let peer = context.peer.clone();
         let call = ToolCallContext::new(self, request, context);
-        let result = self.tool_router.call(call).await?;
+        let response = self.tool_router.call(call).await?;
+        let CallToolResponse::Complete(result) = response else {
+            return Ok(response);
+        };
         if changed_prompt_list(&tool, &result) {
             let _ = peer.notify_prompt_list_changed().await;
         }
-        Ok(self.with_suggestion(&tool, result))
+        Ok(self.with_suggestion(&tool, result).into())
     }
 }
 
