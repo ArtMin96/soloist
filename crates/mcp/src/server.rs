@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ContentBlock, GetPromptRequestParams, GetPromptResult,
-    Implementation, ListPromptsResult, ListToolsResult, PaginatedRequestParams, PromptsCapability,
-    ServerCapabilities, ServerInfo, Tool,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetPromptRequestParams,
+    GetPromptResponse, Implementation, ListPromptsResult, ListToolsResult, PaginatedRequestParams,
+    PromptsCapability, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{tool_handler, ErrorData, RoleServer, ServerHandler};
@@ -340,8 +340,8 @@ impl ServerHandler for SoloistMcp {
         &self,
         request: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<GetPromptResult, ErrorData> {
-        self.prompt_get(request).await
+    ) -> Result<GetPromptResponse, ErrorData> {
+        self.prompt_get(request).await.map(Into::into)
     }
 
     /// Serves `tools/list` with the featured tools first (see [`SoloistMcp::featured_tool_list`])
@@ -353,11 +353,7 @@ impl ServerHandler for SoloistMcp {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult {
-            tools: self.featured_tool_list(),
-            meta: None,
-            next_cursor: None,
-        })
+        Ok(ListToolsResult::with_all_items(self.featured_tool_list()))
     }
 
     /// Routes a tool call to the composed router (as the `#[tool_handler]` macro's default would),
@@ -372,15 +368,18 @@ impl ServerHandler for SoloistMcp {
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         let tool = request.name.clone();
         let peer = context.peer.clone();
         let call = ToolCallContext::new(self, request, context);
-        let result = self.tool_router.call(call).await?;
+        let response = self.tool_router.call(call).await?;
+        let CallToolResponse::Complete(result) = response else {
+            return Ok(response);
+        };
         if changed_prompt_list(&tool, &result) {
             let _ = peer.notify_prompt_list_changed().await;
         }
-        Ok(self.with_suggestion(&tool, result))
+        Ok(self.with_suggestion(&tool, result).into())
     }
 }
 
