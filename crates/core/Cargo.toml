@@ -20,7 +20,7 @@ schema = ["dep:schemars"]
 
 [dependencies]
 async-trait = "0.1"
-base64 = "0.21"
+base64 = "0.22"
 globset = "0.4"
 indexmap = { version = "2", features = ["serde"] }
 schemars = { version = "1", optional = true }
