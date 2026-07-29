@@ -136,3 +136,20 @@ fn a_record_missing_a_field_deserializes_to_the_default_for_that_field() {
     let empty: Settings = serde_json::from_str("{}").expect("parse empty");
     assert_eq!(empty, Settings::default());
 }
+
+#[test]
+fn a_notifications_record_written_before_the_bell_existed_still_loads() {
+    // Exactly what a build before the bell wrote. The whole document is one JSON blob, so a
+    // sub-document that failed to parse would take every other tab's settings down with it.
+    let settings: Settings =
+        serde_json::from_str(r#"{"notifications":{"enabled":false}}"#).expect("parse");
+
+    assert!(
+        !settings.notifications.enabled,
+        "the stored switch survives"
+    );
+    assert_eq!(
+        settings.notifications.bell, None,
+        "a record that names no bell reads as silent, not as whichever sound happens to be first",
+    );
+}

@@ -9,9 +9,11 @@ use crate::composition::CorePorts;
 use crate::events::DomainEvent;
 use crate::facade::Facade;
 use crate::ids::ProcessId;
-use crate::notify::Presence;
+use crate::notify::{NotifierStatus, Presence};
+use crate::settings::Notifications;
 use crate::testing::{
-    drain, FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock, RecordingNotifier,
+    drain, FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo, MockClock,
+    RecordingNotifier,
 };
 
 const WEB: ProcessId = ProcessId::from_raw(1);
@@ -39,6 +41,22 @@ fn facade_with_notifier(notifier: &RecordingNotifier) -> Facade {
             Arc::new(FakeProjectRepo::new()),
         )
         .notifier(Arc::new(notifier.clone()))
+        .build(),
+    )
+}
+
+/// The same, over settings that actually persist — the default repo discards every write, so a
+/// test about what a stored preference does to a notification needs this one.
+fn facade_with_settings_and_notifier(notifier: &RecordingNotifier) -> Facade {
+    Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(MockClock::new()),
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .notifier(Arc::new(notifier.clone()))
+        .settings_repo(Arc::new(FakeSettingsRepo::new()))
         .build(),
     )
 }
@@ -208,4 +226,53 @@ async fn a_test_notification_reaches_the_desktop_and_marks_nothing_unread() {
 
     assert_eq!(notifier.shown().len(), 1);
     assert_eq!(facade.attention_snapshot().total, 0);
+}
+
+#[test]
+fn a_test_notification_asks_for_the_configured_bell() {
+    let notifier = RecordingNotifier::new();
+    let facade = facade_with_settings_and_notifier(&notifier);
+    facade
+        .set_notification_settings(Notifications {
+            enabled: true,
+            bell: Some("message".into()),
+        })
+        .unwrap();
+
+    facade.send_test_notification();
+
+    // A sample that played a different sound than a real alert would tell the user nothing about
+    // the bell they just chose — which is most of what they press this for.
+    assert_eq!(notifier.shown()[0].sound, Some("message".into()));
+}
+
+#[test]
+fn a_test_notification_is_silent_when_no_bell_is_chosen() {
+    let notifier = RecordingNotifier::new();
+    let facade = facade_with_settings_and_notifier(&notifier);
+
+    facade.send_test_notification();
+
+    assert_eq!(notifier.shown()[0].sound, None);
+}
+
+#[test]
+fn the_notifier_status_is_reported_as_the_channel_gives_it() {
+    let listening = NotifierStatus::Available {
+        server: "gnome-shell".into(),
+        version: "46.0".into(),
+        capabilities: vec!["sound".into()],
+    };
+    let facade = facade_with_notifier(&RecordingNotifier::with_status(listening.clone()));
+
+    // Reported verbatim: the surface that renders it exists to say what is actually there, so a
+    // façade that summarised or substituted would be the one thing it must not do.
+    assert_eq!(facade.notifier_status(), listening);
+}
+
+#[test]
+fn a_channel_with_nothing_listening_reports_unavailable() {
+    let facade = facade_with_notifier(&RecordingNotifier::new());
+
+    assert_eq!(facade.notifier_status(), NotifierStatus::Unavailable);
 }

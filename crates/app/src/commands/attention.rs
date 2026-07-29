@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use soloist_core::{AttentionSnapshot, Facade, Presence, ProcessId};
+use soloist_core::{AttentionSnapshot, Facade, NotifierStatus, Presence, ProcessId};
 use tauri::State;
 
 /// Reports where the user is. Called when the window gains or loses focus and when the selected
@@ -53,4 +53,12 @@ pub async fn clear_all_attention(facade: State<'_, Arc<Facade>>) -> Result<(), S
 pub async fn send_test_notification(facade: State<'_, Arc<Facade>>) -> Result<(), String> {
     facade.send_test_notification();
     Ok(())
+}
+
+/// What the desktop notification channel can currently do on this machine. Probed on the user's
+/// action (opening the Notifications settings, or asking again), never on an interval: the probe
+/// is a blocking round trip to the desktop's notification backend.
+#[tauri::command]
+pub async fn notifier_status(facade: State<'_, Arc<Facade>>) -> Result<NotifierStatus, String> {
+    Ok(facade.notifier_status())
 }

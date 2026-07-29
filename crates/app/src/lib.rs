@@ -435,6 +435,7 @@ pub fn run() {
             commands::clear_attention,
             commands::clear_all_attention,
             commands::send_test_notification,
+            commands::notifier_status,
             commands::mcp_tool_groups,
             commands::set_mcp_tool_group,
             commands::mcp_setup_info,

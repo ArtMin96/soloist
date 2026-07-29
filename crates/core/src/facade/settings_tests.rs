@@ -69,12 +69,18 @@ fn notification_settings_default_on_and_round_trip_through_the_facade() {
         Notifications::default()
     );
     assert!(facade.notification_settings().unwrap().enabled);
+    // Silent until the user picks a bell, so no sound is played that was never asked for.
+    assert_eq!(facade.notification_settings().unwrap().bell, None);
 
-    let off = Notifications { enabled: false };
-    assert_eq!(facade.set_notification_settings(off).unwrap(), off);
-    assert!(
-        !facade.notification_settings().unwrap().enabled,
-        "a re-read sees the persisted master switch",
+    let off = Notifications {
+        enabled: false,
+        bell: Some("message".into()),
+    };
+    assert_eq!(facade.set_notification_settings(off.clone()).unwrap(), off);
+    assert_eq!(
+        facade.notification_settings().unwrap(),
+        off,
+        "a re-read sees the whole persisted document, switch and bell alike",
     );
 }
 
@@ -191,9 +197,14 @@ fn each_tab_round_trips_through_the_facade_independently() {
         facade.notification_settings().unwrap(),
         Notifications::default()
     );
-    let notifications = Notifications { enabled: false };
+    let notifications = Notifications {
+        enabled: false,
+        bell: None,
+    };
     assert_eq!(
-        facade.set_notification_settings(notifications).unwrap(),
+        facade
+            .set_notification_settings(notifications.clone())
+            .unwrap(),
         notifications
     );
     assert_eq!(facade.notification_settings().unwrap(), notifications);

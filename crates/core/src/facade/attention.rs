@@ -9,7 +9,7 @@
 use super::Facade;
 use crate::events::DomainEvent;
 use crate::ids::ProcessId;
-use crate::notify::{AttentionSnapshot, Notification, Presence};
+use crate::notify::{AttentionSnapshot, Notification, NotifierStatus, Presence};
 
 /// The test alert's text. Fixed rather than composed from an event: it stands for no real signal,
 /// and its whole job is to prove the channel works.
@@ -81,12 +81,32 @@ impl Facade {
     /// nothing at all for the focused user who is most likely to press it. Best-effort like every
     /// notification: with no backend listening it is silently dropped, which is itself the answer
     /// the user pressed it for.
+    ///
+    /// It asks for the configured sound, so the sample is a sample of the real thing — a chosen
+    /// bell is otherwise unhearable until something goes wrong, which is the worst moment to
+    /// discover it is not the one you wanted. Reading a preference is not routing; the gates this
+    /// stays outside of are the ones that decide *whether* to alert. A settings read that fails
+    /// leaves it silent rather than unsent, since the channel is what the user is testing.
     pub fn send_test_notification(&self) {
         self.notifier.notify(Notification {
             title: TEST_NOTIFICATION_TITLE.into(),
             body: TEST_NOTIFICATION_BODY.into(),
-            sound: None,
+            sound: self
+                .settings
+                .get(&())
+                .map(|settings| settings.notifications.bell)
+                .unwrap_or_default(),
         });
+    }
+
+    /// What the desktop notification channel can currently do on this machine.
+    ///
+    /// Answers "why did no toast appear" — the question the fire-and-forget channel can never
+    /// answer for an individual alert, because showing one discards whatever the desktop made of
+    /// it. Probed on demand, never cached and never on the event path: a backend can start or stop
+    /// while the app runs, and the probe is a blocking round trip to the desktop.
+    pub fn notifier_status(&self) -> NotifierStatus {
+        self.notifier.status()
     }
 }
 
