@@ -53,6 +53,12 @@ test:
 # never in a release build) and drives the actual window through WebdriverIO. A separate, slower gate
 # than `just test` — it compiles and launches the app. Needs a display; on a headless box install
 # xvfb and WebdriverIO uses it automatically. One-time setup: `pnpm -C e2e install`.
+#
+# The window must end up with focus: the core routes an alert to the desktop rather than to an
+# in-app toast for a user who is not looking, so the notification walks say so and stop rather than
+# assert against a window nobody is at. A desktop that leaves the app in the background — a
+# GNOME/Wayland session refuses an XWayland client focus outright — needs a display of its own:
+# `xvfb-run -a just e2e`, which is what CI does.
 e2e:
     #!/usr/bin/env bash
     set -euo pipefail

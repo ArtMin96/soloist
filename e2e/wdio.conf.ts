@@ -204,11 +204,26 @@ export const config: WebdriverIO.Config = {
     }
   },
 
+  // Each capture stands alone, and a capture that fails is reported rather than thrown: the two
+  // ask different things of the driver and the picture is the fragile one — on a virtual display
+  // WebKitGTK can refuse a snapshot outright. Letting that escape would replace the real failure
+  // with a hook error and take the page source, which still works, down with it.
   afterTest: async (test, _context, { passed }) => {
     if (passed) return;
     mkdirSync(logsDir, { recursive: true });
     const slug = `${test.parent} ${test.title}`.replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase();
-    await browser.saveScreenshot(path.join(logsDir, `${slug}.png`));
-    writeFileSync(path.join(logsDir, `${slug}.html`), await browser.getPageSource());
+    const capture = async (what: string, take: () => Promise<void>) => {
+      try {
+        await take();
+      } catch (error) {
+        console.warn(`could not capture the ${what} for "${test.title}": ${String(error)}`);
+      }
+    };
+    await capture("screenshot", async () => {
+      await browser.saveScreenshot(path.join(logsDir, `${slug}.png`));
+    });
+    await capture("page source", async () => {
+      writeFileSync(path.join(logsDir, `${slug}.html`), await browser.getPageSource());
+    });
   },
 };
