@@ -1,10 +1,13 @@
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { useWindowControls } from "@/components/titlebar/useWindowControls";
 import { WindowControls } from "@/components/titlebar/WindowControls";
 
 interface TitlebarProps {
   appName: string;
   appVersion?: string;
+  /** Contextual controls for the trailing end of the strip, before the window controls. They sit
+   *  outside the drag region so they stay clickable. */
+  actions?: ReactNode;
 }
 
 // Marks an element as a window-drag handle. Tauri starts a drag on mousedown over any
@@ -15,7 +18,7 @@ const DRAG = { "data-tauri-drag-region": "" };
 // The single window-chrome surface: a unified toolbar carrying app identity and the OS window
 // controls. Workspace and session actions live on the start surface, leaving this strip available
 // for contextual repository controls. It stands in for the disabled native decorations.
-export function Titlebar({ appName, appVersion }: TitlebarProps) {
+export function Titlebar({ appName, appVersion, actions }: TitlebarProps) {
   const { isMaximized, minimize, toggleMaximize, close } = useWindowControls();
 
   // Double-clicking the bare bar (not a button) toggles maximize, matching native
@@ -52,6 +55,7 @@ export function Titlebar({ appName, appVersion }: TitlebarProps) {
         </span>
       )}
       <div {...DRAG} className="h-full flex-1" />
+      {actions}
       <WindowControls
         isMaximized={isMaximized}
         onMinimize={minimize}
