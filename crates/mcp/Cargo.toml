@@ -9,7 +9,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-rmcp = { version = "1.7.0", features = ["server", "transport-io", "macros", "schemars"] }
+rmcp = { version = "2.2.0", features = ["server", "transport-io", "macros", "schemars"] }
 soloist-core = { path = "../core" }
 soloist-ipc = { path = "../ipc" }
 serde = { version = "1", features = ["derive"] }

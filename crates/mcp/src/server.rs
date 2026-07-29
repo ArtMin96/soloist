@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams, GetPromptResult,
+    CallToolRequestParams, CallToolResult, ContentBlock, GetPromptRequestParams, GetPromptResult,
     Implementation, ListPromptsResult, ListToolsResult, PaginatedRequestParams, PromptsCapability,
     ServerCapabilities, ServerInfo, Tool,
 };
@@ -118,11 +118,11 @@ impl SoloistMcp {
     fn capabilities(&self) -> ServerCapabilities {
         let capabilities = ServerCapabilities::builder().enable_tools();
         match self.prompts_enabled() {
-            true => capabilities
-                .enable_prompts_with(PromptsCapability {
-                    list_changed: Some(true),
-                })
-                .build(),
+            true => {
+                let mut prompts = PromptsCapability::default();
+                prompts.list_changed = Some(true);
+                capabilities.enable_prompts_with(prompts).build()
+            }
             false => capabilities.build(),
         }
     }
@@ -178,7 +178,9 @@ impl SoloistMcp {
     fn with_suggestion(&self, tool: &str, mut result: CallToolResult) -> CallToolResult {
         if result.is_error != Some(true) {
             if let Some(hint) = self.suggestions.take(tool) {
-                result.content.push(Content::text(format!("Next: {hint}")));
+                result
+                    .content
+                    .push(ContentBlock::text(format!("Next: {hint}")));
             }
         }
         result

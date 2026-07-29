@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rmcp::model::{
     CallToolResult, ErrorData, GetPromptRequestParams, GetPromptResult, JsonObject,
-    ListPromptsResult, Prompt, PromptArgument, PromptMessage, PromptMessageRole,
+    ListPromptsResult, Prompt, PromptArgument, PromptMessage, Role,
 };
 use soloist_core::{MissingPolicy, TemplateSummary};
 use soloist_ipc::{IpcRequest, IpcResponse};
@@ -245,10 +245,8 @@ impl SoloistMcp {
             .await
         {
             Ok(IpcResponse::PromptTemplateRendered(rendered)) => {
-                let result = GetPromptResult::new(vec![PromptMessage::new_text(
-                    PromptMessageRole::User,
-                    rendered.text,
-                )]);
+                let result =
+                    GetPromptResult::new(vec![PromptMessage::new_text(Role::User, rendered.text)]);
                 Ok(match summary.description {
                     Some(description) => result.with_description(description),
                     None => result,
