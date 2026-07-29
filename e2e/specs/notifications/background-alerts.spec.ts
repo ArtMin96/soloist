@@ -57,6 +57,11 @@ describe("alerting about processes the user is not watching", () => {
   });
 
   it("marks the crashed process's row and its project as unread", async () => {
+    // The toast is not a sync point for the markers: the core publishes the alert first and only
+    // then records it as unread, so the window can be showing the alert with nothing marked yet.
+    // The count is the barrier — it and both markers render from the one snapshot.
+    await attentionControl.waitForCount(1);
+
     const row = (await sidebar.rows()).find((candidate) => candidate.label === FAULTY);
 
     expect(row?.unread).toBe(true);
