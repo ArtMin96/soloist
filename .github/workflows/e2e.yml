@@ -19,7 +19,7 @@ jobs:
     # Matches the CI floor and the supported runtime target, Ubuntu 22.04+.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The Tauri build deps, plus xvfb for the display. Deliberately NOT webkit2gtk-driver and NOT
       # `cargo install tauri-driver`: the embedded provider runs the WebDriver server inside the app,
