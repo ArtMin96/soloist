@@ -160,7 +160,10 @@ async fn falling_behind_the_bus_still_leaves_the_badge_current() {
     .await;
 
     let counts = decided.lock().expect("no test panicked");
-    assert!(!counts.is_empty(), "the lag was skipped instead of caught up");
+    assert!(
+        !counts.is_empty(),
+        "the lag was skipped instead of caught up"
+    );
     assert!(counts.iter().all(|count| *count == Some(2)));
 }
 

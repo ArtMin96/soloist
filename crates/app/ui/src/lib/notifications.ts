@@ -1,9 +1,30 @@
-import type { AttentionKind, NotificationLevel, Notifications } from "@/domain";
-import type { Choice } from "@/lib/appearance";
+import type { AttentionKind, NotificationLevel, Notifications, NotifierStatus } from "@/domain";
+import type { Choice, Option } from "@/lib/appearance";
 
-// The master switch defaults on (mirrors soloist_core::Notifications::default); the facade's stored
-// value supersedes this the moment it loads.
-export const DEFAULT_NOTIFICATIONS: Notifications = { enabled: true };
+// The master switch defaults on and no sound is chosen (mirrors soloist_core::Notifications::default);
+// the facade's stored value supersedes this the moment it loads.
+export const DEFAULT_NOTIFICATIONS: Notifications = { enabled: true, bell: null };
+
+// The sounds the alert-sound picker offers. Names only — nothing is bundled, because whatever
+// renders the alert resolves the name against the user's own sound theme, so shipping audio would
+// both bloat the app and ignore the theme they chose.
+//
+// Every name is one the freedesktop Sound Naming Specification defines, rather than a file that
+// happens to exist on one machine: a theme that ships a different set is the normal case, and the
+// spec's own lookup rule covers it — an unfound name "is truncated at the last '-' and it is tried
+// again", falling back through the theme's parents to freedesktop. So `bell-terminal` reaches a
+// plain `bell` on a theme that has only that, and a theme with neither simply plays nothing while
+// the notification still shows.
+//
+// Silence leads and is the default: a sound nobody asked for is what makes someone turn
+// notifications off altogether.
+export const ALERT_SOUND_OPTIONS: Option<string | null>[] = [
+  { value: null, label: "None" },
+  { value: "bell-terminal", label: "Bell" },
+  { value: "message-new-instant", label: "Message" },
+  { value: "dialog-information", label: "Information" },
+  { value: "dialog-warning", label: "Warning" },
+];
 
 // The three levels, in descending loudness — the one list every level picker renders from.
 //
@@ -84,6 +105,61 @@ export const TOAST: Record<AttentionKind, ToastDisplay> = {
 // How many toasts are on screen at once; the rest stack behind them, newest in front. A burst of
 // alerts must never grow an unbounded column down the window.
 export const VISIBLE_TOASTS = 3;
+
+// How the desktop channel's state reads. Encoded the way every other state in the app is — glyph
+// and color and label together, never hue alone — reusing the status vocabulary rather than a
+// second one: a notification service that is not running is the same fact as a process that is not
+// running, so it should not look like a different kind of thing.
+export interface NotifierStatusDisplay {
+  /** A shape carrying the state without color, from the same vocabulary as process status. */
+  glyph: string;
+  /** Tailwind text-color utility for the glyph. */
+  toneClass: string;
+  label: string;
+  /**
+   * What the state means, scoped to the desktop channel alone. It never says an alert was or will
+   * be delivered — that is the one thing this channel cannot report.
+   */
+  detail: string;
+  /** What the user can do about it, or `null` when there is nothing to do. */
+  check: string | null;
+}
+
+// The exhaustive Record makes the compiler demand an entry for every state the core can report.
+export const NOTIFIER_STATUS: Record<NotifierStatus["type"], NotifierStatusDisplay> = {
+  available: {
+    glyph: "●",
+    toneClass: "text-status-running",
+    label: "Connected",
+    detail: "Something is listening for alerts.",
+    check: null,
+  },
+  unavailable: {
+    glyph: "○",
+    toneClass: "text-status-stopped",
+    label: "Not available",
+    // The second sentence is the whole reason this row exists: it is what stops a dead desktop
+    // channel reading as "Soloist has gone quiet", which it has not.
+    detail:
+      "No notification service is running on this session bus, so desktop alerts won't appear. In-app toasts still will.",
+    check:
+      "Check that your desktop's notification service is running — on GNOME it is part of gnome-shell.",
+  },
+};
+
+// What an available daemon says it can do with an alert, in the two respects that change what the
+// user gets. `body` carries the alert's second line; `sound` decides whether a chosen bell can play
+// at all. A daemon advertising neither still shows notifications — it just shows less of one, and
+// saying so here is what keeps a silent bell from looking like a Soloist bug.
+export function advertisedSupport(capabilities: string[]): string {
+  const body = capabilities.includes("body");
+  const sound = capabilities.includes("sound");
+  if (body && sound) return "It advertises support for message text and for sound.";
+  if (body) return "It advertises message text but not sound, so an alert sound may not play.";
+  if (sound)
+    return "It advertises sound but not message text, so an alert may show only its title.";
+  return "It advertises neither message text nor sound, so an alert may show only its title, silently.";
+}
 
 // A command with no level of its own inherits its project's. A radio value cannot carry `null`, so
 // that state travels as a sentinel string; the two mappings across that edge live here only.

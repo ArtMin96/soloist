@@ -24,6 +24,7 @@ import type {
   McpToolGroups,
   NotificationLevel,
   Notifications,
+  NotifierStatus,
   OrchestrationSnapshot,
   Presence,
   ProcessSpec,
@@ -510,9 +511,17 @@ export function clearAllAttention(): Promise<void> {
   return invoke<void>("clear_all_attention");
 }
 
-// Shows a sample desktop notification, so a user can tell whether alerts reach them at all.
+// Shows a sample desktop notification, so a user can tell whether alerts reach them at all. It
+// resolves once the alert has been handed to the desktop — never once it has been seen, which the
+// fire-and-forget channel cannot report.
 export function sendTestNotification(): Promise<void> {
   return invoke<void>("send_test_notification");
+}
+
+// What the desktop notification channel can currently do. Probed on a user's action, never on an
+// interval: answering it is a blocking round trip to the desktop's notification backend.
+export function notifierStatus(): Promise<NotifierStatus> {
+  return invoke<NotifierStatus>("notifier_status");
 }
 
 export function mcpToolGroups(): Promise<McpToolGroups> {

@@ -655,12 +655,22 @@ export interface Integrations {
   http_api_enabled: boolean;
 }
 
-// The Notifications settings — the master on/off for every desktop toast. Off silences
-// notifications everywhere; the per-project crash/exit and terminal-alert switches refine what an
-// enabled reactor shows. Mirrors soloist_core::Notifications.
+// The Notifications settings — the master on/off for every alert, and the sound one asks for. Off
+// silences notifications everywhere; the per-project crash/exit and terminal-alert switches refine
+// what an enabled reactor shows. Mirrors soloist_core::Notifications.
 export interface Notifications {
   enabled: boolean;
+  /** A sound name for whatever renders the alert to resolve, or null to alert silently. */
+  bell: string | null;
 }
+
+// What the desktop notification channel can currently do on this machine (mirrors
+// soloist_core::NotifierStatus). It describes the channel, never one alert: showing a notification
+// is fire-and-forget, so whether one reached the user is not observable and must never be presented
+// as confirmed. `available` means something is listening — no more than that.
+export type NotifierStatus =
+  | { type: "unavailable" }
+  | { type: "available"; server: string; version: string; capabilities: string[] };
 
 // A toggleable MCP feature-tool group (mirrors core::McpFeatureGroup). Core groups are always
 // served and are not represented here.
