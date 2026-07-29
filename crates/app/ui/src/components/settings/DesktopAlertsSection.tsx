@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { sendTestNotification } from "@/api";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { Button } from "@/components/ui/button";
-import { NOTIFIER_STATUS } from "@/lib/notifications";
+import { advertisedSupport, NOTIFIER_STATUS } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { useNotifierStatus } from "@/store/useNotifierStatus";
 
@@ -50,10 +50,18 @@ export function DesktopAlertsSection() {
           <div className="min-w-0">
             <div className="text-[0.8125rem] text-foreground">{display.label}</div>
             <p className="mt-0.5 max-w-[42ch] text-xs text-muted-foreground">{display.detail}</p>
+            {display.check && (
+              <p className="mt-1 max-w-[42ch] text-xs text-muted-foreground">{display.check}</p>
+            )}
             {status.type === "available" && (
-              <p className="mt-1 truncate font-mono text-[0.6875rem] text-muted-foreground">
-                {status.server} {status.version}
-              </p>
+              <>
+                <p className="mt-1 max-w-[42ch] text-xs text-muted-foreground">
+                  {advertisedSupport(status.capabilities)}
+                </p>
+                <p className="mt-1 truncate font-mono text-[0.6875rem] text-muted-foreground">
+                  {status.server} {status.version}
+                </p>
+              </>
             )}
           </div>
         </div>

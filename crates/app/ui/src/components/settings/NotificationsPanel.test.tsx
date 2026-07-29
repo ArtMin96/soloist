@@ -36,7 +36,8 @@ function mountWith(stored: Notifications, status: NotifierStatus = { type: "unav
   return { saved, sent };
 }
 
-const masterSwitch = () => screen.getByRole("switch", { name: "Show notifications" });
+const masterSwitch = () =>
+  screen.getByRole("switch", { name: "Show notifications" }) as HTMLButtonElement;
 const soundPicker = () => screen.getByRole("combobox", { name: "Alert sound" });
 
 describe("Settings — Notifications", () => {
@@ -49,14 +50,14 @@ describe("Settings — Notifications", () => {
   });
 
   it("persists a toggle without dropping the chosen sound", async () => {
-    const { saved } = mountWith({ enabled: true, bell: "bell" });
+    const { saved } = mountWith({ enabled: true, bell: "bell-terminal" });
     await waitFor(() => expect(masterSwitch().getAttribute("aria-checked")).toBe("true"));
 
     fireEvent.click(masterSwitch());
 
     // The setter replaces the whole document, so a row that sent only its own field would silently
     // reset the other — turning notifications off and on again would lose the user's sound.
-    await waitFor(() => expect(saved).toEqual([{ enabled: false, bell: "bell" }]));
+    await waitFor(() => expect(saved).toEqual([{ enabled: false, bell: "bell-terminal" }]));
   });
 
   it("shows no sound chosen as None rather than as the first sound offered", async () => {
@@ -79,6 +80,18 @@ describe("Settings — Notifications", () => {
 
     await waitFor(() => expect(screen.getByText("Connected")).toBeTruthy());
     expect(screen.getByText("gnome-shell 46.0")).toBeTruthy();
+    expect(screen.getByText(/advertises support for message text and for sound/)).toBeTruthy();
+  });
+
+  it("says when the listening service cannot play a sound", async () => {
+    // A daemon that does not advertise `sound` is itself the explanation for a bell that never
+    // plays. Reporting it here is what stops that reading as a Soloist bug.
+    mountWith(
+      { enabled: true, bell: "bell-terminal" },
+      { type: "available", server: "dunst", version: "1.9.2", capabilities: ["body"] },
+    );
+
+    await waitFor(() => expect(screen.getByText(/but not sound/)).toBeTruthy());
   });
 
   it("scopes an unavailable desktop channel to the desktop, leaving the settings operable", async () => {
@@ -89,7 +102,10 @@ describe("Settings — Notifications", () => {
     // service — so the row must say what is actually unreachable, and the controls must keep
     // working. Presenting them as dead would be the confusion this row exists to prevent.
     expect(screen.getByText(/In-app toasts still will/)).toBeTruthy();
+    // Not just the diagnosis — what to do about it.
+    expect(screen.getByText(/on GNOME it is part of gnome-shell/)).toBeTruthy();
 
+    expect(masterSwitch().disabled).not.toBe(true);
     expect(masterSwitch().getAttribute("aria-disabled")).not.toBe("true");
     fireEvent.click(masterSwitch());
     await waitFor(() => expect(saved).toEqual([{ enabled: false, bell: null }]));
