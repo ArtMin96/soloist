@@ -63,7 +63,7 @@ pub fn open_from_args<I: IntoIterator<Item = String>>(app: &AppHandle, args: I) 
 
 /// Brings the main window to the foreground.
 pub fn reveal(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = app.get_webview_window(crate::MAIN_WINDOW) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();

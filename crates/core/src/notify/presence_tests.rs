@@ -32,3 +32,15 @@ fn the_newest_observation_wins() {
 
     assert_eq!(cell.get().viewing, Some(api));
 }
+
+#[test]
+fn a_repeated_observation_reports_no_change() {
+    let cell = PresenceCell::new();
+    let here = Presence {
+        focused: true,
+        viewing: Some(ProcessId::from_raw(1)),
+    };
+
+    assert!(cell.set(here), "arriving moved the user");
+    assert!(!cell.set(here), "saying it again moved nobody");
+}

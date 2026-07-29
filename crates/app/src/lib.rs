@@ -5,6 +5,7 @@
 //! routes `invoke` calls to facade commands (see [`commands`]), and forwards the core's
 //! `DomainEvent` stream to the webview as Tauri events. The UI renders the read model.
 
+mod badge;
 mod commands;
 mod companion_bins;
 mod integration_servers;
@@ -40,6 +41,9 @@ use tokio::sync::broadcast::error::RecvError;
 
 use notifier::TauriNotifier;
 use pty_bridge::PtyBridge;
+
+/// The label of the window the app shows its UI in.
+const MAIN_WINDOW: &str = "main";
 
 /// The webview event name carrying every serialized [`soloist_core::DomainEvent`].
 const DOMAIN_EVENT: &str = "domain-event";
@@ -301,6 +305,9 @@ pub fn run() {
             // Start the notification reactor: it shows a desktop toast on a crash or an
             // exhausted auto-restart via the notification plugin (also weakly held).
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().notifications_loop());
+            // Start the app-icon badge: it draws the unread count on the dock icon while the user
+            // is away from the window, where the desktop supports it (ends when the bus closes).
+            badge::install(app.handle());
             // Start the template cache evictor: removing a project cascades its template rows
             // away in the store without the aggregate seeing a write, so this drops that
             // project's cached rows (aggregate weakly held, also self-supervised).
@@ -344,7 +351,7 @@ pub fn run() {
                 {
                     let window_handle = app.handle().clone();
                     let focus: soloist_httpapi::FocusFn = Arc::new(move || {
-                        if let Some(window) = window_handle.get_webview_window("main") {
+                        if let Some(window) = window_handle.get_webview_window(MAIN_WINDOW) {
                             let _ = window.set_focus();
                         }
                     });

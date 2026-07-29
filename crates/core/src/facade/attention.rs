@@ -28,12 +28,13 @@ impl Facade {
     /// markers unobservable by construction. The app-icon badge does clear on focus, but that is
     /// one surface choosing what to draw from an unchanged snapshot, not the core forgetting.
     ///
-    /// Reporting presence cannot drive a cycle, though surfaces re-read on the announcement: an
-    /// announcement needs a clear that actually removed something, and nothing can be removed
-    /// twice without the reactor raising it again — which, for the process on screen, it will not
-    /// do.
+    /// Reporting presence cannot drive a cycle, though surfaces re-read on the announcement: a
+    /// report that moved nobody announces nothing, and the shell reports what it observes — window
+    /// focus and the selected process — never what it read back from the bus.
     pub fn set_presence(&self, presence: Presence) {
-        self.presence.set(presence);
+        if self.presence.set(presence) {
+            self.bus.publish(DomainEvent::PresenceChanged);
+        }
         // A process is only really seen when the window showing it is on screen, so a selection
         // made in a background window clears nothing.
         let seen = presence.focused
@@ -43,6 +44,13 @@ impl Facade {
         if seen {
             self.bus.publish(DomainEvent::AttentionChanged);
         }
+    }
+
+    /// Where the user last reported being. The app-icon badge reads it to decide whether to draw a
+    /// count at all: the badge answers "did anything happen while I was away", which is nothing
+    /// once the user is back, even though the unread itself survives their arrival.
+    pub fn presence(&self) -> Presence {
+        self.presence.get()
     }
 
     /// Everything currently unread: which processes are waiting on the user and how much in total.
