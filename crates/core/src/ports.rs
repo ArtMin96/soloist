@@ -234,10 +234,16 @@ pub trait ProjectRepo: Send + Sync {
         name: Option<&str>,
         icon: Option<&Path>,
     ) -> Result<ProjectRecord, StoreError>;
-    /// All known projects, most-recently-added first.
+    /// All known projects in their display order — the user's own if they have arranged one,
+    /// most-recently-added first otherwise.
     fn list(&self) -> Result<Vec<ProjectRecord>, StoreError>;
     /// One project by id, `None` if absent.
     fn get(&self, id: ProjectId) -> Result<Option<ProjectRecord>, StoreError>;
+    /// Files `order` as the durable display order [`Self::list`] returns. The listed ids take
+    /// the leading places in the order given; every other known project keeps its current
+    /// relative order behind them. Ids that name no project are ignored, so an order computed
+    /// against a stale read cannot fail — it just does not move a project that is already gone.
+    fn reorder(&self, order: &[ProjectId]) -> Result<(), StoreError>;
     /// Removes a project (cascading to its trust records).
     fn remove(&self, id: ProjectId) -> Result<(), StoreError>;
 }

@@ -4,6 +4,7 @@ import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
 import { useSidebarHotkeys } from "@/components/sidebar/useSidebarHotkeys";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SortableItem, SortableList } from "@/components/ui/sortable-list";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
@@ -15,7 +16,13 @@ import {
 import { useCollapseState } from "@/store/useCollapseState";
 import { useSidebarSettings } from "@/store/sidebarSettingsContext";
 import { useToggleSet } from "@/store/useToggleSet";
+import type { ProjectTree } from "@/store/projects";
 import type { ProcessView, ProjectView } from "@/domain";
+
+// What a rearranged project is called when a move is announced.
+function nameOfProject(trees: ProjectTree[], id: string): string {
+  return trees.find((tree) => String(tree.project.id) === id)?.project.name ?? id;
+}
 
 interface SidebarProps {
   projects: ProjectView[];
@@ -39,6 +46,7 @@ interface SidebarProps {
   onOpenProjectSettings: (projectId: number) => void;
   onOpenOrchestration: (projectId: number) => void;
   onRemoveProject: (projectId: number) => void;
+  onReorderProjects: (order: number[]) => void;
 }
 
 // The process tree, grouped by project: each opened project is a collapsible node over its
@@ -67,12 +75,15 @@ export function Sidebar({
   onOpenProjectSettings,
   onOpenOrchestration,
   onRemoveProject,
+  onReorderProjects,
 }: SidebarProps) {
   const { sidebar } = useSidebarSettings();
   const [filter, setFilter] = useState("");
   // The filter only narrows the tree while its input is shown; hiding the input restores the full
   // list (there is then no way to change the query).
-  const visible = filterSidebar(processes, projects, sidebar.show_filter_input ? filter : "");
+  const query = sidebar.show_filter_input ? filter : "";
+  const filtering = query.trim().length > 0;
+  const visible = filterSidebar(processes, projects, query);
   const trees = groupByProject(
     visible.processes,
     visible.projects,
@@ -109,34 +120,51 @@ export function Sidebar({
         tabIndex={0}
         onKeyDown={handleNavKeyDown}
       >
-        {trees.map((tree, index) => (
-          <div key={tree.project.id} className={index > 0 ? "mt-1 border-t pt-1" : undefined}>
-            <ProjectGroup
-              tree={tree}
-              open={!collapsed[projectCollapseKey(tree.project.id)]}
-              onOpenChange={(open) => setCollapsed(projectCollapseKey(tree.project.id), !open)}
-              kindOpen={(kind) => !collapsed[kindCollapseKey(tree.project.id, kind)]}
-              onKindOpenChange={(kind, open) =>
-                setCollapsed(kindCollapseKey(tree.project.id, kind), !open)
-              }
-              collapsedLeads={collapsedLeads}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              onStart={onStart}
-              onStop={onStop}
-              onRestart={onRestart}
-              onResume={onResume}
-              onRemove={onRemove}
-              onTrust={onTrust}
-              onStartAll={() => onStartAll(tree.project.id)}
-              onRestartRunning={() => onRestartRunning(tree.project.id)}
-              onStopAll={() => onStopAll(tree.project.id)}
-              onOpenProjectSettings={() => onOpenProjectSettings(tree.project.id)}
-              onOpenOrchestration={() => onOpenOrchestration(tree.project.id)}
-              onRemoveProject={() => onRemoveProject(tree.project.id)}
-            />
-          </div>
-        ))}
+        <SortableList
+          ids={trees.map((tree) => String(tree.project.id))}
+          onReorder={(order) => onReorderProjects(order.map(Number))}
+          nameOf={(id) => nameOfProject(trees, id)}
+          // A filtered tree is only part of the list, and an order arranged from part of a list
+          // is not the user's answer for the whole of it.
+          disabled={filtering}
+        >
+          {trees.map((tree, index) => (
+            <SortableItem
+              key={tree.project.id}
+              id={String(tree.project.id)}
+              className={index > 0 ? "mt-1 border-t pt-1" : undefined}
+            >
+              {({ handleProps, isDragging }) => (
+                <ProjectGroup
+                  tree={tree}
+                  dragHandleProps={filtering ? undefined : handleProps}
+                  dragging={isDragging}
+                  open={!collapsed[projectCollapseKey(tree.project.id)]}
+                  onOpenChange={(open) => setCollapsed(projectCollapseKey(tree.project.id), !open)}
+                  kindOpen={(kind) => !collapsed[kindCollapseKey(tree.project.id, kind)]}
+                  onKindOpenChange={(kind, open) =>
+                    setCollapsed(kindCollapseKey(tree.project.id, kind), !open)
+                  }
+                  collapsedLeads={collapsedLeads}
+                  selectedId={selectedId}
+                  onSelect={onSelect}
+                  onStart={onStart}
+                  onStop={onStop}
+                  onRestart={onRestart}
+                  onResume={onResume}
+                  onRemove={onRemove}
+                  onTrust={onTrust}
+                  onStartAll={() => onStartAll(tree.project.id)}
+                  onRestartRunning={() => onRestartRunning(tree.project.id)}
+                  onStopAll={() => onStopAll(tree.project.id)}
+                  onOpenProjectSettings={() => onOpenProjectSettings(tree.project.id)}
+                  onOpenOrchestration={() => onOpenOrchestration(tree.project.id)}
+                  onRemoveProject={() => onRemoveProject(tree.project.id)}
+                />
+              )}
+            </SortableItem>
+          ))}
+        </SortableList>
       </nav>
       <div className="flex items-center gap-1 border-t border-sidebar-border p-2">
         <Tooltip>

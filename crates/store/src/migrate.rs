@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 18;
+pub(crate) const SCHEMA_VERSION: i64 = 19;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -319,6 +319,15 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
              );",
         )
         .map_err(sql_err)?;
+    }
+
+    if version < 19 {
+        // Projects gain a user-arrangeable display order. Only a reorder ever writes `position`,
+        // so a project the user has never placed keeps the default and is ordered by the reader's
+        // `id DESC` tiebreak — which is the newest-first order the list has always had. An upgrade
+        // therefore rearranges nothing, and a newly opened project still leads.
+        conn.execute_batch("ALTER TABLE projects ADD COLUMN position INTEGER NOT NULL DEFAULT 0;")
+            .map_err(sql_err)?;
     }
 
     if version < SCHEMA_VERSION {

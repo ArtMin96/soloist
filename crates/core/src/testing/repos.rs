@@ -100,12 +100,14 @@ impl ProjectRepo for FakeProjectRepo {
             icon: icon.map(Path::to_path_buf),
         };
         inner.next_id += 1;
-        inner.rows.push(record.clone());
+        // `rows` is held in display order, as the real store's `position` column keeps it: a
+        // newly opened project leads until the user arranges the list otherwise.
+        inner.rows.insert(0, record.clone());
         Ok(record)
     }
 
     fn list(&self) -> Result<Vec<ProjectRecord>, StoreError> {
-        Ok(lock(&self.inner).rows.iter().rev().cloned().collect())
+        Ok(lock(&self.inner).rows.clone())
     }
 
     fn get(&self, id: ProjectId) -> Result<Option<ProjectRecord>, StoreError> {
@@ -113,6 +115,23 @@ impl ProjectRepo for FakeProjectRepo {
             return Err(StoreError::Backend("simulated store failure".into()));
         }
         Ok(lock(&self.inner).rows.iter().find(|r| r.id == id).cloned())
+    }
+
+    fn reorder(&self, order: &[ProjectId]) -> Result<(), StoreError> {
+        let mut inner = lock(&self.inner);
+        let mut placed: Vec<ProjectRecord> = order
+            .iter()
+            .filter_map(|id| inner.rows.iter().find(|r| r.id == *id).cloned())
+            .collect();
+        placed.extend(
+            inner
+                .rows
+                .iter()
+                .filter(|r| !order.contains(&r.id))
+                .cloned(),
+        );
+        inner.rows = placed;
+        Ok(())
     }
 
     fn remove(&self, id: ProjectId) -> Result<(), StoreError> {

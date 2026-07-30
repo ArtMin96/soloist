@@ -25,14 +25,24 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useSortableList } from "@/components/ui/sortable-list";
 import { ATTENTION_LABEL } from "@/lib/attention";
+import { cn } from "@/lib/utils";
 import { useUnreadProject } from "@/store/attentionContext";
 import { monogram, type ProjectTree } from "@/store/projects";
 import type { ToggleSet } from "@/store/useToggleSet";
 import type { ProcessKind } from "@/domain";
 
+/** One place toward the top of the list, and one place toward its bottom. */
+const MOVE_TOWARD_TOP = -1;
+const MOVE_TOWARD_BOTTOM = 1;
+
 interface ProjectGroupProps {
   tree: ProjectTree;
+  /** Spread onto the header row so the project is dragged by its whole line, not by a grip. */
+  dragHandleProps?: Record<string, unknown>;
+  /** True while this project is the one being dragged. */
+  dragging?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   kindOpen: (kind: ProcessKind) => boolean;
@@ -61,6 +71,8 @@ interface ProjectGroupProps {
 // so the name never competes with a row of buttons. Empty subgroups are not rendered.
 export function ProjectGroup({
   tree,
+  dragHandleProps,
+  dragging,
   open,
   onOpenChange,
   kindOpen,
@@ -86,6 +98,9 @@ export function ProjectGroup({
   // The menus only *open* the confirm; the removal itself runs solely from the dialog's
   // destructive action, so a destructive menu click can never remove anything by itself.
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const { moveItemBy, canMoveItemBy } = useSortableList();
+  const id = String(project.id);
+  const move = (delta: number) => (canMoveItemBy(id, delta) ? () => moveItemBy(id, delta) : null);
   const actions = projectActions({
     onStartAll,
     onRestartRunning,
@@ -93,13 +108,25 @@ export function ProjectGroup({
     onOpenOrchestration,
     onOpenProjectSettings,
     onRemoveProject: () => setConfirmRemove(true),
+    onMoveUp: move(MOVE_TOWARD_TOP),
+    onMoveDown: move(MOVE_TOWARD_BOTTOM),
   });
 
   return (
     <Collapsible open={open} onOpenChange={onOpenChange} className="select-none">
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div className="group/project flex h-8 items-center gap-1.5 rounded-md px-1">
+          {/* The whole line is the drag handle — there is no grip to find, and no part of the
+              row that refuses to move. The press only becomes a drag once it travels, so the
+              disclosure and the ••• menu inside it keep taking their clicks. */}
+          <div
+            {...dragHandleProps}
+            className={cn(
+              "group/project flex h-8 items-center gap-1.5 rounded-md px-1",
+              dragHandleProps && "cursor-grab active:cursor-grabbing",
+              dragging && "cursor-grabbing",
+            )}
+          >
             <CollapsibleTrigger className="group/trigger flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
               <ChevronRight
                 aria-hidden
@@ -176,6 +203,19 @@ export function ProjectGroup({
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuGroup>
+                  {actions.arrange.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuGroup>
+                        {actions.arrange.map((action) => (
+                          <DropdownMenuItem key={action.id} onSelect={action.run}>
+                            <ActionIcon action={action} />
+                            {action.label}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuGroup>
+                    </>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
                     {actions.danger.map((action) => (
@@ -210,6 +250,19 @@ export function ProjectGroup({
               </ContextMenuItem>
             ))}
           </ContextMenuGroup>
+          {actions.arrange.length > 0 && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuGroup>
+                {actions.arrange.map((action) => (
+                  <ContextMenuItem key={action.id} onSelect={action.run}>
+                    <ActionIcon action={action} />
+                    {action.label}
+                  </ContextMenuItem>
+                ))}
+              </ContextMenuGroup>
+            </>
+          )}
           <ContextMenuSeparator />
           <ContextMenuGroup>
             {actions.danger.map((action) => (

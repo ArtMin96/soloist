@@ -278,6 +278,15 @@ impl Facade {
         self.project_service().remove(project).await
     }
 
+    /// Files the user's own arrangement of the project list, then announces it so every
+    /// surface re-reads the same order. The order is durable, so the list a user arranges is
+    /// the list they get back on the next launch.
+    pub fn reorder_projects(&self, order: &[ProjectId]) -> Result<(), StoreError> {
+        self.projects.reorder(order)?;
+        self.bus.publish(DomainEvent::ProjectsReordered);
+        Ok(())
+    }
+
     /// Assembles the project lifecycle service over the contexts the Facade owns.
     fn project_service(&self) -> ProjectService<'_> {
         ProjectService::new(&self.projects, &self.config, &self.supervisor, &self.bus)

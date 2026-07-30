@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
+import { SortableList } from "@/components/ui/sortable-list";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ProjectTree } from "@/store/projects";
 
@@ -13,31 +14,35 @@ const tree: ProjectTree = {
 
 const noop = () => {};
 
-function renderGroup() {
+// A project header only exists inside the arrangeable project list, which is what supplies its
+// move actions — so the harness composes it the way the sidebar does.
+function renderGroup(ids: string[] = ["1"]) {
   render(
     <TooltipProvider>
-      <ProjectGroup
-        tree={tree}
-        open
-        onOpenChange={noop}
-        kindOpen={() => true}
-        onKindOpenChange={noop}
-        collapsedLeads={{ has: () => false, toggle: noop }}
-        selectedId={null}
-        onSelect={noop}
-        onStart={noop}
-        onStop={noop}
-        onRestart={noop}
-        onResume={noop}
-        onRemove={noop}
-        onTrust={noop}
-        onStartAll={noop}
-        onRestartRunning={noop}
-        onStopAll={noop}
-        onOpenProjectSettings={noop}
-        onOpenOrchestration={noop}
-        onRemoveProject={noop}
-      />
+      <SortableList ids={ids} onReorder={noop}>
+        <ProjectGroup
+          tree={tree}
+          open
+          onOpenChange={noop}
+          kindOpen={() => true}
+          onKindOpenChange={noop}
+          collapsedLeads={{ has: () => false, toggle: noop }}
+          selectedId={null}
+          onSelect={noop}
+          onStart={noop}
+          onStop={noop}
+          onRestart={noop}
+          onResume={noop}
+          onRemove={noop}
+          onTrust={noop}
+          onStartAll={noop}
+          onRestartRunning={noop}
+          onStopAll={noop}
+          onOpenProjectSettings={noop}
+          onOpenOrchestration={noop}
+          onRemoveProject={noop}
+        />
+      </SortableList>
     </TooltipProvider>,
   );
 }

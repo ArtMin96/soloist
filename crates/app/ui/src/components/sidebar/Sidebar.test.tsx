@@ -95,6 +95,7 @@ function renderSidebar(
     onOpenStart?: () => void;
     bindings?: HotkeyBindingView[];
     lineage?: ReadonlyMap<number, number>;
+    onReorderProjects?: (order: number[]) => void;
   } = {},
 ) {
   const {
@@ -105,6 +106,7 @@ function renderSidebar(
     onOpenStart = noop,
     bindings = DEFAULT_BINDINGS,
     lineage = new Map(),
+    onReorderProjects = noop,
   } = overrides;
   render(
     <TooltipProvider>
@@ -131,6 +133,7 @@ function renderSidebar(
             onOpenProjectSettings={noop}
             onOpenOrchestration={noop}
             onRemoveProject={noop}
+            onReorderProjects={onReorderProjects}
           />
         </SidebarSettingsContext>
       </HotkeysContext>
@@ -240,6 +243,7 @@ describe("Sidebar lineage nesting", () => {
               onOpenProjectSettings={noop}
               onOpenOrchestration={noop}
               onRemoveProject={noop}
+              onReorderProjects={noop}
             />
           </SidebarSettingsContext>
         </HotkeysContext>
@@ -335,5 +339,52 @@ describe("Sidebar hotkeys", () => {
     const nav = renderSidebar({ selectedId: 10, onRestart, bindings });
     fireEvent.keyDown(nav, { key: "R" });
     expect(onRestart).not.toHaveBeenCalled();
+  });
+});
+
+describe("Sidebar project arrangement", () => {
+  // Opening a Radix menu is a pointer-down, not a click.
+  const openMenu = (project: string) =>
+    fireEvent.pointerDown(screen.getByRole("button", { name: `Actions for ${project}` }));
+
+  const projectRow = (name: string) =>
+    screen.getByText(name).closest("div[class*='group/project']");
+
+  it("makes the whole project line the drag handle, with no grip to find", () => {
+    renderSidebar();
+
+    // The row itself carries the drag, so there is no dead zone on it and no separate handle
+    // competing with the project name for width.
+    expect(projectRow("alpha")?.className).toContain("cursor-grab");
+    expect(screen.queryByRole("button", { name: /drag/i })).toBeNull();
+  });
+
+  it("rearranges the list from the project menu, reporting the whole new order", () => {
+    const onReorderProjects = vi.fn();
+    renderSidebar({ onReorderProjects });
+
+    openMenu("beta");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }));
+
+    expect(onReorderProjects).toHaveBeenCalledWith([2, 1]);
+  });
+
+  it("withholds the move a project at an end of the list cannot make", () => {
+    renderSidebar();
+
+    openMenu("alpha");
+    // alpha leads the list, so there is nowhere above it to go.
+    expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Move down" })).toBeTruthy();
+  });
+
+  it("does not offer to arrange a list a filter has narrowed", () => {
+    renderSidebar({ settings: { ...DEFAULT_SIDEBAR, show_filter_input: true } });
+
+    fireEvent.change(screen.getByLabelText("Filter processes"), { target: { value: "beta" } });
+
+    // Only part of the list is on screen, so an order arranged from it would not be the user's
+    // answer for the whole of it.
+    expect(projectRow("beta")?.className).not.toContain("cursor-grab");
   });
 });

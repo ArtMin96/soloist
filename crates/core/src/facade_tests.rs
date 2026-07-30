@@ -570,3 +570,40 @@ async fn scope_is_ambiguous_with_several_projects_until_one_is_selected() {
         Err(IdentityError::ForeignProject)
     ));
 }
+
+#[tokio::test]
+async fn reordering_projects_files_the_order_and_announces_it() {
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let first = tempfile::tempdir().expect("temp dir");
+    let second = tempfile::tempdir().expect("temp dir");
+    let third = tempfile::tempdir().expect("temp dir");
+    let opened: Vec<ProjectId> = [&first, &second, &third]
+        .iter()
+        .map(|dir| {
+            facade
+                .projects()
+                .add(dir.path(), None, None)
+                .expect("open a project")
+                .id
+        })
+        .collect();
+    let mut rx = facade.subscribe();
+
+    let arranged = vec![opened[0], opened[2], opened[1]];
+    facade.reorder_projects(&arranged).expect("reorder");
+
+    assert_eq!(
+        facade
+            .projects_snapshot()
+            .expect("snapshot")
+            .into_iter()
+            .map(|view| view.id)
+            .collect::<Vec<_>>(),
+        arranged,
+        "the read model every surface renders comes back in the arranged order"
+    );
+    assert!(
+        matches!(rx.try_recv(), Ok(DomainEvent::ProjectsReordered)),
+        "the arrangement is announced, so a surface that did not make it still re-reads"
+    );
+}

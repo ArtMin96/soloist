@@ -739,6 +739,9 @@ impl ProjectRepo for NoProjects {
     fn get(&self, _id: ProjectId) -> Result<Option<ProjectRecord>, StoreError> {
         Ok(None)
     }
+    fn reorder(&self, _order: &[ProjectId]) -> Result<(), StoreError> {
+        Ok(())
+    }
     fn remove(&self, _id: ProjectId) -> Result<(), StoreError> {
         Ok(())
     }

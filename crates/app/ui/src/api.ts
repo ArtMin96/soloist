@@ -296,6 +296,12 @@ export function projectRemove(project: number): Promise<void> {
   return invoke<void>("project_remove", { project });
 }
 
+// Files the user's own arrangement of the project list — the ids in the order they belong.
+// Durable, so it survives a restart; emits `ProjectsReordered`, which prompts the re-read.
+export function projectReorder(order: number[]): Promise<void> {
+  return invoke<void>("project_reorder", { order });
+}
+
 // What trusting a project's command would authorize — its command line, working directory
 // and environment — so a grant can be shown before it is offered. `null` when the project
 // has no such command.

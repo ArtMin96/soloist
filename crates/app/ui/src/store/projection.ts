@@ -61,6 +61,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "RestartExhausted":
     case "FileRestart":
     case "ProjectOpened":
+    case "ProjectsReordered":
     case "ConfigChanged":
     case "TerminalTitleChanged":
     case "TerminalBell":

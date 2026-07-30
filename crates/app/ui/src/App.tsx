@@ -276,6 +276,7 @@ export default function App() {
                         onOpenProjectSettings={openProjectSettings}
                         onOpenOrchestration={openOrchestration}
                         onRemoveProject={projects.remove}
+                        onReorderProjects={projects.reorder}
                       />
                       <main className="min-w-0 flex-1">
                         <Suspense fallback={<div className="h-full w-full bg-background" />}>

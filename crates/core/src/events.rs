@@ -110,6 +110,10 @@ pub enum DomainEvent {
     /// re-read the project read model and drop any state keyed to the id. Files on disk
     /// are untouched.
     ProjectRemoved { id: ProjectId },
+    /// The user rearranged the project list. The new order is durable and carried by the
+    /// project read model itself, so adapters re-read that model rather than reconstructing
+    /// the order from the event.
+    ProjectsReordered,
     /// A project's `solo.yml` changed on disk. Carries the add/update/remove/rename
     /// diff, whether any added/updated command now needs (re-)trust, and the detail of
     /// each command awaiting trust (so the review dialog can show what will run). Sync
