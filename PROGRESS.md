@@ -11,6 +11,42 @@
 
 > **PHASE 12 (Packaging — `.deb`/`.AppImage`, x86_64) — `Done — pending verify` (2026-06-30, branch `feat/phase-12-packaging`):** v1 rows J1/J2/J3 + the owner-requested J4/J5/tray are gate-green and container-smoked; only the user-only real-desktop GUI walk and the `git tag`→release publish remain. **2026-07-03: both artifacts now also bundle the companion binaries (`soloist-mcp`, `soloist-cli`) — a user-reported gap; fixed + verified, see the top entry. Re-tag/republish so installed apps get them.** **D-11: the supported floor is Ubuntu 22.04+** (20.04 infeasible — Tauri v2 needs WebKitGTK 4.1). Details in the Phase 12 Decisions entry and "Next session should start with".
 >
+> **LATEST (2026-08-01): CHILD-AGENT LIFECYCLE — review findings fixed, four owner decisions taken** —
+> `Done — pending verify`, same branch `feat/child-agent-lifecycle` (uncommitted at time of writing). An
+> `xhigh` multi-agent review of the branch (6 finder angles → 53 candidates → 41 independent verifiers →
+> 11 refuted) reported **15 distinct defects**. All 15 are fixed. **The owner took four decisions** (recorded
+> in `plan/05` §12): **(1) a lead is always an `Agent`** — a Terminal/Command caller spawns a root, closing a
+> path where a worker's multi-line report was typed into the user's interactive shell and executed line by
+> line; **(2) a `close_when_done` worker leaves the registry only on a clean self-ended run whose report
+> actually landed** — a user Stop, a crash, and a stale queued exit event all keep the row and its scrollback;
+> **(3) one idle source of truth** — the scheduler's private `ObservedActivity` fold is deleted and `is_due`
+> and `is_idle_now` are now the same read; **(4) `spawn_agent` refuses by name** when a tool cannot carry an
+> opening turn, while a launch that asks for *no* turn still launches plainly (the "never invent a flag"
+> decision is untouched).
+> - **Reversals of the 2026-07-31 work:** I14/O3's cross-kind sidebar nesting is **reversed** — it made a group
+>   hold and count rows of another kind, over-reporting header counts and letting empty-section hiding delete a
+>   populated section. Nesting resolves within each kind bucket again (`grouping.ts` executable code is now
+>   byte-identical to `origin/main`; the `sidebarNav.ts` compensation was dead and is removed). The frontend
+>   tests `nests a worker under a lead of another kind, in the lead's group` and `jumps to a worker nested under
+>   a lead of another kind` **no longer exist** — cited as evidence in the entry below, they are superseded.
+> - **Root causes worth carrying forward.** `watched_is_idle` could not be fixed by rearranging its status
+>   match: the ambiguity lives entirely in `ProcStatus::Stopped`, since a process is registered in the state it
+>   later rests in. `ObservedActivity` now carries a launch record, so "never started" and "ran and ended" are
+>   distinguishable facts rather than one status. Separately, `try_write_stdin` was always-`Ok`, so *every*
+>   delivery report was a guess; it now returns whether the write was queued, which is what makes decision (2)
+>   enforceable at all.
+> - **Evidence.** `cargo check --workspace --all-targets` clean; **`just lint` exit 0** (fmt, clippy `-D
+>   warnings`, tsc, ESLint, Prettier, `check-core-deps.sh`, `check-core-cycles.sh` — 149 edges no cycles,
+>   file-size advisory only, now 18 files). UI `pnpm vitest run` **132 files / 905 tests, exit 0**. Every new or
+>   changed test was **proven by mutation** — broken, watched redden, restored — per agent report. One flake
+>   observed: `App.test.tsx > navigates only after live removal is confirmed` timed out at 5 s during a combined
+>   `just test` run and passed standalone immediately after, twice; it is untouched by this work, but it is a
+>   real flake and is **not yet fixed**.
+> - **NOT YET DONE: runtime verification.** As with the entry below, these fixes are headless-green only.
+>   A real-window manual walk (lead spawns ≥2 workers → reports land → auto-close ordering → Stop keeps the row
+>   → never-started process does not fire a timer → hand-started agent has no lead) was **in flight when this
+>   entry was written**; its result is not recorded here yet. Do not mark `Verified` until it is.
+>
 > **LATEST (2026-07-31): CHILD-AGENT LIFECYCLE — a worker reports to its lead, and may close itself** —
 > `Done — pending verify`, on branch `feat/child-agent-lifecycle` (9 commits, not yet merged). A review of
 > the lead→worker flow found the two behaviours the owner expected — a worker reporting its result, and a
