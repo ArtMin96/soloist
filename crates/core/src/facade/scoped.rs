@@ -179,6 +179,20 @@ impl ScopedFacade<'_> {
         Ok(view)
     }
 
+    /// The managed process this session speaks for: the one it bound to, else the one its
+    /// connecting peer's group belongs to. Both are authenticated facts — a bind is checked
+    /// against the peer group, and the group itself is kernel-read — so either names the caller
+    /// truthfully. The binding takes precedence because it outlives the group it was checked
+    /// against: a process that restarts keeps its binding while its old group owns nothing.
+    /// `None` only for a caller Soloist did not launch and that never bound.
+    pub(in crate::facade) fn caller_process(&self) -> Option<ProcessId> {
+        self.inner
+            .identity
+            .origin(self.session)
+            .process()
+            .or_else(|| self.home_process())
+    }
+
     /// The scope guard when the caller needs only the pass/fail, not the view. Public for the
     /// one remote read whose own return shape differs from the scoped reads — the async
     /// `wait_for_bound_port`, which confirms scope, then awaits — so its cross-project

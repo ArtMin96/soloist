@@ -96,9 +96,10 @@ impl ScopedFacade<'_> {
     /// [`Facade::launch_agent`] for the one launch behaviour; the worker always
     /// lands in the caller's own project (the resolved scope), so it can never spawn into
     /// another and needs no project argument. The new agent auto-binds via the injected
-    /// `SOLOIST_PROCESS_ID`. When the calling session is bound to a lead process, the worker's
-    /// lineage is recorded under that lead so the orchestration tree nests it; an unbound or
-    /// external caller's spawn is a root. Delegation is one level deep: a caller that was
+    /// `SOLOIST_PROCESS_ID`. Whenever the caller is identifiable — by its binding, else by the
+    /// process group it connects from — the worker's lineage is recorded under it so the
+    /// orchestration tree nests it; only a caller Soloist did not launch and that never bound
+    /// spawns a root. Delegation is one level deep: a caller that was
     /// itself spawned as a worker this run is refused with
     /// [`SpawnAgentError::WorkerMayNotSpawn`], whether it identified itself by binding or is
     /// recognised by the process group it connects from. Must run within a `tokio` runtime
@@ -128,9 +129,11 @@ impl ScopedFacade<'_> {
             return Err(SpawnAgentError::WorkerMayNotSpawn);
         }
         let worker = self.inner.launch_agent(project, tool, extra_args)?;
-        // A worker spawned by a bound lead nests under it in the orchestration tree; an
-        // unbound or external caller's spawn records no parent and so reads back as a root.
-        if let Some(lead) = self.inner.identity.origin(self.session).process() {
+        // A worker nests under its lead whenever Soloist can name the caller at all — by its own
+        // binding, else by the process group it connects from — so the same identity the gate
+        // above recognises is the one the tree records. Only a caller neither names (an agent
+        // Soloist did not launch) spawns a root.
+        if let Some(lead) = self.caller_process() {
             self.inner.lineage.record(worker, lead);
         }
         Ok(worker)

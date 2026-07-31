@@ -360,6 +360,66 @@ async fn the_worker_gate_outlives_a_closed_lead() {
     ));
 }
 
+/// The lineage parent recorded for `worker`, read through the tree the sidebar renders (an
+/// edge counts only while both ends are live), or `None` when it reads back as a root.
+fn lead_of(facade: &Facade, worker: ProcessId) -> Option<ProcessId> {
+    facade
+        .lineage_edges()
+        .into_iter()
+        .find(|edge| edge.child == worker)
+        .map(|edge| edge.parent)
+}
+
+#[tokio::test]
+async fn a_bound_leads_worker_nests_under_it() {
+    let (facade, project) = facade_with_agent_tool();
+    let lead = facade
+        .supervisor()
+        .register(agent_registration(project, "lead"));
+    let lead_session = scoped_to(&facade, lead);
+
+    let worker = facade
+        .scoped(lead_session)
+        .spawn_agent("worker", Vec::new())
+        .expect("a lead spawns a worker");
+
+    assert_eq!(lead_of(&facade, worker), Some(lead));
+}
+
+#[tokio::test]
+async fn a_lead_that_never_bound_still_has_its_worker_nest_under_it() {
+    let (facade, project) = facade_with_agent_tool();
+    let lead = facade
+        .supervisor()
+        .register(agent_registration(project, "lead"));
+    // The lead's client connects from the lead's own process group but never binds. The group
+    // is not the caller's to choose and names it just as the gate reads it, so its spawn is a
+    // worker of that lead — not a second root beside it.
+    let lead_session = authentic_session(&facade, lead, TEST_PEER_PGID);
+
+    let worker = facade
+        .scoped(lead_session)
+        .spawn_agent("worker", Vec::new())
+        .expect("an unbound lead spawns a worker");
+
+    assert_eq!(lead_of(&facade, worker), Some(lead));
+}
+
+#[tokio::test]
+async fn a_caller_soloist_cannot_name_spawns_a_root() {
+    let (facade, _project) = facade_with_agent_tool();
+    // An external caller: no binding and no managed process in its group, so nothing names it.
+    // Its spawn has no parent to nest under and reads back as a root.
+    let session = facade.open_session(PeerCredentials::unauthenticated());
+
+    let worker = facade
+        .scoped(session)
+        .spawn_agent("worker", Vec::new())
+        .expect("an external caller spawns into the sole project");
+
+    assert_eq!(lead_of(&facade, worker), None);
+}
+
 #[test]
 fn bulk_commands_without_a_project_in_scope_are_refused() {
     let (facade, _trust) = facade();
