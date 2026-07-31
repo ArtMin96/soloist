@@ -289,6 +289,10 @@ pub fn run() {
             // relaunches crashed auto_restart commands within the documented rate limit
             // (the future holds only a weak reference and ends when the app shuts down).
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().self_healing_loop());
+            // Start the auto-close reactor: it closes each process launched with
+            // `close_when_done` as its run ends, so a lead's one-shot workers do not pile up
+            // in the registry (also weakly held).
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().auto_close_loop());
             // Start the metrics sampler: it samples each running process group on its
             // interval and publishes CPU/memory ticks (also weakly held, also self-supervised).
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().metrics_sampler_loop());

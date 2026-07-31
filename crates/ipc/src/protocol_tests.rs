@@ -99,6 +99,7 @@ fn requests_round_trip_through_json() {
         IpcRequest::SpawnAgent {
             tool: "Claude".into(),
             extra_args: vec!["--model".into(), "opus".into()],
+            close_when_done: true,
         },
         IpcRequest::ListAgentTools,
         IpcRequest::StartAllCommands,

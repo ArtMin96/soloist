@@ -373,6 +373,12 @@ impl Facade {
     /// for a loopback-OAuth browser step and any `ANTHROPIC_*` the user set pass straight
     /// through, and the CLI keeps using whatever auth the user already configured.
     ///
+    /// With `close_when_done`, the agent is removed from the registry — reaped, forgotten, its
+    /// terminal buffers freed — as soon as its run ends, for a caller launching a one-shot worker
+    /// it will not read afterwards. Off for an interactive launch, which leaves the finished
+    /// agent resting so its output stays readable. Armed before the start, so a run that ends
+    /// immediately is still caught.
+    ///
     /// One method behind the Facade, so the UI launch picker now and the MCP `spawn_agent`
     /// tool later launch agents identically. Must run within a `tokio` runtime (starting
     /// spawns the actor).
@@ -381,6 +387,7 @@ impl Facade {
         project: ProjectId,
         tool: &str,
         extra_args: Vec<String>,
+        close_when_done: bool,
     ) -> Result<ProcessId, LaunchAgentError> {
         let tool = self
             .agents
@@ -400,6 +407,9 @@ impl Facade {
             Registration::launched(project, ProcessKind::Agent, tool.name, spec)
                 .resumable_with(resume_command),
         );
+        if close_when_done {
+            self.supervisor.close_when_done(id);
+        }
         self.supervisor.start(id)?;
         // Track the agent's idle activity from now on; the idle sampler reclassifies it each
         // interval using its provider's heuristic.

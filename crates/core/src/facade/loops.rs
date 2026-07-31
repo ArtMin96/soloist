@@ -26,6 +26,15 @@ impl Facade {
         self.supervisor.self_healing_loop()
     }
 
+    /// The auto-close reactor loop (C2), returned for the composition root to spawn once on its
+    /// runtime. It closes each process launched with `close_when_done` as its run ends — reaping
+    /// it, dropping its registry row, and freeing its terminal buffers — so a lead's one-shot
+    /// workers do not accumulate. Nothing is armed by default, so with no such launch it does
+    /// nothing. It runs until the facade is dropped.
+    pub fn auto_close_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        self.supervisor.auto_close_loop()
+    }
+
     /// The metrics sampler loop (monitoring C5), returned for the composition root to spawn
     /// once on its runtime. It samples each running process group on an interval and publishes a
     /// [`crate::events::DomainEvent::MetricsTick`] when a group's reading changes — with an

@@ -211,7 +211,7 @@ async fn spawn_agent(
     }
     match state
         .facade()
-        .blocking(move |f| f.launch_agent(ProjectId::from_raw(id), &body.tool, body.args))
+        .blocking(move |f| f.launch_agent(ProjectId::from_raw(id), &body.tool, body.args, false))
         .await
     {
         Ok(process) => Ok(Json(SpawnResponse { id: process.get() })),

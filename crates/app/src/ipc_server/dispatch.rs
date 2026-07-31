@@ -161,9 +161,13 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .rename_process(process, label)
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
-        IpcRequest::SpawnAgent { tool, extra_args } => facade
+        IpcRequest::SpawnAgent {
+            tool,
+            extra_args,
+            close_when_done,
+        } => facade
             .scoped(session)
-            .spawn_agent(&tool, extra_args)
+            .spawn_agent(&tool, extra_args, close_when_done)
             .map(IpcResponse::Spawned)
             .map_err(IpcError::from),
         IpcRequest::ListAgentTools => facade

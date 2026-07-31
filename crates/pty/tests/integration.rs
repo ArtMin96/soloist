@@ -435,7 +435,7 @@ async fn launch_agent_runs_a_stub_in_the_project_dir_inheriting_the_environment(
         .expect("register the project");
 
     let id = facade
-        .launch_agent(project.id, "Stub", Vec::new())
+        .launch_agent(project.id, "Stub", Vec::new(), false)
         .expect("launch the stub agent");
 
     // It is an Agent-kind process, and it runs then exits cleanly.
@@ -513,7 +513,7 @@ async fn resume_relaunches_a_stub_agent_with_its_providers_resume_command() {
 
     // Fresh launch: the stub runs with no arguments, then exits and rests.
     let id = facade
-        .launch_agent(project.id, "Stub", Vec::new())
+        .launch_agent(project.id, "Stub", Vec::new(), false)
         .expect("launch the stub agent");
     assert!(
         facade
@@ -586,7 +586,7 @@ async fn spawn_agent_launches_a_worker_in_the_sessions_project() {
 
     let id = facade
         .scoped(session)
-        .spawn_agent("Stub", Vec::new())
+        .spawn_agent("Stub", Vec::new(), false)
         .expect("spawn the worker agent");
 
     let view = facade

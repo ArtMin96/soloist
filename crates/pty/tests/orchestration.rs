@@ -102,7 +102,7 @@ async fn a_lead_spawns_a_worker_assigns_a_locked_todo_and_is_woken_when_the_work
     // The lead spawns a worker into its own project — the scoped spawn_agent over launch_agent.
     let worker = facade
         .scoped(session)
-        .spawn_agent("Worker", Vec::new())
+        .spawn_agent("Worker", Vec::new(), false)
         .expect("spawn the worker agent");
     assert!(
         await_status(&facade, worker, ProcStatus::Running).await,

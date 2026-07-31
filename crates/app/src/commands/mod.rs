@@ -179,7 +179,7 @@ pub async fn agent_launch(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<u64, String> {
     facade
-        .blocking(move |f| f.launch_agent(ProjectId::from_raw(project), &tool, extra_args))
+        .blocking(move |f| f.launch_agent(ProjectId::from_raw(project), &tool, extra_args, false))
         .await
         .map(|id| id.get())
         .map_err(|err| err.to_string())

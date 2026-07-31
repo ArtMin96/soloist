@@ -293,7 +293,7 @@ async fn launch_agent_registers_and_starts_an_agent_in_the_project() {
     let project = facade.load_project(dir.path()).expect("load");
 
     let id = facade
-        .launch_agent(project.id, "Claude", Vec::new())
+        .launch_agent(project.id, "Claude", Vec::new(), false)
         .expect("launch");
 
     // It appears as an ungated Agent-kind process labelled by the tool, and starts.
@@ -320,10 +320,10 @@ async fn launch_agent_marks_resumable_for_a_supported_provider_only() {
     let project = facade.load_project(dir.path()).expect("load");
 
     let claude = facade
-        .launch_agent(project.id, "Claude", Vec::new())
+        .launch_agent(project.id, "Claude", Vec::new(), false)
         .expect("launch claude");
     let amp = facade
-        .launch_agent(project.id, "Amp", Vec::new())
+        .launch_agent(project.id, "Amp", Vec::new(), false)
         .expect("launch amp");
 
     let resumable = |id| {
@@ -348,7 +348,7 @@ async fn launch_agent_rejects_an_unknown_tool() {
     let project = facade.load_project(dir.path()).expect("load");
 
     assert!(matches!(
-        facade.launch_agent(project.id, "Nonexistent", Vec::new()),
+        facade.launch_agent(project.id, "Nonexistent", Vec::new(), false),
         Err(LaunchAgentError::UnknownTool)
     ));
 }
@@ -358,7 +358,7 @@ async fn launch_agent_rejects_an_unknown_project() {
     let facade = facade_with_tools(FakeSpawner::exits_on_terminate());
 
     assert!(matches!(
-        facade.launch_agent(ProjectId::from_raw(9999), "Claude", Vec::new()),
+        facade.launch_agent(ProjectId::from_raw(9999), "Claude", Vec::new(), false),
         Err(LaunchAgentError::UnknownProject)
     ));
 }

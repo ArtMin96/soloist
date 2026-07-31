@@ -15,6 +15,7 @@
 
 mod actor;
 mod adopt;
+mod autoclose;
 mod bulk;
 mod lifecycle;
 mod monitoring;
@@ -43,6 +44,7 @@ use crate::shellenv::{ShellEnv, ShellEnvProbe};
 use crate::terminal::Terminals;
 
 use actor::{ActorMsg, ActorPorts, OrphanIdentity};
+use autoclose::AutoClose;
 use registry::{ActorHandle, Registry};
 use restart::RestartPolicy;
 
@@ -86,6 +88,7 @@ pub struct Supervisor {
     registry: Registry,
     terminals: Terminals,
     restart_policy: RestartPolicy,
+    auto_close: AutoClose,
     /// Resolves the environment each process launches with — the captured login-shell
     /// environment layered under the process's own `env`. Shared by every actor so the
     /// shell is captured at most once per cache window.
@@ -130,6 +133,7 @@ impl Supervisor {
             registry: Registry::default(),
             terminals: Terminals::default(),
             restart_policy: RestartPolicy::default(),
+            auto_close: AutoClose::default(),
             shell_env,
         }
     }

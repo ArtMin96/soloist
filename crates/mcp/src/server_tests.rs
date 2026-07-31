@@ -816,9 +816,11 @@ async fn spawn_agent_threads_its_arguments_through_and_returns_the_process_id() 
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
     spawn_fake_app(socket.clone(), |request| match request {
-        IpcRequest::SpawnAgent { tool, extra_args }
-            if tool == "Claude" && extra_args == ["--model", "opus"] =>
-        {
+        IpcRequest::SpawnAgent {
+            tool,
+            extra_args,
+            close_when_done,
+        } if tool == "Claude" && extra_args == ["--model", "opus"] && close_when_done => {
             Ok(IpcResponse::Spawned(ProcessId::from_raw(42)))
         }
         _ => Err(IpcError::Internal("unexpected request".into())),
@@ -828,6 +830,7 @@ async fn spawn_agent_threads_its_arguments_through_and_returns_the_process_id() 
         .spawn_agent(Parameters(SpawnAgentArg {
             tool: "Claude".into(),
             extra_args: vec!["--model".into(), "opus".into()],
+            close_when_done: true,
         }))
         .await
         .expect("spawn_agent succeeds");
@@ -849,6 +852,7 @@ async fn a_workers_spawn_refusal_is_a_tool_error_the_model_can_read() {
         .spawn_agent(Parameters(SpawnAgentArg {
             tool: "worker".into(),
             extra_args: Vec::new(),
+            close_when_done: false,
         }))
         .await
         .expect("a request error is a tool result, not a protocol error");

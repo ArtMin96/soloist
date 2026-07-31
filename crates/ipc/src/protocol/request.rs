@@ -49,9 +49,12 @@ pub enum IpcRequest {
         wait_ms: Option<u64>,
     },
     /// Spawn a configured agent tool as a worker in the session's effective project, by name.
+    /// With `close_when_done`, the worker is closed as soon as its run ends.
     SpawnAgent {
         tool: String,
         extra_args: Vec<String>,
+        #[serde(default)]
+        close_when_done: bool,
     },
     /// Every configured agent tool that `spawn_agent` can launch (not scope-filtered).
     ListAgentTools,

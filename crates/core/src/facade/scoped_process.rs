@@ -102,12 +102,15 @@ impl ScopedFacade<'_> {
     /// spawns a root. Delegation is one level deep: a caller that was
     /// itself spawned as a worker this run is refused with
     /// [`SpawnAgentError::WorkerMayNotSpawn`], whether it identified itself by binding or is
-    /// recognised by the process group it connects from. Must run within a `tokio` runtime
-    /// (starting spawns the actor).
+    /// recognised by the process group it connects from. With `close_when_done` the worker is
+    /// closed the moment its run ends, for a lead that will not read it afterwards; without it
+    /// the finished worker rests in the registry with its output intact. Must run within a
+    /// `tokio` runtime (starting spawns the actor).
     pub fn spawn_agent(
         &self,
         tool: &str,
         extra_args: Vec<String>,
+        close_when_done: bool,
     ) -> Result<ProcessId, SpawnAgentError> {
         let project = self
             .inner
@@ -128,7 +131,9 @@ impl ScopedFacade<'_> {
         if caller_is_worker {
             return Err(SpawnAgentError::WorkerMayNotSpawn);
         }
-        let worker = self.inner.launch_agent(project, tool, extra_args)?;
+        let worker = self
+            .inner
+            .launch_agent(project, tool, extra_args, close_when_done)?;
         // A worker nests under its lead whenever Soloist can name the caller at all — by its own
         // binding, else by the process group it connects from — so the same identity the gate
         // above recognises is the one the tree records. Only a caller neither names (an agent

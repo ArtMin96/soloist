@@ -213,7 +213,9 @@ fn spawn_agent_without_a_project_in_scope_is_refused() {
     let (facade, _trust) = facade();
     let session = facade.open_session(PeerCredentials::unauthenticated());
     assert!(matches!(
-        facade.scoped(session).spawn_agent("Claude", Vec::new()),
+        facade
+            .scoped(session)
+            .spawn_agent("Claude", Vec::new(), false),
         Err(SpawnAgentError::NoProjectScope)
     ));
 }
@@ -226,7 +228,9 @@ fn spawn_agent_with_an_unknown_tool_is_refused() {
     let id = terminal_in(&facade, ProjectId::from_raw(1), "term");
     let session = scoped_to(&facade, id);
     assert!(matches!(
-        facade.scoped(session).spawn_agent("NoSuchTool", Vec::new()),
+        facade
+            .scoped(session)
+            .spawn_agent("NoSuchTool", Vec::new(), false),
         Err(SpawnAgentError::Launch(LaunchAgentError::UnknownTool))
     ));
 }
@@ -240,7 +244,7 @@ async fn a_spawned_worker_cannot_spawn_its_own_worker() {
     let lead_session = scoped_to(&facade, lead);
     let worker = facade
         .scoped(lead_session)
-        .spawn_agent("worker", Vec::new())
+        .spawn_agent("worker", Vec::new(), false)
         .expect("a lead spawns a worker");
 
     // The worker's own MCP client binds to it, exactly as the lead's did — but its spawn is
@@ -254,7 +258,7 @@ async fn a_spawned_worker_cannot_spawn_its_own_worker() {
     assert!(matches!(
         facade
             .scoped(worker_session)
-            .spawn_agent("worker", Vec::new()),
+            .spawn_agent("worker", Vec::new(), false),
         Err(SpawnAgentError::WorkerMayNotSpawn)
     ));
     assert_eq!(
@@ -273,7 +277,7 @@ async fn a_worker_that_never_binds_is_still_refused_a_spawn() {
     let lead_session = scoped_to(&facade, lead);
     let worker = facade
         .scoped(lead_session)
-        .spawn_agent("worker", Vec::new())
+        .spawn_agent("worker", Vec::new(), false)
         .expect("a lead spawns a worker");
 
     // The worker's client connects from the worker's own process group but never binds, so
@@ -285,7 +289,7 @@ async fn a_worker_that_never_binds_is_still_refused_a_spawn() {
     assert!(matches!(
         facade
             .scoped(worker_session)
-            .spawn_agent("worker", Vec::new()),
+            .spawn_agent("worker", Vec::new(), false),
         Err(SpawnAgentError::WorkerMayNotSpawn)
     ));
     assert_eq!(
@@ -304,7 +308,7 @@ async fn the_worker_gate_survives_the_group_the_caller_was_recognised_by_going_a
     let lead_session = scoped_to(&facade, lead);
     let worker = facade
         .scoped(lead_session)
-        .spawn_agent("worker", Vec::new())
+        .spawn_agent("worker", Vec::new(), false)
         .expect("a lead spawns a worker");
     let worker_pgid = TEST_PEER_PGID + 1;
     let worker_session = authentic_session(&facade, worker, worker_pgid);
@@ -322,7 +326,7 @@ async fn the_worker_gate_survives_the_group_the_caller_was_recognised_by_going_a
     assert!(matches!(
         facade
             .scoped(worker_session)
-            .spawn_agent("worker", Vec::new()),
+            .spawn_agent("worker", Vec::new(), false),
         Err(SpawnAgentError::WorkerMayNotSpawn)
     ));
 }
@@ -336,7 +340,7 @@ async fn the_worker_gate_outlives_a_closed_lead() {
     let lead_session = scoped_to(&facade, lead);
     let worker = facade
         .scoped(lead_session)
-        .spawn_agent("worker", Vec::new())
+        .spawn_agent("worker", Vec::new(), false)
         .expect("a lead spawns a worker");
     let worker_session = authentic_session(&facade, worker, TEST_PEER_PGID + 1);
     facade
@@ -355,7 +359,7 @@ async fn the_worker_gate_outlives_a_closed_lead() {
     assert!(matches!(
         facade
             .scoped(worker_session)
-            .spawn_agent("worker", Vec::new()),
+            .spawn_agent("worker", Vec::new(), false),
         Err(SpawnAgentError::WorkerMayNotSpawn)
     ));
 }
@@ -380,7 +384,7 @@ async fn a_bound_leads_worker_nests_under_it() {
 
     let worker = facade
         .scoped(lead_session)
-        .spawn_agent("worker", Vec::new())
+        .spawn_agent("worker", Vec::new(), false)
         .expect("a lead spawns a worker");
 
     assert_eq!(lead_of(&facade, worker), Some(lead));
@@ -399,7 +403,7 @@ async fn a_lead_that_never_bound_still_has_its_worker_nest_under_it() {
 
     let worker = facade
         .scoped(lead_session)
-        .spawn_agent("worker", Vec::new())
+        .spawn_agent("worker", Vec::new(), false)
         .expect("an unbound lead spawns a worker");
 
     assert_eq!(lead_of(&facade, worker), Some(lead));
@@ -414,10 +418,84 @@ async fn a_caller_soloist_cannot_name_spawns_a_root() {
 
     let worker = facade
         .scoped(session)
-        .spawn_agent("worker", Vec::new())
+        .spawn_agent("worker", Vec::new(), false)
         .expect("an external caller spawns into the sole project");
 
     assert_eq!(lead_of(&facade, worker), None);
+}
+
+/// Awaits `id` reaching `target`, ignoring every other process's transitions.
+async fn wait_process_to(
+    rx: &mut broadcast::Receiver<DomainEvent>,
+    id: ProcessId,
+    target: ProcStatus,
+) {
+    loop {
+        match rx.recv().await {
+            Ok(DomainEvent::ProcessStatusChanged { id: got, to, .. })
+                if got == id && to == target =>
+            {
+                return
+            }
+            Ok(_) | Err(RecvError::Lagged(_)) => {}
+            Err(RecvError::Closed) => panic!("event bus closed"),
+        }
+    }
+}
+
+/// Awaits `id` leaving the registry, failing rather than hanging if it never does.
+async fn wait_process_removed(rx: &mut broadcast::Receiver<DomainEvent>, id: ProcessId) {
+    let removal = async {
+        loop {
+            match rx.recv().await {
+                Ok(DomainEvent::ProcessRemoved { id: got }) if got == id => return,
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => panic!("event bus closed"),
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(10), removal)
+        .await
+        .expect("the worker is closed once its run ends");
+}
+
+#[tokio::test]
+async fn only_a_worker_spawned_to_close_when_done_leaves_the_registry() {
+    let (facade, project) = facade_with_agent_tool();
+    let lead = facade
+        .supervisor()
+        .register(agent_registration(project, "lead"));
+    let lead_session = scoped_to(&facade, lead);
+    let mut rx = facade.subscribe();
+    tokio::spawn(facade.auto_close_loop());
+
+    let kept = facade
+        .scoped(lead_session)
+        .spawn_agent("worker", Vec::new(), false)
+        .expect("a lead spawns a worker to keep");
+    let closed = facade
+        .scoped(lead_session)
+        .spawn_agent("worker", Vec::new(), true)
+        .expect("a lead spawns a worker to close");
+    for worker in [kept, closed] {
+        wait_process_to(&mut rx, worker, ProcStatus::Running).await;
+        facade
+            .scoped(lead_session)
+            .stop_process(worker)
+            .expect("stop the worker");
+    }
+    // The closed one's removal proves the reactor has run past both stops.
+    wait_process_removed(&mut rx, closed).await;
+
+    let registered: Vec<ProcessId> = facade.snapshot().into_iter().map(|view| view.id).collect();
+    assert!(
+        registered.contains(&kept),
+        "a finished worker stays listed by default, so its lead can still read it"
+    );
+    assert!(
+        !registered.contains(&closed),
+        "a worker spawned with close_when_done is forgotten once its run ends"
+    );
 }
 
 #[test]

@@ -362,6 +362,7 @@ async fn spawning_an_agent_without_scope_is_refused() {
             IpcRequest::SpawnAgent {
                 tool: "Claude".into(),
                 extra_args: Vec::new(),
+                close_when_done: false,
             },
         )
         .await,
