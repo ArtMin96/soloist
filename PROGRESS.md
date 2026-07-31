@@ -45,10 +45,39 @@
 >   that differs from `origin/main` is `grouping.ts`, whose executable diff is empty (comments only), so the UI
 >   behaves identically to `main`. The previous entry's own commit already recorded this same test as a
 >   pre-existing flake on both `main` and this branch. Still unfixed, and it will keep `just test` red until it is.
-> - **NOT YET DONE: runtime verification.** As with the entry below, these fixes are headless-green only.
->   A real-window manual walk (lead spawns ≥2 workers → reports land → auto-close ordering → Stop keeps the row
->   → never-started process does not fire a timer → hand-started agent has no lead) was **in flight when this
->   entry was written**; its result is not recorded here yet. Do not mark `Verified` until it is.
+> - **RUNTIME WALK DONE — and the reported symptom is STILL NOT FIXED.** A real-window `dev-alongside` walk
+>   against a scratch `SOLOIST_APP_DATA_DIR` ran the whole loop with real `claude` workers. **T3/T4/T5/T6 PASS**
+>   — a user Stop keeps the row and its scrollback (53,294 → 62,361 chars), a crashed worker keeps its row and
+>   crash output, a never-started `solo.yml` command does not fire a fire-when-idle timer, `timer_list` returns
+>   a populated `waiting_on:[1,5]`, a hand-started terminal agent has no lead and **nothing was typed into the
+>   shell**, and every refusal message read accurately. **T1/T2 FAIL.**
+> - **The delivery mechanism does not deliver.** `submitted_turn` writes `header\nbody\r` as one chunk; Claude
+>   Code's TUI treats a bulk write as a **paste**, so the `\n` becomes a newline inside the composer and the
+>   trailing `\r` never submits. Both workers produced correct answers; both reports sat in the lead's input box
+>   as unsent drafts and were only seen because the tester pressed Enter. The lead reported `Idle` throughout.
+>   **Fired coordination timers have the identical fault.** A stranded draft then merges with the user's next
+>   typed message — the lead was observed *refusing* the user's own instruction as "worker-injected".
+> - **This was raised in the review and wrongly refuted.** A finder flagged `turn.rs`'s newline handling; a
+>   verifier refuted it after grepping for bracketed-paste markers and finding none. The paste behaviour is the
+>   *TUI's* reaction to a bulk write, not anything greppable in our source, so the check could not have found it.
+>   Headless tests cannot catch it either: the fake PTY has no TUI to misread the bytes. **Record this as the
+>   limit of both gates** — a green workspace and an adversarial review both passed a broken end-to-end path.
+> - **`close_when_done` reaps a worker whose report was never read.** Handover is recorded when `try_write_stdin`
+>   queues bytes, not when the lead consumes a turn, so a worker was reaped 0.45 s after "reporting" with its
+>   report still a draft — row and scrollback destroyed, and that report was the only copy. It also never fires
+>   at all for a default **interactive** worker, which stays alive after answering, so "run ends" never happens;
+>   it only ever worked for headless `-p` workers. Neither is documented.
+> - **Owner decisions taken on the walk results (2026-08-01).** (a) **Agent-to-agent messaging moves off the
+>   PTY** — lead→worker and worker→lead go through each provider's own message/hook interface instead of typed
+>   keystrokes; a per-provider investigation grounded in primary sources is the prerequisite, in flight.
+>   (b) **Auto-close is suspended** — `close_when_done: true` must not reap, until delivery is verified end to
+>   end. In flight.
+> - **Also found, outside the brief.** Rendered `get_process_output` mangles a TUI agent's screen (drops spaces,
+>   overlays lines: `"Quicksafetycheck:Isthisaprojectyoucreatedoroneyoutrust?"`); raw output is clean, so any
+>   agent reading another's output over MCP gets the mangled form. And an over-long `SOLOIST_APP_DATA_DIR`
+>   silently disables MCP (`path must be shorter than SUN_LEN`) with the app looking healthy — stderr only.
+> - **Status stays `Done — pending verify`.** Do not mark `Verified`: the headline behaviour this branch exists
+>   to deliver does not work in the real app.
 >
 > **LATEST (2026-07-31): CHILD-AGENT LIFECYCLE — a worker reports to its lead, and may close itself** —
 > `Done — pending verify`, on branch `feat/child-agent-lifecycle` (9 commits, not yet merged). A review of
