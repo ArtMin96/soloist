@@ -25,7 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useSortableList } from "@/components/ui/sortable-list";
+import { useSortableList } from "@/components/useSortableList";
 import { ATTENTION_LABEL } from "@/lib/attention";
 import { cn } from "@/lib/utils";
 import { useUnreadProject } from "@/store/attentionContext";
@@ -98,9 +98,12 @@ export function ProjectGroup({
   // The menus only *open* the confirm; the removal itself runs solely from the dialog's
   // destructive action, so a destructive menu click can never remove anything by itself.
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const { moveItemBy, canMoveItemBy } = useSortableList();
+  // Outside an arrangeable list — the design harness stands a row up on its own — there is nowhere
+  // to move to, so the row simply offers no move.
+  const list = useSortableList();
   const id = String(project.id);
-  const move = (delta: number) => (canMoveItemBy(id, delta) ? () => moveItemBy(id, delta) : null);
+  const move = (delta: number) =>
+    list?.canMoveItemBy(id, delta) ? () => list.moveItemBy(id, delta) : null;
   const actions = projectActions({
     onStartAll,
     onRestartRunning,

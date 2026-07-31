@@ -49,7 +49,10 @@ impl Projects {
     /// Files the user's own display order for the project list. `order` is the arrangement as
     /// the user left it; anything it omits keeps its current relative order behind the listed
     /// projects, so an order computed from a partial view never silently discards a project.
-    pub fn reorder(&self, order: &[ProjectId]) -> Result<(), StoreError> {
+    ///
+    /// Crate-visible so [`crate::facade::Facade::reorder_projects`] is the only way in: filing an
+    /// order without announcing it would leave every other surface showing the one before.
+    pub(crate) fn reorder(&self, order: &[ProjectId]) -> Result<(), StoreError> {
         self.repo.reorder(order)
     }
 

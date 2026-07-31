@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   closestCenter,
   DndContext,
@@ -11,8 +11,10 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { SortableListContext, type SortableListActions } from "@/components/useSortableList";
 import { canMoveBy, moveBy, moveItem } from "@/lib/sortable";
 import { cn } from "@/lib/utils";
+import { prefersReducedMotion } from "@/store/useScrollSpy";
 
 /**
  * How far a press travels before it becomes a drag. An item is dragged by its own body rather
@@ -21,41 +23,18 @@ import { cn } from "@/lib/utils";
  */
 const DRAG_ACTIVATION_DISTANCE = 4;
 
-/** The displaced items' settle, in ms — the `--dur-control` duration this side of the boundary. */
-const SORT_DURATION = 220;
+/**
+ * The displaced items' settle, in ms. dnd-kit composes the transition in script and takes a
+ * number, so this side of the boundary cannot say `var(--dur-control)` — it mirrors that token
+ * instead, and `SortableList.test.tsx` fails if the two ever part.
+ */
+export const SORT_DURATION = 220;
+
+/** Marks the live region a move made without a drag is announced through. */
+export const ANNOUNCEMENT_SLOT = "sortable-announcement";
 
 /** Reordering is one axis, so a drag that wanders sideways still reads as a clean list move. */
 const verticalOnly: Modifier = ({ transform }) => ({ ...transform, x: 0 });
-
-// Animating a reorder means transforming the items that give up their place, which the OS-level
-// preference asks us not to do; there the move simply happens.
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
-
-interface SortableListContext {
-  /** Moves `id` by `delta` places and commits the result — negative moves it toward the front. */
-  moveItemBy: (id: string, delta: number) => void;
-  /** Whether `id` has anywhere to go `delta` places away. */
-  canMoveItemBy: (id: string, delta: number) => boolean;
-}
-
-const ListContext = createContext<SortableListContext | null>(null);
-
-/**
- * The move actions of the enclosing [`SortableList`], for building affordances that reorder
- * without a pointer — a menu item, a button, a shortcut. Throws outside a list, so a consumer
- * cannot silently render a control that does nothing.
- */
-export function useSortableList(): SortableListContext {
-  const context = useContext(ListContext);
-  if (!context) throw new Error("useSortableList must be used within a SortableList");
-  return context;
-}
 
 export interface SortableListProps {
   /** The item ids, in the order they are rendered. */
@@ -64,7 +43,11 @@ export interface SortableListProps {
   onReorder: (ids: string[]) => void;
   /** The item's name, for what assistive tech is told about a move. Defaults to the id. */
   nameOf?: (id: string) => string;
-  /** Stops items being dragged — e.g. while only part of the list is on screen. */
+  /**
+   * Stops the list being rearranged at all — by drag or by any control built on
+   * [`useSortableList`]. Set it when `ids` is only part of the list, so an order arranged from
+   * what is on screen is never filed as the answer for the whole of it.
+   */
   disabled?: boolean;
   children: React.ReactNode;
 }
@@ -89,31 +72,37 @@ export function SortableList({ ids, onReorder, nameOf, disabled, children }: Sor
 
   const moveItemBy = useCallback(
     (id: string, delta: number) => {
-      if (!canMoveBy(ids, id, delta)) return;
+      if (disabled || !canMoveBy(ids, id, delta)) return;
       const next = moveBy(ids, id, delta);
       onReorder(next);
       setAnnouncement(`${name(id)} moved to ${next.indexOf(id) + 1} of ${next.length}.`);
     },
-    [ids, onReorder, name],
+    [disabled, ids, onReorder, name],
   );
 
-  const context = useMemo<SortableListContext>(
+  // `disabled` is gated here rather than at each call site, so it holds for every way of moving an
+  // item and not just the drag. A caller disables the list because the ids it handed over are not
+  // the whole list; an order arranged from part of one is not the user's answer for all of it, by
+  // whichever affordance it was arranged.
+  const context = useMemo<SortableListActions>(
     () => ({
       moveItemBy,
-      canMoveItemBy: (id, delta) => canMoveBy(ids, id, delta),
+      canMoveItemBy: (id, delta) => !disabled && canMoveBy(ids, id, delta),
     }),
-    [ids, moveItemBy],
+    [disabled, ids, moveItemBy],
   );
 
   const announcements: Announcements = {
-    onDragStart: ({ active }) => `Picked up ${name(String(active.id))}, ${place(String(active.id))}.`,
+    onDragStart: ({ active }) =>
+      `Picked up ${name(String(active.id))}, ${place(String(active.id))}.`,
     onDragOver: ({ active, over }) =>
       over ? `${name(String(active.id))} is over ${place(String(over.id))}.` : undefined,
     onDragEnd: ({ active, over }) =>
       over
         ? `${name(String(active.id))} dropped at ${place(String(over.id))}.`
         : `${name(String(active.id))} was left where it was.`,
-    onDragCancel: ({ active }) => `Move cancelled. ${name(String(active.id))} was left where it was.`,
+    onDragCancel: ({ active }) =>
+      `Move cancelled. ${name(String(active.id))} was left where it was.`,
   };
 
   function handleDragEnd({ active, over }: DragEndEvent) {
@@ -122,7 +111,7 @@ export function SortableList({ ids, onReorder, nameOf, disabled, children }: Sor
   }
 
   return (
-    <ListContext.Provider value={context}>
+    <SortableListContext.Provider value={context}>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -136,10 +125,10 @@ export function SortableList({ ids, onReorder, nameOf, disabled, children }: Sor
       </DndContext>
       {/* A move made from a control rather than a drag: dnd-kit's own live region covers the
           drag, and never sees this one. */}
-      <span data-slot="sortable-announcement" aria-live="polite" className="sr-only">
+      <span data-slot={ANNOUNCEMENT_SLOT} aria-live="polite" className="sr-only">
         {announcement}
       </span>
-    </ListContext.Provider>
+    </SortableListContext.Provider>
   );
 }
 
@@ -167,7 +156,10 @@ export interface SortableItemProps {
  */
 export function SortableItem({ id, className, children }: SortableItemProps) {
   const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
-    useSortable({ id, transition: { duration: SORT_DURATION, easing: "var(--ease-spring-settle)" } });
+    useSortable({
+      id,
+      transition: { duration: SORT_DURATION, easing: "var(--ease-spring-settle)" },
+    });
 
   // Only the listeners, never dnd-kit's `attributes`: those announce a keyboard-draggable button,
   // and an item dragged by its whole body already holds the controls that own those semantics.

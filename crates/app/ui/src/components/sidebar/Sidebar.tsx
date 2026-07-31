@@ -4,7 +4,7 @@ import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
 import { useSidebarHotkeys } from "@/components/sidebar/useSidebarHotkeys";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SortableItem, SortableList } from "@/components/ui/sortable-list";
+import { SortableItem, SortableList } from "@/components/SortableList";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
-import { SortableList } from "@/components/ui/sortable-list";
+import { SortableList } from "@/components/SortableList";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ProjectTree } from "@/store/projects";
 
@@ -14,8 +14,31 @@ const tree: ProjectTree = {
 
 const noop = () => {};
 
-// A project header only exists inside the arrangeable project list, which is what supplies its
-// move actions — so the harness composes it the way the sidebar does.
+const groupProps = {
+  tree,
+  open: true,
+  onOpenChange: noop,
+  kindOpen: () => true,
+  onKindOpenChange: noop,
+  collapsedLeads: { has: () => false, toggle: noop },
+  selectedId: null,
+  onSelect: noop,
+  onStart: noop,
+  onStop: noop,
+  onRestart: noop,
+  onResume: noop,
+  onRemove: noop,
+  onTrust: noop,
+  onStartAll: noop,
+  onRestartRunning: noop,
+  onStopAll: noop,
+  onOpenProjectSettings: noop,
+  onOpenOrchestration: noop,
+  onRemoveProject: noop,
+};
+
+// A project header inside the arrangeable project list, which is what supplies its move actions —
+// composed the way the sidebar does.
 function renderGroup(ids: string[] = ["1"]) {
   render(
     <TooltipProvider>
@@ -48,6 +71,27 @@ function renderGroup(ids: string[] = ["1"]) {
 }
 
 afterEach(cleanup);
+
+describe("ProjectGroup outside a list", () => {
+  // The design harness renders a project row on its own to look at it. A row is a presentational
+  // component, so standing it up must not require the list it usually sits in — it simply has
+  // nowhere to move to.
+  it("renders on its own, offering no move it has no list to make", () => {
+    expect(() =>
+      render(
+        <TooltipProvider>
+          <ProjectGroup {...groupProps} />
+        </TooltipProvider>,
+      ),
+    ).not.toThrow();
+
+    expect(screen.getByText("Storefront")).toBeTruthy();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Actions for Storefront" }));
+    expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Move down" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Start all" })).toBeTruthy();
+  });
+});
 
 describe("ProjectGroup header", () => {
   it("keeps the project name visible and collapses every action into one menu", () => {

@@ -387,4 +387,24 @@ describe("Sidebar project arrangement", () => {
     // answer for the whole of it.
     expect(projectRow("beta")?.className).not.toContain("cursor-grab");
   });
+
+  // The query leaves *two* projects on screen deliberately. With one, both moves are refused by
+  // arithmetic alone and the guard is never actually asked — which is how a filtered move reached
+  // the core unnoticed.
+  it("withholds the move actions too while a filter narrows the list", () => {
+    const onReorderProjects = vi.fn();
+    renderSidebar({
+      settings: { ...DEFAULT_SIDEBAR, show_filter_input: true },
+      onReorderProjects,
+    });
+
+    fireEvent.change(screen.getByLabelText("Filter processes"), { target: { value: "e" } });
+    expect(screen.getByText("alpha")).toBeTruthy();
+    expect(screen.getByText("beta")).toBeTruthy();
+
+    openMenu("alpha");
+    expect(screen.queryByRole("menuitem", { name: "Move down" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull();
+    expect(onReorderProjects).not.toHaveBeenCalled();
+  });
 });

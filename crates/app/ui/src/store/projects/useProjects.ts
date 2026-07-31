@@ -129,7 +129,14 @@ export function useProjects(reportError: (reason: unknown) => void): ProjectStor
   const reorder = useCallback(
     (order: number[]) => {
       const byId = new Map(projects.map((project) => [project.id, project]));
-      setArranged(order.flatMap((id) => byId.get(id) ?? []));
+      // The named projects lead, and whatever `order` leaves out keeps its place behind them —
+      // the same reading the core gives a partial order, so what is shown while the core answers
+      // is not a list a project has dropped out of.
+      const named = new Set(order);
+      setArranged([
+        ...order.flatMap((id) => byId.get(id) ?? []),
+        ...projects.filter((project) => !named.has(project.id)),
+      ]);
       projectReorder(order).catch((reason) => {
         // The arrangement never reached the core, so stop showing it as though it had.
         setArranged(null);

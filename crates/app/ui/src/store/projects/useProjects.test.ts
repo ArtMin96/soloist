@@ -172,6 +172,31 @@ describe("useProjects", () => {
     act(() => settle());
   });
 
+  // The core files a partial order by leading with the named projects and keeping the rest behind
+  // them. What is shown while it answers has to say the same thing, or a project the order did not
+  // name would blink out of the list and back.
+  it("keeps a project the new order does not name, behind the ones it does", async () => {
+    const opened = [
+      { id: 1, name: "alpha", root: "/p/a", icon: null },
+      { id: 2, name: "beta", root: "/p/b", icon: null },
+      { id: 3, name: "gamma", root: "/p/c", icon: null },
+    ];
+    list.mockResolvedValue(opened);
+    let settle = () => {};
+    reorder.mockImplementationOnce(() => new Promise<void>((resolve) => (settle = resolve)));
+    const { result } = renderHook(() => useProjects(noop));
+    await waitFor(() => expect(result.current.projects).toHaveLength(3));
+
+    act(() => result.current.reorder([3, 1]));
+
+    expect(result.current.projects.map((project) => project.name)).toEqual([
+      "gamma",
+      "alpha",
+      "beta",
+    ]);
+    act(() => settle());
+  });
+
   it("re-reads the snapshot when the list is rearranged", async () => {
     renderHook(() => useProjects(noop));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
