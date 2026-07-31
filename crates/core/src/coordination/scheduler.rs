@@ -8,11 +8,11 @@
 //! each agent's idle state via [`AgentActivityChanged`](DomainEvent::AgentActivityChanged) — the
 //! C4 idle signal, consumed as events so coordination depends only on the shared event type, not
 //! on C4's internals — alongside the process lifecycle, so a watched worker that exits ends the
-//! wait as surely as one that goes idle. A due timer is claimed atomically (so a concurrent pause/cancel wins the
-//! race cleanly) and its body is written to its owner's PTY — reusing the one supervisor input
-//! behaviour, never reimplementing it. It holds a [`Weak`] reference to the supervisor so it never
-//! keeps the app alive, and is self-supervised like the monitoring samplers: a panicking pass is
-//! isolated and the loop restarts.
+//! wait as surely as one that goes idle. A due timer is claimed atomically (so a concurrent
+//! pause/cancel wins the race cleanly) and its body is written to its owner's PTY — reusing the
+//! one supervisor input behaviour, never reimplementing it. It holds a [`Weak`] reference to the
+//! supervisor so it never keeps the app alive, and is self-supervised like the monitoring
+//! samplers: a panicking pass is isolated and the loop restarts.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
@@ -21,8 +21,8 @@ use std::time::Duration;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::Notify;
 
-use crate::agents::AgentActivity;
 use crate::events::{DomainEvent, EventBus};
+use crate::idle::ObservedActivity;
 use crate::ids::ProcessId;
 use crate::ports::Clock;
 use crate::process::ProcStatus;
@@ -76,10 +76,10 @@ impl TimerScheduler {
     /// bus; ends when the supervisor is dropped or the bus closes (app shutdown).
     async fn schedule_loop(self) {
         let mut events = self.bus.subscribe();
-        // Last-known activity per agent, from the bus, for the run it is currently in. Only agents
-        // ever appear here, so it stays bounded to the live agent set; what an unknown or resting
-        // process counts as is decided by `watched_is_idle`.
-        let mut activity: HashMap<ProcessId, AgentActivity> = HashMap::new();
+        // What has been observed of each agent's turn, folded from the bus, for the run it is
+        // currently in. Only agents ever appear here, so it stays bounded to the live agent set;
+        // what an unknown or resting process counts as is decided by `watched_is_idle`.
+        let mut activity: HashMap<ProcessId, ObservedActivity> = HashMap::new();
         loop {
             let Some(supervisor) = self.supervisor.upgrade() else {
                 return;
@@ -123,7 +123,7 @@ impl TimerScheduler {
                     // A lagged subscriber may have missed an idle transition; re-evaluate.
                     Err(RecvError::Lagged(_)) => {}
                     Ok(DomainEvent::AgentActivityChanged { id, state }) => {
-                        activity.insert(id, state);
+                        activity.entry(id).or_default().observe(state);
                     }
                     Ok(DomainEvent::ProcessRemoved { id }) => {
                         activity.remove(&id);
@@ -154,7 +154,7 @@ impl TimerScheduler {
     fn is_due(
         timer: &StoredTimer,
         now: u64,
-        activity: &HashMap<ProcessId, AgentActivity>,
+        activity: &HashMap<ProcessId, ObservedActivity>,
         supervisor: &Supervisor,
     ) -> bool {
         if timer.deadline_unix_millis <= now {
@@ -164,7 +164,7 @@ impl TimerScheduler {
             None => false,
             Some((mode, watched)) => mode.quorum_met(watched, |p| {
                 watched_is_idle(
-                    activity.get(&p).copied(),
+                    activity.get(&p).copied().unwrap_or_default(),
                     supervisor.view(p).map(|view| view.status),
                 )
             }),

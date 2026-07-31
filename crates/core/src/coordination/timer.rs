@@ -20,8 +20,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
 use super::timer_repo::{NewTimer, TimerRepo};
-use crate::agents::AgentActivity;
 use crate::events::EventBus;
+use crate::idle::{AgentActivity, ObservedActivity};
 use crate::ids::{ProcessId, ProjectId, TimerId};
 use crate::ports::{Clock, StoreError};
 use crate::process::ProcStatus;
@@ -102,25 +102,26 @@ impl IdleMode {
     }
 }
 
-/// Whether a watched process counts as idle for a fire-when-idle timer, from its last-known
-/// activity and its supervision status (`None` once it has left the registry):
+/// Whether a watched process counts as idle for a fire-when-idle timer, from the activity observed
+/// since it began working and its supervision status (`None` once it has left the registry):
 ///
 /// - a process that has left the registry, or that has exited to a resting or terminal status
 ///   ([`ProcStatus::is_active`] is false), can no longer do work — so it counts as done however it
 ///   was last classified, and neither a departed nor an exited worker deadlocks the wait;
 /// - a live process counts as idle once the agent idle FSM reports
-///   [`Idle`](AgentActivity::Idle) for it;
-/// - a live process whose activity is unknown (not yet classified, or a non-agent with no idle
-///   signal) is *not* idle; the wait continues, with the timer's backstop as the guarantee it
-///   eventually fires.
+///   [`Idle`](AgentActivity::Idle) for a turn it has been [observed](ObservedActivity) starting —
+///   the quiet of a CLI still starting up is not a finished turn;
+/// - a live process that is working, blocked on a prompt, or has never been classified (an agent
+///   still starting up, or a non-agent with no idle signal) is *not* idle; the wait continues,
+///   with the timer's backstop as the guarantee it eventually fires.
 ///
 /// The single definition of "idle" for a watched process, shared by the scheduler and the façade's
 /// `already_idle`/`waiting_on` report, so what is reported matches what fires.
-pub(crate) fn watched_is_idle(activity: Option<AgentActivity>, status: Option<ProcStatus>) -> bool {
+pub(crate) fn watched_is_idle(observed: ObservedActivity, status: Option<ProcStatus>) -> bool {
     match status {
         None => true,
         Some(status) if !status.is_active() => true,
-        Some(_) => matches!(activity, Some(AgentActivity::Idle)),
+        Some(_) => observed.latest().is_some_and(AgentActivity::is_idle),
     }
 }
 
@@ -167,9 +168,24 @@ pub struct TimerView {
     pub paused_remaining_millis: Option<u64>,
 }
 
+impl TimerView {
+    /// Fills this view's read-time idle report — which watched processes are not yet idle, and
+    /// whether the quorum is already met — from the live `is_idle` test. Leaves a plain
+    /// [`FireCond::At`] timer untouched: it watches nothing. The one place the report is computed,
+    /// so every view of a timer carries the same answer as the aggregate it is reported beside.
+    pub(crate) fn report_idle(&mut self, is_idle: impl Fn(ProcessId) -> bool) {
+        let Some((mode, watched)) = self.fire.idle_quorum() else {
+            return;
+        };
+        self.waiting_on = watched.iter().copied().filter(|&p| !is_idle(p)).collect();
+        self.already_idle = mode.quorum_met(watched, is_idle);
+    }
+}
+
 /// The outcome of arming a fire-when-idle timer: the timer itself, whether its idle condition is
 /// **already** satisfied at set time (so it will fire promptly), and which watched processes it
-/// is still `waiting_on` (those not yet idle). A non-blocking signal the caller can act on.
+/// is still `waiting_on` (those not yet idle). A non-blocking signal the caller can act on. The
+/// timer view carries the same report ([`TimerView::report_idle`]) — one answer, not two.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetWhenIdleOutcome {
     pub timer: TimerView,

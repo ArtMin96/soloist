@@ -5,6 +5,9 @@
 //! attention from, and what [`crate::events`] carries — so, like [`crate::process`]'s
 //! [`ProcStatus`](crate::process::ProcStatus), it is owned by none of them and depends on nothing.
 //! The heuristics that decide it live in `crate::agents::idle`.
+//!
+//! Alongside the state itself lives [`ObservedActivity`], the rule for reading a *sequence* of
+//! them — shared for the same reason, since C4 and C6 each fold their own.
 
 use serde::{Deserialize, Serialize};
 
@@ -40,5 +43,44 @@ impl AgentActivity {
     /// Drives the attention notification (see [`crate::notify`]).
     pub fn requires_attention(self) -> bool {
         matches!(self, AgentActivity::Permission | AgentActivity::Error)
+    }
+
+    /// Whether the agent is quiet and available. The one state that is *not* evidence of a turn
+    /// under way, which is what makes it ambiguous: an agent that has done nothing yet looks
+    /// exactly like one that has finished (see [`ObservedActivity`]).
+    pub fn is_idle(self) -> bool {
+        matches!(self, AgentActivity::Idle)
+    }
+}
+
+/// An agent's latest activity, from the point it demonstrably began working.
+///
+/// An agent's terminal is quiet while its CLI starts up, so the idle heuristics classify it
+/// [`Idle`](AgentActivity::Idle) before it has done anything — a "finished" reading for an agent
+/// that has not begun. Taking that at face value ends a wait on a worker that never started, so it
+/// is withheld here: nothing is observed until the agent is first seen in some other state, after
+/// which every classification is recorded. Once an agent has begun, the quiet that follows is the
+/// real thing.
+///
+/// Both the idle tracker (C4), which classifies agents, and the timer scheduler (C6), which folds
+/// the classifications off the event bus, keep one of these per agent — so "has it begun?" is
+/// decided the same way whichever of them is asked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ObservedActivity {
+    latest: Option<AgentActivity>,
+}
+
+impl ObservedActivity {
+    /// Records one classification, ignoring the quiet that precedes the agent's first activity.
+    pub(crate) fn observe(&mut self, activity: AgentActivity) {
+        if self.latest.is_some() || !activity.is_idle() {
+            self.latest = Some(activity);
+        }
+    }
+
+    /// The latest activity observed, or `None` while the agent has only ever been quiet (it is
+    /// still starting up) or has not been classified at all.
+    pub(crate) fn latest(self) -> Option<AgentActivity> {
+        self.latest
     }
 }

@@ -270,6 +270,37 @@ fn fire_when_idle_counts_a_process_absent_from_the_registry_as_idle() {
 }
 
 #[test]
+fn fire_when_idle_reports_the_same_state_in_the_timer_it_returns() {
+    // The answer carries the report twice: at the top level, and on the timer view a caller reads
+    // back (and sees again in the orchestration snapshot). A view that says the timer is still
+    // waiting, beside an outcome that says its condition is already met, is two answers to one
+    // question.
+    let facade = facade_with(Arc::new(FakeProjectRepo::new()));
+    let (session, _owner) = bound_session(&facade, ProjectId::from_raw(1));
+    let gone = ProcessId::from_raw(9999); // never registered → not in the supervisor
+
+    let outcome = facade
+        .scoped(session)
+        .timer_fire_when_idle(
+            "all done".into(),
+            vec![gone],
+            IdleMode::All,
+            Some(Duration::from_secs(60)),
+        )
+        .expect("set");
+
+    assert!(outcome.already_idle);
+    assert_eq!(
+        outcome.timer.already_idle, outcome.already_idle,
+        "the timer view carries the same verdict as the outcome around it"
+    );
+    assert_eq!(
+        outcome.timer.waiting_on, outcome.waiting_on,
+        "the timer view waits on the same processes as the outcome around it"
+    );
+}
+
+#[test]
 fn fire_when_idle_counts_a_resting_watched_process_as_idle() {
     // A watched worker that has exited is still registered — its output stays readable — but it can
     // do no more work, so its resting status ends the wait however it was last classified. Reported

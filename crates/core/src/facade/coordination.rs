@@ -213,7 +213,7 @@ impl Facade {
     /// process's supervision status (C2), so the report can never disagree with what fires.
     pub(in crate::facade) fn is_idle_now(&self, process: ProcessId) -> bool {
         watched_is_idle(
-            self.idle.activity(process),
+            self.idle.observed_activity(process),
             self.supervisor.view(process).map(|view| view.status),
         )
     }
@@ -327,24 +327,19 @@ impl ScopedFacade<'_> {
         let project = self.coordination_scope()?;
         let owner = self.coordination_owner()?;
         check_payload_size(body.len(), MAX_TIMER_BODY_BYTES, "timer body")?;
-        let waiting_on: Vec<ProcessId> = processes
-            .iter()
-            .copied()
-            .filter(|&process| !self.inner.is_idle_now(process))
-            .collect();
-        let already_idle = mode.quorum_met(&processes, |process| self.inner.is_idle_now(process));
-        let timer = self
+        let mut timer = self
             .inner
             .timers
             .set_when_idle(project, owner, body, processes, mode, max_wait)?;
+        timer.report_idle(|process| self.inner.is_idle_now(process));
         self.inner.bus.publish(DomainEvent::TimerArmed {
             owner,
             id: timer.id,
         });
         Ok(SetWhenIdleOutcome {
+            already_idle: timer.already_idle,
+            waiting_on: timer.waiting_on.clone(),
             timer,
-            already_idle,
-            waiting_on,
         })
     }
 

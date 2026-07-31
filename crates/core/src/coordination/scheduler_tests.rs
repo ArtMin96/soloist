@@ -261,6 +261,13 @@ async fn fire_when_idle_all_fires_only_when_every_watched_process_is_idle() {
         .expect("set");
     settle().await;
     assert!(h.armed(view.id), "running workers are not idle yet");
+    // Both take up their turn — the stream a working agent produces before it settles.
+    for worker in [first, second] {
+        h.bus.publish(DomainEvent::AgentActivityChanged {
+            id: worker,
+            state: AgentActivity::Working,
+        });
+    }
 
     // One worker idle is not enough for an all-timer.
     h.bus.publish(DomainEvent::AgentActivityChanged {
@@ -301,6 +308,11 @@ async fn fire_when_idle_any_fires_as_soon_as_one_watched_process_is_idle() {
     settle().await;
     assert!(h.armed(view.id));
 
+    // One worker takes up its turn and finishes it; that alone satisfies an any-timer.
+    h.bus.publish(DomainEvent::AgentActivityChanged {
+        id: second,
+        state: AgentActivity::Working,
+    });
     h.bus.publish(DomainEvent::AgentActivityChanged {
         id: second,
         state: AgentActivity::Idle,
@@ -332,6 +344,51 @@ async fn a_watched_process_absent_from_the_registry_counts_as_idle_and_fires() {
 
     // No event published and no clock advance: arming wakes the scheduler, which sees the absent
     // process as idle and fires at once — far before the hour-long backstop.
+    settle_until(|| !h.armed(view.id)).await;
+}
+
+#[tokio::test]
+async fn a_watched_worker_that_has_not_begun_a_turn_does_not_fire_the_timer() {
+    // A worker's terminal is quiet while its CLI starts up, so it is classified Idle before it has
+    // done anything. That quiet is not a finished turn: the timer must keep waiting until the
+    // worker has taken up its work and settled again, or the lead is woken before the work exists.
+    let h = harness(FakeSpawner::exits_on_kill());
+    let owner = h.running_process().await;
+    let worker = h.running_process().await;
+    h.spawn_scheduler();
+    settle().await;
+
+    let view = h
+        .timers
+        .set_when_idle(
+            PROJECT,
+            owner,
+            "worker finished".into(),
+            vec![worker],
+            IdleMode::All,
+            Some(Duration::from_secs(3600)),
+        )
+        .expect("set");
+
+    h.bus.publish(DomainEvent::AgentActivityChanged {
+        id: worker,
+        state: AgentActivity::Idle,
+    });
+    settle().await;
+    assert!(
+        h.armed(view.id),
+        "a worker that has only ever been quiet has not finished anything"
+    );
+
+    // It takes up its turn and finishes it: now its quiet is the real thing.
+    h.bus.publish(DomainEvent::AgentActivityChanged {
+        id: worker,
+        state: AgentActivity::Working,
+    });
+    h.bus.publish(DomainEvent::AgentActivityChanged {
+        id: worker,
+        state: AgentActivity::Idle,
+    });
     settle_until(|| !h.armed(view.id)).await;
 }
 

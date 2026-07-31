@@ -84,25 +84,16 @@ impl Facade {
                 activity: self.idle.activity(view.id),
             })
             .collect();
-        // Enrich each timer view with `waiting_on` (watched but not yet idle) and `already_idle`
-        // (quorum met at read time) computed from the live idle tracker and process registry. These
-        // are dynamic at-read-time values, not stored — the aggregate defaults them to empty/false.
+        // Each timer view carries `waiting_on` (watched but not yet idle) and `already_idle`
+        // (quorum met at read time), computed from the live idle tracker and process registry.
+        // These are dynamic at-read-time values, not stored — the aggregate defaults them to
+        // empty/false.
         let timers = self
             .timers
             .list_project(project)?
             .into_iter()
             .map(|mut tv| {
-                let enrichment = tv.fire.idle_quorum().map(|(mode, watched)| {
-                    let is_idle = |p: ProcessId| self.is_idle_now(p);
-                    let waiting_on: Vec<ProcessId> =
-                        watched.iter().copied().filter(|&p| !is_idle(p)).collect();
-                    let already_idle = mode.quorum_met(watched, is_idle);
-                    (waiting_on, already_idle)
-                });
-                if let Some((waiting_on, already_idle)) = enrichment {
-                    tv.waiting_on = waiting_on;
-                    tv.already_idle = already_idle;
-                }
+                tv.report_idle(|p| self.is_idle_now(p));
                 tv
             })
             .collect();
