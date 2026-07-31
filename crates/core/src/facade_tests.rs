@@ -379,11 +379,11 @@ async fn a_provider_with_no_prompt_argument_still_launches_and_never_resumes_int
     let project = facade.load_project(dir.path()).expect("load");
     let mut rx = facade.subscribe();
 
-    let gemini = facade
+    let amp = facade
         .launch_agent(
-            AgentLaunch::new(project.id, "Gemini", Vec::new()).opening_with("brief".to_string()),
+            AgentLaunch::new(project.id, "Amp", Vec::new()).opening_with("brief".to_string()),
         )
-        .expect("launch gemini");
+        .expect("launch amp");
     wait_for(&mut rx, ProcStatus::Running).await;
     let claude = facade
         .launch_agent(
@@ -402,7 +402,7 @@ async fn a_provider_with_no_prompt_argument_still_launches_and_never_resumes_int
     assert_eq!(
         lock(&commands).clone(),
         vec![
-            "gemini".to_string(),
+            "amp".to_string(),
             "claude brief".into(),
             "claude --continue".into(),
         ]
@@ -411,7 +411,7 @@ async fn a_provider_with_no_prompt_argument_still_launches_and_never_resumes_int
         facade
             .snapshot()
             .into_iter()
-            .any(|view| view.id == gemini && view.status == ProcStatus::Running),
+            .any(|view| view.id == amp && view.status == ProcStatus::Running),
         "a provider that takes no opening turn still starts"
     );
 }

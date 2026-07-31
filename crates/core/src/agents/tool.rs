@@ -114,15 +114,17 @@ impl AgentTool {
         self.compose(prefix, extra_args, &[])
     }
 
-    /// Composes the tool's command line with `trailing` appended as the final argument, after
-    /// the per-launch extra args — where a positional prompt goes, so it is never read as the
-    /// value of a flag that precedes it.
+    /// Composes the tool's command line with `trailing` appended as the final arguments, after
+    /// the per-launch extra args — where an initial prompt goes, in either shape a provider
+    /// takes it: a bare positional, which nothing preceding it can then claim as its value, or
+    /// a flag followed by the prompt it binds, which stay adjacent because the flag reads the
+    /// token right after it.
     pub(super) fn command_line_with_trailing(
         &self,
         extra_args: &[String],
-        trailing: &str,
+        trailing: &[&str],
     ) -> String {
-        self.compose(&[], extra_args, &[trailing])
+        self.compose(&[], extra_args, trailing)
     }
 
     /// The one composition: command, prefix, default args (appended every launch), per-launch

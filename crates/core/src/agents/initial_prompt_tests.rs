@@ -23,6 +23,16 @@ fn a_provider_with_a_documented_prompt_argument_opens_on_it() {
     for (kind, command, expected) in [
         (AgentKind::Claude, "claude", "claude 'do the thing'"),
         (AgentKind::Codex, "codex", "codex 'do the thing'"),
+        (
+            AgentKind::Gemini,
+            "gemini",
+            "gemini --prompt-interactive 'do the thing'",
+        ),
+        (
+            AgentKind::OpenCode,
+            "opencode",
+            "opencode --prompt 'do the thing'",
+        ),
     ] {
         assert_eq!(
             tool(kind, command, &[], PromptMode::AppendedArg)
@@ -34,12 +44,27 @@ fn a_provider_with_a_documented_prompt_argument_opens_on_it() {
 }
 
 #[test]
+fn a_flag_carried_prompt_stays_paired_with_its_flag_at_the_end() {
+    // The flag binds the prompt as its value, so the two have to stay adjacent and come after
+    // the tool's own default args and the per-launch flags.
+    assert_eq!(
+        tool(
+            AgentKind::Gemini,
+            "gemini",
+            &["--yolo"],
+            PromptMode::AppendedArg
+        )
+        .launch_command_line_with_prompt("go", &["--model".to_string(), "flash".to_string()])
+        .as_deref(),
+        Some("gemini --yolo --model flash --prompt-interactive go"),
+    );
+}
+
+#[test]
 fn a_provider_without_a_documented_prompt_argument_takes_none() {
     // No invented flag: the launch falls back to the plain command line, which still starts.
     for (kind, command) in [
-        (AgentKind::Gemini, "gemini"),
         (AgentKind::Amp, "amp"),
-        (AgentKind::OpenCode, "opencode"),
         (AgentKind::Copilot, "copilot"),
         (AgentKind::Kimi, "kimi"),
     ] {

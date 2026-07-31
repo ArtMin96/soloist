@@ -1,7 +1,8 @@
 //! The per-provider initial-prompt invocation (the Strategy pattern).
 //!
 //! A worker Soloist spawns is handed its orchestration context as a first turn, and each provider
-//! takes one differently — a trailing positional argument for those that take one at all. So one
+//! takes one differently — a trailing positional argument for some, the value of a flag that keeps
+//! the session interactive for others, and nothing at all for the rest. So one
 //! [`InitialPromptStrategy`] per provider, selected by [`initial_prompt_strategy_for`], owns the
 //! single decision of how, or whether, a launch can carry a first turn. Adding a future provider
 //! is one arm there, exactly as [`resume`](super::resume) adds a resume invocation.
@@ -41,7 +42,26 @@ impl InitialPromptStrategy for PositionalPrompt {
         prompt: &str,
         extra_args: &[String],
     ) -> Option<String> {
-        Some(tool.command_line_with_trailing(extra_args, prompt))
+        Some(tool.command_line_with_trailing(extra_args, &[prompt]))
+    }
+}
+
+/// Providers that take the prompt as the value of a flag which runs it and keeps the session
+/// interactive, as distinct from the print-and-exit flag each also offers. The flag and its
+/// prompt go last and adjacent, after the tool's own default and per-launch args, so the prompt
+/// is read as this flag's value and no other's.
+struct FlaggedPrompt {
+    flag: &'static str,
+}
+
+impl InitialPromptStrategy for FlaggedPrompt {
+    fn launch_command_line(
+        &self,
+        tool: &AgentTool,
+        prompt: &str,
+        extra_args: &[String],
+    ) -> Option<String> {
+        Some(tool.command_line_with_trailing(extra_args, &[self.flag, prompt]))
     }
 }
 
@@ -61,7 +81,7 @@ impl InitialPromptStrategy for ByPromptMode {
         extra_args: &[String],
     ) -> Option<String> {
         match tool.prompt_mode {
-            PromptMode::AppendedArg => Some(tool.command_line_with_trailing(extra_args, prompt)),
+            PromptMode::AppendedArg => Some(tool.command_line_with_trailing(extra_args, &[prompt])),
             PromptMode::Stdin => None,
         }
     }
@@ -83,6 +103,13 @@ impl InitialPromptStrategy for NoInitialPrompt {
 }
 
 static POSITIONAL: PositionalPrompt = PositionalPrompt;
+/// `--prompt-interactive <text>`: Gemini's interactive counterpart to its print-and-exit
+/// `--prompt`.
+static GEMINI_INTERACTIVE_PROMPT: FlaggedPrompt = FlaggedPrompt {
+    flag: "--prompt-interactive",
+};
+/// `--prompt <text>`: the prompt OpenCode's terminal UI opens on.
+static OPENCODE_PROMPT: FlaggedPrompt = FlaggedPrompt { flag: "--prompt" };
 static BY_PROMPT_MODE: ByPromptMode = ByPromptMode;
 static NO_INITIAL_PROMPT: NoInitialPrompt = NoInitialPrompt;
 
@@ -100,12 +127,24 @@ pub(super) fn initial_prompt_strategy_for(kind: AgentKind) -> &'static dyn Initi
         // message"; `codex exec` is the non-interactive form. —
         // learn.chatgpt.com/docs/developer-commands
         Codex => &POSITIONAL,
+        // `gemini -i` / `--prompt-interactive <text>`: "Execute the provided prompt and continue
+        // in interactive mode" — the counterpart to `-p`/`--prompt`, which answers and exits. —
+        // `gemini --help`
+        Gemini => &GEMINI_INTERACTIVE_PROMPT,
+        // `opencode --prompt <text>`: a flag of the default terminal-UI command
+        // (`opencode [project]`), not of the non-interactive `opencode run`. — `opencode --help`,
+        // opencode.ai/docs/cli. The UI submits it as the session's first turn rather than leaving
+        // it sitting in the input box.
+        OpenCode => &OPENCODE_PROMPT,
         // A user-configured CLI, so its convention is the user's to declare.
         Generic => &BY_PROMPT_MODE,
-        // No published interactive prompt argument for these, so none is invented. Amp
-        // (`amp -x`) and OpenCode (`opencode run`) document prompt arguments only for their
-        // non-interactive forms, which would exit instead of opening the session Soloist runs.
-        Amp | Gemini | OpenCode | Copilot | Kimi => &NO_INITIAL_PROMPT,
+        // No interactive prompt argument for these, so none is invented. Copilot's `-p` runs "in
+        // non-interactive mode … and exits when done" (docs.github.com/copilot) and Kimi's
+        // "doesn't enter interactive mode" (moonshotai.github.io/kimi-cli); Amp opens on an
+        // opening message only from piped stdin, which a PTY launch never supplies, and its
+        // `-x` prints one answer and exits (`amp --help`). Each would end the worker its lead
+        // still needs to talk to.
+        Amp | Copilot | Kimi => &NO_INITIAL_PROMPT,
     }
 }
 
