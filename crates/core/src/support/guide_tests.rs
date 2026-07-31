@@ -3,18 +3,19 @@ use super::*;
 use crate::settings::McpFeatureGroup;
 
 #[test]
-fn the_guide_teaches_automatic_binding_not_a_manual_bind_call() {
+fn the_guide_teaches_automatic_binding_and_the_retry_when_it_is_refused() {
     let guide = agent_guide();
     // The injected id and the external fallback are named...
     assert!(guide.contains(PROCESS_ID_ENV));
     assert!(guide.contains("register_agent"));
     assert!(guide.contains("whoami"));
-    // ...and binding is taught as automatic — there is no bind tool for an agent to call, so the
-    // guide must not instruct one (the earlier text told agents to call `bind_session_process`).
+    // ...binding is taught as automatic...
     assert!(guide.contains("automatically"));
+    // ...and so is the way out of a refused bind, which is otherwise a dead end: an agent that
+    // reads the guide but not the tool list would never learn the explicit bind exists.
     assert!(
-        !guide.contains("bind_session_process"),
-        "the guide must not tell agents to call a bind tool that the MCP surface does not expose"
+        guide.contains("bind_session_process"),
+        "the guide must name the tool an agent binds with when its automatic bind was refused"
     );
 }
 

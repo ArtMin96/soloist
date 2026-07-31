@@ -88,7 +88,9 @@ pub use facade::{
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
-pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};
+pub use identity::{
+    BindRefusal, BindRefusalReason, Identity, IdentityError, Origin, PeerCredentials, Whoami,
+};
 pub use ids::{
     DiagramId, ProcessId, ProjectId, ScratchpadId, SessionId, TemplateId, TimerId, TodoId,
     PROCESS_ID_ENV,

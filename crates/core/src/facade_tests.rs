@@ -1,5 +1,5 @@
 use super::*;
-use crate::identity::{IdentityError, Origin};
+use crate::identity::{BindRefusalReason, IdentityError, Origin};
 use crate::ids::ProjectId;
 use crate::ports::{TokioClock, TrustRepo};
 use crate::process::{ProcStatus, ProcessKind};
@@ -372,6 +372,9 @@ async fn whoami_of_a_fresh_session_is_unbound_and_unscoped() {
     assert_eq!(who.session, session);
     assert_eq!(who.origin, Origin::Unbound);
     assert!(who.bound_process.is_none());
+    // Nothing was ever attempted, so there is no refusal to report — the fact that separates this
+    // session from one whose bind was rejected.
+    assert!(who.bind_refusal.is_none());
     // No project loaded and nothing bound: the scope cannot be resolved.
     assert!(who.effective_project.is_none());
 }
@@ -435,6 +438,63 @@ async fn binding_a_process_the_caller_does_not_run_in_is_refused() {
         facade.scoped(session).bind_session_process(id),
         Err(IdentityError::ForeignProcess)
     ));
+}
+
+#[tokio::test]
+async fn a_refused_bind_is_reported_by_whoami() {
+    // A refused session and one that never tried both stay unbound, so the origin alone cannot
+    // tell them apart. The recorded refusal is what makes the rejection — and its reason —
+    // legible to the caller instead of silently indistinguishable from never binding.
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    facade.supervisor().assign_test_group(id, TEST_PEER_PGID);
+    let session = facade.open_session(PeerCredentials::in_group(9999));
+    assert!(facade.scoped(session).bind_session_process(id).is_err());
+
+    let who = facade.scoped(session).whoami();
+    assert_eq!(who.origin, Origin::Unbound);
+    let refusal = who.bind_refusal.expect("the refused bind is reported");
+    assert_eq!(refusal.process, id);
+    assert_eq!(refusal.reason, BindRefusalReason::ForeignProcess);
+}
+
+#[tokio::test]
+async fn a_bind_that_succeeds_clears_an_earlier_refusal() {
+    // An agent that binds explicitly after its automatic bind was refused is simply bound: the
+    // stale refusal must not keep telling it something is wrong.
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    let session = authentic_session(&facade, id, TEST_PEER_PGID);
+    // An unknown process is refused first, so the session carries a refusal to clear.
+    assert!(facade
+        .scoped(session)
+        .bind_session_process(ProcessId::from_raw(999))
+        .is_err());
+    assert_eq!(
+        facade
+            .scoped(session)
+            .whoami()
+            .bind_refusal
+            .map(|refusal| refusal.reason),
+        Some(BindRefusalReason::UnknownProcess)
+    );
+
+    facade
+        .scoped(session)
+        .bind_session_process(id)
+        .expect("bind to the process the caller runs in");
+
+    let who = facade.scoped(session).whoami();
+    assert_eq!(who.origin, Origin::Process(id));
+    assert!(who.bind_refusal.is_none());
 }
 
 #[tokio::test]

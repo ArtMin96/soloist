@@ -2,12 +2,12 @@ use super::*;
 
 use crate::error::IpcError;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, ExportedTemplate, FeedbackEntry, FireCond,
-    IntegrationFile, IntegrationWrite, LeaseView, MissingPolicy, Origin, ProcStatus, ProcessId,
-    ProcessKind, ProcessView, ProjectId, ProjectRef, ProjectView, PromptMode, Readiness,
-    RenderedPrompt, ScratchpadId, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary,
-    TemplateId, TemplateKind, TemplateScope, TemplateSummary, TemplateView, TimerId, TimerStatus,
-    TimerView, TodoDoc, TodoId, TodoStatus, TodoView, Whoami,
+    AcquireOutcome, AgentKind, AgentTool, BindRefusal, BindRefusalReason, ExportedTemplate,
+    FeedbackEntry, FireCond, IntegrationFile, IntegrationWrite, LeaseView, MissingPolicy, Origin,
+    ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, ProjectView,
+    PromptMode, Readiness, RenderedPrompt, ScratchpadId, ScratchpadView, SessionId,
+    SetWhenIdleOutcome, StartSummary, TemplateId, TemplateKind, TemplateScope, TemplateSummary,
+    TemplateView, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoView, Whoami,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -231,6 +231,12 @@ fn every_response_variant_round_trips_through_json() {
             effective_project: Some(ProjectRef {
                 id: ProjectId::from_raw(1),
                 name: Some("storefront".into()),
+            }),
+            // A bound session that was refused a later re-bind reports both, so the refusal is
+            // populated here too and its round-trip is exercised.
+            bind_refusal: Some(BindRefusal {
+                process: ProcessId::from_raw(8),
+                reason: BindRefusalReason::ForeignProcess,
             }),
         }),
         IpcResponse::Acked,

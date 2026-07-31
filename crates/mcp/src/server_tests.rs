@@ -74,6 +74,7 @@ fn sample_view(id: u64) -> ProcessView {
 const EXPECTED_TOOL_SURFACE: &[&str] = &[
     // tools/identity.rs
     "whoami",
+    "bind_session_process",
     "register_agent",
     "select_project",
     "select_process",
@@ -498,6 +499,7 @@ async fn whoami_projects_the_resolved_identity_and_the_enabled_tool_count() {
             id: ProjectId::from_raw(1),
             name: Some("storefront".into()),
         }),
+        bind_refusal: None,
     };
     let canned = who.clone();
     spawn_fake_app(socket.clone(), move |_request| {

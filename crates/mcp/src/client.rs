@@ -8,6 +8,7 @@
 
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::PoisonError;
 use std::time::Duration;
 
 use soloist_core::{McpToolGroups, ProcessId};
@@ -47,6 +48,16 @@ impl fmt::Display for ClientError {
     }
 }
 
+/// Why the bind on a fresh connection did not take effect. The session stays usable — it simply
+/// runs unbound — so this is a diagnostic, never a connection failure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum BindFailure {
+    /// The app answered the bind with a typed refusal.
+    Refused(IpcError),
+    /// The app could not be asked — the bind request did not complete.
+    Unreachable,
+}
+
 /// A stateless front over one connection to the app.
 pub struct AppClient {
     /// The app's IPC socket path.
@@ -56,6 +67,10 @@ pub struct AppClient {
     bound: Option<ProcessId>,
     /// The live connection, opened lazily and reopened after a transport failure.
     stream: Mutex<Option<UnixStream>>,
+    /// The bind failure already written to stderr, so a refusal that persists across reconnects
+    /// is stated once rather than on every connection. A plain `std::sync::Mutex`: the critical
+    /// section only compares and swaps a value, and nothing is awaited while it is held.
+    reported_bind_failure: std::sync::Mutex<Option<BindFailure>>,
 }
 
 impl AppClient {
@@ -66,6 +81,7 @@ impl AppClient {
             socket,
             bound,
             stream: Mutex::new(None),
+            reported_bind_failure: std::sync::Mutex::new(None),
         }
     }
 
@@ -106,11 +122,53 @@ impl AppClient {
             .await
             .map_err(|_| ClientError::NotRunning)?;
         if let Some(process) = self.bound {
-            // A bind failure must not fail the connection — whoami simply reports unbound.
-            let _ = exchange(&mut stream, &IpcRequest::BindSessionProcess { process }).await;
+            // A bind failure must not fail the connection — the session runs unbound instead, and
+            // the app records the refusal for `whoami`. It is reported here as well, so a user
+            // reading the MCP host's log learns of it without having to ask an agent.
+            let failure =
+                match exchange(&mut stream, &IpcRequest::BindSessionProcess { process }).await {
+                    Ok(Ok(_)) => None,
+                    Ok(Err(err)) => Some(BindFailure::Refused(err)),
+                    Err(_) => Some(BindFailure::Unreachable),
+                };
+            if let Some(failure) = failure {
+                if let Some(report) = self.note_bind_failure(process, failure) {
+                    eprintln!("{report}");
+                }
+            }
         }
         Ok(stream)
     }
+
+    /// Records `failure` and returns the line to report, or `None` when the same failure was
+    /// reported already — so a client that reconnects states a standing refusal once.
+    fn note_bind_failure(&self, process: ProcessId, failure: BindFailure) -> Option<String> {
+        let mut reported = self
+            .reported_bind_failure
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if reported.as_ref() == Some(&failure) {
+            return None;
+        }
+        let report = bind_failure_report(process, &failure);
+        *reported = Some(failure);
+        Some(report)
+    }
+}
+
+/// The diagnostic for a bind that did not take effect: the process the session could not bind to,
+/// why, and the way back. Written to stderr, which an MCP host captures for its user — the one
+/// channel a stdio server has that does not disturb the protocol on stdout.
+fn bind_failure_report(process: ProcessId, failure: &BindFailure) -> String {
+    let reason = match failure {
+        BindFailure::Refused(err) => err.to_string(),
+        BindFailure::Unreachable => "Soloist did not answer".to_string(),
+    };
+    format!(
+        "soloist-mcp: could not bind this session to process {process}: {reason}. \
+Tools run unbound, so anything that needs an owning process (leases, timers) is refused. \
+Call `whoami` for the recorded reason, and `bind_session_process` to retry."
+    )
 }
 
 /// Writes one request and reads one reply over the stream, bounded by [`REQUEST_TIMEOUT`]

@@ -91,10 +91,15 @@ files, and wait on other processes with idle timers instead of polling.\n\n{ONBO
             title: "Identity & binding",
             body: format!(
                 "- When Soloist launches a process it injects `{PROCESS_ID_ENV}`. Your MCP session \
-binds to that process **automatically when it connects** — you do not call anything, and there \
-is no manual bind tool. Binding attributes your locks, timers, and todo locks to your process \
-and releases them when it closes.\n\
-- Call `whoami` to confirm how you are bound and which project your tools act on.\n\
+binds to that process **automatically when it connects** — normally you call nothing. Binding \
+attributes your locks, timers, and todo locks to your process and releases them when it \
+closes.\n\
+- Call `whoami` to confirm how you are bound and which project your tools act on. It reports a \
+bind that was refused, and why.\n\
+- A bind is only authentic from inside the process it names, so one can be refused — starting an \
+agent by hand inside a Soloist terminal puts it in a different process group than the terminal \
+it inherited its id from. If `whoami` shows you unbound with your id injected, call \
+`bind_session_process` with that id to bind explicitly.\n\
 - If Soloist did *not* launch you (no injected id), call `register_agent` with a label so \
 `whoami` can report who is calling."
             ),

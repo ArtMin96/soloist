@@ -44,6 +44,31 @@ impl Origin {
     }
 }
 
+/// A bind a session asked for and was refused: the process it named and why. Kept beside the
+/// [`Origin`] rather than as a variant of it because a refusal is not an identity — the caller
+/// remains [`Unbound`](Origin::Unbound) — and the two facts move independently: an unbound
+/// session that registers a label still carries the refusal that explains why it had to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BindRefusal {
+    /// The process the session asked to bind to.
+    pub process: ProcessId,
+    /// Why the bind was refused.
+    pub reason: BindRefusalReason,
+}
+
+/// Why a bind was refused — the two conditions
+/// [`bind_session_process`](crate::ScopedFacade::bind_session_process) checks, in the order it
+/// checks them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BindRefusalReason {
+    /// The named process is not in the registry.
+    UnknownProcess,
+    /// The caller's connecting peer does not run in the named process's group, so the binding
+    /// would not be authentic.
+    ForeignProcess,
+}
+
 /// The facts the transport reads from the kernel about a connection's peer — the process group it
 /// runs in and the working directory it runs from — each authenticating a session's project scope
 /// *without the caller asserting it as a tool argument*. They differ in strength. The **group** is
@@ -107,6 +132,8 @@ struct Session {
     /// `selected_project` it confers no scope or authority — every scoped tool takes an
     /// explicit process id — so it is never reconciled against `peer`.
     selected_process: Option<ProcessId>,
+    /// The last bind this session asked for and was refused, cleared by a bind that succeeds.
+    bind_refusal: Option<BindRefusal>,
     peer: PeerCredentials,
 }
 
@@ -130,6 +157,11 @@ pub struct Whoami {
     /// The project this session's scoped tools act on, with its display name — `None` when the
     /// scope is unresolved (nothing bound or selected and more than one project open).
     pub effective_project: Option<ProjectRef>,
+    /// The bind this session asked for and was refused, if any — the fact that separates a caller
+    /// whose bind was *rejected* from one that never attempted a bind, which both report
+    /// [`Origin::Unbound`]. A bind that succeeds clears it; a session that is bound and then
+    /// refused a later re-bind reports both, which is the whole truth about it.
+    pub bind_refusal: Option<BindRefusal>,
 }
 
 /// Why an identity command failed: the referenced process or project is not registered,
@@ -155,6 +187,15 @@ pub enum IdentityError {
     /// The project store could not be read.
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+impl From<BindRefusalReason> for IdentityError {
+    fn from(reason: BindRefusalReason) -> Self {
+        match reason {
+            BindRefusalReason::UnknownProcess => IdentityError::UnknownProcess,
+            BindRefusalReason::ForeignProcess => IdentityError::ForeignProcess,
+        }
+    }
 }
 
 /// The per-session identity registry (C8): the source of truth for which process each
@@ -189,9 +230,19 @@ impl Identity {
         id
     }
 
-    /// Binds a session to the supervised process it runs in (from [`PROCESS_ID_ENV`](crate::ids::PROCESS_ID_ENV)).
+    /// Binds a session to the supervised process it runs in (from [`PROCESS_ID_ENV`](crate::ids::PROCESS_ID_ENV)),
+    /// clearing any earlier refusal — the session is bound, so there is nothing left to explain.
     pub fn bind_process(&self, session: SessionId, process: ProcessId) {
-        self.update(session, |s| s.origin = Origin::Process(process));
+        self.update(session, |s| {
+            s.origin = Origin::Process(process);
+            s.bind_refusal = None;
+        });
+    }
+
+    /// Records that a session's bind was refused, so [`Whoami`] reports the rejection instead of
+    /// a bare unbound session.
+    pub fn refuse_bind(&self, session: SessionId, refusal: BindRefusal) {
+        self.update(session, |s| s.bind_refusal = Some(refusal));
     }
 
     /// Registers an external (non-supervised) caller under a label.
@@ -235,6 +286,14 @@ impl Identity {
         lock(&self.sessions)
             .get(&session)
             .and_then(|s| s.selected_process)
+    }
+
+    /// The bind a session was last refused, if any — `None` when it never attempted one, or when
+    /// a later bind succeeded.
+    pub fn bind_refusal(&self, session: SessionId) -> Option<BindRefusal> {
+        lock(&self.sessions)
+            .get(&session)
+            .and_then(|s| s.bind_refusal.clone())
     }
 
     /// The connecting peer's process group recorded for a session ([`None`] if unknown or the

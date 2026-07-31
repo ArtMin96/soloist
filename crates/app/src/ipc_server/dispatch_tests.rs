@@ -171,6 +171,30 @@ async fn project_status_for_an_unknown_project_is_refused() {
 }
 
 #[tokio::test]
+async fn binding_a_process_the_caller_does_not_run_in_maps_to_the_wire_error() {
+    // The bind tool routes through the same gate the automatic bind does: a session whose peer
+    // group owns no managed process cannot claim one, so a caller cannot bind its way into a
+    // process — or a project — it does not run in.
+    let facade = facade();
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    facade.supervisor().assign_test_group(id, PEER_PGID);
+    let session = facade.open_session(PeerCredentials::in_group(PEER_PGID + 1));
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::BindSessionProcess { process: id }
+        )
+        .await,
+        Err(IpcError::ForeignProcess)
+    );
+}
+
+#[tokio::test]
 async fn binding_an_unknown_process_maps_to_the_wire_error() {
     let facade = facade();
     let session = grouped_session(&facade);
