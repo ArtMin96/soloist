@@ -170,6 +170,11 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .spawn_agent(&tool, extra_args, close_when_done)
             .map(IpcResponse::Spawned)
             .map_err(IpcError::from),
+        IpcRequest::ReportToLead { report } => facade
+            .scoped(session)
+            .report_to_lead(report)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
         IpcRequest::ListAgentTools => facade
             .agents()
             .list_tools()

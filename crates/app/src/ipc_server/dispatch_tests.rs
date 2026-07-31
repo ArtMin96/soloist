@@ -371,6 +371,25 @@ async fn spawning_an_agent_without_scope_is_refused() {
 }
 
 #[tokio::test]
+async fn reporting_with_no_lead_is_refused_over_the_wire() {
+    let facade = facade();
+    let session = grouped_session(&facade);
+    // The route carries no target, so the only thing a caller with no lead can get back is the
+    // refusal the core resolved — not a write into someone else.
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::ReportToLead {
+                report: "anything".into(),
+            },
+        )
+        .await,
+        Err(IpcError::NoLead)
+    );
+}
+
+#[tokio::test]
 async fn list_agent_tools_routes_to_the_registry() {
     let facade = facade();
     let session = grouped_session(&facade);

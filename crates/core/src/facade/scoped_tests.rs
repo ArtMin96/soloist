@@ -1,16 +1,20 @@
 use super::*;
+use crate::agents::{AgentKind, AgentTool, PromptMode};
 use crate::composition::CorePorts;
 use crate::config::parse;
 use crate::events::DomainEvent;
 use crate::facade::scoped_process::MAX_INPUT_WAIT;
+use crate::facade::scoped_process::MAX_REPORT_BYTES;
 use crate::ids::ProjectId;
+use crate::ports::ProjectRepo;
 use crate::ports::{Clock, TokioClock, TrustRepo};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::Registration;
 use crate::sync::lock;
 use crate::testing::{
     agent_registration, authentic_session, facade_recording_agent_launches, facade_with_agent_tool,
-    terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo, TEST_PEER_PGID,
+    terminal_registration, FakeAgentToolRepo, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
+    TEST_PEER_PGID,
 };
 use crate::PeerCredentials;
 use async_trait::async_trait;
@@ -528,6 +532,171 @@ async fn a_spawned_worker_opens_on_its_orchestration_context() {
         launched.contains("whoami"),
         "the worker is told how to resolve its own identity: {launched}"
     );
+}
+
+/// A running lead with a running worker spawned by it, plus the buffer the lead's PTY input is
+/// recorded into — the shape every report test needs. Returns the façade, the lead, the worker's
+/// bound session, and the lead's input log.
+async fn a_lead_and_its_worker() -> (Facade, ProcessId, SessionId, Arc<Mutex<Vec<u8>>>) {
+    let (spawner, lead_input) = FakeSpawner::records_input();
+    let projects = Arc::new(FakeProjectRepo::new());
+    let project = projects
+        .upsert(Path::new("/"), Some("proj"), None)
+        .expect("seed a project")
+        .id;
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(spawner),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            projects,
+        )
+        .agent_tools(Arc::new(FakeAgentToolRepo::new(vec![AgentTool {
+            name: "worker".into(),
+            command: "true".into(),
+            default_args: Vec::new(),
+            kind: AgentKind::Generic,
+            prompt_mode: PromptMode::AppendedArg,
+        }])))
+        .build(),
+    );
+    let mut rx = facade.subscribe();
+    let lead = facade
+        .supervisor()
+        .register(agent_registration(project, "lead"));
+    let lead_session = scoped_to(&facade, lead);
+    facade
+        .scoped(lead_session)
+        .start_process(lead)
+        .expect("start the lead");
+    wait_process_to(&mut rx, lead, ProcStatus::Running).await;
+
+    let worker = facade
+        .scoped(lead_session)
+        .spawn_agent("worker", Vec::new(), false)
+        .expect("a lead spawns a worker");
+    wait_process_to(&mut rx, worker, ProcStatus::Running).await;
+    let worker_session = authentic_session(&facade, worker, TEST_PEER_PGID + 1);
+    facade
+        .scoped(worker_session)
+        .bind_session_process(worker)
+        .expect("an authentic bind to the worker");
+    (facade, worker, worker_session, lead_input)
+}
+
+/// Awaits a complete turn reaching the lead's PTY — the write is queued on the process's bounded
+/// input channel and applied by its pump, so it lands a scheduling turn after the call returns. A
+/// turn is complete once its submitting carriage return has arrived.
+async fn wait_for_a_turn(log: &Arc<Mutex<Vec<u8>>>) -> String {
+    let arrival = async {
+        loop {
+            let written = lock(log).clone();
+            if written.last() == Some(&b'\r') {
+                return String::from_utf8(written).expect("utf-8 input");
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(10), arrival)
+        .await
+        .expect("the report reaches the lead's terminal as a submitted turn")
+}
+
+#[tokio::test]
+async fn a_workers_report_reaches_its_lead_as_a_submitted_turn() {
+    let (facade, worker, worker_session, lead_input) = a_lead_and_its_worker().await;
+
+    facade
+        .scoped(worker_session)
+        .report_to_lead("the build is green".to_string())
+        .expect("a worker reports to its lead");
+
+    let written = wait_for_a_turn(&lead_input).await;
+    assert!(
+        written.contains("the build is green"),
+        "the lead receives the body: {written:?}"
+    );
+    assert!(
+        written.contains(&format!("[Soloist worker #{worker}")),
+        "the lead is told which worker reported: {written:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_caller_no_agent_spawned_has_no_lead_to_report_to() {
+    // The lead is resolved from lineage, never named by the caller, so a caller with none is
+    // refused rather than defaulted onto a terminal — its own or anyone else's. Both shapes of
+    // "no lead" are refused: a lead agent, which Soloist knows but nothing spawned, and an
+    // external caller it cannot name at all.
+    let (facade, project) = facade_with_agent_tool();
+    let lead = facade
+        .supervisor()
+        .register(agent_registration(project, "lead"));
+    let lead_session = scoped_to(&facade, lead);
+    assert!(matches!(
+        facade
+            .scoped(lead_session)
+            .report_to_lead("anything".to_string()),
+        Err(ReportToLeadError::NoLead)
+    ));
+
+    let external = facade.open_session(PeerCredentials::unauthenticated());
+    assert!(matches!(
+        facade
+            .scoped(external)
+            .report_to_lead("anything".to_string()),
+        Err(ReportToLeadError::NoLead)
+    ));
+}
+
+#[tokio::test]
+async fn a_report_to_a_departed_lead_is_refused() {
+    let (facade, _worker, worker_session, _lead_input) = a_lead_and_its_worker().await;
+    let lead = facade
+        .snapshot()
+        .into_iter()
+        .find(|view| view.label == "lead")
+        .expect("the lead is registered")
+        .id;
+    facade
+        .supervisor()
+        .close(lead)
+        .await
+        .expect("close the lead");
+
+    // The recorded parent outlives the process; the registry is what says whether it is there.
+    assert!(matches!(
+        facade
+            .scoped(worker_session)
+            .report_to_lead("too late".to_string()),
+        Err(ReportToLeadError::LeadGone)
+    ));
+}
+
+#[tokio::test]
+async fn an_oversized_report_is_refused_and_the_cap_itself_is_allowed() {
+    let (facade, _worker, worker_session, lead_input) = a_lead_and_its_worker().await;
+
+    assert!(matches!(
+        facade
+            .scoped(worker_session)
+            .report_to_lead("x".repeat(MAX_REPORT_BYTES + 1)),
+        Err(ReportToLeadError::TooLong { max_bytes, .. }) if max_bytes == MAX_REPORT_BYTES
+    ));
+
+    // A report exactly at the cap is delivered, so the bound is inclusive rather than off by one
+    // — and what reaches the lead is that report, with nothing of the refused one before it.
+    facade
+        .scoped(worker_session)
+        .report_to_lead("y".repeat(MAX_REPORT_BYTES))
+        .expect("a report at the cap is delivered");
+
+    let written = wait_for_a_turn(&lead_input).await;
+    assert!(
+        !written.contains('x'),
+        "the refused report never reached the lead"
+    );
+    assert!(written.contains(&"y".repeat(MAX_REPORT_BYTES)));
 }
 
 #[test]

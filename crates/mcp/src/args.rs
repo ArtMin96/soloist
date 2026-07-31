@@ -69,6 +69,15 @@ pub(crate) struct SpawnAgentArg {
     pub(crate) close_when_done: bool,
 }
 
+/// Arguments for reporting a worker's result to the lead that spawned it.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ReportToLeadArg {
+    /// What to tell the lead — your result, findings, or why you could not finish. Delivered as
+    /// a fresh turn on the lead's terminal, so write it as a message to another agent, not a log
+    /// dump. Bounded: an over-long report is refused with the cap it exceeded.
+    pub(crate) report: String,
+}
+
 /// Arguments for selecting the session's project scope.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub(crate) struct SelectProjectArg {

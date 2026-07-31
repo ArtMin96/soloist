@@ -9,8 +9,8 @@
 use serde::{Deserialize, Serialize};
 use soloist_core::{
     CoordinationError, FeedbackError, IdentityError, IntegrationWriteError, LaunchAgentError,
-    PromptRenderError, RenderError, ScopedActionError, SetupIntegrationError, SpawnAgentError,
-    TodoId,
+    PromptRenderError, RenderError, ReportToLeadError, ScopedActionError, SetupIntegrationError,
+    SpawnAgentError, TodoId,
 };
 
 /// What an over-cap render is named as in [`IpcError::PayloadTooLarge`], matching how the
@@ -142,6 +142,12 @@ pub enum IpcError {
     /// worker — delegation is one level deep.
     #[error("a worker agent cannot spawn agents; report back to the lead that spawned it")]
     WorkerMayNotSpawn,
+    /// A report was made by a caller no other agent spawned, so there is no lead to deliver to.
+    #[error("you have no lead to report to; only an agent that another agent spawned has one")]
+    NoLead,
+    /// The lead that spawned the reporting caller has left the registry.
+    #[error("the lead that spawned you is no longer running")]
+    LeadGone,
     /// A feedback submission was refused (empty, oversized, or the store is full); the
     /// detail says why.
     #[error("feedback was not accepted: {0}")]
@@ -198,6 +204,8 @@ impl IpcError {
             | IpcError::Untrusted
             | IpcError::UnknownTool
             | IpcError::WorkerMayNotSpawn
+            | IpcError::NoLead
+            | IpcError::LeadGone
             | IpcError::InvalidFeedback(_)
             | IpcError::UnmatchedIntegrationMarkers(_) => true,
             IpcError::Internal(_) => false,
@@ -246,6 +254,20 @@ impl From<SpawnAgentError> for IpcError {
             SpawnAgentError::NoProjectScope => IpcError::NoProjectScope,
             SpawnAgentError::WorkerMayNotSpawn => IpcError::WorkerMayNotSpawn,
             SpawnAgentError::Launch(err) => err.into(),
+        }
+    }
+}
+
+impl From<ReportToLeadError> for IpcError {
+    fn from(err: ReportToLeadError) -> Self {
+        match err {
+            ReportToLeadError::NoLead => IpcError::NoLead,
+            ReportToLeadError::LeadGone => IpcError::LeadGone,
+            ReportToLeadError::TooLong { what, max_bytes } => IpcError::PayloadTooLarge {
+                what: what.to_string(),
+                max_bytes,
+            },
+            ReportToLeadError::Store(err) => IpcError::Internal(err.to_string()),
         }
     }
 }

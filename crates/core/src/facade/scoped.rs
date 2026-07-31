@@ -137,6 +137,29 @@ pub enum SpawnAgentError {
     Launch(#[from] LaunchAgentError),
 }
 
+/// Why a worker's report to its lead was refused: it has no lead to report to, the lead is no
+/// longer there, the report is over its cap, or a durable read failed while resolving scope.
+#[derive(Debug, thiserror::Error)]
+pub enum ReportToLeadError {
+    /// The caller has no recorded lead — it was not spawned by another agent this run, or is a
+    /// caller Soloist cannot name at all. Refused rather than delivered to a default target.
+    #[error("you have no lead to report to; only an agent that another agent spawned has one")]
+    NoLead,
+    /// The lead that spawned the caller has left the registry, so there is nothing to report to.
+    #[error("the lead that spawned you is no longer running")]
+    LeadGone,
+    /// The report exceeds its cap; `what` names it and `max_bytes` is the cap it exceeded, the
+    /// same shape the coordination write caps refuse with.
+    #[error("{what} exceeds the {max_bytes} byte cap")]
+    TooLong {
+        what: &'static str,
+        max_bytes: usize,
+    },
+    /// A durable read failed while resolving scope.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
 impl From<SupervisorError> for ScopedActionError {
     /// Projects a supervisor refusal onto the scoped taxonomy. The scope guard runs first, so
     /// a `NotFound` here means the process was forgotten between checks — reported as unknown.

@@ -6,7 +6,7 @@ use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
-use crate::args::SpawnAgentArg;
+use crate::args::{ReportToLeadArg, SpawnAgentArg};
 use crate::server::SoloistMcp;
 use crate::tools::reply::{app_error, structured, unexpected};
 
@@ -30,6 +30,24 @@ impl SoloistMcp {
         };
         match self.client.request(request).await {
             Ok(IpcResponse::Spawned(id)) => structured(&serde_json::json!({ "process": id })),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Hand your result to the lead agent that spawned you, delivered as a fresh turn on its terminal so it wakes with what you found. Call this when your work is done — the lead does not read your output and cannot tell when you have finished. You cannot choose who receives it: the lead is resolved from who spawned you, and a caller no agent spawned has none to report to."
+    )]
+    pub(crate) async fn report_to_lead(
+        &self,
+        Parameters(ReportToLeadArg { report }): Parameters<ReportToLeadArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self
+            .client
+            .request(IpcRequest::ReportToLead { report })
+            .await
+        {
+            Ok(IpcResponse::Acked) => structured(&serde_json::json!({ "delivered": true })),
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }

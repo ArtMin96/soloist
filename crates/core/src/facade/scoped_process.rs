@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use super::scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
+use super::scoped::{ReportToLeadError, ScopedActionError, ScopedFacade, SpawnAgentError};
 use super::AgentLaunch;
 use crate::ids::{ProcessId, ProjectId};
 use crate::process::ProcessView;
@@ -18,6 +18,16 @@ use crate::support::orchestration_preamble;
 /// How many trailing rendered lines `send_input`'s `wait_ms` snapshot returns — a bounded
 /// tail (about a screenful), never the whole scrollback, so the reply stays small.
 const INPUT_TAIL_LINES: usize = 24;
+
+/// The most one worker's report may carry. A report is written into the lead's terminal as a
+/// turn it will read, so the cap is the same as a timer body's for the same reason: a wake is
+/// a summary, and an unbounded one would let a worker flood the context of the agent it is
+/// reporting to.
+pub const MAX_REPORT_BYTES: usize = 16 * 1024;
+
+/// What an over-cap report is named as in the refusal, matching how the coordination write caps
+/// name the payload they refused.
+const REPORT: &str = "the report";
 
 /// The longest `send_input` waits before snapshotting the tail, regardless of the requested
 /// `wait_ms`. A bound (per the longevity rules) so a large value cannot tie up the request,
@@ -157,6 +167,55 @@ impl ScopedFacade<'_> {
             self.inner.lineage.record(worker, lead);
         }
         Ok(worker)
+    }
+
+    /// Hands this worker's result to the lead that spawned it, delivered as a fresh submitted
+    /// turn on the lead's terminal — the reply half of [`spawn_agent`](Self::spawn_agent), so a
+    /// worker can finish by telling its lead what it found instead of leaving the lead to read
+    /// its output and guess when it is done. The delivery reuses the same header-then-body shape
+    /// a fired timer wakes an agent with, so a wake reads the same whatever produced it.
+    ///
+    /// **The lead is resolved from the recorded spawn lineage, never named by the caller.** A
+    /// caller cannot choose a target, so this can only ever reach the one agent that spawned it —
+    /// it is not a way to type into an arbitrary process in the project. A caller with no
+    /// recorded lead is refused rather than defaulted to anyone.
+    ///
+    /// Best-effort like every autonomous PTY write: the report is dropped rather than awaited if
+    /// the lead has stopped draining its input, so one deaf lead cannot stall the caller.
+    pub fn report_to_lead(&self, report: String) -> Result<(), ReportToLeadError> {
+        if report.len() > MAX_REPORT_BYTES {
+            return Err(ReportToLeadError::TooLong {
+                what: REPORT,
+                max_bytes: MAX_REPORT_BYTES,
+            });
+        }
+        let worker = self.caller_process().ok_or(ReportToLeadError::NoLead)?;
+        let lead = self
+            .inner
+            .lineage
+            .parent_of(worker)
+            .ok_or(ReportToLeadError::NoLead)?;
+        // The recorded parent is a hint; the registry stays the source of truth for who exists,
+        // so a lead that has left it is reported gone rather than written into. The one scope
+        // guard does both checks — a worker always lands in its lead's project, so a lead that
+        // is out of scope is one that is no longer there to report to.
+        match self.require_in_scope(lead) {
+            Ok(()) => {}
+            Err(ScopedActionError::Store(err)) => return Err(ReportToLeadError::Store(err)),
+            Err(_) => return Err(ReportToLeadError::LeadGone),
+        }
+        let named = self
+            .inner
+            .process_view(worker)
+            .map(|view| format!(" \"{}\"", view.label))
+            .unwrap_or_default();
+        let mut input = format!("[Soloist worker #{worker}{named}] report\n{report}").into_bytes();
+        // The carriage return is what submits the turn, exactly as a fired timer's delivery does.
+        input.push(b'\r');
+        self.inner
+            .supervisor()
+            .try_write_stdin(lead, input)
+            .map_err(|_| ReportToLeadError::LeadGone)
     }
 
     /// Starts every trusted command in the session's effective project, regardless of

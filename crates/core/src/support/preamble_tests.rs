@@ -21,6 +21,10 @@ fn a_worker_is_told_who_spawned_it_and_where_it_is() {
         preamble.contains("\"storefront\" (#7)"),
         "the worker learns which project its tools act on: {preamble}"
     );
+    assert!(
+        preamble.contains("report_to_lead"),
+        "the worker learns how to hand its result back: {preamble}"
+    );
 }
 
 #[test]

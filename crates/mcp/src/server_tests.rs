@@ -23,10 +23,11 @@ use crate::args::{
     DiagramArchiveArg, DiagramNameArg, DiagramTagsArg, DiagramWriteArg, HelpArg,
     IntegrationFileArg, LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, PromptScopeArg,
     PromptTemplateCreateArg, PromptTemplateRenderArg, PromptTemplateUpdateArg, RenameArg,
-    ScratchpadArchiveArg, ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg,
-    SelectProjectArg, SendInputArg, SetupAgentIntegrationArg, SpawnAgentArg, SubmitFeedbackArg,
-    TimerArg, TimerFireWhenIdleArg, TimerSetArg, TodoArg, TodoCommentCreateArg, TodoCreateArg,
-    TodoGetArg, TodoRef, TodoStatusArg, TodoUpdateArg, WaitForPortArg,
+    ReportToLeadArg, ScratchpadArchiveArg, ScratchpadNameArg, ScratchpadTagsArg,
+    ScratchpadWriteArg, SearchArg, SelectProjectArg, SendInputArg, SetupAgentIntegrationArg,
+    SpawnAgentArg, SubmitFeedbackArg, TimerArg, TimerFireWhenIdleArg, TimerSetArg, TodoArg,
+    TodoCommentCreateArg, TodoCreateArg, TodoGetArg, TodoRef, TodoStatusArg, TodoUpdateArg,
+    WaitForPortArg,
 };
 
 /// The tool names the composed router actually serves.
@@ -92,6 +93,7 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "send_input",
     // tools/agent.rs
     "spawn_agent",
+    "report_to_lead",
     "list_agent_tools",
     // tools/bulk.rs
     "start_all_commands",
@@ -835,6 +837,57 @@ async fn spawn_agent_threads_its_arguments_through_and_returns_the_process_id() 
         .await
         .expect("spawn_agent succeeds");
     assert_eq!(structured_of(result), serde_json::json!({ "process": 42 }));
+}
+
+#[tokio::test]
+async fn report_to_lead_carries_the_report_and_names_no_target() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        // The tool takes no target: whatever it forwards, the app resolves the lead itself.
+        IpcRequest::ReportToLead { report } if report == "the build is green" => {
+            Ok(IpcResponse::Acked)
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .report_to_lead(Parameters(ReportToLeadArg {
+            report: "the build is green".into(),
+        }))
+        .await
+        .expect("report_to_lead succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "delivered": true })
+    );
+}
+
+#[tokio::test]
+async fn having_no_lead_to_report_to_is_a_tool_error_the_model_can_read() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::ReportToLead { .. } => Err(IpcError::NoLead),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    // A lead agent calling this has no one to report to; that is caller-fixable feedback, so it
+    // comes back as a tool-execution error carrying the message rather than a protocol error.
+    let result = handler(socket)
+        .report_to_lead(Parameters(ReportToLeadArg {
+            report: "anything".into(),
+        }))
+        .await
+        .expect("a request error is a tool result, not a protocol error");
+    assert_eq!(result.is_error, Some(true));
+    let rendered = serde_json::to_value(&result)
+        .expect("serialize the tool result")
+        .to_string();
+    assert!(
+        rendered.contains("you have no lead to report to"),
+        "the refusal reads as guidance: {rendered}"
+    );
 }
 
 #[tokio::test]

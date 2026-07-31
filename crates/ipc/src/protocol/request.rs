@@ -58,6 +58,9 @@ pub enum IpcRequest {
     },
     /// Every configured agent tool that `spawn_agent` can launch (not scope-filtered).
     ListAgentTools,
+    /// Hand the caller's result to the lead that spawned it, as a fresh turn on the lead's
+    /// terminal. The lead is resolved from lineage, never named here.
+    ReportToLead { report: String },
     /// Start every trusted command in the session's effective project (trust-gated).
     StartAllCommands,
     /// Gracefully stop every running command in the session's effective project.
