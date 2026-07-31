@@ -14,7 +14,7 @@ use crate::sync::lock;
 use crate::testing::{
     agent_registration, authentic_session, facade_recording_agent_launches, facade_with_agent_tool,
     terminal_registration, FakeAgentToolRepo, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
-    TEST_PEER_PGID,
+    InputLog, TEST_PEER_PGID,
 };
 use crate::PeerCredentials;
 use async_trait::async_trait;
@@ -534,16 +534,30 @@ async fn a_spawned_worker_opens_on_its_orchestration_context() {
     );
 }
 
-/// A running lead with a running worker spawned by it, plus the buffer the lead's PTY input is
-/// recorded into — the shape every report test needs. Returns the façade, the lead, the worker's
-/// bound session, and the lead's input log.
-async fn a_lead_and_its_worker() -> (Facade, ProcessId, SessionId, Arc<Mutex<Vec<u8>>>) {
-    let (spawner, lead_input) = FakeSpawner::records_input();
+/// A running lead with a running worker it spawned, plus the per-process record of what reached
+/// each one's PTY — the shape every report test needs.
+struct LeadAndWorker {
+    facade: Facade,
+    lead: ProcessId,
+    worker: ProcessId,
+    /// The worker's bound session — the caller every report is made from.
+    worker_session: SessionId,
+    input: InputLog,
+}
+
+/// Builds [`LeadAndWorker`]. A second project is registered beside the lead's so no caller's
+/// scope can resolve by there being only one project to pick — a report's scope must come from
+/// the caller itself.
+async fn a_lead_and_its_worker() -> LeadAndWorker {
+    let (spawner, input) = FakeSpawner::records_input();
     let projects = Arc::new(FakeProjectRepo::new());
     let project = projects
         .upsert(Path::new("/"), Some("proj"), None)
         .expect("seed a project")
         .id;
+    projects
+        .upsert(Path::new("/elsewhere"), Some("other"), None)
+        .expect("seed a second project");
     let facade = Facade::new(
         CorePorts::builder(
             Arc::new(spawner),
@@ -581,44 +595,67 @@ async fn a_lead_and_its_worker() -> (Facade, ProcessId, SessionId, Arc<Mutex<Vec
         .scoped(worker_session)
         .bind_session_process(worker)
         .expect("an authentic bind to the worker");
-    (facade, worker, worker_session, lead_input)
+    LeadAndWorker {
+        facade,
+        lead,
+        worker,
+        worker_session,
+        input,
+    }
 }
 
-/// Awaits a complete turn reaching the lead's PTY — the write is queued on the process's bounded
-/// input channel and applied by its pump, so it lands a scheduling turn after the call returns. A
-/// turn is complete once its submitting carriage return has arrived.
-async fn wait_for_a_turn(log: &Arc<Mutex<Vec<u8>>>) -> String {
+/// Awaits `body` arriving as a complete submitted turn on *some* process's PTY, returning which
+/// process received it and the turn it received. The write is queued on the process's bounded
+/// input channel and applied by its pump, so it lands a scheduling turn after the call that made
+/// it returns; a turn is complete once its submitting carriage return has arrived. The recipient
+/// is returned rather than assumed so a caller asserts where the turn landed instead of merely
+/// that one did.
+async fn wait_for_the_turn_carrying(input: &InputLog, body: &str) -> (ProcessId, String) {
     let arrival = async {
         loop {
-            let written = lock(log).clone();
-            if written.last() == Some(&b'\r') {
-                return String::from_utf8(written).expect("utf-8 input");
+            let landed = input.by_process().into_iter().find_map(|(id, written)| {
+                let turn = String::from_utf8(written).expect("utf-8 input");
+                (turn.ends_with('\r') && turn.contains(body)).then_some((id, turn))
+            });
+            if let Some(landed) = landed {
+                return landed;
             }
             tokio::task::yield_now().await;
         }
     };
-    tokio::time::timeout(Duration::from_secs(10), arrival)
-        .await
-        .expect("the report reaches the lead's terminal as a submitted turn")
+    match tokio::time::timeout(Duration::from_secs(10), arrival).await {
+        Ok(landed) => landed,
+        Err(_) => {
+            let received: Vec<_> = input
+                .by_process()
+                .into_iter()
+                .map(|(id, written)| (id, written.len()))
+                .collect();
+            panic!("no process received the turn; bytes received per process: {received:?}")
+        }
+    }
 }
 
 #[tokio::test]
 async fn a_workers_report_reaches_its_lead_as_a_submitted_turn() {
-    let (facade, worker, worker_session, lead_input) = a_lead_and_its_worker().await;
+    let h = a_lead_and_its_worker().await;
 
-    facade
-        .scoped(worker_session)
+    h.facade
+        .scoped(h.worker_session)
         .report_to_lead("the build is green".to_string())
         .expect("a worker reports to its lead");
 
-    let written = wait_for_a_turn(&lead_input).await;
-    assert!(
-        written.contains("the build is green"),
-        "the lead receives the body: {written:?}"
+    // Which terminal the turn lands on is the whole of the behaviour: a report the reporter
+    // submits to itself, or to any process other than its lead, is a report nobody read.
+    let (recipient, turn) = wait_for_the_turn_carrying(&h.input, "the build is green").await;
+    assert_eq!(
+        recipient, h.lead,
+        "the report is a turn on the lead's terminal, not the reporting worker's (#{}): {turn:?}",
+        h.worker
     );
     assert!(
-        written.contains(&format!("[Soloist worker #{worker}")),
-        "the lead is told which worker reported: {written:?}"
+        turn.contains(&format!("[Soloist worker #{}", h.worker)),
+        "the lead is told which worker reported: {turn:?}"
     );
 }
 
@@ -651,52 +688,82 @@ async fn a_caller_no_agent_spawned_has_no_lead_to_report_to() {
 
 #[tokio::test]
 async fn a_report_to_a_departed_lead_is_refused() {
-    let (facade, _worker, worker_session, _lead_input) = a_lead_and_its_worker().await;
-    let lead = facade
-        .snapshot()
-        .into_iter()
-        .find(|view| view.label == "lead")
-        .expect("the lead is registered")
-        .id;
-    facade
+    let h = a_lead_and_its_worker().await;
+    h.facade
         .supervisor()
-        .close(lead)
+        .close(h.lead)
         .await
         .expect("close the lead");
 
     // The recorded parent outlives the process; the registry is what says whether it is there.
     assert!(matches!(
-        facade
-            .scoped(worker_session)
+        h.facade
+            .scoped(h.worker_session)
             .report_to_lead("too late".to_string()),
         Err(ReportToLeadError::LeadGone)
     ));
 }
 
 #[tokio::test]
-async fn an_oversized_report_is_refused_and_the_cap_itself_is_allowed() {
-    let (facade, _worker, worker_session, lead_input) = a_lead_and_its_worker().await;
+async fn a_report_from_a_worker_soloist_has_forgotten_is_refused() {
+    let h = a_lead_and_its_worker().await;
+    // The worker's process is closed while its bound session lives on — a last tool call from an
+    // agent Soloist no longer knows. Its lead is still running and its terminal still writable,
+    // so the caller's own scope is the only thing standing between that call and the lead's
+    // terminal: a report that cannot be placed in a project is refused, not delivered anyway.
+    h.facade
+        .supervisor()
+        .close(h.worker)
+        .await
+        .expect("close the worker");
 
     assert!(matches!(
-        facade
-            .scoped(worker_session)
+        h.facade
+            .scoped(h.worker_session)
+            .report_to_lead("orphaned".to_string()),
+        Err(ReportToLeadError::LeadGone)
+    ));
+
+    // A delivery would have been queued on the lead's input channel ahead of this one, so once
+    // this turn has landed the absence of the report is a fact rather than a race. That the write
+    // is accepted at all is what proves the refusal above was the scope guard's doing and not a
+    // lead that had gone unwritable.
+    h.facade
+        .supervisor()
+        .try_write_stdin(h.lead, b"typed by the user\r".to_vec())
+        .expect("the lead's terminal is still writable");
+    let (recipient, _) = wait_for_the_turn_carrying(&h.input, "typed by the user").await;
+    assert_eq!(recipient, h.lead);
+    assert!(
+        !String::from_utf8_lossy(&h.input.to(h.lead)).contains("orphaned"),
+        "the refused report never reached the lead"
+    );
+}
+
+#[tokio::test]
+async fn an_oversized_report_is_refused_and_the_cap_itself_is_allowed() {
+    let h = a_lead_and_its_worker().await;
+
+    assert!(matches!(
+        h.facade
+            .scoped(h.worker_session)
             .report_to_lead("x".repeat(MAX_REPORT_BYTES + 1)),
         Err(ReportToLeadError::TooLong { max_bytes, .. }) if max_bytes == MAX_REPORT_BYTES
     ));
 
     // A report exactly at the cap is delivered, so the bound is inclusive rather than off by one
     // — and what reaches the lead is that report, with nothing of the refused one before it.
-    facade
-        .scoped(worker_session)
+    h.facade
+        .scoped(h.worker_session)
         .report_to_lead("y".repeat(MAX_REPORT_BYTES))
         .expect("a report at the cap is delivered");
 
-    let written = wait_for_a_turn(&lead_input).await;
+    let (recipient, _) = wait_for_the_turn_carrying(&h.input, &"y".repeat(MAX_REPORT_BYTES)).await;
+    assert_eq!(recipient, h.lead, "the report at the cap reaches the lead");
     assert!(
-        !written.contains('x'),
+        !String::from_utf8_lossy(&h.input.to(h.lead)).contains('x'),
         "the refused report never reached the lead"
     );
-    assert!(written.contains(&"y".repeat(MAX_REPORT_BYTES)));
 }
 
 #[test]

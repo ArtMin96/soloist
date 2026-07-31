@@ -21,7 +21,6 @@ use crate::ids::{ProcessId, ProjectId, TimerId};
 use crate::ports::{PtySize, SpawnSpec};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, Supervisor};
-use crate::sync::lock;
 use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTimerRepo, FakeTrustRepo, MockClock};
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);
@@ -182,7 +181,7 @@ async fn settle_until<F: Fn() -> bool>(pred: F) {
 
 #[tokio::test]
 async fn an_at_timer_fires_at_its_deadline_and_delivers_the_body_as_a_fresh_turn() {
-    let (spawner, recorder) = FakeSpawner::records_input();
+    let (spawner, delivered) = FakeSpawner::records_input();
     let h = harness(spawner);
     let owner = h.running_process().await;
     h.spawn_scheduler();
@@ -207,7 +206,7 @@ async fn an_at_timer_fires_at_its_deadline_and_delivers_the_body_as_a_fresh_turn
     // submitted fresh turn and can tell why it woke (the header format is tested separately via
     // `wake_reason_header` — here we only assert the body text is present).
     advance_until(&h.clock, Duration::from_secs(10), || {
-        String::from_utf8_lossy(&lock(&recorder)).contains("resume work")
+        String::from_utf8_lossy(&delivered.to(owner)).contains("resume work")
     })
     .await;
     assert!(!h.exists(owner, view.id), "a fired timer is gone");
