@@ -199,13 +199,13 @@ fn setting_a_timer_with_a_body_at_the_cap_arms_it() {
     assert_eq!(facade.scoped(session).timer_list().expect("list").len(), 1);
 }
 
-#[test]
-fn fire_when_idle_reports_the_processes_it_is_waiting_on() {
+#[tokio::test]
+async fn fire_when_idle_reports_the_processes_it_is_waiting_on() {
     let facade = facade_with(Arc::new(FakeProjectRepo::new()));
     let project = ProjectId::from_raw(1);
     let (session, _owner) = bound_session(&facade, project);
-    // Two registered processes, running but not classified idle: in the registry with no idle
-    // signal, so the timer waits on both.
+    // Two live processes with no idle signal yet: neither is resting and neither has been
+    // classified, so the timer waits on both.
     let watched = vec![
         facade
             .supervisor()
@@ -214,6 +214,15 @@ fn fire_when_idle_reports_the_processes_it_is_waiting_on() {
             .supervisor()
             .register(terminal_registration(project, "second", "sleep 60")),
     ];
+    for &id in &watched {
+        facade.supervisor().start(id).expect("start the process");
+        assert!(
+            facade
+                .process_view(id)
+                .is_some_and(|view| view.status.is_active()),
+            "the watched process is live rather than resting",
+        );
+    }
 
     let outcome = facade
         .scoped(session)
@@ -257,5 +266,44 @@ fn fire_when_idle_counts_a_process_absent_from_the_registry_as_idle() {
     assert!(
         outcome.waiting_on.is_empty(),
         "the report must not wait on a process that has left the registry"
+    );
+}
+
+#[test]
+fn fire_when_idle_counts_a_resting_watched_process_as_idle() {
+    // A watched worker that has exited is still registered — its output stays readable — but it can
+    // do no more work, so its resting status ends the wait however it was last classified. Reported
+    // the same way the scheduler fires, so a lead is not told it is still waiting on a worker whose
+    // exit has already satisfied the condition.
+    let facade = facade_with(Arc::new(FakeProjectRepo::new()));
+    let project = ProjectId::from_raw(1);
+    let (session, _owner) = bound_session(&facade, project);
+    let resting = facade
+        .supervisor()
+        .register(terminal_registration(project, "worker", "sleep 60"));
+    assert!(
+        facade
+            .process_view(resting)
+            .is_some_and(|view| !view.status.is_active()),
+        "the watched process is registered but not running",
+    );
+
+    let outcome = facade
+        .scoped(session)
+        .timer_fire_when_idle(
+            "worker finished".into(),
+            vec![resting],
+            IdleMode::All,
+            Some(Duration::from_secs(60)),
+        )
+        .expect("set");
+
+    assert!(
+        outcome.already_idle,
+        "a resting watched process can do no more work, so the condition is already met"
+    );
+    assert!(
+        outcome.waiting_on.is_empty(),
+        "the report must not wait on a process that has exited"
     );
 }

@@ -24,6 +24,7 @@ use crate::agents::AgentActivity;
 use crate::events::EventBus;
 use crate::ids::{ProcessId, ProjectId, TimerId};
 use crate::ports::{Clock, StoreError};
+use crate::process::ProcStatus;
 use crate::supervisor::Supervisor;
 
 /// The ceiling on an [`FireCond::At`] timer's delay — a bound (per the longevity rules) so a
@@ -102,18 +103,24 @@ impl IdleMode {
 }
 
 /// Whether a watched process counts as idle for a fire-when-idle timer, from its last-known
-/// activity and whether it is still in the process registry: an agent reported
-/// [`Idle`](AgentActivity::Idle), or a process that has **left the registry** entirely — it can no
-/// longer do work, so a watched process that has gone counts as done and never deadlocks the wait.
-/// A process still running whose activity is unknown (not yet classified, or a non-agent with no
-/// idle signal) is *not* idle; the wait continues, with the timer's backstop as the guarantee it
-/// eventually fires. The single definition of "idle" for a watched process, shared by the scheduler
-/// and the façade's `already_idle`/`waiting_on` report, so what is reported matches what fires.
-pub(crate) fn watched_is_idle(activity: Option<AgentActivity>, in_registry: bool) -> bool {
-    match activity {
-        Some(AgentActivity::Idle) => true,
-        Some(_) => false,
-        None => !in_registry,
+/// activity and its supervision status (`None` once it has left the registry):
+///
+/// - a process that has left the registry, or that has exited to a resting or terminal status
+///   ([`ProcStatus::is_active`] is false), can no longer do work — so it counts as done however it
+///   was last classified, and neither a departed nor an exited worker deadlocks the wait;
+/// - a live process counts as idle once the agent idle FSM reports
+///   [`Idle`](AgentActivity::Idle) for it;
+/// - a live process whose activity is unknown (not yet classified, or a non-agent with no idle
+///   signal) is *not* idle; the wait continues, with the timer's backstop as the guarantee it
+///   eventually fires.
+///
+/// The single definition of "idle" for a watched process, shared by the scheduler and the façade's
+/// `already_idle`/`waiting_on` report, so what is reported matches what fires.
+pub(crate) fn watched_is_idle(activity: Option<AgentActivity>, status: Option<ProcStatus>) -> bool {
+    match status {
+        None => true,
+        Some(status) if !status.is_active() => true,
+        Some(_) => matches!(activity, Some(AgentActivity::Idle)),
     }
 }
 

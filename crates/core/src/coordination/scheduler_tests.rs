@@ -336,6 +336,45 @@ async fn a_watched_process_absent_from_the_registry_counts_as_idle_and_fires() {
 }
 
 #[tokio::test]
+async fn a_watched_process_that_exits_while_working_fires_the_timer() {
+    // A worker that exits can do no more work, so the wait is over — even though the last activity
+    // classified for it was `Working`, and even though it stays registered (its scrollback remains
+    // readable). Without the status, the stale `Working` would hold the timer to its backstop.
+    let h = harness(FakeSpawner::exits_on_terminate());
+    let owner = h.running_process().await;
+    let worker = h.running_process().await;
+    h.spawn_scheduler();
+    settle().await;
+
+    let view = h
+        .timers
+        .set_when_idle(
+            PROJECT,
+            owner,
+            "worker finished".into(),
+            vec![worker],
+            IdleMode::All,
+            Some(Duration::from_secs(3600)),
+        )
+        .expect("set");
+    h.bus.publish(DomainEvent::AgentActivityChanged {
+        id: worker,
+        state: AgentActivity::Working,
+    });
+    settle().await;
+    assert!(h.armed(view.id), "a working worker does not fire the timer");
+
+    // The worker exits. No clock advance, so the hour-long backstop cannot be what fires it.
+    h.sup.stop(worker);
+    settle_until(|| h.sup.view(worker).map(|view| view.status) == Some(ProcStatus::Stopped)).await;
+    assert!(
+        h.sup.view(worker).is_some(),
+        "the exited worker is still registered, so only its status ends the wait"
+    );
+    settle_until(|| !h.armed(view.id)).await;
+}
+
+#[tokio::test]
 async fn a_non_idle_transition_does_not_fire_a_fire_when_idle_timer() {
     let h = harness(FakeSpawner::exits_on_kill());
     let owner = h.running_process().await;

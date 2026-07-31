@@ -209,12 +209,12 @@ impl Facade {
 
     /// Whether a process counts as idle right now for a fire-when-idle timer — the snapshot the
     /// `already_idle`/`waiting_on` report is built from. Applies the same rule the scheduler fires
-    /// on ([`watched_is_idle`]): the agent idle FSM (C4) reports `Idle`, or the process has left the
-    /// registry (it can no longer work), so the report can never disagree with what fires.
-    fn is_idle_now(&self, process: ProcessId) -> bool {
+    /// on ([`watched_is_idle`]), from the same two sources: the agent idle FSM (C4) and the
+    /// process's supervision status (C2), so the report can never disagree with what fires.
+    pub(in crate::facade) fn is_idle_now(&self, process: ProcessId) -> bool {
         watched_is_idle(
             self.idle.activity(process),
-            self.supervisor.view(process).is_some(),
+            self.supervisor.view(process).map(|view| view.status),
         )
     }
 

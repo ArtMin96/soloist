@@ -4,10 +4,11 @@
 //! It is woken three ways and re-evaluates the full armed set on each: a [`Clock`] sleep until the
 //! soonest deadline (for [`At`](super::timer::FireCond::At) and the idle max-wait backstops); a [`Notify`] the
 //! [`Timers`](super::Timers) aggregate pings when a timer is created or resumed (so an
-//! already-satisfied condition fires at once); and the [`DomainEvent`] bus, from which it tracks
+//! already-satisfied condition fires at once); and the [`DomainEvent`] bus, from which it follows
 //! each agent's idle state via [`AgentActivityChanged`](DomainEvent::AgentActivityChanged) — the
 //! C4 idle signal, consumed as events so coordination depends only on the shared event type, not
-//! on C4's internals. A due timer is claimed atomically (so a concurrent pause/cancel wins the
+//! on C4's internals — alongside the process lifecycle, so a watched worker that exits ends the
+//! wait as surely as one that goes idle. A due timer is claimed atomically (so a concurrent pause/cancel wins the
 //! race cleanly) and its body is written to its owner's PTY — reusing the one supervisor input
 //! behaviour, never reimplementing it. It holds a [`Weak`] reference to the supervisor so it never
 //! keeps the app alive, and is self-supervised like the monitoring samplers: a panicking pass is
@@ -24,6 +25,7 @@ use crate::agents::AgentActivity;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProcessId;
 use crate::ports::Clock;
+use crate::process::ProcStatus;
 use crate::supervision::supervise;
 use crate::supervisor::Supervisor;
 
@@ -74,9 +76,9 @@ impl TimerScheduler {
     /// bus; ends when the supervisor is dropped or the bus closes (app shutdown).
     async fn schedule_loop(self) {
         let mut events = self.bus.subscribe();
-        // Last-known activity per agent, from the bus. Only agents ever appear here, so it stays
-        // bounded to the live agent set; a process unknown here is treated as not-idle unless it
-        // has left the registry entirely (see `is_idle`).
+        // Last-known activity per agent, from the bus, for the run it is currently in. Only agents
+        // ever appear here, so it stays bounded to the live agent set; what an unknown or resting
+        // process counts as is decided by `watched_is_idle`.
         let mut activity: HashMap<ProcessId, AgentActivity> = HashMap::new();
         loop {
             let Some(supervisor) = self.supervisor.upgrade() else {
@@ -128,6 +130,15 @@ impl TimerScheduler {
                         // A closed process strands no timers: drop the ones it owned.
                         let _ = self.repo.release_owner(id);
                     }
+                    // A process that is not running is classified afresh when it next runs (C4
+                    // resets it), so the activity remembered from its previous run is dropped
+                    // here too rather than carried into the next one. While it is not running
+                    // its status alone answers the quorum (see `watched_is_idle`).
+                    Ok(DomainEvent::ProcessStatusChanged { id, to, .. }) => {
+                        if to != ProcStatus::Running {
+                            activity.remove(&id);
+                        }
+                    }
                     Ok(_) => {}
                 },
                 () = self.wake.notified() => {}
@@ -152,7 +163,10 @@ impl TimerScheduler {
         match timer.fire.idle_quorum() {
             None => false,
             Some((mode, watched)) => mode.quorum_met(watched, |p| {
-                watched_is_idle(activity.get(&p).copied(), supervisor.view(p).is_some())
+                watched_is_idle(
+                    activity.get(&p).copied(),
+                    supervisor.view(p).map(|view| view.status),
+                )
             }),
         }
     }

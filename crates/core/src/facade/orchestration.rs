@@ -11,7 +11,6 @@
 use std::collections::HashSet;
 
 use super::Facade;
-use crate::coordination::watched_is_idle;
 use crate::ids::{ProcessId, ProjectId};
 use crate::orchestration::{AgentNode, AgentSignal, LineageEdge, OrchestrationSnapshot};
 use crate::ports::StoreError;
@@ -94,9 +93,7 @@ impl Facade {
             .into_iter()
             .map(|mut tv| {
                 let enrichment = tv.fire.idle_quorum().map(|(mode, watched)| {
-                    let is_idle = |p: ProcessId| {
-                        watched_is_idle(self.idle.activity(p), self.supervisor.view(p).is_some())
-                    };
+                    let is_idle = |p: ProcessId| self.is_idle_now(p);
                     let waiting_on: Vec<ProcessId> =
                         watched.iter().copied().filter(|&p| !is_idle(p)).collect();
                     let already_idle = mode.quorum_met(watched, is_idle);
