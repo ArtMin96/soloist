@@ -166,11 +166,30 @@ constant or module keeps it fixture-tested and easy to tune. The activity signal
 (notifications now, fire-when-idle timers in Phase 9); it never auto-acts, so an occasional
 misclassification degrades gracefully.
 
+**Amended 2026-07-31 (branch `feat/child-agent-lifecycle`, `Done — pending verify`) — what the quiet
+window governs, and what it no longer counts for.** The window is unchanged as the *rendering* rule: a
+quiet terminal still reads `IDLE` on every surface, because that is what the terminal shows. What
+changed is the **fire-when-idle quorum**, which used to read the same value and treat it as *done*. An
+agent's activity is now tracked only from the point it demonstrably began, so the quiet that
+**precedes** an agent's first observed activity is unclassified rather than `IDLE`, and a
+fire-when-idle wait (which already treats unclassified as not idle) no longer fires on a
+silently-booting worker. Separately, a watched process that **exits** now ends the wait however it was
+last classified — one that exited while `WORKING` used to wait out the 3600 s max-wait backstop. The
+tracker and the timer scheduler fold the same rule, so what is reported and what fires stay one
+answer. **The heuristic's limit is unchanged and is now stated rather than papered over:** a *noisy*
+boot (a TUI banner, then quiet) still satisfies the quorum, because the signal is a cumulative output
+byte count that cannot distinguish quiet-before-work from quiet-after-work. **No settle-time constant
+was introduced** — see **D-35**, which records the decision that completion is explicit and terminal
+quiet is not a completion signal.
+
 **Effect on parity:** E5 ("state tracks a real agent") holds — a real agent transitions to `WORKING`
 under output, `IDLE` when quiet, and `PERMISSION` on a recognised prompt. A difference from Solo would
 only show as a different quiet-window latency or a permission prompt phrased outside our cue set
 (reported as `WORKING`/`IDLE` rather than `PERMISSION`). Revisit the cue set as real agent CLIs are
-observed; it is the most likely thing to tune.
+observed; it is the most likely thing to tune. One known unevenness, code-read and not reproduced:
+`looks_like_permission_prompt` has a single call site, inside the output-delta strategy, so the
+title-based providers (Codex/Amp, Gemini) cannot report `PERMISSION` at all — a worker of theirs
+blocked on a prompt reads `IDLE`.
 
 ---
 
@@ -536,7 +555,7 @@ rename decision gets its own entry here.
 
 ---
 
-## D-15 — `whoami` omits the OS pid, and there is no manual bind tool 🟢
+## D-15 — `whoami` omits the OS pid 🟢 — the "no manual bind tool" half is REVERSED (2026-07-31)
 
 **Introduced:** MCP progressive-disclosure pass, 2026-07-12 (source: Aaron Francis,
 `x.com/aarondfrancis/status/2075571055041675691`, 2026-07-10; post-v0.8.2 primary evidence).
@@ -550,11 +569,24 @@ rename decision gets its own entry here.
   and the effective project by name — but **not the OS pid**. `ProcessView` (the canonical
   process projection) does not carry the OS pid, and the agent already knows its own; surfacing
   it would mean plumbing a raw pid through the read model for no operational gain.
-- There is **no manual bind tool**. A Soloist-launched process's `soloist-mcp` client sends the
-  bind **automatically on connect** (authenticated by `SO_PEERCRED`, D-6); an external caller uses
-  `register_agent`. The agent guide (and the `AGENTS.md` section it writes) teaches this — the
-  earlier guide text told agents to *call* `bind_session_process`, a tool the surface never
-  exposed, so an agent following it literally would have errored. That text is fixed.
+- ~~There is **no manual bind tool**.~~ **REVERSED 2026-07-31** (branch `feat/child-agent-lifecycle`,
+  `Done — pending verify`). Binding is still sent **automatically on connect** by a Soloist-launched
+  process's `soloist-mcp` client (authenticated by `SO_PEERCRED`, D-6), and an external caller still
+  uses `register_agent` — but the client used to **discard the result**, so a *refused* bind was
+  indistinguishable from never having attempted one: both reported `origin: unbound`, with no error,
+  no log, and no way back, while the session silently lost every coordination surface that needs an
+  owning process (lineage on spawn, timers, leases, todo locks). This is reachable in ordinary use —
+  an agent the user starts by hand inside a Soloist terminal inherits that terminal's
+  `SOLOIST_PROCESS_ID` but connects from a *new* process group (shell job control), fails the peer
+  check, and operates unbound. So `bind_session_process` **is now exposed as an MCP tool**, matching
+  the name `plan/05` §7 records Solo documenting, routed through the same façade gate — a bind to a
+  process the caller does not run in is refused exactly as before, so the tool adds a retry, not an
+  authority. The refusal itself is recorded on the session and reported by `whoami` as a field beside
+  `origin` (a refusal is not an identity, and the two facts move independently), and the client writes
+  one deduplicated line to stderr for its MCP host to show. **The rationale below still holds for
+  auto-bind** — the agent should not *have* to bind itself, and the authenticity check still requires
+  the binding to come from the connecting peer; what changed is that a caller whose automatic bind was
+  refused can now see why and try again.
 
 **Rationale:** keep the read model lean and the agent-facing guide truthful. Auto-bind is the
 correct ergonomics (the agent should not have to bind itself) and the authenticity check
@@ -562,7 +594,9 @@ correct ergonomics (the agent should not have to bind itself) and the authentici
 OS pid is a detail the agent owns about itself, not a coordination fact other agents need.
 
 **Effect on parity:** F12/identity Verify is unaffected — `whoami` still reports which process and
-project a session acts on, now with names. The enriched payload, the auto-bind clarification, and
+project a session acts on, now with names. **`plan/02` F4 already *named* `bind_session_process`, so
+the 2026-07-31 reversal also closes a pre-existing doc-vs-doc contradiction, in F4's favour.** The
+enriched payload, the auto-bind clarification, and
 the related progressive-disclosure additions (topic `help`, init instructions, `mcp_tools_summary`,
 featured `tools/list` order, decaying next-tool suggestions, and the group-level-only tool disable)
 are recorded as decisions in `plan/05 §12`.
@@ -1761,3 +1795,60 @@ promise that a sound is produced: volume, sink state and the user's theme all si
 Soloist can observe anything. The status row reports what the daemon advertises and nothing beyond it.
 
 **Effect on parity:** satisfies `plan/02` **I7l** (global Notifications tab). No row regresses.
+
+---
+
+## D-35 — A worker's completion is explicit; terminal quiet is not a completion signal 🟢
+
+**Introduced:** the child-agent lifecycle work, 2026-07-31 (branch `feat/child-agent-lifecycle`,
+`Done — pending verify` — not yet exercised against a running build).
+
+**Solo (ref `plan/05` §6, §7 + the orchestration demo):** the documented delegation mechanism is
+`timer_fire_when_idle_any` / `_all` — a lead arms a timer on the workers it spawned and is woken with
+its own pre-written `body` when they go idle. `plan/05` §6 concedes in passing that "a quiet terminal
+is not always completed work", but no other completion mechanism is documented: there is no tool by
+which a worker reports a result, and none that closes a worker when it finishes.
+
+**Soloist — going quiet is not finishing, and the loop says so.** A worker that has finished and a
+worker that is still thinking are indistinguishable from outside, so **nothing derived from terminal
+output stands in for the worker saying it is done.** A worker's task is over when it **exits**, calls
+**`report_to_lead`**, or **completes its todo** — and each of those is an event, not an inference.
+Three additions carry it:
+
+- **`report_to_lead`** (new MCP tool, ours) delivers a worker's final result — success or failure — to
+  its lead as a fresh **submitted** turn, in the same header-then-body shape a fired timer wakes an
+  agent with, so a wake reads the same whatever produced it. The target is **resolved from recorded
+  spawn lineage and cannot be named by the caller**, so the tool reaches only the one agent that
+  spawned it, and a caller with no lead is refused rather than defaulted onto someone's terminal. That
+  is strictly narrower than `send_input`, which the same worker may already call on any process in its
+  project — this adds an *address*, not reach, so `send_input`'s gate is unchanged. The body is capped
+  like a timer body and delivered non-blocking, so one deaf lead cannot stall a worker.
+- **`close_when_done`** on `spawn_agent`, **off unless asked for.** Nothing previously removed a
+  process from the registry on its own, so every worker a lead spawned stayed listed as a `Stopped`
+  row for the rest of the session. That is right for a dev server, whose output the user still wants,
+  and wrong for the short-lived workers an orchestrating lead runs — so the caller chooses. A failed
+  run is still a finished one, so a crashed armed worker is closed too.
+- **The spawn preamble and the timer surfaces now say what is true** (`plan/02` **O13**, **O7**). A
+  spawned worker is told, as the load-bearing instruction of its opening turn, that it must report its
+  final result and that going quiet says nothing. The fire-when-idle tool descriptions and the agent
+  guide's timers topic previously read "wait until every worker you spawned is done" — a lead
+  following that acts on work nobody did. They now say the watched processes went quiet, which is
+  where to *look*, and name the three things that actually end a worker's task.
+
+**Rationale — why not simply make the idle heuristic better.** The heuristic reads a cumulative output
+byte count, so it cannot distinguish quiet *before* work from quiet *after* it. Measured against the
+live app: a freshly spawned `claude` worker's raw output was byte-identical by SHA-256 for ~6 s,
+changed once, then byte-identical for a further ~8 s — the spinner is a static frame, not an
+animation. Two independent routes to a false "done" therefore exist (never sampled, and sampled during
+a boot-time lull), and **a settle-time constant would only encode a guess about boot duration**;
+inventing one was explicitly declined by the owner. Two real defects *were* fixed (D-5): quiet
+preceding an agent's first observed activity no longer counts toward the quorum, and a watched process
+that exits now ends the wait instead of hanging to the 3600 s backstop. **The noisy-boot case still
+fires early**, which is survivable precisely because nothing now treats a fired timer as proof of
+completion.
+
+**Effect on parity:** extends `plan/02` **E7** (the delegation loop gains its completion channel),
+**F11** (`report_to_lead`, `close_when_done`), **O8** (a lead can now be woken by a worker's own
+result, not only by its own pre-written timer body), and constrains **O7** (fire-when-idle is a
+"they went quiet" convenience, not a completion guarantee). No row regresses. The residual heuristic
+gap is tracked in **D-5** 🟡.
