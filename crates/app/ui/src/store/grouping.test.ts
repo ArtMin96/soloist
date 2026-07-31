@@ -71,15 +71,20 @@ describe("groupByKind", () => {
     expect(agents?.roots.map((root) => root.process.label)).toEqual(["worker"]);
   });
 
-  it("keeps a worker flat when its recorded parent is in another subtype group", () => {
+  it("nests a worker under a lead of another kind, in the lead's group", () => {
     const groups = groupByKind(
       [process(1, "Terminal", "shell"), process(2, "Agent", "worker")],
       new Map([[2, 1]]),
     );
-    const agents = groups.find((group) => group.kind === "Agent");
-    expect(agents?.roots.map((root) => root.process.label)).toEqual(["worker"]);
     const terminals = groups.find((group) => group.kind === "Terminal");
-    expect(terminals?.roots[0]?.children).toEqual([]);
+    expect(terminals?.roots.map((root) => root.process.label)).toEqual(["shell"]);
+    expect(terminals?.roots[0]?.children.map((child) => child.process.label)).toEqual(["worker"]);
+    // The count and nav order follow the rows the group renders, so the worker is counted where
+    // it shows rather than in a group it never appears in.
+    expect(terminals?.processes.map((row) => row.label)).toEqual(["shell", "worker"]);
+    const agents = groups.find((group) => group.kind === "Agent");
+    expect(agents?.roots).toEqual([]);
+    expect(agents?.processes).toEqual([]);
   });
 
   it("treats a self-referential edge as a root", () => {

@@ -3,7 +3,7 @@ import {
   findSelectedTree,
   firstOfKind,
   firstProcessInTree,
-  selectedKind,
+  selectedGroupKind,
 } from "@/components/sidebar/sidebarNav";
 import { bindingFromEvent, isEditableTarget, matchHotkey } from "@/lib/hotkeys";
 import { projectCollapseKey, type ProjectTree } from "@/store/projects";
@@ -88,7 +88,7 @@ export function useSidebarHotkeys(state: SidebarHotkeysState) {
       }
       case "next_section": {
         if (!currentTree || selectedId === null) break;
-        const kind = selectedKind(currentTree, selectedId);
+        const kind = selectedGroupKind(currentTree, selectedId);
         if (!kind) break;
         const kinds = currentTree.kinds.filter((k) => k.processes.length > 0);
         const next = kinds[kinds.findIndex((k) => k.kind === kind) + 1];
@@ -97,7 +97,7 @@ export function useSidebarHotkeys(state: SidebarHotkeysState) {
       }
       case "prev_section": {
         if (!currentTree || selectedId === null) break;
-        const kind = selectedKind(currentTree, selectedId);
+        const kind = selectedGroupKind(currentTree, selectedId);
         if (!kind) break;
         const kinds = currentTree.kinds.filter((k) => k.processes.length > 0);
         const prev = kinds[kinds.findIndex((k) => k.kind === kind) - 1];

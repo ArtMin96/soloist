@@ -13,8 +13,12 @@ export function findSelectedTree(
   );
 }
 
-/** The ProcessKind of the selected process in the given tree, or null. */
-export function selectedKind(tree: ProjectTree, selectedId: number): ProcessKind | null {
+/**
+ * The kind of the subtype group that renders the selected process, or null. A worker nested under
+ * a lead of another kind renders in the lead's group, so this is the group section navigation
+ * moves from — not necessarily the process's own kind.
+ */
+export function selectedGroupKind(tree: ProjectTree, selectedId: number): ProcessKind | null {
   return tree.kinds.find((k) => k.processes.some((p) => p.id === selectedId))?.kind ?? null;
 }
 
@@ -26,7 +30,15 @@ export function firstProcessInTree(tree: ProjectTree): ProcessView | null {
   return null;
 }
 
-/** First process of the given kind in the tree, or null. */
+/**
+ * First rendered row of the given kind in the tree, or null. Scans the rows each group renders
+ * rather than the groups themselves, so a worker nested under a lead of another kind is still
+ * reachable by a jump to its own kind.
+ */
 export function firstOfKind(tree: ProjectTree, kind: ProcessKind): ProcessView | null {
-  return tree.kinds.find((k) => k.kind === kind)?.processes[0] ?? null;
+  for (const group of tree.kinds) {
+    const match = group.processes.find((process) => process.kind === kind);
+    if (match) return match;
+  }
+  return null;
 }

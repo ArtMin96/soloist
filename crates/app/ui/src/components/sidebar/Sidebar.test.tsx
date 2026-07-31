@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { DEFAULT_SIDEBAR } from "@/lib/sidebar";
 import { HotkeysContext } from "@/store/hotkeysContext";
 import { SidebarSettingsContext } from "@/store/sidebarSettingsContext";
-import type { HotkeyBindingView } from "@/domain";
+import type { HotkeyBindingView, ProcessView, ProjectView } from "@/domain";
 import type { Sidebar as SidebarSettings } from "@/domain";
 
 const noop = () => {};
@@ -89,6 +89,8 @@ const DEFAULT_BINDINGS = makeBindings({
 function renderSidebar(
   overrides: {
     settings?: SidebarSettings;
+    projects?: ProjectView[];
+    processes?: ProcessView[];
     selectedId?: number | null;
     onSelect?: (id: number) => void;
     onRestart?: (id: number) => void;
@@ -100,6 +102,8 @@ function renderSidebar(
 ) {
   const {
     settings = DEFAULT_SIDEBAR,
+    projects = [PROJECT_A, PROJECT_B],
+    processes = PROCESSES,
     selectedId = null,
     onSelect = noop,
     onRestart = noop,
@@ -113,8 +117,8 @@ function renderSidebar(
       <HotkeysContext value={{ bindings, remap: noop, disable: noop, reset: noop, resetAll: noop }}>
         <SidebarSettingsContext value={{ sidebar: settings, setSidebar: noop }}>
           <Sidebar
-            projects={[PROJECT_A, PROJECT_B]}
-            processes={PROCESSES}
+            projects={projects}
+            processes={processes}
             lineage={lineage}
             selectedId={selectedId}
             onSelect={onSelect}
@@ -209,52 +213,65 @@ describe("Sidebar lineage nesting", () => {
     ready: "Ungated" as const,
   };
 
+  const TERMINAL_LEAD = {
+    id: 30,
+    project: 1,
+    kind: "Terminal" as const,
+    label: "shell",
+    status: "Running" as const,
+    exit_code: null,
+    requires_trust: false,
+    resumable: false,
+    ports: [],
+    ready: "Ungated" as const,
+  };
+
   it("nests a spawned worker under its lead in the Agents group", () => {
-    render(
-      <TooltipProvider>
-        <HotkeysContext
-          value={{
-            bindings: DEFAULT_BINDINGS,
-            remap: noop,
-            disable: noop,
-            reset: noop,
-            resetAll: noop,
-          }}
-        >
-          <SidebarSettingsContext value={{ sidebar: DEFAULT_SIDEBAR, setSidebar: noop }}>
-            <Sidebar
-              projects={[PROJECT_A]}
-              processes={[...PROCESSES.filter((p) => p.project === 1), WORKER]}
-              lineage={new Map([[12, 10]])}
-              selectedId={null}
-              onSelect={noop}
-              onStart={noop}
-              onStop={noop}
-              onRestart={noop}
-              onResume={noop}
-              onRemove={noop}
-              onTrust={noop}
-              onStartAll={noop}
-              onRestartRunning={noop}
-              onStopAll={noop}
-              onOpenStart={noop}
-              startActive
-              onOpenSettings={noop}
-              onOpenProjectSettings={noop}
-              onOpenOrchestration={noop}
-              onRemoveProject={noop}
-              onReorderProjects={noop}
-            />
-          </SidebarSettingsContext>
-        </HotkeysContext>
-      </TooltipProvider>,
-    );
+    renderSidebar({
+      projects: [PROJECT_A],
+      processes: [...PROCESSES.filter((p) => p.project === 1), WORKER],
+      lineage: new Map([[12, 10]]),
+    });
     const lead = screen.getByRole("treeitem", { name: /claude/ });
     expect(lead.getAttribute("aria-expanded")).toBe("true");
     const worker = screen.getByRole("treeitem", { name: /codex-worker/ });
     expect(worker.getAttribute("aria-level")).toBe("2");
     // The Commands group carries no lineage, so its row stays a flat level-1 row.
     expect(screen.getByRole("treeitem", { name: /build/ }).getAttribute("aria-level")).toBe("1");
+  });
+
+  it("nests a worker under a lead of another kind, in the lead's group", () => {
+    renderSidebar({
+      projects: [PROJECT_A],
+      processes: [TERMINAL_LEAD, WORKER],
+      lineage: new Map([[12, 30]]),
+    });
+    const terminals = screen.getByRole("tree", { name: "Terminals" });
+    expect(
+      within(terminals).getByRole("treeitem", { name: /shell/ }).getAttribute("aria-level"),
+    ).toBe("1");
+    expect(
+      within(terminals)
+        .getByRole("treeitem", { name: /codex-worker/ })
+        .getAttribute("aria-level"),
+    ).toBe("2");
+    // The group counts the rows it renders, so the header and the tree tell the same story.
+    expect(within(screen.getByRole("tree", { name: "Agents" })).queryAllByRole("treeitem")).toEqual(
+      [],
+    );
+  });
+
+  it("jumps to a worker nested under a lead of another kind", () => {
+    const onSelect = vi.fn();
+    const nav = renderSidebar({
+      projects: [PROJECT_A],
+      processes: [TERMINAL_LEAD, WORKER],
+      lineage: new Map([[12, 30]]),
+      selectedId: 30,
+      onSelect,
+    });
+    fireEvent.keyDown(nav, { key: "A", altKey: true });
+    expect(onSelect).toHaveBeenCalledWith(12);
   });
 
   it("keeps every agent flat when no lineage exists", () => {
