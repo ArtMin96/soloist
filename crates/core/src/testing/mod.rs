@@ -51,9 +51,9 @@ pub use coordination_todo::{FakeTodoRepo, FakeTodoRows};
 #[cfg(test)]
 pub use events::{drain, next_change, next_matching, next_to, wait_all};
 pub use filewatch::FakeFileWatcher;
-#[cfg(test)]
-pub use fixtures::facade_with_agent_tool;
 pub use fixtures::{agent_registration, terminal_registration};
+#[cfg(test)]
+pub use fixtures::{facade_recording_agent_launches, facade_with_agent_tool};
 pub use identity::{authentic_session, session_in_dir, TEST_PEER_PGID};
 pub use lock_releaser::RecordingLockReleaser;
 pub use metrics::FakeMetricsProbe;
@@ -65,6 +65,6 @@ pub use settings::FakeSettingsRepo;
 pub use shellenv::FakeShellEnvProbe;
 #[cfg(test)]
 pub(crate) use spawner::PANIC_FAKE_PGID;
-pub use spawner::{FakeSpawner, ResizeLog};
+pub use spawner::{CommandLog, FakeSpawner, ResizeLog};
 pub use support::FakeFeedbackRepo;
 pub use template::FakeTemplateRepo;

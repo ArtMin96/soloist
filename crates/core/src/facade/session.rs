@@ -32,7 +32,7 @@ impl Facade {
     /// it comes from in-memory identity — while the name is a best-effort durable-store read that
     /// resolves to `None` when the store cannot be read or the record is gone. So a transient store
     /// error dims the name without ever dropping the scope the caller still holds.
-    fn project_ref(&self, id: ProjectId) -> ProjectRef {
+    pub(in crate::facade) fn project_ref(&self, id: ProjectId) -> ProjectRef {
         match self.projects.get(id).ok().flatten() {
             Some(record) => ProjectRef::from_record(&record),
             None => ProjectRef { id, name: None },

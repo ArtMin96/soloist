@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::initial_prompt::initial_prompt_strategy_for;
 use super::resume::resume_strategy_for;
 
 /// The agent CLI providers Soloist knows out of the box, plus [`AgentKind::Generic`] for any
@@ -87,22 +88,53 @@ impl AgentTool {
         resume_strategy_for(self.kind).resume_command_line(self, extra_args)
     }
 
+    /// The command line that launches this tool with `prompt` already submitted as its first
+    /// turn, composed with the same `extra_args` as any other launch — or `None` when the
+    /// provider has no documented way to take one (see
+    /// [`initial_prompt_strategy_for`], the single place that knows each provider's convention),
+    /// leaving the caller to launch it plainly. Only a fresh launch carries a prompt: a resume
+    /// reopens an existing conversation, which must not be handed an opening turn again.
+    pub fn launch_command_line_with_prompt(
+        &self,
+        prompt: &str,
+        extra_args: &[String],
+    ) -> Option<String> {
+        initial_prompt_strategy_for(self.kind).launch_command_line(self, prompt, extra_args)
+    }
+
     /// Composes the tool's command line with `prefix` tokens inserted immediately after the
     /// command and before the args: command, prefix, default args (appended every launch),
-    /// then per-launch extra args. Each token is POSIX-quoted so it survives `$SHELL -lc
-    /// <line>` as exactly one argument — an arg with spaces or shell metacharacters stays a
-    /// single argument rather than being word-split. The single source for how this tool's
-    /// command line is built: a fresh launch passes an empty prefix, a resume passes the
-    /// provider's resume verb or flag.
+    /// then per-launch extra args. The single source for how this tool's command line is built:
+    /// a fresh launch passes an empty prefix, a resume passes the provider's resume verb or flag.
     pub(super) fn command_line_with_prefix(
         &self,
         prefix: &[&str],
         extra_args: &[String],
     ) -> String {
+        self.compose(prefix, extra_args, &[])
+    }
+
+    /// Composes the tool's command line with `trailing` appended as the final argument, after
+    /// the per-launch extra args — where a positional prompt goes, so it is never read as the
+    /// value of a flag that precedes it.
+    pub(super) fn command_line_with_trailing(
+        &self,
+        extra_args: &[String],
+        trailing: &str,
+    ) -> String {
+        self.compose(&[], extra_args, &[trailing])
+    }
+
+    /// The one composition: command, prefix, default args (appended every launch), per-launch
+    /// extra args, then trailing. Each token is POSIX-quoted so it survives `$SHELL -lc <line>`
+    /// as exactly one argument — a token with spaces, newlines, or shell metacharacters stays a
+    /// single argument rather than being word-split or interpreted.
+    fn compose(&self, prefix: &[&str], extra_args: &[String], trailing: &[&str]) -> String {
         std::iter::once(self.command.as_str())
             .chain(prefix.iter().copied())
             .chain(self.default_args.iter().map(String::as_str))
             .chain(extra_args.iter().map(String::as_str))
+            .chain(trailing.iter().copied())
             .map(shell_quote)
             .collect::<Vec<_>>()
             .join(" ")

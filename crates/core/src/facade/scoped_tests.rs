@@ -9,8 +9,8 @@ use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::Registration;
 use crate::sync::lock;
 use crate::testing::{
-    agent_registration, authentic_session, facade_with_agent_tool, terminal_registration,
-    FakeProjectRepo, FakeSpawner, FakeTrustRepo, TEST_PEER_PGID,
+    agent_registration, authentic_session, facade_recording_agent_launches, facade_with_agent_tool,
+    terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo, TEST_PEER_PGID,
 };
 use crate::PeerCredentials;
 use async_trait::async_trait;
@@ -495,6 +495,38 @@ async fn only_a_worker_spawned_to_close_when_done_leaves_the_registry() {
     assert!(
         !registered.contains(&closed),
         "a worker spawned with close_when_done is forgotten once its run ends"
+    );
+}
+
+#[tokio::test]
+async fn a_spawned_worker_opens_on_its_orchestration_context() {
+    let (facade, project, commands) = facade_recording_agent_launches();
+    let lead = facade
+        .supervisor()
+        .register(agent_registration(project, "lead"));
+    let lead_session = scoped_to(&facade, lead);
+    let mut rx = facade.subscribe();
+
+    let worker = facade
+        .scoped(lead_session)
+        .spawn_agent("worker", Vec::new(), false)
+        .expect("a lead spawns a worker");
+    wait_process_to(&mut rx, worker, ProcStatus::Running).await;
+
+    // The worker's CLI is launched with the briefing already submitted, so it starts knowing
+    // which lead spawned it, which project it is in, and what it can reach.
+    let launched = lock(&commands).first().cloned().expect("a launch");
+    assert!(
+        launched.contains("[SOLO ORCHESTRATION CONTEXT]"),
+        "{launched}"
+    );
+    assert!(
+        launched.contains(&format!("process #{lead}")),
+        "the worker is told which process spawned it: {launched}"
+    );
+    assert!(
+        launched.contains("whoami"),
+        "the worker is told how to resolve its own identity: {launched}"
     );
 }
 

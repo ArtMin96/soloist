@@ -10,6 +10,7 @@
 mod feedback;
 mod guide;
 mod integration_file;
+mod preamble;
 
 pub use feedback::{
     Feedback, FeedbackEntry, FeedbackError, FeedbackRepo, NoopFeedbackRepo, MAX_FEEDBACK_ENTRIES,
@@ -19,3 +20,4 @@ pub use guide::{agent_guide, help_overview, help_topic, onboarding_hint};
 pub use integration_file::{
     write_integration_guide, IntegrationFile, IntegrationWrite, IntegrationWriteError,
 };
+pub use preamble::orchestration_preamble;

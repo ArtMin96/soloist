@@ -373,25 +373,23 @@ impl Facade {
     /// for a loopback-OAuth browser step and any `ANTHROPIC_*` the user set pass straight
     /// through, and the CLI keeps using whatever auth the user already configured.
     ///
-    /// With `close_when_done`, the agent is removed from the registry — reaped, forgotten, its
-    /// terminal buffers freed — as soon as its run ends, for a caller launching a one-shot worker
-    /// it will not read afterwards. Off for an interactive launch, which leaves the finished
-    /// agent resting so its output stays readable. Armed before the start, so a run that ends
-    /// immediately is still caught.
+    /// The launch's options — auto-close and an opening turn — are carried by [`AgentLaunch`];
+    /// see it for what each does.
     ///
     /// One method behind the Facade, so the UI launch picker now and the MCP `spawn_agent`
     /// tool later launch agents identically. Must run within a `tokio` runtime (starting
     /// spawns the actor).
-    pub fn launch_agent(
-        &self,
-        project: ProjectId,
-        tool: &str,
-        extra_args: Vec<String>,
-        close_when_done: bool,
-    ) -> Result<ProcessId, LaunchAgentError> {
+    pub fn launch_agent(&self, launch: AgentLaunch) -> Result<ProcessId, LaunchAgentError> {
+        let AgentLaunch {
+            project,
+            tool,
+            extra_args,
+            close_when_done,
+            first_turn,
+        } = launch;
         let tool = self
             .agents
-            .tool(tool)?
+            .tool(&tool)?
             .ok_or(LaunchAgentError::UnknownTool)?;
         let root = self
             .project_root(project)?
@@ -400,9 +398,15 @@ impl Facade {
         // The resume invocation is composed once here, from the same extra args as this
         // launch, by the single per-provider strategy ([`AgentTool::resume_command_line`]);
         // the supervisor stores it and replays it for "Resume last session". `None` for a
-        // provider with no documented resume, leaving the process non-resumable.
+        // provider with no documented resume, leaving the process non-resumable. It never
+        // carries the opening turn: a resume reopens the conversation that turn already began.
         let resume_command = tool.resume_command_line(&extra_args);
-        let spec = SpawnSpec::inheriting_env(tool.launch_command_line(&extra_args), root);
+        // A provider with no documented way to take an opening turn falls back to the plain
+        // launch line, so an unsupported CLI still starts rather than failing on an invented flag.
+        let command = first_turn
+            .and_then(|turn| tool.launch_command_line_with_prompt(&turn, &extra_args))
+            .unwrap_or_else(|| tool.launch_command_line(&extra_args));
+        let spec = SpawnSpec::inheriting_env(command, root);
         let id = self.supervisor.register(
             Registration::launched(project, ProcessKind::Agent, tool.name, spec)
                 .resumable_with(resume_command),
@@ -436,6 +440,49 @@ pub enum TrustCommandError {
     ChangedSinceReview,
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+/// One agent launch: which tool, where, and the two things that distinguish a worker a lead
+/// orchestrates from an agent the user opened a pane for. Built by
+/// [`new`](Self::new) and narrowed by the two options, so a plain interactive launch names only
+/// what it needs and every launch still goes through the one [`Facade::launch_agent`].
+pub struct AgentLaunch {
+    project: ProjectId,
+    tool: String,
+    extra_args: Vec<String>,
+    close_when_done: bool,
+    first_turn: Option<String>,
+}
+
+impl AgentLaunch {
+    /// A plain interactive launch of `tool` in `project`, with `extra_args` appended for this one
+    /// launch ("agent with flags"): it opens on an empty turn and rests in the registry when it
+    /// finishes, which is what the user opening an agent pane expects.
+    pub fn new(project: ProjectId, tool: impl Into<String>, extra_args: Vec<String>) -> Self {
+        Self {
+            project,
+            tool: tool.into(),
+            extra_args,
+            close_when_done: false,
+            first_turn: None,
+        }
+    }
+
+    /// Removes the agent from the registry — reaped, forgotten, its terminal buffers freed — as
+    /// soon as its run ends, for a caller launching a one-shot worker it will not read afterwards.
+    /// Armed before the start, so a run that ends immediately is still caught.
+    pub fn closing_when_done(mut self, close_when_done: bool) -> Self {
+        self.close_when_done = close_when_done;
+        self
+    }
+
+    /// Starts the agent with `turn` already submitted as its opening message — how a spawned
+    /// worker is told what it is and what it can reach before it does anything. Honoured only for
+    /// a provider with a documented interactive prompt argument; the rest launch plainly.
+    pub fn opening_with(mut self, turn: String) -> Self {
+        self.first_turn = Some(turn);
+        self
+    }
 }
 
 /// Why launching an agent failed: no tool is registered under that name, the project is not

@@ -4,6 +4,7 @@ use crate::ids::ProjectId;
 use crate::ports::{TokioClock, TrustRepo};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, SupervisorError};
+use crate::sync::lock;
 use crate::testing::{
     authentic_session, terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
     TEST_PEER_PGID,
@@ -293,7 +294,7 @@ async fn launch_agent_registers_and_starts_an_agent_in_the_project() {
     let project = facade.load_project(dir.path()).expect("load");
 
     let id = facade
-        .launch_agent(project.id, "Claude", Vec::new(), false)
+        .launch_agent(AgentLaunch::new(project.id, "Claude", Vec::new()))
         .expect("launch");
 
     // It appears as an ungated Agent-kind process labelled by the tool, and starts.
@@ -320,10 +321,10 @@ async fn launch_agent_marks_resumable_for_a_supported_provider_only() {
     let project = facade.load_project(dir.path()).expect("load");
 
     let claude = facade
-        .launch_agent(project.id, "Claude", Vec::new(), false)
+        .launch_agent(AgentLaunch::new(project.id, "Claude", Vec::new()))
         .expect("launch claude");
     let amp = facade
-        .launch_agent(project.id, "Amp", Vec::new(), false)
+        .launch_agent(AgentLaunch::new(project.id, "Amp", Vec::new()))
         .expect("launch amp");
 
     let resumable = |id| {
@@ -342,13 +343,87 @@ async fn launch_agent_marks_resumable_for_a_supported_provider_only() {
 }
 
 #[tokio::test]
+async fn an_opening_turn_reaches_only_the_launch_that_asked_for_one() {
+    // The dashboard's launch picker and the scoped spawn share this one method, so the opening
+    // turn has to be the launch's own choice: an agent the user opened a pane for must start on
+    // an empty prompt, not on a briefing written for a worker.
+    let (spawner, commands) = FakeSpawner::records_command();
+    let facade = facade_with_tools(spawner);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load");
+    let mut rx = facade.subscribe();
+
+    facade
+        .launch_agent(AgentLaunch::new(project.id, "Claude", Vec::new()))
+        .expect("a plain launch");
+    wait_for(&mut rx, ProcStatus::Running).await;
+    facade
+        .launch_agent(
+            AgentLaunch::new(project.id, "Claude", Vec::new()).opening_with("brief".to_string()),
+        )
+        .expect("a briefed launch");
+    wait_for(&mut rx, ProcStatus::Running).await;
+
+    let launched = lock(&commands).clone();
+    assert_eq!(launched, vec!["claude".to_string(), "claude brief".into()]);
+}
+
+#[tokio::test]
+async fn a_provider_with_no_prompt_argument_still_launches_and_never_resumes_into_one() {
+    // Two ways an opening turn could break a launch: a provider that documents no prompt
+    // argument must start plainly rather than on an invented flag, and no provider's resume may
+    // carry the turn — a resume reopens the conversation that turn already began.
+    let (spawner, commands) = FakeSpawner::records_command();
+    let facade = facade_with_tools(spawner);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load");
+    let mut rx = facade.subscribe();
+
+    let gemini = facade
+        .launch_agent(
+            AgentLaunch::new(project.id, "Gemini", Vec::new()).opening_with("brief".to_string()),
+        )
+        .expect("launch gemini");
+    wait_for(&mut rx, ProcStatus::Running).await;
+    let claude = facade
+        .launch_agent(
+            AgentLaunch::new(project.id, "Claude", Vec::new()).opening_with("brief".to_string()),
+        )
+        .expect("launch claude");
+    wait_for(&mut rx, ProcStatus::Running).await;
+    assert!(
+        facade.supervisor().stop(claude),
+        "the claude agent was live"
+    );
+    wait_for(&mut rx, ProcStatus::Stopped).await;
+    facade.supervisor().resume(claude).expect("resume claude");
+    wait_for(&mut rx, ProcStatus::Running).await;
+
+    assert_eq!(
+        lock(&commands).clone(),
+        vec![
+            "gemini".to_string(),
+            "claude brief".into(),
+            "claude --continue".into(),
+        ]
+    );
+    assert!(
+        facade
+            .snapshot()
+            .into_iter()
+            .any(|view| view.id == gemini && view.status == ProcStatus::Running),
+        "a provider that takes no opening turn still starts"
+    );
+}
+
+#[tokio::test]
 async fn launch_agent_rejects_an_unknown_tool() {
     let facade = facade_with_tools(FakeSpawner::exits_on_terminate());
     let dir = tempfile::tempdir().expect("temp dir");
     let project = facade.load_project(dir.path()).expect("load");
 
     assert!(matches!(
-        facade.launch_agent(project.id, "Nonexistent", Vec::new(), false),
+        facade.launch_agent(AgentLaunch::new(project.id, "Nonexistent", Vec::new())),
         Err(LaunchAgentError::UnknownTool)
     ));
 }
@@ -358,7 +433,11 @@ async fn launch_agent_rejects_an_unknown_project() {
     let facade = facade_with_tools(FakeSpawner::exits_on_terminate());
 
     assert!(matches!(
-        facade.launch_agent(ProjectId::from_raw(9999), "Claude", Vec::new(), false),
+        facade.launch_agent(AgentLaunch::new(
+            ProjectId::from_raw(9999),
+            "Claude",
+            Vec::new()
+        )),
         Err(LaunchAgentError::UnknownProject)
     ));
 }

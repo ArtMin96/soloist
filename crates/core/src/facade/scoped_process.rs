@@ -9,9 +9,11 @@
 use std::time::Duration;
 
 use super::scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
+use super::AgentLaunch;
 use crate::ids::{ProcessId, ProjectId};
 use crate::process::ProcessView;
 use crate::supervisor::StartSummary;
+use crate::support::orchestration_preamble;
 
 /// How many trailing rendered lines `send_input`'s `wait_ms` snapshot returns — a bounded
 /// tail (about a screenful), never the whole scrollback, so the reply stays small.
@@ -104,8 +106,13 @@ impl ScopedFacade<'_> {
     /// [`SpawnAgentError::WorkerMayNotSpawn`], whether it identified itself by binding or is
     /// recognised by the process group it connects from. With `close_when_done` the worker is
     /// closed the moment its run ends, for a lead that will not read it afterwards; without it
-    /// the finished worker rests in the registry with its output intact. Must run within a
-    /// `tokio` runtime (starting spawns the actor).
+    /// the finished worker rests in the registry with its output intact.
+    ///
+    /// The worker opens on an [orchestration preamble](orchestration_preamble) naming its lead,
+    /// its project, and the coordination tools, so an agent that loads no skill and reads no
+    /// project file still knows what it is and what it can reach. Only the scoped spawn carries
+    /// one — an agent the user launches from the dashboard is theirs to open, not a worker being
+    /// briefed. Must run within a `tokio` runtime (starting spawns the actor).
     pub fn spawn_agent(
         &self,
         tool: &str,
@@ -131,14 +138,22 @@ impl ScopedFacade<'_> {
         if caller_is_worker {
             return Err(SpawnAgentError::WorkerMayNotSpawn);
         }
-        let worker = self
-            .inner
-            .launch_agent(project, tool, extra_args, close_when_done)?;
+        // The caller resolved once: it is both the lead the worker is told about and the lead its
+        // lineage nests under, so the tree and the briefing can never name different processes.
+        let lead = self.caller_process();
+        let worker = self.inner.launch_agent(
+            AgentLaunch::new(project, tool, extra_args)
+                .closing_when_done(close_when_done)
+                .opening_with(orchestration_preamble(
+                    &self.inner.project_ref(project),
+                    lead,
+                )),
+        )?;
         // A worker nests under its lead whenever Soloist can name the caller at all — by its own
         // binding, else by the process group it connects from — so the same identity the gate
         // above recognises is the one the tree records. Only a caller neither names (an agent
         // Soloist did not launch) spawns a root.
-        if let Some(lead) = self.caller_process() {
+        if let Some(lead) = lead {
             self.inner.lineage.record(worker, lead);
         }
         Ok(worker)

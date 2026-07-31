@@ -22,7 +22,7 @@ type SpecEnvLog = Arc<Mutex<Vec<BTreeMap<String, String>>>>;
 /// A shared buffer of the command line of each spawn, recorded by
 /// [`FakeSpawner::records_command`] so a test can read back which command line launched a
 /// process — e.g. the fresh launch versus the resume command line.
-type CommandLog = Arc<Mutex<Vec<String>>>;
+pub type CommandLog = Arc<Mutex<Vec<String>>>;
 
 /// The shared record a [`FakeSpawner::records_resizes`] child fills: the winsize each spawn
 /// created its PTY at (`spawns`, in launch order) and every resize applied to a live PTY

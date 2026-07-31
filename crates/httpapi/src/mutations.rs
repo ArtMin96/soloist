@@ -15,8 +15,8 @@ use axum::routing::{delete, post};
 use axum::{Json, Router};
 
 use soloist_core::{
-    CoordinationError, LaunchAgentError, ProcessId, ProjectId, ReloadError, RemoveProjectError,
-    SupervisorError, TodoId,
+    AgentLaunch, CoordinationError, LaunchAgentError, ProcessId, ProjectId, ReloadError,
+    RemoveProjectError, SupervisorError, TodoId,
 };
 use soloist_ipc::http::{
     SpawnRequest, SpawnResponse, TransferScratchpadRequest, TransferTodoRequest,
@@ -211,7 +211,13 @@ async fn spawn_agent(
     }
     match state
         .facade()
-        .blocking(move |f| f.launch_agent(ProjectId::from_raw(id), &body.tool, body.args, false))
+        .blocking(move |f| {
+            f.launch_agent(AgentLaunch::new(
+                ProjectId::from_raw(id),
+                body.tool,
+                body.args,
+            ))
+        })
         .await
     {
         Ok(process) => Ok(Json(SpawnResponse { id: process.get() })),
