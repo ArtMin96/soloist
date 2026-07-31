@@ -12,7 +12,7 @@
 
 use super::scoped::ScopedFacade;
 use super::Facade;
-use crate::identity::{IdentityError, PeerCredentials, Whoami};
+use crate::identity::{BindRefusal, BindRefusalReason, IdentityError, PeerCredentials, Whoami};
 use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::projects::ProjectRef;
 
@@ -32,7 +32,7 @@ impl Facade {
     /// it comes from in-memory identity — while the name is a best-effort durable-store read that
     /// resolves to `None` when the store cannot be read or the record is gone. So a transient store
     /// error dims the name without ever dropping the scope the caller still holds.
-    fn project_ref(&self, id: ProjectId) -> ProjectRef {
+    pub(in crate::facade) fn project_ref(&self, id: ProjectId) -> ProjectRef {
         match self.projects.get(id).ok().flatten() {
             Some(record) => ProjectRef::from_record(&record),
             None => ProjectRef { id, name: None },
@@ -110,16 +110,31 @@ impl ScopedFacade<'_> {
     /// registered, or [`ForeignProcess`](IdentityError::ForeignProcess) if the binding is not
     /// authentic — the caller's connecting peer does not run in that process's group. The
     /// authenticity check is what makes the effective-project scope trustworthy: a client on
-    /// the local socket cannot bind to a sibling project's process it does not run in.
+    /// the local socket cannot bind to a sibling project's process it does not run in. A refusal
+    /// is also *recorded* on the session, so a caller whose automatic bind was rejected reads that
+    /// from `whoami` instead of a bare unbound session it cannot tell from never having tried.
     pub fn bind_session_process(&self, process: ProcessId) -> Result<(), IdentityError> {
-        if self.inner.supervisor.label_of(process).is_none() {
-            return Err(IdentityError::UnknownProcess);
-        }
-        if self.home_process() != Some(process) {
-            return Err(IdentityError::ForeignProcess);
+        if let Some(reason) = self.bind_refusal_reason(process) {
+            self.inner
+                .identity
+                .refuse_bind(self.session, BindRefusal { process, reason });
+            return Err(reason.into());
         }
         self.inner.identity.bind_process(self.session, process);
         Ok(())
+    }
+
+    /// Why binding this session to `process` would not be authentic, or `None` when it would be.
+    /// The one decision behind both the error the caller sees and the refusal `whoami` reports,
+    /// so the two can never disagree about why a bind failed.
+    fn bind_refusal_reason(&self, process: ProcessId) -> Option<BindRefusalReason> {
+        if self.inner.supervisor.label_of(process).is_none() {
+            return Some(BindRefusalReason::UnknownProcess);
+        }
+        if self.home_process() != Some(process) {
+            return Some(BindRefusalReason::ForeignProcess);
+        }
+        None
     }
 
     /// Registers an external caller (one with no Soloist-supervised process) under a
@@ -186,6 +201,7 @@ impl ScopedFacade<'_> {
                 .inner
                 .effective_project(self.session)
                 .map(|id| self.inner.project_ref(id)),
+            bind_refusal: self.inner.identity.bind_refusal(self.session),
             origin,
         }
     }

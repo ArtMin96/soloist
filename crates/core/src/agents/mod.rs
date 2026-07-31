@@ -8,6 +8,7 @@
 
 mod detect;
 pub mod idle;
+mod initial_prompt;
 mod lineage;
 mod repo;
 mod resume;

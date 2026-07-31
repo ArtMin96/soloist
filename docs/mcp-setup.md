@@ -35,6 +35,15 @@ these snippets with the resolved paths filled in — prefer copying from there.
 - Every session is identified by its connecting peer's process group. Scoped tools act only on
   the caller's effective project, and a bind or project selection that the peer does not actually
   run in is refused — one client cannot forge its way into a sibling project.
+- A refused bind leaves the session unbound rather than failing it, so it is worth recognizing:
+  `whoami` reports the refusal and its reason, and `soloist-mcp` writes one line to stderr (which
+  the MCP host logs). The usual cause is an agent started by hand inside a Soloist terminal — an
+  interactive shell's job control puts it in a new process group, so the id it inherited no longer
+  matches the process it runs in. That refusal (`foreign_process`) is settled for the life of the
+  connection: the `bind_session_process` tool re-runs the same check and refuses it again, so the
+  fix is to launch the agent from Soloist rather than by hand. The tool is for the other two
+  cases — a bind that never reached the app, and an `unknown_process` refusal naming a process that
+  may have registered since.
 - Starting or restarting commands stays behind the trust gate in the core: an untrusted command
   is refused over MCP exactly as it is in the UI.
 

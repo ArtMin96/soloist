@@ -3,12 +3,13 @@
 //! actor path — the grace window, panic isolation, a clean or signalled exit, or an
 //! output stream into the terminal buffers.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use tokio::sync::{mpsc, oneshot, Notify};
 
+use crate::ids::{ProcessId, PROCESS_ID_ENV};
 use crate::ports::{
     ExitFuture, ExitStatus, ProcessControl, ProcessSpawner, PtyIo, PtySize, SpawnError, SpawnSpec,
     Spawned,
@@ -22,7 +23,33 @@ type SpecEnvLog = Arc<Mutex<Vec<BTreeMap<String, String>>>>;
 /// A shared buffer of the command line of each spawn, recorded by
 /// [`FakeSpawner::records_command`] so a test can read back which command line launched a
 /// process — e.g. the fresh launch versus the resume command line.
-type CommandLog = Arc<Mutex<Vec<String>>>;
+pub type CommandLog = Arc<Mutex<Vec<String>>>;
+
+/// The shared record a [`FakeSpawner::records_input`] child fills: every byte written to a
+/// child's PTY, kept under the process that received it. Attribution comes from the
+/// [`PROCESS_ID_ENV`] the supervisor injects into each launch, so a test can prove not merely
+/// that a write happened but *which* process it reached — the difference between a report
+/// delivered to its lead and one the reporter sent to itself.
+#[derive(Clone, Default)]
+pub struct InputLog {
+    per_process: Arc<Mutex<BTreeMap<ProcessId, Vec<u8>>>>,
+}
+
+impl InputLog {
+    /// Every byte written to `process`'s PTY, in order. Empty for a process that received none.
+    pub fn to(&self, process: ProcessId) -> Vec<u8> {
+        lock(&self.per_process)
+            .get(&process)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// What every process received, keyed by process — for a test that must find where a write
+    /// landed rather than assert about one it already names.
+    pub fn by_process(&self) -> BTreeMap<ProcessId, Vec<u8>> {
+        lock(&self.per_process).clone()
+    }
+}
 
 /// The shared record a [`FakeSpawner::records_resizes`] child fills: the winsize each spawn
 /// created its PTY at (`spawns`, in launch order) and every resize applied to a live PTY
@@ -53,9 +80,48 @@ impl ResizeLog {
     }
 }
 
+/// Ends a [`FakeSpawner::exits_when_told`] child's run on cue, so a test can drive a process
+/// finishing **by itself** — which a caller's stop is not, and which is the only ending an
+/// auto-close acts on. Keyed by process, so ending one run and not another keeps the order of the
+/// events a test then observes deterministic.
+#[derive(Clone, Default)]
+pub struct ExitTrigger {
+    fired: Arc<Mutex<HashSet<ProcessId>>>,
+    changed: Arc<Notify>,
+}
+
+impl ExitTrigger {
+    /// Ends `process`'s current run: its child exits cleanly on its own, as a finished worker
+    /// does. Spent by the child that takes it, so a process started again afterwards runs on
+    /// until it is fired again — a restart is a new run, not a replay of the last ending.
+    pub fn fire(&self, process: ProcessId) {
+        lock(&self.fired).insert(process);
+        self.changed.notify_waiters();
+    }
+
+    /// Resolves once `process` has been fired, taking that ending so no later run inherits it.
+    async fn awaited(&self, process: ProcessId) {
+        loop {
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            // Registered before the check, so a fire landing between the two still wakes this.
+            changed.as_mut().enable();
+            if lock(&self.fired).remove(&process) {
+                return;
+            }
+            changed.await;
+        }
+    }
+}
+
 /// Signal numbers a simulated kill records on a fake child's exit status.
 const SIGKILL: i32 = 9;
 const SIGTERM: i32 = 15;
+
+/// The pid an [`FakeSpawner::exits_when_told`] child reports, offset by the process it belongs to
+/// so no two of them share a group — a shared group makes the home-process lookup ambiguous, and
+/// these children are launched several at a time.
+const CUED_EXIT_PID_BASE: u32 = 430_000;
 
 /// The pid — and therefore process group — of [`FakeSpawner::panics_after_running`]'s child.
 /// The panic-isolation test asserts this exact group is SIGKILLed when the actor reaps the child
@@ -96,10 +162,10 @@ enum Behavior {
     /// produced output and remains running, for exercising the idle classifier (output is
     /// in the buffers while the process is still `Running`).
     StreamsThenStaysAlive { chunks: Vec<Vec<u8>> },
-    /// Stays alive until killed and records every byte written to its PTY into a shared
-    /// buffer — so a test can prove what reached a process's input (e.g. a timer delivering
-    /// its body as a fresh turn).
-    RecordsInput(Arc<Mutex<Vec<u8>>>),
+    /// Stays alive until killed and records every byte written to its PTY under the process it
+    /// belongs to — so a test can prove what reached a *given* process's input (e.g. a timer
+    /// delivering its body as a fresh turn, or a report reaching its lead and not its author).
+    RecordsInput(InputLog),
     /// Stays alive until killed and records the environment of each spawn into a shared
     /// buffer — so a test can prove what env reached a process (e.g. the captured shell
     /// environment merged with the per-process overrides).
@@ -120,6 +186,10 @@ enum Behavior {
     /// at and every resize applied to it — so a test can prove a resize reaches the child and
     /// that a respawn re-creates the PTY at the last requested size.
     RecordsResizes(ResizeLog),
+    /// Stays alive until the test ends its run through the shared [`ExitTrigger`], then exits
+    /// cleanly **on its own** — the self-ended run a stop is not. Obeys SIGTERM too, so one
+    /// spawner drives both endings.
+    ExitsWhenTold(ExitTrigger),
 }
 
 /// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is chosen
@@ -205,16 +275,17 @@ impl FakeSpawner {
         }
     }
 
-    /// A long-lived child that records every byte written to its PTY, returning the spawner and
-    /// the shared buffer the test reads. Used to prove what reached a process's input — e.g. that
-    /// a fired timer delivered its body, followed by a carriage return, as a fresh turn.
-    pub fn records_input() -> (Self, Arc<Mutex<Vec<u8>>>) {
-        let recorder = Arc::new(Mutex::new(Vec::new()));
+    /// A long-lived child that records every byte written to its PTY under the process that
+    /// received it, returning the spawner and the shared [`InputLog`] the test reads. Used to
+    /// prove what reached a given process's input — e.g. that a fired timer delivered its body,
+    /// followed by a carriage return, as a fresh turn to the process that set it.
+    pub fn records_input() -> (Self, InputLog) {
+        let log = InputLog::default();
         (
             Self {
-                behavior: Behavior::RecordsInput(recorder.clone()),
+                behavior: Behavior::RecordsInput(log.clone()),
             },
-            recorder,
+            log,
         )
     }
 
@@ -278,6 +349,19 @@ impl FakeSpawner {
                 behavior: Behavior::RecordsResizes(log.clone()),
             },
             log,
+        )
+    }
+
+    /// Children that run until the test ends them through the returned [`ExitTrigger`], then exit
+    /// cleanly on their own. The one fake that separates a run a process finished itself from one
+    /// a caller stopped, which the auto-close policy treats as different endings.
+    pub fn exits_when_told() -> (Self, ExitTrigger) {
+        let trigger = ExitTrigger::default();
+        (
+            Self {
+                behavior: Behavior::ExitsWhenTold(trigger.clone()),
+            },
+            trigger,
         )
     }
 }
@@ -373,7 +457,7 @@ impl ProcessSpawner for FakeSpawner {
                     io: Box::new(NoopPtyIo),
                 })
             }
-            Behavior::RecordsInput(recorder) => {
+            Behavior::RecordsInput(log) => {
                 let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
                 let control = Box::new(OneshotControl {
                     exit_tx: Mutex::new(Some(exit_tx)),
@@ -381,14 +465,23 @@ impl ProcessSpawner for FakeSpawner {
                 });
                 let exit: ExitFuture =
                     Box::pin(async move { exit_rx.await.unwrap_or_else(|_| killed_by(SIGKILL)) });
+                // A launch that carries no process id cannot be attributed, so its child discards
+                // its input rather than pooling it under someone else's: a test then reads nothing
+                // and reddens, instead of reading a write that was never meant for the process it
+                // asked about.
+                let io: Box<dyn PtyIo> = match spawned_process(spec) {
+                    Some(process) => Box::new(RecordingPtyIo {
+                        process,
+                        log: log.clone(),
+                    }),
+                    None => Box::new(NoopPtyIo),
+                };
                 Ok(Spawned {
                     pid: Some(424244),
                     output: no_output(),
                     exit,
                     control,
-                    io: Box::new(RecordingPtyIo {
-                        recorder: recorder.clone(),
-                    }),
+                    io,
                 })
             }
             Behavior::RecordsSpecEnv(recorder) => {
@@ -447,6 +540,43 @@ impl ProcessSpawner for FakeSpawner {
                         resizes: log.resizes.clone(),
                         applied: log.applied.clone(),
                     }),
+                })
+            }
+            Behavior::ExitsWhenTold(trigger) => {
+                let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
+                let control = Box::new(OneshotControl {
+                    exit_tx: Mutex::new(Some(exit_tx)),
+                    dies_on: DiesOn::Terminate,
+                });
+                let trigger = trigger.clone();
+                // A launch that carries no process id cannot be told apart from another's, so it
+                // is never ended this way — a test that meant to end it reddens instead of ending
+                // somebody else's run.
+                let process = spawned_process(spec);
+                let exit: ExitFuture = Box::pin(async move {
+                    let told = async {
+                        match process {
+                            Some(process) => trigger.awaited(process).await,
+                            None => std::future::pending().await,
+                        }
+                        ExitStatus {
+                            code: Some(0),
+                            signal: None,
+                        }
+                    };
+                    tokio::select! {
+                        signalled = exit_rx => signalled.unwrap_or_else(|_| killed_by(SIGKILL)),
+                        exited = told => exited,
+                    }
+                });
+                Ok(Spawned {
+                    pid: Some(
+                        CUED_EXIT_PID_BASE + process.map(|id| id.get() as u32).unwrap_or_default(),
+                    ),
+                    output: no_output(),
+                    exit,
+                    control,
+                    io: Box::new(NoopPtyIo),
                 })
             }
             Behavior::FailsToSpawn(message) => Err(SpawnError::Spawn(message.clone())),
@@ -573,16 +703,27 @@ impl PtyIo for ResizeRecordingPtyIo {
     }
 }
 
-/// A [`PtyIo`] that appends every written byte to a shared buffer (discarding resizes), so a
-/// test can read back exactly what was sent to a process's input.
+/// The process a launch belongs to, read from the id the supervisor injects into every
+/// managed process's environment. `None` for a launch that carries none.
+fn spawned_process(spec: &SpawnSpec) -> Option<ProcessId> {
+    let raw = spec.env.get(PROCESS_ID_ENV)?.parse().ok()?;
+    Some(ProcessId::from_raw(raw))
+}
+
+/// A [`PtyIo`] that appends every written byte to the shared log under its own process
+/// (discarding resizes), so a test can read back exactly what was sent to that process's input.
 struct RecordingPtyIo {
-    recorder: Arc<Mutex<Vec<u8>>>,
+    process: ProcessId,
+    log: InputLog,
 }
 
 #[async_trait]
 impl PtyIo for RecordingPtyIo {
     async fn write(&self, data: &[u8]) -> Result<(), SpawnError> {
-        lock(&self.recorder).extend_from_slice(data);
+        lock(&self.log.per_process)
+            .entry(self.process)
+            .or_default()
+            .extend_from_slice(data);
         Ok(())
     }
 

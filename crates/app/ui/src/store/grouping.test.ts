@@ -71,15 +71,45 @@ describe("groupByKind", () => {
     expect(agents?.roots.map((root) => root.process.label)).toEqual(["worker"]);
   });
 
-  it("keeps a worker flat when its recorded parent is in another subtype group", () => {
+  // A lead is always an agent, so a parent of another kind is data that should not exist. It must
+  // still leave every group describing itself: the worker stays in the group that renders it, and
+  // no group counts or holds a row of another kind.
+  it("keeps a worker in its own group when its recorded parent is of another kind", () => {
     const groups = groupByKind(
       [process(1, "Terminal", "shell"), process(2, "Agent", "worker")],
       new Map([[2, 1]]),
     );
+    const terminals = groups.find((group) => group.kind === "Terminal");
+    expect(terminals?.roots.map((root) => root.process.label)).toEqual(["shell"]);
+    expect(terminals?.roots[0]?.children).toEqual([]);
+    expect(terminals?.processes.map((row) => row.label)).toEqual(["shell"]);
     const agents = groups.find((group) => group.kind === "Agent");
     expect(agents?.roots.map((root) => root.process.label)).toEqual(["worker"]);
-    const terminals = groups.find((group) => group.kind === "Terminal");
-    expect(terminals?.roots[0]?.children).toEqual([]);
+    expect(agents?.processes.map((row) => row.label)).toEqual(["worker"]);
+  });
+
+  it("lists only its own kind in every group, however deep the lineage runs", () => {
+    const groups = groupByKind(
+      [
+        process(1, "Terminal", "shell"),
+        process(2, "Agent", "lead"),
+        process(3, "Agent", "worker"),
+        process(4, "Command", "web"),
+      ],
+      new Map([
+        [2, 1],
+        [3, 2],
+      ]),
+    );
+    expect(groups.map((group) => group.processes.map((row) => row.kind))).toEqual([
+      ["Agent", "Agent"],
+      ["Terminal"],
+      ["Command"],
+    ]);
+    // The lead's own worker still nests; only the edge that leaves the group is dropped.
+    const agents = groups.find((group) => group.kind === "Agent");
+    expect(agents?.roots.map((root) => root.process.label)).toEqual(["lead"]);
+    expect(agents?.roots[0]?.children.map((child) => child.process.label)).toEqual(["worker"]);
   });
 
   it("treats a self-referential edge as a root", () => {

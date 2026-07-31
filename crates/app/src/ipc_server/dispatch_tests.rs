@@ -171,6 +171,30 @@ async fn project_status_for_an_unknown_project_is_refused() {
 }
 
 #[tokio::test]
+async fn binding_a_process_the_caller_does_not_run_in_maps_to_the_wire_error() {
+    // The bind tool routes through the same gate the automatic bind does: a session whose peer
+    // group owns no managed process cannot claim one, so a caller cannot bind its way into a
+    // process — or a project — it does not run in.
+    let facade = facade();
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    facade.supervisor().assign_test_group(id, PEER_PGID);
+    let session = facade.open_session(PeerCredentials::in_group(PEER_PGID + 1));
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::BindSessionProcess { process: id }
+        )
+        .await,
+        Err(IpcError::ForeignProcess)
+    );
+}
+
+#[tokio::test]
 async fn binding_an_unknown_process_maps_to_the_wire_error() {
     let facade = facade();
     let session = grouped_session(&facade);
@@ -338,10 +362,30 @@ async fn spawning_an_agent_without_scope_is_refused() {
             IpcRequest::SpawnAgent {
                 tool: "Claude".into(),
                 extra_args: Vec::new(),
+                close_when_done: false,
             },
         )
         .await,
         Err(IpcError::NoProjectScope)
+    );
+}
+
+#[tokio::test]
+async fn reporting_with_no_lead_is_refused_over_the_wire() {
+    let facade = facade();
+    let session = grouped_session(&facade);
+    // The route carries no target, so the only thing a caller with no lead can get back is the
+    // refusal the core resolved — not a write into someone else.
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::ReportToLead {
+                report: "anything".into(),
+            },
+        )
+        .await,
+        Err(IpcError::NoLead)
     );
 }
 

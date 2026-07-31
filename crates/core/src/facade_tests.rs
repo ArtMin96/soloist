@@ -1,9 +1,10 @@
 use super::*;
-use crate::identity::{IdentityError, Origin};
+use crate::identity::{BindRefusalReason, IdentityError, Origin};
 use crate::ids::ProjectId;
 use crate::ports::{TokioClock, TrustRepo};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, SupervisorError};
+use crate::sync::lock;
 use crate::testing::{
     authentic_session, terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
     TEST_PEER_PGID,
@@ -293,7 +294,7 @@ async fn launch_agent_registers_and_starts_an_agent_in_the_project() {
     let project = facade.load_project(dir.path()).expect("load");
 
     let id = facade
-        .launch_agent(project.id, "Claude", Vec::new())
+        .launch_agent(AgentLaunch::new(project.id, "Claude", Vec::new()))
         .expect("launch");
 
     // It appears as an ungated Agent-kind process labelled by the tool, and starts.
@@ -320,10 +321,10 @@ async fn launch_agent_marks_resumable_for_a_supported_provider_only() {
     let project = facade.load_project(dir.path()).expect("load");
 
     let claude = facade
-        .launch_agent(project.id, "Claude", Vec::new())
+        .launch_agent(AgentLaunch::new(project.id, "Claude", Vec::new()))
         .expect("launch claude");
     let amp = facade
-        .launch_agent(project.id, "Amp", Vec::new())
+        .launch_agent(AgentLaunch::new(project.id, "Amp", Vec::new()))
         .expect("launch amp");
 
     let resumable = |id| {
@@ -342,13 +343,122 @@ async fn launch_agent_marks_resumable_for_a_supported_provider_only() {
 }
 
 #[tokio::test]
+async fn an_opening_turn_reaches_only_the_launch_that_asked_for_one() {
+    // The dashboard's launch picker and the scoped spawn share this one method, so the opening
+    // turn has to be the launch's own choice: an agent the user opened a pane for must start on
+    // an empty prompt, not on a briefing written for a worker.
+    let (spawner, commands) = FakeSpawner::records_command();
+    let facade = facade_with_tools(spawner);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load");
+    let mut rx = facade.subscribe();
+
+    facade
+        .launch_agent(AgentLaunch::new(project.id, "Claude", Vec::new()))
+        .expect("a plain launch");
+    wait_for(&mut rx, ProcStatus::Running).await;
+    facade
+        .launch_agent(
+            AgentLaunch::new(project.id, "Claude", Vec::new()).opening_with("brief".to_string()),
+        )
+        .expect("a briefed launch");
+    wait_for(&mut rx, ProcStatus::Running).await;
+
+    let launched = lock(&commands).clone();
+    assert_eq!(launched, vec!["claude".to_string(), "claude brief".into()]);
+}
+
+#[tokio::test]
+async fn a_launch_that_cannot_carry_its_opening_turn_is_refused_by_name() {
+    // A provider with no documented interactive prompt argument cannot be handed a briefing.
+    // Launching it plainly anyway starts an agent that never learns what it was launched for and
+    // never reports — reported to the caller as a success — so the launch is refused instead, and
+    // the refusal names the tool so a caller can choose one that can carry it.
+    let (spawner, commands) = FakeSpawner::records_command();
+    let facade = facade_with_tools(spawner);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load");
+
+    assert!(matches!(
+        facade.launch_agent(
+            AgentLaunch::new(project.id, "Amp", Vec::new()).opening_with("brief".to_string())
+        ),
+        Err(LaunchAgentError::NoOpeningTurn(tool)) if tool == "Amp"
+    ));
+    assert!(
+        facade.snapshot().is_empty(),
+        "the refused launch registers nothing"
+    );
+    assert!(
+        lock(&commands).is_empty(),
+        "and spawns nothing: {:?}",
+        lock(&commands)
+    );
+}
+
+#[tokio::test]
+async fn a_provider_with_no_prompt_argument_still_launches_when_no_turn_is_asked_for() {
+    // The refusal above is about a briefing that cannot be carried, not about the tool: the
+    // dashboard's launch picker opens an agent pane on an empty prompt, which every provider does.
+    let (spawner, commands) = FakeSpawner::records_command();
+    let facade = facade_with_tools(spawner);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load");
+    let mut rx = facade.subscribe();
+
+    let amp = facade
+        .launch_agent(AgentLaunch::new(project.id, "Amp", Vec::new()))
+        .expect("launch amp");
+    wait_for(&mut rx, ProcStatus::Running).await;
+
+    assert_eq!(lock(&commands).clone(), vec!["amp".to_string()]);
+    assert!(
+        facade
+            .snapshot()
+            .into_iter()
+            .any(|view| view.id == amp && view.status == ProcStatus::Running),
+        "a provider that takes no opening turn still starts without one"
+    );
+}
+
+#[tokio::test]
+async fn a_resume_reopens_the_conversation_without_the_opening_turn() {
+    // The opening turn began the conversation a resume reopens, so replaying it would hand the
+    // agent its briefing a second time as if it were fresh work.
+    let (spawner, commands) = FakeSpawner::records_command();
+    let facade = facade_with_tools(spawner);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load");
+    let mut rx = facade.subscribe();
+
+    let claude = facade
+        .launch_agent(
+            AgentLaunch::new(project.id, "Claude", Vec::new()).opening_with("brief".to_string()),
+        )
+        .expect("launch claude");
+    wait_for(&mut rx, ProcStatus::Running).await;
+    assert!(
+        facade.supervisor().stop(claude),
+        "the claude agent was live"
+    );
+    wait_for(&mut rx, ProcStatus::Stopped).await;
+    facade.supervisor().resume(claude).expect("resume claude");
+    wait_for(&mut rx, ProcStatus::Running).await;
+
+    assert_eq!(
+        lock(&commands).clone(),
+        vec!["claude brief".to_string(), "claude --continue".into()]
+    );
+}
+
+#[tokio::test]
 async fn launch_agent_rejects_an_unknown_tool() {
     let facade = facade_with_tools(FakeSpawner::exits_on_terminate());
     let dir = tempfile::tempdir().expect("temp dir");
     let project = facade.load_project(dir.path()).expect("load");
 
     assert!(matches!(
-        facade.launch_agent(project.id, "Nonexistent", Vec::new()),
+        facade.launch_agent(AgentLaunch::new(project.id, "Nonexistent", Vec::new())),
         Err(LaunchAgentError::UnknownTool)
     ));
 }
@@ -358,7 +468,11 @@ async fn launch_agent_rejects_an_unknown_project() {
     let facade = facade_with_tools(FakeSpawner::exits_on_terminate());
 
     assert!(matches!(
-        facade.launch_agent(ProjectId::from_raw(9999), "Claude", Vec::new()),
+        facade.launch_agent(AgentLaunch::new(
+            ProjectId::from_raw(9999),
+            "Claude",
+            Vec::new()
+        )),
         Err(LaunchAgentError::UnknownProject)
     ));
 }
@@ -372,6 +486,9 @@ async fn whoami_of_a_fresh_session_is_unbound_and_unscoped() {
     assert_eq!(who.session, session);
     assert_eq!(who.origin, Origin::Unbound);
     assert!(who.bound_process.is_none());
+    // Nothing was ever attempted, so there is no refusal to report — the fact that separates this
+    // session from one whose bind was rejected.
+    assert!(who.bind_refusal.is_none());
     // No project loaded and nothing bound: the scope cannot be resolved.
     assert!(who.effective_project.is_none());
 }
@@ -435,6 +552,63 @@ async fn binding_a_process_the_caller_does_not_run_in_is_refused() {
         facade.scoped(session).bind_session_process(id),
         Err(IdentityError::ForeignProcess)
     ));
+}
+
+#[tokio::test]
+async fn a_refused_bind_is_reported_by_whoami() {
+    // A refused session and one that never tried both stay unbound, so the origin alone cannot
+    // tell them apart. The recorded refusal is what makes the rejection — and its reason —
+    // legible to the caller instead of silently indistinguishable from never binding.
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    facade.supervisor().assign_test_group(id, TEST_PEER_PGID);
+    let session = facade.open_session(PeerCredentials::in_group(9999));
+    assert!(facade.scoped(session).bind_session_process(id).is_err());
+
+    let who = facade.scoped(session).whoami();
+    assert_eq!(who.origin, Origin::Unbound);
+    let refusal = who.bind_refusal.expect("the refused bind is reported");
+    assert_eq!(refusal.process, id);
+    assert_eq!(refusal.reason, BindRefusalReason::ForeignProcess);
+}
+
+#[tokio::test]
+async fn a_bind_that_succeeds_clears_an_earlier_refusal() {
+    // An agent that binds explicitly after its automatic bind was refused is simply bound: the
+    // stale refusal must not keep telling it something is wrong.
+    let (facade, _trust) = facade(FakeSpawner::exits_on_terminate());
+    let id = facade.supervisor().register(terminal_registration(
+        ProjectId::from_raw(1),
+        "term",
+        "sleep 60",
+    ));
+    let session = authentic_session(&facade, id, TEST_PEER_PGID);
+    // An unknown process is refused first, so the session carries a refusal to clear.
+    assert!(facade
+        .scoped(session)
+        .bind_session_process(ProcessId::from_raw(999))
+        .is_err());
+    assert_eq!(
+        facade
+            .scoped(session)
+            .whoami()
+            .bind_refusal
+            .map(|refusal| refusal.reason),
+        Some(BindRefusalReason::UnknownProcess)
+    );
+
+    facade
+        .scoped(session)
+        .bind_session_process(id)
+        .expect("bind to the process the caller runs in");
+
+    let who = facade.scoped(session).whoami();
+    assert_eq!(who.origin, Origin::Process(id));
+    assert!(who.bind_refusal.is_none());
 }
 
 #[tokio::test]

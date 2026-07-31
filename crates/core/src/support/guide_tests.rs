@@ -2,19 +2,72 @@ use super::*;
 
 use crate::settings::McpFeatureGroup;
 
+/// The identity-topic line that names a `whoami` refusal `reason` — the guidance an agent matches
+/// its own refusal against.
+fn refusal_guidance(reason: &str) -> String {
+    let topic = help_topic("identity").expect("the identity topic resolves");
+    topic
+        .lines()
+        .find(|line| line.contains(reason))
+        .unwrap_or_else(|| panic!("the identity topic must explain the {reason} refusal: {topic}"))
+        .to_string()
+}
+
 #[test]
-fn the_guide_teaches_automatic_binding_not_a_manual_bind_call() {
+fn the_guide_teaches_automatic_binding_and_names_the_manual_bind() {
     let guide = agent_guide();
     // The injected id and the external fallback are named...
     assert!(guide.contains(PROCESS_ID_ENV));
     assert!(guide.contains("register_agent"));
     assert!(guide.contains("whoami"));
-    // ...and binding is taught as automatic — there is no bind tool for an agent to call, so the
-    // guide must not instruct one (the earlier text told agents to call `bind_session_process`).
+    // ...binding is taught as automatic...
     assert!(guide.contains("automatically"));
+    // ...and the explicit bind is named, which an agent that reads the guide but not the tool list
+    // would otherwise never learn exists.
     assert!(
-        !guide.contains("bind_session_process"),
-        "the guide must not tell agents to call a bind tool that the MCP surface does not expose"
+        guide.contains("bind_session_process"),
+        "the guide must name the tool an agent binds with"
+    );
+}
+
+#[test]
+fn the_identity_topic_offers_the_bind_retry_only_where_it_can_succeed() {
+    // `bind_session_process` re-runs the very check that produced the refusal, against the same
+    // connection. For `foreign_process` — the caller does not run in the process it named — that
+    // check reads a peer process group fixed for the life of the connection, so the retry can only
+    // be refused again. Sending an agent back to the tool there leaves it with no remedy at all,
+    // so the guidance has to say so and name what the agent can do instead.
+    let foreign = refusal_guidance("foreign_process");
+    assert!(
+        foreign.contains("refuses the same way"),
+        "the guide must say the retry is refused again rather than offer it: {foreign}"
+    );
+    assert!(
+        foreign.contains("unbound"),
+        "the guide must say what an agent that cannot bind does instead: {foreign}"
+    );
+    // `unknown_process` is the refusal a retry can genuinely clear — the process may register
+    // after the automatic bind ran — so that is where the tool belongs.
+    let unknown = refusal_guidance("unknown_process");
+    assert!(
+        unknown.contains("bind_session_process"),
+        "the guide must offer the retry where it can succeed: {unknown}"
+    );
+}
+
+#[test]
+fn the_timers_topic_separates_going_quiet_from_finishing() {
+    // A fire-when-idle timer fires on quiet, and quiet is not completion — a worker pausing
+    // mid-task is quiet too. The guide is what an agent reads instead of the tool list, so it is
+    // where a lead would otherwise learn to treat a wake as "my workers are done".
+    let topic = help_topic("timers").expect("the timers topic resolves");
+    assert!(
+        topic.contains("not the same as"),
+        "the topic must not leave quiet reading as finished: {topic}"
+    );
+    assert!(
+        topic.contains("report_to_lead"),
+        "the topic must name what completion actually looks like: {topic}"
     );
 }
 

@@ -4,13 +4,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::*;
+use crate::agents::AgentKind;
 use crate::composition::CorePorts;
 use crate::coordination::{AcquireOutcome, IdleMode, TimerStatus, MAX_TIMER_BODY_BYTES};
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{ProjectRepo, TokioClock};
 use crate::testing::{
-    authentic_session, terminal_registration, FakeLockRepo, FakeProjectRepo, FakeSpawner,
-    FakeTimerRepo, FakeTrustRepo, TEST_PEER_PGID,
+    agent_registration, authentic_session, terminal_registration, FakeLockRepo, FakeProjectRepo,
+    FakeSpawner, FakeTimerRepo, FakeTrustRepo, TEST_PEER_PGID,
 };
 
 /// A façade over in-memory fakes with the lease and timer stores wired, so the coordination
@@ -199,13 +200,13 @@ fn setting_a_timer_with_a_body_at_the_cap_arms_it() {
     assert_eq!(facade.scoped(session).timer_list().expect("list").len(), 1);
 }
 
-#[test]
-fn fire_when_idle_reports_the_processes_it_is_waiting_on() {
+#[tokio::test]
+async fn fire_when_idle_reports_the_processes_it_is_waiting_on() {
     let facade = facade_with(Arc::new(FakeProjectRepo::new()));
     let project = ProjectId::from_raw(1);
     let (session, _owner) = bound_session(&facade, project);
-    // Two registered processes, running but not classified idle: in the registry with no idle
-    // signal, so the timer waits on both.
+    // Two live processes with no idle signal yet: neither is resting and neither has been
+    // classified, so the timer waits on both.
     let watched = vec![
         facade
             .supervisor()
@@ -214,6 +215,15 @@ fn fire_when_idle_reports_the_processes_it_is_waiting_on() {
             .supervisor()
             .register(terminal_registration(project, "second", "sleep 60")),
     ];
+    for &id in &watched {
+        facade.supervisor().start(id).expect("start the process");
+        assert!(
+            facade
+                .process_view(id)
+                .is_some_and(|view| view.status.is_active()),
+            "the watched process is live rather than resting",
+        );
+    }
 
     let outcome = facade
         .scoped(session)
@@ -258,4 +268,143 @@ fn fire_when_idle_counts_a_process_absent_from_the_registry_as_idle() {
         outcome.waiting_on.is_empty(),
         "the report must not wait on a process that has left the registry"
     );
+}
+
+#[test]
+fn fire_when_idle_reports_the_same_state_in_the_timer_it_returns() {
+    // The answer carries the report twice: at the top level, and on the timer view a caller reads
+    // back (and sees again in the orchestration snapshot). A view that says the timer is still
+    // waiting, beside an outcome that says its condition is already met, is two answers to one
+    // question.
+    let facade = facade_with(Arc::new(FakeProjectRepo::new()));
+    let (session, _owner) = bound_session(&facade, ProjectId::from_raw(1));
+    let gone = ProcessId::from_raw(9999); // never registered → not in the supervisor
+
+    let outcome = facade
+        .scoped(session)
+        .timer_fire_when_idle(
+            "all done".into(),
+            vec![gone],
+            IdleMode::All,
+            Some(Duration::from_secs(60)),
+        )
+        .expect("set");
+
+    assert!(outcome.already_idle);
+    assert_eq!(
+        outcome.timer.already_idle, outcome.already_idle,
+        "the timer view carries the same verdict as the outcome around it"
+    );
+    assert_eq!(
+        outcome.timer.waiting_on, outcome.waiting_on,
+        "the timer view waits on the same processes as the outcome around it"
+    );
+}
+
+#[test]
+fn fire_when_idle_tells_a_watched_process_that_ran_and_ended_from_one_never_started() {
+    // Both watched processes are registered and at rest, in the identical status — a process is
+    // registered in the state it later comes to rest in. One was launched and has run: it can do no
+    // more work, so it ends the wait however it was last classified. The other has never been
+    // started, so it has finished nothing, and treating it as idle would fire a lead's timer the
+    // instant it armed one over a `solo.yml` command nobody had launched.
+    let facade = facade_with(Arc::new(FakeProjectRepo::new()));
+    let project = ProjectId::from_raw(1);
+    let (session, _owner) = bound_session(&facade, project);
+    let ran = facade
+        .supervisor()
+        .register(agent_registration(project, "worker"));
+    facade.idle.track(ran, AgentKind::Claude);
+    let never_started =
+        facade
+            .supervisor()
+            .register(terminal_registration(project, "api", "npm run dev"));
+    for id in [ran, never_started] {
+        assert!(
+            facade
+                .process_view(id)
+                .is_some_and(|view| !view.status.is_active()),
+            "both watched processes are registered and at rest",
+        );
+    }
+
+    let ended = facade
+        .scoped(session)
+        .timer_fire_when_idle(
+            "worker finished".into(),
+            vec![ran],
+            IdleMode::All,
+            Some(Duration::from_secs(60)),
+        )
+        .expect("set");
+    assert!(
+        ended.already_idle,
+        "a watched process that ran and ended can do no more work, so the condition is already met"
+    );
+    assert!(
+        ended.waiting_on.is_empty(),
+        "the report must not wait on a process that has ended"
+    );
+
+    let unstarted = facade
+        .scoped(session)
+        .timer_fire_when_idle(
+            "workers finished".into(),
+            vec![never_started],
+            IdleMode::All,
+            Some(Duration::from_secs(60)),
+        )
+        .expect("set");
+    assert!(
+        !unstarted.already_idle,
+        "a watched process nobody has started has not finished anything"
+    );
+    assert_eq!(
+        unstarted.waiting_on,
+        vec![never_started],
+        "the report names the process that has yet to do anything"
+    );
+}
+
+#[tokio::test]
+async fn listing_timers_reports_the_idle_state_each_one_is_waiting_on() {
+    // `timer_list` is where a lead checks which watched workers are still outstanding. A listed
+    // timer whose read-time report was never computed carries the empty default — no one waited on,
+    // not yet idle — which reads as "every worker is in", so the lead acts on results that do not
+    // exist. Every read of a timer carries the same answer arming it gave.
+    let facade = facade_with(Arc::new(FakeProjectRepo::new()));
+    let project = ProjectId::from_raw(1);
+    let (session, _owner) = bound_session(&facade, project);
+    let worker = facade
+        .supervisor()
+        .register(terminal_registration(project, "worker", "sleep 60"));
+    facade.supervisor().start(worker).expect("start the worker");
+    assert!(
+        facade
+            .process_view(worker)
+            .is_some_and(|view| view.status.is_active()),
+        "the watched worker is live and has not been classified idle",
+    );
+
+    let armed = facade
+        .scoped(session)
+        .timer_fire_when_idle(
+            "worker finished".into(),
+            vec![worker],
+            IdleMode::All,
+            Some(Duration::from_secs(60)),
+        )
+        .expect("set");
+
+    let listed = facade.scoped(session).timer_list().expect("list");
+    let [timer] = listed.as_slice() else {
+        panic!("the one timer the session owns");
+    };
+    assert_eq!(
+        timer.waiting_on,
+        vec![worker],
+        "the listed timer names the worker it is still waiting on"
+    );
+    assert_eq!(timer.waiting_on, armed.waiting_on);
+    assert_eq!(timer.already_idle, armed.already_idle);
 }

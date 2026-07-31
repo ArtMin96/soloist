@@ -6,7 +6,7 @@ use crate::agents::AgentKind;
 use crate::terminal::TerminalActivity;
 
 use super::strategy::{strategy_for, AgentMemory, IdleStrategy};
-use crate::idle::AgentActivity;
+use crate::idle::{AgentActivity, ObservedActivity};
 
 /// Tracks one agent's activity over successive terminal samples. Holds the provider's
 /// heuristic, its rolling memory, and the last activity reported, so it can emit only on a
@@ -15,6 +15,7 @@ pub(super) struct Classifier {
     strategy: &'static dyn IdleStrategy,
     memory: AgentMemory,
     current: Option<AgentActivity>,
+    observed: ObservedActivity,
 }
 
 impl Classifier {
@@ -24,6 +25,7 @@ impl Classifier {
             strategy: strategy_for(kind),
             memory: AgentMemory::default(),
             current: None,
+            observed: ObservedActivity::launched(),
         }
     }
 
@@ -34,12 +36,19 @@ impl Classifier {
         // previous state rather than flapping (see the strategies' `current` handling).
         let previous = self.current.unwrap_or(AgentActivity::Idle);
         let next = self.strategy.classify(&mut self.memory, signals, previous);
+        self.observed.observe(next);
         if self.current == Some(next) {
             None
         } else {
             self.current = Some(next);
             Some(next)
         }
+    }
+
+    /// This agent's activity from the point it began working — what a caller waiting for the
+    /// agent to *finish* must read, rather than the quiet of a CLI that is still starting up.
+    pub(super) fn observed(&self) -> ObservedActivity {
+        self.observed
     }
 
     /// The activity last reported for this agent, or `None` before its first sample. A snapshot
@@ -50,10 +59,13 @@ impl Classifier {
     }
 
     /// Resets to the pre-sample state, so an agent that stopped and is relaunched re-emits
-    /// its first activity. Called while the agent is not running.
+    /// its first activity and must earn its next turn's observation afresh. Called while the
+    /// agent is not running. The launch itself is not forgotten — it is what distinguishes an
+    /// agent resting after a run from one that was never started.
     pub(super) fn reset(&mut self) {
         self.memory = AgentMemory::default();
         self.current = None;
+        self.observed = ObservedActivity::launched();
     }
 }
 

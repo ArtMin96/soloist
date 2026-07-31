@@ -62,6 +62,20 @@ pub(crate) struct SpawnAgentArg {
     /// Extra command-line flags appended for this one launch ("agent with flags"). Optional.
     #[serde(default)]
     pub(crate) extra_args: Vec<String>,
+    /// Close the worker as soon as it finishes, instead of leaving it in the process list.
+    /// Optional, off by default: a closed worker's output is gone, so ask for this only when
+    /// you will not need to read it. Defaults to false.
+    #[serde(default)]
+    pub(crate) close_when_done: bool,
+}
+
+/// Arguments for reporting a worker's result to the lead that spawned it.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ReportToLeadArg {
+    /// What to tell the lead — your result, findings, or why you could not finish. Delivered as
+    /// a fresh turn on the lead's terminal, so write it as a message to another agent, not a log
+    /// dump. Bounded: an over-long report is refused with the cap it exceeded.
+    pub(crate) report: String,
 }
 
 /// Arguments for selecting the session's project scope.

@@ -26,6 +26,15 @@ impl Facade {
         self.supervisor.self_healing_loop()
     }
 
+    /// The auto-close reactor loop (C2), returned for the composition root to spawn once on its
+    /// runtime. It closes each process launched with `close_when_done` as its run ends — reaping
+    /// it, dropping its registry row, and freeing its terminal buffers — so a lead's one-shot
+    /// workers do not accumulate. Nothing is armed by default, so with no such launch it does
+    /// nothing. It runs until the facade is dropped.
+    pub fn auto_close_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        self.supervisor.auto_close_loop()
+    }
+
     /// The metrics sampler loop (monitoring C5), returned for the composition root to spawn
     /// once on its runtime. It samples each running process group on an interval and publishes a
     /// [`crate::events::DomainEvent::MetricsTick`] when a group's reading changes — with an
@@ -64,14 +73,18 @@ impl Facade {
     /// The coordination timer scheduler loop (C6), returned for the composition root to spawn
     /// once on its runtime. It fires each due timer — at its deadline, or when the agents it
     /// watches go idle — and delivers the timer's body to its owning process as a fresh turn
-    /// (reusing the supervisor's input behaviour). It tracks idle state from the
-    /// [`crate::events::DomainEvent::AgentActivityChanged`] stream, watches the supervisor weakly so
-    /// it ends when the facade is dropped, and is self-supervised like the samplers. With the
-    /// default [`crate::coordination::NoopTimerRepo`] no timer ever persists, so it fires nothing —
-    /// the real SQLite store is chosen in the composition root.
+    /// (reusing the supervisor's input behaviour). It reads idle state from the same idle tracker
+    /// (C4) the façade reports a timer from, so what fires matches what its caller was told,
+    /// watches the supervisor weakly so it ends when the facade is dropped, and is self-supervised
+    /// like the samplers. With the default [`crate::coordination::NoopTimerRepo`] no timer ever
+    /// persists, so it fires nothing — the real SQLite store is chosen in the composition root.
     pub fn timer_scheduler_loop(&self) -> impl Future<Output = ()> + Send + 'static {
         self.timers
-            .scheduler(self.bus.clone(), Arc::downgrade(&self.supervisor))
+            .scheduler(
+                self.bus.clone(),
+                Arc::downgrade(&self.supervisor),
+                self.idle.clone(),
+            )
             .run()
     }
 

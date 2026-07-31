@@ -32,8 +32,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use soloist_core::{
-    AgentTool, DetectedTool, Facade, ProcessId, ProcessView, ProjectId, ProjectLoad, ProjectView,
-    TrustReviewCommand,
+    AgentLaunch, AgentTool, DetectedTool, Facade, ProcessId, ProcessView, ProjectId, ProjectLoad,
+    ProjectView, TrustReviewCommand,
 };
 use tauri::ipc::{Channel, Response};
 use tauri::State;
@@ -179,7 +179,13 @@ pub async fn agent_launch(
     facade: State<'_, Arc<Facade>>,
 ) -> Result<u64, String> {
     facade
-        .blocking(move |f| f.launch_agent(ProjectId::from_raw(project), &tool, extra_args))
+        .blocking(move |f| {
+            f.launch_agent(AgentLaunch::new(
+                ProjectId::from_raw(project),
+                tool,
+                extra_args,
+            ))
+        })
         .await
         .map(|id| id.get())
         .map_err(|err| err.to_string())

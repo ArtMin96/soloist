@@ -75,7 +75,7 @@ pub use template::{
 pub use template_evictor::TemplateEvictor;
 pub use template_render::{MissingPolicy, RenderError, RenderRequest, RenderedPrompt};
 pub use template_repo::{NoopTemplateRepo, StoredTemplate, TemplateRepo, TemplateWriteResult};
-pub(crate) use timer::watched_is_idle;
+pub(crate) use timer::watched_process_is_idle;
 pub use timer::{
     FireCond, IdleMode, SetWhenIdleOutcome, TimerStatus, TimerView, Timers, MAX_TIMER_BODY_BYTES,
 };

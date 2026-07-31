@@ -51,6 +51,16 @@ pub fn agent_registration(project: ProjectId, name: &str) -> Registration {
 /// builds (the same rule as the event waiters).
 #[cfg(test)]
 pub fn facade_with_agent_tool() -> (crate::facade::Facade, ProjectId) {
+    let (facade, project, _commands) = facade_recording_agent_launches();
+    (facade, project)
+}
+
+/// [`facade_with_agent_tool`] plus the buffer its spawner records each launch's command line
+/// into, for a test that must read back *how* a worker was launched rather than only that it
+/// was. One fixture behind both, so the spawn path a test drives is the same either way.
+#[cfg(test)]
+pub fn facade_recording_agent_launches(
+) -> (crate::facade::Facade, ProjectId, crate::testing::CommandLog) {
     use std::path::Path;
     use std::sync::Arc;
 
@@ -62,6 +72,7 @@ pub fn facade_with_agent_tool() -> (crate::facade::Facade, ProjectId) {
         FakeAgentToolRepo, FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock,
     };
 
+    let (spawner, commands) = FakeSpawner::records_command();
     let projects = Arc::new(FakeProjectRepo::new());
     let project = projects
         .upsert(Path::new("/"), Some("proj"), None)
@@ -76,7 +87,7 @@ pub fn facade_with_agent_tool() -> (crate::facade::Facade, ProjectId) {
     };
     let facade = Facade::new(
         CorePorts::builder(
-            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(spawner),
             Arc::new(MockClock::new()),
             Arc::new(FakeTrustRepo::new()),
             projects,
@@ -84,5 +95,5 @@ pub fn facade_with_agent_tool() -> (crate::facade::Facade, ProjectId) {
         .agent_tools(Arc::new(FakeAgentToolRepo::new(vec![tool])))
         .build(),
     );
-    (facade, project)
+    (facade, project, commands)
 }

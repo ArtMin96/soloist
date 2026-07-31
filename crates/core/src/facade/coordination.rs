@@ -14,7 +14,7 @@ use std::time::Duration;
 use super::scoped::ScopedFacade;
 use super::Facade;
 use crate::coordination::{
-    watched_is_idle, AcquireOutcome, IdleMode, LeaseView, SetWhenIdleOutcome, TimerView,
+    watched_process_is_idle, AcquireOutcome, IdleMode, LeaseView, SetWhenIdleOutcome, TimerView,
     MAX_TIMER_BODY_BYTES,
 };
 use crate::events::DomainEvent;
@@ -208,14 +208,21 @@ impl Facade {
     }
 
     /// Whether a process counts as idle right now for a fire-when-idle timer — the snapshot the
-    /// `already_idle`/`waiting_on` report is built from. Applies the same rule the scheduler fires
-    /// on ([`watched_is_idle`]): the agent idle FSM (C4) reports `Idle`, or the process has left the
-    /// registry (it can no longer work), so the report can never disagree with what fires.
-    fn is_idle_now(&self, process: ProcessId) -> bool {
-        watched_is_idle(
-            self.idle.activity(process),
-            self.supervisor.view(process).is_some(),
-        )
+    /// `already_idle`/`waiting_on` report is built from. The same read the scheduler fires on
+    /// ([`watched_process_is_idle`]), over the same idle tracker (C4) and process registry (C2), so
+    /// the report cannot disagree with what fires.
+    pub(in crate::facade) fn is_idle_now(&self, process: ProcessId) -> bool {
+        watched_process_is_idle(self.idle.as_ref(), &self.supervisor, process)
+    }
+
+    /// A stored timer view in the form a caller must see it: its read-time idle report
+    /// ([`TimerView::report_idle`]) filled in from the live idle state. Arming a timer and listing
+    /// them answer through this one step, so the two cannot differ — a view whose report was never
+    /// computed carries the empty default, "waiting on nothing, not yet idle", which reads to a
+    /// lead as "no worker is outstanding" and is wrong in both directions.
+    pub(in crate::facade) fn reported_timer(&self, mut timer: TimerView) -> TimerView {
+        timer.report_idle(|process| self.is_idle_now(process));
+        timer
     }
 
     /// The session's effective project, or [`CoordinationError::NoProjectScope`]. Shared with the
@@ -327,24 +334,19 @@ impl ScopedFacade<'_> {
         let project = self.coordination_scope()?;
         let owner = self.coordination_owner()?;
         check_payload_size(body.len(), MAX_TIMER_BODY_BYTES, "timer body")?;
-        let waiting_on: Vec<ProcessId> = processes
-            .iter()
-            .copied()
-            .filter(|&process| !self.inner.is_idle_now(process))
-            .collect();
-        let already_idle = mode.quorum_met(&processes, |process| self.inner.is_idle_now(process));
-        let timer = self
-            .inner
-            .timers
-            .set_when_idle(project, owner, body, processes, mode, max_wait)?;
+        let timer = self.inner.reported_timer(
+            self.inner
+                .timers
+                .set_when_idle(project, owner, body, processes, mode, max_wait)?,
+        );
         self.inner.bus.publish(DomainEvent::TimerArmed {
             owner,
             id: timer.id,
         });
         Ok(SetWhenIdleOutcome {
+            already_idle: timer.already_idle,
+            waiting_on: timer.waiting_on.clone(),
             timer,
-            already_idle,
-            waiting_on,
         })
     }
 
@@ -386,10 +388,18 @@ impl ScopedFacade<'_> {
         Ok(resumed)
     }
 
-    /// Every timer the session's bound process owns (armed or paused).
+    /// Every timer the session's bound process owns (armed or paused), each carrying the same
+    /// read-time idle report arming one returns — so a lead checking which watched workers are
+    /// still outstanding reads the live answer, not an empty default.
     pub fn timer_list(&self) -> Result<Vec<TimerView>, CoordinationError> {
         let owner = self.coordination_owner()?;
-        Ok(self.inner.timers.list(owner)?)
+        Ok(self
+            .inner
+            .timers
+            .list(owner)?
+            .into_iter()
+            .map(|timer| self.inner.reported_timer(timer))
+            .collect())
     }
 }
 

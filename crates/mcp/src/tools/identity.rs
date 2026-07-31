@@ -49,6 +49,23 @@ impl SoloistMcp {
     }
 
     #[tool(
+        description = "Bind this MCP session to the Soloist process it runs in, by the id Soloist injected as SOLOIST_PROCESS_ID. Binding happens automatically when the session connects, so call this only when `whoami` shows you unbound and either reports no refusal at all (the automatic bind never reached Soloist) or reports the reason `unknown_process` (the process may have registered since). A `foreign_process` refusal means you are not running in the process you named; this tool re-runs that same check on the same connection and refuses it again, so retrying it cannot bind you."
+    )]
+    pub(crate) async fn bind_session_process(
+        &self,
+        Parameters(ProcessArg { process }): Parameters<ProcessArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::BindSessionProcess {
+            process: ProcessId::from_raw(process),
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
         description = "Register this MCP session as an external caller under a label, so `whoami` reports who is calling. For agents Soloist did not launch."
     )]
     pub(crate) async fn register_agent(

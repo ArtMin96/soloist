@@ -32,14 +32,14 @@ export interface ProcessGroup {
   label: string;
   /** The group's rows in visual (depth-first) order — counts and keyboard nav read this. */
   processes: ProcessView[];
-  /** The same rows nested by spawn lineage; a node whose parent is outside this group is a root. */
+  /** The same rows nested by spawn lineage; every node in the tree is of the group's kind. */
   roots: ProcessNode[];
 }
 
-// Nests one group's members by the child→parent lineage map. Scoped to the group: an edge
-// resolves only when both ends are in the same group, so a child whose parent is absent,
-// self-referential, or in another subtype group re-roots flat rather than disappearing.
-// Order is preserved at every level.
+// Nests one group's members by the child→parent lineage map. Resolution is scoped to the members
+// handed in, so a child whose parent is absent, self-referential, or of another kind re-roots
+// rather than disappearing — a group can never come to hold a row it does not own. Order is
+// preserved at every level.
 function nestByLineage(
   members: ProcessView[],
   parents: ReadonlyMap<number, number>,
@@ -72,12 +72,14 @@ function flatten(roots: ProcessNode[]): ProcessView[] {
   return rows;
 }
 
-// Buckets processes into the three subtype groups, preserving registry order within each
-// group and the fixed group order, and nests each group's rows by the spawn-lineage map
-// (worker under its lead — in practice only Agents ever nest, since both ends of a lineage
-// edge are agents). With no lineage every node is a root and `processes` keeps today's flat
-// order. Pure — no view concerns, unit-testable. The project tier (which project owns which
-// processes) is the projects module's concern; this is purely the process-kind grouping used
+// Buckets processes into the three subtype groups, preserving registry order within each group and
+// the fixed group order, and nests each group's rows by the spawn-lineage map (a worker under the
+// lead that spawned it — a lead is always an agent, so in practice only Agents ever nest). Nesting
+// resolves inside a group, so a group's `processes` is exactly the rows it renders and every one of
+// them is of its own kind: its count matches what is on screen, and no section can be emptied by a
+// row that renders elsewhere. With no lineage every node is a root and `processes` keeps the flat
+// registry order. Pure — no view concerns, unit-testable. The project tier (which project owns
+// which processes) is the projects module's concern; this is purely the process-kind grouping used
 // within a project node.
 export function groupByKind(
   processes: ProcessView[],

@@ -50,6 +50,7 @@ pub mod trust;
 mod cache;
 mod supervision;
 mod sync;
+mod turn;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
@@ -82,13 +83,15 @@ pub use coordination::{
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
-    CoordinationError, CreateTerminalError, Facade, LaunchAgentError, LocalCommandError,
-    MoveCommandError, PromptRenderError, ScopedActionError, ScopedFacade, SetupIntegrationError,
-    SpawnAgentError, StatusSummary, TrustCommandError,
+    AgentLaunch, CoordinationError, CreateTerminalError, Facade, LaunchAgentError,
+    LocalCommandError, MoveCommandError, PromptRenderError, ReportToLeadError, ScopedActionError,
+    ScopedFacade, SetupIntegrationError, SpawnAgentError, StatusSummary, TrustCommandError,
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
-pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};
+pub use identity::{
+    BindRefusal, BindRefusalReason, Identity, IdentityError, Origin, PeerCredentials, Whoami,
+};
 pub use ids::{
     DiagramId, ProcessId, ProjectId, ScratchpadId, SessionId, TemplateId, TimerId, TodoId,
     PROCESS_ID_ENV,
@@ -121,7 +124,9 @@ pub use settings::{
     SettingsStore, Sidebar, TemplateDefaults, TerminalAppearance, Theme, ToolDefaults,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
-pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError, SupervisorPorts};
+pub use supervisor::{
+    ClosePolicy, Registration, StartSummary, Supervisor, SupervisorError, SupervisorPorts,
+};
 pub use support::{
     agent_guide, help_overview, help_topic, onboarding_hint, Feedback, FeedbackEntry,
     FeedbackError, FeedbackRepo, IntegrationFile, IntegrationWrite, IntegrationWriteError,

@@ -8,19 +8,43 @@
 
 use std::time::Duration;
 
-use super::scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
+use super::scoped::{ReportToLeadError, ScopedActionError, ScopedFacade, SpawnAgentError};
+use super::AgentLaunch;
 use crate::ids::{ProcessId, ProjectId};
-use crate::process::ProcessView;
-use crate::supervisor::StartSummary;
+use crate::process::{ProcessKind, ProcessView};
+use crate::supervisor::{ClosePolicy, StartSummary};
+use crate::support::orchestration_preamble;
+use crate::turn::submitted_turn;
 
 /// How many trailing rendered lines `send_input`'s `wait_ms` snapshot returns — a bounded
 /// tail (about a screenful), never the whole scrollback, so the reply stays small.
 const INPUT_TAIL_LINES: usize = 24;
 
+/// The most one worker's report may carry. A report is written into the lead's terminal as a
+/// turn it will read, so the cap is the same as a timer body's for the same reason: a wake is
+/// a summary, and an unbounded one would let a worker flood the context of the agent it is
+/// reporting to.
+pub const MAX_REPORT_BYTES: usize = 16 * 1024;
+
+/// What an over-cap report is named as in the refusal, matching how the coordination write caps
+/// name the payload they refused.
+const REPORT: &str = "the report";
+
 /// The longest `send_input` waits before snapshotting the tail, regardless of the requested
 /// `wait_ms`. A bound (per the longevity rules) so a large value cannot tie up the request,
 /// and it stays well under the IPC client's request timeout.
 pub(in crate::facade) const MAX_INPUT_WAIT: Duration = Duration::from_secs(10);
+
+/// What a spawned worker's row is closed on: nothing unless the caller asked for it, and — when
+/// the worker has a lead — not until its report has actually reached that lead, so a run whose
+/// result never landed keeps its row and its output for the user to read.
+fn close_policy(close_when_done: bool, lead: Option<ProcessId>) -> ClosePolicy {
+    match (close_when_done, lead) {
+        (false, _) => ClosePolicy::Keep,
+        (true, None) => ClosePolicy::WhenRunEnds,
+        (true, Some(_)) => ClosePolicy::WhenRunEndsAndHandedOver,
+    }
+}
 
 impl ScopedFacade<'_> {
     /// Starts one process for a scoped session, after confirming it is in scope. The
@@ -96,17 +120,28 @@ impl ScopedFacade<'_> {
     /// [`Facade::launch_agent`] for the one launch behaviour; the worker always
     /// lands in the caller's own project (the resolved scope), so it can never spawn into
     /// another and needs no project argument. The new agent auto-binds via the injected
-    /// `SOLOIST_PROCESS_ID`. When the calling session is bound to a lead process, the worker's
-    /// lineage is recorded under that lead so the orchestration tree nests it; an unbound or
-    /// external caller's spawn is a root. Delegation is one level deep: a caller that was
+    /// `SOLOIST_PROCESS_ID`. Whenever the caller is identifiable — by its binding, else by the
+    /// process group it connects from — the worker's lineage is recorded under it so the
+    /// orchestration tree nests it; only a caller Soloist did not launch and that never bound
+    /// spawns a root. Delegation is one level deep: a caller that was
     /// itself spawned as a worker this run is refused with
     /// [`SpawnAgentError::WorkerMayNotSpawn`], whether it identified itself by binding or is
-    /// recognised by the process group it connects from. Must run within a `tokio` runtime
-    /// (starting spawns the actor).
+    /// recognised by the process group it connects from. Only an **agent** can be a lead, so a
+    /// caller that resolves to a terminal or a command spawns a root: no lineage edge is recorded
+    /// and the worker is briefed as having no lead. With `close_when_done` the worker is closed
+    /// once its run ends on its own and — when it has a lead — its report has reached that lead;
+    /// without it the finished worker rests in the registry with its output intact.
+    ///
+    /// The worker opens on an [orchestration preamble](orchestration_preamble) naming its lead,
+    /// its project, and the coordination tools, so an agent that loads no skill and reads no
+    /// project file still knows what it is and what it can reach. Only the scoped spawn carries
+    /// one — an agent the user launches from the dashboard is theirs to open, not a worker being
+    /// briefed. Must run within a `tokio` runtime (starting spawns the actor).
     pub fn spawn_agent(
         &self,
         tool: &str,
         extra_args: Vec<String>,
+        close_when_done: bool,
     ) -> Result<ProcessId, SpawnAgentError> {
         let project = self
             .inner
@@ -127,13 +162,106 @@ impl ScopedFacade<'_> {
         if caller_is_worker {
             return Err(SpawnAgentError::WorkerMayNotSpawn);
         }
-        let worker = self.inner.launch_agent(project, tool, extra_args)?;
-        // A worker spawned by a bound lead nests under it in the orchestration tree; an
-        // unbound or external caller's spawn records no parent and so reads back as a root.
-        if let Some(lead) = self.inner.identity.origin(self.session).process() {
+        // The caller resolved once: it is both the lead the worker is told about and the lead its
+        // lineage nests under, so the tree and the briefing can never name different processes.
+        // A lead is always an agent — only an agent runs the loop that reads a submitted turn —
+        // so a caller Soloist resolves to a terminal or a command is nobody's lead, and the
+        // worker it asks for is a root. That is settled here, at the one place an edge is
+        // recorded, rather than left for the report to discover: nothing may later type a
+        // worker's multi-line result into a live interactive shell, where each line would run.
+        let lead = self
+            .caller_process()
+            .filter(|caller| self.inner.is_agent(*caller));
+        let worker = self.inner.launch_agent(
+            AgentLaunch::new(project, tool, extra_args)
+                .closing(close_policy(close_when_done, lead))
+                .opening_with(orchestration_preamble(
+                    &self.inner.project_ref(project),
+                    lead,
+                )),
+        )?;
+        // A worker nests under its lead whenever Soloist can name an agent caller at all — by its
+        // own binding, else by the process group it connects from — so the same identity the gate
+        // above recognises is the one the tree records.
+        if let Some(lead) = lead {
             self.inner.lineage.record(worker, lead);
         }
         Ok(worker)
+    }
+
+    /// Hands this worker's result to the lead that spawned it, delivered as a fresh submitted
+    /// turn on the lead's terminal — the reply half of [`spawn_agent`](Self::spawn_agent). The
+    /// turn is composed by the same `submitted_turn` a fired timer wakes an agent with, so the
+    /// two differ only in the header they carry and a wake reads the same whatever produced it.
+    ///
+    /// **This is how a worker signals completion.** Terminal quiet is not: a worker that has
+    /// finished and one that is still thinking are indistinguishable from outside, so nothing
+    /// derived from output can stand in for the worker saying so. A fire-when-idle timer wakes a
+    /// lead on quiet, which is where to look, not proof that the delegated work is done.
+    ///
+    /// **The lead is resolved from the recorded spawn lineage, never named by the caller.** A
+    /// caller cannot choose a target, so this can only ever reach the one agent that spawned it —
+    /// it is not a way to type into an arbitrary process in the project. A caller with no
+    /// recorded lead is refused rather than defaulted to anyone.
+    ///
+    /// Never blocks: the report is refused rather than awaited if the lead has stopped draining
+    /// its input, so one deaf lead cannot stall the caller — and the caller learns its result did
+    /// not land instead of being told it did.
+    pub fn report_to_lead(&self, report: String) -> Result<(), ReportToLeadError> {
+        if report.len() > MAX_REPORT_BYTES {
+            return Err(ReportToLeadError::TooLong {
+                what: REPORT,
+                max_bytes: MAX_REPORT_BYTES,
+            });
+        }
+        let worker = self.caller_process().ok_or(ReportToLeadError::NoLead)?;
+        // The registry is the source of truth for who exists at *both* ends of the edge: a caller
+        // Soloist has forgotten is no longer a node in the tree, so its recorded edge is stale
+        // rather than an address it may still spend.
+        let worker_view = self
+            .inner
+            .process_view(worker)
+            .ok_or(ReportToLeadError::NoLead)?;
+        let lead = self
+            .inner
+            .lineage
+            .parent_of(worker)
+            .ok_or(ReportToLeadError::NoLead)?;
+        let lead_view = match self.resolve_in_scope(lead) {
+            Ok(view) => view,
+            // A lead that has left the registry is gone; the caller's own scope failing to resolve
+            // is a different fault, and reporting it as a departed lead would send a worker to
+            // abandon a report the lead could still have taken.
+            Err(ScopedActionError::UnknownProcess) => return Err(ReportToLeadError::LeadGone),
+            Err(err) => return Err(ReportToLeadError::Scope(err)),
+        };
+        // Only an agent reads a submitted turn as a turn. The spawn records no edge onto anything
+        // else, and this is the second line of defence: written into a live shell the report would
+        // be submitted with a carriage return and run line by line as commands.
+        if lead_view.kind != ProcessKind::Agent {
+            return Err(ReportToLeadError::NoLead);
+        }
+        // A lead whose own run has ended keeps its registry row *and* an input channel nobody
+        // drains, so a write into it would be accepted and read by no one. Refuse instead: a
+        // worker told its result was delivered has no reason to keep it.
+        if !lead_view.status.is_active() {
+            return Err(ReportToLeadError::LeadGone);
+        }
+        let header = format!(
+            "[Soloist worker #{worker} \"{}\"] report",
+            worker_view.label
+        );
+        if !self
+            .inner
+            .supervisor()
+            .try_write_stdin(lead, submitted_turn(&header, &report))
+        {
+            return Err(ReportToLeadError::NotDelivered);
+        }
+        // The handover a worker's own auto-close waits on. Only now, with the report on its lead's
+        // input, may the row and the output behind it be discarded when its run ends.
+        self.inner.supervisor().record_handover(worker);
+        Ok(())
     }
 
     /// Starts every trusted command in the session's effective project, regardless of

@@ -33,7 +33,7 @@ use crate::projects::{
     RemoveProjectError,
 };
 use crate::settings::{ProjectSettings, Settings, SettingsStore};
-use crate::supervisor::{Registration, Supervisor, SupervisorError};
+use crate::supervisor::{ClosePolicy, Registration, Supervisor, SupervisorError};
 use crate::support::Feedback;
 use crate::trust::TrustStore;
 
@@ -79,7 +79,7 @@ mod todo;
 pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
 pub use prompt_template::PromptRenderError;
-pub use scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
+pub use scoped::{ReportToLeadError, ScopedActionError, ScopedFacade, SpawnAgentError};
 pub use scratchpad::ScratchpadWrite;
 pub use support::SetupIntegrationError;
 pub use template::Seeded;
@@ -248,6 +248,14 @@ impl Facade {
         &self.agents
     }
 
+    /// Whether `id` is a registered [`ProcessKind::Agent`]. Only an agent runs the tool loop that
+    /// reads a submitted turn, so only an agent can be a lead; the spawn that records a lineage
+    /// edge and the report that spends one ask the same question here.
+    pub(in crate::facade) fn is_agent(&self, id: ProcessId) -> bool {
+        self.process_view(id)
+            .is_some_and(|view| view.kind == ProcessKind::Agent)
+    }
+
     /// Opens a project end to end — see [`ProjectService::open`]. The Facade owns the
     /// contexts the lifecycle spans; it assembles the service and delegates, so the open
     /// sequence lives in the projects domain rather than being re-implemented here.
@@ -373,18 +381,23 @@ impl Facade {
     /// for a loopback-OAuth browser step and any `ANTHROPIC_*` the user set pass straight
     /// through, and the CLI keeps using whatever auth the user already configured.
     ///
+    /// The launch's options — auto-close and an opening turn — are carried by [`AgentLaunch`];
+    /// see it for what each does.
+    ///
     /// One method behind the Facade, so the UI launch picker now and the MCP `spawn_agent`
     /// tool later launch agents identically. Must run within a `tokio` runtime (starting
     /// spawns the actor).
-    pub fn launch_agent(
-        &self,
-        project: ProjectId,
-        tool: &str,
-        extra_args: Vec<String>,
-    ) -> Result<ProcessId, LaunchAgentError> {
+    pub fn launch_agent(&self, launch: AgentLaunch) -> Result<ProcessId, LaunchAgentError> {
+        let AgentLaunch {
+            project,
+            tool,
+            extra_args,
+            close_policy,
+            first_turn,
+        } = launch;
         let tool = self
             .agents
-            .tool(tool)?
+            .tool(&tool)?
             .ok_or(LaunchAgentError::UnknownTool)?;
         let root = self
             .project_root(project)?
@@ -393,13 +406,25 @@ impl Facade {
         // The resume invocation is composed once here, from the same extra args as this
         // launch, by the single per-provider strategy ([`AgentTool::resume_command_line`]);
         // the supervisor stores it and replays it for "Resume last session". `None` for a
-        // provider with no documented resume, leaving the process non-resumable.
+        // provider with no documented resume, leaving the process non-resumable. It never
+        // carries the opening turn: a resume reopens the conversation that turn already began.
         let resume_command = tool.resume_command_line(&extra_args);
-        let spec = SpawnSpec::inheriting_env(tool.launch_command_line(&extra_args), root);
+        // A launch that opens on a first turn has to be able to carry one: a provider with no
+        // documented interactive prompt argument would otherwise start an agent that never learns
+        // what it was launched for, reported to the caller as a success. A launch that asked for
+        // no opening turn is untouched — every provider can open on an empty prompt.
+        let command = match first_turn {
+            Some(turn) => tool
+                .launch_command_line_with_prompt(&turn, &extra_args)
+                .ok_or_else(|| LaunchAgentError::NoOpeningTurn(tool.name.clone()))?,
+            None => tool.launch_command_line(&extra_args),
+        };
+        let spec = SpawnSpec::inheriting_env(command, root);
         let id = self.supervisor.register(
             Registration::launched(project, ProcessKind::Agent, tool.name, spec)
                 .resumable_with(resume_command),
         );
+        self.supervisor.close_when_done(id, close_policy);
         self.supervisor.start(id)?;
         // Track the agent's idle activity from now on; the idle sampler reclassifies it each
         // interval using its provider's heuristic.
@@ -428,14 +453,67 @@ pub enum TrustCommandError {
     Store(#[from] StoreError),
 }
 
+/// One agent launch: which tool, where, and the two things that distinguish a worker a lead
+/// orchestrates from an agent the user opened a pane for. Built by
+/// [`new`](Self::new) and narrowed by the two options, so a plain interactive launch names only
+/// what it needs and every launch still goes through the one [`Facade::launch_agent`].
+pub struct AgentLaunch {
+    project: ProjectId,
+    tool: String,
+    extra_args: Vec<String>,
+    close_policy: ClosePolicy,
+    first_turn: Option<String>,
+}
+
+impl AgentLaunch {
+    /// A plain interactive launch of `tool` in `project`, with `extra_args` appended for this one
+    /// launch ("agent with flags"): it opens on an empty turn and rests in the registry when it
+    /// finishes, which is what the user opening an agent pane expects.
+    pub fn new(project: ProjectId, tool: impl Into<String>, extra_args: Vec<String>) -> Self {
+        Self {
+            project,
+            tool: tool.into(),
+            extra_args,
+            close_policy: ClosePolicy::Keep,
+            first_turn: None,
+        }
+    }
+
+    /// When the agent's registry row — and the terminal buffers behind it — are dropped once it
+    /// finishes, for a caller launching a one-shot worker it will not read afterwards. Defaults
+    /// to [`ClosePolicy::Keep`]. Armed before the start, so a run that ends immediately is still
+    /// caught.
+    pub fn closing(mut self, policy: ClosePolicy) -> Self {
+        self.close_policy = policy;
+        self
+    }
+
+    /// Starts the agent with `turn` already submitted as its opening message — how a spawned
+    /// worker is told what it is and what it can reach before it does anything. A provider whose
+    /// CLI has no documented way to receive one refuses the launch with
+    /// [`LaunchAgentError::NoOpeningTurn`] rather than starting an agent that would never learn
+    /// its task.
+    pub fn opening_with(mut self, turn: String) -> Self {
+        self.first_turn = Some(turn);
+        self
+    }
+}
+
 /// Why launching an agent failed: no tool is registered under that name, the project is not
-/// known, a durable read failed, or the supervisor refused to start the process.
+/// known, the tool cannot carry the opening turn the launch asked for, a durable read failed, or
+/// the supervisor refused to start the process.
 #[derive(Debug, thiserror::Error)]
 pub enum LaunchAgentError {
     #[error("no agent tool registered under that name")]
     UnknownTool,
     #[error("no such project")]
     UnknownProject,
+    /// The launch was to open on a first turn, but this tool's CLI has no documented way to take
+    /// one; the field names the tool so the caller can choose one that can.
+    #[error(
+        "the {0} agent tool cannot be launched with an opening turn, so a worker spawned with it would never learn its task"
+    )]
+    NoOpeningTurn(String),
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]

@@ -14,7 +14,7 @@ use crate::sync::lock;
 use crate::terminal::TerminalActivity;
 
 use super::classifier::Classifier;
-use crate::idle::AgentActivity;
+use crate::idle::{AgentActivity, ObservedActivities, ObservedActivity};
 
 /// Tracks the activity classifier of every launched agent, keyed by process. Cloneable state
 /// is unnecessary — it is shared behind an `Arc`; the launch path calls [`Self::track`] and
@@ -41,8 +41,9 @@ impl IdleTracker {
         lock(&self.agents).keys().copied().collect()
     }
 
-    /// The activity last classified for `id`, or `None` if it is untracked or not yet sampled. A
-    /// snapshot read the façade uses to report whether a fire-when-idle timer is already satisfied.
+    /// The activity last classified for `id`, or `None` if it is untracked or not yet sampled. The
+    /// snapshot read a surface renders — an agent quiet since launch reads `Idle` here, which is
+    /// what it is; whether it has *finished* is [`observed_activity`](Self::observed_activity).
     pub fn activity(&self, id: ProcessId) -> Option<AgentActivity> {
         lock(&self.agents).get(&id).and_then(Classifier::current)
     }
@@ -85,6 +86,19 @@ impl IdleTracker {
     /// never outgrows the live process set.
     pub(super) fn retain_live(&self, live: &HashSet<ProcessId>) {
         lock(&self.agents).retain(|id, _| live.contains(id));
+    }
+}
+
+/// The tracker is the one place a process's observed activity is kept, so it is what every waiter
+/// reads — the façade reporting a fire-when-idle timer and the timer scheduler firing one alike.
+/// An untracked id (a command, a terminal, an agent that was never launched) has no observation at
+/// all, which is the answer that keeps a process that never started from counting as finished.
+impl ObservedActivities for IdleTracker {
+    fn observed_activity(&self, process: ProcessId) -> ObservedActivity {
+        lock(&self.agents)
+            .get(&process)
+            .map(Classifier::observed)
+            .unwrap_or_default()
     }
 }
 

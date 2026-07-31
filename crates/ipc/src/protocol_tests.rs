@@ -2,12 +2,12 @@ use super::*;
 
 use crate::error::IpcError;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, ExportedTemplate, FeedbackEntry, FireCond,
-    IntegrationFile, IntegrationWrite, LeaseView, MissingPolicy, Origin, ProcStatus, ProcessId,
-    ProcessKind, ProcessView, ProjectId, ProjectRef, ProjectView, PromptMode, Readiness,
-    RenderedPrompt, ScratchpadId, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary,
-    TemplateId, TemplateKind, TemplateScope, TemplateSummary, TemplateView, TimerId, TimerStatus,
-    TimerView, TodoDoc, TodoId, TodoStatus, TodoView, Whoami,
+    AcquireOutcome, AgentKind, AgentTool, BindRefusal, BindRefusalReason, ExportedTemplate,
+    FeedbackEntry, FireCond, IntegrationFile, IntegrationWrite, LeaseView, MissingPolicy, Origin,
+    ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, ProjectView,
+    PromptMode, Readiness, RenderedPrompt, ScratchpadId, ScratchpadView, SessionId,
+    SetWhenIdleOutcome, StartSummary, TemplateId, TemplateKind, TemplateScope, TemplateSummary,
+    TemplateView, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoView, Whoami,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -99,6 +99,7 @@ fn requests_round_trip_through_json() {
         IpcRequest::SpawnAgent {
             tool: "Claude".into(),
             extra_args: vec!["--model".into(), "opus".into()],
+            close_when_done: true,
         },
         IpcRequest::ListAgentTools,
         IpcRequest::StartAllCommands,
@@ -231,6 +232,12 @@ fn every_response_variant_round_trips_through_json() {
             effective_project: Some(ProjectRef {
                 id: ProjectId::from_raw(1),
                 name: Some("storefront".into()),
+            }),
+            // A bound session that was refused a later re-bind reports both, so the refusal is
+            // populated here too and its round-trip is exercised.
+            bind_refusal: Some(BindRefusal {
+                process: ProcessId::from_raw(8),
+                reason: BindRefusalReason::ForeignProcess,
             }),
         }),
         IpcResponse::Acked,
@@ -679,6 +686,32 @@ fn core_spawn_errors_map_to_the_wire_error() {
     assert_eq!(
         IpcError::from(LaunchAgentError::UnknownProject),
         IpcError::UnknownProject
+    );
+    // The tool survives the crossing: a caller told only "that failed" cannot tell which of the
+    // tools it may spawn is the one that cannot be briefed.
+    assert_eq!(
+        IpcError::from(LaunchAgentError::NoOpeningTurn("Amp".into())),
+        IpcError::NoOpeningTurn { tool: "Amp".into() }
+    );
+}
+
+#[test]
+fn core_report_errors_map_to_the_wire_error() {
+    use soloist_core::{ReportToLeadError, ScopedActionError};
+    assert_eq!(IpcError::from(ReportToLeadError::NoLead), IpcError::NoLead);
+    assert_eq!(
+        IpcError::from(ReportToLeadError::LeadGone),
+        IpcError::LeadGone
+    );
+    assert_eq!(
+        IpcError::from(ReportToLeadError::NotDelivered),
+        IpcError::ReportNotDelivered
+    );
+    // A fault in the caller's own scope stays one: reported as a departed lead, an agent abandons
+    // a report the lead — running and writable — would still have taken.
+    assert_eq!(
+        IpcError::from(ReportToLeadError::Scope(ScopedActionError::NoProjectScope)),
+        IpcError::NoProjectScope
     );
 }
 

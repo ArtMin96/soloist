@@ -369,7 +369,7 @@ async fn a_worker_spawned_by_a_bound_lead_nests_under_it() {
 
     let worker = facade
         .scoped(session)
-        .spawn_agent("worker", Vec::new())
+        .spawn_agent("worker", Vec::new(), false)
         .expect("spawn the worker under the lead");
 
     let snap = facade
@@ -396,7 +396,7 @@ async fn an_unbound_spawn_is_a_root() {
 
     let worker = facade
         .scoped(session)
-        .spawn_agent("worker", Vec::new())
+        .spawn_agent("worker", Vec::new(), false)
         .expect("spawn the worker with no bound lead");
 
     let snap = facade
@@ -424,7 +424,7 @@ async fn closing_a_lead_re_parents_its_worker_to_root() {
         .expect("bind the lead to its own process");
     let worker = facade
         .scoped(session)
-        .spawn_agent("worker", Vec::new())
+        .spawn_agent("worker", Vec::new(), false)
         .expect("spawn the worker under the lead");
 
     // The lead leaves the registry; its worker must not be stranded.
@@ -463,7 +463,7 @@ async fn lineage_edges_omits_an_edge_whose_parent_left_the_registry() {
         .expect("bind the lead to its own process");
     let worker = facade
         .scoped(session)
-        .spawn_agent("worker", Vec::new())
+        .spawn_agent("worker", Vec::new(), false)
         .expect("spawn the worker under the lead");
 
     assert_eq!(
