@@ -257,6 +257,9 @@ export type DomainEvent =
   // and its Soloist state deleted. The UI re-reads the project snapshot and drops any
   // state keyed to the id; files on disk are untouched.
   | { type: "ProjectRemoved"; id: number }
+  // The project list was rearranged. The new order lives in the project read model, so the UI
+  // re-reads that snapshot rather than reconstructing the order from the event.
+  | { type: "ProjectsReordered" }
   | {
       type: "ConfigChanged";
       project: number;

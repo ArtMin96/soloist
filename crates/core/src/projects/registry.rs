@@ -35,7 +35,8 @@ impl Projects {
         Ok(self.repo.upsert(&canonical, name, icon)?)
     }
 
-    /// All known projects, most-recently-added first.
+    /// All known projects in their display order — see [`Self::reorder`]; most-recently-added
+    /// first until the user arranges them.
     pub fn list(&self) -> Result<Vec<ProjectRecord>, StoreError> {
         self.repo.list()
     }
@@ -43,6 +44,16 @@ impl Projects {
     /// One project by id, `None` if absent.
     pub fn get(&self, id: ProjectId) -> Result<Option<ProjectRecord>, StoreError> {
         self.repo.get(id)
+    }
+
+    /// Files the user's own display order for the project list. `order` is the arrangement as
+    /// the user left it; anything it omits keeps its current relative order behind the listed
+    /// projects, so an order computed from a partial view never silently discards a project.
+    ///
+    /// Crate-visible so [`crate::facade::Facade::reorder_projects`] is the only way in: filing an
+    /// order without announcing it would leave every other surface showing the one before.
+    pub(crate) fn reorder(&self, order: &[ProjectId]) -> Result<(), StoreError> {
+        self.repo.reorder(order)
     }
 
     /// The loaded project whose canonical root contains `path` — the project a caller runs *in*,
@@ -66,9 +77,10 @@ impl Projects {
             .map(|record| record.id))
     }
 
-    /// The display projection of every known project, most-recently-added first — the
-    /// project read model the UI groups its process tree by (snapshot half of
-    /// snapshot-then-deltas; paired with [`crate::events::DomainEvent::ProjectOpened`]).
+    /// The display projection of every known project, in display order — the project read
+    /// model the UI groups its process tree by (snapshot half of snapshot-then-deltas; paired
+    /// with [`crate::events::DomainEvent::ProjectOpened`] and
+    /// [`crate::events::DomainEvent::ProjectsReordered`]).
     pub fn views(&self) -> Result<Vec<ProjectView>, StoreError> {
         Ok(self.list()?.iter().map(ProjectView::from_record).collect())
     }

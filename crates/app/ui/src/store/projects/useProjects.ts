@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   onDomainEvent,
   openProjectDirectory,
   projectList,
   projectLoad,
   projectRemove,
+  projectReorder,
 } from "@/api";
 import { CacheKey } from "@/store/cache/persistentCache";
 import { usePersistentSnapshot } from "@/store/cache/usePersistentSnapshot";
@@ -21,6 +22,8 @@ export interface ProjectStore {
    * files on disk are untouched). The caller confirms first — this action just routes.
    */
   remove: (project: number) => void;
+  /** Arrange the list: the project ids in the order the user put them. */
+  reorder: (order: number[]) => void;
   /** A plain-language note about the last open (auto-created config, or no commands). */
   notice: string | null;
 }
@@ -61,14 +64,28 @@ export function useProjects(reportError: (reason: unknown) => void): ProjectStor
   const { value, revalidate } = usePersistentSnapshot(CacheKey.projects, () => projectList(), {
     onError: reportError,
   });
-  const projects = value ?? [];
+  // An arrangement the user just made, shown until the core's own answer lands. Without it a
+  // dropped project would sit back in its old place for the round trip; the core still decides
+  // the order, this only spares the user watching it be decided.
+  const [arranged, setArranged] = useState<ProjectView[] | null>(null);
+  // Memoized: an empty list rebuilt each render would churn every consumer that depends on it.
+  const projects = useMemo(() => arranged ?? value ?? [], [arranged, value]);
+
+  // Any fresh snapshot is the authoritative order, including the one this arrangement caused.
+  useEffect(() => setArranged(null), [value]);
 
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    // `ProjectOpened`/`ProjectRemoved` just signal "projects changed"; re-read the snapshot.
+    // These just signal "the project list changed"; re-read the snapshot.
     onDomainEvent((event) => {
-      if (event.type === "ProjectOpened" || event.type === "ProjectRemoved") revalidate();
+      if (
+        event.type === "ProjectOpened" ||
+        event.type === "ProjectRemoved" ||
+        event.type === "ProjectsReordered"
+      ) {
+        revalidate();
+      }
     })
       .then((stopListening) => {
         if (cancelled) {
@@ -109,5 +126,25 @@ export function useProjects(reportError: (reason: unknown) => void): ProjectStor
     [reportError],
   );
 
-  return { projects, open, remove, notice };
+  const reorder = useCallback(
+    (order: number[]) => {
+      const byId = new Map(projects.map((project) => [project.id, project]));
+      // The named projects lead, and whatever `order` leaves out keeps its place behind them —
+      // the same reading the core gives a partial order, so what is shown while the core answers
+      // is not a list a project has dropped out of.
+      const named = new Set(order);
+      setArranged([
+        ...order.flatMap((id) => byId.get(id) ?? []),
+        ...projects.filter((project) => !named.has(project.id)),
+      ]);
+      projectReorder(order).catch((reason) => {
+        // The arrangement never reached the core, so stop showing it as though it had.
+        setArranged(null);
+        reportError(reason);
+      });
+    },
+    [projects, reportError],
+  );
+
+  return { projects, open, remove, reorder, notice };
 }

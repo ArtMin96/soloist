@@ -10,6 +10,8 @@ describe("projectActions", () => {
       onOpenOrchestration: vi.fn(),
       onOpenProjectSettings: vi.fn(),
       onRemoveProject: vi.fn(),
+      onMoveUp: vi.fn(),
+      onMoveDown: vi.fn(),
     };
     const { bulk, views, danger } = projectActions(handlers);
 
@@ -36,5 +38,48 @@ describe("projectActions", () => {
     expect(handlers.onOpenProjectSettings).toHaveBeenCalledOnce();
     danger[0].run();
     expect(handlers.onRemoveProject).toHaveBeenCalledOnce();
+  });
+
+  it("offers a move in each direction the project can actually go", () => {
+    const onMoveUp = vi.fn();
+    const onMoveDown = vi.fn();
+    const handlers = {
+      onStartAll: vi.fn(),
+      onRestartRunning: vi.fn(),
+      onStopAll: vi.fn(),
+      onOpenOrchestration: vi.fn(),
+      onOpenProjectSettings: vi.fn(),
+      onRemoveProject: vi.fn(),
+      onMoveUp,
+      onMoveDown,
+    };
+
+    const { arrange } = projectActions(handlers);
+
+    expect(arrange.map((action) => action.label)).toEqual(["Move up", "Move down"]);
+    arrange[0].run();
+    expect(onMoveUp).toHaveBeenCalledOnce();
+    arrange[1].run();
+    expect(onMoveDown).toHaveBeenCalledOnce();
+  });
+
+  it("withholds the move a project at an end of the list cannot make", () => {
+    const base = {
+      onStartAll: vi.fn(),
+      onRestartRunning: vi.fn(),
+      onStopAll: vi.fn(),
+      onOpenOrchestration: vi.fn(),
+      onOpenProjectSettings: vi.fn(),
+      onRemoveProject: vi.fn(),
+    };
+
+    const first = projectActions({ ...base, onMoveUp: null, onMoveDown: vi.fn() });
+    const last = projectActions({ ...base, onMoveUp: vi.fn(), onMoveDown: null });
+    const only = projectActions({ ...base, onMoveUp: null, onMoveDown: null });
+
+    expect(first.arrange.map((action) => action.label)).toEqual(["Move down"]);
+    expect(last.arrange.map((action) => action.label)).toEqual(["Move up"]);
+    // A list of one has no arrangement to offer, so the menus render no group at all.
+    expect(only.arrange).toEqual([]);
   });
 });

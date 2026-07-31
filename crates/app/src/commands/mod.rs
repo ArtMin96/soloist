@@ -88,6 +88,21 @@ pub async fn project_remove(project: u64, facade: State<'_, Arc<Facade>>) -> Res
         .map_err(|err| err.to_string())
 }
 
+/// Files the user's own arrangement of the project list, given as project ids in the order
+/// they should appear. The order is durable, so it survives a restart, and announcing
+/// `ProjectsReordered` prompts the UI to re-read the project snapshot it sorted by.
+#[tauri::command]
+pub async fn project_reorder(
+    order: Vec<u64>,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<(), String> {
+    let order: Vec<ProjectId> = order.into_iter().map(ProjectId::from_raw).collect();
+    facade
+        .blocking(move |f| f.reorder_projects(&order))
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// What trusting a project's command would authorize — its command line, working
 /// directory, and environment — so the UI can show the grant before offering to make it.
 /// `None` when the project has no such command.

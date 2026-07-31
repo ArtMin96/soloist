@@ -619,6 +619,10 @@ impl ProjectRepo for ThreadRecordingRepo {
         self.inner.get(id)
     }
 
+    fn reorder(&self, order: &[ProjectId]) -> Result<(), StoreError> {
+        self.inner.reorder(order)
+    }
+
     fn remove(&self, id: ProjectId) -> Result<(), StoreError> {
         *self.delete_thread.lock().expect("uncontended") = Some(thread::current().id());
         self.inner.remove(id)

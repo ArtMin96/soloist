@@ -9,6 +9,7 @@ vi.mock("@/api", () => ({
   projectLoad: vi.fn(),
   projectList: vi.fn(() => Promise.resolve([])),
   projectRemove: vi.fn(() => Promise.resolve()),
+  projectReorder: vi.fn(() => Promise.resolve()),
   onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
   onResync: vi.fn(() => Promise.resolve(() => {})),
 }));
@@ -27,6 +28,7 @@ import {
   projectList,
   projectLoad,
   projectRemove,
+  projectReorder,
 } from "@/api";
 import { useProjects } from "@/store/projects/useProjects";
 import type { DomainEvent } from "@/domain";
@@ -35,6 +37,7 @@ const pickDirectory = vi.mocked(openProjectDirectory);
 const load = vi.mocked(projectLoad);
 const list = vi.mocked(projectList);
 const remove = vi.mocked(projectRemove);
+const reorder = vi.mocked(projectReorder);
 const subscribe = vi.mocked(onDomainEvent);
 
 // A stable error sink, like the one the app passes (`store.reportError` is a useCallback):
@@ -143,5 +146,80 @@ describe("useProjects", () => {
     const failing = renderHook(() => useProjects(reportError));
     failing.result.current.remove(9);
     await waitFor(() => expect(reportError).toHaveBeenCalledWith("no such project is open"));
+  });
+
+  it("shows the new order at once, without waiting for the core to answer", async () => {
+    const opened = [
+      { id: 1, name: "alpha", root: "/p/a", icon: null },
+      { id: 2, name: "beta", root: "/p/b", icon: null },
+      { id: 3, name: "gamma", root: "/p/c", icon: null },
+    ];
+    list.mockResolvedValue(opened);
+    // A reorder the core has not answered yet, so the rendered order can only be the local one.
+    let settle = () => {};
+    reorder.mockImplementationOnce(() => new Promise<void>((resolve) => (settle = resolve)));
+    const { result } = renderHook(() => useProjects(noop));
+    await waitFor(() => expect(result.current.projects).toHaveLength(3));
+
+    act(() => result.current.reorder([3, 1, 2]));
+
+    expect(result.current.projects.map((project) => project.name)).toEqual([
+      "gamma",
+      "alpha",
+      "beta",
+    ]);
+    expect(reorder).toHaveBeenCalledWith([3, 1, 2]);
+    act(() => settle());
+  });
+
+  // The core files a partial order by leading with the named projects and keeping the rest behind
+  // them. What is shown while it answers has to say the same thing, or a project the order did not
+  // name would blink out of the list and back.
+  it("keeps a project the new order does not name, behind the ones it does", async () => {
+    const opened = [
+      { id: 1, name: "alpha", root: "/p/a", icon: null },
+      { id: 2, name: "beta", root: "/p/b", icon: null },
+      { id: 3, name: "gamma", root: "/p/c", icon: null },
+    ];
+    list.mockResolvedValue(opened);
+    let settle = () => {};
+    reorder.mockImplementationOnce(() => new Promise<void>((resolve) => (settle = resolve)));
+    const { result } = renderHook(() => useProjects(noop));
+    await waitFor(() => expect(result.current.projects).toHaveLength(3));
+
+    act(() => result.current.reorder([3, 1]));
+
+    expect(result.current.projects.map((project) => project.name)).toEqual([
+      "gamma",
+      "alpha",
+      "beta",
+    ]);
+    act(() => settle());
+  });
+
+  it("re-reads the snapshot when the list is rearranged", async () => {
+    renderHook(() => useProjects(noop));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+
+    const handler = subscribe.mock.calls[0][0];
+    act(() => handler({ type: "ProjectsReordered" } as DomainEvent));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+  });
+
+  it("stops showing an order the core refused, and says why", async () => {
+    const opened = [
+      { id: 1, name: "alpha", root: "/p/a", icon: null },
+      { id: 2, name: "beta", root: "/p/b", icon: null },
+    ];
+    list.mockResolvedValue(opened);
+    reorder.mockRejectedValueOnce("the store is unwritable");
+    const reportError = vi.fn();
+    const { result } = renderHook(() => useProjects(reportError));
+    await waitFor(() => expect(result.current.projects).toHaveLength(2));
+
+    act(() => result.current.reorder([2, 1]));
+
+    await waitFor(() => expect(reportError).toHaveBeenCalledWith("the store is unwritable"));
+    expect(result.current.projects.map((project) => project.name)).toEqual(["alpha", "beta"]);
   });
 });
