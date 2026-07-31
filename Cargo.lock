@@ -5227,7 +5227,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-app"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "console-subscriber",
  "nix 0.31.3",
@@ -5262,7 +5262,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-cli"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "axum 0.8.9",
  "clap",
@@ -5278,7 +5278,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-core"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "async-trait",
  "base64 0.23.0",
@@ -5299,7 +5299,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-httpapi"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "axum 0.8.9",
  "serde",
@@ -5315,7 +5315,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-ipc"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "getrandom 0.4.3",
  "hex",
@@ -5329,7 +5329,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-mcp"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "rmcp",
  "serde",
@@ -5342,7 +5342,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-pty"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "async-trait",
  "nix 0.31.3",
@@ -5354,7 +5354,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-store"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -5365,7 +5365,7 @@ dependencies = [
 
 [[package]]
 name = "soloist-sys"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "libc",
  "nix 0.31.3",
