@@ -38,10 +38,13 @@
 > - **Evidence.** `cargo check --workspace --all-targets` clean; **`just lint` exit 0** (fmt, clippy `-D
 >   warnings`, tsc, ESLint, Prettier, `check-core-deps.sh`, `check-core-cycles.sh` — 149 edges no cycles,
 >   file-size advisory only, now 18 files). UI `pnpm vitest run` **132 files / 905 tests, exit 0**. Every new or
->   changed test was **proven by mutation** — broken, watched redden, restored — per agent report. One flake
->   observed: `App.test.tsx > navigates only after live removal is confirmed` timed out at 5 s during a combined
->   `just test` run and passed standalone immediately after, twice; it is untouched by this work, but it is a
->   real flake and is **not yet fixed**.
+>   changed test was **proven by mutation** — broken, watched redden, restored — per agent report.
+>   **`just test` itself is RED**, and was not made green: `App.test.tsx > navigates only after live removal is
+>   confirmed` times out at 5 s and did so on **both** `just test` runs, while passing standalone on both runs
+>   — it is load-sensitive, not random. It is **not** a regression from this work: the only non-test UI source
+>   that differs from `origin/main` is `grouping.ts`, whose executable diff is empty (comments only), so the UI
+>   behaves identically to `main`. The previous entry's own commit already recorded this same test as a
+>   pre-existing flake on both `main` and this branch. Still unfixed, and it will keep `just test` red until it is.
 > - **NOT YET DONE: runtime verification.** As with the entry below, these fixes are headless-green only.
 >   A real-window manual walk (lead spawns ≥2 workers → reports land → auto-close ordering → Stop keeps the row
 >   → never-started process does not fire a timer → hand-started agent has no lead) was **in flight when this
