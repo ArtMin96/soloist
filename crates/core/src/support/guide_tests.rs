@@ -20,6 +20,22 @@ fn the_guide_teaches_automatic_binding_and_the_retry_when_it_is_refused() {
 }
 
 #[test]
+fn the_timers_topic_separates_going_quiet_from_finishing() {
+    // A fire-when-idle timer fires on quiet, and quiet is not completion — a worker pausing
+    // mid-task is quiet too. The guide is what an agent reads instead of the tool list, so it is
+    // where a lead would otherwise learn to treat a wake as "my workers are done".
+    let topic = help_topic("timers").expect("the timers topic resolves");
+    assert!(
+        topic.contains("not the same as"),
+        "the topic must not leave quiet reading as finished: {topic}"
+    );
+    assert!(
+        topic.contains("report_to_lead"),
+        "the topic must name what completion actually looks like: {topic}"
+    );
+}
+
+#[test]
 fn every_topic_is_rendered_into_the_full_guide_and_the_overview_menu() {
     // The topic set is the single source for all three renderings, so none may be silently dropped:
     // the full guide must carry every topic's section, and the overview must list every topic key.

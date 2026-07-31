@@ -36,7 +36,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Hand your result to the lead agent that spawned you, delivered as a fresh turn on its terminal so it wakes with what you found. Call this when your work is done — the lead does not read your output and cannot tell when you have finished. You cannot choose who receives it: the lead is resolved from who spawned you, and a caller no agent spawned has none to report to."
+        description = "Hand your final result to the lead agent that spawned you, delivered as a fresh turn on its terminal so it wakes with what you found. This is how a worker signals it is done, and the only way: going quiet does not, because a worker that has finished and one that is still thinking look identical from outside. Call it when your task is complete, including when you failed or finished only part of it. You cannot choose who receives it: the lead is resolved from who spawned you, and a caller no agent spawned has none to report to."
     )]
     pub(crate) async fn report_to_lead(
         &self,

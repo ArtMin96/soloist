@@ -161,7 +161,11 @@ polling the log for a ready line."
 quiet, arm `timer_fire_when_idle_any` or `timer_fire_when_idle_all`; to act after a delay, \
 `timer_set`; to wait for a server to come up, `wait_for_bound_port`.\n\
 - A fired timer delivers its body back to you as a fresh turn, so you can hand off control and \
-be woken exactly when there is something to do. `timer_list` shows what is armed."
+be woken exactly when there is something to do. `timer_list` shows what is armed.\n\
+- A fire-when-idle timer fires when the processes you watch go *quiet*, which is not the same as \
+their work being finished — a worker pausing mid-task is quiet too. Use it to check in, not to \
+conclude delegated work is done. A worker says it is done explicitly: it calls `report_to_lead`, \
+completes its todo, or exits."
                 .to_string(),
         },
         GuideTopic {

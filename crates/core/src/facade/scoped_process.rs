@@ -170,10 +170,14 @@ impl ScopedFacade<'_> {
     }
 
     /// Hands this worker's result to the lead that spawned it, delivered as a fresh submitted
-    /// turn on the lead's terminal — the reply half of [`spawn_agent`](Self::spawn_agent), so a
-    /// worker can finish by telling its lead what it found instead of leaving the lead to read
-    /// its output and guess when it is done. The delivery reuses the same header-then-body shape
-    /// a fired timer wakes an agent with, so a wake reads the same whatever produced it.
+    /// turn on the lead's terminal — the reply half of [`spawn_agent`](Self::spawn_agent). The
+    /// delivery reuses the same header-then-body shape a fired timer wakes an agent with, so a
+    /// wake reads the same whatever produced it.
+    ///
+    /// **This is how a worker signals completion.** Terminal quiet is not: a worker that has
+    /// finished and one that is still thinking are indistinguishable from outside, so nothing
+    /// derived from output can stand in for the worker saying so. A fire-when-idle timer wakes a
+    /// lead on quiet, which is where to look, not proof that the delegated work is done.
     ///
     /// **The lead is resolved from the recorded spawn lineage, never named by the caller.** A
     /// caller cannot choose a target, so this can only ever reach the one agent that spawned it —

@@ -3,8 +3,9 @@
 //!
 //! A timer is owned by the caller's bound process; when it fires it delivers its `body` to that
 //! process as a fresh, submitted turn — both the ownership and the delivery are enforced in the
-//! core, not here. The fire-when-idle tools are the token-free way for a lead agent to wait until
-//! the workers it spawned are done, without polling.
+//! core, not here. The fire-when-idle tools are the token-free way for a lead agent to be woken
+//! when the workers it spawned go quiet, without polling — quiet being where to look, not proof
+//! that the delegated work finished.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
@@ -37,7 +38,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Set a timer that delivers `body` to your bound process when ANY watched process is idle, or `max_wait_ms` elapses (omit for the default backstop). Returns the timer plus whether the condition is already met and which processes it is still waiting on. The token-free way to react as soon as one worker is free."
+        description = "Set a timer that delivers `body` to your bound process when ANY watched process is idle, or `max_wait_ms` elapses (omit for the default backstop). Returns the timer plus whether the condition is already met and which processes it is still waiting on. The token-free way to be woken as soon as one watched process goes quiet. Quiet is not proof it finished: a worker pausing mid-task is quiet too, and a worker reports completion explicitly by calling `report_to_lead`, completing its todo, or exiting. Use this to check in on a worker, not to conclude its work is done."
     )]
     pub(crate) async fn timer_fire_when_idle_any(
         &self,
@@ -52,7 +53,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Set a timer that delivers `body` to your bound process when ALL watched processes are idle, or `max_wait_ms` elapses (omit for the default backstop). Returns the timer plus whether the condition is already met and which processes it is still waiting on. The token-free way to wait until every worker you spawned is done."
+        description = "Set a timer that delivers `body` to your bound process when ALL watched processes are idle, or `max_wait_ms` elapses (omit for the default backstop). Returns the timer plus whether the condition is already met and which processes it is still waiting on. The token-free way to be woken once every watched process has gone quiet. Quiet is not proof they finished: a worker pausing mid-task is quiet too, and a worker reports completion explicitly by calling `report_to_lead`, completing its todo, or exiting. Use this to check in on your workers, not to conclude their work is done."
     )]
     pub(crate) async fn timer_fire_when_idle_all(
         &self,
