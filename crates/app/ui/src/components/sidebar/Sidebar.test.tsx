@@ -240,28 +240,42 @@ describe("Sidebar lineage nesting", () => {
     expect(screen.getByRole("treeitem", { name: /build/ }).getAttribute("aria-level")).toBe("1");
   });
 
-  it("nests a worker under a lead of another kind, in the lead's group", () => {
+  // A lead is always an agent, so a parent of another kind is data that should not exist. If it
+  // ever arrives, every section must still say what it holds — the count a user reads and the rows
+  // beneath it cannot disagree.
+  it("shows an agent in its own section when its recorded lead is of another kind", () => {
     renderSidebar({
       projects: [PROJECT_A],
       processes: [TERMINAL_LEAD, WORKER],
       lineage: new Map([[12, 30]]),
     });
-    const terminals = screen.getByRole("tree", { name: "Terminals" });
+    const terminalRows = within(screen.getByRole("tree", { name: "Terminals" })).getAllByRole(
+      "treeitem",
+    );
+    expect(terminalRows).toHaveLength(1);
+    expect(terminalRows[0].textContent).toContain("shell");
+    expect(screen.getByRole("button", { name: /^Terminals\s*1$/ })).toBeTruthy();
+    const agents = screen.getByRole("tree", { name: "Agents" });
     expect(
-      within(terminals).getByRole("treeitem", { name: /shell/ }).getAttribute("aria-level"),
-    ).toBe("1");
-    expect(
-      within(terminals)
+      within(agents)
         .getByRole("treeitem", { name: /codex-worker/ })
         .getAttribute("aria-level"),
-    ).toBe("2");
-    // The group counts the rows it renders, so the header and the tree tell the same story.
-    expect(within(screen.getByRole("tree", { name: "Agents" })).queryAllByRole("treeitem")).toEqual(
-      [],
-    );
+    ).toBe("1");
+    expect(screen.getByRole("button", { name: /^Agents\s*1$/ })).toBeTruthy();
   });
 
-  it("jumps to a worker nested under a lead of another kind", () => {
+  it("keeps the Agents section while hiding empty ones, when a lead is of another kind", () => {
+    renderSidebar({
+      settings: { ...DEFAULT_SIDEBAR, hide_empty_sections: true },
+      projects: [PROJECT_A],
+      processes: [TERMINAL_LEAD, WORKER],
+      lineage: new Map([[12, 30]]),
+    });
+    expect(screen.getByRole("tree", { name: "Agents" })).toBeTruthy();
+    expect(screen.getByRole("treeitem", { name: /codex-worker/ })).toBeTruthy();
+  });
+
+  it("jumps to an agent whose recorded lead is of another kind", () => {
     const onSelect = vi.fn();
     const nav = renderSidebar({
       projects: [PROJECT_A],

@@ -75,6 +75,25 @@ fn reset_drops_the_turn_observed_before_the_agent_stopped() {
 }
 
 #[test]
+fn a_launched_agent_stays_recorded_as_launched_once_it_stops() {
+    // A process at rest is at rest either because it ran and ended or because nobody ever started
+    // it, and the two share a status. Only the launch tells them apart, so stopping an agent must
+    // forget the turn it was in without forgetting that it ran at all.
+    let mut classifier = Classifier::new(AgentKind::Claude);
+    assert!(
+        classifier.observed().has_launched(),
+        "a classifier exists only because its agent was launched"
+    );
+    classifier.observe(&signals(64, None, &[]));
+
+    classifier.reset();
+    assert!(
+        classifier.observed().has_launched(),
+        "stopping an agent does not unlaunch it"
+    );
+}
+
+#[test]
 fn an_unchanged_activity_does_not_re_emit() {
     let mut classifier = Classifier::new(AgentKind::Claude);
     assert_eq!(

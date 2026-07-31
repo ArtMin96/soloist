@@ -369,10 +369,37 @@ async fn an_opening_turn_reaches_only_the_launch_that_asked_for_one() {
 }
 
 #[tokio::test]
-async fn a_provider_with_no_prompt_argument_still_launches_and_never_resumes_into_one() {
-    // Two ways an opening turn could break a launch: a provider that documents no prompt
-    // argument must start plainly rather than on an invented flag, and no provider's resume may
-    // carry the turn — a resume reopens the conversation that turn already began.
+async fn a_launch_that_cannot_carry_its_opening_turn_is_refused_by_name() {
+    // A provider with no documented interactive prompt argument cannot be handed a briefing.
+    // Launching it plainly anyway starts an agent that never learns what it was launched for and
+    // never reports — reported to the caller as a success — so the launch is refused instead, and
+    // the refusal names the tool so a caller can choose one that can carry it.
+    let (spawner, commands) = FakeSpawner::records_command();
+    let facade = facade_with_tools(spawner);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load");
+
+    assert!(matches!(
+        facade.launch_agent(
+            AgentLaunch::new(project.id, "Amp", Vec::new()).opening_with("brief".to_string())
+        ),
+        Err(LaunchAgentError::NoOpeningTurn(tool)) if tool == "Amp"
+    ));
+    assert!(
+        facade.snapshot().is_empty(),
+        "the refused launch registers nothing"
+    );
+    assert!(
+        lock(&commands).is_empty(),
+        "and spawns nothing: {:?}",
+        lock(&commands)
+    );
+}
+
+#[tokio::test]
+async fn a_provider_with_no_prompt_argument_still_launches_when_no_turn_is_asked_for() {
+    // The refusal above is about a briefing that cannot be carried, not about the tool: the
+    // dashboard's launch picker opens an agent pane on an empty prompt, which every provider does.
     let (spawner, commands) = FakeSpawner::records_command();
     let facade = facade_with_tools(spawner);
     let dir = tempfile::tempdir().expect("temp dir");
@@ -380,11 +407,30 @@ async fn a_provider_with_no_prompt_argument_still_launches_and_never_resumes_int
     let mut rx = facade.subscribe();
 
     let amp = facade
-        .launch_agent(
-            AgentLaunch::new(project.id, "Amp", Vec::new()).opening_with("brief".to_string()),
-        )
+        .launch_agent(AgentLaunch::new(project.id, "Amp", Vec::new()))
         .expect("launch amp");
     wait_for(&mut rx, ProcStatus::Running).await;
+
+    assert_eq!(lock(&commands).clone(), vec!["amp".to_string()]);
+    assert!(
+        facade
+            .snapshot()
+            .into_iter()
+            .any(|view| view.id == amp && view.status == ProcStatus::Running),
+        "a provider that takes no opening turn still starts without one"
+    );
+}
+
+#[tokio::test]
+async fn a_resume_reopens_the_conversation_without_the_opening_turn() {
+    // The opening turn began the conversation a resume reopens, so replaying it would hand the
+    // agent its briefing a second time as if it were fresh work.
+    let (spawner, commands) = FakeSpawner::records_command();
+    let facade = facade_with_tools(spawner);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let project = facade.load_project(dir.path()).expect("load");
+    let mut rx = facade.subscribe();
+
     let claude = facade
         .launch_agent(
             AgentLaunch::new(project.id, "Claude", Vec::new()).opening_with("brief".to_string()),
@@ -401,18 +447,7 @@ async fn a_provider_with_no_prompt_argument_still_launches_and_never_resumes_int
 
     assert_eq!(
         lock(&commands).clone(),
-        vec![
-            "amp".to_string(),
-            "claude brief".into(),
-            "claude --continue".into(),
-        ]
-    );
-    assert!(
-        facade
-            .snapshot()
-            .into_iter()
-            .any(|view| view.id == amp && view.status == ProcStatus::Running),
-        "a provider that takes no opening turn still starts"
+        vec!["claude brief".to_string(), "claude --continue".into()]
     );
 }
 

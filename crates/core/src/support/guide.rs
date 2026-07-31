@@ -94,12 +94,21 @@ files, and wait on other processes with idle timers instead of polling.\n\n{ONBO
 binds to that process **automatically when it connects** — normally you call nothing. Binding \
 attributes your locks, timers, and todo locks to your process and releases them when it \
 closes.\n\
-- Call `whoami` to confirm how you are bound and which project your tools act on. It reports a \
-bind that was refused, and why.\n\
-- A bind is only authentic from inside the process it names, so one can be refused — starting an \
-agent by hand inside a Soloist terminal puts it in a different process group than the terminal \
-it inherited its id from. If `whoami` shows you unbound with your id injected, call \
-`bind_session_process` with that id to bind explicitly.\n\
+- Call `whoami` to confirm how you are bound and which project your tools act on. A bind that \
+was refused is reported there as `bind_refusal`, and its `reason` says whether calling \
+`bind_session_process` yourself can help.\n\
+- `foreign_process` — you are not running in the process whose id you hold, so no call can bind \
+it: `bind_session_process` checks the same thing and refuses the same way. An agent started by \
+hand inside a Soloist terminal is in this position, because the shell puts it in its own process \
+group, so the id it inherited names a process it does not run in. Carry on unbound — `whoami` \
+still reports the project scope you have, and what binding adds is the tools that need an owning \
+process (leases, timers, todo locks). To own those, be launched from Soloist as an agent instead \
+of started by hand.\n\
+- `unknown_process` — Soloist has no process with that id, usually because the id is stale. \
+Calling `bind_session_process` with the injected id is worth one attempt in case the process \
+registered late; a second refusal means the id is gone.\n\
+- Unbound with an id injected and *no* refusal reported means the automatic bind never reached \
+Soloist. That is the case a retry fixes: call `bind_session_process` with that id.\n\
 - If Soloist did *not* launch you (no injected id), call `register_agent` with a label so \
 `whoami` can report who is calling."
             ),

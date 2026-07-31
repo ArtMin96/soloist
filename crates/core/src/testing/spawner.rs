@@ -3,7 +3,7 @@
 //! actor path — the grace window, panic isolation, a clean or signalled exit, or an
 //! output stream into the terminal buffers.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -80,9 +80,48 @@ impl ResizeLog {
     }
 }
 
+/// Ends a [`FakeSpawner::exits_when_told`] child's run on cue, so a test can drive a process
+/// finishing **by itself** — which a caller's stop is not, and which is the only ending an
+/// auto-close acts on. Keyed by process, so ending one run and not another keeps the order of the
+/// events a test then observes deterministic.
+#[derive(Clone, Default)]
+pub struct ExitTrigger {
+    fired: Arc<Mutex<HashSet<ProcessId>>>,
+    changed: Arc<Notify>,
+}
+
+impl ExitTrigger {
+    /// Ends `process`'s current run: its child exits cleanly on its own, as a finished worker
+    /// does. Spent by the child that takes it, so a process started again afterwards runs on
+    /// until it is fired again — a restart is a new run, not a replay of the last ending.
+    pub fn fire(&self, process: ProcessId) {
+        lock(&self.fired).insert(process);
+        self.changed.notify_waiters();
+    }
+
+    /// Resolves once `process` has been fired, taking that ending so no later run inherits it.
+    async fn awaited(&self, process: ProcessId) {
+        loop {
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            // Registered before the check, so a fire landing between the two still wakes this.
+            changed.as_mut().enable();
+            if lock(&self.fired).remove(&process) {
+                return;
+            }
+            changed.await;
+        }
+    }
+}
+
 /// Signal numbers a simulated kill records on a fake child's exit status.
 const SIGKILL: i32 = 9;
 const SIGTERM: i32 = 15;
+
+/// The pid an [`FakeSpawner::exits_when_told`] child reports, offset by the process it belongs to
+/// so no two of them share a group — a shared group makes the home-process lookup ambiguous, and
+/// these children are launched several at a time.
+const CUED_EXIT_PID_BASE: u32 = 430_000;
 
 /// The pid — and therefore process group — of [`FakeSpawner::panics_after_running`]'s child.
 /// The panic-isolation test asserts this exact group is SIGKILLed when the actor reaps the child
@@ -147,6 +186,10 @@ enum Behavior {
     /// at and every resize applied to it — so a test can prove a resize reaches the child and
     /// that a respawn re-creates the PTY at the last requested size.
     RecordsResizes(ResizeLog),
+    /// Stays alive until the test ends its run through the shared [`ExitTrigger`], then exits
+    /// cleanly **on its own** — the self-ended run a stop is not. Obeys SIGTERM too, so one
+    /// spawner drives both endings.
+    ExitsWhenTold(ExitTrigger),
 }
 
 /// A [`ProcessSpawner`] that returns fully in-memory children. Its behaviour is chosen
@@ -306,6 +349,19 @@ impl FakeSpawner {
                 behavior: Behavior::RecordsResizes(log.clone()),
             },
             log,
+        )
+    }
+
+    /// Children that run until the test ends them through the returned [`ExitTrigger`], then exit
+    /// cleanly on their own. The one fake that separates a run a process finished itself from one
+    /// a caller stopped, which the auto-close policy treats as different endings.
+    pub fn exits_when_told() -> (Self, ExitTrigger) {
+        let trigger = ExitTrigger::default();
+        (
+            Self {
+                behavior: Behavior::ExitsWhenTold(trigger.clone()),
+            },
+            trigger,
         )
     }
 }
@@ -484,6 +540,43 @@ impl ProcessSpawner for FakeSpawner {
                         resizes: log.resizes.clone(),
                         applied: log.applied.clone(),
                     }),
+                })
+            }
+            Behavior::ExitsWhenTold(trigger) => {
+                let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
+                let control = Box::new(OneshotControl {
+                    exit_tx: Mutex::new(Some(exit_tx)),
+                    dies_on: DiesOn::Terminate,
+                });
+                let trigger = trigger.clone();
+                // A launch that carries no process id cannot be told apart from another's, so it
+                // is never ended this way — a test that meant to end it reddens instead of ending
+                // somebody else's run.
+                let process = spawned_process(spec);
+                let exit: ExitFuture = Box::pin(async move {
+                    let told = async {
+                        match process {
+                            Some(process) => trigger.awaited(process).await,
+                            None => std::future::pending().await,
+                        }
+                        ExitStatus {
+                            code: Some(0),
+                            signal: None,
+                        }
+                    };
+                    tokio::select! {
+                        signalled = exit_rx => signalled.unwrap_or_else(|_| killed_by(SIGKILL)),
+                        exited = told => exited,
+                    }
+                });
+                Ok(Spawned {
+                    pid: Some(
+                        CUED_EXIT_PID_BASE + process.map(|id| id.get() as u32).unwrap_or_default(),
+                    ),
+                    output: no_output(),
+                    exit,
+                    control,
+                    io: Box::new(NoopPtyIo),
                 })
             }
             Behavior::FailsToSpawn(message) => Err(SpawnError::Spawn(message.clone())),

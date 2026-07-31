@@ -6,10 +6,15 @@
 //! [`ProcStatus`](crate::process::ProcStatus), it is owned by none of them and depends on nothing.
 //! The heuristics that decide it live in `crate::agents::idle`.
 //!
-//! Alongside the state itself lives [`ObservedActivity`], the rule for reading a *sequence* of
-//! them — shared for the same reason, since C4 and C6 each fold their own.
+//! Alongside the state itself live [`ObservedActivity`] — what a *sequence* of them, plus the
+//! launch that preceded them, says about whether a process has finished anything — and
+//! [`ObservedActivities`], the read through which a waiter asks for it. Both are shared for the
+//! same reason: the context that classifies and the context that waits on a classification each
+//! need them, and neither owns them.
 
 use serde::{Deserialize, Serialize};
+
+use crate::ids::ProcessId;
 
 /// The five activity states an agent process can be in, derived from its terminal output
 /// by a per-provider heuristic. A closed enum so every consumer handles each case explicitly.
@@ -53,24 +58,37 @@ impl AgentActivity {
     }
 }
 
-/// An agent's latest activity, from the point it demonstrably began working.
+/// What has been observed of one process's work: whether it was ever launched under idle
+/// classification, and — from the point it demonstrably began — its latest activity.
 ///
-/// An agent's terminal is quiet while its CLI starts up, so the idle heuristics classify it
-/// [`Idle`](AgentActivity::Idle) before it has done anything — a "finished" reading for an agent
-/// that has not begun. Taking that at face value ends a wait on a worker that never started, so it
-/// is withheld here: nothing is observed until the agent is first seen in some other state, after
-/// which every classification is recorded. Once an agent has begun, the quiet that follows is the
-/// real thing.
+/// Two facts, because a caller waiting for work to finish needs both and neither answers alone:
 ///
-/// Both the idle tracker (C4), which classifies agents, and the timer scheduler (C6), which folds
-/// the classifications off the event bus, keep one of these per agent — so "has it begun?" is
-/// decided the same way whichever of them is asked.
+/// - An agent's terminal is quiet while its CLI starts up, so the idle heuristics classify it
+///   [`Idle`](AgentActivity::Idle) before it has done anything — a "finished" reading for an agent
+///   that has not begun. Taking that at face value ends a wait on a worker that never started, so
+///   it is withheld: nothing is recorded until the agent is first seen in some other state, after
+///   which every classification is. Once an agent has begun, the quiet that follows is the real
+///   thing.
+/// - A process at rest is equally ambiguous the other way: the state it rests in is the same one
+///   it was registered in, so "it ran and ended" and "it was never started" are indistinguishable
+///   from status alone. The launch record tells them apart, and survives the classifier being
+///   reset when the process stops.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ObservedActivity {
+    launched: bool,
     latest: Option<AgentActivity>,
 }
 
 impl ObservedActivity {
+    /// The observation of a process that has just been launched under classification: it has
+    /// demonstrably run, but nothing has been classified for it yet.
+    pub(crate) fn launched() -> Self {
+        Self {
+            launched: true,
+            latest: None,
+        }
+    }
+
     /// Records one classification, ignoring the quiet that precedes the agent's first activity.
     pub(crate) fn observe(&mut self, activity: AgentActivity) {
         if self.latest.is_some() || !activity.is_idle() {
@@ -83,4 +101,23 @@ impl ObservedActivity {
     pub(crate) fn latest(self) -> Option<AgentActivity> {
         self.latest
     }
+
+    /// Whether this process has ever been launched, and so has actually run. `false` for one that
+    /// was never started — the honest answer a resting status cannot give on its own.
+    pub(crate) fn has_launched(self) -> bool {
+        self.launched
+    }
+}
+
+/// The read through which a waiter asks what has been observed of a process's work.
+///
+/// The idle tracker (C4) is the one place classifications are kept, and it answers for every
+/// process — a never-launched one included, whose observation is simply empty. A waiter reads it
+/// rather than folding the classification stream into a copy of its own: a fold starts empty again
+/// after a supervised restart and cannot be recovered from a dropped event, so two folds of one
+/// fact drift apart and a caller is told one thing while another thing fires. A read cannot drift.
+pub(crate) trait ObservedActivities: Send + Sync {
+    /// What has been observed of `process`'s work; empty for a process never launched under
+    /// classification.
+    fn observed_activity(&self, process: ProcessId) -> ObservedActivity;
 }

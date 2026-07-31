@@ -21,7 +21,7 @@ use tokio::sync::Notify;
 
 use super::timer_repo::{NewTimer, TimerRepo};
 use crate::events::EventBus;
-use crate::idle::{AgentActivity, ObservedActivity};
+use crate::idle::{AgentActivity, ObservedActivities, ObservedActivity};
 use crate::ids::{ProcessId, ProjectId, TimerId};
 use crate::ports::{Clock, StoreError};
 use crate::process::ProcStatus;
@@ -102,27 +102,48 @@ impl IdleMode {
     }
 }
 
-/// Whether a watched process counts as idle for a fire-when-idle timer, from the activity observed
-/// since it began working and its supervision status (`None` once it has left the registry):
+/// Whether a watched process counts as idle for a fire-when-idle timer, from what has been
+/// [observed](ObservedActivity) of its work and its supervision status (`None` once it has left the
+/// registry). Only positive evidence that the work is over counts:
 ///
-/// - a process that has left the registry, or that has exited to a resting or terminal status
-///   ([`ProcStatus::is_active`] is false), can no longer do work — so it counts as done however it
-///   was last classified, and neither a departed nor an exited worker deadlocks the wait;
-/// - a live process counts as idle once the agent idle FSM reports
-///   [`Idle`](AgentActivity::Idle) for a turn it has been [observed](ObservedActivity) starting —
-///   the quiet of a CLI still starting up is not a finished turn;
-/// - a live process that is working, blocked on a prompt, or has never been classified (an agent
-///   still starting up, or a non-agent with no idle signal) is *not* idle; the wait continues,
-///   with the timer's backstop as the guarantee it eventually fires.
+/// - a process that has left the registry can no longer do anything, so it counts as done however
+///   it was last classified, and a departed worker never deadlocks the wait;
+/// - a live process ([`ProcStatus::is_active`]) counts as idle once the agent idle FSM reports
+///   [`Idle`](AgentActivity::Idle) for a turn it was observed starting — the quiet of a CLI still
+///   starting up is not a finished turn, and neither is a process working, blocked on a prompt, or
+///   never classified at all;
+/// - a process at rest counts as done only if it was launched, because that is the one thing that
+///   separates the two ways to be at rest: a worker that ran and ended can never become busy again,
+///   while one nobody has started yet has not begun. They share a status, so status alone would
+///   read every unstarted process in the project as finished.
 ///
-/// The single definition of "idle" for a watched process, shared by the scheduler and the façade's
-/// `already_idle`/`waiting_on` report, so what is reported matches what fires.
-pub(crate) fn watched_is_idle(observed: ObservedActivity, status: Option<ProcStatus>) -> bool {
+/// A process with no positive evidence either way — never launched, or launched but silent — is
+/// not idle: the wait continues, with the timer's backstop as the guarantee it eventually fires.
+fn watched_is_idle(observed: ObservedActivity, status: Option<ProcStatus>) -> bool {
     match status {
         None => true,
-        Some(status) if !status.is_active() => true,
-        Some(_) => observed.latest().is_some_and(AgentActivity::is_idle),
+        Some(status) if status.is_active() => observed.latest().is_some_and(AgentActivity::is_idle),
+        Some(_) => observed.has_launched(),
     }
+}
+
+/// Whether `process` counts as idle for a fire-when-idle timer right now, applying
+/// [`watched_is_idle`] to the two live registries: what has been observed of its work (C4) and its
+/// supervision status (C2).
+///
+/// The one place those reads are composed. The scheduler deciding to fire and the façade reporting
+/// `already_idle`/`waiting_on` both ask through here, over the same registry instances, so a caller
+/// is never told one thing while another fires — and neither of them keeps a copy that could go
+/// stale between the two.
+pub(crate) fn watched_process_is_idle(
+    idle: &dyn ObservedActivities,
+    supervisor: &Supervisor,
+    process: ProcessId,
+) -> bool {
+    watched_is_idle(
+        idle.observed_activity(process),
+        supervisor.view(process).map(|view| view.status),
+    )
 }
 
 /// Whether a timer is counting down or has been suspended by its owner. A paused timer never
@@ -139,9 +160,9 @@ pub enum TimerStatus {
 
 /// A timer as a caller sees it (the answer to setting one and the rows `timer_list` returns):
 /// its id, the body it will deliver, what it is waiting for, when its deadline is, and whether
-/// it is armed or paused. `waiting_on` and `already_idle` are computed at read time by the
-/// façade from the live idle state — they default to empty/false here and are enriched by the
-/// caller that has access to idle state (the orchestration snapshot and `timer_list`).
+/// it is armed or paused. `waiting_on` and `already_idle` are not stored: they default to
+/// empty/false on the shape the aggregate builds and are filled in by [`report_idle`]
+/// (Self::report_idle), which every façade read of a timer goes through, from the live idle state.
 /// Built from a [`StoredTimer`](super::StoredTimer) so the wire shape cannot drift from the
 /// persisted one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -211,11 +232,14 @@ impl Timers {
 
     /// Builds the [`TimerScheduler`](super::TimerScheduler) over this aggregate's store, clock,
     /// and wake handle — so the scheduler and the aggregate share one repo and one wake signal.
-    /// The composition root spawns the returned scheduler's loop once.
+    /// `idle` must be the same observation registry the façade reports a timer from, so a timer
+    /// fires on exactly the state its caller was told about. The composition root spawns the
+    /// returned scheduler's loop once.
     pub(crate) fn scheduler(
         &self,
         bus: EventBus,
         supervisor: Weak<Supervisor>,
+        idle: Arc<dyn ObservedActivities>,
     ) -> super::TimerScheduler {
         super::TimerScheduler::new(
             self.repo.clone(),
@@ -223,6 +247,7 @@ impl Timers {
             self.wake.clone(),
             bus,
             supervisor,
+            idle,
         )
     }
 

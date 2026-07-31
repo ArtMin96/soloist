@@ -13,7 +13,7 @@ use crate::tools::reply::{app_error, structured, unexpected};
 #[tool_router(router = agent_router, vis = "pub(crate)")]
 impl SoloistMcp {
     #[tool(
-        description = "Spawn a configured agent tool as a worker in this session's project and start it. Use `list_agent_tools` for the available names. Returns the new process id. Delegation is one level deep: a worker spawned by a lead cannot itself spawn agents. Set `close_when_done` to remove the worker from the process list as soon as it finishes; it defaults to false, which leaves the finished worker there with its output readable."
+        description = "Spawn a configured agent tool as a worker in this session's project and start it. Use `list_agent_tools` for the available names. Returns the new process id. Delegation is one level deep: a worker spawned by a lead cannot itself spawn agents. Set `close_when_done` to remove the worker from the process list once its run ends on its own and it has reported back to you; a worker you stop, one that crashes, and one that never reported all keep their row and their output so nothing is lost. It defaults to false, which leaves every finished worker there with its output readable."
     )]
     pub(crate) async fn spawn_agent(
         &self,

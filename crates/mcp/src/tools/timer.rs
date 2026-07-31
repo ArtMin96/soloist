@@ -134,7 +134,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "List every timer your bound process owns (armed or paused), with each timer's id, body, fire condition, deadline, and status."
+        description = "List every timer your bound process owns (armed or paused), with each timer's id, body, fire condition, deadline, and status. A fire-when-idle timer also carries which watched processes it is still waiting on and whether its condition is already met, read live at list time — the way to check which watched processes are still outstanding."
     )]
     pub(crate) async fn timer_list(&self) -> Result<CallToolResult, ErrorData> {
         match self.client.request(IpcRequest::TimerList).await {

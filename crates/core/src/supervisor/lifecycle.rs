@@ -38,6 +38,10 @@ impl Supervisor {
     pub fn stop(&self, id: ProcessId) -> bool {
         match self.registry.status(id) {
             Some(status) if status.is_active() => {
+                // The run about to end was ended by a caller, not by the process itself, so an
+                // auto-close arming must not read the resting status that follows as a finished
+                // run: someone asking a process to stop is someone about to read its output.
+                self.auto_close.observe_stop_request(id);
                 self.registry.signal(id, ActorMsg::Stop);
                 true
             }

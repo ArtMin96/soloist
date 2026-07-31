@@ -14,7 +14,7 @@ use crate::sync::lock;
 use crate::terminal::TerminalActivity;
 
 use super::classifier::Classifier;
-use crate::idle::{AgentActivity, ObservedActivity};
+use crate::idle::{AgentActivity, ObservedActivities, ObservedActivity};
 
 /// Tracks the activity classifier of every launched agent, keyed by process. Cloneable state
 /// is unnecessary — it is shared behind an `Arc`; the launch path calls [`Self::track`] and
@@ -46,16 +46,6 @@ impl IdleTracker {
     /// what it is; whether it has *finished* is [`observed_activity`](Self::observed_activity).
     pub fn activity(&self, id: ProcessId) -> Option<AgentActivity> {
         lock(&self.agents).get(&id).and_then(Classifier::current)
-    }
-
-    /// `id`'s activity from the point it began working — empty for an untracked agent and for one
-    /// that has only ever been quiet. The read behind "is this agent done?", which the quiet of a
-    /// still-starting CLI must not answer; the façade reports a fire-when-idle timer from it.
-    pub(crate) fn observed_activity(&self, id: ProcessId) -> ObservedActivity {
-        lock(&self.agents)
-            .get(&id)
-            .map(Classifier::observed)
-            .unwrap_or_default()
     }
 
     /// The current activity of every tracked agent classified at least once, as `(id, activity)`
@@ -96,6 +86,19 @@ impl IdleTracker {
     /// never outgrows the live process set.
     pub(super) fn retain_live(&self, live: &HashSet<ProcessId>) {
         lock(&self.agents).retain(|id, _| live.contains(id));
+    }
+}
+
+/// The tracker is the one place a process's observed activity is kept, so it is what every waiter
+/// reads — the façade reporting a fire-when-idle timer and the timer scheduler firing one alike.
+/// An untracked id (a command, a terminal, an agent that was never launched) has no observation at
+/// all, which is the answer that keeps a process that never started from counting as finished.
+impl ObservedActivities for IdleTracker {
+    fn observed_activity(&self, process: ProcessId) -> ObservedActivity {
+        lock(&self.agents)
+            .get(&process)
+            .map(Classifier::observed)
+            .unwrap_or_default()
     }
 }
 

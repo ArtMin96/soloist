@@ -76,20 +76,17 @@ impl Supervisor {
         self.send_input(id, PtyInput::Write(data)).await
     }
 
-    /// Like [`Supervisor::write_stdin`] but never blocks: if the input channel is full (the child
-    /// has stopped draining its stdin) the write is dropped rather than awaited. Autonomous timer
-    /// delivery uses this so one deaf child cannot stall the shared scheduler for every other
-    /// agent; interactive input keeps [`Supervisor::write_stdin`]'s backpressure so no keystroke
-    /// is lost. Returns [`SupervisorError::NotFound`] only when the process has no terminal at all.
-    pub fn try_write_stdin(&self, id: ProcessId, data: Vec<u8>) -> Result<(), SupervisorError> {
+    /// Like [`Supervisor::write_stdin`] but never blocks, reporting whether the write was handed
+    /// to the process's input pump. `false` when the process has no terminal at all, or when its
+    /// bounded input channel is full or closed because the child has stopped draining its stdin —
+    /// the bytes are dropped rather than awaited either way, so one deaf child cannot stall a
+    /// caller shared by every other process. Interactive input keeps
+    /// [`Supervisor::write_stdin`]'s backpressure so no keystroke is lost; an autonomous delivery
+    /// that must know whether its message landed reads the answer here rather than assuming it.
+    pub fn try_write_stdin(&self, id: ProcessId, data: Vec<u8>) -> bool {
         match self.terminals.input(id) {
-            // A full channel (a child not draining its stdin) or a closed one (the process has
-            // since stopped) both drop harmlessly — this delivery path is best-effort.
-            Some(sender) => {
-                let _ = sender.try_send(PtyInput::Write(data));
-                Ok(())
-            }
-            None => Err(SupervisorError::NotFound(id)),
+            Some(sender) => sender.try_send(PtyInput::Write(data)).is_ok(),
+            None => false,
         }
     }
 

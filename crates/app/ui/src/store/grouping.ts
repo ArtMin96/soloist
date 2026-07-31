@@ -32,25 +32,23 @@ export interface ProcessGroup {
   label: string;
   /** The group's rows in visual (depth-first) order — counts and keyboard nav read this. */
   processes: ProcessView[];
-  /**
-   * The same rows nested by spawn lineage. A root is a process with no live lead; it carries its
-   * whole subtree, so a root's workers can be of another kind than the group.
-   */
+  /** The same rows nested by spawn lineage; every node in the tree is of the group's kind. */
   roots: ProcessNode[];
 }
 
-// Nests processes by the child→parent lineage map, across kinds: a worker nests under the lead
-// that spawned it whatever kind that lead is. A child whose parent is absent from the list, or
-// self-referential, re-roots rather than disappearing. Order is preserved at every level.
+// Nests one group's members by the child→parent lineage map. Resolution is scoped to the members
+// handed in, so a child whose parent is absent, self-referential, or of another kind re-roots
+// rather than disappearing — a group can never come to hold a row it does not own. Order is
+// preserved at every level.
 function nestByLineage(
-  processes: ProcessView[],
+  members: ProcessView[],
   parents: ReadonlyMap<number, number>,
 ): ProcessNode[] {
   const byId = new Map<number, ProcessNode>(
-    processes.map((process) => [process.id, { process, children: [] }]),
+    members.map((process) => [process.id, { process, children: [] }]),
   );
   const roots: ProcessNode[] = [];
-  for (const process of processes) {
+  for (const process of members) {
     const node = byId.get(process.id);
     if (!node) continue;
     const parentId = parents.get(process.id);
@@ -74,26 +72,29 @@ function flatten(roots: ProcessNode[]): ProcessView[] {
   return rows;
 }
 
-// Nests every process by spawn lineage, then files each root subtree under the subtype group its
-// root belongs to, in the fixed group order and preserving registry order within each. A subtree
-// renders whole, so an agent spawned from a terminal nests under that terminal rather than sitting
-// flat — the same shape the orchestration tree shows. A group's `processes` is exactly the rows it
-// renders, so its count and keyboard nav describe what is on screen. With no lineage every node is
-// a root in its own kind's group and `processes` keeps the flat registry order. Pure — no view
-// concerns, unit-testable. The project tier (which project owns which processes) is the projects
-// module's concern; this is purely the process-kind grouping used within a project node.
+// Buckets processes into the three subtype groups, preserving registry order within each group and
+// the fixed group order, and nests each group's rows by the spawn-lineage map (a worker under the
+// lead that spawned it — a lead is always an agent, so in practice only Agents ever nest). Nesting
+// resolves inside a group, so a group's `processes` is exactly the rows it renders and every one of
+// them is of its own kind: its count matches what is on screen, and no section can be emptied by a
+// row that renders elsewhere. With no lineage every node is a root and `processes` keeps the flat
+// registry order. Pure — no view concerns, unit-testable. The project tier (which project owns
+// which processes) is the projects module's concern; this is purely the process-kind grouping used
+// within a project node.
 export function groupByKind(
   processes: ProcessView[],
   parents: ReadonlyMap<number, number> = new Map(),
 ): ProcessGroup[] {
-  const roots = nestByLineage(processes, parents);
   return GROUP_ORDER.map((kind) => {
-    const owned = roots.filter((root) => root.process.kind === kind);
+    const roots = nestByLineage(
+      processes.filter((process) => process.kind === kind),
+      parents,
+    );
     return {
       kind,
       label: GROUP_LABELS[kind],
-      processes: flatten(owned),
-      roots: owned,
+      processes: flatten(roots),
+      roots,
     };
   });
 }

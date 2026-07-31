@@ -73,14 +73,18 @@ impl Facade {
     /// The coordination timer scheduler loop (C6), returned for the composition root to spawn
     /// once on its runtime. It fires each due timer — at its deadline, or when the agents it
     /// watches go idle — and delivers the timer's body to its owning process as a fresh turn
-    /// (reusing the supervisor's input behaviour). It tracks idle state from the
-    /// [`crate::events::DomainEvent::AgentActivityChanged`] stream, watches the supervisor weakly so
-    /// it ends when the facade is dropped, and is self-supervised like the samplers. With the
-    /// default [`crate::coordination::NoopTimerRepo`] no timer ever persists, so it fires nothing —
-    /// the real SQLite store is chosen in the composition root.
+    /// (reusing the supervisor's input behaviour). It reads idle state from the same idle tracker
+    /// (C4) the façade reports a timer from, so what fires matches what its caller was told,
+    /// watches the supervisor weakly so it ends when the facade is dropped, and is self-supervised
+    /// like the samplers. With the default [`crate::coordination::NoopTimerRepo`] no timer ever
+    /// persists, so it fires nothing — the real SQLite store is chosen in the composition root.
     pub fn timer_scheduler_loop(&self) -> impl Future<Output = ()> + Send + 'static {
         self.timers
-            .scheduler(self.bus.clone(), Arc::downgrade(&self.supervisor))
+            .scheduler(
+                self.bus.clone(),
+                Arc::downgrade(&self.supervisor),
+                self.idle.clone(),
+            )
             .run()
     }
 

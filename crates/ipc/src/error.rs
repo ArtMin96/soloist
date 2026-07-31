@@ -28,8 +28,12 @@ pub enum IpcError {
     #[error("no such project")]
     UnknownProject,
     /// `bind_session_process` named a process the caller does not run in — the binding is not
-    /// authentic. An agent must bind to its own injected `SOLOIST_PROCESS_ID`.
-    #[error("that process is not yours to bind")]
+    /// authentic. An agent must bind to its own injected `SOLOIST_PROCESS_ID`. The message carries
+    /// the remedy, since a caller cannot fix this by retrying: the peer process group is read once
+    /// per connection and cannot change under it.
+    #[error(
+        "that process is not yours to bind; this session does not run in it, so no retry can bind it — an agent started by hand inside a Soloist terminal runs in its own process group and cannot bind to the id it inherited. Launch it from Soloist as an agent to give it an owning process; until then it works unbound, with the project scope `whoami` reports"
+    )]
     ForeignProcess,
     /// `select_project` named a project the caller does not run in — the scope would not be
     /// authentic. The message carries the remedies, since a caller cannot fix this by retrying.
@@ -138,6 +142,12 @@ pub enum IpcError {
     /// No agent tool is registered under the requested name.
     #[error("no agent tool is registered under that name")]
     UnknownTool,
+    /// The named agent tool's CLI has no documented way to take an opening turn, so a worker
+    /// spawned with it would start without the briefing that tells it what to do.
+    #[error(
+        "the {tool} agent tool cannot be given an opening turn, so a worker spawned with it would never learn its task; spawn one whose CLI takes an initial prompt"
+    )]
+    NoOpeningTurn { tool: String },
     /// A spawn was requested by a session bound to a process that was itself spawned as a
     /// worker — delegation is one level deep.
     #[error("a worker agent cannot spawn agents; report back to the lead that spawned it")]
@@ -145,9 +155,13 @@ pub enum IpcError {
     /// A report was made by a caller no other agent spawned, so there is no lead to deliver to.
     #[error("you have no lead to report to; only an agent that another agent spawned has one")]
     NoLead,
-    /// The lead that spawned the reporting caller has left the registry.
+    /// The lead that spawned the reporting caller has left the registry, or its own run has ended.
     #[error("the lead that spawned you is no longer running")]
     LeadGone,
+    /// The lead is running but has stopped draining its input, so the report was dropped rather
+    /// than delivered and the caller still holds its result.
+    #[error("the lead did not take the report, so it was not delivered; try again")]
+    ReportNotDelivered,
     /// A feedback submission was refused (empty, oversized, or the store is full); the
     /// detail says why.
     #[error("feedback was not accepted: {0}")]
@@ -203,9 +217,11 @@ impl IpcError {
             | IpcError::OutOfScope
             | IpcError::Untrusted
             | IpcError::UnknownTool
+            | IpcError::NoOpeningTurn { .. }
             | IpcError::WorkerMayNotSpawn
             | IpcError::NoLead
             | IpcError::LeadGone
+            | IpcError::ReportNotDelivered
             | IpcError::InvalidFeedback(_)
             | IpcError::UnmatchedIntegrationMarkers(_) => true,
             IpcError::Internal(_) => false,
@@ -242,6 +258,7 @@ impl From<LaunchAgentError> for IpcError {
         match err {
             LaunchAgentError::UnknownTool => IpcError::UnknownTool,
             LaunchAgentError::UnknownProject => IpcError::UnknownProject,
+            LaunchAgentError::NoOpeningTurn(tool) => IpcError::NoOpeningTurn { tool },
             LaunchAgentError::Store(err) => IpcError::Internal(err.to_string()),
             LaunchAgentError::Supervisor(err) => IpcError::Internal(err.to_string()),
         }
@@ -263,11 +280,12 @@ impl From<ReportToLeadError> for IpcError {
         match err {
             ReportToLeadError::NoLead => IpcError::NoLead,
             ReportToLeadError::LeadGone => IpcError::LeadGone,
+            ReportToLeadError::NotDelivered => IpcError::ReportNotDelivered,
             ReportToLeadError::TooLong { what, max_bytes } => IpcError::PayloadTooLarge {
                 what: what.to_string(),
                 max_bytes,
             },
-            ReportToLeadError::Store(err) => IpcError::Internal(err.to_string()),
+            ReportToLeadError::Scope(err) => err.into(),
         }
     }
 }

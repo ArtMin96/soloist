@@ -125,28 +125,42 @@ impl AppClient {
             // A bind failure must not fail the connection — the session runs unbound instead, and
             // the app records the refusal for `whoami`. It is reported here as well, so a user
             // reading the MCP host's log learns of it without having to ask an agent.
-            let failure =
-                match exchange(&mut stream, &IpcRequest::BindSessionProcess { process }).await {
-                    Ok(Ok(_)) => None,
-                    Ok(Err(err)) => Some(BindFailure::Refused(err)),
-                    Err(_) => Some(BindFailure::Unreachable),
-                };
-            if let Some(failure) = failure {
-                if let Some(report) = self.note_bind_failure(process, failure) {
-                    eprintln!("{report}");
-                }
+            if let Some(report) = self.bind_session(&mut stream, process).await {
+                eprintln!("{report}");
             }
         }
         Ok(stream)
     }
 
-    /// Records `failure` and returns the line to report, or `None` when the same failure was
-    /// reported already — so a client that reconnects states a standing refusal once.
-    fn note_bind_failure(&self, process: ProcessId, failure: BindFailure) -> Option<String> {
+    /// Binds a fresh connection to `process`, returning the line to write to stderr when the
+    /// outcome is worth stating.
+    async fn bind_session(&self, stream: &mut UnixStream, process: ProcessId) -> Option<String> {
+        let outcome = match exchange(stream, &IpcRequest::BindSessionProcess { process }).await {
+            Ok(Ok(_)) => None,
+            Ok(Err(err)) => Some(BindFailure::Refused(err)),
+            Err(_) => Some(BindFailure::Unreachable),
+        };
+        self.note_bind_outcome(process, outcome)
+    }
+
+    /// Records a connection's bind `outcome` and returns the line to report, or `None` when there
+    /// is nothing new to say. Repeating the failure already reported is silent, so a standing
+    /// refusal is stated once across reconnects; a bind that *succeeds* forgets it, so the same
+    /// refusal arriving after an intervening success is news again rather than a repeat — that is
+    /// a session that went unbound, which is the event this line exists to announce.
+    fn note_bind_outcome(
+        &self,
+        process: ProcessId,
+        outcome: Option<BindFailure>,
+    ) -> Option<String> {
         let mut reported = self
             .reported_bind_failure
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        let Some(failure) = outcome else {
+            *reported = None;
+            return None;
+        };
         if reported.as_ref() == Some(&failure) {
             return None;
         }
@@ -157,19 +171,40 @@ impl AppClient {
 }
 
 /// The diagnostic for a bind that did not take effect: the process the session could not bind to,
-/// why, and the way back. Written to stderr, which an MCP host captures for its user — the one
-/// channel a stdio server has that does not disturb the protocol on stdout.
+/// why, and what to do about it. Written to stderr, which an MCP host captures for its user — the
+/// one channel a stdio server has that does not disturb the protocol on stdout.
 fn bind_failure_report(process: ProcessId, failure: &BindFailure) -> String {
-    let reason = match failure {
-        BindFailure::Refused(err) => err.to_string(),
-        BindFailure::Unreachable => "Soloist did not answer".to_string(),
+    let (reason, remedy) = match failure {
+        BindFailure::Refused(err) => (err.to_string(), retry_remedy(err)),
+        BindFailure::Unreachable => ("Soloist did not answer".to_string(), Some(RETRY_REMEDY)),
     };
-    format!(
+    let mut report = format!(
         "soloist-mcp: could not bind this session to process {process}: {reason}. \
-Tools run unbound, so anything that needs an owning process (leases, timers) is refused. \
-Call `whoami` for the recorded reason, and `bind_session_process` to retry."
-    )
+Tools run unbound, so anything that needs an owning process (leases, timers) is refused."
+    );
+    if let Some(remedy) = remedy {
+        report.push(' ');
+        report.push_str(remedy);
+    }
+    report
 }
+
+/// Whether a refused bind is worth retrying. `bind_session_process` re-runs the very check that
+/// produced the refusal, so the retry is only worth naming where that check can come out
+/// differently: a process the app does not know may yet register, but the peer process group
+/// behind [`IpcError::ForeignProcess`] is read once per connection and cannot change under it —
+/// and that refusal states its own way forward.
+fn retry_remedy(err: &IpcError) -> Option<&'static str> {
+    match err {
+        IpcError::ForeignProcess => None,
+        _ => Some(RETRY_REMEDY),
+    }
+}
+
+/// The way back where a retry can genuinely take: the bind never reached the app, or named a
+/// process that may have registered since.
+const RETRY_REMEDY: &str = "Call `whoami` for the recorded reason, and `bind_session_process` \
+with the injected id to retry.";
 
 /// Writes one request and reads one reply over the stream, bounded by [`REQUEST_TIMEOUT`]
 /// so a wedged app surfaces as [`ClientError::Timeout`] rather than hanging the caller.

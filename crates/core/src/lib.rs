@@ -124,7 +124,9 @@ pub use settings::{
     SettingsStore, Sidebar, TemplateDefaults, TerminalAppearance, Theme, ToolDefaults,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
-pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError, SupervisorPorts};
+pub use supervisor::{
+    ClosePolicy, Registration, StartSummary, Supervisor, SupervisorError, SupervisorPorts,
+};
 pub use support::{
     agent_guide, help_overview, help_topic, onboarding_hint, Feedback, FeedbackEntry,
     FeedbackError, FeedbackRepo, IntegrationFile, IntegrationWrite, IntegrationWriteError,

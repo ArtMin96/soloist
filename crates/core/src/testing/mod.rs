@@ -65,6 +65,6 @@ pub use settings::FakeSettingsRepo;
 pub use shellenv::FakeShellEnvProbe;
 #[cfg(test)]
 pub(crate) use spawner::PANIC_FAKE_PGID;
-pub use spawner::{CommandLog, FakeSpawner, InputLog, ResizeLog};
+pub use spawner::{CommandLog, ExitTrigger, FakeSpawner, InputLog, ResizeLog};
 pub use support::FakeFeedbackRepo;
 pub use template::FakeTemplateRepo;

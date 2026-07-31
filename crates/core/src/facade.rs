@@ -33,7 +33,7 @@ use crate::projects::{
     RemoveProjectError,
 };
 use crate::settings::{ProjectSettings, Settings, SettingsStore};
-use crate::supervisor::{Registration, Supervisor, SupervisorError};
+use crate::supervisor::{ClosePolicy, Registration, Supervisor, SupervisorError};
 use crate::support::Feedback;
 use crate::trust::TrustStore;
 
@@ -248,6 +248,14 @@ impl Facade {
         &self.agents
     }
 
+    /// Whether `id` is a registered [`ProcessKind::Agent`]. Only an agent runs the tool loop that
+    /// reads a submitted turn, so only an agent can be a lead; the spawn that records a lineage
+    /// edge and the report that spends one ask the same question here.
+    pub(in crate::facade) fn is_agent(&self, id: ProcessId) -> bool {
+        self.process_view(id)
+            .is_some_and(|view| view.kind == ProcessKind::Agent)
+    }
+
     /// Opens a project end to end — see [`ProjectService::open`]. The Facade owns the
     /// contexts the lifecycle spans; it assembles the service and delegates, so the open
     /// sequence lives in the projects domain rather than being re-implemented here.
@@ -384,7 +392,7 @@ impl Facade {
             project,
             tool,
             extra_args,
-            close_when_done,
+            close_policy,
             first_turn,
         } = launch;
         let tool = self
@@ -401,19 +409,22 @@ impl Facade {
         // provider with no documented resume, leaving the process non-resumable. It never
         // carries the opening turn: a resume reopens the conversation that turn already began.
         let resume_command = tool.resume_command_line(&extra_args);
-        // A provider with no documented way to take an opening turn falls back to the plain
-        // launch line, so an unsupported CLI still starts rather than failing on an invented flag.
-        let command = first_turn
-            .and_then(|turn| tool.launch_command_line_with_prompt(&turn, &extra_args))
-            .unwrap_or_else(|| tool.launch_command_line(&extra_args));
+        // A launch that opens on a first turn has to be able to carry one: a provider with no
+        // documented interactive prompt argument would otherwise start an agent that never learns
+        // what it was launched for, reported to the caller as a success. A launch that asked for
+        // no opening turn is untouched — every provider can open on an empty prompt.
+        let command = match first_turn {
+            Some(turn) => tool
+                .launch_command_line_with_prompt(&turn, &extra_args)
+                .ok_or_else(|| LaunchAgentError::NoOpeningTurn(tool.name.clone()))?,
+            None => tool.launch_command_line(&extra_args),
+        };
         let spec = SpawnSpec::inheriting_env(command, root);
         let id = self.supervisor.register(
             Registration::launched(project, ProcessKind::Agent, tool.name, spec)
                 .resumable_with(resume_command),
         );
-        if close_when_done {
-            self.supervisor.close_when_done(id);
-        }
+        self.supervisor.close_when_done(id, close_policy);
         self.supervisor.start(id)?;
         // Track the agent's idle activity from now on; the idle sampler reclassifies it each
         // interval using its provider's heuristic.
@@ -450,7 +461,7 @@ pub struct AgentLaunch {
     project: ProjectId,
     tool: String,
     extra_args: Vec<String>,
-    close_when_done: bool,
+    close_policy: ClosePolicy,
     first_turn: Option<String>,
 }
 
@@ -463,22 +474,25 @@ impl AgentLaunch {
             project,
             tool: tool.into(),
             extra_args,
-            close_when_done: false,
+            close_policy: ClosePolicy::Keep,
             first_turn: None,
         }
     }
 
-    /// Removes the agent from the registry — reaped, forgotten, its terminal buffers freed — as
-    /// soon as its run ends, for a caller launching a one-shot worker it will not read afterwards.
-    /// Armed before the start, so a run that ends immediately is still caught.
-    pub fn closing_when_done(mut self, close_when_done: bool) -> Self {
-        self.close_when_done = close_when_done;
+    /// When the agent's registry row — and the terminal buffers behind it — are dropped once it
+    /// finishes, for a caller launching a one-shot worker it will not read afterwards. Defaults
+    /// to [`ClosePolicy::Keep`]. Armed before the start, so a run that ends immediately is still
+    /// caught.
+    pub fn closing(mut self, policy: ClosePolicy) -> Self {
+        self.close_policy = policy;
         self
     }
 
     /// Starts the agent with `turn` already submitted as its opening message — how a spawned
-    /// worker is told what it is and what it can reach before it does anything. Honoured only for
-    /// a provider with a documented interactive prompt argument; the rest launch plainly.
+    /// worker is told what it is and what it can reach before it does anything. A provider whose
+    /// CLI has no documented way to receive one refuses the launch with
+    /// [`LaunchAgentError::NoOpeningTurn`] rather than starting an agent that would never learn
+    /// its task.
     pub fn opening_with(mut self, turn: String) -> Self {
         self.first_turn = Some(turn);
         self
@@ -486,13 +500,20 @@ impl AgentLaunch {
 }
 
 /// Why launching an agent failed: no tool is registered under that name, the project is not
-/// known, a durable read failed, or the supervisor refused to start the process.
+/// known, the tool cannot carry the opening turn the launch asked for, a durable read failed, or
+/// the supervisor refused to start the process.
 #[derive(Debug, thiserror::Error)]
 pub enum LaunchAgentError {
     #[error("no agent tool registered under that name")]
     UnknownTool,
     #[error("no such project")]
     UnknownProject,
+    /// The launch was to open on a first turn, but this tool's CLI has no documented way to take
+    /// one; the field names the tool so the caller can choose one that can.
+    #[error(
+        "the {0} agent tool cannot be launched with an opening turn, so a worker spawned with it would never learn its task"
+    )]
+    NoOpeningTurn(String),
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]

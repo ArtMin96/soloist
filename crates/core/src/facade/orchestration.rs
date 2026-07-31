@@ -84,18 +84,11 @@ impl Facade {
                 activity: self.idle.activity(view.id),
             })
             .collect();
-        // Each timer view carries `waiting_on` (watched but not yet idle) and `already_idle`
-        // (quorum met at read time), computed from the live idle tracker and process registry.
-        // These are dynamic at-read-time values, not stored — the aggregate defaults them to
-        // empty/false.
         let timers = self
             .timers
             .list_project(project)?
             .into_iter()
-            .map(|mut tv| {
-                tv.report_idle(|p| self.is_idle_now(p));
-                tv
-            })
+            .map(|timer| self.reported_timer(timer))
             .collect();
         Ok(OrchestrationSnapshot {
             project,

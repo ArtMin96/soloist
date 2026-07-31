@@ -687,6 +687,32 @@ fn core_spawn_errors_map_to_the_wire_error() {
         IpcError::from(LaunchAgentError::UnknownProject),
         IpcError::UnknownProject
     );
+    // The tool survives the crossing: a caller told only "that failed" cannot tell which of the
+    // tools it may spawn is the one that cannot be briefed.
+    assert_eq!(
+        IpcError::from(LaunchAgentError::NoOpeningTurn("Amp".into())),
+        IpcError::NoOpeningTurn { tool: "Amp".into() }
+    );
+}
+
+#[test]
+fn core_report_errors_map_to_the_wire_error() {
+    use soloist_core::{ReportToLeadError, ScopedActionError};
+    assert_eq!(IpcError::from(ReportToLeadError::NoLead), IpcError::NoLead);
+    assert_eq!(
+        IpcError::from(ReportToLeadError::LeadGone),
+        IpcError::LeadGone
+    );
+    assert_eq!(
+        IpcError::from(ReportToLeadError::NotDelivered),
+        IpcError::ReportNotDelivered
+    );
+    // A fault in the caller's own scope stays one: reported as a departed lead, an agent abandons
+    // a report the lead — running and writable — would still have taken.
+    assert_eq!(
+        IpcError::from(ReportToLeadError::Scope(ScopedActionError::NoProjectScope)),
+        IpcError::NoProjectScope
+    );
 }
 
 #[test]

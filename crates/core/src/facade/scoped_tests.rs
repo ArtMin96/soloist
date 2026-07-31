@@ -13,8 +13,8 @@ use crate::supervisor::Registration;
 use crate::sync::lock;
 use crate::testing::{
     agent_registration, authentic_session, facade_recording_agent_launches, facade_with_agent_tool,
-    terminal_registration, FakeAgentToolRepo, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
-    InputLog, TEST_PEER_PGID,
+    terminal_registration, ExitTrigger, FakeAgentToolRepo, FakeProjectRepo, FakeSpawner,
+    FakeTrustRepo, InputLog, TEST_PEER_PGID,
 };
 use crate::PeerCredentials;
 use async_trait::async_trait;
@@ -428,6 +428,37 @@ async fn a_caller_soloist_cannot_name_spawns_a_root() {
     assert_eq!(lead_of(&facade, worker), None);
 }
 
+#[tokio::test]
+async fn a_caller_that_is_not_an_agent_spawns_a_root() {
+    // A lead is always an agent. An agent the user starts by hand inside a Soloist terminal is
+    // named by that terminal's group, so the terminal would otherwise be recorded as its lead —
+    // and a report to it would be typed into a live shell and run line by line. No edge is
+    // recorded at all, and the worker is briefed as the root it is.
+    let (facade, project, commands) = facade_recording_agent_launches();
+    let shell = facade
+        .supervisor()
+        .register(terminal_registration(project, "shell", "sleep 60"));
+    let session = scoped_to(&facade, shell);
+    let mut rx = facade.subscribe();
+
+    let worker = facade
+        .scoped(session)
+        .spawn_agent("worker", Vec::new(), false)
+        .expect("a terminal can spawn an agent");
+    wait_process_to(&mut rx, worker, ProcStatus::Running).await;
+
+    assert_eq!(
+        facade.lineage.parent_of(worker),
+        None,
+        "no lineage edge is recorded onto a caller that is not an agent"
+    );
+    let launched = lock(&commands).first().cloned().expect("a launch");
+    assert!(
+        !launched.contains(&format!("process #{shell}")),
+        "the worker is not told a terminal spawned it: {launched}"
+    );
+}
+
 /// Awaits `id` reaching `target`, ignoring every other process's transitions.
 async fn wait_process_to(
     rx: &mut broadcast::Receiver<DomainEvent>,
@@ -463,13 +494,78 @@ async fn wait_process_removed(rx: &mut broadcast::Receiver<DomainEvent>, id: Pro
         .expect("the worker is closed once its run ends");
 }
 
-#[tokio::test]
-async fn only_a_worker_spawned_to_close_when_done_leaves_the_registry() {
-    let (facade, project) = facade_with_agent_tool();
+/// The agent tool every spawn test launches: a user-configured CLI that takes its opening turn as
+/// a trailing argument, so a spawn composes a real briefed command line rather than being refused
+/// for a tool that cannot carry one.
+fn worker_tool() -> AgentTool {
+    AgentTool {
+        name: "worker".into(),
+        command: "true".into(),
+        default_args: Vec::new(),
+        kind: AgentKind::Generic,
+        prompt_mode: PromptMode::AppendedArg,
+    }
+}
+
+/// A façade over `spawner` and `projects` with [`worker_tool`] registered — the one place the
+/// spawn tests assemble a core, so each differs only in the children its spawner returns.
+fn facade_spawning_workers(spawner: FakeSpawner, projects: Arc<FakeProjectRepo>) -> Facade {
+    Facade::new(
+        CorePorts::builder(
+            Arc::new(spawner),
+            Arc::new(TokioClock),
+            Arc::new(FakeTrustRepo::new()),
+            projects,
+        )
+        .agent_tools(Arc::new(FakeAgentToolRepo::new(vec![worker_tool()])))
+        .build(),
+    )
+}
+
+/// A running lead agent whose workers run until the test ends each one's run, plus the project
+/// they are all in — the shape the auto-close tests need, where a run that ends *itself* has to be
+/// distinguishable from one a caller stopped.
+async fn a_lead_with_workers_that_finish_on_cue() -> (Facade, ProcessId, SessionId, ExitTrigger) {
+    let (spawner, exits) = FakeSpawner::exits_when_told();
+    let projects = Arc::new(FakeProjectRepo::new());
+    let project = projects
+        .upsert(Path::new("/"), Some("proj"), None)
+        .expect("seed a project")
+        .id;
+    let facade = facade_spawning_workers(spawner, projects);
+    let mut rx = facade.subscribe();
     let lead = facade
         .supervisor()
         .register(agent_registration(project, "lead"));
     let lead_session = scoped_to(&facade, lead);
+    facade
+        .scoped(lead_session)
+        .start_process(lead)
+        .expect("start the lead");
+    wait_process_to(&mut rx, lead, ProcStatus::Running).await;
+    (facade, lead, lead_session, exits)
+}
+
+/// Reports to the lead as `worker`, from a session authenticated to it the way the worker's own
+/// MCP client authenticates.
+fn report_as(facade: &Facade, worker: ProcessId, pgid: i32, report: &str) {
+    let session = authentic_session(facade, worker, pgid);
+    facade
+        .scoped(session)
+        .bind_session_process(worker)
+        .expect("an authentic bind to the worker");
+    facade
+        .scoped(session)
+        .report_to_lead(report.to_string())
+        .expect("the worker reports to its lead");
+}
+
+#[tokio::test]
+async fn a_worker_leaves_the_registry_only_when_it_asked_to_and_its_report_landed() {
+    // Closing a worker throws its output away, so both halves have to hold: the caller asked for
+    // it, and the result actually reached the lead. A worker that finished without ever handing
+    // anything back is the one case where the row is all that is left of the run.
+    let (facade, _lead, lead_session, exits) = a_lead_with_workers_that_finish_on_cue().await;
     let mut rx = facade.subscribe();
     tokio::spawn(facade.auto_close_loop());
 
@@ -477,19 +573,39 @@ async fn only_a_worker_spawned_to_close_when_done_leaves_the_registry() {
         .scoped(lead_session)
         .spawn_agent("worker", Vec::new(), false)
         .expect("a lead spawns a worker to keep");
-    let closed = facade
+    let silent = facade
         .scoped(lead_session)
         .spawn_agent("worker", Vec::new(), true)
-        .expect("a lead spawns a worker to close");
-    for worker in [kept, closed] {
+        .expect("a lead spawns a worker that will not report");
+    let reporting = facade
+        .scoped(lead_session)
+        .spawn_agent("worker", Vec::new(), true)
+        .expect("a lead spawns a worker that will report");
+    for worker in [kept, silent, reporting] {
         wait_process_to(&mut rx, worker, ProcStatus::Running).await;
-        facade
-            .scoped(lead_session)
-            .stop_process(worker)
-            .expect("stop the worker");
     }
-    // The closed one's removal proves the reactor has run past both stops.
-    wait_process_removed(&mut rx, closed).await;
+
+    report_as(
+        &facade,
+        kept,
+        TEST_PEER_PGID + 1,
+        "kept: the build is green",
+    );
+    report_as(
+        &facade,
+        reporting,
+        TEST_PEER_PGID + 2,
+        "reporting: the build is green",
+    );
+
+    // Ended one at a time, so by the time the last one's removal arrives the reactor has
+    // demonstrably passed the two earlier ends rather than merely not reached them yet.
+    for worker in [kept, silent] {
+        exits.fire(worker);
+        wait_process_to(&mut rx, worker, ProcStatus::Stopped).await;
+    }
+    exits.fire(reporting);
+    wait_process_removed(&mut rx, reporting).await;
 
     let registered: Vec<ProcessId> = facade.snapshot().into_iter().map(|view| view.id).collect();
     assert!(
@@ -497,8 +613,12 @@ async fn only_a_worker_spawned_to_close_when_done_leaves_the_registry() {
         "a finished worker stays listed by default, so its lead can still read it"
     );
     assert!(
-        !registered.contains(&closed),
-        "a worker spawned with close_when_done is forgotten once its run ends"
+        registered.contains(&silent),
+        "a worker whose result never reached its lead keeps its row, so nothing is lost"
+    );
+    assert!(
+        !registered.contains(&reporting),
+        "a worker that asked to close and handed its result back is forgotten"
     );
 }
 
@@ -538,6 +658,7 @@ async fn a_spawned_worker_opens_on_its_orchestration_context() {
 /// each one's PTY — the shape every report test needs.
 struct LeadAndWorker {
     facade: Facade,
+    project: ProjectId,
     lead: ProcessId,
     worker: ProcessId,
     /// The worker's bound session — the caller every report is made from.
@@ -558,22 +679,7 @@ async fn a_lead_and_its_worker() -> LeadAndWorker {
     projects
         .upsert(Path::new("/elsewhere"), Some("other"), None)
         .expect("seed a second project");
-    let facade = Facade::new(
-        CorePorts::builder(
-            Arc::new(spawner),
-            Arc::new(TokioClock),
-            Arc::new(FakeTrustRepo::new()),
-            projects,
-        )
-        .agent_tools(Arc::new(FakeAgentToolRepo::new(vec![AgentTool {
-            name: "worker".into(),
-            command: "true".into(),
-            default_args: Vec::new(),
-            kind: AgentKind::Generic,
-            prompt_mode: PromptMode::AppendedArg,
-        }])))
-        .build(),
-    );
+    let facade = facade_spawning_workers(spawner, projects);
     let mut rx = facade.subscribe();
     let lead = facade
         .supervisor()
@@ -597,6 +703,7 @@ async fn a_lead_and_its_worker() -> LeadAndWorker {
         .expect("an authentic bind to the worker");
     LeadAndWorker {
         facade,
+        project,
         lead,
         worker,
         worker_session,
@@ -707,10 +814,16 @@ async fn a_report_to_a_departed_lead_is_refused() {
 #[tokio::test]
 async fn a_report_from_a_worker_soloist_has_forgotten_is_refused() {
     let h = a_lead_and_its_worker().await;
-    // The worker's process is closed while its bound session lives on — a last tool call from an
-    // agent Soloist no longer knows. Its lead is still running and its terminal still writable,
-    // so the caller's own scope is the only thing standing between that call and the lead's
-    // terminal: a report that cannot be placed in a project is refused, not delivered anyway.
+    // The worker selects its project first, so its scope outlives its process: what refuses the
+    // call below is the registry no longer knowing the caller, not a scope that failed to resolve
+    // — the difference between a guard that holds in every workspace and one that only appears to
+    // hold while a second project happens to be open.
+    h.facade
+        .scoped(h.worker_session)
+        .select_project(h.project)
+        .expect("the worker selects the project it runs in");
+    // Its process is then closed while its bound session lives on — a last tool call from an
+    // agent Soloist no longer knows. Its lead is still running and its terminal still writable.
     h.facade
         .supervisor()
         .close(h.worker)
@@ -721,23 +834,111 @@ async fn a_report_from_a_worker_soloist_has_forgotten_is_refused() {
         h.facade
             .scoped(h.worker_session)
             .report_to_lead("orphaned".to_string()),
-        Err(ReportToLeadError::LeadGone)
+        Err(ReportToLeadError::NoLead)
     ));
 
     // A delivery would have been queued on the lead's input channel ahead of this one, so once
     // this turn has landed the absence of the report is a fact rather than a race. That the write
-    // is accepted at all is what proves the refusal above was the scope guard's doing and not a
-    // lead that had gone unwritable.
-    h.facade
-        .supervisor()
-        .try_write_stdin(h.lead, b"typed by the user\r".to_vec())
-        .expect("the lead's terminal is still writable");
+    // is accepted at all is what proves the refusal above was the guard's doing and not a lead
+    // that had gone unwritable.
+    assert!(
+        h.facade
+            .supervisor()
+            .try_write_stdin(h.lead, b"typed by the user\r".to_vec()),
+        "the lead's terminal is still writable"
+    );
     let (recipient, _) = wait_for_the_turn_carrying(&h.input, "typed by the user").await;
     assert_eq!(recipient, h.lead);
     assert!(
         !String::from_utf8_lossy(&h.input.to(h.lead)).contains("orphaned"),
         "the refused report never reached the lead"
     );
+}
+
+#[tokio::test]
+async fn a_report_whose_own_scope_is_unresolved_is_not_blamed_on_the_lead() {
+    // A caller that cannot place itself in a project and a lead that has stopped are different
+    // faults. Told the second, a worker abandons a report its lead — running and writable — would
+    // still have taken, and has no reason to retry.
+    let h = a_lead_and_its_worker().await;
+    // A second session from the worker's own group that never bound: the group names it, so it is
+    // the caller, but nothing resolves which project it acts in while more than one is open.
+    let unbound = authentic_session(&h.facade, h.worker, TEST_PEER_PGID + 1);
+
+    assert!(matches!(
+        h.facade
+            .scoped(unbound)
+            .report_to_lead("scoped out".to_string()),
+        Err(ReportToLeadError::Scope(ScopedActionError::NoProjectScope))
+    ));
+}
+
+#[tokio::test]
+async fn a_report_is_refused_when_the_recorded_lead_is_not_an_agent() {
+    // The second line of defence behind the spawn that now records no such edge. A terminal is a
+    // live interactive shell: a report written into it arrives with the carriage return that
+    // submits it, and every line of it runs as a command in the project root.
+    let h = a_lead_and_its_worker().await;
+    let mut rx = h.facade.subscribe();
+    let shell = h
+        .facade
+        .supervisor()
+        .register(terminal_registration(h.project, "shell", "sleep 60"));
+    h.facade.supervisor().start(shell).expect("start the shell");
+    wait_process_to(&mut rx, shell, ProcStatus::Running).await;
+    h.facade.lineage.record(h.worker, shell);
+
+    assert!(matches!(
+        h.facade
+            .scoped(h.worker_session)
+            .report_to_lead("rm -rf everything".to_string()),
+        Err(ReportToLeadError::NoLead)
+    ));
+
+    // The shell is running and writable, so only the kind check kept the report off it.
+    assert!(h
+        .facade
+        .supervisor()
+        .try_write_stdin(shell, b"typed by the user\r".to_vec()));
+    let (recipient, _) = wait_for_the_turn_carrying(&h.input, "typed by the user").await;
+    assert_eq!(recipient, shell);
+    assert!(
+        !String::from_utf8_lossy(&h.input.to(shell)).contains("rm -rf everything"),
+        "the refused report never reached the shell"
+    );
+}
+
+#[tokio::test]
+async fn a_report_to_a_lead_whose_own_run_has_ended_is_refused() {
+    // A lead that exited keeps its registry row *and* an input channel nobody drains, so the
+    // write is accepted and read by no one. Answering "delivered" there loses the worker's whole
+    // result with no error on any surface.
+    let (facade, lead, lead_session, exits) = a_lead_with_workers_that_finish_on_cue().await;
+    let mut rx = facade.subscribe();
+    let worker = facade
+        .scoped(lead_session)
+        .spawn_agent("worker", Vec::new(), false)
+        .expect("a lead spawns a worker");
+    wait_process_to(&mut rx, worker, ProcStatus::Running).await;
+    let worker_session = authentic_session(&facade, worker, TEST_PEER_PGID + 1);
+    facade
+        .scoped(worker_session)
+        .bind_session_process(worker)
+        .expect("an authentic bind to the worker");
+
+    exits.fire(lead);
+    wait_process_to(&mut rx, lead, ProcStatus::Stopped).await;
+    assert!(
+        facade.process_view(lead).is_some(),
+        "the exited lead still rests in the registry, which is what makes the write succeed"
+    );
+
+    assert!(matches!(
+        facade
+            .scoped(worker_session)
+            .report_to_lead("the build is green".to_string()),
+        Err(ReportToLeadError::LeadGone)
+    ));
 }
 
 #[tokio::test]

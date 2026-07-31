@@ -16,9 +16,14 @@ use super::guide::help_overview;
 const MARKER: &str = "[SOLO ORCHESTRATION CONTEXT]";
 
 /// The first turn a Soloist-spawned worker is launched with: who spawned it, the project its
-/// tools act on, and the capability overview it needs to use the coordination primitives — so it
-/// can work without a skill or a project file loaded. `lead` is the process that spawned it, or
-/// `None` when the spawning caller was one Soloist could not name.
+/// tools act on, how to hand its result back, and the capability overview it needs to use the
+/// coordination primitives — so it can work without a skill or a project file loaded. `lead` is
+/// the agent that spawned it, or `None` when it is a root: the spawning caller was one Soloist
+/// could not name, or was not an agent and so is nobody's lead.
+///
+/// A root worker is told what to do *instead* of reporting. Ordering it to call `report_to_lead`
+/// would make the one mandatory step of its contract a call that can only ever be refused, which
+/// leaves it with no way to signal that it is done.
 ///
 /// The worker's *own* process id is not written in: it is minted by the registration this command
 /// line is being built for, so it does not exist yet — and it is already delivered as
@@ -33,16 +38,27 @@ pub fn orchestration_preamble(project: &ProjectRef, lead: Option<ProcessId>) -> 
         Some(name) => format!("\"{name}\" (#{})", project.id),
         None => format!("#{}", project.id),
     };
+    let finishing = match lead {
+        Some(_) => {
+            "When you finish your task you must call `report_to_lead` with your final result — \
+including if you failed or could only do part of it. That call is the only thing that tells your \
+lead you are done. Going quiet does not: a worker that has finished and a worker that is thinking \
+look the same from outside, so a lead reading silence as completion acts on work nobody did.\n\n\
+Until then, coordinate through the shared workspace below rather than ad-hoc files."
+        }
+        None => {
+            "No agent spawned you, so you have no lead to report to and `report_to_lead` can only \
+refuse. Leave your final result — including if you failed or could only do part of it — in the \
+shared workspace below instead, on the todo you were given or in a scratchpad, so it outlives \
+this terminal. Coordinate there rather than in ad-hoc files."
+        }
+    };
     format!(
         "{MARKER}\n\n\
 You are a worker agent running under Soloist, {spawned_by}to carry out one piece of work in \
 project {project_name}. Soloist injects your own process id into your environment and your MCP \
 session is already bound to it, so `whoami` reports who you are and what your tools act on.\n\n\
-When you finish your task you must call `report_to_lead` with your final result — including if \
-you failed or could only do part of it. That call is the only thing that tells your lead you are \
-done. Going quiet does not: a worker that has finished and a worker that is thinking look the \
-same from outside, so a lead reading silence as completion acts on work nobody did.\n\n\
-Until then, coordinate through the shared workspace below rather than ad-hoc files.\n\n\
+{finishing}\n\n\
 {}",
         help_overview()
     )

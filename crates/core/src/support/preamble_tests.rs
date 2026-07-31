@@ -59,12 +59,26 @@ fn a_worker_can_use_the_coordination_primitives_from_the_preamble_alone() {
 }
 
 #[test]
-fn a_root_spawn_names_no_lead() {
-    // A caller Soloist could not name spawned it, so there is no lead to point the worker at —
-    // and inventing one would send its report to a process that never asked for it.
+fn a_root_spawn_names_no_lead_and_is_not_ordered_to_report_to_one() {
+    // Nothing that could be a lead spawned it, so there is none to point the worker at — and
+    // inventing one would send its report to a process that never asked for it. Ordering it to
+    // report anyway makes the one mandatory step of its contract a call that can only be refused,
+    // leaving it no way to signal that it is done, so it is told what to do instead.
     let preamble = orchestration_preamble(&project(Some("storefront")), None);
     assert!(!preamble.contains("spawned by"), "{preamble}");
     assert!(preamble.contains("\"storefront\" (#7)"), "{preamble}");
+    assert!(
+        !preamble.contains("must call `report_to_lead`"),
+        "a worker with no lead is not ordered to make a call that can only fail: {preamble}"
+    );
+    assert!(
+        preamble.contains("you have no lead to report to"),
+        "it is told it has none: {preamble}"
+    );
+    assert!(
+        preamble.contains("so it outlives this terminal"),
+        "and where to leave its result instead: {preamble}"
+    );
 }
 
 #[test]

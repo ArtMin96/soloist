@@ -226,10 +226,12 @@ async fn spawn_agent(
 }
 
 /// Maps an agent-launch failure to the status the adapter returns: an unknown tool or project is
-/// `404`, and a durable-store or supervisor failure is `500`.
+/// `404`, a tool that cannot carry the requested opening turn is `400`, and a durable-store or
+/// supervisor failure is `500`.
 fn launch_status(err: &LaunchAgentError) -> StatusCode {
     match err {
         LaunchAgentError::UnknownTool | LaunchAgentError::UnknownProject => StatusCode::NOT_FOUND,
+        LaunchAgentError::NoOpeningTurn(_) => StatusCode::BAD_REQUEST,
         LaunchAgentError::Store(_) | LaunchAgentError::Supervisor(_) => {
             StatusCode::INTERNAL_SERVER_ERROR
         }

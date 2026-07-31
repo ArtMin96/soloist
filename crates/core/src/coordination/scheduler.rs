@@ -4,17 +4,17 @@
 //! It is woken three ways and re-evaluates the full armed set on each: a [`Clock`] sleep until the
 //! soonest deadline (for [`At`](super::timer::FireCond::At) and the idle max-wait backstops); a [`Notify`] the
 //! [`Timers`](super::Timers) aggregate pings when a timer is created or resumed (so an
-//! already-satisfied condition fires at once); and the [`DomainEvent`] bus, from which it follows
-//! each agent's idle state via [`AgentActivityChanged`](DomainEvent::AgentActivityChanged) — the
-//! C4 idle signal, consumed as events so coordination depends only on the shared event type, not
-//! on C4's internals — alongside the process lifecycle, so a watched worker that exits ends the
-//! wait as surely as one that goes idle. A due timer is claimed atomically (so a concurrent
-//! pause/cancel wins the race cleanly) and its body is written to its owner's PTY — reusing the
-//! one supervisor input behaviour, never reimplementing it. It holds a [`Weak`] reference to the
-//! supervisor so it never keeps the app alive, and is self-supervised like the monitoring
-//! samplers: a panicking pass is isolated and the loop restarts.
+//! already-satisfied condition fires at once); and the [`DomainEvent`] bus, which tells it *when*
+//! to look again — an agent's activity changed, a process started or exited, one left the registry.
+//! *What* it then sees is read from the shared [`ObservedActivities`] registry (C4) and the process
+//! registry (C2), never folded into state of its own, so the answer a timer fires on is the same
+//! one its caller was given when the timer was armed, and survives both a supervised restart of
+//! this loop and a dropped event. A due timer is claimed atomically (so a concurrent pause/cancel
+//! wins the race cleanly) and its body is written to its owner's PTY — reusing the one supervisor
+//! input behaviour, never reimplementing it. It holds a [`Weak`] reference to the supervisor so it
+//! never keeps the app alive, and is self-supervised like the monitoring samplers: a panicking pass
+//! is isolated and the loop restarts.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -22,20 +22,18 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::Notify;
 
 use crate::events::{DomainEvent, EventBus};
-use crate::idle::ObservedActivity;
-use crate::ids::ProcessId;
+use crate::idle::ObservedActivities;
 use crate::ports::Clock;
-use crate::process::ProcStatus;
 use crate::supervision::supervise;
 use crate::supervisor::Supervisor;
 use crate::turn::submitted_turn;
 
-use super::timer::{watched_is_idle, FireCond};
+use super::timer::{watched_process_is_idle, FireCond};
 use super::timer_repo::{StoredTimer, TimerRepo};
 
 /// Fires due coordination timers. Cloneable so the supervising [`run`](TimerScheduler::run) can
 /// hand a fresh copy to each restart of the inner loop; all clones share the same repo, clock,
-/// wake handle, and event bus.
+/// wake handle, event bus, and idle registry.
 #[derive(Clone)]
 pub struct TimerScheduler {
     repo: Arc<dyn TimerRepo>,
@@ -43,17 +41,20 @@ pub struct TimerScheduler {
     wake: Arc<Notify>,
     bus: EventBus,
     supervisor: Weak<Supervisor>,
+    idle: Arc<dyn ObservedActivities>,
 }
 
 impl TimerScheduler {
-    /// Builds a scheduler over the timer store, clock, the aggregate's wake handle, and the event
-    /// bus, watching the given supervisor weakly (so it never keeps the app alive).
+    /// Builds a scheduler over the timer store, clock, the aggregate's wake handle, the event bus,
+    /// and the idle observation registry, watching the given supervisor weakly (so it never keeps
+    /// the app alive).
     pub(super) fn new(
         repo: Arc<dyn TimerRepo>,
         clock: Arc<dyn Clock>,
         wake: Arc<Notify>,
         bus: EventBus,
         supervisor: Weak<Supervisor>,
+        idle: Arc<dyn ObservedActivities>,
     ) -> Self {
         Self {
             repo,
@@ -61,6 +62,7 @@ impl TimerScheduler {
             wake,
             bus,
             supervisor,
+            idle,
         }
     }
 
@@ -73,14 +75,10 @@ impl TimerScheduler {
     }
 
     /// The scheduling loop: evaluate and fire every due timer, then wait for the soonest deadline,
-    /// a wake, or an idle/removal event — re-evaluating on each. Tracks agent idle state from the
-    /// bus; ends when the supervisor is dropped or the bus closes (app shutdown).
+    /// a wake, or a domain event — re-evaluating from the live registries on each. Ends when the
+    /// supervisor is dropped or the bus closes (app shutdown).
     async fn schedule_loop(self) {
         let mut events = self.bus.subscribe();
-        // What has been observed of each agent's turn, folded from the bus, for the run it is
-        // currently in. Only agents ever appear here, so it stays bounded to the live agent set;
-        // what an unknown or resting process counts as is decided by `watched_is_idle`.
-        let mut activity: HashMap<ProcessId, ObservedActivity> = HashMap::new();
         loop {
             let Some(supervisor) = self.supervisor.upgrade() else {
                 return;
@@ -89,7 +87,7 @@ impl TimerScheduler {
             let armed = self.repo.armed().unwrap_or_default();
             let mut next_deadline: Option<u64> = None;
             for timer in armed {
-                if Self::is_due(&timer, now, &activity, &supervisor) {
+                if self.is_due(&timer, now, &supervisor) {
                     // Claim atomically: a timer the owner paused or cancelled since we read the
                     // armed set is no longer claimable, so it is not fired.
                     if let Ok(Some(claimed)) = self.repo.take_if_armed(timer.id) {
@@ -121,26 +119,14 @@ impl TimerScheduler {
             tokio::select! {
                 result = events.recv() => match result {
                     Err(RecvError::Closed) => return,
-                    // A lagged subscriber may have missed an idle transition; re-evaluate.
-                    Err(RecvError::Lagged(_)) => {}
-                    Ok(DomainEvent::AgentActivityChanged { id, state }) => {
-                        activity.entry(id).or_default().observe(state);
-                    }
                     Ok(DomainEvent::ProcessRemoved { id }) => {
-                        activity.remove(&id);
                         // A closed process strands no timers: drop the ones it owned.
                         let _ = self.repo.release_owner(id);
                     }
-                    // A process that is not running is classified afresh when it next runs (C4
-                    // resets it), so the activity remembered from its previous run is dropped
-                    // here too rather than carried into the next one. While it is not running
-                    // its status alone answers the quorum (see `watched_is_idle`).
-                    Ok(DomainEvent::ProcessStatusChanged { id, to, .. }) => {
-                        if to != ProcStatus::Running {
-                            activity.remove(&id);
-                        }
-                    }
-                    Ok(_) => {}
+                    // Every other event, and a lag that dropped some, is only a signal to look
+                    // again; the loop re-reads the idle and process registries above, so nothing
+                    // is lost by not knowing which event it was.
+                    Ok(_) | Err(RecvError::Lagged(_)) => {}
                 },
                 () = self.wake.notified() => {}
                 () = sleep_until_millis(&self.clock, next_deadline) => {}
@@ -150,24 +136,17 @@ impl TimerScheduler {
 
     /// Whether `timer` should fire now: any timer once its deadline passes (its scheduled time, or
     /// a fire-when-idle backstop), and a fire-when-idle timer as soon as its watched quorum is idle.
-    /// The quorum and the per-process idle rule are the shared `IdleMode::quorum_met` and
-    /// [`watched_is_idle`], so this fires on exactly what the façade reports at set time.
-    fn is_due(
-        timer: &StoredTimer,
-        now: u64,
-        activity: &HashMap<ProcessId, ObservedActivity>,
-        supervisor: &Supervisor,
-    ) -> bool {
+    /// The quorum and the per-process idle read are the shared `IdleMode::quorum_met` and
+    /// [`watched_process_is_idle`], over the same registries the façade reports from, so this fires
+    /// on exactly what its caller was told at set time.
+    fn is_due(&self, timer: &StoredTimer, now: u64, supervisor: &Supervisor) -> bool {
         if timer.deadline_unix_millis <= now {
             return true;
         }
         match timer.fire.idle_quorum() {
             None => false,
             Some((mode, watched)) => mode.quorum_met(watched, |p| {
-                watched_is_idle(
-                    activity.get(&p).copied().unwrap_or_default(),
-                    supervisor.view(p).map(|view| view.status),
-                )
+                watched_process_is_idle(self.idle.as_ref(), supervisor, p)
             }),
         }
     }

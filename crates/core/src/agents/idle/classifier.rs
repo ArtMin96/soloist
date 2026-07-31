@@ -25,7 +25,7 @@ impl Classifier {
             strategy: strategy_for(kind),
             memory: AgentMemory::default(),
             current: None,
-            observed: ObservedActivity::default(),
+            observed: ObservedActivity::launched(),
         }
     }
 
@@ -60,11 +60,12 @@ impl Classifier {
 
     /// Resets to the pre-sample state, so an agent that stopped and is relaunched re-emits
     /// its first activity and must earn its next turn's observation afresh. Called while the
-    /// agent is not running.
+    /// agent is not running. The launch itself is not forgotten — it is what distinguishes an
+    /// agent resting after a run from one that was never started.
     pub(super) fn reset(&mut self) {
         self.memory = AgentMemory::default();
         self.current = None;
-        self.observed = ObservedActivity::default();
+        self.observed = ObservedActivity::launched();
     }
 }
 

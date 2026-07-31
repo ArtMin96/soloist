@@ -48,6 +48,7 @@ use autoclose::AutoClose;
 use registry::{ActorHandle, Registry};
 use restart::RestartPolicy;
 
+pub use autoclose::ClosePolicy;
 pub use bulk::StartSummary;
 pub use registration::{Labelling, Registration};
 
@@ -286,6 +287,9 @@ impl Supervisor {
         let Some(from) = self.registry.begin_launch(id, mailbox) else {
             return false;
         };
+        // Record the claim against any auto-close arming here rather than from the event stream,
+        // so a dropped status delta cannot leave the process looking as though it never ran.
+        self.auto_close.observe_launch(id);
         // Open the terminal channel synchronously, before spawning the actor, so a viewer that
         // attaches in the window between this launch and the actor being scheduled finds a live
         // channel instead of "process has not started". The actor receives the actor-facing half
@@ -542,24 +546,24 @@ mod tests {
         write_blocking.notified().await;
 
         let flooded = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut refused = false;
             for _ in 0..1024 {
-                h.sup
-                    .try_write_stdin(id, b"timer body".to_vec())
-                    .expect("a live process accepts (and may drop) best-effort input");
+                refused |= !h.sup.try_write_stdin(id, b"timer body".to_vec());
             }
+            refused
         })
         .await;
-        assert!(
-            flooded.is_ok(),
-            "best-effort delivery to a deaf child must drop, never block the caller"
+        assert_eq!(
+            flooded,
+            Ok(true),
+            "best-effort delivery to a deaf child drops — reporting that it did — rather than \
+             blocking the caller"
         );
 
-        // A process with no terminal is still a not-found, as for the blocking path.
-        assert!(matches!(
-            h.sup
-                .try_write_stdin(ProcessId::from_raw(999), b"x".to_vec()),
-            Err(SupervisorError::NotFound(_))
-        ));
+        // A process with no terminal has nothing to deliver to either, reported the same way.
+        assert!(!h
+            .sup
+            .try_write_stdin(ProcessId::from_raw(999), b"x".to_vec()));
     }
 
     #[tokio::test]

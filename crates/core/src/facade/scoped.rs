@@ -138,16 +138,23 @@ pub enum SpawnAgentError {
 }
 
 /// Why a worker's report to its lead was refused: it has no lead to report to, the lead is no
-/// longer there, the report is over its cap, or a durable read failed while resolving scope.
+/// longer running, the lead did not take the report, it is over its cap, or the caller's own
+/// scope could not be resolved.
 #[derive(Debug, thiserror::Error)]
 pub enum ReportToLeadError {
-    /// The caller has no recorded lead — it was not spawned by another agent this run, or is a
-    /// caller Soloist cannot name at all. Refused rather than delivered to a default target.
+    /// The caller has no lead to report to: nothing spawned it, Soloist can no longer name it or
+    /// the process it was, or the process its recorded edge points at is not an agent and so was
+    /// never a lead. Refused rather than delivered to a default target.
     #[error("you have no lead to report to; only an agent that another agent spawned has one")]
     NoLead,
-    /// The lead that spawned the caller has left the registry, so there is nothing to report to.
+    /// The lead that spawned the caller has left the registry, or its own run has ended, so
+    /// nothing there would ever read the report.
     #[error("the lead that spawned you is no longer running")]
     LeadGone,
+    /// The lead is running but did not take the report — it has stopped draining its input — so
+    /// the report was dropped rather than delivered, and the caller still holds its result.
+    #[error("the lead did not take the report, so it was not delivered; try again")]
+    NotDelivered,
     /// The report exceeds its cap; `what` names it and `max_bytes` is the cap it exceeded, the
     /// same shape the coordination write caps refuse with.
     #[error("{what} exceeds the {max_bytes} byte cap")]
@@ -155,9 +162,11 @@ pub enum ReportToLeadError {
         what: &'static str,
         max_bytes: usize,
     },
-    /// A durable read failed while resolving scope.
+    /// The caller's own scope could not be resolved, so the report was not placed. Distinct from
+    /// the lead being gone: a caller told its lead has stopped abandons a report the lead — still
+    /// running, still writable — would have taken.
     #[error(transparent)]
-    Store(#[from] StoreError),
+    Scope(#[from] ScopedActionError),
 }
 
 impl From<SupervisorError> for ScopedActionError {
