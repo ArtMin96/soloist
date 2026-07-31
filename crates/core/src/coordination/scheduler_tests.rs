@@ -201,14 +201,27 @@ async fn an_at_timer_fires_at_its_deadline_and_delivers_the_body_as_a_fresh_turn
     settle().await;
     assert!(h.armed(view.id), "the timer waits until its deadline");
 
-    // Past the deadline it fires: claimed from the store and delivered to the owner with the
-    // wake-reason header prepended and a trailing carriage return, so the agent receives it as a
-    // submitted fresh turn and can tell why it woke (the header format is tested separately via
-    // `wake_reason_header` — here we only assert the body text is present).
+    // Past the deadline it fires: claimed from the store and delivered to the owner as a fresh
+    // submitted turn — the wake-reason header on its own line so the agent can tell why it woke,
+    // the body beneath it, and the carriage return that submits it. Without that byte the body
+    // sits in the agent's prompt as an unsent draft and the wake never happens. The header's
+    // wording is covered by the `wake_reason_header` tests; here only the turn's shape is.
     advance_until(&h.clock, Duration::from_secs(10), || {
         String::from_utf8_lossy(&delivered.to(owner)).contains("resume work")
     })
     .await;
+    let turn = String::from_utf8(delivered.to(owner)).expect("utf-8 input");
+    let (header, body) = turn
+        .split_once('\n')
+        .expect("a wake-reason header line above the body");
+    assert!(
+        header.starts_with(&format!("[Soloist timer #{}]", view.id)),
+        "the woken agent is told which timer fired: {header:?}"
+    );
+    assert_eq!(
+        body, "resume work\r",
+        "the body is delivered whole and submitted by a trailing carriage return"
+    );
     assert!(!h.exists(owner, view.id), "a fired timer is gone");
 }
 

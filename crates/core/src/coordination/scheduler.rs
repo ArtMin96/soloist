@@ -28,6 +28,7 @@ use crate::ports::Clock;
 use crate::process::ProcStatus;
 use crate::supervision::supervise;
 use crate::supervisor::Supervisor;
+use crate::turn::submitted_turn;
 
 use super::timer::{watched_is_idle, FireCond};
 use super::timer_repo::{StoredTimer, TimerRepo};
@@ -172,16 +173,14 @@ impl TimerScheduler {
     }
 }
 
-/// Delivers a fired timer's body to its owner as a fresh user turn: a compact wake-reason header
-/// (so the woken agent knows *why* it woke) followed by the body and a carriage return so the
-/// agent CLI submits it. Best-effort and non-blocking — the timer is already claimed and removed,
-/// so an owner that has since gone (or a deaf child whose input channel is full) simply means the
-/// body is not delivered; delivery must never stall the loop for every other agent's timers.
+/// Delivers a fired timer's body to its owner as a fresh submitted turn, carrying a compact
+/// wake-reason header so the woken agent knows *why* it woke. Best-effort and non-blocking — the
+/// timer is already claimed and removed, so an owner that has since gone (or a deaf child whose
+/// input channel is full) simply means the body is not delivered; delivery must never stall the
+/// loop for every other agent's timers.
 fn deliver(supervisor: &Supervisor, timer: StoredTimer, fired_at_backstop: bool) {
     let header = wake_reason_header(&timer, fired_at_backstop);
-    let mut input = format!("{header}\n{}", timer.body).into_bytes();
-    input.push(b'\r');
-    let _ = supervisor.try_write_stdin(timer.owner, input);
+    let _ = supervisor.try_write_stdin(timer.owner, submitted_turn(&header, &timer.body));
 }
 
 /// A compact, clean-room wake-reason header prepended to the delivered body so the woken agent can

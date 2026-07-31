@@ -14,6 +14,7 @@ use crate::ids::{ProcessId, ProjectId};
 use crate::process::ProcessView;
 use crate::supervisor::StartSummary;
 use crate::support::orchestration_preamble;
+use crate::turn::submitted_turn;
 
 /// How many trailing rendered lines `send_input`'s `wait_ms` snapshot returns — a bounded
 /// tail (about a screenful), never the whole scrollback, so the reply stays small.
@@ -171,8 +172,8 @@ impl ScopedFacade<'_> {
 
     /// Hands this worker's result to the lead that spawned it, delivered as a fresh submitted
     /// turn on the lead's terminal — the reply half of [`spawn_agent`](Self::spawn_agent). The
-    /// delivery reuses the same header-then-body shape a fired timer wakes an agent with, so a
-    /// wake reads the same whatever produced it.
+    /// turn is composed by the same `submitted_turn` a fired timer wakes an agent with, so the
+    /// two differ only in the header they carry and a wake reads the same whatever produced it.
     ///
     /// **This is how a worker signals completion.** Terminal quiet is not: a worker that has
     /// finished and one that is still thinking are indistinguishable from outside, so nothing
@@ -213,12 +214,10 @@ impl ScopedFacade<'_> {
             .process_view(worker)
             .map(|view| format!(" \"{}\"", view.label))
             .unwrap_or_default();
-        let mut input = format!("[Soloist worker #{worker}{named}] report\n{report}").into_bytes();
-        // The carriage return is what submits the turn, exactly as a fired timer's delivery does.
-        input.push(b'\r');
+        let header = format!("[Soloist worker #{worker}{named}] report");
         self.inner
             .supervisor()
-            .try_write_stdin(lead, input)
+            .try_write_stdin(lead, submitted_turn(&header, &report))
             .map_err(|_| ReportToLeadError::LeadGone)
     }
 
