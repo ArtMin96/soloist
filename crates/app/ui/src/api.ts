@@ -15,6 +15,7 @@ import type {
   DetectedTool,
   DiagramView,
   DomainEvent,
+  GitStatus,
   HotkeyAction,
   HotkeyBindingView,
   Integrations,
@@ -29,6 +30,7 @@ import type {
   Presence,
   ProcessSpec,
   ProcessView,
+  ProjectFile,
   ProjectId,
   ProjectLoad,
   ProjectSettings,
@@ -75,6 +77,21 @@ export function lineageEdges(): Promise<LineageEdge[]> {
 // true state instead of an edge-triggered stale badge.
 export function agentActivity(): Promise<AgentSignal[]> {
   return invoke<AgentSignal[]>("agent_activity");
+}
+
+// A project's working-tree status — what is checked out, how it stands against its upstream, and
+// every path that differs from the last commit. `null` for a project that is not a repository, an
+// ordinary state rather than an error. Seeds the git rail; a `GitStatusChanged` event prompts a
+// re-read (snapshot-then-deltas).
+export function gitStatus(project: number): Promise<GitStatus | null> {
+  return invoke<GitStatus | null>("git_status", { project });
+}
+
+// Every path in a project's repository — tracked, untracked, and ignored, with an ignored
+// directory listed as itself rather than walked. `null` for a project that is not a repository.
+// Read on demand by the rail's file browser, not cached in the core.
+export function gitFiles(project: number): Promise<ProjectFile[] | null> {
+  return invoke<ProjectFile[] | null>("git_files", { project });
 }
 
 // --- Coordination panels: the scratchpad panel and the to-do board read/write through these.

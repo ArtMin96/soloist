@@ -221,6 +221,12 @@ pub enum DomainEvent {
         kind: TemplateKind,
         project: Option<ProjectId>,
     },
+    /// A project's working tree or its standing against its upstream changed. A
+    /// change-notification carrying the project only: the surface re-reads
+    /// [`Facade::git_status`](crate::facade::Facade::git_status) rather than trusting a
+    /// payload, so a repository under active change coalesces to one re-query per frame
+    /// instead of one per file.
+    GitStatusChanged { project: ProjectId },
 }
 
 /// The outbound event port: anything the core publishes domain events through.

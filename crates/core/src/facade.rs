@@ -21,6 +21,7 @@ use crate::configchange::{ConfigSync, TrustReviewCommand};
 use crate::coordination::{Diagrams, Kv, Leases, Scratchpads, Templates, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::FileWatcher;
+use crate::git::Git;
 use crate::identity::Identity;
 use crate::ids::{ProcessId, ProjectId};
 use crate::metrics::MetricsProbe;
@@ -57,6 +58,7 @@ mod blocking;
 mod commands;
 mod coordination;
 mod diagram;
+mod git;
 mod kv;
 mod link;
 mod loops;
@@ -78,6 +80,7 @@ mod todo;
 
 pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
+pub use git::GitStatusError;
 pub use prompt_template::PromptRenderError;
 pub use scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
 pub use scratchpad::ScratchpadWrite;
@@ -97,6 +100,8 @@ pub struct Facade {
     metrics: Arc<dyn MetricsProbe>,
     port_probe: Arc<dyn PortProbe>,
     file_watcher: Arc<dyn FileWatcher>,
+    // `Arc`, like the supervisor: the git status watch reactor shares it beyond `&self`.
+    git: Arc<Git>,
     notifier: Arc<dyn Notifier>,
     // The notification reactor shares both beyond `&self`: it reads presence to route an alert and
     // records what it delivered as unread.
@@ -135,6 +140,7 @@ impl Facade {
             metrics,
             port_probe,
             file_watcher,
+            git_repository,
             notifier,
             trust,
             projects,
@@ -167,6 +173,7 @@ impl Facade {
             settings: Arc::new(SettingsStore::new(settings_repo)),
             project_settings: Arc::new(SettingsStore::new(project_settings_repo)),
             feedback: Feedback::new(feedback_repo, clock.clone()),
+            git: Arc::new(Git::new(git_repository)),
             clock,
             metrics,
             port_probe,

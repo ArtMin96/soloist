@@ -5269,6 +5269,7 @@ dependencies = [
  "serde",
  "serde_json",
  "soloist-core",
+ "soloist-git",
  "soloist-httpapi",
  "soloist-ipc",
  "soloist-pty",
@@ -5329,6 +5330,15 @@ dependencies = [
  "tokio-util",
  "tracing",
  "vte",
+]
+
+[[package]]
+name = "soloist-git"
+version = "0.11.0"
+dependencies = [
+ "nix 0.31.3",
+ "soloist-core",
+ "tempfile",
 ]
 
 [[package]]

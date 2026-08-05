@@ -13,6 +13,7 @@ use super::Facade;
 use crate::agents::IdleSampler;
 use crate::coordination::TemplateEvictor;
 use crate::filewatch::WatchReactor;
+use crate::git::GitStatusWatchReactor;
 use crate::metrics::MetricsSampler;
 use crate::notify::NotificationReactor;
 use crate::portscan::PortScanner;
@@ -123,6 +124,27 @@ impl Facade {
             Arc::downgrade(&self.supervisor),
             self.projects.clone(),
             self.config.clone(),
+        )
+        .run()
+    }
+
+    /// The git status watch reactor loop (git C9), returned for the composition root to spawn
+    /// once on its runtime. It watches each open project's repository state and, when a change
+    /// there leaves the working tree looking different, re-reads that project's status
+    /// (debounced) and announces
+    /// [`crate::events::DomainEvent::GitStatusChanged`] — so a commit made in a terminal
+    /// beside the rail shows up without a manual refresh. Holds the git context weakly and ends
+    /// when the bus closes (app shutdown). With the default
+    /// [`crate::filewatch::NoopFileWatcher`] it watches nothing, and with the default
+    /// [`crate::git::NoopGitRepository`] a re-read finds no repository, so the real adapters are
+    /// chosen in the composition root.
+    pub fn git_status_watch_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        GitStatusWatchReactor::new(
+            self.clock.clone(),
+            self.file_watcher.clone(),
+            &self.bus,
+            Arc::downgrade(&self.git),
+            self.projects.clone(),
         )
         .run()
     }
