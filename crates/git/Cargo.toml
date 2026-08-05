@@ -1,0 +1,19 @@
+[package]
+name = "soloist-git"
+description = "Version-control adapter for Soloist, driving the system `git` command line behind the core's GitRepository port."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+soloist-core = { path = "../core" }
+# Stopping an invocation means signalling its whole process group (`killpg`), so a tool that
+# started helpers of its own leaves nothing behind. `signal` also carries the existence probe
+# the timeout test asserts a reaped group with.
+nix = { version = "0.31", features = ["signal"] }
+
+[dev-dependencies]
+tempfile = "3"

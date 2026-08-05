@@ -159,8 +159,8 @@ describe("applyEvent", () => {
     }
   });
 
-  it("leaves the process list untouched for coordination events (the orchestration snapshot owns them)", () => {
-    const coordination: DomainEvent[] = [
+  it("leaves the process list untouched for events another read model owns", () => {
+    const elsewhere: DomainEvent[] = [
       { type: "TodoChanged", project: 1, id: 7 },
       { type: "TimerArmed", owner: 1, id: 2 },
       { type: "TimerFired", owner: 1, id: 2 },
@@ -168,9 +168,10 @@ describe("applyEvent", () => {
       { type: "LeaseChanged", project: 1, key: "deploy" },
       { type: "ScratchpadChanged", project: 1, name: "plan" },
       { type: "KvChanged", project: 1, key: "config" },
+      { type: "GitStatusChanged", project: 1 },
     ];
     const input = [starting];
-    for (const event of coordination) {
+    for (const event of elsewhere) {
       // Referential identity: the reducer returns the same array, never re-allocating for a
       // delta that does not touch the process list.
       expect(applyEvent(input, event)).toBe(input);

@@ -303,6 +303,10 @@ export type DomainEvent =
   // surface reads separately. A templates surface re-reads that (kind, scope) list (coalesced); the
   // selected default is read separately.
   | { type: "TemplateChanged"; kind: TemplateKind; project: number | null }
+  // A project's working tree, or its standing against its upstream, changed. Carries the project
+  // only: the rail re-reads gitStatus() (coalesced) rather than trusting a payload, so a
+  // repository under active change costs one re-query per frame instead of one per file.
+  | { type: "GitStatusChanged"; project: number }
   // An alert for a user who is looking at Soloist but not at the process that raised it, so it
   // belongs in an in-app toast. The core has already applied the master switch, the notification
   // level, and the focus rules — a surface renders this and decides nothing. Unlike the
@@ -327,6 +331,67 @@ export type DomainEvent =
 export interface AppInfo {
   name: string;
   version: string;
+}
+
+// ── Version control (mirrors core::vcs and core::git) ────────────────────────
+// The git rail renders these; enum string values are the core's serde snake_case output.
+
+// What happened to one path, as version control classifies it (mirrors core::ChangeKind).
+export type ChangeKind =
+  | "modified"
+  | "type_changed"
+  | "added"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  | "untracked"
+  | "conflicted";
+
+// One path's change on each side of the index: what a commit would record (staged) and what the
+// working tree holds beyond it (unstaged). An untracked path and an unresolved conflict are both
+// reported as unstaged — neither is staged, and both are resolved by acting on the working tree.
+export interface GitFileStatus {
+  staged: ChangeKind | null;
+  unstaged: ChangeKind | null;
+}
+
+// One changed path, relative to the repository root. `original_path` is where a renamed or
+// copied file came from.
+export interface FileChange {
+  path: string;
+  status: GitFileStatus;
+  original_path: string | null;
+}
+
+// How the checked-out branch stands against its upstream (mirrors core::SyncState, serde
+// internally tagged on `state`). "unknown" means there is no comparison to make — the branch
+// tracks nothing, or its upstream's position is not known here; BranchInfo.upstream says which.
+export type SyncState =
+  | { state: "unknown" }
+  | { state: "up_to_date" }
+  | { state: "ahead"; ahead: number }
+  | { state: "behind"; behind: number }
+  | { state: "diverged"; ahead: number; behind: number };
+
+// What is checked out and how it stands against its upstream. `name` is null on a detached head.
+export interface BranchInfo {
+  name: string | null;
+  upstream: string | null;
+  sync: SyncState;
+}
+
+// A repository's working tree at one moment. `null` from gitStatus() for a project that is not
+// a repository — an ordinary state, not an error.
+export interface GitStatus {
+  branch: BranchInfo;
+  changes: FileChange[];
+}
+
+// One entry in a project's file listing. A `path` ending in `/` is a whole directory rather
+// than a file — how an ignored folder is reported, listed once instead of walked.
+export interface ProjectFile {
+  path: string;
+  ignored: boolean;
 }
 
 // ── Coordination read-model (mirrors core::coordination view types) ──────────

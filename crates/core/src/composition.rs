@@ -17,6 +17,7 @@ use crate::coordination::{
     TodoRepo,
 };
 use crate::filewatch::{FileWatcher, NoopFileWatcher};
+use crate::git::{GitRepository, NoopGitRepository};
 use crate::ids::ProjectId;
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
 use crate::notify::{NoopNotifier, Notifier};
@@ -37,8 +38,8 @@ use crate::ports::{
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
 /// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `diagram_repo`,
 /// `todo_repo`, `kv_repo`, `template_repo`, `runtime`, `orphan_control`, `metrics`,
-/// `port_probe`, `file_watcher`, `notifier`, `agent_tools`, `version_probe`, `shell_env_probe`,
-/// `settings_repo`, `project_settings_repo`, `feedback_repo`)
+/// `port_probe`, `file_watcher`, `git_repository`, `notifier`, `agent_tools`, `version_probe`,
+/// `shell_env_probe`, `settings_repo`, `project_settings_repo`, `feedback_repo`)
 /// default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
 /// forces every existing composition root to change. `app_env` (the app's own environment,
 /// captured at the composition root for the shell-environment resolver) defaults to empty.
@@ -62,6 +63,7 @@ pub struct CorePorts {
     pub(crate) metrics: Arc<dyn MetricsProbe>,
     pub(crate) port_probe: Arc<dyn PortProbe>,
     pub(crate) file_watcher: Arc<dyn FileWatcher>,
+    pub(crate) git_repository: Arc<dyn GitRepository>,
     pub(crate) notifier: Arc<dyn Notifier>,
     pub(crate) agent_tools: Arc<dyn AgentToolRepo>,
     pub(crate) version_probe: Arc<dyn VersionProbe>,
@@ -116,6 +118,7 @@ impl CorePorts {
                 metrics: Arc::new(NoopMetricsProbe),
                 port_probe: Arc::new(NoopPortProbe),
                 file_watcher: Arc::new(NoopFileWatcher),
+                git_repository: Arc::new(NoopGitRepository),
                 notifier: Arc::new(NoopNotifier),
                 agent_tools: Arc::new(NoopAgentToolRepo),
                 version_probe: Arc::new(NoopVersionProbe),
@@ -234,6 +237,14 @@ impl CorePortsBuilder {
     /// [`NoopFileWatcher`], which watches nothing — so the reactor never restarts).
     pub fn file_watcher(mut self, file_watcher: Arc<dyn FileWatcher>) -> Self {
         self.ports.file_watcher = file_watcher;
+        self
+    }
+
+    /// Overrides the repository reader the git context reads a working tree through (C9;
+    /// defaults to [`NoopGitRepository`], which reports every root as belonging to no
+    /// repository, so a project simply shows no version control).
+    pub fn git_repository(mut self, git_repository: Arc<dyn GitRepository>) -> Self {
+        self.ports.git_repository = git_repository;
         self
     }
 

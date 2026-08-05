@@ -14,6 +14,7 @@
 mod attention;
 mod coordination;
 mod export;
+mod git;
 mod orchestration;
 mod project_settings;
 mod settings;
@@ -22,6 +23,7 @@ mod timers;
 pub use attention::*;
 pub use coordination::*;
 pub use export::*;
+pub use git::*;
 pub use orchestration::*;
 pub use project_settings::*;
 pub use settings::*;
