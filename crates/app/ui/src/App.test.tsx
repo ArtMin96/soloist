@@ -98,6 +98,8 @@ function mockBackend(
       if (cmd === "appearance") return DEFAULT_APPEARANCE;
       if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
       if (cmd === "hotkeys") return [];
+      // The fixture project is a plain directory, so version control has nothing to report.
+      if (cmd === "git_status" || cmd === "git_files") return null;
       return undefined;
     },
     { shouldMockEvents },
@@ -135,6 +137,25 @@ describe("App dashboard", () => {
     expect(within(row(1)).getByText("assistant")).toBeTruthy();
     expect(row(1).querySelector("[data-status]")?.getAttribute("data-status")).toBe("Stopped");
     expect(row(2).querySelector("[data-status]")?.getAttribute("data-status")).toBe("Running");
+  });
+
+  it("puts the version control rail beside the main area, never around it", async () => {
+    mockBackend(STACK);
+    render(<App />);
+    await screen.findAllByRole("treeitem");
+    fireEvent.click(within(row(2)).getByText("shell"));
+
+    const main = document.querySelector("main");
+    const rail = await screen.findByRole("complementary", { name: "Version control" });
+
+    // The rail's chunk arrives after the first paint. Were it an ancestor of <main>, the terminal
+    // pane would be torn down and rebuilt the moment it landed, losing the emulator and its
+    // scrollback — so the two must be siblings, and the pane's width must stay the main area's
+    // to resize against.
+    expect(main).toBeTruthy();
+    expect(main?.contains(rail)).toBe(false);
+    expect(rail.contains(main)).toBe(false);
+    expect(main?.parentElement?.contains(rail)).toBe(true);
   });
 
   it("derives sparse control availability from the status FSM", async () => {
@@ -432,6 +453,7 @@ describe("App dashboard", () => {
       if (cmd === "appearance") return DEFAULT_APPEARANCE;
       if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
       if (cmd === "hotkeys") return [];
+      if (cmd === "git_status" || cmd === "git_files") return null;
       if (cmd === "config_command_review")
         return {
           name: "build",
@@ -475,6 +497,7 @@ describe("App dashboard", () => {
         if (cmd === "appearance") return DEFAULT_APPEARANCE;
         if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
         if (cmd === "hotkeys") return [];
+        if (cmd === "git_status" || cmd === "git_files") return null;
         return undefined;
       },
       { shouldMockEvents: true },
