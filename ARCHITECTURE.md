@@ -8,8 +8,8 @@
 
 Soloist is a native-Linux **process-supervisor + agent-coordination workspace** (a clean-room rebuild of
 macOS Solo). Stack: **Tauri v2 + Rust core + React/TS + xterm.js**. Style: **Hexagonal (Ports & Adapters)**
-— a pure, framework-free domain core with 8 bounded contexts, actor-model supervision, event-driven +
-CQRS-lite, SQLite for durable state.
+— a pure, framework-free domain core with 9 bounded contexts (C9 Git is designed, not yet built),
+actor-model supervision, event-driven + CQRS-lite, SQLite for durable state.
 
 ---
 
@@ -22,12 +22,13 @@ CQRS-lite, SQLite for durable state.
   │  MCP      ── crates/mcp     [→P8]  │                   │  Store / repos          ── crates/store│
   │  HTTP     ── crates/httpapi [→P10] │                   │  Clock                  ── core (tokio)│
   │  CLI      ── crates/cli     [→P10] │                   │  MetricsProbe/PortProbe/FileWatcher ── crates/sys│
+  │                                    │                   │  GitRepository/GitForge ── crates/git, crates/forge│
   └─────────────────┬─────────────────┘                   └───────────────────┬────────────────┘
                     │ one Facade call                                          ▲ trait (port)
                     ▼                                                          │
             ╔═══════════════════════════════════════════════════════════════════════╗
             ║                    crates/core  —  PURE DOMAIN                          ║
-            ║   C1…C8 bounded contexts · ports (traits) · DomainEvent bus · Facade    ║
+            ║   C1…C9 bounded contexts · ports (traits) · DomainEvent bus · Facade    ║
             ║   imports NO tauri / rmcp / axum / rusqlite / notify-rust  (CI-enforced)║
             ╚═══════════════════════════════════════════════════════════════════════╝
 ```
@@ -40,10 +41,12 @@ headless-testable and is the mechanical guarantee behind *"remove MCP → app st
 
 | Crate | Kind | Owns | May depend on | Status |
 |-------|------|------|---------------|--------|
-| `core` | domain | C1–C8, ports (traits), domain types, event bus, `Facade` | `tokio`/`serde`/`thiserror`/`vte` — **never** an adapter crate | live (C1–C3, C8) |
+| `core` | domain | C1–C9, ports (traits), domain types, event bus, `Facade` | `tokio`/`serde`/`thiserror`/`vte` — **never** an adapter crate | live (C1–C3, C8) |
 | `store` | driven adapter | SQLite: `Store`/`ProjectRepo`/`TrustRepo`/`RuntimeState` + migrations | `core`, `ipc`, `rusqlite` | live |
 | `pty` | driven adapter | `ProcessSpawner`/`PtyIo`/`ProcessControl`/`OrphanControl` over `portable-pty`+`nix` | `core`, `portable-pty`, `nix` | live |
 | `sys` | driven adapter | `MetricsProbe` (CPU/mem) + `PortProbe` (discovery), both over `/proc`; `FileWatcher` over `notify` — monitoring C5 | `core`, `notify`, `libc` | live |
+| `git` | driven adapter | `GitRepository` over the **system `git` CLI** — machine formats, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, fresh process group, bounded timeout, kill+reap — git C9 | `core`, `tokio` | planned (`git-integration`) |
+| `forge` | driven adapter | `GitForge` over the **`gh` CLI** (`gh pr … --json`; `gh auth status` feature detection) — git C9 | `core`, `tokio`, `serde_json` | planned (`git-integration`) |
 | `app` | driving + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `sys`, `httpapi`, `tauri` | live |
 | `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | live (P8 skeleton) |
 | `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | live (P10: read API + CORS) |
@@ -55,10 +58,10 @@ adapter. Adapters hold **no** business state and make **no** domain decisions.
 
 ---
 
-## 2. Domain separation — 8 bounded contexts
+## 2. Domain separation — 9 bounded contexts
 
 ```
-  adapters ──► C8 Facade ──► C1…C7      (adapters touch C8 ONLY)
+  adapters ──► C8 Facade ──► C1…C7, C9  (adapters touch C8 ONLY)
   scope-limited callers ──► ScopedFacade  (no accessor onto a context; enforced by the type)
   composition ──► every context         (one-way: the only module that may name them all)
 ```
@@ -74,7 +77,8 @@ every build rather than leaving it to be asserted here. There is no allow-list.
 
 That holds because a value type shared by several contexts lives in a **shared-kernel module that
 depends on nothing** — `ids`, `process` (`ProcStatus`), `idle` (`AgentActivity`), `configchange`
-(`ConfigSync`, `TrustReviewCommand`), `orphans` — rather than in whichever context feels closest.
+(`ConfigSync`, `TrustReviewCommand`), `orphans`, and (planned) `vcs` (`FileChange`, `BranchInfo`,
+`SyncState`) — rather than in whichever context feels closest.
 `DomainEvent` names the payloads it carries, and the contexts that produce them also publish to the
 bus; if either owned the type, the two would import each other. Only the types live there — the
 heuristics that decide an `AgentActivity`, and the `diff` that builds a `ConfigSync`, stay in their
@@ -96,13 +100,15 @@ the layer those contexts import.
 | **C6** Coordination | `coordination` | scratchpads, todos, diagrams, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos + key-value); **diagrams** (Mermaid source docs, `mermaid-diagrams` initiative) mirror scratchpads; end-to-end orchestration (E7) proven |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
 | **C8** Integration façade | `facade` `identity` | the public command/query API (`Facade`, local authority) + the session-scoped surface (`ScopedFacade`); MCP identity & effective scope | live (`facade`) |
+| **C9** Git | `git/` (+ shared-kernel `vcs`) | working-tree status & diff, staging (file & hunk), commit/amend, sync + ahead/behind, branches & stash, PR create/review/merge, paged log, the per-project status cache and its watch reactor | planned (`git-integration`; `plan/02` §VC, `KNOWN-DIVERGENCES` D-35) |
 
 Cross-cutting in `core`: `events` (the `DomainEvent` bus), `composition` (the `CorePorts` set the root
 assembles), `ports` (the traits no single context owns, each with its `Noop` default),
 `ids` (newtype IDs), `sync` (poison-safe lock helper), `cache` (Clock-driven read-through memo),
 `testing` (shared fakes). Shared-kernel value types — owned by no context, depending on nothing:
 `process` (`ProcStatus`/`ProcessKind`/`ProcessView`), `idle` (`AgentActivity`), `configchange`
-(`ConfigSync`/`Rename`/`TrustReviewCommand`), `orphans` (`OrphanInfo`).
+(`ConfigSync`/`Rename`/`TrustReviewCommand`), `orphans` (`OrphanInfo`); `vcs`
+(`FileChange`/`BranchInfo`/`SyncState`) joins them with C9.
 
 **Isolation guarantees.** A bug in summarization (C4) cannot corrupt the process registry (C2);
 coordination state (C6) persists in SQLite independently of live processes (C2), so todos/scratchpads

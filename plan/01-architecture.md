@@ -30,6 +30,7 @@ external agent ──► soloist-mcp ──IPC(UDS)──►    │
  │                                          C6 Coordination ──► SQLite   │
  │                                          C7 Notifications ──► libnotify│
  │                                          C8 Integration façade        │
+ │                                          C9 Git ──► git / gh CLI      │
  └───────────┬───────────────┬───────────────┬──────────────────────────┘
              ▼ PTY+pgroup     ▼ PTY+pgroup    ▼ PTY+pgroup
         dev server        queue worker     CLI agent
@@ -41,9 +42,11 @@ All three adapters (UI, MCP, HTTP/CLI) drive the **same core commands** — one 
 
 ```
 crates/
-  core/    # C1–C8 + ports (traits) + domain types + event bus. NO tauri/mcp/axum/sqlite imports.
+  core/    # C1–C9 + ports (traits) + domain types + event bus. NO tauri/mcp/axum/sqlite imports.
   store/   # SQLite impl of the Store port (repos + migrations)
-  pty/     # ProcessSpawner impl (portable-pty + nix)
+  pty/     # ProcessSpawner impl (portable-pty + nix); headless AgentOneShot adapter
+  git/     # GitRepository impl over the system `git` CLI (C9)
+  forge/   # GitForge impl over the `gh` CLI (C9)
   app/     # Tauri binary + command/event adapter + HTTP API + bundled UI (ui/)
   mcp/     # soloist-mcp binary (stdio MCP adapter)
   httpapi/ # loopback HTTP API adapter (used by app)
@@ -65,6 +68,7 @@ The dependency rule (adapters → core, never the reverse) is CI-enforced (ref `
 | C6 | `coordination` (`scratchpads`,`todos`,`diagrams`,`timers`,`locks`,`kv`) | durable coordination aggregates | Store, Clock |
 | C7 | `notify` | crash/attention/idle toasts; unread/attention-bell | Notifier, EventSink |
 | C8 | `facade` + `identity` | public command/query API; effective-project scope; `SOLOIST_PROCESS_ID` | — |
+| C9 | `git` + `vcs` | status/diff/staging (file+hunk); commit/amend; sync + ahead/behind; branches/stash; PR create/review/merge; paged log; per-project status cache | GitRepository, GitForge, AgentOneShot, FileWatcher, Clock |
 | — | `events` | typed `DomainEvent` bus (`broadcast`) | — |
 
 ## State model (authoritative, in the core)

@@ -1761,3 +1761,60 @@ promise that a sound is produced: volume, sink state and the user's theme all si
 Soloist can observe anything. The status row reports what the daemon advertises and nothing beyond it.
 
 **Effect on parity:** satisfies `plan/02` **I7l** (global Notifications tab). No row regresses.
+
+---
+
+## D-35 — Git is a first-class surface inside Soloist (a Soloist extension) 🟢
+
+**Introduced:** the `git-integration` initiative, design approved 2026-08-05 (owner-directed;
+`plan/02` §VC). Recorded here for the same reason as
+[D-20](#d-20--diagrams-are-a-first-class-coordination-document-rendering-mermaid-a-soloist-extension-)
+and [D-18](#d-18--todos-may-carry-an-optional-link-to-a-scratchpad-a-soloist-extension-): so a
+Soloist original is discoverable beside the parity record rather than buried in a design note.
+
+**Solo — silent, not contradicted.** ⚠️ A **strict-reading exception** to this file's scope, on the
+D-20 precedent. `plan/05` records that Solo is **not a git-worktree orchestrator**, and documents no
+git capability of any kind — no changed-files tree, no diff viewer, no staging, commit, push or PR
+flow, and no `git`-shaped MCP tool in §7's catalog. But **no Solo page states that Soloist may not
+add one**; the public record is simply silent, and per `CLAUDE.md` §9 that silence *is* the gap, so
+the primary decision lives in [`plan/05` §12](plan/05-solo-reference-and-sources.md). **Nothing here
+asserts what Solo does or does not do**, and no behavior below is attributed to Solo.
+
+**Soloist:** git is a persistent surface beside the agent — a changed-files/project-files tree, a
+diff viewer, staging at file *and* hunk level, commit/amend, sync with a live ahead/behind
+indicator, branches + stash, PR create/review/merge, a commit history viewer, and the same behavior
+offered to agents over MCP. It lands as a new bounded context **C9 Git** in `crates/core/src/git/`
+with the shared-kernel value types in `crates/core/src/vcs.rs`; the ports are context-owned with
+`Noop` defaults, so an install with no `git`, no `gh` and no assist tool still runs.
+
+- **The engine is the system `git` CLI, not a library** (decision **G-1**, 2026-08-05 — this
+  *revises* the earlier `git2` pick recorded on 2026-07-24). The adapter `crates/git` execs `git`
+  with machine-readable formats (`status --porcelain=v2 -z --branch`, NUL-separated `log --format`,
+  `git apply --cached [--reverse]`), `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, a fresh process group, a
+  bounded timeout, and kill-and-reap. Consequences the app gets for free rather than reimplementing:
+  hooks, signing and the user's `git config` are honored; push/pull inherit the SSH agent, credential
+  helpers and `gh auth setup-git`, so **Soloist stores no git credential and holds no token** (the
+  same posture as E8, where agents authenticate themselves); and a subprocess failure cannot take
+  down the app process.
+- **GitHub operations exec `gh`** (**G-2**), in `crates/forge`, feature-detected via `gh auth status`.
+  No HTTP client, no stored token. **GitHub-only in v1**; without `gh` the PR surface hides behind an
+  install/login hint and every local git action still works.
+- **AI text comes from the user's already-configured agent tools, run headless** (**G-3**) through a
+  new C4 `AgentOneShot` port with a `NoopAgentOneShot` default — no bundled LLM client, no API key,
+  no `reqwest`. This is the sanctioned headless path; `Facade::launch_agent` stays PTY-only for
+  *interactive* agents.
+- **Mutating git ops are trust-gated in the core** (commit, push, discard, branch ops, merge), on the
+  same gate as `start*`; read-only status/diff/log are ungated. The **MCP group `Git` defaults OFF**
+  (**G-7**) and is reached through `ScopedFacade`, so a bound agent cannot touch a project it is not
+  scoped to.
+- **Worktree orchestration remains excluded.** Interactive rebase, stacked PRs, virtual branches,
+  blame, worktree management, image diff and multi-forge are `later` or out of scope — this is git
+  *inside* one project root, not the worktree orchestrator `plan/05` records Solo is not either.
+
+**Why 🟢 (settled):** the scope, the engine, the forge, the AI path, the MCP default and the layout
+were all owner-decided (2026-07-24 and 2026-08-05) with no open question straddling the design.
+
+**Effect on parity:** a new Soloist-only section **VC** (`plan/02`, rows VC1–VC12) covers it; no
+existing row regresses, and the "git worktrees/sandboxes" exclusion in `plan/02`'s closing section
+still stands. Design of record: the Soloist scratchpad **`git-integration-design`**. Full gap
+decision: `plan/05` §12.
