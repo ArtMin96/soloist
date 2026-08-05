@@ -83,6 +83,8 @@ function mockBackend(
       if (cmd === "appearance") return DEFAULT_APPEARANCE;
       if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
       if (cmd === "hotkeys") return [];
+      // The fixture project is a plain directory, so version control has nothing to report.
+      if (cmd === "git_status" || cmd === "git_files") return null;
       if (cmd === "attention_snapshot") return state.snapshot;
       if (cmd === "clear_all_attention") {
         state.snapshot = NOTHING;

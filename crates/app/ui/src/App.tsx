@@ -2,6 +2,7 @@ import { Suspense, useCallback, useMemo, useState } from "react";
 import { DeferredOverlay } from "@/components/DeferredOverlay";
 import {
   CommandPalette,
+  GitRail,
   LaunchPicker,
   OrchestrationPane,
   ProjectSettingsPane,
@@ -320,6 +321,15 @@ export default function App() {
                             ))}
                         </Suspense>
                       </main>
+                      {/* The version-control rail sits beside the main area rather than
+                          replacing it, so a repository's state stays in sight while an agent
+                          keeps working. A sibling of <main> rather than a wrapper around it:
+                          nothing here remounts the terminal pane when the rail's chunk lands. */}
+                      {activeProjectId !== null && (
+                        <Suspense fallback={null}>
+                          <GitRail key={activeProjectId} project={activeProjectId} />
+                        </Suspense>
+                      )}
                     </div>
                     <NotificationToasts
                       processes={store.processes}
