@@ -26,13 +26,14 @@ the phase file (the task).
         ▼                                       mcp/     soloist-mcp binary (stdio)              [stub→P8]
    ┌─────────────────────────────┐              httpapi/ loopback HTTP adapter                  [P10: read API]
    │  crates/core::Facade  (C8)  │              cli/     soloist CLI (HTTP client)               [stub→P10]
-   │  bounded contexts C1–C8     │              ipc/     app↔mcp transport + shared msg types    [stub→P8]
-   │  ports (traits) · event bus │
-   └─────────────────────────────┘
+   │  bounded contexts C1–C9     │              ipc/     app↔mcp transport + shared msg types    [stub→P8]
+   │  ports (traits) · event bus │              git/     system `git` CLI adapter (C9)           [planned→git-int]
+   └─────────────────────────────┘              forge/   `gh` CLI adapter (C9)                   [planned→git-int]
         │  (driven ports — traits the core defines)
         ▼
  DRIVEN adapters (the core calls)
    ProcessSpawner→pty   repos→store   Clock→core   MetricsProbe/PortProbe/FileWatcher→sys   Notifier→app
+   GitRepository→git   GitForge→forge   AgentOneShot→pty
 ```
 
 Two directions of dependency, **one rule**: everything points *at* `core`; `core` points at *nothing
@@ -46,10 +47,12 @@ builds and runs" (§8).
 
 | Crate | Kind | Owns | May depend on | Status |
 |-------|------|------|---------------|--------|
-| `core` | domain | C1–C8, ports (traits), domain types, event bus | `tokio`/`serde`/`thiserror`/`vte`/etc. — **never** an adapter crate | live (C1–C3 + C8) |
+| `core` | domain | C1–C9, ports (traits), domain types, event bus | `tokio`/`serde`/`thiserror`/`vte`/etc. — **never** an adapter crate | live (C1–C3 + C8) |
 | `store` | driven adapter | SQLite impl of `Store`/`ProjectRepo`/`TrustRepo`/`RuntimeState` + migrations | `core`, `ipc`, `rusqlite` | live |
 | `pty` | driven adapter | `ProcessSpawner`/`PtyIo`/`ProcessControl`/`OrphanControl` over `portable-pty`+`nix` | `core`, `portable-pty`, `nix` | live |
 | `sys` | driven adapter | `MetricsProbe` (CPU/mem) + `PortProbe` (discovery) over `/proc`; `FileWatcher` over `notify` — monitoring C5 | `core`, `notify`, `libc` | live |
+| `git` | driven adapter | `GitRepository` over the **system `git` CLI** (machine formats, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, fresh process group, bounded timeout, kill+reap) — git C9 | `core`, `tokio` | **planned → `git-integration`** |
+| `forge` | driven adapter | `GitForge` over the **`gh` CLI** (`gh pr … --json`, `gh auth status` feature detection) — git C9 | `core`, `tokio`, `serde_json` | **planned → `git-integration`** |
 | `app` | driving adapter + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `sys`, `httpapi`, `tauri` | live |
 | `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | live (P8 skeleton) |
 | `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | live (P10: read + mutation API, CORS, local-auth) |
@@ -85,6 +88,7 @@ builds and runs" (§8).
 | `coordination` | **C6 Coordination** | scratchpads, todos, diagrams, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos); kv → P9; diagrams (Mermaid source docs) mirror scratchpads (`mermaid-diagrams`) |
 | `notify` | **C7 Notifications** | crash/attention/idle toasts, unread/bell state | **placeholder → P6** |
 | `facade` · `identity` | **C8 Integration façade** | the public command/query API; MCP identity & effective scope | live (`facade`) / placeholder `identity` → P8 |
+| `git/` · `vcs` | **C9 Git** | status/diff, staging (file & hunk), commit/amend, sync + ahead/behind, branches & stash, PR create/review/merge, paged log, status cache + watch reactor; `vcs` is the shared-kernel value vocabulary the events carry | **planned → `git-integration`**; adapters `crates/git` (system `git` CLI) + `crates/forge` (`gh` CLI); `AgentOneShot` for assistive text is C4-owned (`agents/oneshot`), its adapter in `crates/pty` |
 | `events` | cross-cutting | typed `DomainEvent` + `EventBus` (broadcast) | live |
 | `ports` | cross-cutting | every port trait + its `Noop*` default | live |
 | `ids` | cross-cutting | newtype IDs (`ProcessId`, `ProjectId`, …) | live |
