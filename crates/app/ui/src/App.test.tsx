@@ -117,6 +117,10 @@ afterEach(() => {
   clearMocks();
 });
 
+// A deferred surface is fetched, transformed, and evaluated on first use, which under a fully
+// loaded suite takes longer than the default wait allows. It bounds a wait, not an assertion.
+const LAZY_CHUNK_TIMEOUT = 15_000;
+
 describe("App dashboard", () => {
   it("renders the stack grouped by subtype with a status per row", async () => {
     mockBackend(STACK);
@@ -146,7 +150,11 @@ describe("App dashboard", () => {
     fireEvent.click(within(row(2)).getByText("shell"));
 
     const main = document.querySelector("main");
-    const rail = await screen.findByRole("complementary", { name: "Version control" });
+    const rail = await screen.findByRole(
+      "complementary",
+      { name: "Version control" },
+      { timeout: LAZY_CHUNK_TIMEOUT },
+    );
 
     // The rail's chunk arrives after the first paint. Were it an ancestor of <main>, the terminal
     // pane would be torn down and rebuilt the moment it landed, losing the emulator and its
@@ -156,6 +164,67 @@ describe("App dashboard", () => {
     expect(main?.contains(rail)).toBe(false);
     expect(rail.contains(main)).toBe(false);
     expect(main?.parentElement?.contains(rail)).toBe(true);
+  });
+
+  it("opens the diff without ever tearing down the terminal beside it", async () => {
+    // A repository with one change, so the rail has a row to open, and a diff with no patch in
+    // it, so the split renders its own surface without the viewer's cost.
+    mockIPC(
+      (cmd) => {
+        if (cmd === "app_info") return { name: "soloist", version: "0.1.0" };
+        if (cmd === "proc_list") return STACK;
+        if (cmd === "project_list") return [PROJECT];
+        if (cmd === "appearance") return DEFAULT_APPEARANCE;
+        if (cmd === "sidebar_settings") return DEFAULT_SIDEBAR;
+        if (cmd === "hotkeys") return [];
+        if (cmd === "git_status")
+          return {
+            branch: { name: "main", upstream: null, sync: { state: "unknown" } },
+            changes: [
+              {
+                path: "src/main.rs",
+                status: { staged: null, unstaged: "modified" },
+                original_path: null,
+              },
+            ],
+          };
+        if (cmd === "git_files") return null;
+        if (cmd === "git_diff")
+          return {
+            path: "src/main.rs",
+            original_path: null,
+            target: "unstaged",
+            binary: false,
+            patch: "",
+            truncated: false,
+          };
+        return undefined;
+      },
+      { shouldMockEvents: true },
+    );
+    render(<App />);
+    await screen.findAllByRole("treeitem");
+    fireEvent.click(within(row(2)).getByText("shell"));
+    const main = document.querySelector("main");
+    if (!main) throw new Error("no main area");
+    const terminal = (await within(main).findByTestId("terminal-host")).closest("section");
+    if (!terminal) throw new Error("no terminal pane");
+
+    const changes = await screen.findByRole("tree", { name: "Changed files" });
+    fireEvent.click(within(changes).getByText("main.rs"));
+
+    const diff = await screen.findByRole(
+      "region",
+      { name: "Diff" },
+      { timeout: LAZY_CHUNK_TIMEOUT },
+    );
+    // The split is a sibling of the panes' region inside <main>, so opening it adds a box rather
+    // than replacing one — the very same terminal element is still mounted, emulator and
+    // scrollback intact.
+    expect(diff).toBeTruthy();
+    expect(document.body.contains(terminal)).toBe(true);
+    expect(terminal.contains(diff)).toBe(false);
+    expect(diff.contains(terminal)).toBe(false);
   });
 
   it("derives sparse control availability from the status FSM", async () => {

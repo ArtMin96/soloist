@@ -84,12 +84,15 @@ pub use coordination::{
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
-    CoordinationError, CreateTerminalError, Facade, GitStatusError, LaunchAgentError,
+    CoordinationError, CreateTerminalError, Facade, GitReadError, LaunchAgentError,
     LocalCommandError, MoveCommandError, PromptRenderError, ScopedActionError, ScopedFacade,
     SetupIntegrationError, SpawnAgentError, StatusSummary, TrustCommandError,
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
-pub use git::{Git, GitError, GitRepository, GitStatus, GitStatusWatchReactor, NoopGitRepository};
+pub use git::{
+    DiffExtent, Git, GitError, GitRepository, GitStatus, GitStatusWatchReactor, NoopGitRepository,
+    RawFileDiff,
+};
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};
 pub use ids::{
@@ -133,4 +136,7 @@ pub use support::{
 pub use template::{TemplateKind, TemplateScope};
 pub use terminal::{LogLine, PtyChunk, RenderedScreen};
 pub use trust::{Trust, TrustStore};
-pub use vcs::{BranchInfo, ChangeKind, FileChange, GitFileStatus, ProjectFile, SyncState};
+pub use vcs::{
+    BranchInfo, ChangeKind, DiffTarget, FileChange, FileContent, FileDiff, GitFileStatus,
+    ProjectFile, SyncState,
+};

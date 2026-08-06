@@ -19,8 +19,12 @@ const IGNORED = "ignored";
  */
 export const FilesTree = forwardRef<
   RepositoryTreeHandle,
-  { files: ProjectFile[]; onExpansionChange?: (allExpanded: boolean) => void }
->(function FilesTree({ files, onExpansionChange }, ref) {
+  {
+    files: ProjectFile[];
+    onExpansionChange?: (allExpanded: boolean) => void;
+    onOpen?: (path: string) => void;
+  }
+>(function FilesTree({ files, onExpansionChange, onOpen }, ref) {
   const data = useMemo(() => buildFilesTree(files), [files]);
 
   return (
@@ -30,6 +34,7 @@ export const FilesTree = forwardRef<
       label={LABEL}
       autoExpand={false}
       onExpansionChange={onExpansionChange}
+      onOpen={(node) => onOpen?.(node.path)}
       row={(node) => (
         <TreeItemLabel className={cn(node.ignored && IGNORED_TONE_CLASS)}>
           {node.name}

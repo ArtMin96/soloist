@@ -475,6 +475,8 @@ pub fn run() {
             commands::set_project_icon,
             commands::git_status,
             commands::git_files,
+            commands::git_diff,
+            commands::git_file,
             commands::orchestration_snapshot,
             commands::lineage_edges,
             commands::agent_activity,

@@ -14,7 +14,11 @@ import type {
   Binding,
   DetectedTool,
   DiagramView,
+  DiffExtent,
+  DiffTarget,
   DomainEvent,
+  FileContent,
+  FileDiff,
   GitStatus,
   HotkeyAction,
   HotkeyBindingView,
@@ -92,6 +96,24 @@ export function gitStatus(project: number): Promise<GitStatus | null> {
 // Read on demand by the rail's file browser, not cached in the core.
 export function gitFiles(project: number): Promise<ProjectFile[] | null> {
   return invoke<ProjectFile[] | null>("git_files", { project });
+}
+
+// How one path differs — `target` deciding against what, `extent` how much of the answer is
+// carried. A diff past the core's cap comes back `truncated`; asking again at "full" carries the
+// rest. `null` for a project that is not a repository and for a path outside it.
+export function gitDiff(
+  project: number,
+  path: string,
+  target: DiffTarget,
+  extent: DiffExtent,
+): Promise<FileDiff | null> {
+  return invoke<FileDiff | null>("git_diff", { project, path, target, extent });
+}
+
+// The working tree's copy of one path, for the preview that shows a file rather than a change to
+// one. `null` for a project that is not a repository, a path outside it, and one that is gone.
+export function gitFile(project: number, path: string): Promise<FileContent | null> {
+  return invoke<FileContent | null>("git_file", { project, path });
 }
 
 // --- Coordination panels: the scratchpad panel and the to-do board read/write through these.

@@ -80,7 +80,7 @@ mod todo;
 
 pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
-pub use git::GitStatusError;
+pub use git::GitReadError;
 pub use prompt_template::PromptRenderError;
 pub use scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
 pub use scratchpad::ScratchpadWrite;

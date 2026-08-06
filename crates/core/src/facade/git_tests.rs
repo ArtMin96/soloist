@@ -8,11 +8,21 @@ use tempfile::TempDir;
 
 use crate::composition::CorePorts;
 use crate::facade::Facade;
+use crate::git::DiffExtent;
 use crate::ids::ProjectId;
 use crate::ports::{ProjectRepo, TokioClock};
-use crate::testing::{git_status, FakeGitRepository, FakeProjectRepo, FakeSpawner, FakeTrustRepo};
+use crate::testing::{
+    file_change, git_status, raw_diff, FakeGitRepository, FakeProjectRepo, FakeSpawner,
+    FakeTrustRepo,
+};
+use crate::vcs::{ChangeKind, DiffTarget, FileContent};
 
-use super::GitStatusError;
+use super::GitReadError;
+
+const PATH: &str = "src/main.rs";
+
+const HEADER: &str =
+    "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n";
 
 /// A façade over `repository` with one project open, returning it and the project's id.
 fn facade_with_project(repository: Option<FakeGitRepository>) -> (Facade, ProjectId, TempDir) {
@@ -52,9 +62,45 @@ fn a_project_that_is_not_open_is_named_as_such_rather_than_read() {
 
     assert!(matches!(
         facade.git_status(ProjectId::from_raw(4_242)),
-        Err(GitStatusError::UnknownProject),
+        Err(GitReadError::UnknownProject),
     ));
     assert_eq!(repository.reads(), 0, "an unknown project is never read");
+}
+
+#[test]
+fn an_open_project_reports_the_diff_of_one_of_its_paths() {
+    let mut status = git_status("main");
+    status
+        .changes
+        .push(file_change(PATH, None, Some(ChangeKind::Modified)));
+    let repository = FakeGitRepository::reporting(status)
+        .diffing(raw_diff(HEADER, &["@@ -1,1 +1,1 @@\n-old\n+new\n"]));
+    let (facade, project, _dir) = facade_with_project(Some(repository));
+
+    let diff = facade
+        .git_diff(project, PATH, DiffTarget::Unstaged, DiffExtent::Capped)
+        .expect("read")
+        .expect("a repository");
+
+    assert_eq!(diff.path, PATH);
+    assert!(diff.patch.contains("+new"));
+}
+
+#[test]
+fn an_open_project_reports_the_contents_of_one_of_its_files() {
+    let repository = FakeGitRepository::reporting(git_status("main")).holding(FileContent {
+        text: Some("fn main() {}\n".to_string()),
+        truncated: false,
+    });
+    let (facade, project, _dir) = facade_with_project(Some(repository));
+
+    let content = facade
+        .git_file(project, PATH)
+        .expect("read")
+        .expect("a file");
+
+    assert_eq!(content.text.as_deref(), Some("fn main() {}\n"));
+    assert!(!content.truncated);
 }
 
 #[test]

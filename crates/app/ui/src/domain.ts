@@ -394,6 +394,33 @@ export interface ProjectFile {
   ignored: boolean;
 }
 
+// Which two versions of a path a diff compares (mirrors core::DiffTarget). "untracked" is
+// resolved by the core from the path's own status — nothing earlier exists to compare against —
+// so it is never asked for, only reported.
+export type DiffTarget = "staged" | "unstaged" | "head" | "untracked";
+
+// How much of a diff one read carries (mirrors core::DiffExtent). "capped" is the default;
+// "full" is what a reader asks for after being told the diff was truncated.
+export type DiffExtent = "capped" | "full";
+
+// One path's unified diff. `patch` is always whole hunks, so it is a patch rather than a
+// fragment of one, and is empty for a binary path and for one that does not differ at `target`.
+export interface FileDiff {
+  path: string;
+  original_path: string | null;
+  target: DiffTarget;
+  binary: boolean;
+  patch: string;
+  truncated: boolean;
+}
+
+// A path's contents. `text` is null when the file holds bytes that are not text, which a reader
+// is told about rather than shown.
+export interface FileContent {
+  text: string | null;
+  truncated: boolean;
+}
+
 // ── Coordination read-model (mirrors core::coordination view types) ──────────
 // Projected by the orchestration snapshot; the orchestration UI renders these.
 // Enum string values are the core's serde `snake_case` output. Ids serialize as numbers.
