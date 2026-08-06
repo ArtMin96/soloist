@@ -5,7 +5,8 @@
 //! [`FakeTrustRepo`]/[`FakeProjectRepo`]/[`FakeLockRepo`] standing in for the durable store, a
 //! [`FakeAgentToolRepo`]/[`FakeVersionProbe`] for the agent registry and auto-detection, a
 //! [`FakeMetricsProbe`]/[`FakePortProbe`] reporting fixed CPU-memory/port readings, a
-//! [`FakeFileWatcher`] feeding synthetic filesystem changes, a [`RecordingNotifier`] capturing
+//! [`FakeFileWatcher`] feeding synthetic filesystem changes, a [`FakeGitRepository`] answering
+//! working-tree reads from a queue, a [`RecordingNotifier`] capturing
 //! the toasts the notification reactor composes, the [`terminal_registration`]
 //! fixture for driving the supervisor thread, and (in the core's own tests) the
 //! `wait_all`/`next_matching` event waiters that let a test await an asynchronous effect
@@ -28,6 +29,7 @@ mod coordination_todo;
 mod events;
 mod filewatch;
 mod fixtures;
+mod git;
 mod identity;
 mod lock_releaser;
 mod metrics;
@@ -54,6 +56,7 @@ pub use filewatch::FakeFileWatcher;
 #[cfg(test)]
 pub use fixtures::facade_with_agent_tool;
 pub use fixtures::{agent_registration, terminal_registration};
+pub use git::{git_over, git_status, project_file, FakeGitRepository};
 pub use identity::{authentic_session, session_in_dir, TEST_PEER_PGID};
 pub use lock_releaser::RecordingLockReleaser;
 pub use metrics::FakeMetricsProbe;

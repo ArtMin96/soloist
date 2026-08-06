@@ -41,3 +41,8 @@ export const CommandPalette = lazy(() =>
     default: module.CommandPalette,
   })),
 );
+// The version-control rail and everything it needs — the tree engine included — load together,
+// so an app opened on a project without version control never pays for them.
+export const GitRail = lazy(() =>
+  import("@/components/git/GitRail").then((module) => ({ default: module.GitRail })),
+);

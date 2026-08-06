@@ -82,15 +82,19 @@ internals. Ask of each: *what does it do, how do you use it, what does it depend
 | C5 | **Monitoring** | CPU/mem sampling, port discovery, readiness | Clock, /proc | §7,§10 |
 | C6 | **Coordination** | scratchpads (rev-guarded), todos (blockers/locks/comments), timers, leases, key-value | Store, Clock, C4(idle) | §7 |
 | C7 | **Notifications** | crash/attention/idle toasts, unread/attention-bell state | Notifier, EventSink | §10 |
-| C8 | **Integration façade** | the public command/query API the adapters call; identity & effective-project scope | all above | §7,§8 |
+| C8 | **Integration façade** | the public command/query API the adapters call; identity & effective-project scope | all other contexts | §7,§8 |
+| C9 | **Git** | working-tree status + diff, staging (file & hunk), commit/amend, sync + ahead/behind, branches & stash, PR create/review/merge, paged log, per-project status cache | GitRepository, GitForge, FileWatcher, Clock, C1(trust), C4(`AgentOneShot`) | — (Soloist extension, `02` §VC) |
 
 **Why these boundaries:** they match Solo's real seams (ref §) and they isolate failure. A bug in
 auto-summarization (C4) cannot corrupt the process registry (C2). Coordination state (C6) persists
 independently of live processes (C2), so todos/scratchpads survive restarts while PTY buffers don't.
+C9 owns no process and no durable aggregate — the repository on disk is the state — so a git
+subprocess that fails, hangs or is killed degrades that one project's rail and nothing else.
 
-**Context map (who calls whom):** adapters → C8 only. C8 orchestrates C1–C7. C2↔C3 are tightly paired
-(a process has a PTY) and share a `ProcessId`. C4 observes C3 output + C2 status. C6 references
-`ProcessId`/`ProjectId` but never controls processes. No cycles.
+**Context map (who calls whom):** adapters → C8 only. C8 orchestrates C1–C7 and C9. C2↔C3 are tightly
+paired (a process has a PTY) and share a `ProcessId`. C4 observes C3 output + C2 status. C6 references
+`ProcessId`/`ProjectId` but never controls processes. C9 reads C1's project root and trust gate and
+drives C4's `AgentOneShot` for assistive text; it controls no process. No cycles.
 
 ---
 

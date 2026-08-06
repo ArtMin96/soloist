@@ -30,6 +30,7 @@ use soloist_core::{
     CompositeLockReleaser, CorePorts, Facade, LeaseReleaser, NoopRuntimeState, RuntimeState,
     TodoLockReleaser, TokioClock,
 };
+use soloist_git::CliGitRepository;
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use soloist_store::{FileRuntimeState, SqliteStore};
 use soloist_sys::{
@@ -100,7 +101,8 @@ fn build_facade(app: AppHandle) -> Facade {
     // process's close out to both its leases and its todo locks (over the same store), and the lease,
     // timer, scratchpad, diagram, and todo stores persist them; the runtime-state and orphan-control adapters are
     // wired for adoption, the metrics probe reads CPU/memory from /proc, the port probe reads /proc,
-    // the file watcher reports filesystem changes via notify, the notifier shows desktop toasts via
+    // the file watcher reports filesystem changes via notify, the git repository reads working
+    // trees through the user's own `git`, the notifier shows desktop toasts via
     // the Tauri notification plugin, the version probe auto-detects installed agent CLIs, and the
     // shell-env probe captures the login shell's environment (over this process's own env as the
     // base) so launched processes see version-manager PATHs.
@@ -120,6 +122,7 @@ fn build_facade(app: AppHandle) -> Facade {
         .metrics(Arc::new(ProcMetricsProbe::new()))
         .port_probe(Arc::new(ProcPortProbe::new()))
         .file_watcher(Arc::new(NotifyFileWatcher::new()))
+        .git_repository(Arc::new(CliGitRepository::new()))
         .notifier(Arc::new(TauriNotifier::new(app)))
         .agent_tools(store.clone())
         .version_probe(Arc::new(CommandVersionProbe::new()))
@@ -325,6 +328,10 @@ pub fn run() {
             // `solo.yml` edits, so it starts after restore for the same reason; a debounced
             // edit reloads the project and raises the trust review when needed.
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().config_watch_loop());
+            // The git status watch reactor watches each restored project's repository state for
+            // the same reason, so a commit or a branch switch made in a terminal updates the
+            // rail without a manual refresh.
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().git_status_watch_loop());
             // Assemble the toggleable integration servers, each present only when its adapter is
             // compiled in. The composition root owns each server's task + cancellation handle so a
             // runtime toggle of the Integrations setting starts or stops it live, no app restart —
@@ -466,6 +473,8 @@ pub fn run() {
             commands::make_command_local,
             commands::save_command_to_yaml,
             commands::set_project_icon,
+            commands::git_status,
+            commands::git_files,
             commands::orchestration_snapshot,
             commands::lineage_edges,
             commands::agent_activity,

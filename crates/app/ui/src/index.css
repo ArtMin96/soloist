@@ -96,6 +96,22 @@
   --color-status-crashed: var(--status-crashed);
   --color-status-exhausted: var(--status-exhausted);
   --color-status-attention: var(--status-attention);
+  --color-git-modified: var(--git-modified);
+  --color-git-added: var(--git-added);
+  --color-git-deleted: var(--git-deleted);
+  --color-git-conflicted: var(--git-conflicted);
+  --color-git-ignored: var(--git-ignored);
+  --color-git-branch-synced: var(--git-branch-synced);
+  --color-git-branch-local: var(--git-branch-local);
+  --color-file-language-amber: var(--file-language-amber);
+  --color-file-language-azure: var(--file-language-azure);
+  --color-file-language-blue: var(--file-language-blue);
+  --color-file-language-cyan: var(--file-language-cyan);
+  --color-file-language-green: var(--file-language-green);
+  --color-file-language-orange: var(--file-language-orange);
+  --color-file-language-pink: var(--file-language-pink);
+  --color-file-language-red: var(--file-language-red);
+  --color-file-language-violet: var(--file-language-violet);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -197,6 +213,30 @@
   --status-exhausted: oklch(0.47 0.19 22);
   --status-attention: oklch(0.72 0.17 75);
 
+  /* Version control extends the status vocabulary rather than starting a second one: the same
+   * hue families, darkened here because these are read as *text* (a letter beside a path) and
+   * so owe 4.5:1, where a status dot owes only the 3:1 graphical floor. Each clears 4.5:1 on
+   * the rail, on the azure-tinted selection, and on the hover fill — measured, not assumed. */
+  --git-modified: oklch(0.5 0.13 70);
+  --git-added: oklch(0.47 0.15 150);
+  --git-deleted: oklch(0.515 0.2 30);
+  --git-conflicted: oklch(0.47 0.2 12);
+  --git-ignored: oklch(0.495 0.008 255);
+  --git-branch-synced: oklch(0.47 0.15 150);
+  --git-branch-local: oklch(0.48 0.15 305);
+
+  /* File-type colors are deliberately scoped to language marks. They make a dense source tree
+   * scannable without turning generic documents or project controls into a second status system. */
+  --file-language-amber: oklch(0.62 0.14 80);
+  --file-language-azure: oklch(0.53 0.15 245);
+  --file-language-blue: oklch(0.5 0.14 260);
+  --file-language-cyan: oklch(0.51 0.12 205);
+  --file-language-green: oklch(0.48 0.13 150);
+  --file-language-orange: oklch(0.56 0.16 50);
+  --file-language-pink: oklch(0.54 0.17 345);
+  --file-language-red: oklch(0.53 0.18 25);
+  --file-language-violet: oklch(0.49 0.15 300);
+
   --sidebar: oklch(0.972 0.004 250);
   --sidebar-foreground: oklch(0.205 0.01 255);
   --sidebar-primary: oklch(0.55 0.13 245);
@@ -272,6 +312,24 @@
   --status-crashed: oklch(0.68 0.19 25);
   --status-exhausted: oklch(0.6 0.19 22);
   --status-attention: oklch(0.81 0.16 78);
+
+  --git-modified: oklch(0.78 0.14 75);
+  --git-added: oklch(0.74 0.16 150);
+  --git-deleted: oklch(0.74 0.17 32);
+  --git-conflicted: oklch(0.7 0.2 12);
+  --git-ignored: oklch(0.665 0.01 255);
+  --git-branch-synced: oklch(0.74 0.16 150);
+  --git-branch-local: oklch(0.76 0.15 305);
+
+  --file-language-amber: oklch(0.8 0.15 82);
+  --file-language-azure: oklch(0.72 0.14 245);
+  --file-language-blue: oklch(0.71 0.14 260);
+  --file-language-cyan: oklch(0.74 0.12 205);
+  --file-language-green: oklch(0.72 0.14 150);
+  --file-language-orange: oklch(0.74 0.16 52);
+  --file-language-pink: oklch(0.75 0.17 345);
+  --file-language-red: oklch(0.7 0.17 25);
+  --file-language-violet: oklch(0.73 0.15 300);
 
   --sidebar: oklch(0.2 0.012 255);
   --sidebar-foreground: oklch(0.96 0.003 250);
