@@ -1,25 +1,41 @@
-import { useState, type ReactNode } from "react";
-import { GitBranchIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react";
+import { useRef, useState, type ReactNode } from "react";
+import {
+  FoldVerticalIcon,
+  GitBranchIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
+  UnfoldVerticalIcon,
+} from "lucide-react";
 import { BranchHeader } from "@/components/git/BranchHeader";
 import { ChangesTree } from "@/components/git/ChangesTree";
 import { FilesTree } from "@/components/git/FilesTree";
+import type { RepositoryTreeHandle } from "@/components/git/RepositoryTree";
 import { RailDivider } from "@/components/git/RailDivider";
+import { SegmentedControl } from "@/components/SegmentedControl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { Option } from "@/lib/appearance";
 import { useGitFiles } from "@/store/git/useGitFiles";
 import { useGitStatus } from "@/store/git/useGitStatus";
 import { useRailLayout } from "@/store/git/useRailLayout";
 
-/** The two things the rail can show. The values key the tab panels. */
-const CHANGES_TAB = "changes";
-const FILES_TAB = "files";
+/** The two things the rail can show. The values key the selected view. */
+const CHANGES_TAB = "changes" as const;
+const FILES_TAB = "files" as const;
+type RailTab = typeof CHANGES_TAB | typeof FILES_TAB;
+
+const RAIL_TAB_OPTIONS: Option<RailTab>[] = [
+  { value: CHANGES_TAB, label: "Changes" },
+  { value: FILES_TAB, label: "Files" },
+];
 
 const RAIL_LABEL = "Version control";
-const COLLAPSE_LABEL = "Hide version control";
-const EXPAND_LABEL = "Show version control";
+const COLLAPSE_RAIL_LABEL = "Hide version control";
+const EXPAND_RAIL_LABEL = "Show version control";
+const EXPAND_FOLDERS_LABEL = "Expand all folders";
+const COLLAPSE_FOLDERS_LABEL = "Collapse all folders";
 
 /** What the rail says when a tab has nothing in it, per state. */
 const NOT_A_REPOSITORY = "Not a git repository";
@@ -34,7 +50,11 @@ const NO_FILES = "No files";
  */
 export function GitRail({ project }: { project: number }) {
   const [layout, setLayout] = useRailLayout();
-  const [tab, setTab] = useState<string>(CHANGES_TAB);
+  const [tab, setTab] = useState<RailTab>(CHANGES_TAB);
+  const [changesFoldersExpanded, setChangesFoldersExpanded] = useState(false);
+  const [filesFoldersExpanded, setFilesFoldersExpanded] = useState(false);
+  const changesTree = useRef<RepositoryTreeHandle>(null);
+  const filesTree = useRef<RepositoryTreeHandle>(null);
   const status = useGitStatus(project);
   const files = useGitFiles(project, !layout.collapsed && tab === FILES_TAB);
   const changes = status.status?.changes ?? [];
@@ -46,7 +66,7 @@ export function GitRail({ project }: { project: number }) {
         className="flex shrink-0 flex-col items-center gap-2 border-s border-sidebar-border bg-sidebar py-2"
       >
         <RailButton
-          label={EXPAND_LABEL}
+          label={EXPAND_RAIL_LABEL}
           icon={<PanelRightOpenIcon />}
           onClick={() => setLayout({ collapsed: false })}
         />
@@ -74,14 +94,14 @@ export function GitRail({ project }: { project: number }) {
         <div className="flex items-stretch">
           <div className="min-w-0 flex-1">
             {status.status === null ? (
-              <div className="h-9 border-b border-sidebar-border" />
+              <div className="h-11 shrink-0 border-b border-sidebar-border" />
             ) : (
               <BranchHeader branch={status.status.branch} />
             )}
           </div>
           <div className="flex items-center border-b border-sidebar-border pe-1">
             <RailButton
-              label={COLLAPSE_LABEL}
+              label={COLLAPSE_RAIL_LABEL}
               icon={<PanelRightCloseIcon />}
               onClick={() => setLayout({ collapsed: true })}
             />
@@ -101,46 +121,87 @@ export function GitRail({ project }: { project: number }) {
             </div>
           )
         ) : (
-          <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-            <TabsList variant="line" className="h-8 w-full justify-start gap-2 px-2">
-              <TabsTrigger value={CHANGES_TAB} className="flex-none gap-1.5">
-                Changes
-                {changes.length > 0 && (
-                  <Badge variant="muted" className="tabular-nums">
-                    {changes.length}
-                  </Badge>
+          <>
+            <div className="flex h-11 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-3">
+              <SegmentedControl<RailTab>
+                value={tab}
+                options={RAIL_TAB_OPTIONS}
+                onChange={setTab}
+                ariaLabel="Git views"
+                counts={{ changes: changes.length }}
+              />
+              {tab === CHANGES_TAB && changes.length > 0 && (
+                <TreeExpansionButton
+                  expanded={changesFoldersExpanded}
+                  onClick={() =>
+                    changesTree.current?.setAllFoldersExpanded(!changesFoldersExpanded)
+                  }
+                />
+              )}
+              {tab === FILES_TAB && files.files !== null && (
+                <TreeExpansionButton
+                  expanded={filesFoldersExpanded}
+                  onClick={() => filesTree.current?.setAllFoldersExpanded(!filesFoldersExpanded)}
+                />
+              )}
+            </div>
+            <div className="min-h-0 flex-1">
+              <div hidden={tab !== CHANGES_TAB} className="h-full">
+                {changes.length === 0 ? (
+                  <RailEmpty>{NOTHING_CHANGED}</RailEmpty>
+                ) : (
+                  <ScrollArea className="h-full">
+                    <ChangesTree
+                      ref={changesTree}
+                      changes={changes}
+                      onExpansionChange={setChangesFoldersExpanded}
+                    />
+                  </ScrollArea>
                 )}
-              </TabsTrigger>
-              <TabsTrigger value={FILES_TAB} className="flex-none">
-                Files
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value={CHANGES_TAB} className="min-h-0">
-              {changes.length === 0 ? (
-                <RailEmpty>{NOTHING_CHANGED}</RailEmpty>
-              ) : (
-                <ScrollArea className="h-full">
-                  <ChangesTree changes={changes} />
-                </ScrollArea>
-              )}
-            </TabsContent>
-            <TabsContent value={FILES_TAB} className="min-h-0">
-              {files.files === null ? (
-                <RailEmpty>{files.loading ? "" : NO_FILES}</RailEmpty>
-              ) : (
-                <ScrollArea className="h-full">
-                  <FilesTree files={files.files} />
-                </ScrollArea>
-              )}
-            </TabsContent>
-          </Tabs>
+              </div>
+              <div hidden={tab !== FILES_TAB} className="h-full">
+                {files.files === null ? (
+                  <RailEmpty>{files.loading ? "" : NO_FILES}</RailEmpty>
+                ) : (
+                  <ScrollArea className="h-full">
+                    <FilesTree
+                      ref={filesTree}
+                      files={files.files}
+                      onExpansionChange={setFilesFoldersExpanded}
+                    />
+                  </ScrollArea>
+                )}
+              </div>
+            </div>
+          </>
         )}
       </aside>
     </div>
   );
 }
 
-/** A ghost icon button sized for the rail's chrome. */
+/** A compact tree control for either tab; it never changes the version-control rail. */
+function TreeExpansionButton({ expanded, onClick }: { expanded: boolean; onClick: () => void }) {
+  const label = expanded ? COLLAPSE_FOLDERS_LABEL : EXPAND_FOLDERS_LABEL;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="ml-auto"
+          aria-label={label}
+          onClick={onClick}
+        >
+          {expanded ? <FoldVerticalIcon /> : <UnfoldVerticalIcon />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** The existing rail-level control remains separate from the Files tree disclosure control. */
 function RailButton({
   label,
   icon,

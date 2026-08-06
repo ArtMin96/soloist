@@ -61,12 +61,12 @@ describe("GitRail", () => {
     expect(within(rail()).getByLabelText("2 ahead")).toBeTruthy();
   });
 
-  it("counts the changed files beside the tab that lists them", async () => {
+  it("counts the changed files in the shared Git view switcher", async () => {
     readStatus.mockResolvedValue(statusWith(["a.rs", "b.rs", "c.rs"]));
 
     renderRail();
 
-    const changes = await screen.findByRole("tab", { name: /changes/i });
+    const changes = await screen.findByRole("radio", { name: /changes/i });
     expect(changes.textContent).toContain("3");
   });
 
@@ -77,7 +77,7 @@ describe("GitRail", () => {
 
     await waitFor(() => expect(within(rail()).getByText("Not a git repository")).toBeTruthy());
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.queryByLabelText("Git views")).toBeNull();
   });
 
   it("says nothing about a repository until the first read has answered", () => {
@@ -103,31 +103,81 @@ describe("GitRail", () => {
     readFiles.mockResolvedValue(files);
 
     renderRail();
-    await screen.findByRole("tab", { name: /changes/i });
+    await screen.findByRole("radio", { name: /changes/i });
     expect(readFiles).not.toHaveBeenCalled();
 
-    // The tab list switches on the press, not the click that follows it.
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Files" }), { button: 0 });
+    fireEvent.click(screen.getByRole("radio", { name: "Files" }));
 
     await waitFor(() => expect(screen.getByRole("tree", { name: "Project files" })).toBeTruthy());
     expect(readFiles).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the rail closed across a relaunch once it has been closed", async () => {
-    readStatus.mockResolvedValue(statusWith(["a.rs"]));
+  it("expands and collapses the Files tree without hiding version control", async () => {
+    readStatus.mockResolvedValue(statusWith([]));
+    readFiles.mockResolvedValue([{ path: "src/components/GitRail.tsx", ignored: false }]);
+
     renderRail();
-    await waitFor(() => expect(within(rail()).getByText("main")).toBeTruthy());
+    await screen.findByRole("radio", { name: /changes/i });
+    fireEvent.click(screen.getByRole("radio", { name: "Files" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide version control" }));
-    expect(screen.queryByRole("tab")).toBeNull();
+    const tree = await screen.findByRole("tree", { name: "Project files" });
+    expect(within(tree).queryByText("GitRail.tsx")).toBeNull();
 
-    cleanup();
+    fireEvent.click(screen.getByRole("button", { name: "Expand all folders" }));
+    expect(within(tree).getByText("GitRail.tsx")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse all folders" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all folders" }));
+    expect(within(tree).queryByText("GitRail.tsx")).toBeNull();
+    expect(screen.getByLabelText("Git views")).toBeTruthy();
+  });
+
+  it("keeps each tab's folder expansion state while switching views", async () => {
+    readStatus.mockResolvedValue(statusWith(["changed/readme.md"]));
+    readFiles.mockResolvedValue([{ path: "src/components/GitRail.tsx", ignored: false }]);
+
     renderRail();
+    await screen.findByRole("radio", { name: /changes/i });
+    const changesTree = await screen.findByRole("tree", { name: "Changed files" });
+    expect(within(changesTree).getByText("readme.md")).toBeTruthy();
+    fireEvent.click(within(changesTree).getByRole("treeitem", { name: "changed" }));
+    expect(within(changesTree).queryByText("readme.md")).toBeNull();
 
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Show version control" })).toBeTruthy(),
-    );
-    expect(screen.queryByRole("tab")).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "Files" }));
+
+    const filesTree = await screen.findByRole("tree", { name: "Project files" });
+    expect(within(filesTree).queryByText("GitRail.tsx")).toBeNull();
+
+    fireEvent.click(within(filesTree).getByRole("treeitem", { name: "src" }));
+    expect(within(filesTree).getByRole("treeitem", { name: "components" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("radio", { name: /changes/i }));
+    await screen.findByRole("tree", { name: "Changed files" });
+    expect(within(changesTree).queryByText("readme.md")).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "Files" }));
+
+    expect(
+      await within(screen.getByRole("tree", { name: "Project files" })).findByRole("treeitem", {
+        name: "components",
+      }),
+    ).toBeTruthy();
+  });
+
+  it("collapses and expands the Changes tree without changing tabs", async () => {
+    readStatus.mockResolvedValue(statusWith(["src/components/GitRail.tsx"]));
+
+    renderRail();
+    const tree = await screen.findByRole("tree", { name: "Changed files" });
+    expect(within(tree).getByText("GitRail.tsx")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse all folders" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all folders" }));
+    expect(within(tree).queryByText("GitRail.tsx")).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand all folders" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand all folders" }));
+    expect(within(tree).getByText("GitRail.tsx")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /changes/i })).toBeTruthy();
   });
 
   it("keeps a resized rail at the width it was left, across a relaunch", async () => {
@@ -147,15 +197,5 @@ describe("GitRail", () => {
     await waitFor(() => expect(within(rail()).getByText("main")).toBeTruthy());
 
     expect((relaunched.container.firstElementChild as HTMLElement).style.width).toBe(widened);
-  });
-
-  it("still reports how much has changed while it is closed", async () => {
-    readStatus.mockResolvedValue(statusWith(["a.rs", "b.rs"]));
-    renderRail();
-    await waitFor(() => expect(within(rail()).getByText("main")).toBeTruthy());
-
-    fireEvent.click(screen.getByRole("button", { name: "Hide version control" }));
-
-    expect(within(rail()).getByText("2")).toBeTruthy();
   });
 });

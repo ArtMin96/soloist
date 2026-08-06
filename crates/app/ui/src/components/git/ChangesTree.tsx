@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { RepositoryTree } from "@/components/git/RepositoryTree";
+import { forwardRef, useMemo } from "react";
+import { RepositoryTree, type RepositoryTreeHandle } from "@/components/git/RepositoryTree";
 import { StatusLetter } from "@/components/git/StatusLetter";
 import { TreeItemLabel } from "@/components/ui/tree";
 import { CHANGE } from "@/lib/git";
@@ -15,14 +15,19 @@ const LABEL = "Changed files";
  * version control prints for it. A folder shows its strongest child's change, so a closed folder
  * still says whether something under it needs attention.
  */
-export function ChangesTree({ changes }: { changes: FileChange[] }) {
+export const ChangesTree = forwardRef<
+  RepositoryTreeHandle,
+  { changes: FileChange[]; onExpansionChange?: (allExpanded: boolean) => void }
+>(function ChangesTree({ changes, onExpansionChange }, ref) {
   const data = useMemo(() => buildChangesTree(changes), [changes]);
 
   return (
     <RepositoryTree
+      ref={ref}
       data={data}
       label={LABEL}
       autoExpand
+      onExpansionChange={onExpansionChange}
       row={(node) => (
         <>
           {/* Only the file itself is struck through: a folder holding a deleted file is still
@@ -39,4 +44,4 @@ export function ChangesTree({ changes }: { changes: FileChange[] }) {
       )}
     />
   );
-}
+});
