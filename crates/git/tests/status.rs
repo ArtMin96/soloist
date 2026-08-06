@@ -4,66 +4,13 @@
 //! reports.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use soloist_core::{ChangeKind, FileChange, GitError, GitRepository, GitStatus, SyncState};
 use soloist_git::CliGitRepository;
 use tempfile::TempDir;
 
-/// The branch every fixture starts on, named rather than inherited so the assertions do not
-/// depend on whichever default the host's git was built with.
-const BRANCH: &str = "main";
-
-/// Runs `git args` in `dir` under an identity of its own and with no user or system
-/// configuration, so a fixture is the same repository on every machine. Returns whether it
-/// succeeded, for the invocations a fixture *wants* to fail.
-fn try_git(dir: &Path, args: &[&str]) -> bool {
-    Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_AUTHOR_NAME", "Fixture")
-        .env("GIT_AUTHOR_EMAIL", "fixture@example.com")
-        .env("GIT_COMMITTER_NAME", "Fixture")
-        .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .expect("run git")
-        .success()
-}
-
-/// Runs `git args` in `dir`, failing the test if the fixture step did not take.
-fn git(dir: &Path, args: &[&str]) {
-    assert!(
-        try_git(dir, args),
-        "git {args:?} failed in {}",
-        dir.display()
-    );
-}
-
-fn write(dir: &Path, name: &str, contents: &str) {
-    std::fs::write(dir.join(name), contents).expect("write file");
-}
-
-/// A repository with one commit holding each of `files`. Each file gets contents of its own:
-/// identical files are interchangeable to rename detection, which would pair a deletion with an
-/// unrelated addition and make the fixture describe something other than what it set up.
-fn repository_with(files: &[&str]) -> TempDir {
-    let dir = tempfile::tempdir().expect("temp dir");
-    git(dir.path(), &["init", "-b", BRANCH]);
-    for file in files {
-        write(
-            dir.path(),
-            file,
-            &format!("the original contents of {file}\n"),
-        );
-    }
-    git(dir.path(), &["add", "-A"]);
-    git(dir.path(), &["commit", "-m", "start"]);
-    dir
-}
+mod fixture;
+use fixture::{git, repository_with, try_git, write, BRANCH};
 
 /// A clone of a bare repository with one commit pushed to it, returned as (the whole fixture,
 /// the working copy) so the remote outlives the test.

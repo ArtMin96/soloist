@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use crate::ids::ProjectId;
 use crate::testing::{git_status, project_file, FakeGitRepository};
+use crate::vcs::FileContent;
 
 use super::Git;
 
@@ -62,6 +63,42 @@ fn a_listing_is_read_afresh_rather_than_remembered() {
         repository.reads(),
         2,
         "a listing is shown on demand, so it is read on demand rather than cached",
+    );
+}
+
+#[test]
+fn a_listed_file_is_read_as_the_working_tree_holds_it() {
+    let content = FileContent {
+        text: Some("fn main() {}\n".to_string()),
+        truncated: false,
+    };
+    let repository = FakeGitRepository::reporting(git_status("main")).holding(content.clone());
+    let git = Git::new(Arc::new(repository));
+
+    assert_eq!(
+        git.file(ProjectId::next(), Path::new(ROOT), "src/main.rs")
+            .expect("read"),
+        Some(content),
+    );
+}
+
+#[test]
+fn a_path_that_climbs_out_of_the_repository_is_never_read() {
+    let repository = FakeGitRepository::reporting(git_status("main")).holding(FileContent {
+        text: Some("root:x:0:0".to_string()),
+        truncated: false,
+    });
+    let git = Git::new(Arc::new(repository.clone()));
+
+    let content = git
+        .file(ProjectId::next(), Path::new(ROOT), "../../etc/passwd")
+        .expect("no error");
+
+    assert_eq!(content, None);
+    assert_eq!(
+        repository.reads(),
+        0,
+        "a path outside the repository reaches no read at all",
     );
 }
 

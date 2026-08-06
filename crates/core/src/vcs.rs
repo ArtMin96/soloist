@@ -74,6 +74,54 @@ pub struct ProjectFile {
     pub ignored: bool,
 }
 
+/// Which two versions of a path a diff compares. A closed set: every reader answers for each
+/// case, so a comparison cannot be added without every surface saying what it shows for it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffTarget {
+    /// What the next commit would record: the last commit against the index.
+    Staged,
+    /// What the working tree holds beyond the index.
+    Unstaged,
+    /// The working tree against the last commit, whether staged or not.
+    Head,
+    /// The whole of a path version control does not track, which has no earlier version to be
+    /// compared against. Resolved from a path's own status rather than asked for.
+    Untracked,
+}
+
+/// One path's unified diff, as a reader is given it.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct FileDiff {
+    /// The path relative to the repository root, as [`FileChange::path`] reports it.
+    pub path: String,
+    /// Where a renamed or copied file came from, `None` otherwise.
+    pub original_path: Option<String>,
+    /// Which comparison produced this: what was asked for, unless the path is untracked and
+    /// there is only one comparison to make.
+    pub target: DiffTarget,
+    /// Whether version control reports the path as holding bytes rather than text. `patch` is
+    /// then empty — there is nothing in it a reader could be shown but noise.
+    pub binary: bool,
+    /// The unified diff, its header included, or empty when the path does not differ at
+    /// `target`. Always whole hunks, so it is a patch rather than a fragment of one.
+    pub patch: String,
+    /// Whether the diff was longer than one read carries, leaving `patch` holding only its
+    /// first hunks. Asking for the same diff in full carries the rest.
+    pub truncated: bool,
+}
+
+/// A path's contents, as a reader is given them.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct FileContent {
+    /// The file's text, or `None` when it holds bytes that are not text — which a reader is
+    /// told about rather than shown.
+    pub text: Option<String>,
+    /// Whether the file was longer than one read carries, leaving `text` holding only its
+    /// beginning.
+    pub truncated: bool,
+}
+
 /// How the checked-out branch stands against its upstream. A closed set carrying the counts
 /// where it has them, so "how far ahead" is stated once rather than beside a separate flag
 /// that could disagree with it.

@@ -1,0 +1,21 @@
+/* The diff viewer's own surfaces, moved onto the app's palette.
+ *
+ * Only the neutral chrome is reassigned — the page it sits on, the gutter, the rules between
+ * rows. The washes behind an added, removed, or expanded line keep the viewer's own low-chroma
+ * tints: they classify content rather than report a process's state, the same exemption the
+ * terminal's palette holds, and they have to agree with the syntax colours painted over them. */
+
+.diff-tailwindcss-wrapper .diff-style-root {
+  font-family: var(--font-mono);
+}
+
+.diff-tailwindcss-wrapper[data-theme="light"] .diff-style-root,
+.diff-tailwindcss-wrapper[data-theme="dark"] .diff-style-root {
+  --diff-border--: var(--border);
+  --diff-plain-content--: var(--background);
+  --diff-plain-lineNumber--: var(--muted);
+  --diff-plain-lineNumber-color--: var(--muted-foreground);
+  --diff-expand-lineNumber--: var(--muted);
+  --diff-expand-lineNumber-color--: var(--muted-foreground);
+  --diff-empty-content--: var(--muted);
+}

@@ -43,7 +43,13 @@ const e2ePlugin: Plugin[] = process.env.VITE_E2E
 export default defineConfig({
   plugins: [react(), tailwindcss(), ...e2ePlugin, ...bundleReport],
   resolve: {
-    alias: { "@": path.resolve(dir, "./src") },
+    alias: {
+      "@": path.resolve(dir, "./src"),
+      // The diff viewer's fallback highlighter, which this app never reaches and which links
+      // every grammar highlight.js publishes. Measured: it is 785 kB raw / 274 kB gzip of the
+      // diff chunk. See the stub for what it answers and why that is safe.
+      lowlight: path.resolve(dir, "./src/lib/diff/lowlight.ts"),
+    },
   },
   clearScreen: false,
   server: {

@@ -10,16 +10,22 @@ import { BranchHeader } from "@/components/git/BranchHeader";
 import { ChangesTree } from "@/components/git/ChangesTree";
 import { FilesTree } from "@/components/git/FilesTree";
 import type { RepositoryTreeHandle } from "@/components/git/RepositoryTree";
-import { RailDivider } from "@/components/git/RailDivider";
+import { PaneDivider } from "@/components/PaneDivider";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Option } from "@/lib/appearance";
+import { CHANGE, FILE, type DiffSelection } from "@/store/git/useDiffSelection";
 import { useGitFiles } from "@/store/git/useGitFiles";
 import { useGitStatus } from "@/store/git/useGitStatus";
-import { useRailLayout } from "@/store/git/useRailLayout";
+import {
+  RAIL_MAX_WIDTH,
+  RAIL_MIN_WIDTH,
+  RAIL_RESIZE_STEP,
+  useRailLayout,
+} from "@/store/git/useRailLayout";
 
 /** The two things the rail can show. The values key the selected view. */
 const CHANGES_TAB = "changes" as const;
@@ -34,6 +40,7 @@ const RAIL_TAB_OPTIONS: Option<RailTab>[] = [
 const RAIL_LABEL = "Version control";
 const COLLAPSE_RAIL_LABEL = "Hide version control";
 const EXPAND_RAIL_LABEL = "Show version control";
+const RESIZE_RAIL_LABEL = "Resize the version control rail";
 const EXPAND_FOLDERS_LABEL = "Expand all folders";
 const COLLAPSE_FOLDERS_LABEL = "Collapse all folders";
 
@@ -48,7 +55,14 @@ const NO_FILES = "No files";
  *
  * The one place in the rail that reaches the core, so the trees below stay presentational.
  */
-export function GitRail({ project }: { project: number }) {
+export function GitRail({
+  project,
+  onOpen,
+}: {
+  project: number;
+  /** A path in either tree was chosen; the diff split shows it. */
+  onOpen?: (selection: DiffSelection) => void;
+}) {
   const [layout, setLayout] = useRailLayout();
   const [tab, setTab] = useState<RailTab>(CHANGES_TAB);
   const [changesFoldersExpanded, setChangesFoldersExpanded] = useState(false);
@@ -86,7 +100,15 @@ export function GitRail({ project }: { project: number }) {
 
   return (
     <div className="flex shrink-0" style={{ width: `${layout.width}px` }}>
-      <RailDivider width={layout.width} onResize={(width) => setLayout({ width })} />
+      <PaneDivider
+        orientation="vertical"
+        label={RESIZE_RAIL_LABEL}
+        size={layout.width}
+        min={RAIL_MIN_WIDTH}
+        max={RAIL_MAX_WIDTH}
+        step={RAIL_RESIZE_STEP}
+        onResize={(width) => setLayout({ width })}
+      />
       <aside
         aria-label={RAIL_LABEL}
         className="flex min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
@@ -155,6 +177,7 @@ export function GitRail({ project }: { project: number }) {
                       ref={changesTree}
                       changes={changes}
                       onExpansionChange={setChangesFoldersExpanded}
+                      onOpen={(path) => onOpen?.({ kind: CHANGE, path })}
                     />
                   </ScrollArea>
                 )}
@@ -168,6 +191,7 @@ export function GitRail({ project }: { project: number }) {
                       ref={filesTree}
                       files={files.files}
                       onExpansionChange={setFilesFoldersExpanded}
+                      onOpen={(path) => onOpen?.({ kind: FILE, path })}
                     />
                   </ScrollArea>
                 )}

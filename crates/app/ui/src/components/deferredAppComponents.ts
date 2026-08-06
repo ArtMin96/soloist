@@ -46,3 +46,9 @@ export const CommandPalette = lazy(() =>
 export const GitRail = lazy(() =>
   import("@/components/git/GitRail").then((module) => ({ default: module.GitRail })),
 );
+// The diff surface loads apart from the rail, and only once a path is opened: the diff viewer
+// and the syntax highlighter behind it are the heaviest things in the app, and a session spent
+// watching a repository's state never needs either.
+export const DiffPane = lazy(() =>
+  import("@/components/git/DiffPane").then((module) => ({ default: module.DiffPane })),
+);

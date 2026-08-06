@@ -17,8 +17,12 @@ const LABEL = "Changed files";
  */
 export const ChangesTree = forwardRef<
   RepositoryTreeHandle,
-  { changes: FileChange[]; onExpansionChange?: (allExpanded: boolean) => void }
->(function ChangesTree({ changes, onExpansionChange }, ref) {
+  {
+    changes: FileChange[];
+    onExpansionChange?: (allExpanded: boolean) => void;
+    onOpen?: (path: string) => void;
+  }
+>(function ChangesTree({ changes, onExpansionChange, onOpen }, ref) {
   const data = useMemo(() => buildChangesTree(changes), [changes]);
 
   return (
@@ -28,6 +32,7 @@ export const ChangesTree = forwardRef<
       label={LABEL}
       autoExpand
       onExpansionChange={onExpansionChange}
+      onOpen={(node) => onOpen?.(node.path)}
       row={(node) => (
         <>
           {/* Only the file itself is struck through: a folder holding a deleted file is still

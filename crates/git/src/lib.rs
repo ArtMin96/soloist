@@ -8,13 +8,18 @@
 //! The crate depends only on `soloist-core` and the operating system — never the reverse (the
 //! dependency-direction guard enforces it).
 
+mod diff_parse;
 mod files_parse;
 mod runner;
 mod status_parse;
 
+use std::fs::File;
+use std::io::{self, Read};
 use std::path::Path;
 
-use soloist_core::{GitError, GitRepository, GitStatus, ProjectFile};
+use soloist_core::{
+    DiffTarget, FileContent, GitError, GitRepository, GitStatus, ProjectFile, RawFileDiff,
+};
 
 /// The arguments asking for a working tree's state in the one machine-readable form this
 /// adapter reads.
@@ -48,6 +53,34 @@ const INSIDE_WORK_TREE_ARGS: &[&str] = &["rev-parse", "--is-inside-work-tree"];
 
 /// What [`INSIDE_WORK_TREE_ARGS`] prints for a path inside a working tree.
 const INSIDE_WORK_TREE: &[u8] = b"true";
+
+/// The arguments that make a diff say the same thing on every machine: counted form first (the
+/// only place "binary" is stated as data), then the patch, with every part of the output a
+/// user's own configuration could otherwise have changed pinned back to its default.
+const DIFF_ARGS: &[&str] = &[
+    "--numstat",
+    "--patch",
+    "--no-color",
+    "--no-ext-diff",
+    "--find-renames",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+];
+
+/// What is compared against a path version control does not track: nothing at all.
+const NOTHING: &str = "/dev/null";
+
+/// The status a comparison against something outside the repository reports when the two sides
+/// differ. It is an answer, not a failure — the only exit this adapter accepts as one.
+const DIFFERED: i32 = 1;
+
+/// The most of one file this adapter carries. A file past it arrives cut, and says so; reading
+/// a pipe or a path without a ceiling is how one pathological file becomes an out-of-memory.
+const FILE_LIMIT: usize = 1024 * 1024;
+
+/// How far into a file the byte that means "not text" is looked for, matching what version
+/// control itself inspects.
+const BINARY_SNIFF: usize = 8000;
 
 /// Reads working trees by running the system `git` command line.
 #[derive(Clone, Copy, Default)]
@@ -87,6 +120,83 @@ impl GitRepository for CliGitRepository {
             .chain(files_parse::parse(&ignored, true))
             .collect())
     }
+
+    fn diff(
+        &self,
+        root: &Path,
+        target: DiffTarget,
+        path: &str,
+        original_path: Option<&str>,
+    ) -> Result<RawFileDiff, GitError> {
+        let untracked = matches!(target, DiffTarget::Untracked);
+        let mut args = vec!["diff"];
+        match target {
+            DiffTarget::Staged => args.push("--cached"),
+            DiffTarget::Unstaged => {}
+            DiffTarget::Head => args.push("HEAD"),
+            // Nothing in the repository to compare against, so the comparison is made against
+            // a path outside it — which is also why this is the one invocation whose non-zero
+            // exit is an answer.
+            DiffTarget::Untracked => args.push("--no-index"),
+        }
+        args.extend_from_slice(DIFF_ARGS);
+        args.push("--");
+        if untracked {
+            args.push(NOTHING);
+        }
+        args.push(path);
+        // A rename is recognised only when both of its names are asked about together: given
+        // one, version control sees a file deleted and an unrelated one added.
+        args.extend(original_path);
+
+        let accepted = untracked.then_some(DIFFERED);
+        let output = match runner::run_accepting(root, &args, accepted) {
+            Ok(output) => output,
+            Err(GitError::Op { .. }) if !inside_work_tree(root) => return Err(GitError::NotARepo),
+            Err(err) => return Err(err),
+        };
+        Ok(diff_parse::parse(&output))
+    }
+
+    fn read_file(&self, root: &Path, path: &str) -> Result<Option<FileContent>, GitError> {
+        let file = match File::open(root.join(path)) {
+            Ok(file) => file,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(GitError::Op { status: None }),
+        };
+        // A listing carries directories as well as files, so being handed one is ordinary
+        // rather than a fault — and there is no content in it to show.
+        if file.metadata().is_ok_and(|metadata| metadata.is_dir()) {
+            return Ok(None);
+        }
+        // One byte past the ceiling is all it takes to know the ceiling was crossed.
+        let mut bytes = Vec::new();
+        file.take(FILE_LIMIT as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| GitError::Op { status: None })?;
+        Ok(Some(content(bytes)))
+    }
+}
+
+/// One file's bytes as a reader is given them: cut at the ceiling if it was over it, and with
+/// no text at all when they are not text.
+fn content(mut bytes: Vec<u8>) -> FileContent {
+    let truncated = bytes.len() > FILE_LIMIT;
+    bytes.truncate(FILE_LIMIT);
+    if bytes.iter().take(BINARY_SNIFF).any(|&byte| byte == 0) {
+        return FileContent {
+            text: None,
+            truncated,
+        };
+    }
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => Some(text),
+        // A read cut at the ceiling can end part-way through a character. That is the cut
+        // showing, not the file being unreadable, so only the last character is lost.
+        Err(err) if truncated => Some(String::from_utf8_lossy(err.as_bytes()).into_owned()),
+        Err(_) => None,
+    };
+    FileContent { text, truncated }
 }
 
 /// Whether `root` is inside a working tree.
