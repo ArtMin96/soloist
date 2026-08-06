@@ -2,42 +2,12 @@
 //! `git` a user would run — so what is asserted is what the installed tool actually reports.
 
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 use soloist_core::{GitError, GitRepository, ProjectFile};
 use soloist_git::CliGitRepository;
 
-/// The branch every fixture starts on, named rather than inherited so the fixture does not
-/// depend on whichever default the host's git was built with.
-const BRANCH: &str = "main";
-
-/// Runs `git args` in `dir` under an identity of its own and with no user or system
-/// configuration, so a fixture is the same repository on every machine.
-fn git(dir: &Path, args: &[&str]) {
-    let ok = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_AUTHOR_NAME", "Fixture")
-        .env("GIT_AUTHOR_EMAIL", "fixture@example.com")
-        .env("GIT_COMMITTER_NAME", "Fixture")
-        .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .expect("run git")
-        .success();
-    assert!(ok, "git {args:?} failed in {}", dir.display());
-}
-
-fn write(dir: &Path, name: &str, contents: &str) {
-    let path = dir.join(name);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).expect("create parent");
-    }
-    std::fs::write(path, contents).expect("write file");
-}
+mod fixture;
+use fixture::{git, write, BRANCH};
 
 fn listing(dir: &Path) -> Vec<ProjectFile> {
     CliGitRepository::new().list_files(dir).expect("list files")

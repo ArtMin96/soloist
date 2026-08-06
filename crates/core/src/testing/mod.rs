@@ -56,7 +56,7 @@ pub use filewatch::FakeFileWatcher;
 #[cfg(test)]
 pub use fixtures::facade_with_agent_tool;
 pub use fixtures::{agent_registration, terminal_registration};
-pub use git::{git_over, git_status, project_file, FakeGitRepository};
+pub use git::{file_change, git_over, git_status, project_file, raw_diff, FakeGitRepository};
 pub use identity::{authentic_session, session_in_dir, TEST_PEER_PGID};
 pub use lock_releaser::RecordingLockReleaser;
 pub use metrics::FakeMetricsProbe;

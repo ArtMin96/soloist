@@ -39,6 +39,9 @@ interface RepositoryTreeProps {
   row: (node: TreeNode) => ReactNode;
   /** Lets the Files view's header expand or collapse the visible folder hierarchy. */
   onExpansionChange?: (allExpanded: boolean) => void;
+  /** A path was chosen — clicked, or focused and confirmed. Folders open instead, so this only
+   *  ever names a file. */
+  onOpen?: (node: TreeNode) => void;
 }
 
 export interface RepositoryTreeHandle {
@@ -55,7 +58,7 @@ export interface RepositoryTreeHandle {
  * is the caller's `row`.
  */
 export const RepositoryTree = forwardRef<RepositoryTreeHandle, RepositoryTreeProps>(
-  function RepositoryTree({ data, label, autoExpand, row, onExpansionChange }, ref) {
+  function RepositoryTree({ data, label, autoExpand, row, onExpansionChange, onOpen }, ref) {
     const [expandedItems, setExpandedItems] = useState<string[]>([]);
     const [selectedItems, setSelectedItems] = useState<string[]>([]);
     const seenFolders = useRef(new Set<string>());
@@ -71,6 +74,11 @@ export const RepositoryTree = forwardRef<RepositoryTreeHandle, RepositoryTreePro
       dataLoader: {
         getItem: (path) => data.nodes[path] ?? MISSING,
         getChildren: (path) => (path === ROOT ? data.roots : (data.nodes[path]?.children ?? [])),
+      },
+      onPrimaryAction: (item) => {
+        const node = item.getItemData();
+        // A folder's own primary action is to open or close, which the tree already does.
+        if (!node.folder) onOpen?.(node);
       },
       features: [syncDataLoaderFeature, selectionFeature, hotkeysCoreFeature],
     });

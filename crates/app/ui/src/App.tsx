@@ -2,6 +2,7 @@ import { Suspense, useCallback, useMemo, useState } from "react";
 import { DeferredOverlay } from "@/components/DeferredOverlay";
 import {
   CommandPalette,
+  DiffPane,
   GitRail,
   LaunchPicker,
   OrchestrationPane,
@@ -33,6 +34,7 @@ import { useProcesses } from "@/store/useProcesses";
 import { useProcessRemoval } from "@/store/useProcessRemoval";
 import { useProcessActivationNavigation } from "@/store/useProcessActivationNavigation";
 import { TERMINAL_POOL_CAP, useTerminalPool } from "@/store/useTerminalPool";
+import { useDiffSelection } from "@/store/git/useDiffSelection";
 import { useProjects } from "@/store/projects";
 import { FileDropProvider } from "@/store/FileDropProvider";
 import { SignalsProvider } from "@/store/SignalsProvider";
@@ -108,6 +110,14 @@ export default function App() {
   // The project whose processes the Quick Actions palette shows: whichever project currently
   // has a terminal open, or the settings / orchestration pane open.
   const activeProjectId = selected?.project ?? selectedProjectId ?? orchestrationProjectId ?? null;
+
+  // What the diff split is showing, if anything. Opening a path in the rail fills it; Escape or
+  // the split's own close empties it.
+  const {
+    selection: diffSelection,
+    open: openDiff,
+    close: closeDiff,
+  } = useDiffSelection(activeProjectId);
 
   // Project views deselect the process without erasing its MRU lifecycle history.
   const openProjectSettings = useCallback(
@@ -279,47 +289,61 @@ export default function App() {
                         onRemoveProject={projects.remove}
                         onReorderProjects={projects.reorder}
                       />
-                      <main className="min-w-0 flex-1">
-                        <Suspense fallback={<div className="h-full w-full bg-background" />}>
-                          {/* Keep-alive pool: every recently-viewed process keeps its terminal mounted
+                      {/* A column, so the diff opens as a split at the foot of the area
+                          rather than in place of what is above it. The panes keep their own
+                          region: nothing here remounts the terminal when the split appears. */}
+                      <main className="relative flex min-w-0 flex-1 flex-col">
+                        <div className="relative min-h-0 flex-1">
+                          <Suspense fallback={<div className="h-full w-full bg-background" />}>
+                            {/* Keep-alive pool: every recently-viewed process keeps its terminal mounted
                           (xterm + live stream) so switching back is instant; only the selected one
                           is visible, the rest sit hidden with both their renderer and their byte
                           parsing paused, so a hidden pane costs no per-frame main-thread work. */}
-                          {poolProcesses.map((process) => (
-                            <TerminalPane
-                              key={process.id}
-                              process={process}
-                              visible={process.id === selectedId}
-                              processes={store.processes}
-                              onSelectProcess={selectProcess}
-                              onStart={() => startProcess(process.id)}
-                              onStop={() => stopProcess(process.id)}
-                              onRestart={() => restartProcess(process.id)}
-                              onResume={() => resumeProcess(process.id)}
-                              onTrust={() => reviewById(process.id)}
-                              onRemove={() => requestProcessRemoval(process.id)}
-                            />
-                          ))}
-                          {!selected &&
-                            (selectedProject ? (
-                              <ProjectSettingsPane
-                                key={selectedProject.id}
-                                project={selectedProject}
-                              />
-                            ) : orchestrationProject ? (
-                              <OrchestrationPane
-                                key={orchestrationProject.id}
-                                project={orchestrationProject}
-                              />
-                            ) : (
-                              <StartSurface
-                                hasProjects={projects.projects.length > 0}
-                                onOpenProject={projects.open}
-                                onLaunchAgent={openPicker}
-                                notice={projects.notice}
+                            {poolProcesses.map((process) => (
+                              <TerminalPane
+                                key={process.id}
+                                process={process}
+                                visible={process.id === selectedId}
+                                processes={store.processes}
+                                onSelectProcess={selectProcess}
+                                onStart={() => startProcess(process.id)}
+                                onStop={() => stopProcess(process.id)}
+                                onRestart={() => restartProcess(process.id)}
+                                onResume={() => resumeProcess(process.id)}
+                                onTrust={() => reviewById(process.id)}
+                                onRemove={() => requestProcessRemoval(process.id)}
                               />
                             ))}
-                        </Suspense>
+                            {!selected &&
+                              (selectedProject ? (
+                                <ProjectSettingsPane
+                                  key={selectedProject.id}
+                                  project={selectedProject}
+                                />
+                              ) : orchestrationProject ? (
+                                <OrchestrationPane
+                                  key={orchestrationProject.id}
+                                  project={orchestrationProject}
+                                />
+                              ) : (
+                                <StartSurface
+                                  hasProjects={projects.projects.length > 0}
+                                  onOpenProject={projects.open}
+                                  onLaunchAgent={openPicker}
+                                  notice={projects.notice}
+                                />
+                              ))}
+                          </Suspense>
+                        </div>
+                        {activeProjectId !== null && diffSelection !== null && (
+                          <Suspense fallback={null}>
+                            <DiffPane
+                              project={activeProjectId}
+                              selection={diffSelection}
+                              onClose={closeDiff}
+                            />
+                          </Suspense>
+                        )}
                       </main>
                       {/* The version-control rail sits beside the main area rather than
                           replacing it, so a repository's state stays in sight while an agent
@@ -327,7 +351,11 @@ export default function App() {
                           nothing here remounts the terminal pane when the rail's chunk lands. */}
                       {activeProjectId !== null && (
                         <Suspense fallback={null}>
-                          <GitRail key={activeProjectId} project={activeProjectId} />
+                          <GitRail
+                            key={activeProjectId}
+                            project={activeProjectId}
+                            onOpen={openDiff}
+                          />
                         </Suspense>
                       )}
                     </div>

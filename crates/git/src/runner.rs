@@ -37,6 +37,16 @@ const OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
 
 /// Runs `git args` in `root` and returns what it wrote to standard output.
 pub(crate) fn run(root: &Path, args: &[&str]) -> Result<Vec<u8>, GitError> {
+    run_accepting(root, args, None)
+}
+
+/// The same, accepting `accepted` as an answer alongside a zero status — for the invocations
+/// whose non-zero exit reports what they found rather than that they failed.
+pub(crate) fn run_accepting(
+    root: &Path,
+    args: &[&str],
+    accepted: Option<i32>,
+) -> Result<Vec<u8>, GitError> {
     let child = Command::new(GIT)
         .args(args)
         .current_dir(root)
@@ -52,12 +62,22 @@ pub(crate) fn run(root: &Path, args: &[&str]) -> Result<Vec<u8>, GitError> {
             _ => GitError::Op { status: None },
         })?;
     let (output, status) = wait_bounded(child, TIME_LIMIT)?;
-    if !status.success() {
+    if !answered(status, accepted) {
         return Err(GitError::Op {
             status: status.code(),
         });
     }
     Ok(output)
+}
+
+/// Whether a finished invocation produced an answer: it succeeded, or it exited with the status
+/// its caller reads as one.
+///
+/// An invocation stopped by a signal reports no status at all, and that is never an answer — so
+/// it is refused here rather than mistaken for a caller that accepts nothing, which reports no
+/// status either.
+fn answered(status: ExitStatus, accepted: Option<i32>) -> bool {
+    status.success() || (accepted.is_some() && status.code() == accepted)
 }
 
 /// Waits for `child` within `limit`, capturing its standard output up to [`OUTPUT_LIMIT`].

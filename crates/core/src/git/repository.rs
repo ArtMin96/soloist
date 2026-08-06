@@ -12,7 +12,22 @@ use std::path::Path;
 
 use super::error::GitError;
 use super::status::GitStatus;
-use crate::vcs::ProjectFile;
+use crate::vcs::{DiffTarget, FileContent, ProjectFile};
+
+/// One path's unified diff as version control produced it, split where its hunks begin.
+///
+/// The split is the adapter's, because knowing where a hunk starts is knowing the patch format
+/// — and it is what lets the context hand a reader the first hunks of a very long diff without
+/// handing them a patch that stops halfway through one.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct RawFileDiff {
+    /// Whether version control reports the path as holding bytes rather than text.
+    pub binary: bool,
+    /// Everything before the first hunk — what any hunk of this patch has to be preceded by.
+    pub header: String,
+    /// Each hunk in turn, its own `@@` line included.
+    pub hunks: Vec<String>,
+}
 
 /// Reads the state of a version-controlled working tree.
 ///
@@ -32,6 +47,25 @@ pub trait GitRepository: Send + Sync {
     /// its contents, which is what keeps the answer bounded for a working tree carrying build
     /// output. Same [`GitError::NotARepo`] meaning as [`GitRepository::status`].
     fn list_files(&self, root: &Path) -> Result<Vec<ProjectFile>, GitError>;
+
+    /// How `path` differs at `target`, split where its hunks begin. `original_path` is where a
+    /// renamed or copied path came from, which version control has to be told: a rename is
+    /// recognised only when both of its names are asked about together.
+    ///
+    /// A path that does not differ is an empty diff rather than a failure — the ordinary answer
+    /// for asking about the staged side of a change that is only in the working tree.
+    fn diff(
+        &self,
+        root: &Path,
+        target: DiffTarget,
+        path: &str,
+        original_path: Option<&str>,
+    ) -> Result<RawFileDiff, GitError>;
+
+    /// The working tree's copy of `path`, bounded: past the adapter's ceiling only the
+    /// beginning arrives, marked as [`FileContent::truncated`]. `Ok(None)` for a path that is
+    /// not there, which is ordinary for a listing read a moment before the file was removed.
+    fn read_file(&self, root: &Path, path: &str) -> Result<Option<FileContent>, GitError>;
 }
 
 /// A [`GitRepository`] that reports every path as belonging to no repository — the default
@@ -49,6 +83,20 @@ impl GitRepository for NoopGitRepository {
     }
 
     fn list_files(&self, _root: &Path) -> Result<Vec<ProjectFile>, GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn diff(
+        &self,
+        _root: &Path,
+        _target: DiffTarget,
+        _path: &str,
+        _original_path: Option<&str>,
+    ) -> Result<RawFileDiff, GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn read_file(&self, _root: &Path, _path: &str) -> Result<Option<FileContent>, GitError> {
         Err(GitError::NotARepo)
     }
 }
