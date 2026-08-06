@@ -1,5 +1,7 @@
 import { ArrowDownIcon, ArrowUpIcon, GitBranchIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { syncLabel } from "@/lib/git";
+import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { BranchInfo } from "@/domain";
 
@@ -16,15 +18,26 @@ export function BranchHeader({ branch }: { branch: BranchInfo }) {
   const standing = syncLabel(branch.sync);
   const ahead = "ahead" in branch.sync ? branch.sync.ahead : 0;
   const behind = "behind" in branch.sync ? branch.sync.behind : 0;
+  // Green confirms a tracking branch is known to match its upstream. Violet deliberately marks
+  // a branch that is local-only, detached, or still needs reconciliation with its upstream.
+  const isSynced = branch.upstream !== null && branch.sync.state === "up_to_date";
 
   return (
-    <div className="flex h-9 min-w-0 items-center gap-1.5 border-b border-sidebar-border px-3">
-      <GitBranchIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+    <div className="flex h-11 min-w-0 items-center gap-2 border-b border-sidebar-border px-3">
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="type-title min-w-0 truncate font-[550] tracking-[var(--tracking-title)]">
-            {name}
-          </span>
+          <Badge
+            variant="outline"
+            className={cn(
+              "h-6 min-w-0 max-w-full shrink gap-1.5 rounded-md px-2 text-[0.75rem] font-[550] tracking-[var(--tracking-body)] shadow-none",
+              isSynced
+                ? "border-git-branch-synced/40 bg-git-branch-synced/10 text-git-branch-synced"
+                : "border-git-branch-local/40 bg-git-branch-local/10 text-git-branch-local",
+            )}
+          >
+            <GitBranchIcon aria-hidden className="size-3.5 shrink-0" />
+            <span className="min-w-0 truncate">{name}</span>
+          </Badge>
         </TooltipTrigger>
         <TooltipContent>
           {branch.upstream ? `${name} → ${branch.upstream}` : `${name} (tracking nothing)`}

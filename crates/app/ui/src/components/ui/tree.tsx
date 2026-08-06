@@ -49,11 +49,11 @@ function TreeItem<T>({
       data-selected={item.isSelected() ? "" : undefined}
       style={{ paddingInlineStart: `${item.getItemMeta().level * TREE_INDENT}px` }}
       className={cn(
-        "relative flex h-7 w-full min-w-0 cursor-default items-center gap-1 rounded-md pe-2 text-left text-[0.8125rem] outline-none",
+        "relative flex h-8 w-full min-w-0 cursor-default items-center gap-2 rounded-sm pe-2 text-left text-[0.8125rem] tracking-[var(--tracking-body)] outline-none",
         "transition-colors duration-[var(--dur-select)] ease-out-quint",
         "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-        "data-selected:bg-[var(--sel-fill)] data-selected:font-medium data-selected:hover:bg-[var(--sel-fill-hover)]",
-        "not-data-selected:hover:bg-sidebar-accent",
+        "data-folder:font-medium data-selected:bg-[var(--sel-fill)] data-selected:hover:bg-[var(--sel-fill-hover)]",
+        "not-data-selected:hover:bg-sidebar-accent/75",
         className,
       )}
       {...props}
@@ -73,7 +73,7 @@ function TreeItemChevron<T>({ item }: { item: ItemInstance<T> }) {
     <ChevronRightIcon
       aria-hidden
       className={cn(
-        "size-3.5 shrink-0 text-muted-foreground",
+        "size-3.5 shrink-0 text-muted-foreground/80",
         "transition-transform duration-[var(--dur-control)] ease-spring-settle motion-reduce:transition-none",
         item.isExpanded() && "rotate-90",
       )}
@@ -83,7 +83,7 @@ function TreeItemChevron<T>({ item }: { item: ItemInstance<T> }) {
 
 /** The row's name, truncating rather than wrapping — a rail is narrow by design. */
 function TreeItemLabel({ className, ...props }: React.ComponentProps<"span">) {
-  return <span data-slot="tree-item-label" className={cn("truncate", className)} {...props} />;
+  return <span data-slot="tree-item-label" className={cn("min-w-0 truncate", className)} {...props} />;
 }
 
 export { Tree, TreeItem, TreeItemChevron, TreeItemLabel };

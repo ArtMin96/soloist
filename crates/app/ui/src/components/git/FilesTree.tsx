@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { RepositoryTree } from "@/components/git/RepositoryTree";
+import { forwardRef, useMemo } from "react";
+import { RepositoryTree, type RepositoryTreeHandle } from "@/components/git/RepositoryTree";
 import { TreeItemLabel } from "@/components/ui/tree";
 import { IGNORED_TONE_CLASS } from "@/lib/git";
 import { cn } from "@/lib/utils";
@@ -17,14 +17,19 @@ const IGNORED = "ignored";
  * so; an ignored folder is one row rather than the thousands of files beneath it, because that
  * is how the listing reports it.
  */
-export function FilesTree({ files }: { files: ProjectFile[] }) {
+export const FilesTree = forwardRef<
+  RepositoryTreeHandle,
+  { files: ProjectFile[]; onExpansionChange?: (allExpanded: boolean) => void }
+>(function FilesTree({ files, onExpansionChange }, ref) {
   const data = useMemo(() => buildFilesTree(files), [files]);
 
   return (
     <RepositoryTree
+      ref={ref}
       data={data}
       label={LABEL}
       autoExpand={false}
+      onExpansionChange={onExpansionChange}
       row={(node) => (
         <TreeItemLabel className={cn(node.ignored && IGNORED_TONE_CLASS)}>
           {node.name}
@@ -33,4 +38,4 @@ export function FilesTree({ files }: { files: ProjectFile[] }) {
       )}
     />
   );
-}
+});
