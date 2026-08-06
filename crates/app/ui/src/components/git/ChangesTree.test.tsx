@@ -31,7 +31,7 @@ afterEach(cleanup);
 
 describe("ChangesTree", () => {
   it("presents the changed paths as a tree a screen reader can walk", () => {
-    render(<ChangesTree changes={[change("src/main.rs", "modified")]} />);
+    render(<ChangesTree actions={null} changes={[change("src/main.rs", "modified")]} />);
 
     const tree = screen.getByRole("tree", { name: "Changed files" });
     const [folder, file] = within(tree).getAllByRole("treeitem");
@@ -44,6 +44,7 @@ describe("ChangesTree", () => {
   it("names each row's change in words, so the letter is never the only thing carrying it", () => {
     render(
       <ChangesTree
+        actions={null}
         changes={[
           change("a.rs", "modified"),
           change("b.rs", "deleted"),
@@ -59,7 +60,10 @@ describe("ChangesTree", () => {
 
   it("shows a folder the strongest change beneath it, so a closed folder still reports", () => {
     render(
-      <ChangesTree changes={[change("src/a.rs", "untracked"), change("src/b.rs", "conflicted")]} />,
+      <ChangesTree
+        actions={null}
+        changes={[change("src/a.rs", "untracked"), change("src/b.rs", "conflicted")]}
+      />,
     );
     const folder = row("src");
     expect(within(folder).getByRole("img").getAttribute("aria-label")).toBe("Conflicted");
@@ -72,7 +76,10 @@ describe("ChangesTree", () => {
 
   it("walks, closes and opens by keyboard alone", async () => {
     render(
-      <ChangesTree changes={[change("src/a.rs", "modified"), change("zeta.rs", "modified")]} />,
+      <ChangesTree
+        actions={null}
+        changes={[change("src/a.rs", "modified"), change("zeta.rs", "modified")]}
+      />,
     );
     const tree = screen.getByRole("tree");
 
@@ -90,7 +97,7 @@ describe("ChangesTree", () => {
   });
 
   it("draws a deleted file as gone, and the folder holding it as still there", () => {
-    render(<ChangesTree changes={[change("src/gone.rs", "deleted")]} />);
+    render(<ChangesTree actions={null} changes={[change("src/gone.rs", "deleted")]} />);
 
     expect(within(row("gone.rs")).getByText("gone.rs").className).toContain("line-through");
     expect(within(row("src")).getByText("src").className).not.toContain("line-through");

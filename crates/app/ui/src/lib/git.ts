@@ -1,4 +1,4 @@
-import type { ChangeKind, GitFileStatus, SyncState } from "@/domain";
+import type { ChangeKind, GitFileStatus, HunkRange, SyncState } from "@/domain";
 
 /**
  * The single source for turning a version-control change into its display, alongside
@@ -64,6 +64,27 @@ const SEVERITY: Record<ChangeKind, number> = {
 /** The stronger of two changes — what a folder inherits from a child. */
 export function strongerChange(a: ChangeKind, b: ChangeKind): ChangeKind {
   return SEVERITY[b] > SEVERITY[a] ? b : a;
+}
+
+/**
+ * How much of a path is recorded for the next commit, which is what its checkbox shows. A path
+ * changed on both sides is neither staged nor unstaged but part of each, and says so rather than
+ * rounding to one — ticking it then stages the rest.
+ */
+export type StagedState = "staged" | "unstaged" | "partial";
+
+export function stagedState(status: GitFileStatus): StagedState {
+  if (status.staged === null) return "unstaged";
+  return status.unstaged === null ? "staged" : "partial";
+}
+
+/**
+ * The key one action on one hunk is tracked by while it is in flight. Built from where the hunk
+ * falls, which is also how the core names it — so a row that scrolls out of view and back comes
+ * back to the same state rather than to whatever the new row in that position holds.
+ */
+export function hunkKey(path: string, hunk: HunkRange): string {
+  return `${path}@${hunk.old_start},${hunk.old_lines},${hunk.new_start},${hunk.new_lines}`;
 }
 
 /** How a branch's standing against its upstream reads, or null when there is nothing to say. */

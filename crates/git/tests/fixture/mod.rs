@@ -46,6 +46,37 @@ pub fn git(dir: &Path, args: &[&str]) {
     );
 }
 
+/// Runs `git args` in `dir` and returns what it printed, for the assertions made against
+/// version control's own account of a repository rather than against the adapter's.
+pub fn git_output(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .stderr(Stdio::null())
+        .output()
+        .expect("run git");
+    assert!(output.status.success(), "git {args:?} failed");
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// What the index holds for `path`, byte for byte — the one assertion that tells a hunk staged
+/// exactly as it was produced from one staged nearly so.
+pub fn staged_content(dir: &Path, path: &str) -> String {
+    git_output(dir, &["show", &format!(":{path}")])
+}
+
+/// The two letters version control prints for `path` in its machine-readable status: what is
+/// staged, and what the working tree holds beyond it.
+pub fn porcelain_status(dir: &Path, path: &str) -> String {
+    git_output(dir, &["status", "--porcelain", "--"])
+        .lines()
+        .find(|line| line.ends_with(path))
+        .map(|line| line[..2].to_string())
+        .unwrap_or_default()
+}
+
 /// Writes `contents` to `name` under `dir`, creating the folders above it.
 pub fn write(dir: &Path, name: &str, contents: &str) {
     let path = dir.join(name);
@@ -61,6 +92,12 @@ pub fn write(dir: &Path, name: &str, contents: &str) {
 pub fn repository_with(files: &[&str]) -> TempDir {
     let dir = tempfile::tempdir().expect("temp dir");
     git(dir.path(), &["init", "-b", BRANCH]);
+    // The adapter runs the user's own `git` without an identity of its own, so a fixture it has
+    // to commit in carries one — and turns off the signing that the machine's own configuration
+    // might otherwise switch on, which would make the test depend on a key nobody else has.
+    git(dir.path(), &["config", "user.name", "Fixture"]);
+    git(dir.path(), &["config", "user.email", "fixture@example.com"]);
+    git(dir.path(), &["config", "commit.gpgsign", "false"]);
     for file in files {
         write(
             dir.path(),

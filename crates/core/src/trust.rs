@@ -61,6 +61,23 @@ impl TrustStore {
     pub fn untrust(&self, project: ProjectId, spec: &ProcessSpec) -> Result<(), StoreError> {
         self.repo.revoke(project, &spec.variant_hash())
     }
+
+    /// Whether the user has authorised Soloist to make changes within `project` — the gate the
+    /// version-control write side spends. Coarser than command trust on purpose: it authorises
+    /// Soloist to act on the project rather than one command line to run.
+    pub fn is_project_trusted(&self, project: ProjectId) -> Result<bool, StoreError> {
+        self.repo.is_project_trusted(project)
+    }
+
+    /// Records that authorisation for `project`.
+    pub fn trust_project(&self, project: ProjectId) -> Result<(), StoreError> {
+        self.repo.set_project_trusted(project)
+    }
+
+    /// Withdraws it again.
+    pub fn untrust_project(&self, project: ProjectId) -> Result<(), StoreError> {
+        self.repo.revoke_project(project)
+    }
 }
 
 #[cfg(test)]

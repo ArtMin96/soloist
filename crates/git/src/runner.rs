@@ -8,14 +8,17 @@
 //!
 //! Diagnostics are discarded rather than read. They are prose, and translated; only the exit
 //! status crosses back, which is what keeps the core's behaviour independent of the wording,
-//! and the language, of a program it does not own.
+//! and the language, of a program it does not own. The one exception is an invocation that runs
+//! the *user's* code — a commit, and the hooks it fires — where what was written is the user's
+//! own message and the only useful thing to show them. It is carried across as opaque text and
+//! never read here, so no behaviour depends on it either.
 
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use nix::sys::signal::{killpg, Signal};
@@ -26,8 +29,9 @@ use soloist_core::GitError;
 const GIT: &str = "git";
 
 /// How long one invocation may take before it is stopped. Generous enough for a first read of
-/// a very large working tree, bounded so an invocation waiting on something that will never
-/// arrive cannot hold its caller for ever.
+/// a very large working tree — and for a repository's own commit hooks, which run inside it —
+/// bounded so an invocation waiting on something that will never arrive cannot hold its caller
+/// for ever.
 const TIME_LIMIT: Duration = Duration::from_secs(30);
 
 /// The most output one invocation may produce. A working tree past this is past anything a
@@ -35,39 +39,85 @@ const TIME_LIMIT: Duration = Duration::from_secs(30);
 /// becomes an out-of-memory.
 const OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
 
-/// Runs `git args` in `root` and returns what it wrote to standard output.
-pub(crate) fn run(root: &Path, args: &[&str]) -> Result<Vec<u8>, GitError> {
-    run_accepting(root, args, None)
+/// The most of a refused invocation's own account of itself that is carried back. Enough for a
+/// hook to say what it objected to, bounded so a hook that prints a whole build log does not
+/// become the error message.
+const DIAGNOSTIC_LIMIT: usize = 8 * 1024;
+
+/// What one invocation is handed and what is accepted back from it.
+#[derive(Default)]
+pub(crate) struct Run<'a> {
+    /// What to write to its standard input, for the invocations that read a patch from there.
+    pub input: Option<&'a str>,
+    /// An exit status to read as an answer alongside zero, for the invocations whose non-zero
+    /// exit reports what they found rather than that they failed.
+    pub accepted: Option<i32>,
+    /// Whether to carry back what the invocation wrote about itself when it fails — set only
+    /// where that text is the user's own, never to be read as a diagnostic.
+    pub report_refusal: bool,
 }
 
-/// The same, accepting `accepted` as an answer alongside a zero status — for the invocations
-/// whose non-zero exit reports what they found rather than that they failed.
+/// Runs `git args` in `root` and returns what it wrote to standard output.
+pub(crate) fn run(root: &Path, args: &[&str]) -> Result<Vec<u8>, GitError> {
+    run_with(root, args, Run::default())
+}
+
+/// The same, accepting `accepted` as an answer alongside a zero status.
 pub(crate) fn run_accepting(
     root: &Path,
     args: &[&str],
     accepted: Option<i32>,
 ) -> Result<Vec<u8>, GitError> {
-    let child = Command::new(GIT)
+    run_with(
+        root,
+        args,
+        Run {
+            accepted,
+            ..Run::default()
+        },
+    )
+}
+
+/// Runs `git args` in `root` under `options`.
+pub(crate) fn run_with(root: &Path, args: &[&str], options: Run<'_>) -> Result<Vec<u8>, GitError> {
+    let mut child = Command::new(GIT)
         .args(args)
         .current_dir(root)
         .env("LC_ALL", "C")
         .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
+        .stdin(if options.input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(if options.report_refusal {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .process_group(0)
         .spawn()
         .map_err(|err| match err.kind() {
             io::ErrorKind::NotFound => GitError::GitMissing,
             _ => GitError::Op { status: None },
         })?;
-    let (output, status) = wait_bounded(child, TIME_LIMIT)?;
-    if !answered(status, accepted) {
-        return Err(GitError::Op {
-            status: status.code(),
-        });
+
+    let writing = options.input.map(|input| write_input(&mut child, input));
+    let reading = child.stderr.take().map(read_diagnostics);
+    let finished = wait_bounded(child, TIME_LIMIT, writing);
+
+    let refusal = reading.and_then(|reading| reading.join().ok());
+    let (output, status) = finished?;
+    if answered(status, options.accepted) {
+        return Ok(output);
     }
-    Ok(output)
+    match refusal {
+        Some(output) if !output.is_empty() => Err(GitError::Refused { output }),
+        _ => Err(GitError::Op {
+            status: status.code(),
+        }),
+    }
 }
 
 /// Whether a finished invocation produced an answer: it succeeded, or it exited with the status
@@ -80,13 +130,46 @@ fn answered(status: ExitStatus, accepted: Option<i32>) -> bool {
     status.success() || (accepted.is_some() && status.code() == accepted)
 }
 
+/// Writes `input` to the child's standard input on a thread of its own, closing it afterwards
+/// so the child sees the end of what it was given.
+///
+/// It is a thread and not an inline write because a child that exits before reading all of it
+/// would otherwise block the caller for ever; when that happens the write fails and the thread
+/// ends, which is why its result is discarded.
+fn write_input(child: &mut Child, input: &str) -> JoinHandle<()> {
+    let stdin = child.stdin.take();
+    let input = input.to_string();
+    thread::spawn(move || {
+        if let Some(mut stdin) = stdin {
+            let _ = stdin.write_all(input.as_bytes());
+        }
+    })
+}
+
+/// Collects what the invocation wrote about itself, bounded, on a thread of its own so it can
+/// never fill its pipe and deadlock against the wait.
+fn read_diagnostics(mut stderr: ChildStderr) -> JoinHandle<String> {
+    thread::spawn(move || {
+        let mut written = Vec::new();
+        let _ = stderr
+            .by_ref()
+            .take(DIAGNOSTIC_LIMIT as u64)
+            .read_to_end(&mut written);
+        String::from_utf8_lossy(&written).trim().to_string()
+    })
+}
+
 /// Waits for `child` within `limit`, capturing its standard output up to [`OUTPUT_LIMIT`].
 ///
 /// The capture and the wait happen on one thread, so a full pipe can never deadlock against a
 /// caller that stopped reading. Whichever way the wait ends — finished, over the output
 /// ceiling, or out of time — the process group is signalled and the child is reaped before this
-/// returns.
-fn wait_bounded(mut child: Child, limit: Duration) -> Result<(Vec<u8>, ExitStatus), GitError> {
+/// returns, and any thread feeding its input is joined, so nothing outlives the call.
+fn wait_bounded(
+    mut child: Child,
+    limit: Duration,
+    writing: Option<JoinHandle<()>>,
+) -> Result<(Vec<u8>, ExitStatus), GitError> {
     // Spawned into a group of its own, so the child's pid is that group's id.
     let group = Pid::from_raw(child.id() as i32);
     let (finished_tx, finished_rx) = mpsc::channel();
@@ -114,6 +197,9 @@ fn wait_bounded(mut child: Child, limit: Duration) -> Result<(Vec<u8>, ExitStatu
     // Joining after the signal is what makes the reap part of this call: the capture thread
     // only ends once it has waited on the child.
     let _ = capture.join();
+    if let Some(writing) = writing {
+        let _ = writing.join();
+    }
     match finished {
         Ok(Ok((output, status))) if output.len() > OUTPUT_LIMIT => Err(GitError::Op {
             status: status.code(),

@@ -22,6 +22,7 @@ import type {
   GitStatus,
   HotkeyAction,
   HotkeyBindingView,
+  HunkRange,
   Integrations,
   LineageEdge,
   McpFeatureGroup,
@@ -114,6 +115,56 @@ export function gitDiff(
 // one. `null` for a project that is not a repository, a path outside it, and one that is gone.
 export function gitFile(project: number, path: string): Promise<FileContent | null> {
   return invoke<FileContent | null>("git_file", { project, path });
+}
+
+// Whether the user has trusted this project to be changed by Soloist. Changing a repository runs
+// the repository's own hooks, so it is gated in the core the way starting a command is; the rail
+// asks only so it can offer the affordance rather than let an action fail.
+export function gitTrusted(project: number): Promise<boolean> {
+  return invoke<boolean>("git_trusted", { project });
+}
+
+// Records that trust. One core method, so every surface grants it identically.
+export function gitTrustProject(project: number): Promise<void> {
+  return invoke<void>("git_trust_project", { project });
+}
+
+// Records everything the working tree holds for one path in the index.
+export function gitStage(project: number, path: string): Promise<void> {
+  return invoke<void>("git_stage", { project, path });
+}
+
+// Takes one path back out of the index, leaving the working tree untouched.
+export function gitUnstage(project: number, path: string): Promise<void> {
+  return invoke<void>("git_unstage", { project, path });
+}
+
+// Throws away what the working tree holds for one path beyond the index. Destructive — the
+// surface confirms first — and bounded: it restores from the index and reaches no further back.
+export function gitDiscard(project: number, path: string): Promise<void> {
+  return invoke<void>("git_discard", { project, path });
+}
+
+// Records only one hunk of a path's unstaged change in the index.
+export function gitStageHunk(project: number, path: string, hunk: HunkRange): Promise<void> {
+  return invoke<void>("git_stage_hunk", { project, path, hunk });
+}
+
+// Takes only one hunk of a path's staged change back out of the index.
+export function gitUnstageHunk(project: number, path: string, hunk: HunkRange): Promise<void> {
+  return invoke<void>("git_unstage_hunk", { project, path, hunk });
+}
+
+// Throws away only one hunk of a path's unstaged change. Destructive, and bounded as
+// `gitDiscard` is.
+export function gitDiscardHunk(project: number, path: string, hunk: HunkRange): Promise<void> {
+  return invoke<void>("git_discard_hunk", { project, path, hunk });
+}
+
+// Records the index as a commit, or replaces the last commit with it when `amend`. The
+// repository's hooks, the user's signing key and their configuration all apply.
+export function gitCommit(project: number, message: string, amend: boolean): Promise<void> {
+  return invoke<void>("git_commit", { project, message, amend });
 }
 
 // --- Coordination panels: the scratchpad panel and the to-do board read/write through these.

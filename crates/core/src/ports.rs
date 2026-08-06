@@ -248,9 +248,10 @@ pub trait ProjectRepo: Send + Sync {
     fn remove(&self, id: ProjectId) -> Result<(), StoreError>;
 }
 
-/// Durable trust store, keyed by `(project, command-variant hash)`. The presence of
-/// a row means that exact command variant is trusted to run within that project.
-/// All methods are idempotent.
+/// Durable trust store. Trust comes at two grains, and they answer different questions:
+/// `(project, command-variant hash)` says one exact command variant may run within a project,
+/// and `project` alone says the user has authorised Soloist to change that project on their
+/// behalf. All methods are idempotent.
 pub trait TrustRepo: Send + Sync {
     /// Whether `variant` is trusted within `project`.
     fn is_trusted(&self, project: ProjectId, variant: &Hash) -> Result<bool, StoreError>;
@@ -258,6 +259,12 @@ pub trait TrustRepo: Send + Sync {
     fn set_trusted(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError>;
     /// Revokes trust for `variant` within `project`.
     fn revoke(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError>;
+    /// Whether the user has authorised Soloist to make changes within `project`.
+    fn is_project_trusted(&self, project: ProjectId) -> Result<bool, StoreError>;
+    /// Records that authorisation for `project`.
+    fn set_project_trusted(&self, project: ProjectId) -> Result<(), StoreError>;
+    /// Withdraws it again.
+    fn revoke_project(&self, project: ProjectId) -> Result<(), StoreError>;
 }
 
 // ──────────────────────────────── LockReleaser ─────────────────────────────

@@ -1,12 +1,20 @@
-//! The version-control reads adapters call (context C8): what git says about a project.
+//! The version-control commands and queries adapters call (context C8): what git says about a
+//! project, and what a surface may change about it.
+//!
+//! Reads are ungated. Changes are gated in the core on the user having trusted the project to
+//! be changed — a general authorisation kept per project, which version control's write side is
+//! the first thing to spend. Every change announces itself the same way the watcher does, by
+//! re-reading the status and publishing only if it turned out different, so an action and the
+//! watcher noticing the same action converge on one snapshot instead of racing to two.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::Facade;
-use crate::git::{DiffExtent, GitError, GitStatus};
+use crate::events::DomainEvent;
+use crate::git::{DiffExtent, Git, GitError, GitStatus, GitWriteError};
 use crate::ids::ProjectId;
 use crate::ports::StoreError;
-use crate::vcs::{DiffTarget, FileContent, FileDiff, ProjectFile};
+use crate::vcs::{DiffTarget, FileContent, FileDiff, HunkRange, ProjectFile};
 
 impl Facade {
     /// A project's working-tree status: what is checked out, how it stands against its
@@ -70,6 +78,115 @@ impl Facade {
     ) -> Result<Option<FileContent>, GitReadError> {
         let root = self.git_root(project)?;
         Ok(self.git.file(project, &root, path)?)
+    }
+
+    /// Whether the user has trusted `project` to be changed by Soloist. A surface asks so it can
+    /// offer the trust affordance rather than let an action fail; the gate itself is spent in
+    /// the core, so a surface that does not ask changes nothing either.
+    pub fn is_project_trusted(&self, project: ProjectId) -> Result<bool, GitWriteError> {
+        self.git.is_trusted(project)
+    }
+
+    /// Records that trust for `project`, which is what the affordance behind
+    /// [`Facade::is_project_trusted`] does. One method behind the gate, so every surface grants
+    /// it identically.
+    ///
+    /// It announces itself on the same event a change to the working tree does: what a
+    /// version-control surface may show has changed, which is what that event asks a surface to
+    /// go and re-read.
+    pub fn trust_project(&self, project: ProjectId) -> Result<(), GitWriteError> {
+        self.trust.trust_project(project)?;
+        self.bus.publish(DomainEvent::GitStatusChanged { project });
+        Ok(())
+    }
+
+    /// Records everything the working tree holds for `path` in the index.
+    ///
+    /// Runs an external tool, so callers reach this through [`Facade::blocking`] rather than a
+    /// runtime worker.
+    pub fn git_stage(&self, project: ProjectId, path: &str) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| git.stage(project, root, path))
+    }
+
+    /// Takes `path` back out of the index, leaving the working tree untouched.
+    pub fn git_unstage(&self, project: ProjectId, path: &str) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| git.unstage(project, root, path))
+    }
+
+    /// Throws away what the working tree holds for `path` beyond the index. Destructive, and
+    /// bounded: it restores from the index, so nothing staged or committed is within its reach.
+    /// A path version control does not track is refused rather than deleted.
+    pub fn git_discard(&self, project: ProjectId, path: &str) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| git.discard(project, root, path))
+    }
+
+    /// Records only one hunk of `path`'s unstaged change in the index. `hunk` names it by where
+    /// it falls, so a request built against a diff the file has moved past is refused.
+    pub fn git_stage_hunk(
+        &self,
+        project: ProjectId,
+        path: &str,
+        hunk: HunkRange,
+    ) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| {
+            git.stage_hunk(project, root, path, hunk)
+        })
+    }
+
+    /// Takes only one hunk of `path`'s staged change back out of the index.
+    pub fn git_unstage_hunk(
+        &self,
+        project: ProjectId,
+        path: &str,
+        hunk: HunkRange,
+    ) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| {
+            git.unstage_hunk(project, root, path, hunk)
+        })
+    }
+
+    /// Throws away only one hunk of `path`'s unstaged change. Destructive, and bounded exactly
+    /// as [`Facade::git_discard`] is.
+    pub fn git_discard_hunk(
+        &self,
+        project: ProjectId,
+        path: &str,
+        hunk: HunkRange,
+    ) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| {
+            git.discard_hunk(project, root, path, hunk)
+        })
+    }
+
+    /// Records `project`'s index as a commit carrying `message`, or replaces the last commit
+    /// with it when `amend`. The user's hooks, signing and configuration all apply, because it
+    /// is their own `git` that runs.
+    pub fn git_commit(
+        &self,
+        project: ProjectId,
+        message: &str,
+        amend: bool,
+    ) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| {
+            git.commit(project, root, message, amend)
+        })
+    }
+
+    /// The shape every version-control change shares: resolve the project's root, make the
+    /// change, then re-read the status and announce it if it turned out different.
+    fn git_change(
+        &self,
+        project: ProjectId,
+        change: impl FnOnce(&Git, &Path) -> Result<(), GitWriteError>,
+    ) -> Result<(), GitWriteError> {
+        let root = self
+            .project_root(project)?
+            .ok_or(GitWriteError::UnknownProject)?;
+        change(&self.git, &root)?;
+        if matches!(self.git.refresh(project, &root), Ok(true)) {
+            self.bus.publish(DomainEvent::GitStatusChanged { project });
+        }
+        Ok(())
     }
 
     /// The folder a project's repository is read from — one resolution behind every read above,

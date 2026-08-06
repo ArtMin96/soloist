@@ -10,15 +10,18 @@
 
 mod diff_parse;
 mod files_parse;
+mod patch;
 mod runner;
 mod status_parse;
+mod write;
 
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
 use soloist_core::{
-    DiffTarget, FileContent, GitError, GitRepository, GitStatus, ProjectFile, RawFileDiff,
+    DiffTarget, FileContent, GitError, GitRepository, GitStatus, HunkRange, ProjectFile,
+    RawFileDiff,
 };
 
 /// The arguments asking for a working tree's state in the one machine-readable form this
@@ -175,6 +178,54 @@ impl GitRepository for CliGitRepository {
             .read_to_end(&mut bytes)
             .map_err(|_| GitError::Op { status: None })?;
         Ok(Some(content(bytes)))
+    }
+
+    fn stage(&self, root: &Path, path: &str, original_path: Option<&str>) -> Result<(), GitError> {
+        write::stage(root, path, original_path)
+    }
+
+    fn unstage(
+        &self,
+        root: &Path,
+        path: &str,
+        original_path: Option<&str>,
+    ) -> Result<(), GitError> {
+        write::unstage(root, path, original_path)
+    }
+
+    fn discard(&self, root: &Path, path: &str) -> Result<(), GitError> {
+        write::discard(root, path)
+    }
+
+    fn stage_hunk(
+        &self,
+        root: &Path,
+        path: &str,
+        original_path: Option<&str>,
+        hunk: HunkRange,
+    ) -> Result<(), GitError> {
+        let diff = self.diff(root, DiffTarget::Unstaged, path, original_path)?;
+        write::apply_hunk(root, &diff, hunk, write::Apply::Stage)
+    }
+
+    fn unstage_hunk(
+        &self,
+        root: &Path,
+        path: &str,
+        original_path: Option<&str>,
+        hunk: HunkRange,
+    ) -> Result<(), GitError> {
+        let diff = self.diff(root, DiffTarget::Staged, path, original_path)?;
+        write::apply_hunk(root, &diff, hunk, write::Apply::Unstage)
+    }
+
+    fn discard_hunk(&self, root: &Path, path: &str, hunk: HunkRange) -> Result<(), GitError> {
+        let diff = self.diff(root, DiffTarget::Unstaged, path, None)?;
+        write::apply_hunk(root, &diff, hunk, write::Apply::Discard)
+    }
+
+    fn commit(&self, root: &Path, message: &str, amend: bool) -> Result<(), GitError> {
+        write::commit(root, message, amend)
     }
 }
 

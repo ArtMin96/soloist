@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Columns2Icon, Maximize2Icon, Minimize2Icon, Rows2Icon, XIcon } from "lucide-react";
 import { DiffViewer, SIDE_BY_SIDE, UNIFIED, type DiffLayout } from "@/components/git/DiffViewer";
+import { DiscardDialog } from "@/components/git/DiscardDialog";
 import { FilePreview } from "@/components/git/FilePreview";
+import { HunkActions } from "@/components/git/HunkActions";
 import { PaneDivider } from "@/components/PaneDivider";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { Button } from "@/components/ui/button";
@@ -14,13 +16,15 @@ import { useAppearance } from "@/store/appearanceContext";
 import { CHANGE, type DiffSelection } from "@/store/git/useDiffSelection";
 import { useFilePreview } from "@/store/git/useFilePreview";
 import { useGitDiff } from "@/store/git/useGitDiff";
+import { useGitWrite } from "@/store/git/useGitWrite";
 import {
   SPLIT_MAX_HEIGHT,
   SPLIT_MIN_HEIGHT,
   SPLIT_RESIZE_STEP,
   useSplitLayout,
 } from "@/store/git/useSplitLayout";
-import type { DiffTarget } from "@/domain";
+import { hunkKey } from "@/lib/git";
+import type { DiffTarget, HunkRange } from "@/domain";
 
 const PANE_LABEL = "Diff";
 const RESIZE_LABEL = "Resize the diff";
@@ -83,6 +87,8 @@ export function DiffPane({
     showing ? null : project,
     showing ? null : selection.path,
   );
+  const write = useGitWrite(project);
+  const [discarding, setDiscarding] = useState<HunkRange | null>(null);
 
   useEscapeToClose(onClose);
 
@@ -156,7 +162,28 @@ export function DiffPane({
             ) : diff.patch === "" ? (
               <PaneMessage>{NOTHING_TO_SHOW}</PaneMessage>
             ) : (
-              <DiffViewer diff={diff} layout={split} dark={dark} />
+              <DiffViewer
+                diff={diff}
+                layout={split}
+                dark={dark}
+                actions={
+                  // A hunk can only be acted on where there is something to act on: an untracked
+                  // path is not in the index yet, and a project that has not been trusted may not
+                  // be changed at all. Both are absent rather than disabled.
+                  write.trusted === true && !untracked
+                    ? (hunk: HunkRange) => (
+                        <HunkActions
+                          hunk={hunk}
+                          staged={target === STAGED}
+                          busy={write.busy(hunkKey(selection.path, hunk))}
+                          onStage={(it) => write.stageHunk(selection.path, it)}
+                          onUnstage={(it) => write.unstageHunk(selection.path, it)}
+                          onDiscard={setDiscarding}
+                        />
+                      )
+                    : undefined
+                }
+              />
             )
           ) : content === null ? (
             <PaneMessage>{contentLoading ? "" : GONE}</PaneMessage>
@@ -167,6 +194,14 @@ export function DiffPane({
           )}
         </ScrollArea>
       </section>
+      <DiscardDialog
+        discarding={discarding === null ? null : { path: selection.path, hunk: true }}
+        onCancel={() => setDiscarding(null)}
+        onConfirm={() => {
+          if (discarding !== null) write.discardHunk(selection.path, discarding);
+          setDiscarding(null);
+        }}
+      />
     </div>
   );
 }

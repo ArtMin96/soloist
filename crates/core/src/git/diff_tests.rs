@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::ids::ProjectId;
-use crate::testing::{file_change, git_status, raw_diff, FakeGitRepository};
+use crate::testing::{file_change, git_status, raw_diff, untrusting, FakeGitRepository};
 use crate::vcs::{ChangeKind, DiffTarget, FileChange, FileDiff};
 
 use super::{DiffExtent, Git, GitError, RawFileDiff, DIFF_LIMIT};
@@ -34,7 +34,10 @@ fn git_over(change: Option<FileChange>, diff: RawFileDiff) -> (Git, FakeGitRepos
     let mut status: GitStatus = git_status("main");
     status.changes.extend(change);
     let repository = FakeGitRepository::reporting(status).diffing(diff);
-    (Git::new(Arc::new(repository.clone())), repository)
+    (
+        Git::new(Arc::new(repository.clone()), untrusting()),
+        repository,
+    )
 }
 
 /// The one call under test, so each case states only what it varies.
@@ -183,9 +186,10 @@ fn a_path_that_climbs_out_of_the_repository_is_never_read() {
 
 #[test]
 fn a_project_that_is_not_a_repository_has_no_diff_rather_than_failing() {
-    let git = Git::new(Arc::new(FakeGitRepository::answering(vec![Err(
-        GitError::NotARepo,
-    )])));
+    let git = Git::new(
+        Arc::new(FakeGitRepository::answering(vec![Err(GitError::NotARepo)])),
+        untrusting(),
+    );
 
     assert_eq!(
         read(&git, PATH, DiffTarget::Unstaged, DiffExtent::Capped),

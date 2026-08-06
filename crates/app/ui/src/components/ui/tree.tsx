@@ -31,25 +31,29 @@ function Tree<T>({
 }
 
 /**
- * One row. Rendered as a button so it is focusable and pressable by construction; the tree
- * instance supplies `role="treeitem"` and the level/expansion state that screen readers read.
+ * One row. The tree instance supplies `role="treeitem"`, the tab index that carries roving
+ * focus, and the level and expansion state a screen reader reads.
+ *
+ * A row is a `div` rather than a button because a row carries controls of its own — staging a
+ * change, throwing one away — and interactive content inside a button is neither valid nor
+ * operable. It is the same shape the process source list uses for the same reason, and the
+ * keyboard contract is unaffected: it comes from the tree, not from the element.
  */
 function TreeItem<T>({
   item,
   className,
   children,
   ...props
-}: Omit<React.ComponentProps<"button">, "type"> & { item: ItemInstance<T> }) {
+}: React.ComponentProps<"div"> & { item: ItemInstance<T> }) {
   return (
-    <button
+    <div
       {...item.getProps()}
-      type="button"
       data-slot="tree-item"
       data-folder={item.isFolder() ? "" : undefined}
       data-selected={item.isSelected() ? "" : undefined}
       style={{ paddingInlineStart: `${item.getItemMeta().level * TREE_INDENT}px` }}
       className={cn(
-        "relative flex h-8 w-full min-w-0 cursor-default items-center gap-2 rounded-sm pe-2 text-left text-[0.8125rem] tracking-[var(--tracking-body)] outline-none",
+        "group/tree-item relative flex h-8 w-full min-w-0 cursor-default items-center gap-2 rounded-sm pe-2 text-left text-[0.8125rem] tracking-[var(--tracking-body)] outline-none",
         "transition-colors duration-[var(--dur-select)] ease-out-quint",
         "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
         "data-folder:font-medium data-selected:bg-[var(--sel-fill)] data-selected:hover:bg-[var(--sel-fill-hover)]",
@@ -59,7 +63,7 @@ function TreeItem<T>({
       {...props}
     >
       {children}
-    </button>
+    </div>
   );
 }
 

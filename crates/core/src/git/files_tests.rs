@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::ids::ProjectId;
-use crate::testing::{git_status, project_file, FakeGitRepository};
+use crate::testing::{git_status, project_file, untrusting, FakeGitRepository};
 use crate::vcs::FileContent;
 
 use super::Git;
@@ -20,7 +20,7 @@ fn a_listing_carries_every_path_the_repository_reported_and_which_of_them_are_ig
         project_file("src/main.rs", false),
         project_file("target/", true),
     ]);
-    let git = Git::new(Arc::new(repository));
+    let git = Git::new(Arc::new(repository), untrusting());
 
     let files = git
         .files(ProjectId::next(), Path::new(ROOT))
@@ -40,7 +40,10 @@ fn a_listing_carries_every_path_the_repository_reported_and_which_of_them_are_ig
 fn a_project_that_is_not_a_repository_lists_nothing_rather_than_failing() {
     // The fake lists nothing unless told to, which is how a folder under no version control
     // answers.
-    let git = Git::new(Arc::new(FakeGitRepository::reporting(git_status("main"))));
+    let git = Git::new(
+        Arc::new(FakeGitRepository::reporting(git_status("main"))),
+        untrusting(),
+    );
 
     assert_eq!(
         git.files(ProjectId::next(), Path::new(ROOT))
@@ -53,7 +56,7 @@ fn a_project_that_is_not_a_repository_lists_nothing_rather_than_failing() {
 fn a_listing_is_read_afresh_rather_than_remembered() {
     let repository = FakeGitRepository::reporting(git_status("main"))
         .listing(vec![project_file("src/main.rs", false)]);
-    let git = Git::new(Arc::new(repository.clone()));
+    let git = Git::new(Arc::new(repository.clone()), untrusting());
     let project = ProjectId::next();
 
     git.files(project, Path::new(ROOT)).expect("read");
@@ -73,7 +76,7 @@ fn a_listed_file_is_read_as_the_working_tree_holds_it() {
         truncated: false,
     };
     let repository = FakeGitRepository::reporting(git_status("main")).holding(content.clone());
-    let git = Git::new(Arc::new(repository));
+    let git = Git::new(Arc::new(repository), untrusting());
 
     assert_eq!(
         git.file(ProjectId::next(), Path::new(ROOT), "src/main.rs")
@@ -88,7 +91,7 @@ fn a_path_that_climbs_out_of_the_repository_is_never_read() {
         text: Some("root:x:0:0".to_string()),
         truncated: false,
     });
-    let git = Git::new(Arc::new(repository.clone()));
+    let git = Git::new(Arc::new(repository.clone()), untrusting());
 
     let content = git
         .file(ProjectId::next(), Path::new(ROOT), "../../etc/passwd")
@@ -108,7 +111,7 @@ async fn a_listing_and_a_status_never_run_against_one_repository_at_once() {
     // sharing the project's gate.
     let repository = FakeGitRepository::slow(git_status("main"), Duration::from_millis(20))
         .listing(vec![project_file("src/main.rs", false)]);
-    let git = Arc::new(Git::new(Arc::new(repository.clone())));
+    let git = Arc::new(Git::new(Arc::new(repository.clone()), untrusting()));
     let project = ProjectId::next();
 
     let listing = {
