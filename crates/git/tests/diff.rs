@@ -12,7 +12,8 @@ use fixture::{git, repository_with, write};
 
 /// The whole patch a reader would be handed: the header with every hunk after it.
 fn patch(diff: &RawFileDiff) -> String {
-    format!("{}{}", diff.header, diff.hunks.concat())
+    let hunks: String = diff.hunks.iter().map(|hunk| hunk.text.as_str()).collect();
+    format!("{}{}", diff.header, hunks)
 }
 
 fn diff_of(dir: &Path, target: DiffTarget, path: &str, original: Option<&str>) -> RawFileDiff {

@@ -90,8 +90,8 @@ pub use facade::{
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use git::{
-    DiffExtent, Git, GitError, GitRepository, GitStatus, GitStatusWatchReactor, NoopGitRepository,
-    RawFileDiff,
+    DiffExtent, Git, GitError, GitRepository, GitStatus, GitStatusWatchReactor, GitWriteError,
+    NoopGitRepository, RawFileDiff, RawHunk,
 };
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};
@@ -138,5 +138,5 @@ pub use terminal::{LogLine, PtyChunk, RenderedScreen};
 pub use trust::{Trust, TrustStore};
 pub use vcs::{
     BranchInfo, ChangeKind, DiffTarget, FileChange, FileContent, FileDiff, GitFileStatus,
-    ProjectFile, SyncState,
+    HunkRange, ProjectFile, SyncState,
 };

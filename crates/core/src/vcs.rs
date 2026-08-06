@@ -90,6 +90,25 @@ pub enum DiffTarget {
     Untracked,
 }
 
+/// Where one hunk of a unified diff falls on each side of the comparison, taken from its `@@`
+/// line.
+///
+/// It is also how an action names one hunk. Within a path and a comparison the four numbers are
+/// unique, and they change the moment the file does — so a stale request describes a hunk that
+/// is no longer there and is refused, rather than being applied to whatever now occupies those
+/// lines.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+pub struct HunkRange {
+    /// The first line the hunk covers in the version being compared against.
+    pub old_start: u32,
+    /// How many lines it covers there — zero for a hunk that only adds.
+    pub old_lines: u32,
+    /// The first line the hunk covers in the version being compared.
+    pub new_start: u32,
+    /// How many lines it covers there — zero for a hunk that only removes.
+    pub new_lines: u32,
+}
+
 /// One path's unified diff, as a reader is given it.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct FileDiff {
@@ -106,6 +125,10 @@ pub struct FileDiff {
     /// The unified diff, its header included, or empty when the path does not differ at
     /// `target`. Always whole hunks, so it is a patch rather than a fragment of one.
     pub patch: String,
+    /// Where each hunk of `patch` falls, in the order it appears there — the vocabulary an
+    /// action on one hunk is addressed in. A hunk left out of a truncated `patch` is left out
+    /// of this too, so a reader can only name a hunk it was actually shown.
+    pub hunks: Vec<HunkRange>,
     /// Whether the diff was longer than one read carries, leaving `patch` holding only its
     /// first hunks. Asking for the same diff in full carries the rest.
     pub truncated: bool,

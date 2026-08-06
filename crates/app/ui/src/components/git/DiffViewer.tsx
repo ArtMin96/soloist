@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { DiffModeEnum, DiffView } from "@git-diff-view/react";
 import "@git-diff-view/react/styles/diff-view.css";
 import "@/components/git/diff-view.css";
 import { ensureLanguage, HIGHLIGHTER } from "@/lib/diff/highlighter";
 import { languageOf } from "@/lib/diff/language";
-import type { FileDiff } from "@/domain";
+import type { FileDiff, HunkRange } from "@/domain";
 
 /** How the two sides of a change are laid out. */
 export const SIDE_BY_SIDE = "side-by-side" as const;
@@ -19,15 +19,21 @@ const FONT_SIZE = 13;
  *
  * Presentational: it renders the diff it is handed. The patch is whatever version control
  * produced — the core decided which hunks a reader gets and whether there are more.
+ *
+ * `actions` is rendered once per hunk, attached to the line the hunk starts on. It is attached
+ * by *line*, not by position in a list, so the viewer is free to mount and unmount rows as it
+ * likes without an action ending up beside the wrong change.
  */
 export function DiffViewer({
   diff,
   layout,
   dark,
+  actions,
 }: {
   diff: FileDiff;
   layout: DiffLayout;
   dark: boolean;
+  actions?: (hunk: HunkRange) => ReactNode;
 }) {
   const language = useMemo(() => languageOf(diff.path), [diff.path]);
   const [highlight, setHighlight] = useState(false);
@@ -45,13 +51,17 @@ export function DiffViewer({
     };
   }, [language]);
 
+  const attached = useMemo(() => (actions ? attach(diff.hunks) : undefined), [actions, diff.hunks]);
+
   return (
-    <DiffView
+    <DiffView<HunkRange>
       data={{
         oldFile: { fileName: diff.original_path ?? diff.path, fileLang: language },
         newFile: { fileName: diff.path, fileLang: language },
         hunks: [diff.patch],
       }}
+      extendData={attached}
+      renderExtendLine={actions ? ({ data }) => actions(data) : undefined}
       diffViewMode={layout === SIDE_BY_SIDE ? DiffModeEnum.Split : DiffModeEnum.Unified}
       diffViewTheme={dark ? "dark" : "light"}
       diffViewHighlight={highlight}
@@ -60,4 +70,23 @@ export function DiffViewer({
       registerHighlighter={HIGHLIGHTER}
     />
   );
+}
+
+/**
+ * Each hunk against the line it starts on, so its actions render there.
+ *
+ * A hunk that only removes lines has no line on the new side to hang from, so it hangs from the
+ * old one instead — which is where a reader looking at that hunk is looking anyway.
+ */
+function attach(hunks: HunkRange[]): {
+  oldFile: Record<string, { data: HunkRange }>;
+  newFile: Record<string, { data: HunkRange }>;
+} {
+  const oldFile: Record<string, { data: HunkRange }> = {};
+  const newFile: Record<string, { data: HunkRange }> = {};
+  for (const hunk of hunks) {
+    if (hunk.new_lines > 0) newFile[String(hunk.new_start)] = { data: hunk };
+    else if (hunk.old_lines > 0) oldFile[String(hunk.old_start)] = { data: hunk };
+  }
+  return { oldFile, newFile };
 }

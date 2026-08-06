@@ -13,16 +13,24 @@ use crate::ids::ProjectId;
 use crate::ports::{ProjectRecord, ProjectRepo, StoreError, TrustRepo};
 use crate::sync::lock;
 
-/// An in-memory [`TrustRepo`] keyed by `(project, variant hex)`, for headless trust
-/// and sync tests.
+/// An in-memory [`TrustRepo`] keyed by `(project, variant hex)` for command trust and by the
+/// project alone for the authorisation to change it, for headless trust and sync tests.
 #[derive(Default)]
 pub struct FakeTrustRepo {
     trusted: Mutex<HashSet<(u64, String)>>,
+    trusted_projects: Mutex<HashSet<u64>>,
 }
 
 impl FakeTrustRepo {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The same repository, with `project` already authorised to be changed — the one line a
+    /// test that is not about granting authorisation needs to get past the gate.
+    pub fn trusting_project(self, project: ProjectId) -> Self {
+        lock(&self.trusted_projects).insert(project.get());
+        self
     }
 }
 
@@ -38,6 +46,20 @@ impl TrustRepo for FakeTrustRepo {
 
     fn revoke(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError> {
         lock(&self.trusted).remove(&(project.get(), variant.to_hex()));
+        Ok(())
+    }
+
+    fn is_project_trusted(&self, project: ProjectId) -> Result<bool, StoreError> {
+        Ok(lock(&self.trusted_projects).contains(&project.get()))
+    }
+
+    fn set_project_trusted(&self, project: ProjectId) -> Result<(), StoreError> {
+        lock(&self.trusted_projects).insert(project.get());
+        Ok(())
+    }
+
+    fn revoke_project(&self, project: ProjectId) -> Result<(), StoreError> {
+        lock(&self.trusted_projects).remove(&project.get());
         Ok(())
     }
 }

@@ -24,6 +24,7 @@ function diffOf(path = PATH): FileDiff {
     target: "unstaged",
     binary: false,
     patch: PATCH.split(PATH).join(path),
+    hunks: [{ old_start: 1, old_lines: 3, new_start: 1, new_lines: 3 }],
     truncated: false,
   };
 }
@@ -96,5 +97,30 @@ describe("DiffViewer", () => {
     // Unified stacks the removed line above the added one; side by side puts them on one row, so
     // the same patch occupies fewer rows.
     expect(split.container.querySelectorAll("tr").length).toBeLessThan(unifiedRows);
+  });
+
+  it("renders the actions for a hunk beside the hunk itself", async () => {
+    const { container } = render(
+      <DiffViewer
+        diff={diffOf()}
+        layout={UNIFIED}
+        dark={false}
+        actions={(hunk) => (
+          <button type="button">{`stage ${hunk.old_start}-${hunk.new_start}`}</button>
+        )}
+      />,
+    );
+
+    await shown(container, "let renamed = 2;");
+    // The hunk the patch declares, not the row it happened to land on: the viewer is free to
+    // mount and unmount rows, and an action tied to a position would follow the wrong change.
+    await waitFor(() => expect(container.textContent).toContain("stage 1-1"));
+  });
+
+  it("renders no actions at all when a reader may not act on the change", async () => {
+    const { container } = render(<DiffViewer diff={diffOf()} layout={UNIFIED} dark={false} />);
+
+    await shown(container, "let renamed = 2;");
+    expect(container.querySelector("button")).toBeNull();
   });
 });

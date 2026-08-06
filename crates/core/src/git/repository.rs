@@ -12,7 +12,16 @@ use std::path::Path;
 
 use super::error::GitError;
 use super::status::GitStatus;
-use crate::vcs::{DiffTarget, FileContent, ProjectFile};
+use crate::vcs::{DiffTarget, FileContent, HunkRange, ProjectFile};
+
+/// One hunk of a path's diff: where it falls, and the text that says how.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct RawHunk {
+    /// Where the hunk falls on each side, read from its `@@` line.
+    pub range: HunkRange,
+    /// The hunk itself, its own `@@` line included.
+    pub text: String,
+}
 
 /// One path's unified diff as version control produced it, split where its hunks begin.
 ///
@@ -25,8 +34,8 @@ pub struct RawFileDiff {
     pub binary: bool,
     /// Everything before the first hunk — what any hunk of this patch has to be preceded by.
     pub header: String,
-    /// Each hunk in turn, its own `@@` line included.
-    pub hunks: Vec<String>,
+    /// Each hunk in turn.
+    pub hunks: Vec<RawHunk>,
 }
 
 /// Reads the state of a version-controlled working tree.
@@ -66,6 +75,58 @@ pub trait GitRepository: Send + Sync {
     /// beginning arrives, marked as [`FileContent::truncated`]. `Ok(None)` for a path that is
     /// not there, which is ordinary for a listing read a moment before the file was removed.
     fn read_file(&self, root: &Path, path: &str) -> Result<Option<FileContent>, GitError>;
+
+    /// Records everything `path` currently holds in the index, so the next commit would carry
+    /// it. `original_path` is where a renamed path came from, which has to be named too or its
+    /// disappearance is left unrecorded.
+    fn stage(&self, root: &Path, path: &str, original_path: Option<&str>) -> Result<(), GitError>;
+
+    /// Takes `path` back out of the index, leaving the working tree alone: after it the index
+    /// holds what the last commit does, and every difference is unstaged again.
+    fn unstage(&self, root: &Path, path: &str, original_path: Option<&str>)
+        -> Result<(), GitError>;
+
+    /// Throws away what the working tree holds beyond the index for `path`, restoring it from
+    /// the index. It cannot reach past the index, so nothing already staged and nothing already
+    /// committed can be lost through it.
+    fn discard(&self, root: &Path, path: &str) -> Result<(), GitError>;
+
+    /// Records only `hunk` of `path`'s unstaged change in the index, leaving the rest of the
+    /// working tree's changes where they are.
+    ///
+    /// [`GitError::HunkGone`] when the unstaged diff no longer holds a hunk at that range —
+    /// the file moved on between being read and being acted on, and applying the request
+    /// anywhere else would change lines the caller never saw.
+    fn stage_hunk(
+        &self,
+        root: &Path,
+        path: &str,
+        original_path: Option<&str>,
+        hunk: HunkRange,
+    ) -> Result<(), GitError>;
+
+    /// Takes only `hunk` of `path`'s staged change back out of the index. Same
+    /// [`GitError::HunkGone`] meaning as [`GitRepository::stage_hunk`], against the staged diff.
+    fn unstage_hunk(
+        &self,
+        root: &Path,
+        path: &str,
+        original_path: Option<&str>,
+        hunk: HunkRange,
+    ) -> Result<(), GitError>;
+
+    /// Throws away only `hunk` of `path`'s unstaged change, restoring those lines from the
+    /// index. Same [`GitError::HunkGone`] meaning as [`GitRepository::stage_hunk`].
+    fn discard_hunk(&self, root: &Path, path: &str, hunk: HunkRange) -> Result<(), GitError>;
+
+    /// Records the index as a commit carrying `message`, or replaces the last commit with it
+    /// when `amend` — which rewrites what is committed and never touches the working tree.
+    ///
+    /// The user's own hooks, signing key, author and configuration apply, because this is their
+    /// `git` running: that is the whole reason the engine is the command line. A hook that
+    /// refuses is a [`GitError::Refused`] carrying what it wrote, which is the one diagnostic
+    /// worth showing — it is the user's own hook talking, not the tool.
+    fn commit(&self, root: &Path, message: &str, amend: bool) -> Result<(), GitError>;
 }
 
 /// A [`GitRepository`] that reports every path as belonging to no repository — the default
@@ -97,6 +158,56 @@ impl GitRepository for NoopGitRepository {
     }
 
     fn read_file(&self, _root: &Path, _path: &str) -> Result<Option<FileContent>, GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn stage(
+        &self,
+        _root: &Path,
+        _path: &str,
+        _original_path: Option<&str>,
+    ) -> Result<(), GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn unstage(
+        &self,
+        _root: &Path,
+        _path: &str,
+        _original_path: Option<&str>,
+    ) -> Result<(), GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn discard(&self, _root: &Path, _path: &str) -> Result<(), GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn stage_hunk(
+        &self,
+        _root: &Path,
+        _path: &str,
+        _original_path: Option<&str>,
+        _hunk: HunkRange,
+    ) -> Result<(), GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn unstage_hunk(
+        &self,
+        _root: &Path,
+        _path: &str,
+        _original_path: Option<&str>,
+        _hunk: HunkRange,
+    ) -> Result<(), GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn discard_hunk(&self, _root: &Path, _path: &str, _hunk: HunkRange) -> Result<(), GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn commit(&self, _root: &Path, _message: &str, _amend: bool) -> Result<(), GitError> {
         Err(GitError::NotARepo)
     }
 }

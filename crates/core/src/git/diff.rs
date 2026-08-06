@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::ProjectId;
 use crate::sync::lock;
-use crate::vcs::{ChangeKind, DiffTarget, FileChange, FileDiff};
+use crate::vcs::{ChangeKind, DiffTarget, FileChange, FileDiff, HunkRange};
 
 use super::error::GitError;
 use super::path::inside_repository;
@@ -68,14 +68,15 @@ impl Git {
             Err(GitError::NotARepo) => return Ok(None),
             Err(err) => return Err(err),
         };
-        let (patch, truncated) = assemble(&raw, extent);
+        let carried = assemble(&raw, extent);
         Ok(Some(FileDiff {
             path: path.to_string(),
             original_path: original_path.map(str::to_string),
             target,
             binary: raw.binary,
-            patch,
-            truncated,
+            patch: carried.patch,
+            hunks: carried.hunks,
+            truncated: carried.truncated,
         }))
     }
 }
@@ -89,23 +90,48 @@ fn resolve(target: DiffTarget, change: Option<&FileChange>) -> DiffTarget {
     }
 }
 
+/// The part of a diff a reader is given: the patch, where each of its hunks falls, and whether
+/// anything was left out.
+struct Carried {
+    patch: String,
+    hunks: Vec<HunkRange>,
+    truncated: bool,
+}
+
 /// The patch a reader is given, and whether anything was left out of it.
 ///
 /// The first hunk always goes, whatever its size: a header with no hunk under it says a file
 /// changed while showing nothing of how, which is the one answer worse than a long one.
-fn assemble(raw: &RawFileDiff, extent: DiffExtent) -> (String, bool) {
+///
+/// The ranges listed are the hunks actually carried, so an action can only name a hunk the
+/// reader was shown.
+fn assemble(raw: &RawFileDiff, extent: DiffExtent) -> Carried {
     if raw.binary {
-        return (String::new(), false);
+        return Carried {
+            patch: String::new(),
+            hunks: Vec::new(),
+            truncated: false,
+        };
     }
     let mut patch = raw.header.clone();
+    let mut hunks = Vec::new();
     for (index, hunk) in raw.hunks.iter().enumerate() {
-        let over = patch.len() + hunk.len() > DIFF_LIMIT;
+        let over = patch.len() + hunk.text.len() > DIFF_LIMIT;
         if index > 0 && over && matches!(extent, DiffExtent::Capped) {
-            return (patch, true);
+            return Carried {
+                patch,
+                hunks,
+                truncated: true,
+            };
         }
-        patch.push_str(hunk);
+        patch.push_str(&hunk.text);
+        hunks.push(hunk.range);
     }
-    (patch, false)
+    Carried {
+        patch,
+        hunks,
+        truncated: false,
+    }
 }
 
 #[cfg(test)]

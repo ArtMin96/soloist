@@ -714,6 +714,15 @@ impl TrustRepo for NoTrust {
     fn revoke(&self, _project: ProjectId, _variant: &Hash) -> Result<(), StoreError> {
         Ok(())
     }
+    fn is_project_trusted(&self, _project: ProjectId) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+    fn set_project_trusted(&self, _project: ProjectId) -> Result<(), StoreError> {
+        Ok(())
+    }
+    fn revoke_project(&self, _project: ProjectId) -> Result<(), StoreError> {
+        Ok(())
+    }
 }
 
 /// A project repo the demo path never touches; present only to build the façade.

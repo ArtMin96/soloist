@@ -6,7 +6,7 @@ use soloist_core::{AgentTool, StoreError};
 use crate::sql_err;
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 19;
+pub(crate) const SCHEMA_VERSION: i64 = 20;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -328,6 +328,21 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         // therefore rearranges nothing, and a newly opened project still leads.
         conn.execute_batch("ALTER TABLE projects ADD COLUMN position INTEGER NOT NULL DEFAULT 0;")
             .map_err(sql_err)?;
+    }
+
+    if version < 20 {
+        // Trust at the project grain: the presence of a row means the user has authorised
+        // Soloist to make changes within that project on their behalf, which is what version
+        // control's write side is gated on. Separate from the `trust` table because it answers a
+        // different question — that one says a command variant may run, this says a project may
+        // be changed — and keyed by the project alone, so it is one row or none. The project
+        // foreign key cascades, so removing a project withdraws it.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS project_trust (
+                 project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE
+             );",
+        )
+        .map_err(sql_err)?;
     }
 
     if version < SCHEMA_VERSION {
