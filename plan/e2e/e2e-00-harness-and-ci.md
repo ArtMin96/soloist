@@ -183,3 +183,29 @@ developer's installed Soloist open at the same time.
 `WARN tauri-service:service: Failed to clear mock store: A sessionId is required` on teardown. It is
 the service's own mock-store cleanup running after the session closes; we never register mocks
 (§1.2), and the run exits 0. Not worth chasing.
+
+## The suite was building a *development* frontend — found and fixed
+
+**Found 2026-08-06 while building the version-control walk.** WebdriverIO's launcher runs with
+`NODE_ENV=test`, and `buildBinary` handed its whole environment to the app build. Vite reads that as
+"not production", resolves React's **development** build, and the app the suite drives then re-invokes
+every render under the `StrictMode` the app mounts — which a shipped build never does. So every run
+since e2e-00 has been driving a frontend that differs from the shipped one in render behaviour, while
+the charter's whole claim is that the suite drives the app as it is really built.
+
+It was not academic. The diff surface renders correctly under the production frontend and tears the
+window down under the development one: `@git-diff-view/react` keeps a module-cached, mutable model of
+the file being shown, and a re-invoked render reads a row index its line arrays no longer hold
+(`TypeError: undefined is not an object (evaluating 'oldLine.lineNumber')` in `InternalDiffSplitLine`).
+Measured both ways against the same fixture, with and without the app's `lowlight` alias, so it is
+neither the alias nor the fixture.
+
+**The fix:** `buildBinary` pins `NODE_ENV=production` for the app build, beside the `NODE_OPTIONS`
+scrub it already does and for the same reason — the build must not inherit the test runner's own idea
+of what it is. Verified: `runWithFiberInDEV` is absent from the built entry chunk, and all 15 spec
+files pass.
+
+**Carried forward, not fixed here:** the same crash is real in `just dev`, which is also a development
+React build with the same `StrictMode`. It is a defect in the diff viewer package rather than in
+Soloist's own code, and it is out of this track's remit to change; it is recorded so the first person
+to open a diff in a dev session knows what they are looking at.

@@ -64,6 +64,16 @@ export const sidebar = {
     await $(NAV).waitForDisplayed({ timeout: WAIT.render });
   },
 
+  /**
+   * Whether the project tree is on screen at all — read rather than waited on, so it answers for
+   * the frame it is asked about. The app mounts one React root: anything that throws while
+   * rendering takes the root with it and leaves an empty window, which is indistinguishable from
+   * a slow render until something asserts that the shell is still there.
+   */
+  async isRendered(): Promise<boolean> {
+    return $(NAV).isDisplayed();
+  },
+
   /** Waits for a project to appear in the tree by its display name. */
   async waitForProject(name: string): Promise<void> {
     await $(NAV).$(`span*=${name}`).waitForDisplayed({ timeout: WAIT.core });

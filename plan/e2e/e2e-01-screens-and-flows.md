@@ -360,3 +360,21 @@ that flaked.
 ## Effort
 
 ~1 day for the architecture + the first journey; each subsequent catalog walk is ~½–1 day.
+
+## Reading a change — the mutation pass
+
+The walk exists because the diff surface is the one place where what the *bundler* resolved decides
+whether the window survives, and no headless suite can see that: Vitest resolves the viewer's
+dependencies for itself, so the app's `lowlight` alias never applies under test and 19 green component
+tests ran against a stand-in that could not load in a real build.
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Drop `register` from the `lowlight` stand-in (`lib/diff/lowlight.ts`) — the shape it shipped in | only the version-control walk fails, and it fails as an *empty window* rather than a missing diff | exactly that: both of `specs/version-control/open-diff.spec.ts` red (`element ("section[aria-label="Diff"]") still not displayed`, then the sidebar read `false`), the captured page source showing `<div id="root"></div>` with nothing in it; the other 11 non-notification spec files passed unchanged |
+
+Surgical because the stand-in is reachable from exactly one chunk, which exactly one spec loads: no
+other walk opens a diff, and nothing in any cleanup path touches it.
+
+The second assertion is the one that earns its keep. Asserting only that the diff renders reports "no
+diff" for a failure whose real shape is "the app is gone" — the app mounts one React root, and a module
+that throws while a lazily-loaded pane is being brought in takes the root with it.
