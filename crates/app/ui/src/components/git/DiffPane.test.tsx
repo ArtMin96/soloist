@@ -45,6 +45,7 @@ function diffOf(overrides: Partial<FileDiff> = {}): FileDiff {
     target: "unstaged",
     binary: false,
     patch: `diff --git a/${PATH} b/${PATH}\n@@ -1 +1 @@\n-a\n+b\n`,
+    hunks: [{ old_start: 1, old_lines: 1, new_start: 1, new_lines: 1 }],
     truncated: false,
     ...overrides,
   };

@@ -116,9 +116,10 @@ export const RepositoryTree = forwardRef<RepositoryTreeHandle, RepositoryTreePro
     );
 
     useEffect(() => {
-      onExpansionChange?.(
-        folders.length > 0 && folders.every((path) => expandedItems.includes(path)),
-      );
+      // Asked as a set rather than by scanning the list per folder: a large project has
+      // thousands of both, and the two together are what would make this quadratic.
+      const expanded = new Set(expandedItems);
+      onExpansionChange?.(folders.length > 0 && folders.every((path) => expanded.has(path)));
     }, [expandedItems, folders, onExpansionChange]);
 
     return (

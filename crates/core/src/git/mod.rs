@@ -1,4 +1,5 @@
-//! The git bounded context (C9): what version control says about a project, and when to ask.
+//! The git bounded context (C9): what version control says about a project, when to ask, and
+//! what a surface may change.
 //!
 //! Like the metrics and file-watch domains, this context owns *how version control works* here
 //! — the port it depends on ([`GitRepository`], which it defines for itself), the failures it
@@ -14,16 +15,18 @@
 //! these types, so the core's behaviour cannot depend on the wording — or the language — of a
 //! program it does not own.
 
+mod commit;
 mod diff;
 mod error;
 mod files;
 mod path;
 mod repository;
+mod stage;
 mod status;
 mod watch;
 
 pub use diff::DiffExtent;
-pub use error::GitError;
-pub use repository::{GitRepository, NoopGitRepository, RawFileDiff};
+pub use error::{GitError, GitWriteError};
+pub use repository::{GitRepository, NoopGitRepository, RawFileDiff, RawHunk};
 pub use status::{Git, GitStatus};
 pub use watch::GitStatusWatchReactor;

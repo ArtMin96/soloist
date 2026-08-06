@@ -7,8 +7,11 @@ import {
   UnfoldVerticalIcon,
 } from "lucide-react";
 import { BranchHeader } from "@/components/git/BranchHeader";
-import { ChangesTree } from "@/components/git/ChangesTree";
+import { ChangesTree, type ChangeActions } from "@/components/git/ChangesTree";
+import { CommitBox } from "@/components/git/CommitBox";
+import { DiscardDialog, type Discardable } from "@/components/git/DiscardDialog";
 import { FilesTree } from "@/components/git/FilesTree";
+import { TrustNotice } from "@/components/git/TrustNotice";
 import type { RepositoryTreeHandle } from "@/components/git/RepositoryTree";
 import { PaneDivider } from "@/components/PaneDivider";
 import { SegmentedControl } from "@/components/SegmentedControl";
@@ -20,6 +23,7 @@ import type { Option } from "@/lib/appearance";
 import { CHANGE, FILE, type DiffSelection } from "@/store/git/useDiffSelection";
 import { useGitFiles } from "@/store/git/useGitFiles";
 import { useGitStatus } from "@/store/git/useGitStatus";
+import { useGitWrite } from "@/store/git/useGitWrite";
 import {
   RAIL_MAX_WIDTH,
   RAIL_MIN_WIDTH,
@@ -50,10 +54,12 @@ const NOTHING_CHANGED = "No changes";
 const NO_FILES = "No files";
 
 /**
- * The version-control rail: what is checked out, and what has changed under it, kept beside the
- * terminal rather than in place of it. Read-only — everything here reports.
+ * The version-control rail: what is checked out, what has changed under it, and what can be done
+ * about it — kept beside the terminal rather than in place of it.
  *
- * The one place in the rail that reaches the core, so the trees below stay presentational.
+ * The one place in the rail that reaches the core, so the trees and the commit box below stay
+ * presentational. Whether a change is allowed at all is the core's answer, asked once here so
+ * the rail can offer the trust affordance rather than let an action fail.
  */
 export function GitRail({
   project,
@@ -69,9 +75,19 @@ export function GitRail({
   const [filesFoldersExpanded, setFilesFoldersExpanded] = useState(false);
   const changesTree = useRef<RepositoryTreeHandle>(null);
   const filesTree = useRef<RepositoryTreeHandle>(null);
+  const [discarding, setDiscarding] = useState<Discardable | null>(null);
   const status = useGitStatus(project);
   const files = useGitFiles(project, !layout.collapsed && tab === FILES_TAB);
+  const write = useGitWrite(project);
   const changes = status.status?.changes ?? [];
+  const actions: ChangeActions | null =
+    write.trusted === true
+      ? {
+          onStage: (path, stage) => (stage ? write.stage(path) : write.unstage(path)),
+          onDiscard: (path) => setDiscarding({ path, hunk: false }),
+          busy: write.busy,
+        }
+      : null;
 
   if (layout.collapsed) {
     return (
@@ -176,6 +192,7 @@ export function GitRail({
                     <ChangesTree
                       ref={changesTree}
                       changes={changes}
+                      actions={actions}
                       onExpansionChange={setChangesFoldersExpanded}
                       onOpen={(path) => onOpen?.({ kind: CHANGE, path })}
                     />
@@ -197,10 +214,38 @@ export function GitRail({
                 )}
               </div>
             </div>
+            {write.error !== null && <RailError message={write.error} />}
+            {write.trusted === false ? (
+              <TrustNotice onTrust={write.trust} />
+            ) : (
+              write.trusted === true && (
+                <CommitBox changes={changes} busy={write.committing} onCommit={write.commit} />
+              )
+            )}
           </>
         )}
       </aside>
+      <DiscardDialog
+        discarding={discarding}
+        onCancel={() => setDiscarding(null)}
+        onConfirm={() => {
+          if (discarding !== null) write.discard(discarding.path);
+          setDiscarding(null);
+        }}
+      />
     </div>
+  );
+}
+
+/** What the last refused change said, stated where the change was asked for. */
+function RailError({ message }: { message: string }) {
+  return (
+    <p
+      role="alert"
+      className="shrink-0 border-t border-sidebar-border px-3 py-2 text-[0.8125rem] text-destructive"
+    >
+      {message}
+    </p>
   );
 }
 

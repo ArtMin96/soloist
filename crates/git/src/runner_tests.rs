@@ -37,7 +37,7 @@ fn an_invocation_that_will_not_finish_is_stopped_and_reaped() {
         .expect("spawn");
     let pid = Pid::from_raw(child.id() as i32);
 
-    let outcome = wait_bounded(child, LIMIT);
+    let outcome = wait_bounded(child, LIMIT, None);
 
     assert!(
         matches!(outcome, Err(GitError::Timeout)),

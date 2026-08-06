@@ -403,14 +403,27 @@ export type DiffTarget = "staged" | "unstaged" | "head" | "untracked";
 // "full" is what a reader asks for after being told the diff was truncated.
 export type DiffExtent = "capped" | "full";
 
+// Where one hunk of a diff falls on each side (mirrors core::HunkRange). Within one path and
+// comparison the four numbers are unique, which is how an action names a hunk: they change the
+// moment the file does, so a stale request describes a hunk that is no longer there.
+export interface HunkRange {
+  old_start: number;
+  old_lines: number;
+  new_start: number;
+  new_lines: number;
+}
+
 // One path's unified diff. `patch` is always whole hunks, so it is a patch rather than a
 // fragment of one, and is empty for a binary path and for one that does not differ at `target`.
+// `hunks` lists where each hunk of `patch` falls, in the same order — a hunk left out of a
+// truncated patch is left out of this too, so only a hunk that was shown can be named.
 export interface FileDiff {
   path: string;
   original_path: string | null;
   target: DiffTarget;
   binary: boolean;
   patch: string;
+  hunks: HunkRange[];
   truncated: boolean;
 }
 

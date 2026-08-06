@@ -13,10 +13,11 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::ProjectId;
+use crate::ports::TrustRepo;
 use crate::sync::lock;
 use crate::vcs::{BranchInfo, FileChange};
 
-use super::error::GitError;
+use super::error::{GitError, GitWriteError};
 use super::repository::GitRepository;
 
 /// A repository's working tree at one moment: what is checked out, and everything that differs
@@ -33,6 +34,10 @@ pub struct GitStatus {
 /// remembers the answer.
 pub struct Git {
     pub(super) repository: Arc<dyn GitRepository>,
+    /// The durable record of which projects the user has authorised Soloist to change. Held
+    /// here, in the context that changes them, so no surface can reach a write without passing
+    /// the gate — the same reason the supervisor holds it rather than asking a caller.
+    trust: Arc<dyn TrustRepo>,
     /// The last read per project. An entry of `None` records a root that is not a repository —
     /// worth remembering, so a project the user does not keep under version control is not
     /// re-read on every glance.
@@ -42,12 +47,30 @@ pub struct Git {
 }
 
 impl Git {
-    /// Builds the context over the repository port the composition root chose.
-    pub fn new(repository: Arc<dyn GitRepository>) -> Self {
+    /// Builds the context over the repository port the composition root chose, and the trust
+    /// record its write side is gated on.
+    pub fn new(repository: Arc<dyn GitRepository>, trust: Arc<dyn TrustRepo>) -> Self {
         Self {
             repository,
+            trust,
             cached: Mutex::new(HashMap::new()),
             gates: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Whether the user has authorised Soloist to make changes within `project`, which every
+    /// surface needs to know to say so before an action is refused.
+    pub fn is_trusted(&self, project: ProjectId) -> Result<bool, GitWriteError> {
+        Ok(self.trust.is_project_trusted(project)?)
+    }
+
+    /// The check every change to a working tree passes first. Reads are ungated: looking at a
+    /// repository runs nothing the repository carries, and changing one runs its hooks.
+    pub(super) fn authorize(&self, project: ProjectId) -> Result<(), GitWriteError> {
+        if self.trust.is_project_trusted(project)? {
+            Ok(())
+        } else {
+            Err(GitWriteError::Untrusted)
         }
     }
 

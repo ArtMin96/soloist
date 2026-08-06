@@ -173,7 +173,7 @@ impl Facade {
             settings: Arc::new(SettingsStore::new(settings_repo)),
             project_settings: Arc::new(SettingsStore::new(project_settings_repo)),
             feedback: Feedback::new(feedback_repo, clock.clone()),
-            git: Arc::new(Git::new(git_repository)),
+            git: Arc::new(Git::new(git_repository, trust.clone())),
             clock,
             metrics,
             port_probe,

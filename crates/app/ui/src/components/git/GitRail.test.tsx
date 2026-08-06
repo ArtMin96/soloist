@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 // The two reads and the event subscription are the IPC boundary; mocking them leaves the rail's
@@ -8,17 +8,39 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 vi.mock("@/api", () => ({
   gitStatus: vi.fn(),
   gitFiles: vi.fn(),
+  gitTrusted: vi.fn(() => Promise.resolve(false)),
+  gitTrustProject: vi.fn(() => Promise.resolve()),
+  gitStage: vi.fn(() => Promise.resolve()),
+  gitUnstage: vi.fn(() => Promise.resolve()),
+  gitDiscard: vi.fn(() => Promise.resolve()),
+  gitStageHunk: vi.fn(() => Promise.resolve()),
+  gitUnstageHunk: vi.fn(() => Promise.resolve()),
+  gitDiscardHunk: vi.fn(() => Promise.resolve()),
+  gitCommit: vi.fn(() => Promise.resolve()),
   onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
   onResync: vi.fn(() => Promise.resolve(() => {})),
 }));
 
-import { gitFiles, gitStatus } from "@/api";
+import {
+  gitCommit,
+  gitDiscard,
+  gitFiles,
+  gitStage,
+  gitStatus,
+  gitTrusted,
+  gitTrustProject,
+} from "@/api";
 import { GitRail } from "@/components/git/GitRail";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { GitStatus, ProjectFile } from "@/domain";
 
 const readStatus = vi.mocked(gitStatus);
 const readFiles = vi.mocked(gitFiles);
+const readTrust = vi.mocked(gitTrusted);
+const trustProject = vi.mocked(gitTrustProject);
+const stage = vi.mocked(gitStage);
+const discard = vi.mocked(gitDiscard);
+const commit = vi.mocked(gitCommit);
 
 const PROJECT = 7;
 
@@ -26,6 +48,11 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   localStorage.clear();
+});
+
+/** The rail starts on a project nobody has trusted yet, which is where every project starts. */
+beforeEach(() => {
+  readTrust.mockResolvedValue(false);
 });
 
 function statusWith(paths: string[]): GitStatus {
@@ -197,5 +224,79 @@ describe("GitRail", () => {
     await waitFor(() => expect(within(rail()).getByText("main")).toBeTruthy());
 
     expect((relaunched.container.firstElementChild as HTMLElement).style.width).toBe(widened);
+  });
+
+  it("offers to trust a project before it offers to change one", async () => {
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+
+    renderRail();
+    await waitFor(() => expect(within(rail()).getByText("main")).toBeTruthy());
+
+    expect(
+      within(rail()).queryByLabelText(/^Stage /),
+      "an action nobody may take is absent, not disabled",
+    ).toBeNull();
+    expect(within(rail()).queryByLabelText("Commit message")).toBeNull();
+
+    fireEvent.click(within(rail()).getByRole("button", { name: /trust this project/i }));
+
+    await waitFor(() => expect(trustProject).toHaveBeenCalledWith(PROJECT));
+  });
+
+  it("stages a path when its box is ticked, and takes it back when it is cleared", async () => {
+    readTrust.mockResolvedValue(true);
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+
+    renderRail();
+
+    const box = await within(rail()).findByLabelText("Stage src/a.rs");
+    fireEvent.click(box);
+
+    await waitFor(() => expect(stage).toHaveBeenCalledWith(PROJECT, "src/a.rs"));
+  });
+
+  it("asks before throwing a change away, and throws nothing away until it is answered", async () => {
+    readTrust.mockResolvedValue(true);
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+
+    renderRail();
+    const button = await within(rail()).findByLabelText("Discard the changes to src/a.rs");
+    fireEvent.click(button);
+
+    const question = await screen.findByRole("alertdialog");
+    expect(discard, "nothing goes on the strength of one click").not.toHaveBeenCalled();
+
+    fireEvent.click(within(question).getByRole("button", { name: /^discard$/i }));
+    await waitFor(() => expect(discard).toHaveBeenCalledWith(PROJECT, "src/a.rs"));
+  });
+
+  it("will not commit until there is a message and something staged to record", async () => {
+    readTrust.mockResolvedValue(true);
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+
+    renderRail();
+    const message = await within(rail()).findByLabelText("Commit message");
+    const button = within(rail()).getByRole("button", { name: /^commit$/i });
+
+    fireEvent.change(message, { target: { value: "Record it" } });
+    expect(
+      (button as HTMLButtonElement).disabled,
+      "the only change is unstaged, so there is nothing for a commit to record",
+    ).toBe(true);
+  });
+
+  it("commits the message it was given once something is staged", async () => {
+    readTrust.mockResolvedValue(true);
+    const staged = statusWith(["src/a.rs"]);
+    staged.changes[0].status = { staged: "modified", unstaged: null };
+    readStatus.mockResolvedValue(staged);
+
+    renderRail();
+    const message = await within(rail()).findByLabelText("Commit message");
+    fireEvent.change(message, { target: { value: "Record it" } });
+    fireEvent.click(within(rail()).getByRole("button", { name: /^commit$/i }));
+
+    await waitFor(() => expect(commit).toHaveBeenCalledWith(PROJECT, "Record it", false));
+    await waitFor(() => expect((message as HTMLTextAreaElement).value).toBe(""));
   });
 });
