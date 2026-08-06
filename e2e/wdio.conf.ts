@@ -99,7 +99,14 @@ function buildBinary(
   // app build shells out to `pnpm`, and pnpm looks for an optional `.pnpmfile.mjs` by importing it.
   // Under the loader an absent file comes back as a failed import rather than as absent, so pnpm
   // reports a pnpmfile error and the build dies on a file that was never meant to exist.
-  const env = { ...options.env };
+  //
+  // For the same reason it must not inherit the runner's idea of what environment this is.
+  // WebdriverIO launches with `NODE_ENV=test`, which reaches the frontend build and makes Vite
+  // resolve React's *development* build — and a development React re-invokes every render under
+  // the `StrictMode` the app mounts, which a shipped build never does. The suite exists to drive
+  // the app as it is really built, so the frontend is built the way it ships; measured, not
+  // assumed — the diff surface renders under one and tears the window down under the other.
+  const env: NodeJS.ProcessEnv = { ...options.env, NODE_ENV: "production" };
   delete env.NODE_OPTIONS;
 
   const build = spawnSync("cargo", args, { stdio: "inherit", ...options, env });

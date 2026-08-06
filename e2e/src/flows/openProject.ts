@@ -12,13 +12,21 @@ import { sidebar } from "../screens/Sidebar.js";
  * so this calls the same core command that picker's handler calls, then reads the window the way a
  * user would. The load is real: it parses the fixture's `solo.yml`, writes durable rows, and
  * registers the commands the sidebar renders.
+ *
+ * `prepare` shapes the fresh copy before the app is told about it, for a spec that needs the
+ * project to already be in some state when it is first read — a project the app opens and *then*
+ * finds changed is a different journey from one that was that way all along.
  */
-export async function openProject(fixture: string): Promise<ProjectView> {
+export async function openProject(
+  fixture: string,
+  prepare?: (root: string) => void,
+): Promise<ProjectView> {
   // Let the shell finish rendering before the first IPC call: driving the bridge while the
   // webview is still booting is where slow evals and their retries live.
   await sidebar.waitUntilReady();
 
   const path = materializeProject(fixture);
+  prepare?.(path);
   const { id } = await invoke<ProjectLoad>("project_load", { path });
 
   const projects = await invoke<ProjectView[]>("project_list");
