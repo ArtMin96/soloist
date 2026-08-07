@@ -18,6 +18,17 @@ vi.mock("@/api", () => ({
   gitDiscardHunk: vi.fn(() => Promise.resolve()),
   gitCommit: vi.fn(() => Promise.resolve()),
   gitDraftCommitMessage: vi.fn(() => Promise.resolve("")),
+  gitBranches: vi.fn(() => Promise.resolve(null)),
+  gitCreateBranch: vi.fn(() => Promise.resolve()),
+  gitSwitchBranch: vi.fn(() => Promise.resolve()),
+  gitDeleteBranch: vi.fn(() => Promise.resolve()),
+  gitStash: vi.fn(() => Promise.resolve()),
+  gitPopStash: vi.fn(() => Promise.resolve()),
+  gitPush: vi.fn(() => Promise.resolve()),
+  gitPull: vi.fn(() => Promise.resolve()),
+  gitFetch: vi.fn(() => Promise.resolve()),
+  gitStopExchange: vi.fn(() => Promise.resolve()),
+  gitAbortMerge: vi.fn(() => Promise.resolve()),
   assistSettings: vi.fn(() => Promise.resolve({ tool: null })),
   onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
   onResync: vi.fn(() => Promise.resolve(() => {})),
@@ -25,7 +36,14 @@ vi.mock("@/api", () => ({
 
 import {
   assistSettings,
+  gitAbortMerge,
+  gitBranches,
   gitCommit,
+  gitDeleteBranch,
+  gitFetch,
+  gitPush,
+  gitStopExchange,
+  gitSwitchBranch,
   gitDiscard,
   gitDraftCommitMessage,
   gitFiles,
@@ -47,6 +65,13 @@ const discard = vi.mocked(gitDiscard);
 const commit = vi.mocked(gitCommit);
 const draftMessage = vi.mocked(gitDraftCommitMessage);
 const readAssist = vi.mocked(assistSettings);
+const readBranches = vi.mocked(gitBranches);
+const switchBranch = vi.mocked(gitSwitchBranch);
+const deleteBranch = vi.mocked(gitDeleteBranch);
+const fetch = vi.mocked(gitFetch);
+const push = vi.mocked(gitPush);
+const stopExchange = vi.mocked(gitStopExchange);
+const abortMerge = vi.mocked(gitAbortMerge);
 
 const PROJECT = 7;
 
@@ -79,6 +104,7 @@ function statusWith(paths: string[]): GitStatus {
       status: { staged: null, unstaged: "modified" },
       original_path: null,
     })),
+    merging: false,
   };
 }
 
@@ -377,5 +403,149 @@ describe("GitRail", () => {
       name: "Draft a message",
     })) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
+  });
+});
+
+describe("moving between branches and exchanging commits with the remote", () => {
+  it("offers neither a branch switcher nor a sync action until the project is trusted", async () => {
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+
+    renderRail();
+
+    await within(rail()).findByText("main");
+    expect(
+      within(rail()).queryByRole("button", { name: "Switch branch" }),
+      "an action nobody may take is absent, not disabled",
+    ).toBeNull();
+    expect(within(rail()).queryByRole("button", { name: "Fetch" })).toBeNull();
+    expect(
+      readBranches,
+      "and nothing is read for a switcher that is not offered",
+    ).not.toHaveBeenCalled();
+  });
+
+  it("reads the branches only once the switcher is opened, and switches to the one chosen", async () => {
+    readTrust.mockResolvedValue(true);
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+    readBranches.mockResolvedValue({
+      entries: [
+        { name: "main", upstream: "origin/main", head: true },
+        { name: "feature", upstream: null, head: false },
+      ],
+      stashed: false,
+    });
+
+    renderRail();
+    const switcher = await within(rail()).findByRole("button", { name: "Switch branch" });
+    expect(
+      readBranches,
+      "a list nobody is looking at is a subprocess nobody needed",
+    ).not.toHaveBeenCalled();
+    fireEvent.click(switcher);
+
+    fireEvent.click(await screen.findByText("feature"));
+
+    await waitFor(() => expect(switchBranch).toHaveBeenCalledWith(PROJECT, "feature"));
+    expect(readBranches).toHaveBeenCalledWith(PROJECT);
+  });
+
+  it("confirms before a branch is deleted, and deletes nothing until it is confirmed", async () => {
+    readTrust.mockResolvedValue(true);
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+    readBranches.mockResolvedValue({
+      entries: [
+        { name: "main", upstream: null, head: true },
+        { name: "spike", upstream: null, head: false },
+      ],
+      stashed: false,
+    });
+
+    renderRail();
+    fireEvent.click(await within(rail()).findByRole("button", { name: "Switch branch" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete branch spike" }));
+
+    expect(deleteBranch, "nothing goes before the question is answered").not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(deleteBranch).toHaveBeenCalledWith(PROJECT, "spike"));
+  });
+
+  it("offers to publish a branch that tracks nothing rather than to pull from it", async () => {
+    readTrust.mockResolvedValue(true);
+    const untracked = statusWith(["src/a.rs"]);
+    untracked.branch = { name: "spike", upstream: null, sync: { state: "unknown" } };
+    readStatus.mockResolvedValue(untracked);
+
+    renderRail();
+
+    await within(rail()).findByRole("button", { name: "Publish" });
+    expect(
+      within(rail()).queryByRole("button", { name: "Pull" }),
+      "there is nothing to pull from an upstream that does not exist",
+    ).toBeNull();
+  });
+
+  it("offers to stop an exchange while it is under way, and reports nothing when it is stopped", async () => {
+    readTrust.mockResolvedValue(true);
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+    let refuse: (reason: Error) => void = () => {};
+    push.mockImplementation(() => new Promise((_, reject) => (refuse = reject)));
+
+    renderRail();
+    fireEvent.click(await within(rail()).findByRole("button", { name: "Push" }));
+
+    const stop = await within(rail()).findByRole("button", { name: "Stop" });
+    fireEvent.click(stop);
+    expect(stopExchange).toHaveBeenCalledWith(PROJECT);
+    // The core reports a stopped exchange as refused, because from its side it did not finish.
+    refuse(new Error("the git command was stopped"));
+
+    await within(rail()).findByRole("button", { name: "Push" });
+    expect(
+      within(rail()).queryByRole("alert"),
+      "an exchange the reader stopped is what they asked for, not a failure to report back at them",
+    ).toBeNull();
+  });
+
+  it("states the reason an exchange really failed", async () => {
+    readTrust.mockResolvedValue(true);
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+    fetch.mockRejectedValue(new Error("no credential the remote would accept"));
+
+    renderRail();
+    fireEvent.click(await within(rail()).findByRole("button", { name: "Fetch" }));
+
+    const refusal = await within(rail()).findByRole("alert");
+    expect(refusal.textContent).toContain("no credential the remote would accept");
+  });
+
+  it("says how many files a merge left to resolve, and abandons it only after asking", async () => {
+    readTrust.mockResolvedValue(true);
+    const conflicted = statusWith(["src/a.rs"]);
+    conflicted.changes[0].status = { staged: null, unstaged: "conflicted" };
+    conflicted.merging = true;
+    readStatus.mockResolvedValue(conflicted);
+
+    renderRail();
+
+    await within(rail()).findByText("1 file needs resolving");
+    fireEvent.click(await within(rail()).findByRole("button", { name: "Abandon merge" }));
+    expect(
+      abortMerge,
+      "abandoning throws away resolved conflicts, so it asks first",
+    ).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Abandon" }));
+    await waitFor(() => expect(abortMerge).toHaveBeenCalledWith(PROJECT));
+  });
+
+  it("says nothing about conflicts when a merge is under way with none left", async () => {
+    readTrust.mockResolvedValue(true);
+    const merging = statusWith(["src/a.rs"]);
+    merging.merging = true;
+    readStatus.mockResolvedValue(merging);
+
+    renderRail();
+
+    await within(rail()).findByText("Merge in progress");
+    expect(within(rail()).queryByText(/needs resolving/)).toBeNull();
   });
 });

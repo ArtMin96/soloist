@@ -12,10 +12,10 @@ use std::path::{Path, PathBuf};
 use super::Facade;
 use crate::agents::OneShotError;
 use crate::events::DomainEvent;
-use crate::git::{DiffExtent, Git, GitDraftError, GitError, GitStatus, GitWriteError};
+use crate::git::{DiffExtent, Git, GitDraftError, GitError, GitStatus, GitWriteError, Prompting};
 use crate::ids::ProjectId;
 use crate::ports::StoreError;
-use crate::vcs::{DiffTarget, FileContent, FileDiff, HunkRange, ProjectFile};
+use crate::vcs::{Branches, DiffTarget, FileContent, FileDiff, HunkRange, ProjectFile};
 
 impl Facade {
     /// A project's working-tree status: what is checked out, how it stands against its
@@ -79,6 +79,18 @@ impl Facade {
     ) -> Result<Option<FileContent>, GitReadError> {
         let root = self.git_root(project)?;
         Ok(self.git.file(project, &root, path)?)
+    }
+
+    /// The branches `project` could switch to, most recently committed to first and bounded at
+    /// [`BRANCH_PAGE_SIZE`](crate::git::BRANCH_PAGE_SIZE), plus whether it has anything stashed —
+    /// the two things a branch switcher offers.
+    ///
+    /// `Ok(None)` for a project that is not a repository, for the same reason
+    /// [`Facade::git_status`] gives it. A read, so it is ungated; it runs an external tool, so
+    /// callers reach it through [`Facade::blocking`].
+    pub fn git_branches(&self, project: ProjectId) -> Result<Option<Branches>, GitReadError> {
+        let root = self.git_root(project)?;
+        Ok(self.git.branches(project, &root)?)
     }
 
     /// Whether the user has trusted `project` to be changed by Soloist. A surface asks so it can
@@ -171,6 +183,85 @@ impl Facade {
         self.git_change(project, |git, root| {
             git.commit(project, root, message, amend)
         })
+    }
+
+    /// Starts a branch called `name` at what `project` has checked out, and switches to it.
+    pub fn git_create_branch(&self, project: ProjectId, name: &str) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| git.create_branch(project, root, name))
+    }
+
+    /// Checks out `project`'s branch called `name`. A switch that would overwrite uncommitted work
+    /// is refused, carrying version control's own account of what is in the way — nothing is
+    /// stashed or discarded to get past it.
+    pub fn git_switch_branch(&self, project: ProjectId, name: &str) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| git.switch_branch(project, root, name))
+    }
+
+    /// Removes `project`'s branch called `name`. Destructive, so a surface confirms it first — and
+    /// bounded, because a branch holding commits nothing else holds is refused and stays refused.
+    pub fn git_delete_branch(&self, project: ProjectId, name: &str) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| git.delete_branch(project, root, name))
+    }
+
+    /// Sets what `project`'s working tree holds aside, leaving it as the last commit left it.
+    pub fn git_stash(&self, project: ProjectId) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| git.stash(project, root))
+    }
+
+    /// Puts `project`'s most recently stashed changes back. A collision with what the working tree
+    /// holds now comes back as version control's own account of it, because it left a conflict to
+    /// resolve rather than doing what was asked.
+    pub fn git_pop_stash(&self, project: ProjectId) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| git.pop_stash(project, root))
+    }
+
+    /// Hands the checked-out branch's commits to its remote, publishing the branch when it tracks
+    /// nothing yet.
+    ///
+    /// Reaches a machine Soloist has no say over, under the user's own credentials — Soloist keeps
+    /// none of its own and names no credential helper. This is the **local user's** door, so
+    /// [`Prompting::Allowed`]: they clicked something and are sitting in front of it, so version
+    /// control may ask them for a credential. Bounded by the adapter's own limit for reaching a
+    /// remote and stoppable before then ([`Facade::git_stop_exchange`]), so callers reach this
+    /// through [`Facade::blocking`].
+    pub fn git_push(&self, project: ProjectId) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| {
+            git.push(project, root, Prompting::Allowed)
+        })
+    }
+
+    /// Brings the remote's commits into `project` and reconciles them with what is checked out,
+    /// however the user's own configuration says to. Where they have not said, version control
+    /// refuses rather than choosing, and its refusal is what comes back.
+    pub fn git_pull(&self, project: ProjectId) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| {
+            git.pull(project, root, Prompting::Allowed)
+        })
+    }
+
+    /// Brings the remote's commits in without touching `project`'s working tree, which is what
+    /// makes its standing against the upstream true again.
+    pub fn git_fetch(&self, project: ProjectId) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| {
+            git.fetch(project, root, Prompting::Allowed)
+        })
+    }
+
+    /// Asks the exchange with a remote running against `project` to stop.
+    ///
+    /// Instant and infallible: it sets a signal the exchange looks at, taking nothing that exchange
+    /// holds — which is what lets it be called while the exchange is still running, from a surface
+    /// whose only other option would be to wait the limit out. The exchange itself then ends as
+    /// [`GitError::Stopped`](crate::git::GitError::Stopped), the project's gate is released, and the
+    /// next read of the repository goes straight through. Nothing to stop is not a failure.
+    pub fn git_stop_exchange(&self, project: ProjectId) {
+        self.git.stop_exchange(project);
+    }
+
+    /// Abandons a merge that is under way in `project`. Destructive within that merge — a conflict
+    /// resolved by hand since it began goes with it — so a surface confirms it first.
+    pub fn git_abort_merge(&self, project: ProjectId) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| git.abort_merge(project, root))
     }
 
     /// Drafts a commit message describing what is staged in `project`, by running the agent tool

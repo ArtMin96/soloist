@@ -18,6 +18,7 @@ use crate::sync::lock;
 use crate::vcs::{BranchInfo, FileChange};
 
 use super::error::{GitError, GitWriteError};
+use super::exchange::Stop;
 use super::repository::GitRepository;
 
 /// A repository's working tree at one moment: what is checked out, and everything that differs
@@ -28,6 +29,11 @@ pub struct GitStatus {
     pub branch: BranchInfo,
     /// Every path that differs from the last commit, in the order version control reports them.
     pub changes: Vec<FileChange>,
+    /// Whether a merge is under way — which is a separate fact from there being conflicts.
+    /// Conflicts also arrive from putting stashed changes back, where there is no merge to
+    /// abandon; a merge can be under way with every conflict already resolved. So a surface reads
+    /// the conflicts to say what needs attention, and this to say whether abandoning is on offer.
+    pub merging: bool,
 }
 
 /// The git context (C9): reads a project's repository through the [`GitRepository`] port and
@@ -44,6 +50,11 @@ pub struct Git {
     cached: Mutex<HashMap<ProjectId, Option<GitStatus>>>,
     /// One gate per project, so two callers never run against the same repository at once.
     gates: Mutex<HashMap<ProjectId, Arc<Mutex<()>>>>,
+    /// The signal that stops the exchange with a remote currently running against each project.
+    /// Held here rather than passed around because whoever changes their mind about an exchange is
+    /// never the caller that started it — they arrive later, by another route, with only the project
+    /// in hand.
+    stops: Mutex<HashMap<ProjectId, Stop>>,
 }
 
 impl Git {
@@ -55,6 +66,7 @@ impl Git {
             trust,
             cached: Mutex::new(HashMap::new()),
             gates: Mutex::new(HashMap::new()),
+            stops: Mutex::new(HashMap::new()),
         }
     }
 
@@ -104,6 +116,29 @@ impl Git {
     pub fn forget(&self, project: ProjectId) {
         lock(&self.cached).remove(&project);
         lock(&self.gates).remove(&project);
+        lock(&self.stops).remove(&project);
+    }
+
+    /// Asks the exchange with a remote running against `project` to stop, if there is one.
+    ///
+    /// Takes neither the project's gate nor anything the exchange holds — it sets a flag the
+    /// exchange looks at — which is what lets it be called while that exchange is what the gate is
+    /// being held for. Nothing to stop is not a failure: an exchange that has already finished is
+    /// the outcome the caller wanted.
+    pub fn stop_exchange(&self, project: ProjectId) {
+        if let Some(stop) = lock(&self.stops).get(&project) {
+            stop.stop();
+        }
+    }
+
+    /// The signal for the exchange about to run against `project`, replacing whichever the last one
+    /// left behind. Called with the project's gate held, so the signal on file always belongs to the
+    /// exchange that is actually running — and replacing it is what makes a change of mind arriving
+    /// after one finished reach nothing: the next exchange never sees it.
+    pub(super) fn arm(&self, project: ProjectId) -> Stop {
+        let stop = Stop::default();
+        lock(&self.stops).insert(project, stop.clone());
+        stop
     }
 
     /// Runs one read under the project's gate and files it, returning the status and whether it
@@ -126,6 +161,27 @@ impl Git {
     /// taken before the cache lock, so the two are never acquired in the opposite order.
     pub(super) fn gate(&self, project: ProjectId) -> Arc<Mutex<()>> {
         lock(&self.gates).entry(project).or_default().clone()
+    }
+
+    /// The shape every change to a repository shares: the project's trust gate, then its gate, so
+    /// nothing runs beside a read or another change against the same repository.
+    ///
+    /// Every change goes through here — including the ones that reach the network, which is what
+    /// keeps a fetch that will not finish for a minute from being joined by a second one. It is
+    /// also the only route to the port's writing side, so a change cannot be made without the
+    /// trust gate being spent on it.
+    ///
+    /// `act` must not read this project's status: the gate is held while it runs, and a read would
+    /// wait for a lock its own caller holds.
+    pub(super) fn mutating<T>(
+        &self,
+        project: ProjectId,
+        act: impl FnOnce(&dyn GitRepository) -> Result<T, GitError>,
+    ) -> Result<T, GitWriteError> {
+        self.authorize(project)?;
+        let gate = self.gate(project);
+        let _running = lock(&gate);
+        Ok(act(self.repository.as_ref())?)
     }
 }
 

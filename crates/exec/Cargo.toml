@@ -13,3 +13,11 @@ repository.workspace = true
 # helpers of its own leaves nothing behind. `signal` also carries the existence probe the
 # timeout test asserts a reaped group with.
 nix = { version = "0.31", features = ["signal"] }
+
+[dev-dependencies]
+# A run stopped before it started has to be shown to have started nothing, which means giving it
+# somewhere disposable to have left a trace.
+tempfile = "3"
+# Proving a stopped run left neither a child nor a zombie is a question about this process's
+# children, which is what `wait` answers.
+nix = { version = "0.31", features = ["signal", "process"] }

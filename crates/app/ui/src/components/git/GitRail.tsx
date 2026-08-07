@@ -7,8 +7,11 @@ import {
   UnfoldVerticalIcon,
 } from "lucide-react";
 import { BranchHeader } from "@/components/git/BranchHeader";
+import type { BranchActions } from "@/components/git/BranchMenu";
 import { ChangesTree, type ChangeActions } from "@/components/git/ChangesTree";
 import { CommitBox } from "@/components/git/CommitBox";
+import { ConfirmDialog } from "@/components/git/ConfirmDialog";
+import { ConflictNotice } from "@/components/git/ConflictNotice";
 import { DiscardDialog, type Discardable } from "@/components/git/DiscardDialog";
 import { FilesTree } from "@/components/git/FilesTree";
 import { TrustNotice } from "@/components/git/TrustNotice";
@@ -24,6 +27,7 @@ import { CHANGE, FILE, type DiffSelection } from "@/store/git/useDiffSelection";
 import { useGitFiles } from "@/store/git/useGitFiles";
 import { useGitStatus } from "@/store/git/useGitStatus";
 import { useCommitMessageDraft } from "@/store/git/useCommitMessageDraft";
+import { BRANCH as BRANCH_ACTION, MERGE as MERGE_ACTION, useGitSync } from "@/store/git/useGitSync";
 import { useGitWrite } from "@/store/git/useGitWrite";
 import {
   RAIL_MAX_WIDTH,
@@ -48,6 +52,14 @@ const EXPAND_RAIL_LABEL = "Show version control";
 const RESIZE_RAIL_LABEL = "Resize the version control rail";
 const EXPAND_FOLDERS_LABEL = "Expand all folders";
 const COLLAPSE_FOLDERS_LABEL = "Collapse all folders";
+
+/** The two questions the rail asks before it destroys anything. */
+const DELETE_BRANCH_TITLE = "Delete this branch?";
+const DELETE_BRANCH_CONFIRM = "Delete";
+const DELETE_BRANCH_CANCEL = "Keep it";
+const ABANDON_MERGE_TITLE = "Abandon this merge?";
+const ABANDON_MERGE_CONFIRM = "Abandon";
+const ABANDON_MERGE_CANCEL = "Keep merging";
 
 /** What the rail says when a tab has nothing in it, per state. */
 const NOT_A_REPOSITORY = "Not a git repository";
@@ -77,12 +89,16 @@ export function GitRail({
   const changesTree = useRef<RepositoryTreeHandle>(null);
   const filesTree = useRef<RepositoryTreeHandle>(null);
   const [discarding, setDiscarding] = useState<Discardable | null>(null);
+  const [deletingBranch, setDeletingBranch] = useState<string | null>(null);
+  const [abandoningMerge, setAbandoningMerge] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const status = useGitStatus(project);
   const files = useGitFiles(project, !layout.collapsed && tab === FILES_TAB);
   const write = useGitWrite(project);
+  const sync = useGitSync(project, switcherOpen);
   const draft = useCommitMessageDraft(project);
   // One place a refused action is stated, whichever asked for it.
-  const refusal = write.error ?? draft.error;
+  const refusal = write.error ?? sync.error ?? draft.error;
   const changes = status.status?.changes ?? [];
   const actions: ChangeActions | null =
     write.trusted === true
@@ -90,6 +106,17 @@ export function GitRail({
           onStage: (path, stage) => (stage ? write.stage(path) : write.unstage(path)),
           onDiscard: (path) => setDiscarding({ path, hunk: false }),
           busy: write.busy,
+        }
+      : null;
+  // Until the project is trusted nothing here may change it, so none of it is offered.
+  const branchActions: BranchActions | null =
+    write.trusted === true
+      ? {
+          switchTo: sync.switchBranch,
+          create: sync.createBranch,
+          remove: sync.deleteBranch,
+          stash: sync.stash,
+          popStash: sync.popStash,
         }
       : null;
 
@@ -138,7 +165,25 @@ export function GitRail({
             {status.status === null ? (
               <div className="h-11 shrink-0 border-b border-sidebar-border" />
             ) : (
-              <BranchHeader branch={status.status.branch} />
+              <BranchHeader
+                branch={status.status.branch}
+                branches={sync.branches}
+                exchanging={sync.exchanging}
+                busy={sync.busy(BRANCH_ACTION)}
+                sync={
+                  write.trusted === true
+                    ? {
+                        fetch: sync.fetch,
+                        pull: sync.pull,
+                        push: sync.push,
+                        stop: sync.stopExchange,
+                      }
+                    : null
+                }
+                branchActions={branchActions}
+                onDeleteBranch={setDeletingBranch}
+                onBranchesOpen={setSwitcherOpen}
+              />
             )}
           </div>
           <div className="flex items-center border-b border-sidebar-border pe-1">
@@ -218,6 +263,12 @@ export function GitRail({
                 )}
               </div>
             </div>
+            <ConflictNotice
+              changes={changes}
+              merging={status.status?.merging === true}
+              busy={sync.busy(MERGE_ACTION)}
+              onAbandon={() => setAbandoningMerge(true)}
+            />
             {refusal !== null && <RailError message={refusal} />}
             {write.trusted === false ? (
               <TrustNotice onTrust={write.trust} />
@@ -244,6 +295,35 @@ export function GitRail({
           setDiscarding(null);
         }}
       />
+      <ConfirmDialog
+        open={deletingBranch !== null}
+        title={DELETE_BRANCH_TITLE}
+        confirm={DELETE_BRANCH_CONFIRM}
+        cancel={DELETE_BRANCH_CANCEL}
+        onCancel={() => setDeletingBranch(null)}
+        onConfirm={() => {
+          if (deletingBranch !== null) sync.deleteBranch(deletingBranch);
+          setDeletingBranch(null);
+        }}
+      >
+        <span className="font-mono">{deletingBranch}</span> will be removed. Version control refuses
+        while it holds commits no other branch holds, and that refusal stands — there is no forced
+        delete here.
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={abandoningMerge}
+        title={ABANDON_MERGE_TITLE}
+        confirm={ABANDON_MERGE_CONFIRM}
+        cancel={ABANDON_MERGE_CANCEL}
+        onCancel={() => setAbandoningMerge(false)}
+        onConfirm={() => {
+          sync.abortMerge();
+          setAbandoningMerge(false);
+        }}
+      >
+        The working tree goes back to what was checked out before the merge began. Any conflict you
+        have already resolved goes with it, and this cannot be undone.
+      </ConfirmDialog>
     </div>
   );
 }

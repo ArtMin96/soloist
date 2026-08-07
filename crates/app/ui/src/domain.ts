@@ -389,6 +389,26 @@ export interface BranchInfo {
 export interface GitStatus {
   branch: BranchInfo;
   changes: FileChange[];
+  // Whether a merge is under way, which is a separate fact from there being conflicts: conflicts
+  // also arrive from putting stashed changes back, where there is no merge to abandon.
+  merging: boolean;
+}
+
+// One branch a switcher can offer (mirrors core::vcs::Branch).
+export interface Branch {
+  name: string;
+  upstream: string | null;
+  // The branch that is checked out — the one a switch has nothing to do for and a delete cannot
+  // touch.
+  head: boolean;
+}
+
+// What a branch switcher can act on (mirrors core::vcs::Branches): the branches worth offering,
+// most recently committed to first and bounded by the core's own page size, and whether the
+// working tree has anything set aside.
+export interface Branches {
+  entries: Branch[];
+  stashed: boolean;
 }
 
 // One entry in a project's file listing. A `path` ending in `/` is a whole directory rather

@@ -21,12 +21,20 @@ use std::time::Duration;
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::Pid;
 
+/// How often a waiting run asks whether it has been asked to stop. Short enough that stopping feels
+/// immediate to whoever asked, long enough that waiting costs nothing measurable.
+const STOP_CHECK: Duration = Duration::from_millis(25);
+
 /// What one run is handed, and what is accepted back from it. Every bound is stated by the
 /// caller, because what is generous for one command is pathological for another.
 pub struct Run<'a> {
     /// What to write to the command's standard input, for a run whose subject arrives that way.
     /// `None` gives it nothing to read, so a command that waits on input fails rather than hangs.
     pub input: Option<&'a str>,
+    /// Asked periodically while the run waits, for a run somebody may change their mind about.
+    /// Answering true stops it by exactly the path the time limit stops it by — one teardown, two
+    /// reasons to reach it — and the outcome says which reason it was.
+    pub stopped: Option<&'a dyn Fn() -> bool>,
     /// How long the run may take before it is stopped.
     pub time_limit: Duration,
     /// The most standard output the run may produce. Reading a pipe without a ceiling is how one
@@ -60,6 +68,9 @@ pub enum RunError {
     Spawn(io::ErrorKind),
     /// It did not finish within its time limit, and was stopped and reaped.
     TimedOut,
+    /// Whoever asked for it changed their mind, and it was stopped and reaped. Told apart from
+    /// running out of time because it is not a failure at all: it is what was asked for.
+    Stopped,
     /// It produced more than its output ceiling allowed, and was stopped and reaped.
     OverLimit { status: Option<i32> },
     /// The wait itself could not report an outcome — the operating system failed the wait, or the
@@ -77,6 +88,11 @@ pub enum RunError {
 /// Blocking, and bounded by `run.time_limit`. Runs the child on threads of its own, so a full
 /// pipe can never deadlock against the wait.
 pub fn run(mut command: Command, run: Run<'_>) -> Result<Finished, RunError> {
+    // Asked before anything is started as well as while it waits, so a run somebody stopped before
+    // it began costs no process at all.
+    if run.stopped.is_some_and(|stopped| stopped()) {
+        return Err(RunError::Stopped);
+    }
     let mut child = command
         .stdin(if run.input.is_some() {
             Stdio::piped()
@@ -98,7 +114,7 @@ pub fn run(mut command: Command, run: Run<'_>) -> Result<Finished, RunError> {
         .diagnostics
         .zip(child.stderr.take())
         .map(|(limit, stderr)| read_diagnostics(stderr, limit));
-    let finished = wait_bounded(child, run.time_limit, run.output_limit, writing);
+    let finished = wait_bounded(child, &run, writing);
 
     let diagnostics = reading
         .and_then(|reading| reading.join().ok())
@@ -137,20 +153,21 @@ fn read_diagnostics(mut stderr: ChildStderr, limit: usize) -> JoinHandle<String>
     })
 }
 
-/// Waits for `child` within `limit`, capturing its standard output up to `output_limit`.
+/// Waits for `child` within the run's time limit, capturing its standard output up to the run's
+/// ceiling, and stopping early if the run is asked to stop.
 ///
 /// The capture and the wait happen on one thread, so a full pipe can never deadlock against a
 /// caller that stopped reading. Whichever way the wait ends — finished, over the output ceiling,
-/// or out of time — the process group is signalled and the child is reaped before this returns,
-/// and any thread feeding its input is joined, so nothing outlives the call.
+/// out of time, or asked to stop — the process group is signalled and the child is reaped before
+/// this returns, and any thread feeding its input is joined, so nothing outlives the call.
 fn wait_bounded(
     mut child: Child,
-    limit: Duration,
-    output_limit: usize,
+    run: &Run<'_>,
     writing: Option<JoinHandle<()>>,
 ) -> Result<(Vec<u8>, ExitStatus), RunError> {
     // Spawned into a group of its own, so the child's pid is that group's id.
     let group = Pid::from_raw(child.id() as i32);
+    let output_limit = run.output_limit;
     let (finished_tx, finished_rx) = mpsc::channel();
     let capture = thread::spawn(move || {
         let mut output = Vec::new();
@@ -169,8 +186,8 @@ fn wait_bounded(
         let status = child.wait();
         let _ = finished_tx.send(status.map(|status| (output, status)));
     });
-    let finished = finished_rx.recv_timeout(limit);
-    if matches!(finished, Err(RecvTimeoutError::Timeout)) {
+    let finished = wait_or_stop(&finished_rx, run);
+    if matches!(finished, Err(Unfinished::TimedOut | Unfinished::Stopped)) {
         let _ = killpg(group, Signal::SIGKILL);
     }
     // Joining after the signal is what makes the reap part of this call: the capture thread only
@@ -184,8 +201,52 @@ fn wait_bounded(
             status: status.code(),
         }),
         Ok(Ok(finished)) => Ok(finished),
-        Ok(Err(_)) | Err(RecvTimeoutError::Disconnected) => Err(RunError::Lost),
-        Err(RecvTimeoutError::Timeout) => Err(RunError::TimedOut),
+        Ok(Err(_)) | Err(Unfinished::Lost) => Err(RunError::Lost),
+        Err(Unfinished::TimedOut) => Err(RunError::TimedOut),
+        Err(Unfinished::Stopped) => Err(RunError::Stopped),
+    }
+}
+
+/// Why a wait produced nothing to read — before the child's own outcome is judged.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Unfinished {
+    TimedOut,
+    Stopped,
+    Lost,
+}
+
+/// Waits for the child's outcome, giving up at the time limit or as soon as the run is asked to
+/// stop.
+///
+/// A run nobody can stop waits in one call, exactly as it always has. One that can waits in short
+/// steps, because being asked to stop is a question that has to be looked at rather than a message
+/// that arrives.
+fn wait_or_stop(
+    finished: &mpsc::Receiver<io::Result<(Vec<u8>, ExitStatus)>>,
+    run: &Run<'_>,
+) -> Result<io::Result<(Vec<u8>, ExitStatus)>, Unfinished> {
+    let Some(stopped) = run.stopped else {
+        return finished
+            .recv_timeout(run.time_limit)
+            .map_err(|err| match err {
+                RecvTimeoutError::Timeout => Unfinished::TimedOut,
+                RecvTimeoutError::Disconnected => Unfinished::Lost,
+            });
+    };
+    let mut left = run.time_limit;
+    loop {
+        if stopped() {
+            return Err(Unfinished::Stopped);
+        }
+        if left.is_zero() {
+            return Err(Unfinished::TimedOut);
+        }
+        let step = left.min(STOP_CHECK);
+        match finished.recv_timeout(step) {
+            Ok(outcome) => return Ok(outcome),
+            Err(RecvTimeoutError::Disconnected) => return Err(Unfinished::Lost),
+            Err(RecvTimeoutError::Timeout) => left -= step,
+        }
     }
 }
 

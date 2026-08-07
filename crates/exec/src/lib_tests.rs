@@ -2,6 +2,9 @@
 //! subject arrives on its standard input. None is a path a caller can be built to provoke, so all
 //! are driven directly.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use nix::errno::Errno;
 use nix::sys::signal::kill;
 
@@ -19,6 +22,7 @@ const ROOMY: usize = 64 * 1024;
 fn bounded(input: Option<&str>) -> Run<'_> {
     Run {
         input,
+        stopped: None,
         time_limit: Duration::from_secs(10),
         output_limit: ROOMY,
         diagnostics: None,
@@ -30,6 +34,16 @@ fn shell(script: &str) -> Command {
     command.arg("-c").arg(script);
     command
 }
+
+/// The limit the stop test runs under — far longer than the child it stops, so running out of time
+/// is never what ends that run.
+const STOPPED_WELL_WITHIN: Duration = Duration::from_secs(30);
+
+/// How long the stopped child would live untouched, and how long the run may take once it has been
+/// asked to stop. A run that waited for the child instead of killing it takes the first, so the
+/// second is what tells the two apart.
+const CHILD_LIFE: &str = "sleep 10";
+const ENDS_WITHIN: Duration = Duration::from_secs(3);
 
 /// How long the test itself waits for the bounded wait to answer. Comfortably past [`LIMIT`], and
 /// present at all because the wait's bound is the very thing under test: a run that stopped killing
@@ -51,7 +65,15 @@ fn a_run_that_will_not_finish_is_stopped_and_reaped() {
     let (answered, waiting) = mpsc::channel();
     thread::spawn(move || {
         let _ = answered.send(
-            wait_bounded(child, LIMIT, ROOMY, None).is_err_and(|err| err == RunError::TimedOut),
+            wait_bounded(
+                child,
+                &Run {
+                    time_limit: LIMIT,
+                    ..bounded(None)
+                },
+                None,
+            )
+            .is_err_and(|err| err == RunError::TimedOut),
         );
     });
     let timed_out = waiting.recv_timeout(GRACE);
@@ -72,6 +94,83 @@ fn a_run_that_will_not_finish_is_stopped_and_reaped() {
         Err(Errno::ESRCH),
         "the stopped process was reaped, so nothing of it is left — not even a zombie",
     );
+}
+
+#[test]
+fn a_run_somebody_changed_their_mind_about_is_stopped_and_reaped_like_one_out_of_time() {
+    let asked_to_stop = Arc::new(AtomicBool::new(false));
+    let stopped = {
+        let asked_to_stop = Arc::clone(&asked_to_stop);
+        move || asked_to_stop.load(Ordering::SeqCst)
+    };
+    // Asked to stop from another thread once the run is certainly under way, which is the only way
+    // it happens for real.
+    let asking = {
+        let asked_to_stop = Arc::clone(&asked_to_stop);
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            asked_to_stop.store(true, Ordering::SeqCst);
+        })
+    };
+
+    let started = std::time::Instant::now();
+    let outcome = run(
+        shell(CHILD_LIFE),
+        Run {
+            stopped: Some(&stopped),
+            // Bounded well past the moment the stop arrives, but bounded: a run that ignored the
+            // signal has to be reported rather than waited out to a limit nobody would sit through.
+            time_limit: STOPPED_WELL_WITHIN,
+            ..bounded(None)
+        },
+    );
+    let took = started.elapsed();
+    asking.join().expect("the asking thread");
+
+    assert_eq!(
+        outcome.err(),
+        Some(RunError::Stopped),
+        "being asked to stop is not running out of time and not a failure — it is what was asked",
+    );
+    assert!(
+        took < ENDS_WITHIN,
+        "and it ends the run then and there rather than waiting for the child to finish on its \
+         own: took {took:?}",
+    );
+}
+
+#[test]
+fn a_run_that_was_stopped_before_it_started_never_starts_anything() {
+    // A program that could not be started at all: reaching the spawn reports that it is missing, so
+    // reporting the stop instead is proof nothing was reached.
+    let outcome = run(
+        Command::new("soloist-no-such-program"),
+        Run {
+            stopped: Some(&|| true),
+            ..bounded(None)
+        },
+    );
+
+    assert_eq!(
+        outcome.err(),
+        Some(RunError::Stopped),
+        "a run stopped before it began costs no process at all, not even a failed spawn",
+    );
+}
+
+#[test]
+fn a_run_nobody_stopped_still_answers_normally() {
+    let finished = run(
+        shell("printf answered"),
+        Run {
+            stopped: Some(&|| false),
+            ..bounded(None)
+        },
+    )
+    .expect("finished");
+
+    assert_eq!(String::from_utf8_lossy(&finished.output), "answered");
+    assert!(finished.status.success());
 }
 
 #[test]
