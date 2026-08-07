@@ -14,7 +14,6 @@
 use std::path::Path;
 
 use crate::ids::ProjectId;
-use crate::sync::lock;
 use crate::vcs::{ChangeKind, HunkRange};
 
 use super::error::{GitError, GitWriteError};
@@ -106,9 +105,12 @@ impl Git {
         })
     }
 
-    /// The shape every change to one path shares: the trust gate, the path guard, the other
-    /// name a rename has to be asked about by, and the project's gate — so a change never runs
-    /// beside a read of the same repository, and no path to the port skips one of them.
+    /// What a change to one path adds to [`Git::mutating`]: the guard that the path names
+    /// something inside the repository, and the other name a rename has to be asked about by.
+    ///
+    /// The path guard runs before the trust gate because it judges only the caller's own input —
+    /// it says nothing about the repository, so an untrusted caller learns nothing from it. The
+    /// rename is looked up before the gate is taken, because looking it up is itself a read.
     fn changing(
         &self,
         project: ProjectId,
@@ -116,15 +118,13 @@ impl Git {
         path: &str,
         act: impl FnOnce(&dyn GitRepository, Option<&str>) -> Result<(), GitError>,
     ) -> Result<(), GitWriteError> {
-        self.authorize(project)?;
         if !inside_repository(path) {
             return Err(GitWriteError::OutsideRepository);
         }
         let original_path = self.original_path_of(project, root, path);
-        let gate = self.gate(project);
-        let _running = lock(&gate);
-        act(self.repository.as_ref(), original_path.as_deref())?;
-        Ok(())
+        self.mutating(project, |repository| {
+            act(repository, original_path.as_deref())
+        })
     }
 
     /// Where a renamed or copied path came from, as the status reports it. Version control

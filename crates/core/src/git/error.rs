@@ -18,9 +18,11 @@ pub enum GitError {
     /// No git command-line tool is installed, so nothing can be read at all.
     #[error("the git command-line tool is not installed")]
     GitMissing,
-    /// The remote refused the credentials available, or none were available and prompting is
-    /// disabled — so the operation failed instead of waiting for an answer nobody can give.
-    #[error("git could not authenticate with the remote")]
+    /// The remote refused the credential available, or none was available and nobody could be asked
+    /// for one — so the operation failed instead of waiting for an answer nobody can give. The
+    /// message says what to do about it, because the caller may be an agent with no other way to
+    /// find out.
+    #[error("no credential the remote would accept — sign in to the remote once from the app, or arrange one for git, and try again")]
     AuthFailed,
     /// The operation cannot proceed while the working tree holds an unresolved merge.
     #[error("the working tree has unresolved conflicts")]
@@ -28,6 +30,10 @@ pub enum GitError {
     /// The operation did not finish within its time limit and was stopped.
     #[error("the git command did not finish within its time limit")]
     Timeout,
+    /// Whoever asked for the operation asked for it to stop, and it did. Not a failure: it is what
+    /// was asked for, and it is told apart from every other case so nothing reports it as one.
+    #[error("the git command was stopped")]
+    Stopped,
     /// The hunk an action named is not in the current diff, so nothing was changed. The file
     /// moved on between being read and being acted on — applying the request against the lines
     /// that are there now would change something the caller never saw.
@@ -69,6 +75,11 @@ pub enum GitWriteError {
     /// Throwing it away would mean deleting a file nothing else holds a copy of.
     #[error("that file is not tracked, so there is nothing to restore it from")]
     UntrackedPath,
+    /// The branch name given is blank, or begins with `-`, which version control would read as an
+    /// option rather than a name. Everything else about what makes a name legal is version
+    /// control's own to judge.
+    #[error("that is not a usable branch name")]
+    UnusableBranchName,
     /// A commit was asked for with nothing but blank space for a message.
     #[error("a commit needs a message")]
     EmptyMessage,

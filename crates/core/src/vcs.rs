@@ -1,6 +1,6 @@
 //! Shared value types for version control: the closed [`ChangeKind`] and [`SyncState`]
-//! discriminators, and the [`FileChange`]/[`BranchInfo`] vocabulary a working tree's state is
-//! described in.
+//! discriminators, and the [`FileChange`]/[`BranchInfo`]/[`Branch`] vocabulary a working tree's
+//! state is described in.
 //!
 //! These are value vocabulary — like [`process`](crate::process) — owned by no context. The git
 //! context that reads them out of a repository, the event bus that announces a change, and the
@@ -207,4 +207,28 @@ pub struct BranchInfo {
     pub upstream: Option<String>,
     /// How the branch stands against that upstream.
     pub sync: SyncState,
+}
+
+/// One branch a surface can offer to switch to.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Branch {
+    /// The branch's own name, without the `refs/heads/` it is stored under.
+    pub name: String,
+    /// The upstream it tracks (a remote-qualified name), `None` when it tracks nothing.
+    pub upstream: Option<String>,
+    /// Whether this is the branch that is checked out — the one a switch has nothing to do for
+    /// and a delete cannot touch.
+    pub head: bool,
+}
+
+/// What a branch switcher can act on: the branches worth offering, and whether the working tree
+/// has anything set aside — the other thing that surface offers, and the one fact that says
+/// whether taking it back is an action at all.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Branches {
+    /// The branches, most recently committed to first — which is both a bound on how many are
+    /// carried and the order a switcher wants them in.
+    pub entries: Vec<Branch>,
+    /// Whether anything is set aside in the stash.
+    pub stashed: bool,
 }

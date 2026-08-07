@@ -11,8 +11,42 @@
 use std::path::Path;
 
 use super::error::GitError;
+use super::exchange::{Prompting, Stop, SyncOp};
 use super::status::GitStatus;
-use crate::vcs::{CommitEntry, DiffTarget, FileContent, HunkRange, ProjectFile};
+use crate::vcs::{Branches, CommitEntry, DiffTarget, FileContent, HunkRange, ProjectFile};
+
+/// One exchange with a remote, as the port receives it.
+pub struct Exchange<'a> {
+    /// Which exchange to make.
+    pub op: SyncOp,
+    /// Whether version control may stop and ask a person for a credential.
+    pub prompting: Prompting,
+    /// Looked at while the exchange waits; set, it means stop.
+    pub stop: &'a Stop,
+}
+
+/// What to do to a branch. A closed set; the name is given alongside, because all three name one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BranchOp {
+    /// Start it at what is checked out, and switch to it.
+    Create,
+    /// Check it out. Version control refuses when that would overwrite work in the working tree,
+    /// and refusing is the answer — nothing here sets that work aside on the user's behalf.
+    Switch,
+    /// Remove it. Version control refuses while it holds commits no other branch does, and that
+    /// refusal stands: there is no forced delete.
+    Delete,
+}
+
+/// Which way the working tree and the stash exchange what is in them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StashOp {
+    /// Set the working tree's changes aside, leaving it as the last commit left it.
+    Save,
+    /// Put the most recently set-aside changes back and forget them. It can conflict with what
+    /// the working tree holds now, which is an outcome rather than a success.
+    Pop,
+}
 
 /// One hunk of a path's diff: where it falls, and the text that says how.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -135,6 +169,47 @@ pub trait GitRepository: Send + Sync {
     /// refuses is a [`GitError::Refused`] carrying what it wrote, which is the one diagnostic
     /// worth showing — it is the user's own hook talking, not the tool.
     fn commit(&self, root: &Path, message: &str, amend: bool) -> Result<(), GitError>;
+
+    /// The branches a switcher can offer, at most `limit` of them, most recently committed to
+    /// first — so the bound falls on the branches nobody has touched in months rather than on
+    /// whichever ones happen to sort last. Also whether anything is set aside in the stash.
+    fn branches(&self, root: &Path, limit: usize) -> Result<Branches, GitError>;
+
+    /// Does `op` to the branch called `name`.
+    ///
+    /// An operation version control refuses — switching over work that would be lost, deleting a
+    /// branch holding commits nothing else holds — is a [`GitError::Refused`] carrying what it
+    /// said, because its own account is the only thing that names the work in the way. Nothing is
+    /// forced, retried, or set aside to get past a refusal.
+    fn branch(&self, root: &Path, op: BranchOp, name: &str) -> Result<(), GitError>;
+
+    /// Moves what the working tree holds into the stash, or the most recently stashed changes back
+    /// out of it.
+    ///
+    /// A restore that collides with what the working tree holds now is a [`GitError::Refused`]
+    /// carrying version control's account of it: the collision is left in the working tree to be
+    /// resolved and what was set aside is kept, so that report is the only way anyone learns it
+    /// happened.
+    fn stash(&self, root: &Path, op: StashOp) -> Result<(), GitError>;
+
+    /// Exchanges commits with the remote as `exchange` asks.
+    ///
+    /// The user's own credentials apply — an ssh agent, a credential helper, whatever their
+    /// configuration reaches for — because this is their `git` running; Soloist keeps none of its own
+    /// and names no helper. Where a credential needs a person and
+    /// [`Prompting::Denied`](super::Prompting::Denied) says there is none, that is a
+    /// [`GitError::AuthFailed`] rather than a wait for an answer nobody can give. Anything else
+    /// version control refuses arrives as [`GitError::Refused`] carrying what it said, which for a
+    /// divergence it will not guess its way through is the only useful answer.
+    ///
+    /// Bounded by the implementation's own limit for reaching a remote, and stoppable before then:
+    /// [`GitError::Stopped`] when [`Exchange::stop`] was set, which is not a failure but the answer
+    /// to what was asked.
+    fn sync(&self, root: &Path, exchange: Exchange<'_>) -> Result<(), GitError>;
+
+    /// Abandons a merge that is under way, restoring what was checked out before it began — which
+    /// throws away any conflict resolution made since, and is why a surface confirms it first.
+    fn abort_merge(&self, root: &Path) -> Result<(), GitError>;
 }
 
 /// A [`GitRepository`] that reports every path as belonging to no repository — the default
@@ -220,6 +295,26 @@ impl GitRepository for NoopGitRepository {
     }
 
     fn commit(&self, _root: &Path, _message: &str, _amend: bool) -> Result<(), GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn branches(&self, _root: &Path, _limit: usize) -> Result<Branches, GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn branch(&self, _root: &Path, _op: BranchOp, _name: &str) -> Result<(), GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn stash(&self, _root: &Path, _op: StashOp) -> Result<(), GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn sync(&self, _root: &Path, _exchange: Exchange<'_>) -> Result<(), GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn abort_merge(&self, _root: &Path) -> Result<(), GitError> {
         Err(GitError::NotARepo)
     }
 }

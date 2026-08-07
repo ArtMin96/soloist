@@ -91,8 +91,9 @@ pub use facade::{
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use git::{
-    DiffExtent, Git, GitDraftError, GitError, GitRepository, GitStatus, GitStatusWatchReactor,
-    GitWriteError, NoopGitRepository, RawFileDiff, RawHunk, LOG_PAGE_SIZE,
+    BranchOp, DiffExtent, Exchange, Git, GitDraftError, GitError, GitRepository, GitStatus,
+    GitStatusWatchReactor, GitWriteError, NoopGitRepository, Prompting, RawFileDiff, RawHunk,
+    StashOp, Stop, SyncOp, BRANCH_PAGE_SIZE, LOG_PAGE_SIZE,
 };
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};
@@ -138,6 +139,6 @@ pub use template::{TemplateKind, TemplateScope};
 pub use terminal::{LogLine, PtyChunk, RenderedScreen};
 pub use trust::{Trust, TrustStore};
 pub use vcs::{
-    BranchInfo, ChangeKind, CommitEntry, DiffTarget, FileChange, FileContent, FileDiff,
-    GitFileStatus, HunkRange, ProjectFile, SyncState,
+    Branch, BranchInfo, Branches, ChangeKind, CommitEntry, DiffTarget, FileChange, FileContent,
+    FileDiff, GitFileStatus, HunkRange, ProjectFile, SyncState,
 };

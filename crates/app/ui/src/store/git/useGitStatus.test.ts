@@ -28,6 +28,7 @@ function statusWith(paths: string[]): GitStatus {
       status: { staged: null, unstaged: "modified" },
       original_path: null,
     })),
+    merging: false,
   };
 }
 

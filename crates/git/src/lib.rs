@@ -8,12 +8,14 @@
 //! The crate depends only on `soloist-core` and the operating system — never the reverse (the
 //! dependency-direction guard enforces it).
 
+mod branch;
 mod diff_parse;
 mod files_parse;
 mod log_parse;
 mod patch;
 mod runner;
 mod status_parse;
+mod sync;
 mod write;
 
 use std::fs::File;
@@ -21,8 +23,8 @@ use std::io::{self, Read};
 use std::path::Path;
 
 use soloist_core::{
-    CommitEntry, DiffTarget, FileContent, GitError, GitRepository, GitStatus, HunkRange,
-    ProjectFile, RawFileDiff,
+    BranchOp, Branches, CommitEntry, DiffTarget, Exchange, FileContent, GitError, GitRepository,
+    GitStatus, HunkRange, ProjectFile, RawFileDiff, StashOp,
 };
 
 /// The arguments asking for a working tree's state in the one machine-readable form this
@@ -57,6 +59,13 @@ const INSIDE_WORK_TREE_ARGS: &[&str] = &["rev-parse", "--is-inside-work-tree"];
 
 /// What [`INSIDE_WORK_TREE_ARGS`] prints for a path inside a working tree.
 const INSIDE_WORK_TREE: &[u8] = b"true";
+
+/// The question that says whether a merge is under way: the record version control keeps of what is
+/// being merged in exists for exactly as long as the merge does. A second invocation per status
+/// read, because the machine-readable status does not carry it and the only other account of it is
+/// prose. Asked for every read rather than only where there are conflicts, since a merge whose
+/// conflicts have all been resolved is still one a surface must offer to abandon.
+const MERGING_ARGS: &[&str] = &["rev-parse", "--verify", "--quiet", "MERGE_HEAD"];
 
 /// The arguments that make a diff say the same thing on every machine: counted form first (the
 /// only place "binary" is stated as data), then the patch, with every part of the output a
@@ -107,7 +116,9 @@ impl GitRepository for CliGitRepository {
             Err(GitError::Op { .. }) if !inside_work_tree(root) => return Err(GitError::NotARepo),
             Err(err) => return Err(err),
         };
-        status_parse::parse(&output).ok_or(GitError::Op { status: None })
+        let mut status = status_parse::parse(&output).ok_or(GitError::Op { status: None })?;
+        status.merging = merging(root);
+        Ok(status)
     }
 
     fn list_files(&self, root: &Path) -> Result<Vec<ProjectFile>, GitError> {
@@ -250,6 +261,39 @@ impl GitRepository for CliGitRepository {
     fn commit(&self, root: &Path, message: &str, amend: bool) -> Result<(), GitError> {
         write::commit(root, message, amend)
     }
+
+    fn branches(&self, root: &Path, limit: usize) -> Result<Branches, GitError> {
+        match branch::branches(root, limit) {
+            Ok(branches) => Ok(branches),
+            Err(GitError::Op { .. }) if !inside_work_tree(root) => Err(GitError::NotARepo),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn branch(&self, root: &Path, op: BranchOp, name: &str) -> Result<(), GitError> {
+        branch::branch(root, op, name)
+    }
+
+    fn stash(&self, root: &Path, op: StashOp) -> Result<(), GitError> {
+        branch::stash(root, op)
+    }
+
+    fn sync(&self, root: &Path, exchange: Exchange<'_>) -> Result<(), GitError> {
+        sync::sync(root, exchange)
+    }
+
+    fn abort_merge(&self, root: &Path) -> Result<(), GitError> {
+        sync::abort_merge(root)
+    }
+}
+
+/// Whether a merge is under way in the repository at `root`.
+///
+/// A failure to ask is read as "no merge", which is the honest answer to give a surface: the only
+/// thing it decides is whether abandoning one is offered, and offering it where there is nothing to
+/// abandon would be worse than leaving it off.
+fn merging(root: &Path) -> bool {
+    runner::run(root, MERGING_ARGS).is_ok_and(|answer| !answer.trim_ascii().is_empty())
 }
 
 /// One file's bytes as a reader is given them: cut at the ceiling if it was over it, and with

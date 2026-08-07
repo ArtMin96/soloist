@@ -89,6 +89,8 @@ pub(crate) fn parse(output: &[u8]) -> Option<GitStatus> {
             }),
         },
         changes,
+        // Whether a merge is under way is not in this report; the caller asks for it separately.
+        merging: false,
     })
 }
 

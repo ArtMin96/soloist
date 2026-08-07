@@ -82,6 +82,7 @@ impl AgentOneShot for ShellAgentOneShot {
         let finished = soloist_exec::run(
             command,
             Run {
+                stopped: None,
                 input: invocation.input.as_deref(),
                 time_limit: self.time_limit,
                 output_limit: ONE_SHOT_REPLY_LIMIT,
@@ -106,7 +107,8 @@ impl AgentOneShot for ShellAgentOneShot {
 /// What a run that never reached an end means for a draft.
 fn failure(err: RunError) -> OneShotError {
     match err {
-        RunError::TimedOut => OneShotError::Timeout,
+        // Nothing here asks a one-shot run to stop, so it can only end the other ways.
+        RunError::TimedOut | RunError::Stopped => OneShotError::Timeout,
         // The shell itself could not be started, the wait could not report, or the tool would not
         // stop writing. None is the tool being absent, and none of them produced an answer.
         RunError::Spawn(_) | RunError::Lost => OneShotError::Failed { status: None },

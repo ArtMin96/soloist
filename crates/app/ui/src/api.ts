@@ -20,6 +20,7 @@ import type {
   DomainEvent,
   FileContent,
   FileDiff,
+  Branches,
   GitStatus,
   HotkeyAction,
   HotkeyBindingView,
@@ -173,6 +174,69 @@ export function gitCommit(project: number, message: string, amend: boolean): Pro
 // expected to be edited before it is used. Refused until a tool is selected and the project trusted.
 export function gitDraftCommitMessage(project: number): Promise<string> {
   return invoke<string>("git_draft_commit_message", { project });
+}
+
+// The branches this project could switch to and whether anything is stashed — the two things the
+// branch switcher offers. `null` for a project that is not a repository.
+export function gitBranches(project: number): Promise<Branches | null> {
+  return invoke<Branches | null>("git_branches", { project });
+}
+
+// Starts a branch at what is checked out and switches to it.
+export function gitCreateBranch(project: number, name: string): Promise<void> {
+  return invoke<void>("git_create_branch", { project, name });
+}
+
+// Checks out an existing branch. A switch that would overwrite uncommitted work is refused with
+// version control's own account of what is in the way; nothing is stashed or forced past it.
+export function gitSwitchBranch(project: number, name: string): Promise<void> {
+  return invoke<void>("git_switch_branch", { project, name });
+}
+
+// Removes a branch. Destructive, so a surface confirms first; a branch holding commits nothing
+// else holds stays refused.
+export function gitDeleteBranch(project: number, name: string): Promise<void> {
+  return invoke<void>("git_delete_branch", { project, name });
+}
+
+// Sets what the working tree holds aside. A file version control does not track stays where it is.
+export function gitStash(project: number): Promise<void> {
+  return invoke<void>("git_stash", { project });
+}
+
+// Puts the most recently stashed changes back; a collision comes back as version control's own
+// account of it rather than as a success.
+export function gitPopStash(project: number): Promise<void> {
+  return invoke<void>("git_pop_stash", { project });
+}
+
+// Hands the checked-out branch's commits to its remote, publishing the branch when it tracks
+// nothing yet. Reaches another machine, so it can take a while — and can be stopped.
+export function gitPush(project: number): Promise<void> {
+  return invoke<void>("git_push", { project });
+}
+
+// Brings the remote's commits in and reconciles them with what is checked out, however the user's
+// own git configuration says to.
+export function gitPull(project: number): Promise<void> {
+  return invoke<void>("git_pull", { project });
+}
+
+// Brings the remote's commits in without touching the working tree.
+export function gitFetch(project: number): Promise<void> {
+  return invoke<void>("git_fetch", { project });
+}
+
+// Asks the exchange with a remote running against this project to stop. The exchange itself then
+// ends as stopped, and the repository is free for the next read at once.
+export function gitStopExchange(project: number): Promise<void> {
+  return invoke<void>("git_stop_exchange", { project });
+}
+
+// Abandons a merge that is under way, restoring what was checked out before it began. Destructive
+// within that merge, so a surface confirms first.
+export function gitAbortMerge(project: number): Promise<void> {
+  return invoke<void>("git_abort_merge", { project });
 }
 
 // --- Coordination panels: the scratchpad panel and the to-do board read/write through these.

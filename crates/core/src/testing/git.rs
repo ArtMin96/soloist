@@ -6,19 +6,19 @@
 
 use std::collections::VecDeque;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::git::{Git, GitError, GitRepository, GitStatus, RawFileDiff, RawHunk};
-use crate::ids::ProjectId;
-use crate::ports::TrustRepo;
-use crate::sync::lock;
-use crate::testing::FakeTrustRepo;
-use crate::vcs::{
-    BranchInfo, ChangeKind, CommitEntry, DiffTarget, FileChange, FileContent, GitFileStatus,
-    HunkRange, ProjectFile, SyncState,
+use crate::git::{
+    BranchOp, Exchange, GitError, GitRepository, GitStatus, Prompting, RawFileDiff, StashOp, SyncOp,
 };
+use crate::sync::lock;
+use crate::vcs::{Branches, CommitEntry, DiffTarget, FileContent, HunkRange, ProjectFile};
+
+/// How often a stalled exchange looks at whether it has been asked to stop. A race window rather
+/// than a clock: nothing under test reads it.
+const STALL_STEP: Duration = Duration::from_millis(5);
 
 /// One change a working tree was asked to undergo, as the port received it.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -50,6 +50,18 @@ pub enum GitChange {
         message: String,
         amend: bool,
     },
+    Branch {
+        op: BranchOp,
+        name: String,
+    },
+    Stash {
+        op: StashOp,
+    },
+    Sync {
+        op: SyncOp,
+        prompting: Prompting,
+    },
+    AbortMerge,
 }
 
 struct Answers {
@@ -58,6 +70,8 @@ struct Answers {
     diff: Mutex<Result<RawFileDiff, GitError>>,
     content: Mutex<Result<Option<FileContent>, GitError>>,
     history: Mutex<Result<Vec<CommitEntry>, GitError>>,
+    branches: Mutex<Result<Branches, GitError>>,
+    stalls: AtomicBool,
     refusal: Mutex<Option<GitError>>,
     changes: Mutex<Vec<GitChange>>,
     reads: AtomicUsize,
@@ -117,6 +131,21 @@ impl FakeGitRepository {
     /// empty list is the different, ordinary state of a repository with no commits yet.
     pub fn logging(self, commits: Vec<CommitEntry>) -> Self {
         *lock(&self.answers.history) = Ok(commits);
+        self
+    }
+
+    /// The same repository, offering `branches` for every branch read. Without this a branch read
+    /// reads as a folder under no version control, matching the status side's default.
+    pub fn branching(self, branches: Branches) -> Self {
+        *lock(&self.answers.branches) = Ok(branches);
+        self
+    }
+
+    /// The same repository, whose exchange with a remote never finishes on its own — it waits to be
+    /// asked to stop, which is what a remote that accepts a connection and then says nothing looks
+    /// like from here.
+    pub fn stalling(self) -> Self {
+        self.answers.stalls.store(true, Ordering::SeqCst);
         self
     }
 
@@ -187,6 +216,8 @@ impl FakeGitRepository {
                 diff: Mutex::new(Err(GitError::NotARepo)),
                 content: Mutex::new(Err(GitError::NotARepo)),
                 history: Mutex::new(Err(GitError::NotARepo)),
+                branches: Mutex::new(Err(GitError::NotARepo)),
+                stalls: AtomicBool::new(false),
                 refusal: Mutex::new(None),
                 changes: Mutex::new(Vec::new()),
                 reads: AtomicUsize::new(0),
@@ -303,108 +334,47 @@ impl GitRepository for FakeGitRepository {
             amend,
         })
     }
-}
 
-/// One entry in a project's file listing, as a test states it.
-pub fn project_file(path: &str, ignored: bool) -> ProjectFile {
-    ProjectFile {
-        path: path.to_string(),
-        ignored,
+    fn branches(&self, _root: &Path, limit: usize) -> Result<Branches, GitError> {
+        // Bounded for real, so a caller asking for one page of a longer list is exercised rather
+        // than handed the whole of it.
+        self.recorded(|| {
+            lock(&self.answers.branches)
+                .clone()
+                .map(|branches| Branches {
+                    entries: branches.entries.into_iter().take(limit).collect(),
+                    ..branches
+                })
+        })
     }
-}
 
-/// One changed path, as a test states it.
-pub fn file_change(
-    path: &str,
-    staged: Option<ChangeKind>,
-    unstaged: Option<ChangeKind>,
-) -> FileChange {
-    FileChange {
-        path: path.to_string(),
-        status: GitFileStatus { staged, unstaged },
-        original_path: None,
+    fn branch(&self, _root: &Path, op: BranchOp, name: &str) -> Result<(), GitError> {
+        self.changed(GitChange::Branch {
+            op,
+            name: name.to_string(),
+        })
     }
-}
 
-/// One path's diff as the port would produce it, as a test states it. The hunks are given their
-/// ranges in order from line one, which is enough for anything that only needs them to differ.
-pub fn raw_diff(header: &str, hunks: &[&str]) -> RawFileDiff {
-    RawFileDiff {
-        binary: false,
-        header: header.to_string(),
-        hunks: hunks
-            .iter()
-            .enumerate()
-            .map(|(index, hunk)| RawHunk {
-                range: hunk_range(index as u32 + 1),
-                text: hunk.to_string(),
-            })
-            .collect(),
+    fn stash(&self, _root: &Path, op: StashOp) -> Result<(), GitError> {
+        self.changed(GitChange::Stash { op })
     }
-}
 
-/// A hunk covering one line at `line` on both sides, as a test states it.
-pub fn hunk_range(line: u32) -> HunkRange {
-    HunkRange {
-        old_start: line,
-        old_lines: 1,
-        new_start: line,
-        new_lines: 1,
+    fn sync(&self, _root: &Path, exchange: Exchange<'_>) -> Result<(), GitError> {
+        // A real exchange waits on another machine, so a test about stopping one needs a fake that
+        // waits too — and the only thing worth waiting for here is being asked to stop.
+        if self.answers.stalls.load(Ordering::SeqCst) {
+            while !exchange.stop.stopped() {
+                std::thread::sleep(STALL_STEP);
+            }
+            return Err(GitError::Stopped);
+        }
+        self.changed(GitChange::Sync {
+            op: exchange.op,
+            prompting: exchange.prompting,
+        })
     }
-}
 
-/// One commit, as a test states it. Merge commits are stated with [`merge_entry`].
-pub fn commit_entry(id: &str, subject: &str, author: &str) -> CommitEntry {
-    CommitEntry {
-        id: id.to_string(),
-        subject: subject.to_string(),
-        author: author.to_string(),
-        authored_at: 1_700_000_000,
-        merge: false,
+    fn abort_merge(&self, _root: &Path) -> Result<(), GitError> {
+        self.changed(GitChange::AbortMerge)
     }
-}
-
-/// One commit that joins two lines of history, as a test states it.
-pub fn merge_entry(id: &str, subject: &str) -> CommitEntry {
-    CommitEntry {
-        merge: true,
-        ..commit_entry(id, subject, "Somebody")
-    }
-}
-
-/// A clean working tree on `branch`, tracking nothing — the starting point a test varies.
-pub fn git_status(branch: &str) -> GitStatus {
-    GitStatus {
-        branch: BranchInfo {
-            name: Some(branch.to_string()),
-            upstream: None,
-            sync: SyncState::Unknown,
-        },
-        changes: Vec::new(),
-    }
-}
-
-/// A trust record with nothing trusted — the state every project starts in, and all a read
-/// needs, since reading a working tree is ungated.
-pub fn untrusting() -> Arc<dyn TrustRepo> {
-    Arc::new(FakeTrustRepo::new())
-}
-
-/// The git context over `repository`, shared as the façade and the watch reactor hold it, with
-/// no project trusted to be changed — so a read behaves as it always does and a change is
-/// refused, which is the state a project starts in.
-pub fn git_over(repository: FakeGitRepository) -> Arc<Git> {
-    Arc::new(Git::new(
-        Arc::new(repository),
-        Arc::new(FakeTrustRepo::new()),
-    ))
-}
-
-/// The same, with `project` already trusted to be changed — the starting point for a test about
-/// what a change does rather than about whether it is allowed.
-pub fn git_trusting(repository: FakeGitRepository, project: ProjectId) -> Arc<Git> {
-    Arc::new(Git::new(
-        Arc::new(repository),
-        Arc::new(FakeTrustRepo::new().trusting_project(project)),
-    ))
 }

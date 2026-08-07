@@ -1,13 +1,4 @@
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from "@/components/git/ConfirmDialog";
 
 /** What is about to be thrown away: a whole path's change, or one hunk of it. */
 export interface Discardable {
@@ -37,21 +28,16 @@ export function DiscardDialog({
 }) {
   const what = discarding?.hunk === true ? "This hunk of" : "The unstaged changes to";
   return (
-    <AlertDialog open={discarding !== null} onOpenChange={(open) => !open && onCancel()}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{TITLE}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {what} <span className="font-mono">{discarding?.path}</span> will go back to what the
-            index holds. Nothing staged and nothing committed is affected, and this cannot be
-            undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={onCancel}>{CANCEL}</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>{CONFIRM}</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmDialog
+      open={discarding !== null}
+      title={TITLE}
+      confirm={CONFIRM}
+      cancel={CANCEL}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    >
+      {what} <span className="font-mono">{discarding?.path}</span> will go back to what the index
+      holds. Nothing staged and nothing committed is affected, and this cannot be undone.
+    </ConfirmDialog>
   );
 }

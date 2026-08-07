@@ -30,6 +30,7 @@ mod events;
 mod filewatch;
 mod fixtures;
 mod git;
+mod git_fixtures;
 mod identity;
 mod lock_releaser;
 mod metrics;
@@ -56,9 +57,10 @@ pub use filewatch::FakeFileWatcher;
 #[cfg(test)]
 pub use fixtures::facade_with_agent_tool;
 pub use fixtures::{agent_registration, terminal_registration};
-pub use git::{
-    commit_entry, file_change, git_over, git_status, git_trusting, hunk_range, merge_entry,
-    project_file, raw_diff, untrusting, FakeGitRepository, GitChange,
+pub use git::{FakeGitRepository, GitChange};
+pub use git_fixtures::{
+    branch, branches, commit_entry, file_change, git_over, git_status, git_trusting, hunk_range,
+    merge_entry, project_file, raw_diff, tracking_status, untrusting,
 };
 pub use identity::{authentic_session, session_in_dir, TEST_PEER_PGID};
 pub use lock_releaser::RecordingLockReleaser;

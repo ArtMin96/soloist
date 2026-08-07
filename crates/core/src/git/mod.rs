@@ -6,18 +6,21 @@
 //! speaks in ([`GitError`]), the read model it publishes ([`GitStatus`], over the shared
 //! [`vcs`](crate::vcs) vocabulary), the per-project cache that serves it, and the
 //! [`GitStatusWatchReactor`] that decides when a repository is worth re-reading, the file
-//! listing a browsing surface reads, how much of one path's diff a reader is handed at once, and
-//! what an agent is told about a staged change when it is asked to describe it. Running the
-//! tool is an adapter's job (`crates/git`, over the system `git` command line); a missing
-//! adapter degrades to [`NoopGitRepository`], and a project simply shows no version control.
+//! listing a browsing surface reads, how much of one path's diff a reader is handed at once,
+//! what an agent is told about a staged change when it is asked to describe it, and what
+//! exchanging commits with a remote is allowed to cost. Running the tool is an adapter's job
+//! (`crates/git`, over the system `git` command line); a missing adapter degrades to
+//! [`NoopGitRepository`], and a project simply shows no version control.
 //!
 //! Nothing the tool printed reaches here: the adapter parses its machine-readable output into
 //! these types, so the core's behaviour cannot depend on the wording — or the language — of a
 //! program it does not own.
 
+mod branch;
 mod commit;
 mod diff;
 mod error;
+mod exchange;
 mod files;
 mod history;
 mod message;
@@ -25,11 +28,16 @@ mod path;
 mod repository;
 mod stage;
 mod status;
+mod sync;
 mod watch;
 
+pub use branch::BRANCH_PAGE_SIZE;
 pub use diff::DiffExtent;
 pub use error::{GitDraftError, GitError, GitWriteError};
+pub use exchange::{Prompting, Stop, SyncOp};
 pub use history::LOG_PAGE_SIZE;
-pub use repository::{GitRepository, NoopGitRepository, RawFileDiff, RawHunk};
+pub use repository::{
+    BranchOp, Exchange, GitRepository, NoopGitRepository, RawFileDiff, RawHunk, StashOp,
+};
 pub use status::{Git, GitStatus};
 pub use watch::GitStatusWatchReactor;
