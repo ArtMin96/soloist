@@ -221,15 +221,15 @@ pub async fn git_commit(
 /// the caller is expected to read and change it first.
 ///
 /// Refused outright until a tool is selected in settings, and until the project is trusted — what
-/// runs is an agent CLI with the project as its working directory. Runs both a repository read and
-/// an external program, and an agent takes a moment to answer, so it goes to the blocking pool.
+/// runs is an agent CLI with the project as its working directory. Reading the repository and
+/// running the tool are both off the runtime, which the core arranges: this awaits the one method.
 #[tauri::command]
 pub async fn git_draft_commit_message(
     facade: State<'_, Arc<Facade>>,
     project: ProjectId,
 ) -> Result<String, String> {
     facade
-        .blocking(move |f| f.git_draft_commit_message(project))
+        .git_draft_commit_message(project)
         .await
         .map_err(|err| err.to_string())
 }

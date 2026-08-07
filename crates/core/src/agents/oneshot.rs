@@ -11,7 +11,10 @@
 //! Optional, like every other driven subsystem: [`NoopAgentOneShot`] is the default, and nothing
 //! reaches the port at all unless the user has picked a tool to serve it.
 
+use std::collections::BTreeMap;
 use std::path::Path;
+
+use crate::supervision::run_blocking;
 
 use super::tool::AgentTool;
 use super::Agents;
@@ -37,8 +40,8 @@ pub const ONE_SHOT_REPLY_LIMIT: usize = 32 * 1024;
 /// is reached. What is left for an adapter is running the line and reading the answer.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct OneShotInvocation {
-    /// The command line to run, composed for this provider's one-shot form. Run verbatim through
-    /// the user's login shell, so their `PATH` and version managers still resolve.
+    /// The command line to run, composed for this provider's one-shot form. Each token is quoted
+    /// for a shell, which is why it arrives as one string and is run verbatim through one.
     pub command_line: String,
     /// The prompt, when the tool reads it from standard input rather than from the line. `None`
     /// means the line already carries it, and the run is given nothing to read.
@@ -65,17 +68,25 @@ impl OneShotInvocation {
 
 /// Runs one configured agent tool headless, for text.
 ///
-/// An implementation is **blocking**: it runs an external program, so callers reach it from the
-/// blocking pool ([`crate::facade::Facade::blocking`]) rather than a runtime worker. It must return
-/// within a bounded time — a run that cannot answer is [`OneShotError::Timeout`], never a wait
-/// without end — must carry back at most [`ONE_SHOT_REPLY_LIMIT`] of what was written, and must
-/// leave no process behind.
+/// An implementation is **blocking**: it runs an external program, so [`Agents::draft`] reaches it
+/// off the runtime rather than on a worker. It must return within a bounded time — a run that
+/// cannot answer is [`OneShotError::Timeout`], never a wait without end — must carry back at most
+/// [`ONE_SHOT_REPLY_LIMIT`] of what was written, and must leave no process behind.
 pub trait AgentOneShot: Send + Sync {
-    /// Makes `invocation` in `working_dir`, and returns what it wrote to standard output.
+    /// Makes `invocation` in `working_dir` under `env`, and returns what it wrote to standard
+    /// output.
+    ///
+    /// `env` is resolved in the core and layered onto whatever the app itself inherited, exactly as
+    /// a managed process's is: an implementation applies it and adds nothing of its own. It carries
+    /// the `PATH` an interactive login shell would have, which is what makes a CLI a version
+    /// manager installed runnable — so an implementation has **no reason to start a login or
+    /// interactive shell**, and every reason not to: whatever a startup file printed would arrive
+    /// as part of the answer.
     fn run(
         &self,
         invocation: &OneShotInvocation,
         working_dir: &Path,
+        env: &BTreeMap<String, String>,
     ) -> Result<String, OneShotError>;
 }
 
@@ -121,6 +132,7 @@ impl AgentOneShot for NoopAgentOneShot {
         &self,
         _invocation: &OneShotInvocation,
         _working_dir: &Path,
+        _env: &BTreeMap<String, String>,
     ) -> Result<String, OneShotError> {
         Err(OneShotError::Missing)
     }
@@ -134,9 +146,11 @@ impl Agents {
     /// and nothing here or above acts on it. An answer of only blank space is [`OneShotError::Empty`]
     /// rather than an empty success, because a caller asked for text and there is none.
     ///
-    /// Runs an external program, so callers reach it through
-    /// [`Facade::blocking`](crate::facade::Facade::blocking) rather than a runtime worker.
-    pub fn draft(
+    /// The run is made in the environment a managed process is launched with, resolved through the
+    /// shared login-shell cache: after any spawn it costs nothing, and where nothing has filled it
+    /// recently it captures the shell once for every later spawn too. Runs an external program, so
+    /// the port is reached off the runtime; must run within a `tokio` runtime.
+    pub async fn draft(
         &self,
         tool: &AgentTool,
         working_dir: &Path,
@@ -145,7 +159,11 @@ impl Agents {
         let invocation = tool
             .one_shot_invocation(prompt)
             .ok_or(OneShotError::NoHeadlessForm)?;
-        let written = self.one_shot.run(&invocation, working_dir)?;
+        // A run has no per-process overrides of its own, so what it takes is the captured layer.
+        let env = self.shell_env.resolve(&BTreeMap::new()).await;
+        let one_shot = self.one_shot.clone();
+        let working_dir = working_dir.to_path_buf();
+        let written = run_blocking(move || one_shot.run(&invocation, &working_dir, &env)).await?;
         let drafted = written.trim();
         if drafted.is_empty() {
             return Err(OneShotError::Empty);

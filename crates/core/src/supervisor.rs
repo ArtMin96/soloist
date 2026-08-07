@@ -29,8 +29,6 @@ use std::sync::Arc;
 
 use tokio::task::JoinHandle;
 
-use std::collections::BTreeMap;
-
 use crate::events::{DomainEvent, EventBus};
 use crate::hash::Hash;
 use crate::ids::{ProcessId, ProjectId};
@@ -39,7 +37,7 @@ use crate::ports::{
     StoreError, TrustRepo,
 };
 use crate::process::{ProcStatus, ProcessView, Readiness};
-use crate::shellenv::{ShellEnv, ShellEnvProbe};
+use crate::shellenv::ShellEnv;
 use crate::terminal::Terminals;
 
 use actor::{ActorMsg, ActorPorts, OrphanIdentity};
@@ -87,8 +85,8 @@ pub struct Supervisor {
     terminals: Terminals,
     restart_policy: RestartPolicy,
     /// Resolves the environment each process launches with — the captured login-shell
-    /// environment layered under the process's own `env`. Shared by every actor so the
-    /// shell is captured at most once per cache window.
+    /// environment layered under the process's own `env`. Shared by every actor, and beyond this
+    /// context, so the shell is captured at most once per cache window.
     shell_env: Arc<ShellEnv>,
 }
 
@@ -103,10 +101,11 @@ pub struct SupervisorPorts {
     pub locks: Arc<dyn LockReleaser>,
     pub runtime: Arc<dyn RuntimeState>,
     pub orphan_control: Arc<dyn OrphanControl>,
-    pub shell_env_probe: Arc<dyn ShellEnvProbe>,
-    /// The app's own environment, captured at the composition root, that the login-shell
-    /// resolver layers under each process's `env`.
-    pub app_env: BTreeMap<String, String>,
+    /// Resolves the environment each process launches with. Assembled by the composition root
+    /// rather than here, because the agents context runs a headless tool through the very same
+    /// instance — one cache, so the shell is captured at most once per window however many
+    /// consumers ask.
+    pub(crate) shell_env: Arc<ShellEnv>,
 }
 
 impl Supervisor {
@@ -114,11 +113,6 @@ impl Supervisor {
     /// adapters see process events alongside config events; `runtime` persists running process
     /// groups and `orphan_control` operates on them for orphan adoption.
     pub fn new(ports: SupervisorPorts, bus: EventBus) -> Self {
-        let shell_env = Arc::new(ShellEnv::new(
-            ports.shell_env_probe,
-            ports.clock.clone(),
-            ports.app_env,
-        ));
         Self {
             spawner: ports.spawner,
             clock: ports.clock,
@@ -130,7 +124,7 @@ impl Supervisor {
             registry: Registry::default(),
             terminals: Terminals::default(),
             restart_policy: RestartPolicy::default(),
-            shell_env,
+            shell_env: ports.shell_env,
         }
     }
 

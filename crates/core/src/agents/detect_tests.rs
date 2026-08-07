@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
+use super::test_support::detecting;
 use super::*;
-use crate::testing::{FakeAgentToolRepo, FakeVersionProbe, MockClock};
+use crate::testing::{FakeVersionProbe, MockClock};
 
 fn tool(name: &str, command: &str, kind: AgentKind) -> AgentTool {
     AgentTool {
@@ -27,12 +28,11 @@ async fn detection_flags_the_installed_built_in_providers() {
         tool("Claude", "claude", AgentKind::Claude),
         tool("Codex", "codex", AgentKind::Codex),
     ];
-    let agents = Agents::new(
-        Arc::new(FakeAgentToolRepo::new(tools)),
-        // Only `claude` is on this machine; `codex` is not.
+    // Only `claude` is on this machine; `codex` is not.
+    let agents = detecting(
+        tools,
         Arc::new(FakeVersionProbe::new(&["claude"])),
-        Arc::new(NoopAgentOneShot),
-        Arc::new(MockClock::new()),
+        MockClock::new(),
     );
 
     let detected = agents.detect_installed().await.expect("detect");
@@ -51,12 +51,7 @@ async fn tools_outside_the_probe_set_are_never_probed() {
         tool("Copilot", "copilot", AgentKind::Copilot),
     ];
     let probe = Arc::new(FakeVersionProbe::new(&["mycli", "copilot"]));
-    let agents = Agents::new(
-        Arc::new(FakeAgentToolRepo::new(tools)),
-        probe.clone(),
-        Arc::new(NoopAgentOneShot),
-        Arc::new(MockClock::new()),
-    );
+    let agents = detecting(tools, probe.clone(), MockClock::new());
 
     let detected = agents.detect_installed().await.expect("detect");
 
@@ -78,15 +73,10 @@ async fn a_probe_that_reaches_no_answer_is_not_reported_as_absent() {
     // The distinction the UI depends on: a probe that could not answer (no adapter wired, a
     // timeout in the real one) must stay separable from a CLI that genuinely is not installed,
     // so a broken probe cannot masquerade as "you don't have these tools".
-    let agents = Agents::new(
-        Arc::new(FakeAgentToolRepo::new(vec![tool(
-            "Claude",
-            "claude",
-            AgentKind::Claude,
-        )])),
+    let agents = detecting(
+        vec![tool("Claude", "claude", AgentKind::Claude)],
         Arc::new(NoopVersionProbe),
-        Arc::new(NoopAgentOneShot),
-        Arc::new(MockClock::new()),
+        MockClock::new(),
     );
 
     let detected = agents.detect_installed().await.expect("detect");
@@ -97,11 +87,10 @@ async fn a_probe_that_reaches_no_answer_is_not_reported_as_absent() {
 #[tokio::test]
 async fn detection_covers_every_configured_tool() {
     let tools = AgentTool::builtin_defaults();
-    let agents = Agents::new(
-        Arc::new(FakeAgentToolRepo::new(tools.clone())),
+    let agents = detecting(
+        tools.clone(),
         Arc::new(FakeVersionProbe::new(&[])),
-        Arc::new(NoopAgentOneShot),
-        Arc::new(MockClock::new()),
+        MockClock::new(),
     );
 
     let detected = agents.detect_installed().await.expect("detect");
@@ -118,11 +107,10 @@ async fn detection_reports_tools_in_the_registry_order() {
     // The probes run concurrently, so the order results arrive in is whichever finished first;
     // the sweep must still read back in the registry's stable order.
     let tools = AgentTool::builtin_defaults();
-    let agents = Agents::new(
-        Arc::new(FakeAgentToolRepo::new(tools.clone())),
+    let agents = detecting(
+        tools.clone(),
         Arc::new(FakeVersionProbe::new(&[])),
-        Arc::new(NoopAgentOneShot),
-        Arc::new(MockClock::new()),
+        MockClock::new(),
     );
 
     let detected = agents.detect_installed().await.expect("detect");
@@ -136,15 +124,10 @@ async fn detection_reports_tools_in_the_registry_order() {
 async fn detection_is_cached_within_the_ttl_and_refreshed_after_it() {
     let probe = Arc::new(FakeVersionProbe::new(&["claude"]));
     let clock = MockClock::new();
-    let agents = Agents::new(
-        Arc::new(FakeAgentToolRepo::new(vec![tool(
-            "Claude",
-            "claude",
-            AgentKind::Claude,
-        )])),
+    let agents = detecting(
+        vec![tool("Claude", "claude", AgentKind::Claude)],
         probe.clone(),
-        Arc::new(NoopAgentOneShot),
-        Arc::new(clock.clone()),
+        clock.clone(),
     );
 
     agents.detect_installed().await.expect("first detect");
@@ -165,15 +148,10 @@ async fn an_explicit_redetect_re_probes_inside_the_cache_window() {
     // stays on screen until the TTL lapses with no way to correct it.
     let probe = Arc::new(FakeVersionProbe::new(&["claude"]));
     let clock = MockClock::new();
-    let agents = Agents::new(
-        Arc::new(FakeAgentToolRepo::new(vec![tool(
-            "Claude",
-            "claude",
-            AgentKind::Claude,
-        )])),
+    let agents = detecting(
+        vec![tool("Claude", "claude", AgentKind::Claude)],
         probe.clone(),
-        Arc::new(NoopAgentOneShot),
-        Arc::new(clock.clone()),
+        clock.clone(),
     );
 
     agents.detect_installed().await.expect("first detect");

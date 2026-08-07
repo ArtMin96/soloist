@@ -6,9 +6,23 @@
 //! and reaped. The containment is [`soloist_exec`], the same discipline every external tool in the
 //! app runs under.
 //!
-//! Which invocation to make was decided in the core — this runs the line it was handed and reads
-//! back what was written, so no provider knowledge lives here.
+//! Which invocation to make, and which environment to make it in, were both decided in the core —
+//! this runs the line it was handed and reads back what was written, so no provider knowledge lives
+//! here.
+//!
+//! **The shell is here to read the line, and for nothing else.** A command line arrives POSIX-quoted
+//! as one string, so something has to parse it; the `PATH` that finds a CLI a version manager
+//! installed arrives in the environment instead. So the shell is started neither as a login shell
+//! nor as an interactive one, because either would read the user's startup files and **whatever
+//! those print to standard output would arrive as part of the answer** — a shell banner or an update
+//! notice inside a commit message. Dropping only the interactive flag would not be enough:
+//! `bash(1)` reads the same `/etc/profile` and `~/.bash_profile` set "as a non-interactive shell
+//! with the `--login` option" as it does when interactive, and `zsh(1)` reads `.zprofile` and
+//! `.zlogin` for any login shell. What remains is the one file a shell reads however it is started
+//! (`~/.zshenv` for zsh, `$BASH_ENV` for bash), which the shell's own documentation says must not
+//! produce output.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -67,17 +81,17 @@ impl AgentOneShot for ShellAgentOneShot {
         &self,
         invocation: &OneShotInvocation,
         working_dir: &Path,
+        env: &BTreeMap<String, String>,
     ) -> Result<String, OneShotError> {
-        // An **interactive** login shell, unlike the `-lc` a managed process is launched with. A CLI
-        // installed by a version manager is often only on the interactive `PATH`, and that is the
-        // very `PATH` the app's environment capture reads (`$SHELL -ilc env`) so that a launched
-        // process can see it — a capture this adapter cannot reach. Asking through the same shell is
-        // what makes the tool the user was told is installed the tool that actually runs.
         let mut command = Command::new(login_shell());
         command
-            .arg("-ilc")
+            .arg("-c")
             .arg(&invocation.command_line)
-            .current_dir(working_dir);
+            .current_dir(working_dir)
+            // The environment a managed process is launched with, layered onto the app's own the way
+            // the spawner layers it. It carries the `PATH` an interactive login shell would have, so
+            // the tool the user was told is installed is the tool that runs.
+            .envs(env);
 
         let finished = soloist_exec::run(
             command,

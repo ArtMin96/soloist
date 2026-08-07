@@ -8,9 +8,10 @@
 //! watcher noticing the same action converge on one snapshot instead of racing to two.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::Facade;
-use crate::agents::OneShotError;
+use crate::agents::{AgentTool, OneShotError};
 use crate::events::DomainEvent;
 use crate::git::{DiffExtent, Git, GitDraftError, GitError, GitStatus, GitWriteError, Prompting};
 use crate::ids::ProjectId;
@@ -273,12 +274,27 @@ impl Facade {
     /// here stages, commits, or writes anything, and the caller is expected to read and change it
     /// before it is used.
     ///
-    /// Runs both a repository read and an external program, so callers reach this through
-    /// [`Facade::blocking`] rather than a runtime worker.
-    pub fn git_draft_commit_message(
-        &self,
+    /// Composing what to ask reads the repository and the durable settings, so that half goes to
+    /// the blocking pool; the run itself is bounded by the agents context and reaches its tool off
+    /// the runtime. Must run within a `tokio` runtime.
+    pub async fn git_draft_commit_message(
+        self: &Arc<Self>,
         project: ProjectId,
     ) -> Result<String, DraftMessageError> {
+        let (tool, root, prompt) = self
+            .blocking(move |facade| facade.commit_message_question(project))
+            .await?;
+        Ok(self.agents.draft(&tool, &root, &prompt).await?)
+    }
+
+    /// What to ask, and of which tool: the selected tool resolved from the registry, the project's
+    /// root, and the prompt composed from what is staged there. Every refusal a draft can produce
+    /// without running anything happens here — which is what keeps an unselected tool from costing
+    /// a subprocess, let alone an agent.
+    fn commit_message_question(
+        &self,
+        project: ProjectId,
+    ) -> Result<(AgentTool, PathBuf, String), DraftMessageError> {
         let selected = self
             .settings
             .get(&())?
@@ -293,7 +309,7 @@ impl Facade {
             .project_root(project)?
             .ok_or(DraftMessageError::UnknownProject)?;
         let prompt = self.git.commit_message_prompt(project, &root)?;
-        Ok(self.agents.draft(&tool, &root, &prompt)?)
+        Ok((tool, root, prompt))
     }
 
     /// The shape every version-control change shares: resolve the project's root, make the

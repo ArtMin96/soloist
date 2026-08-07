@@ -26,7 +26,7 @@ use crate::metrics::{MetricsProbe, NoopMetricsProbe};
 use crate::notify::{NoopNotifier, Notifier};
 use crate::portscan::{NoopPortProbe, PortProbe};
 use crate::settings::{NoopSettingsRepo, ProjectSettings, Settings, SettingsRepo};
-use crate::shellenv::{NoopShellEnvProbe, ShellEnvProbe};
+use crate::shellenv::{NoopShellEnvProbe, ShellEnv, ShellEnvProbe};
 use crate::supervisor::SupervisorPorts;
 use crate::support::{FeedbackRepo, NoopFeedbackRepo};
 
@@ -83,6 +83,11 @@ impl CorePorts {
     /// The subset process supervision drives, cloned out for [`Supervisor::new`]. The projection
     /// lives here, not in the supervisor: composition knows every context, so it can hand each one
     /// exactly what it needs without that context ever naming this type.
+    ///
+    /// The login-shell environment resolver is **assembled** here rather than passed through,
+    /// because more than one context runs something in the user's environment and sharing the
+    /// instance is the point: one cache means a burst of spawns and a headless run between them
+    /// capture the shell once, not once each.
     pub fn supervisor_ports(&self) -> SupervisorPorts {
         SupervisorPorts {
             spawner: self.spawner.clone(),
@@ -91,8 +96,11 @@ impl CorePorts {
             locks: self.locks.clone(),
             runtime: self.runtime.clone(),
             orphan_control: self.orphan_control.clone(),
-            shell_env_probe: self.shell_env_probe.clone(),
-            app_env: self.app_env.clone(),
+            shell_env: Arc::new(ShellEnv::new(
+                self.shell_env_probe.clone(),
+                self.clock.clone(),
+                self.app_env.clone(),
+            )),
         }
     }
 
