@@ -10,8 +10,9 @@
 use std::path::{Path, PathBuf};
 
 use super::Facade;
+use crate::agents::OneShotError;
 use crate::events::DomainEvent;
-use crate::git::{DiffExtent, Git, GitError, GitStatus, GitWriteError};
+use crate::git::{DiffExtent, Git, GitDraftError, GitError, GitStatus, GitWriteError};
 use crate::ids::ProjectId;
 use crate::ports::StoreError;
 use crate::vcs::{DiffTarget, FileContent, FileDiff, HunkRange, ProjectFile};
@@ -172,6 +173,38 @@ impl Facade {
         })
     }
 
+    /// Drafts a commit message describing what is staged in `project`, by running the agent tool
+    /// the user picked for it.
+    ///
+    /// Opt-in twice over: it is refused outright until a tool is selected
+    /// ([`Facade::set_assist_settings`]), and the project must be trusted, because what runs is an
+    /// agent CLI with the project as its working directory. The draft is **only text** — nothing
+    /// here stages, commits, or writes anything, and the caller is expected to read and change it
+    /// before it is used.
+    ///
+    /// Runs both a repository read and an external program, so callers reach this through
+    /// [`Facade::blocking`] rather than a runtime worker.
+    pub fn git_draft_commit_message(
+        &self,
+        project: ProjectId,
+    ) -> Result<String, DraftMessageError> {
+        let selected = self
+            .settings
+            .get(&())?
+            .assist
+            .tool
+            .ok_or(DraftMessageError::NoAssistTool)?;
+        let tool = self
+            .agents
+            .tool(&selected)?
+            .ok_or(DraftMessageError::UnknownTool)?;
+        let root = self
+            .project_root(project)?
+            .ok_or(DraftMessageError::UnknownProject)?;
+        let prompt = self.git.commit_message_prompt(project, &root)?;
+        Ok(self.agents.draft(&tool, &root, &prompt)?)
+    }
+
     /// The shape every version-control change shares: resolve the project's root, make the
     /// change, then re-read the status and announce it if it turned out different.
     fn git_change(
@@ -207,6 +240,25 @@ pub enum GitReadError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Git(#[from] GitError),
+}
+
+/// Why no commit message was drafted: nobody has picked a tool to draft with, the picked tool is
+/// no longer in the registry, the project is not open, there was nothing worth describing, or the
+/// tool itself could not answer.
+#[derive(Debug, thiserror::Error)]
+pub enum DraftMessageError {
+    #[error("no agent tool is selected to draft with")]
+    NoAssistTool,
+    #[error("the agent tool selected to draft with is no longer configured")]
+    UnknownTool,
+    #[error("no such project")]
+    UnknownProject,
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error(transparent)]
+    Draft(#[from] GitDraftError),
+    #[error(transparent)]
+    OneShot(#[from] OneShotError),
 }
 
 #[cfg(test)]

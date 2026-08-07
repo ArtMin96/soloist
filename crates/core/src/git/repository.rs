@@ -12,7 +12,7 @@ use std::path::Path;
 
 use super::error::GitError;
 use super::status::GitStatus;
-use crate::vcs::{DiffTarget, FileContent, HunkRange, ProjectFile};
+use crate::vcs::{CommitEntry, DiffTarget, FileContent, HunkRange, ProjectFile};
 
 /// One hunk of a path's diff: where it falls, and the text that says how.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -75,6 +75,14 @@ pub trait GitRepository: Send + Sync {
     /// beginning arrives, marked as [`FileContent::truncated`]. `Ok(None)` for a path that is
     /// not there, which is ordinary for a listing read a moment before the file was removed.
     fn read_file(&self, root: &Path, path: &str) -> Result<Option<FileContent>, GitError>;
+
+    /// One page of the checked-out branch's history, newest first: `skip` commits are passed over
+    /// and at most `limit` are returned. Fewer than `limit` means the history ran out.
+    ///
+    /// An empty list for a repository with no commits yet, which is an ordinary state (a fresh
+    /// `git init`, an orphan branch) rather than a failure. Same [`GitError::NotARepo`] meaning as
+    /// [`GitRepository::status`].
+    fn log(&self, root: &Path, skip: usize, limit: usize) -> Result<Vec<CommitEntry>, GitError>;
 
     /// Records everything `path` currently holds in the index, so the next commit would carry
     /// it. `original_path` is where a renamed path came from, which has to be named too or its
@@ -158,6 +166,10 @@ impl GitRepository for NoopGitRepository {
     }
 
     fn read_file(&self, _root: &Path, _path: &str) -> Result<Option<FileContent>, GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn log(&self, _root: &Path, _skip: usize, _limit: usize) -> Result<Vec<CommitEntry>, GitError> {
         Err(GitError::NotARepo)
     }
 

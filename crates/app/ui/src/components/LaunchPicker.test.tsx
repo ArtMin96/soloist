@@ -14,6 +14,7 @@ const TOOLS: DetectedTool[] = [
       prompt_mode: "AppendedArg",
     },
     detection: "Installed",
+    can_draft: true,
   },
   {
     tool: {
@@ -24,6 +25,7 @@ const TOOLS: DetectedTool[] = [
       prompt_mode: "AppendedArg",
     },
     detection: "Missing",
+    can_draft: true,
   },
 ];
 
@@ -77,6 +79,7 @@ describe("LaunchPicker", () => {
             prompt_mode: "AppendedArg",
           },
           detection: "Unknown",
+          can_draft: true,
         },
       ],
     });
@@ -180,6 +183,7 @@ describe("LaunchPicker", () => {
         prompt_mode: "AppendedArg",
       },
       detection: "Installed",
+      can_draft: true,
     };
     const { onLaunch, onCreateTerminal } = renderPicker({ tools: [namesake] });
 

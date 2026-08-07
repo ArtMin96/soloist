@@ -57,8 +57,9 @@ mod sync;
 pub mod testing;
 
 pub use agents::{
-    AgentActivity, AgentKind, AgentTool, AgentToolRepo, Agents, DetectedTool, Detection,
-    NoopAgentToolRepo, NoopVersionProbe, PromptMode, VersionProbe,
+    AgentActivity, AgentKind, AgentOneShot, AgentTool, AgentToolRepo, Agents, DetectedTool,
+    Detection, NoopAgentOneShot, NoopAgentToolRepo, NoopVersionProbe, OneShotError,
+    OneShotInvocation, PromptMode, VersionProbe, ONE_SHOT_PROMPT_LIMIT, ONE_SHOT_REPLY_LIMIT,
 };
 pub use composition::{CorePorts, CorePortsBuilder};
 pub use config::{
@@ -84,14 +85,14 @@ pub use coordination::{
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
-    CoordinationError, CreateTerminalError, Facade, GitReadError, LaunchAgentError,
-    LocalCommandError, MoveCommandError, PromptRenderError, ScopedActionError, ScopedFacade,
-    SetupIntegrationError, SpawnAgentError, StatusSummary, TrustCommandError,
+    CoordinationError, CreateTerminalError, DraftMessageError, Facade, GitReadError,
+    LaunchAgentError, LocalCommandError, MoveCommandError, PromptRenderError, ScopedActionError,
+    ScopedFacade, SetupIntegrationError, SpawnAgentError, StatusSummary, TrustCommandError,
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use git::{
-    DiffExtent, Git, GitError, GitRepository, GitStatus, GitStatusWatchReactor, GitWriteError,
-    NoopGitRepository, RawFileDiff, RawHunk,
+    DiffExtent, Git, GitDraftError, GitError, GitRepository, GitStatus, GitStatusWatchReactor,
+    GitWriteError, NoopGitRepository, RawFileDiff, RawHunk, LOG_PAGE_SIZE,
 };
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};
@@ -120,8 +121,8 @@ pub use projects::{
     ReloadError, RemoveProjectError, Visibility,
 };
 pub use settings::{
-    Appearance, Binding, CursorInactiveStyle, CursorStyle, FontScale, FontWeight, HotkeyAction,
-    HotkeyBindingView, HotkeyScope, Hotkeys, Integrations, LetterSpacing, LineHeight,
+    Appearance, Assist, Binding, CursorInactiveStyle, CursorStyle, FontScale, FontWeight,
+    HotkeyAction, HotkeyBindingView, HotkeyScope, Hotkeys, Integrations, LetterSpacing, LineHeight,
     McpFeatureGroup, McpToolGroups, NoopSettingsRepo, NotificationLevel, Notifications,
     ProcessCpuThreshold, ProcessMemThreshold, ProjectSettings, Settings, SettingsRepo,
     SettingsStore, Sidebar, TemplateDefaults, TerminalAppearance, Theme, ToolDefaults,
@@ -137,6 +138,6 @@ pub use template::{TemplateKind, TemplateScope};
 pub use terminal::{LogLine, PtyChunk, RenderedScreen};
 pub use trust::{Trust, TrustStore};
 pub use vcs::{
-    BranchInfo, ChangeKind, DiffTarget, FileChange, FileContent, FileDiff, GitFileStatus,
-    HunkRange, ProjectFile, SyncState,
+    BranchInfo, ChangeKind, CommitEntry, DiffTarget, FileChange, FileContent, FileDiff,
+    GitFileStatus, HunkRange, ProjectFile, SyncState,
 };

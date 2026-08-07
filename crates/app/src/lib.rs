@@ -31,7 +31,7 @@ use soloist_core::{
     TodoLockReleaser, TokioClock,
 };
 use soloist_git::CliGitRepository;
-use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
+use soloist_pty::{PgidOrphanControl, PtyProcessSpawner, ShellAgentOneShot};
 use soloist_store::{FileRuntimeState, SqliteStore};
 use soloist_sys::{
     CommandShellEnvProbe, CommandVersionProbe, NotifyFileWatcher, ProcMetricsProbe, ProcPortProbe,
@@ -126,6 +126,7 @@ fn build_facade(app: AppHandle) -> Facade {
         .notifier(Arc::new(TauriNotifier::new(app)))
         .agent_tools(store.clone())
         .version_probe(Arc::new(CommandVersionProbe::new()))
+        .agent_one_shot(Arc::new(ShellAgentOneShot::new()))
         .shell_env_probe(Arc::new(CommandShellEnvProbe::new()))
         .app_env(std::env::vars().collect())
         .lock_repo(store.clone())
@@ -434,6 +435,8 @@ pub fn run() {
             commands::reset_all_hotkeys,
             commands::tool_defaults,
             commands::set_tool_defaults,
+            commands::assist_settings,
+            commands::set_assist_settings,
             commands::integration_settings,
             commands::set_integration_settings,
             commands::notification_settings,
@@ -486,6 +489,7 @@ pub fn run() {
             commands::git_unstage_hunk,
             commands::git_discard_hunk,
             commands::git_commit,
+            commands::git_draft_commit_message,
             commands::orchestration_snapshot,
             commands::lineage_edges,
             commands::agent_activity,

@@ -1,14 +1,21 @@
+import { NullableSelect } from "@/components/settings/controls/NullableSelect";
 import { SettingRow } from "@/components/settings/controls/SettingRow";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { detectionLabel, toolInvocation, UNCHECKED_HINT } from "@/lib/agents";
+import { assistToolOptions, detectionLabel, toolInvocation, UNCHECKED_HINT } from "@/lib/agents";
 import { useAgentTools } from "@/store/useAgentTools";
+import { useAssistSettings } from "@/store/useAssistSettings";
 
-// The Agents tab: the read-only registry of detectable agent CLIs Soloist can launch. Pure
-// presentation over the projected read model.
+const ASSIST_LABEL = "Draft text with";
+const ASSIST_DESCRIPTION =
+  "Run this tool once, without a terminal, to draft a commit message you then edit. Only installed tools Soloist can run headless are offered.";
+
+// The Agents tab: the read-only registry of detectable agent CLIs Soloist can launch, and which of
+// them may be run once to draft text. Pure presentation over the projected read model.
 export function AgentsPanel() {
   const { tools, detect } = useAgentTools();
+  const assist = useAssistSettings();
 
   return (
     <div className="flex flex-col">
@@ -37,6 +44,18 @@ export function AgentsPanel() {
           <Button variant="outline" size="sm" onClick={detect}>
             Detect
           </Button>
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Assist">
+        <SettingRow label={ASSIST_LABEL} description={ASSIST_DESCRIPTION}>
+          <NullableSelect<string>
+            value={assist.value.tool}
+            options={assistToolOptions(tools)}
+            onValueChange={(tool) => assist.update({ tool })}
+            ariaLabel={ASSIST_LABEL}
+            className="w-48"
+          />
         </SettingRow>
       </SettingsSection>
     </div>

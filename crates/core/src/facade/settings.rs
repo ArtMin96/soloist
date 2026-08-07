@@ -10,7 +10,7 @@
 use super::Facade;
 use crate::ports::StoreError;
 use crate::settings::{
-    Appearance, Binding, HotkeyAction, HotkeyBindingView, Integrations, McpFeatureGroup,
+    Appearance, Assist, Binding, HotkeyAction, HotkeyBindingView, Integrations, McpFeatureGroup,
     McpToolGroups, Notifications, Sidebar, ToolDefaults,
 };
 
@@ -98,6 +98,19 @@ impl Facade {
     /// Replaces the Tools sub-document and persists it (auto-save), returning the stored value.
     pub fn set_tool_defaults(&self, tools: ToolDefaults) -> Result<ToolDefaults, StoreError> {
         Ok(self.settings.update(&(), |s| s.tools = tools)?.tools)
+    }
+
+    /// The Assist settings — which configured agent tool may be run headless to draft text. The
+    /// default selects nothing, so a fresh install offers no drafting affordance and runs nothing.
+    pub fn assist_settings(&self) -> Result<Assist, StoreError> {
+        Ok(self.settings.get(&())?.assist)
+    }
+
+    /// Replaces the Assist sub-document and persists it (auto-save), returning the stored value.
+    /// Selecting nothing turns drafting off everywhere at once, because every surface that offers it
+    /// reads this one record.
+    pub fn set_assist_settings(&self, assist: Assist) -> Result<Assist, StoreError> {
+        Ok(self.settings.update(&(), |s| s.assist = assist)?.assist)
     }
 
     /// The Integrations settings — the MCP and HTTP-API master toggles. The per-group MCP enablement

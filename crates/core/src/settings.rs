@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::ports::StoreError;
 
 mod appearance;
+mod assist;
 mod hotkeys;
 mod integrations;
 mod level;
@@ -35,6 +36,7 @@ pub use appearance::{
     Appearance, CursorInactiveStyle, CursorStyle, FontScale, FontWeight, LetterSpacing, LineHeight,
     TerminalAppearance, Theme,
 };
+pub use assist::Assist;
 pub use hotkeys::{Binding, HotkeyAction, HotkeyBindingView, HotkeyScope, Hotkeys};
 pub use integrations::Integrations;
 pub use level::NotificationLevel;
@@ -148,6 +150,7 @@ pub struct Settings {
     pub sidebar: Sidebar,
     pub hotkeys: Hotkeys,
     pub tools: ToolDefaults,
+    pub assist: Assist,
     pub integrations: Integrations,
     pub notifications: Notifications,
     pub mcp_tool_groups: McpToolGroups,

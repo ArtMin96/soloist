@@ -6,18 +6,20 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
+use crate::agents::{AgentKind, AgentTool, OneShotError, PromptMode};
 use crate::composition::CorePorts;
 use crate::facade::Facade;
 use crate::git::DiffExtent;
 use crate::ids::ProjectId;
 use crate::ports::{ProjectRepo, TokioClock};
+use crate::settings::Assist;
 use crate::testing::{
-    file_change, git_status, raw_diff, FakeGitRepository, FakeProjectRepo, FakeSpawner,
-    FakeTrustRepo,
+    file_change, git_status, raw_diff, FakeAgentOneShot, FakeAgentToolRepo, FakeGitRepository,
+    FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo,
 };
 use crate::vcs::{ChangeKind, DiffTarget, FileContent};
 
-use super::GitReadError;
+use super::{DraftMessageError, GitReadError};
 
 const PATH: &str = "src/main.rs";
 
@@ -111,5 +113,150 @@ fn without_the_git_adapter_a_project_simply_has_no_version_control() {
         facade.git_status(project).expect("no error"),
         None,
         "the default port degrades silently, as every optional driven port does",
+    );
+}
+
+const ASSIST_TOOL: &str = "My CLI";
+
+const DRAFTED: &str = "Record the index";
+
+fn assist_tool() -> AgentTool {
+    AgentTool {
+        name: ASSIST_TOOL.to_string(),
+        command: "mycli".to_string(),
+        default_args: Vec::new(),
+        kind: AgentKind::Generic,
+        prompt_mode: PromptMode::Stdin,
+    }
+}
+
+/// A façade over a trusted project with one path staged, the given registry, and `one_shot` behind
+/// the drafting port. Durable settings are real (in memory), so what a test selects is what the
+/// façade reads back.
+fn facade_for_drafting(
+    tools: Vec<AgentTool>,
+    one_shot: Arc<FakeAgentOneShot>,
+) -> (Facade, ProjectId, TempDir) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let projects = Arc::new(FakeProjectRepo::new());
+    let root = dir.path().canonicalize().expect("canonical root");
+    let project = projects.upsert(&root, None, None).expect("add project").id;
+    let mut status = git_status("main");
+    status
+        .changes
+        .push(file_change(PATH, Some(ChangeKind::Modified), None));
+    let ports = CorePorts::builder(
+        Arc::new(FakeSpawner::exits_on_terminate()),
+        Arc::new(TokioClock),
+        Arc::new(FakeTrustRepo::new().trusting_project(project)),
+        projects,
+    )
+    .git_repository(Arc::new(
+        FakeGitRepository::reporting(status)
+            .diffing(raw_diff(HEADER, &["@@ -1,1 +1,1 @@\n-old\n+new\n"])),
+    ))
+    .agent_tools(Arc::new(FakeAgentToolRepo::new(tools)))
+    .agent_one_shot(one_shot)
+    .settings_repo(Arc::new(FakeSettingsRepo::new()));
+    (Facade::new(ports.build()), project, dir)
+}
+
+#[test]
+fn with_a_tool_selected_a_draft_comes_back_describing_what_is_staged() {
+    let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
+    let (facade, project, _dir) = facade_for_drafting(vec![assist_tool()], one_shot.clone());
+    facade
+        .set_assist_settings(Assist {
+            tool: Some(ASSIST_TOOL.to_string()),
+        })
+        .expect("select");
+
+    let drafted = facade.git_draft_commit_message(project).expect("a draft");
+
+    assert_eq!(drafted, DRAFTED);
+    let subject = one_shot.subjects().pop().expect("one run");
+    assert!(
+        subject.contains("+new"),
+        "the tool was given the staged change to describe: {subject}",
+    );
+}
+
+#[test]
+fn a_draft_records_nothing_and_commits_nothing() {
+    // The whole safety property of the feature: what comes back is text for a person to read and
+    // change. Nothing about asking for it touches the index or the history.
+    let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
+    let (facade, project, _dir) = facade_for_drafting(vec![assist_tool()], one_shot);
+    facade
+        .set_assist_settings(Assist {
+            tool: Some(ASSIST_TOOL.to_string()),
+        })
+        .expect("select");
+
+    facade.git_draft_commit_message(project).expect("a draft");
+
+    let status = facade
+        .git_status(project)
+        .expect("read")
+        .expect("a repository");
+    assert_eq!(
+        status.changes.len(),
+        1,
+        "the working tree is exactly as it was",
+    );
+}
+
+#[test]
+fn with_no_tool_selected_nothing_is_run_at_all() {
+    // The opt-in half of the feature, asserted where it matters: not merely that the call is
+    // refused, but that the refusal happens before an agent is reached.
+    let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
+    let (facade, project, _dir) = facade_for_drafting(vec![assist_tool()], one_shot.clone());
+
+    let refusal = facade.git_draft_commit_message(project).unwrap_err();
+
+    assert!(
+        matches!(refusal, DraftMessageError::NoAssistTool),
+        "{refusal:?}",
+    );
+    assert!(one_shot.runs().is_empty());
+}
+
+#[test]
+fn a_selected_tool_that_is_no_longer_configured_is_named_rather_than_guessed_at() {
+    // A tool can be renamed or removed after it was picked. Falling back to another one would run
+    // something the user never chose.
+    let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
+    let (facade, project, _dir) = facade_for_drafting(vec![assist_tool()], one_shot.clone());
+    facade
+        .set_assist_settings(Assist {
+            tool: Some("Some Other CLI".to_string()),
+        })
+        .expect("select");
+
+    let refusal = facade.git_draft_commit_message(project).unwrap_err();
+
+    assert!(
+        matches!(refusal, DraftMessageError::UnknownTool),
+        "{refusal:?}",
+    );
+    assert!(one_shot.runs().is_empty());
+}
+
+#[test]
+fn a_tool_that_never_answers_surfaces_the_timeout_it_was_stopped_at() {
+    let one_shot = Arc::new(FakeAgentOneShot::refusing(OneShotError::Timeout));
+    let (facade, project, _dir) = facade_for_drafting(vec![assist_tool()], one_shot);
+    facade
+        .set_assist_settings(Assist {
+            tool: Some(ASSIST_TOOL.to_string()),
+        })
+        .expect("select");
+
+    let refusal = facade.git_draft_commit_message(project).unwrap_err();
+
+    assert!(
+        matches!(refusal, DraftMessageError::OneShot(OneShotError::Timeout)),
+        "a surface can only say what went wrong if the reason survives the trip: {refusal:?}",
     );
 }

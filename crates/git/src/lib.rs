@@ -10,6 +10,7 @@
 
 mod diff_parse;
 mod files_parse;
+mod log_parse;
 mod patch;
 mod runner;
 mod status_parse;
@@ -20,8 +21,8 @@ use std::io::{self, Read};
 use std::path::Path;
 
 use soloist_core::{
-    DiffTarget, FileContent, GitError, GitRepository, GitStatus, HunkRange, ProjectFile,
-    RawFileDiff,
+    CommitEntry, DiffTarget, FileContent, GitError, GitRepository, GitStatus, HunkRange,
+    ProjectFile, RawFileDiff,
 };
 
 /// The arguments asking for a working tree's state in the one machine-readable form this
@@ -178,6 +179,28 @@ impl GitRepository for CliGitRepository {
             .read_to_end(&mut bytes)
             .map_err(|_| GitError::Op { status: None })?;
         Ok(Some(content(bytes)))
+    }
+
+    fn log(&self, root: &Path, skip: usize, limit: usize) -> Result<Vec<CommitEntry>, GitError> {
+        // A repository with no commits yet has nothing to list, and says so through a failure whose
+        // only other reading is prose. Ask the yes-or-no question instead, exactly as the status
+        // read does for a folder outside any repository.
+        let output = match runner::run(
+            root,
+            &[
+                "log",
+                "-z",
+                log_parse::LOG_FORMAT,
+                &format!("--skip={skip}"),
+                &format!("--max-count={limit}"),
+            ],
+        ) {
+            Ok(output) => output,
+            Err(GitError::Op { .. }) if !inside_work_tree(root) => return Err(GitError::NotARepo),
+            Err(GitError::Op { .. }) => return Ok(Vec::new()),
+            Err(err) => return Err(err),
+        };
+        Ok(log_parse::parse(&output))
     }
 
     fn stage(&self, root: &Path, path: &str, original_path: Option<&str>) -> Result<(), GitError> {

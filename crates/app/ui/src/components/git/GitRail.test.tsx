@@ -17,13 +17,17 @@ vi.mock("@/api", () => ({
   gitUnstageHunk: vi.fn(() => Promise.resolve()),
   gitDiscardHunk: vi.fn(() => Promise.resolve()),
   gitCommit: vi.fn(() => Promise.resolve()),
+  gitDraftCommitMessage: vi.fn(() => Promise.resolve("")),
+  assistSettings: vi.fn(() => Promise.resolve({ tool: null })),
   onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
   onResync: vi.fn(() => Promise.resolve(() => {})),
 }));
 
 import {
+  assistSettings,
   gitCommit,
   gitDiscard,
+  gitDraftCommitMessage,
   gitFiles,
   gitStage,
   gitStatus,
@@ -41,6 +45,8 @@ const trustProject = vi.mocked(gitTrustProject);
 const stage = vi.mocked(gitStage);
 const discard = vi.mocked(gitDiscard);
 const commit = vi.mocked(gitCommit);
+const draftMessage = vi.mocked(gitDraftCommitMessage);
+const readAssist = vi.mocked(assistSettings);
 
 const PROJECT = 7;
 
@@ -50,10 +56,20 @@ afterEach(() => {
   localStorage.clear();
 });
 
-/** The rail starts on a project nobody has trusted yet, which is where every project starts. */
+/** The rail starts on a project nobody has trusted yet, which is where every project starts, and
+ * with no tool picked to draft with, which is where every install starts. */
 beforeEach(() => {
   readTrust.mockResolvedValue(false);
+  readAssist.mockResolvedValue({ tool: null });
 });
+
+/** A trusted project with `path` staged, so a commit and a draft both have something to work from. */
+function trustedWithStaged(path: string): void {
+  readTrust.mockResolvedValue(true);
+  const staged = statusWith([path]);
+  staged.changes[0].status = { staged: "modified", unstaged: null };
+  readStatus.mockResolvedValue(staged);
+}
 
 function statusWith(paths: string[]): GitStatus {
   return {
@@ -298,5 +314,68 @@ describe("GitRail", () => {
 
     await waitFor(() => expect(commit).toHaveBeenCalledWith(PROJECT, "Record it", false));
     await waitFor(() => expect((message as HTMLTextAreaElement).value).toBe(""));
+  });
+
+  it("offers no way to draft a message until a tool is picked to draft with", async () => {
+    // The opt-in, at the surface: an action nobody may take is absent rather than disabled — and
+    // nothing is asked of an agent that was never configured.
+    trustedWithStaged("src/a.rs");
+
+    renderRail();
+
+    await within(rail()).findByLabelText("Commit message");
+    expect(within(rail()).queryByRole("button", { name: "Draft a message" })).toBeNull();
+    expect(draftMessage).not.toHaveBeenCalled();
+  });
+
+  it("puts a drafted message in the box to edit, and commits nothing by itself", async () => {
+    readAssist.mockResolvedValue({ tool: "Claude" });
+    trustedWithStaged("src/a.rs");
+    draftMessage.mockResolvedValue("Record the index");
+
+    renderRail();
+    const message = (await within(rail()).findByLabelText("Commit message")) as HTMLTextAreaElement;
+    fireEvent.click(await within(rail()).findByRole("button", { name: "Draft a message" }));
+
+    await waitFor(() => expect(message.value).toBe("Record the index"));
+    expect(
+      commit,
+      "a draft is a draft; committing it stays the user's action",
+    ).not.toHaveBeenCalled();
+
+    fireEvent.change(message, { target: { value: "Record the index, corrected" } });
+    expect(message.value, "what came back is editable like anything typed").toBe(
+      "Record the index, corrected",
+    );
+  });
+
+  it("says why a draft was refused and leaves the message as it was", async () => {
+    readAssist.mockResolvedValue({ tool: "Claude" });
+    trustedWithStaged("src/a.rs");
+    draftMessage.mockRejectedValue("the agent tool did not answer within its time limit");
+
+    renderRail();
+    const message = (await within(rail()).findByLabelText("Commit message")) as HTMLTextAreaElement;
+    fireEvent.change(message, { target: { value: "Half a message" } });
+    fireEvent.click(await within(rail()).findByRole("button", { name: "Draft a message" }));
+
+    const refusal = await within(rail()).findByRole("alert");
+    expect(refusal.textContent).toContain("did not answer within its time limit");
+    expect(message.value, "a refused draft overwrites nothing").toBe("Half a message");
+  });
+
+  it("will not ask for a draft of a change that is not staged", async () => {
+    // There is nothing for a message to describe until something is staged, which the core would
+    // refuse — so the button says so instead of spending an agent to be told.
+    readAssist.mockResolvedValue({ tool: "Claude" });
+    readTrust.mockResolvedValue(true);
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+
+    renderRail();
+
+    const button = (await within(rail()).findByRole("button", {
+      name: "Draft a message",
+    })) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
   });
 });

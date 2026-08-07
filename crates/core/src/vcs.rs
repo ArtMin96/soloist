@@ -134,6 +134,25 @@ pub struct FileDiff {
     pub truncated: bool,
 }
 
+/// One commit, as a history read reports it.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct CommitEntry {
+    /// The full object name, in hexadecimal, as version control reports it. Full rather than
+    /// abbreviated, because an abbreviation is a rendering and can stop being unique.
+    pub id: String,
+    /// The first line of the message.
+    pub subject: String,
+    /// Who wrote it, as the name version control recorded.
+    pub author: String,
+    /// When it was written, in seconds since the epoch. A number rather than a rendering, so a
+    /// surface formats it in the reader's own locale and time zone.
+    pub authored_at: i64,
+    /// Whether it joins more than one line of history. A merge records no change anyone authored,
+    /// so a reader — and anything learning from the log — treats it differently from a commit
+    /// somebody wrote.
+    pub merge: bool,
+}
+
 /// A path's contents, as a reader is given them.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct FileContent {

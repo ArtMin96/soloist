@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use soloist_core::{
-    Appearance, Binding, Facade, HotkeyAction, HotkeyBindingView, Integrations, McpFeatureGroup,
-    McpToolGroups, Notifications, Sidebar, ToolDefaults,
+    Appearance, Assist, Binding, Facade, HotkeyAction, HotkeyBindingView, Integrations,
+    McpFeatureGroup, McpToolGroups, Notifications, Sidebar, ToolDefaults,
 };
 use tauri::State;
 
@@ -135,6 +135,28 @@ pub async fn set_tool_defaults(
 ) -> Result<ToolDefaults, String> {
     facade
         .blocking(move |f| f.set_tool_defaults(tools))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// The Assist settings — which configured agent tool may be run headless to draft text. The default
+/// selects nothing, so nothing is offered and nothing is run until the user picks one.
+#[tauri::command]
+pub async fn assist_settings(facade: State<'_, Arc<Facade>>) -> Result<Assist, String> {
+    facade
+        .blocking(|f| f.assist_settings())
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Replaces the Assist sub-document (auto-save), returning the stored value.
+#[tauri::command]
+pub async fn set_assist_settings(
+    assist: Assist,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<Assist, String> {
+    facade
+        .blocking(move |f| f.set_assist_settings(assist))
         .await
         .map_err(|err| err.to_string())
 }

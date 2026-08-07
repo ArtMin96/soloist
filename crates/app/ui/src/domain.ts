@@ -191,6 +191,10 @@ export type Detection = "Installed" | "Missing" | "Unknown";
 export interface DetectedTool {
   tool: AgentTool;
   detection: Detection;
+  // Whether Soloist knows a documented way to ask this provider a single question and read the
+  // answer — the one thing a tool must do to draft text. Derived in the core, so no surface has to
+  // know which providers those are.
+  can_draft: boolean;
 }
 
 // The five-state agent activity (mirrors core::agents::AgentActivity), derived from an agent's
@@ -754,6 +758,13 @@ export interface HotkeyBindingView {
 export interface ToolDefaults {
   default_editor: string | null;
   default_terminal: string | null;
+}
+
+// The Assist document (mirrors core::Assist) — the registry name of the agent tool Soloist may run
+// headless to draft text, or null for none, which is the default. Nothing is offered and nothing is
+// run until one is picked.
+export interface Assist {
+  tool: string | null;
 }
 
 // The Integrations tab document (mirrors core::Integrations) — the two master integration

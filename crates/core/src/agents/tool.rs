@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::headless::headless_strategy_for;
+use super::oneshot::OneShotInvocation;
 use super::resume::resume_strategy_for;
 
 /// The agent CLI providers Soloist knows out of the box, plus [`AgentKind::Generic`] for any
@@ -85,6 +87,17 @@ impl AgentTool {
     /// resumes; this just composes it onto the tool's command and args.
     pub fn resume_command_line(&self, extra_args: &[String]) -> Option<String> {
         resume_strategy_for(self.kind).resume_command_line(self, extra_args)
+    }
+
+    /// How this tool is run **once**, headless, to answer `prompt` — or `None` when Soloist knows no
+    /// documented way to ask this provider a single question. The per-provider invocation is owned
+    /// by [`headless_strategy_for`], the single place that knows how each provider answers and
+    /// exits; a provider with none is not offered for drafting rather than run with a guessed flag.
+    ///
+    /// This is the *only* headless path. Launching an agent stays interactive and on a real
+    /// terminal ([`AgentTool::launch_command_line`]) — the two never meet.
+    pub fn one_shot_invocation(&self, prompt: &str) -> Option<OneShotInvocation> {
+        headless_strategy_for(self.kind).one_shot(self, prompt)
     }
 
     /// Composes the tool's command line with `prefix` tokens inserted immediately after the

@@ -1,6 +1,6 @@
 use soloist_core::{
-    Appearance, Binding, CursorInactiveStyle, CursorStyle, FontScale, FontWeight, HotkeyAction,
-    Hotkeys, Integrations, LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups,
+    Appearance, Assist, Binding, CursorInactiveStyle, CursorStyle, FontScale, FontWeight,
+    HotkeyAction, Hotkeys, Integrations, LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups,
     Notifications, ProcessCpuThreshold, ProcessMemThreshold, Settings, SettingsRepo, Sidebar,
     TerminalAppearance, Theme, ToolDefaults,
 };
@@ -58,6 +58,9 @@ fn fully_populated() -> Settings {
         tools: ToolDefaults {
             default_editor: Some("zed".into()),
             default_terminal: Some("kitty".into()),
+        },
+        assist: Assist {
+            tool: Some("Claude".into()),
         },
         integrations: Integrations {
             mcp_enabled: false,
