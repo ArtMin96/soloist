@@ -10,6 +10,7 @@ import type {
   AgentTool,
   Appearance,
   AppInfo,
+  Assist,
   AttentionSnapshot,
   Binding,
   DetectedTool,
@@ -165,6 +166,13 @@ export function gitDiscardHunk(project: number, path: string, hunk: HunkRange): 
 // repository's hooks, the user's signing key and their configuration all apply.
 export function gitCommit(project: number, message: string, amend: boolean): Promise<void> {
   return invoke<void>("git_commit", { project, message, amend });
+}
+
+// Drafts a commit message describing what is staged, by running the agent tool the user picked for
+// it once, headless. Only text comes back — nothing is staged or committed, and the message box is
+// expected to be edited before it is used. Refused until a tool is selected and the project trusted.
+export function gitDraftCommitMessage(project: number): Promise<string> {
+  return invoke<string>("git_draft_commit_message", { project });
 }
 
 // --- Coordination panels: the scratchpad panel and the to-do board read/write through these.
@@ -568,6 +576,14 @@ export function toolDefaults(): Promise<ToolDefaults> {
 
 export function setToolDefaults(tools: ToolDefaults): Promise<ToolDefaults> {
   return invoke<ToolDefaults>("set_tool_defaults", { tools });
+}
+
+export function assistSettings(): Promise<Assist> {
+  return invoke<Assist>("assist_settings");
+}
+
+export function setAssistSettings(assist: Assist): Promise<Assist> {
+  return invoke<Assist>("set_assist_settings", { assist });
 }
 
 export function integrationSettings(): Promise<Integrations> {

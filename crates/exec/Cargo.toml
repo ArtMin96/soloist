@@ -1,0 +1,15 @@
+[package]
+name = "soloist-exec"
+description = "Bounded external-command execution for Soloist: a child in a process group of its own, run under a time limit and an output ceiling, always reaped."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Stopping a run means signalling its whole process group (`killpg`), so a command that started
+# helpers of its own leaves nothing behind. `signal` also carries the existence probe the
+# timeout test asserts a reaped group with.
+nix = { version = "0.31", features = ["signal"] }

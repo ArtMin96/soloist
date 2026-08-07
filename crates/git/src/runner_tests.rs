@@ -1,11 +1,8 @@
-//! What happens to an invocation that will not finish, and to one whose exit status has to be
-//! read. Neither is a path a repository can be built to provoke, so both are driven directly.
+//! Which exit statuses this adapter reads as an answer. Not a path a repository can be built to
+//! provoke, so it is driven directly. The containment around an invocation — the time limit, the
+//! output ceiling, the kill and reap — belongs to `soloist_exec` and is tested there.
 
 use std::os::unix::process::ExitStatusExt;
-use std::process::{Command, Stdio};
-
-use nix::errno::Errno;
-use nix::sys::signal::kill;
 
 use super::*;
 
@@ -17,37 +14,6 @@ fn exited(code: i32) -> ExitStatus {
 
 fn killed_by(signal: i32) -> ExitStatus {
     ExitStatus::from_raw(signal)
-}
-
-/// Long enough that the process is certainly still running when the limit expires.
-const FOREVER: &str = "600";
-
-/// Short enough to keep the test quick, long enough not to expire before the child has started.
-const LIMIT: Duration = Duration::from_millis(200);
-
-#[test]
-fn an_invocation_that_will_not_finish_is_stopped_and_reaped() {
-    let child = Command::new("sleep")
-        .arg(FOREVER)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .process_group(0)
-        .spawn()
-        .expect("spawn");
-    let pid = Pid::from_raw(child.id() as i32);
-
-    let outcome = wait_bounded(child, LIMIT, None);
-
-    assert!(
-        matches!(outcome, Err(GitError::Timeout)),
-        "expected a timeout, got {outcome:?}",
-    );
-    assert_eq!(
-        kill(pid, None),
-        Err(Errno::ESRCH),
-        "the stopped process was reaped, so nothing of it is left — not even a zombie",
-    );
 }
 
 #[test]
@@ -72,4 +38,19 @@ fn an_invocation_stopped_by_a_signal_never_answered() {
         "a killed invocation produced no answer, whatever it managed to write first",
     );
     assert!(!answered(killed_by(9), Some(1)));
+}
+
+#[test]
+fn a_missing_tool_is_told_apart_from_an_invocation_that_failed() {
+    // The distinction the whole read path degrades on: no `git` at all is reported as such, where
+    // any other way of not finishing is an ordinary failure.
+    assert_eq!(
+        failure(RunError::Spawn(io::ErrorKind::NotFound)),
+        GitError::GitMissing
+    );
+    assert_eq!(
+        failure(RunError::Spawn(io::ErrorKind::PermissionDenied)),
+        GitError::Op { status: None }
+    );
+    assert_eq!(failure(RunError::TimedOut), GitError::Timeout);
 }

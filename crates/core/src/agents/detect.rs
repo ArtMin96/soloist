@@ -67,4 +67,21 @@ impl VersionProbe for NoopVersionProbe {
 pub struct DetectedTool {
     pub tool: AgentTool,
     pub detection: Detection,
+    /// Whether Soloist knows a documented way to ask this provider a single question and read the
+    /// answer — the one thing a tool has to be able to do to draft text. Derived rather than
+    /// configured, so a surface offering a drafting tool never has to know which providers those
+    /// are, and a provider gaining a documented one-shot form appears without a second edit.
+    pub can_draft: bool,
+}
+
+impl DetectedTool {
+    /// Pairs `tool` with what its probe found, deriving what it can do from the tool itself.
+    pub(super) fn new(tool: AgentTool, detection: Detection) -> Self {
+        let can_draft = tool.one_shot_invocation("").is_some();
+        Self {
+            tool,
+            detection,
+            can_draft,
+        }
+    }
 }

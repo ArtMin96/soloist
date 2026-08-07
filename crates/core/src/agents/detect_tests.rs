@@ -31,6 +31,7 @@ async fn detection_flags_the_installed_built_in_providers() {
         Arc::new(FakeAgentToolRepo::new(tools)),
         // Only `claude` is on this machine; `codex` is not.
         Arc::new(FakeVersionProbe::new(&["claude"])),
+        Arc::new(NoopAgentOneShot),
         Arc::new(MockClock::new()),
     );
 
@@ -53,6 +54,7 @@ async fn tools_outside_the_probe_set_are_never_probed() {
     let agents = Agents::new(
         Arc::new(FakeAgentToolRepo::new(tools)),
         probe.clone(),
+        Arc::new(NoopAgentOneShot),
         Arc::new(MockClock::new()),
     );
 
@@ -83,6 +85,7 @@ async fn a_probe_that_reaches_no_answer_is_not_reported_as_absent() {
             AgentKind::Claude,
         )])),
         Arc::new(NoopVersionProbe),
+        Arc::new(NoopAgentOneShot),
         Arc::new(MockClock::new()),
     );
 
@@ -97,6 +100,7 @@ async fn detection_covers_every_configured_tool() {
     let agents = Agents::new(
         Arc::new(FakeAgentToolRepo::new(tools.clone())),
         Arc::new(FakeVersionProbe::new(&[])),
+        Arc::new(NoopAgentOneShot),
         Arc::new(MockClock::new()),
     );
 
@@ -117,6 +121,7 @@ async fn detection_reports_tools_in_the_registry_order() {
     let agents = Agents::new(
         Arc::new(FakeAgentToolRepo::new(tools.clone())),
         Arc::new(FakeVersionProbe::new(&[])),
+        Arc::new(NoopAgentOneShot),
         Arc::new(MockClock::new()),
     );
 
@@ -138,6 +143,7 @@ async fn detection_is_cached_within_the_ttl_and_refreshed_after_it() {
             AgentKind::Claude,
         )])),
         probe.clone(),
+        Arc::new(NoopAgentOneShot),
         Arc::new(clock.clone()),
     );
 
@@ -166,6 +172,7 @@ async fn an_explicit_redetect_re_probes_inside_the_cache_window() {
             AgentKind::Claude,
         )])),
         probe.clone(),
+        Arc::new(NoopAgentOneShot),
         Arc::new(clock.clone()),
     );
 

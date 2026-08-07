@@ -10,7 +10,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::agents::{AgentToolRepo, NoopAgentToolRepo, NoopVersionProbe, VersionProbe};
+use crate::agents::{
+    AgentOneShot, AgentToolRepo, NoopAgentOneShot, NoopAgentToolRepo, NoopVersionProbe,
+    VersionProbe,
+};
 use crate::coordination::{
     DiagramRepo, KvRepo, LockRepo, NoopDiagramRepo, NoopKvRepo, NoopLockRepo, NoopScratchpadRepo,
     NoopTemplateRepo, NoopTimerRepo, NoopTodoRepo, ScratchpadRepo, TemplateRepo, TimerRepo,
@@ -39,6 +42,7 @@ use crate::ports::{
 /// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `diagram_repo`,
 /// `todo_repo`, `kv_repo`, `template_repo`, `runtime`, `orphan_control`, `metrics`,
 /// `port_probe`, `file_watcher`, `git_repository`, `notifier`, `agent_tools`, `version_probe`,
+/// `agent_one_shot`,
 /// `shell_env_probe`, `settings_repo`, `project_settings_repo`, `feedback_repo`)
 /// default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
 /// forces every existing composition root to change. `app_env` (the app's own environment,
@@ -67,6 +71,7 @@ pub struct CorePorts {
     pub(crate) notifier: Arc<dyn Notifier>,
     pub(crate) agent_tools: Arc<dyn AgentToolRepo>,
     pub(crate) version_probe: Arc<dyn VersionProbe>,
+    pub(crate) agent_one_shot: Arc<dyn AgentOneShot>,
     pub(crate) shell_env_probe: Arc<dyn ShellEnvProbe>,
     pub(crate) settings_repo: Arc<dyn SettingsRepo<(), Settings>>,
     pub(crate) project_settings_repo: Arc<dyn SettingsRepo<ProjectId, ProjectSettings>>,
@@ -122,6 +127,7 @@ impl CorePorts {
                 notifier: Arc::new(NoopNotifier),
                 agent_tools: Arc::new(NoopAgentToolRepo),
                 version_probe: Arc::new(NoopVersionProbe),
+                agent_one_shot: Arc::new(NoopAgentOneShot),
                 shell_env_probe: Arc::new(NoopShellEnvProbe),
                 settings_repo: Arc::new(NoopSettingsRepo),
                 project_settings_repo: Arc::new(NoopSettingsRepo),
@@ -267,6 +273,15 @@ impl CorePortsBuilder {
     /// defaults to [`NoopVersionProbe`], which detects nothing).
     pub fn version_probe(mut self, version_probe: Arc<dyn VersionProbe>) -> Self {
         self.ports.version_probe = version_probe;
+        self
+    }
+
+    /// Overrides the headless one-shot runner an agent tool drafts text through (agents C4;
+    /// defaults to [`NoopAgentOneShot`], which reports every tool as absent — so a build without
+    /// the adapter behaves as one where nobody asked for a draft). The real adapter runs the
+    /// selected tool through the login shell, bounded.
+    pub fn agent_one_shot(mut self, agent_one_shot: Arc<dyn AgentOneShot>) -> Self {
+        self.ports.agent_one_shot = agent_one_shot;
         self
     }
 

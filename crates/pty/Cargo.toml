@@ -10,6 +10,9 @@ repository.workspace = true
 
 [dependencies]
 soloist-core = { path = "../core" }
+# The shared containment every external-tool adapter runs under: the child gets a process group of
+# its own, a time limit, an output ceiling, and a guaranteed reap.
+soloist-exec = { path = "../exec" }
 async-trait = "0.1"
 nix = { version = "0.31", features = ["signal", "process", "user"] }
 portable-pty = "0.9"
@@ -19,3 +22,4 @@ tokio = { version = "1", features = ["rt", "sync"] }
 soloist-core = { path = "../core", features = ["testing"] }
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 tempfile = "3"
+nix = { version = "0.31", features = ["signal"] }

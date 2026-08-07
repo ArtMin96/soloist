@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::ProjectId;
-use crate::ports::TrustRepo;
+use crate::ports::{StoreError, TrustRepo};
 use crate::sync::lock;
 use crate::vcs::{BranchInfo, FileChange};
 
@@ -61,13 +61,18 @@ impl Git {
     /// Whether the user has authorised Soloist to make changes within `project`, which every
     /// surface needs to know to say so before an action is refused.
     pub fn is_trusted(&self, project: ProjectId) -> Result<bool, GitWriteError> {
-        Ok(self.trust.is_project_trusted(project)?)
+        Ok(self.trusted(project)?)
+    }
+
+    /// The one read of the durable authorisation, so nothing in this context asks a second way.
+    pub(super) fn trusted(&self, project: ProjectId) -> Result<bool, StoreError> {
+        self.trust.is_project_trusted(project)
     }
 
     /// The check every change to a working tree passes first. Reads are ungated: looking at a
     /// repository runs nothing the repository carries, and changing one runs its hooks.
     pub(super) fn authorize(&self, project: ProjectId) -> Result<(), GitWriteError> {
-        if self.trust.is_project_trusted(project)? {
+        if self.trusted(project)? {
             Ok(())
         } else {
             Err(GitWriteError::Untrusted)

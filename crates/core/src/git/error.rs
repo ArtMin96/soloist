@@ -82,3 +82,25 @@ pub enum GitWriteError {
     #[error(transparent)]
     Git(#[from] GitError),
 }
+
+/// Why nothing was composed for an agent to describe.
+///
+/// A draft is a read of the working tree, but it is gated like a change: what runs it is an agent
+/// CLI with the project as its working directory, and an agent CLI reads the project's own
+/// configuration — so it runs code the project carries, which is the thing trust authorises.
+#[derive(Debug, thiserror::Error)]
+pub enum GitDraftError {
+    /// The user has not authorised Soloist to run anything within this project.
+    #[error("this project has not been trusted")]
+    Untrusted,
+    /// Nothing staged says anything a message could describe: an empty index, a root that is not a
+    /// repository, or a change made only of files a tool wrote rather than a person.
+    #[error("nothing is staged that a message could describe")]
+    NothingToDescribe,
+    /// The durable record the authorisation is kept in could not be read.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// The working tree could not be read.
+    #[error(transparent)]
+    Git(#[from] GitError),
+}

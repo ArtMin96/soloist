@@ -31,7 +31,10 @@ export function useAgentDetection(options?: SnapshotOptions): {
         return agentRedetect();
       }
       const list = await agentList();
-      emit(list.map((tool) => ({ tool, detection: "Unknown" as const })));
+      // What is known before the core has answered: the tools themselves, and nothing about them.
+      // `can_draft` is derived in the core, so it is `false` here for the same reason `detection` is
+      // "Unknown" — an unconfirmed capability is not offered.
+      emit(list.map((tool) => ({ tool, detection: "Unknown" as const, can_draft: false })));
       return agentDetect();
     },
     options,

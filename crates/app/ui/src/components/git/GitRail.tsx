@@ -23,6 +23,7 @@ import type { Option } from "@/lib/appearance";
 import { CHANGE, FILE, type DiffSelection } from "@/store/git/useDiffSelection";
 import { useGitFiles } from "@/store/git/useGitFiles";
 import { useGitStatus } from "@/store/git/useGitStatus";
+import { useCommitMessageDraft } from "@/store/git/useCommitMessageDraft";
 import { useGitWrite } from "@/store/git/useGitWrite";
 import {
   RAIL_MAX_WIDTH,
@@ -79,6 +80,9 @@ export function GitRail({
   const status = useGitStatus(project);
   const files = useGitFiles(project, !layout.collapsed && tab === FILES_TAB);
   const write = useGitWrite(project);
+  const draft = useCommitMessageDraft(project);
+  // One place a refused action is stated, whichever asked for it.
+  const refusal = write.error ?? draft.error;
   const changes = status.status?.changes ?? [];
   const actions: ChangeActions | null =
     write.trusted === true
@@ -214,12 +218,19 @@ export function GitRail({
                 )}
               </div>
             </div>
-            {write.error !== null && <RailError message={write.error} />}
+            {refusal !== null && <RailError message={refusal} />}
             {write.trusted === false ? (
               <TrustNotice onTrust={write.trust} />
             ) : (
               write.trusted === true && (
-                <CommitBox changes={changes} busy={write.committing} onCommit={write.commit} />
+                <CommitBox
+                  changes={changes}
+                  busy={write.committing}
+                  draft={
+                    draft.available ? { drafting: draft.drafting, request: draft.draft } : null
+                  }
+                  onCommit={write.commit}
+                />
               )
             )}
           </>

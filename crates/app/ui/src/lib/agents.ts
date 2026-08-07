@@ -1,7 +1,28 @@
 // The Agents tab presentation helpers. The agent tool registry is read-only here: list + PATH
 // detection.
 
-import type { Detection, DetectedTool } from "@/domain";
+import type { Assist, Detection, DetectedTool } from "@/domain";
+import type { Option } from "@/lib/appearance";
+
+// What the Assist document reads as before the stored one arrives: nothing selected, which is also
+// what a fresh install holds — so the affordances that need a tool are absent rather than flickering.
+export const DEFAULT_ASSIST: Assist = { tool: null };
+
+// The label for choosing no assist tool, which turns drafting off everywhere at once.
+export const NO_ASSIST_TOOL = "Off";
+
+// The tools that can be offered for drafting: the ones Soloist knows how to ask a single question,
+// and that a probe found on this machine. A provider Soloist cannot run headless is not offered
+// rather than offered and then refused; one that is not installed would only fail.
+export function assistToolOptions(detected: DetectedTool[]): Option<string | null>[] {
+  const options: Option<string | null>[] = [{ value: null, label: NO_ASSIST_TOOL }];
+  for (const tool of detected) {
+    if (tool.can_draft && tool.detection === "Installed") {
+      options.push({ value: tool.tool.name, label: tool.tool.name });
+    }
+  }
+  return options;
+}
 
 // A tool's full launch invocation: the command plus its always-appended args (shown as data).
 export function toolInvocation(tool: DetectedTool["tool"]): string {

@@ -17,6 +17,10 @@
 //!   buffer fills and the child blocks rather than memory growing without limit), and
 //!   one reaps the child and resolves its exit future. Both end with the process.
 
+mod oneshot;
+
+pub use oneshot::ShellAgentOneShot;
+
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 
@@ -29,7 +33,7 @@ use soloist_core::{
     ExitFuture, ExitStatus, OrphanControl, ProcessControl, ProcessIdentity, ProcessSpawner, PtyIo,
     PtySize, SpawnError, SpawnSpec, Spawned,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 
 /// Fallback shell when neither `$SHELL` nor the passwd entry yields one.
 const FALLBACK_SHELL: &str = "/bin/sh";
@@ -45,8 +49,10 @@ const UNKNOWN_SIGNAL: i32 = -1;
 
 /// Resolves the user's login shell: `$SHELL`, then the passwd-entry shell, then
 /// `/bin/sh`. A desktop launcher does not always export `$SHELL`, so the passwd
-/// fallback keeps commands running under the user's real shell.
-fn login_shell() -> String {
+/// fallback keeps commands running under the user's real shell. Shared within the
+/// crate so a headless one-shot ([`ShellAgentOneShot`]) asks through the same shell a
+/// launched process runs under.
+pub(crate) fn login_shell() -> String {
     if let Ok(shell) = std::env::var("SHELL") {
         if !shell.is_empty() {
             return shell;
@@ -104,7 +110,7 @@ impl ProcessSpawner for PtyProcessSpawner {
         std::thread::spawn(move || drain_reader(reader, output_tx));
 
         // Reap the child on a blocking thread and resolve the exit future once.
-        let (exit_tx, exit_rx) = oneshot::channel::<ExitStatus>();
+        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel::<ExitStatus>();
         std::thread::spawn(move || {
             let status = child.wait().map(to_exit_status).unwrap_or(UNKNOWN_EXIT);
             let _ = exit_tx.send(status);

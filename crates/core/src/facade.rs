@@ -80,7 +80,7 @@ mod todo;
 
 pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
-pub use git::GitReadError;
+pub use git::{DraftMessageError, GitReadError};
 pub use prompt_template::PromptRenderError;
 pub use scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
 pub use scratchpad::ScratchpadWrite;
@@ -146,6 +146,7 @@ impl Facade {
             projects,
             agent_tools,
             version_probe,
+            agent_one_shot,
             kv_repo,
             lock_repo,
             timer_repo,
@@ -165,7 +166,7 @@ impl Facade {
             // The scheduler shares this wake handle with the aggregate (see `Timers`), so creating
             // or resuming a timer re-evaluates the schedule at once.
             timers: Timers::new(timer_repo, clock.clone(), Arc::new(Notify::new())),
-            agents: Agents::new(agent_tools, version_probe, clock.clone()),
+            agents: Agents::new(agent_tools, version_probe, agent_one_shot, clock.clone()),
             scratchpads: Scratchpads::new(scratchpad_repo, clock.clone()),
             diagrams: Diagrams::new(diagram_repo, clock.clone()),
             todos: Todos::new(todo_repo),

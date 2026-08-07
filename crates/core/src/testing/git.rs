@@ -16,8 +16,8 @@ use crate::ports::TrustRepo;
 use crate::sync::lock;
 use crate::testing::FakeTrustRepo;
 use crate::vcs::{
-    BranchInfo, ChangeKind, DiffTarget, FileChange, FileContent, GitFileStatus, HunkRange,
-    ProjectFile, SyncState,
+    BranchInfo, ChangeKind, CommitEntry, DiffTarget, FileChange, FileContent, GitFileStatus,
+    HunkRange, ProjectFile, SyncState,
 };
 
 /// One change a working tree was asked to undergo, as the port received it.
@@ -57,6 +57,7 @@ struct Answers {
     listing: Mutex<Result<Vec<ProjectFile>, GitError>>,
     diff: Mutex<Result<RawFileDiff, GitError>>,
     content: Mutex<Result<Option<FileContent>, GitError>>,
+    history: Mutex<Result<Vec<CommitEntry>, GitError>>,
     refusal: Mutex<Option<GitError>>,
     changes: Mutex<Vec<GitChange>>,
     reads: AtomicUsize,
@@ -108,6 +109,14 @@ impl FakeGitRepository {
     /// The same repository, holding `content` at every path it is asked to read.
     pub fn holding(self, content: FileContent) -> Self {
         *lock(&self.answers.content) = Ok(Some(content));
+        self
+    }
+
+    /// The same repository, whose history is `commits`, newest first. Without this a history read
+    /// reads as a folder under no version control, matching the status side's default; an explicitly
+    /// empty list is the different, ordinary state of a repository with no commits yet.
+    pub fn logging(self, commits: Vec<CommitEntry>) -> Self {
+        *lock(&self.answers.history) = Ok(commits);
         self
     }
 
@@ -177,6 +186,7 @@ impl FakeGitRepository {
                 listing: Mutex::new(Err(GitError::NotARepo)),
                 diff: Mutex::new(Err(GitError::NotARepo)),
                 content: Mutex::new(Err(GitError::NotARepo)),
+                history: Mutex::new(Err(GitError::NotARepo)),
                 refusal: Mutex::new(None),
                 changes: Mutex::new(Vec::new()),
                 reads: AtomicUsize::new(0),
@@ -217,6 +227,16 @@ impl GitRepository for FakeGitRepository {
 
     fn read_file(&self, _root: &Path, _path: &str) -> Result<Option<FileContent>, GitError> {
         self.recorded(|| lock(&self.answers.content).clone())
+    }
+
+    fn log(&self, _root: &Path, skip: usize, limit: usize) -> Result<Vec<CommitEntry>, GitError> {
+        // Paged for real, so a caller asking for one page of a longer history is exercised rather
+        // than handed the whole of it.
+        self.recorded(|| {
+            lock(&self.answers.history)
+                .clone()
+                .map(|commits| commits.into_iter().skip(skip).take(limit).collect())
+        })
     }
 
     fn stage(&self, _root: &Path, path: &str, original_path: Option<&str>) -> Result<(), GitError> {
@@ -330,6 +350,25 @@ pub fn hunk_range(line: u32) -> HunkRange {
         old_lines: 1,
         new_start: line,
         new_lines: 1,
+    }
+}
+
+/// One commit, as a test states it. Merge commits are stated with [`merge_entry`].
+pub fn commit_entry(id: &str, subject: &str, author: &str) -> CommitEntry {
+    CommitEntry {
+        id: id.to_string(),
+        subject: subject.to_string(),
+        author: author.to_string(),
+        authored_at: 1_700_000_000,
+        merge: false,
+    }
+}
+
+/// One commit that joins two lines of history, as a test states it.
+pub fn merge_entry(id: &str, subject: &str) -> CommitEntry {
+    CommitEntry {
+        merge: true,
+        ..commit_entry(id, subject, "Somebody")
     }
 }
 

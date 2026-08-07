@@ -7,8 +7,10 @@
 //! real adapters. Launching agents and the 5-state idle FSM build on these types.
 
 mod detect;
+mod headless;
 pub mod idle;
 mod lineage;
+mod oneshot;
 mod repo;
 mod resume;
 mod tool;
@@ -16,6 +18,10 @@ mod tool;
 pub use detect::{DetectedTool, Detection, NoopVersionProbe, VersionProbe};
 pub use idle::{AgentActivity, IdleSampler, IdleTracker};
 pub use lineage::AgentLineage;
+pub use oneshot::{
+    AgentOneShot, NoopAgentOneShot, OneShotError, OneShotInvocation, ONE_SHOT_PROMPT_LIMIT,
+    ONE_SHOT_REPLY_LIMIT,
+};
 pub use repo::{AgentToolRepo, NoopAgentToolRepo};
 pub use tool::{AgentKind, AgentTool, PromptMode};
 
@@ -37,22 +43,27 @@ const DETECT_CACHE_TTL: Duration = Duration::from_secs(600);
 pub struct Agents {
     tools: Arc<dyn AgentToolRepo>,
     version_probe: Arc<dyn VersionProbe>,
+    /// The headless one-shot runner behind [`Agents::draft`]. Optional like every other driven
+    /// port, and reached only when the user has picked a tool to serve it.
+    one_shot: Arc<dyn AgentOneShot>,
     /// A detection sweep reused for [`DETECT_CACHE_TTL`], so repeated picker opens share one
     /// round of `--version` probes instead of re-running the slow probe each time.
     detect_cache: ReadCache<Vec<DetectedTool>>,
 }
 
 impl Agents {
-    /// Assembles the context over its durable registry, its auto-detect probe, and a `clock`
-    /// driving the detection cache's TTL.
+    /// Assembles the context over its durable registry, its auto-detect probe, its headless
+    /// one-shot runner, and a `clock` driving the detection cache's TTL.
     pub fn new(
         tools: Arc<dyn AgentToolRepo>,
         version_probe: Arc<dyn VersionProbe>,
+        one_shot: Arc<dyn AgentOneShot>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
             tools,
             version_probe,
+            one_shot,
             detect_cache: ReadCache::new(clock, DETECT_CACHE_TTL),
         }
     }
@@ -113,7 +124,7 @@ impl Agents {
                 } else {
                     Detection::Unknown
                 };
-                (position, DetectedTool { tool, detection })
+                (position, DetectedTool::new(tool, detection))
             });
         }
 

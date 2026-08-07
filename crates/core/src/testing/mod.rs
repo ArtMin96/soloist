@@ -43,7 +43,7 @@ mod spawner;
 mod support;
 mod template;
 
-pub use agents::{FakeAgentToolRepo, FakeVersionProbe};
+pub use agents::{FakeAgentOneShot, FakeAgentToolRepo, FakeVersionProbe};
 pub use clock::MockClock;
 pub use coordination::{FakeLockRepo, FakeTimerRepo};
 pub use coordination_diagram::FakeDiagramRepo;
@@ -57,8 +57,8 @@ pub use filewatch::FakeFileWatcher;
 pub use fixtures::facade_with_agent_tool;
 pub use fixtures::{agent_registration, terminal_registration};
 pub use git::{
-    file_change, git_over, git_status, git_trusting, hunk_range, project_file, raw_diff,
-    untrusting, FakeGitRepository, GitChange,
+    commit_entry, file_change, git_over, git_status, git_trusting, hunk_range, merge_entry,
+    project_file, raw_diff, untrusting, FakeGitRepository, GitChange,
 };
 pub use identity::{authentic_session, session_in_dir, TEST_PEER_PGID};
 pub use lock_releaser::RecordingLockReleaser;

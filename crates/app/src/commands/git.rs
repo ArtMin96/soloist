@@ -215,3 +215,21 @@ pub async fn git_commit(
         .await
         .map_err(|err| err.to_string())
 }
+
+/// Drafts a commit message describing what is staged, by running the agent tool the user picked for
+/// it once, headless. Only text comes back: nothing here stages, commits, or writes anything, and
+/// the caller is expected to read and change it first.
+///
+/// Refused outright until a tool is selected in settings, and until the project is trusted — what
+/// runs is an agent CLI with the project as its working directory. Runs both a repository read and
+/// an external program, and an agent takes a moment to answer, so it goes to the blocking pool.
+#[tauri::command]
+pub async fn git_draft_commit_message(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+) -> Result<String, String> {
+    facade
+        .blocking(move |f| f.git_draft_commit_message(project))
+        .await
+        .map_err(|err| err.to_string())
+}
