@@ -5,6 +5,7 @@
 //! spawned one. A drafting run must leave nothing behind — not a process still working on an answer
 //! nobody is waiting for, and not a zombie of one.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -28,6 +29,7 @@ fn a_tool_that_never_answers_is_stopped_and_leaves_nothing_behind() {
         .run(
             &OneShotInvocation::in_line(FOREVER.to_string()),
             Path::new(dir.path()),
+            &BTreeMap::new(),
         )
         .expect_err("a tool that never answers cannot have answered");
 

@@ -134,7 +134,11 @@ impl Facade {
     /// store, and the config sync engine, so all three agree on what is trusted.
     pub fn new(ports: CorePorts) -> Self {
         let bus = EventBus::new(EVENT_BUFFER);
-        let supervisor = Arc::new(Supervisor::new(ports.supervisor_ports(), bus.clone()));
+        let supervisor_ports = ports.supervisor_ports();
+        // The resolver the supervisor was handed is the one the agents context drafts through, so a
+        // spawn and a headless run share a single capture of the user's shell.
+        let shell_env = supervisor_ports.shell_env.clone();
+        let supervisor = Arc::new(Supervisor::new(supervisor_ports, bus.clone()));
         let CorePorts {
             clock,
             metrics,
@@ -166,7 +170,13 @@ impl Facade {
             // The scheduler shares this wake handle with the aggregate (see `Timers`), so creating
             // or resuming a timer re-evaluates the schedule at once.
             timers: Timers::new(timer_repo, clock.clone(), Arc::new(Notify::new())),
-            agents: Agents::new(agent_tools, version_probe, agent_one_shot, clock.clone()),
+            agents: Agents::new(
+                agent_tools,
+                version_probe,
+                agent_one_shot,
+                shell_env,
+                clock.clone(),
+            ),
             scratchpads: Scratchpads::new(scratchpad_repo, clock.clone()),
             diagrams: Diagrams::new(diagram_repo, clock.clone()),
             todos: Todos::new(todo_repo),

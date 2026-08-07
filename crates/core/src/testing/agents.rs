@@ -4,7 +4,7 @@
 //! auto-detection, and everything composed on a drafting run are exercised headless, with no
 //! SQLite and no real subprocess.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -75,7 +75,7 @@ impl VersionProbe for FakeVersionProbe {
 /// actually built, and lets a test that expects **no** run at all say so by finding none.
 pub struct FakeAgentOneShot {
     reply: Result<String, OneShotError>,
-    runs: Mutex<Vec<OneShotInvocation>>,
+    runs: Mutex<Vec<(OneShotInvocation, BTreeMap<String, String>)>>,
 }
 
 impl FakeAgentOneShot {
@@ -100,7 +100,19 @@ impl FakeAgentOneShot {
     /// Every run it was asked to make, in order — empty when a caller was refused before it ever got
     /// here, which is what an opt-in that nobody opted into looks like from outside.
     pub fn runs(&self) -> Vec<OneShotInvocation> {
-        lock(&self.runs).clone()
+        lock(&self.runs)
+            .iter()
+            .map(|(invocation, _)| invocation.clone())
+            .collect()
+    }
+
+    /// The environment each run was to be made in, in order — what a caller resolved for a tool to
+    /// be found and to read the project the way the user's own terminal would.
+    pub fn environments(&self) -> Vec<BTreeMap<String, String>> {
+        lock(&self.runs)
+            .iter()
+            .map(|(_, env)| env.clone())
+            .collect()
     }
 
     /// What the tool was given to read on each run: the standard input where the invocation writes
@@ -118,8 +130,9 @@ impl AgentOneShot for FakeAgentOneShot {
         &self,
         invocation: &OneShotInvocation,
         _working_dir: &Path,
+        env: &BTreeMap<String, String>,
     ) -> Result<String, OneShotError> {
-        lock(&self.runs).push(invocation.clone());
+        lock(&self.runs).push((invocation.clone(), env.clone()));
         self.reply.clone()
     }
 }

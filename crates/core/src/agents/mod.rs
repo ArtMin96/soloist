@@ -30,6 +30,7 @@ use std::time::Duration;
 
 use crate::cache::ReadCache;
 use crate::ports::{Clock, StoreError};
+use crate::shellenv::ShellEnv;
 
 /// How long an auto-detection sweep is reused before the CLIs are probed again. CLIs are
 /// installed or removed rarely, so a burst of picker opens shares one sweep; a fresh install
@@ -37,7 +38,7 @@ use crate::ports::{Clock, StoreError};
 const DETECT_CACHE_TTL: Duration = Duration::from_secs(600);
 
 /// The agents context surface: the agent-tool registry plus auto-detection of which
-/// providers' CLIs are installed. Built once by the composition root from its two ports and
+/// providers' CLIs are installed. Built once by the composition root from its own ports and
 /// owned by the [`Facade`](crate::facade::Facade); adapters call into here rather than
 /// touching the ports directly.
 pub struct Agents {
@@ -46,6 +47,10 @@ pub struct Agents {
     /// The headless one-shot runner behind [`Agents::draft`]. Optional like every other driven
     /// port, and reached only when the user has picked a tool to serve it.
     one_shot: Arc<dyn AgentOneShot>,
+    /// Resolves the environment a headless run is made in — the same instance the supervisor
+    /// resolves a spawn's environment through, so an agent CLI a version manager installed is
+    /// found here for the reason it is found there, and the shell is captured once for both.
+    shell_env: Arc<ShellEnv>,
     /// A detection sweep reused for [`DETECT_CACHE_TTL`], so repeated picker opens share one
     /// round of `--version` probes instead of re-running the slow probe each time.
     detect_cache: ReadCache<Vec<DetectedTool>>,
@@ -53,17 +58,20 @@ pub struct Agents {
 
 impl Agents {
     /// Assembles the context over its durable registry, its auto-detect probe, its headless
-    /// one-shot runner, and a `clock` driving the detection cache's TTL.
-    pub fn new(
+    /// one-shot runner, the shared login-shell environment resolver a headless run is made
+    /// under, and a `clock` driving the detection cache's TTL.
+    pub(crate) fn new(
         tools: Arc<dyn AgentToolRepo>,
         version_probe: Arc<dyn VersionProbe>,
         one_shot: Arc<dyn AgentOneShot>,
+        shell_env: Arc<ShellEnv>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
             tools,
             version_probe,
             one_shot,
+            shell_env,
             detect_cache: ReadCache::new(clock, DETECT_CACHE_TTL),
         }
     }
@@ -141,6 +149,9 @@ impl Agents {
         detected.into_iter().map(|(_, tool)| tool).collect()
     }
 }
+
+#[cfg(test)]
+mod test_support;
 
 #[cfg(test)]
 #[path = "detect_tests.rs"]
