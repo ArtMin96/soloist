@@ -540,6 +540,105 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .kv_list()
             .map(IpcResponse::KvPairs)
             .map_err(IpcError::from),
+        IpcRequest::GitStatus => facade
+            .scoped(session)
+            .git_status()
+            .map(IpcResponse::GitStatus)
+            .map_err(IpcError::from),
+        IpcRequest::GitDiff {
+            path,
+            target,
+            extent,
+        } => facade
+            .scoped(session)
+            .git_diff(&path, target, extent)
+            .map(IpcResponse::GitDiff)
+            .map_err(IpcError::from),
+        IpcRequest::GitBranches => facade
+            .scoped(session)
+            .git_branches()
+            .map(IpcResponse::GitBranches)
+            .map_err(IpcError::from),
+        IpcRequest::GitStage { path, hunk } => facade
+            .scoped(session)
+            .git_stage(&path, hunk)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::GitUnstage { path, hunk } => facade
+            .scoped(session)
+            .git_unstage(&path, hunk)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::GitDiscard { path, hunk } => facade
+            .scoped(session)
+            .git_discard(&path, hunk)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::GitCommit { message, amend } => facade
+            .scoped(session)
+            .git_commit(&message, amend)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::GitPush => facade
+            .scoped(session)
+            .git_push()
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::GitPull => facade
+            .scoped(session)
+            .git_pull()
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::GitFetch => facade
+            .scoped(session)
+            .git_fetch()
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::GitCreateBranch { name } => facade
+            .scoped(session)
+            .git_create_branch(&name)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::GitSwitchBranch { name } => facade
+            .scoped(session)
+            .git_switch_branch(&name)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::GitDeleteBranch { name } => facade
+            .scoped(session)
+            .git_delete_branch(&name)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::GitStash => facade
+            .scoped(session)
+            .git_stash()
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::GitPopStash => facade
+            .scoped(session)
+            .git_pop_stash()
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
+        IpcRequest::GitPullRequest => facade
+            .scoped(session)
+            .git_pull_request()
+            .map(IpcResponse::GitPullRequest)
+            .map_err(IpcError::from),
+        IpcRequest::GitPullRequestReview => facade
+            .scoped(session)
+            .git_pull_request_review()
+            .map(IpcResponse::GitPullRequestReview)
+            .map_err(IpcError::from),
+        IpcRequest::GitCreatePullRequest { new } => facade
+            .scoped(session)
+            .git_create_pull_request(&new)
+            .map(IpcResponse::GitPullRequestCreated)
+            .map_err(IpcError::from),
+        IpcRequest::GitMergePullRequest { number, method } => facade
+            .scoped(session)
+            .git_merge_pull_request(number, method)
+            .map(|()| IpcResponse::Acked)
+            .map_err(IpcError::from),
         IpcRequest::McpToolGroups => facade
             .mcp_tool_groups()
             .map(IpcResponse::McpToolGroups)

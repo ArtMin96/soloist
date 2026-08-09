@@ -87,8 +87,8 @@ pub use events::{DomainEvent, EventBus};
 pub use facade::{
     CoordinationError, CreateTerminalError, DraftError, Facade, GitReadError, Handoff,
     HandoffError, LaunchAgentError, LocalCommandError, MoveCommandError, PromptRenderError,
-    ScopedActionError, ScopedFacade, SetupIntegrationError, SpawnAgentError, StatusSummary,
-    TrustCommandError,
+    ScopedActionError, ScopedFacade, ScopedGitError, SetupIntegrationError, SpawnAgentError,
+    StatusSummary, TrustCommandError,
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use git::{

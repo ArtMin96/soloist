@@ -8,10 +8,12 @@
 //! arg as `crate::args::X`.
 
 mod coordination;
+mod git;
 mod prompt_template;
 mod setup;
 
 pub(crate) use coordination::*;
+pub(crate) use git::*;
 pub(crate) use prompt_template::*;
 pub(crate) use setup::*;
 

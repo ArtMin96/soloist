@@ -3,9 +3,9 @@
 //! The tools themselves live in [`crate::tools`], one `#[tool_router(router = …)]` block per
 //! logical category; [`SoloistMcp::new`] composes their routers into the one served router via
 //! [`ToolRouter`]'s `Add`. The **core** groups are always served; the **feature** groups
-//! (Scratchpads, Diagrams, Todos, Timers, Key-Value, Prompt Templates) are gated by the user's settings —
-//! they are registered only when enabled, so a disabled group's tools are neither listed nor
-//! callable (Key-Value and Prompt Templates default off). Tool *names* mirror Solo for
+//! (Scratchpads, Diagrams, Todos, Timers, Key-Value, Prompt Templates, Git) are gated by the user's
+//! settings — they are registered only when enabled, so a disabled group's tools are neither listed
+//! nor callable (Key-Value, Prompt Templates and Git default off). Tool *names* mirror Solo for
 //! interop, but the parameter schemas are clean-room — derived from the argument structs in
 //! [`crate::args`]. No domain logic lives in a tool: each
 //! forwards to the app, which resolves identity, scope, and the trust gate in the core, and the
@@ -206,7 +206,7 @@ impl SoloistMcp {
     /// router from and [`tools_summary`](Self::tools_summary) labels its categories with. A group
     /// added here is automatically both served (per its gate) and categorized in the summary, so the
     /// served surface and its categorization can never fall out of sync.
-    fn tool_groups() -> [ToolGroup; 15] {
+    fn tool_groups() -> [ToolGroup; 16] {
         use GroupGate::{Core, Feature};
         [
             ToolGroup {
@@ -283,6 +283,11 @@ impl SoloistMcp {
                 label: "Prompt templates",
                 router: Self::prompt_template_router,
                 gate: Feature(McpFeatureGroup::PromptTemplates),
+            },
+            ToolGroup {
+                label: "Version control",
+                router: Self::git_router,
+                gate: Feature(McpFeatureGroup::Git),
             },
         ]
     }

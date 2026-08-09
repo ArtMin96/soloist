@@ -13,7 +13,7 @@
 //!
 //! The first global setting is the per-group MCP tool enablement: the MCP server's core tool groups
 //! are always served, while the feature groups can be toggled — Scratchpads, Diagrams, Todos and
-//! Timers default on, Key-Value and Prompt Templates default off.
+//! Timers default on, Key-Value, Prompt Templates and Git default off.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -58,19 +58,21 @@ pub enum McpFeatureGroup {
     Timers,
     KeyValue,
     PromptTemplates,
+    Git,
 }
 
 impl McpFeatureGroup {
     /// Every toggleable feature group, in display order — the single source the settings document
     /// and the MCP server iterate, so adding a group is one edit here plus the exhaustive matches
     /// in [`McpToolGroups`].
-    pub const ALL: [McpFeatureGroup; 6] = [
+    pub const ALL: [McpFeatureGroup; 7] = [
         McpFeatureGroup::Scratchpads,
         McpFeatureGroup::Diagrams,
         McpFeatureGroup::Todos,
         McpFeatureGroup::Timers,
         McpFeatureGroup::KeyValue,
         McpFeatureGroup::PromptTemplates,
+        McpFeatureGroup::Git,
     ];
 
     /// The group's human-readable name — what the settings UI shows and the agent guide
@@ -83,13 +85,19 @@ impl McpFeatureGroup {
             McpFeatureGroup::Timers => "Timers",
             McpFeatureGroup::KeyValue => "Key-Value",
             McpFeatureGroup::PromptTemplates => "Prompt Templates",
+            McpFeatureGroup::Git => "Git",
         }
     }
 }
 
 /// Which MCP feature-tool groups the server exposes. Scratchpads, Diagrams, Todos and Timers default
-/// on; Key-Value and Prompt Templates default off. `#[serde(default)]` fills any field an older
+/// on; Key-Value, Prompt Templates and Git default off. `#[serde(default)]` fills any field an older
 /// record omits from [`Default`], so adding a group stays backward-compatible with stored records.
+///
+/// Git is off until the user turns it on because its tools change the user's own repository —
+/// commit, push, delete a branch — under whatever credentials their `git` reaches for. That is a
+/// larger authority than any other group asks for, so it is granted deliberately rather than
+/// inherited by anybody who installs Soloist.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct McpToolGroups {
@@ -99,6 +107,7 @@ pub struct McpToolGroups {
     pub timers: bool,
     pub key_value: bool,
     pub prompt_templates: bool,
+    pub git: bool,
 }
 
 impl Default for McpToolGroups {
@@ -110,6 +119,7 @@ impl Default for McpToolGroups {
             timers: true,
             key_value: false,
             prompt_templates: false,
+            git: false,
         }
     }
 }
@@ -124,6 +134,7 @@ impl McpToolGroups {
             McpFeatureGroup::Timers => self.timers,
             McpFeatureGroup::KeyValue => self.key_value,
             McpFeatureGroup::PromptTemplates => self.prompt_templates,
+            McpFeatureGroup::Git => self.git,
         }
     }
 
@@ -136,6 +147,7 @@ impl McpToolGroups {
             McpFeatureGroup::Timers => self.timers = enabled,
             McpFeatureGroup::KeyValue => self.key_value = enabled,
             McpFeatureGroup::PromptTemplates => self.prompt_templates = enabled,
+            McpFeatureGroup::Git => self.git = enabled,
         }
     }
 }

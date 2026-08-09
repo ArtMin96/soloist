@@ -48,10 +48,22 @@ impl Facade {
         project: ProjectId,
         new: &NewPullRequest,
     ) -> Result<String, PullRequestError> {
+        self.git_propose(project, new, Prompting::Allowed)
+    }
+
+    /// The one route from a façade to a proposal, so which caller may be asked for a credential
+    /// while the branch is published is decided where the caller's own authority is known — here
+    /// for the local user, and in the session-scoped surface for a caller nobody is watching.
+    pub(in crate::facade) fn git_propose(
+        &self,
+        project: ProjectId,
+        new: &NewPullRequest,
+        prompting: Prompting,
+    ) -> Result<String, PullRequestError> {
         let root = self.pull_request_root(project)?;
         let created = self
             .git
-            .create_pull_request(project, &root, new, Prompting::Allowed)?;
+            .create_pull_request(project, &root, new, prompting)?;
         // Publishing the branch moved how it stands against its upstream, which every
         // version-control surface is watching for.
         self.announce_git(project, &root);

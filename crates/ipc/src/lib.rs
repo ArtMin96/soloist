@@ -12,6 +12,7 @@ mod frame;
 pub mod http;
 mod paths;
 mod protocol;
+mod vcs_error;
 
 pub use error::IpcError;
 pub use frame::{read_frame, write_frame, FrameError, MAX_FRAME};
@@ -22,6 +23,7 @@ pub use paths::{
 pub use protocol::{
     IpcRequest, IpcResponse, IpcResult, PortWaitOutcome, ProjectStatus, ProjectSummary,
 };
+pub use vcs_error::GitRefusal;
 
 /// The core read-model view types the wire carries, re-exported so an out-of-process client
 /// — the `soloist` CLI over the loopback HTTP API — deserializes the exact serde shape the

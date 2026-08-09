@@ -16,6 +16,12 @@ use crate::ids::ProjectId;
 use crate::ports::StoreError;
 use crate::vcs::{Branches, DiffTarget, FileContent, FileDiff, HunkRange, ProjectFile};
 
+/// What every exchange this façade starts is allowed to do about a credential only a person can
+/// give: ask them. The local user clicked something and is watching, so a dialog is the right
+/// answer for them — the opposite decision, for a caller nobody is watching, is named once in
+/// [`scoped_git`](super::scoped_git).
+const AT_THE_WINDOW: Prompting = Prompting::Allowed;
+
 impl Facade {
     /// A project's working-tree status: what is checked out, how it stands against its
     /// upstream, and every path that differs from the last commit. The snapshot half of
@@ -258,26 +264,20 @@ impl Facade {
     /// remote and stoppable before then ([`Facade::git_stop_exchange`]), so callers reach this
     /// through [`Facade::blocking`].
     pub fn git_push(&self, project: ProjectId) -> Result<(), GitWriteError> {
-        self.git_change(project, |git, root| {
-            git.push(project, root, Prompting::Allowed)
-        })
+        self.git_exchange(project, AT_THE_WINDOW, Git::push)
     }
 
     /// Brings the remote's commits into `project` and reconciles them with what is checked out,
     /// however the user's own configuration says to. Where they have not said, version control
     /// refuses rather than choosing, and its refusal is what comes back.
     pub fn git_pull(&self, project: ProjectId) -> Result<(), GitWriteError> {
-        self.git_change(project, |git, root| {
-            git.pull(project, root, Prompting::Allowed)
-        })
+        self.git_exchange(project, AT_THE_WINDOW, Git::pull)
     }
 
     /// Brings the remote's commits in without touching `project`'s working tree, which is what
     /// makes its standing against the upstream true again.
     pub fn git_fetch(&self, project: ProjectId) -> Result<(), GitWriteError> {
-        self.git_change(project, |git, root| {
-            git.fetch(project, root, Prompting::Allowed)
-        })
+        self.git_exchange(project, AT_THE_WINDOW, Git::fetch)
     }
 
     /// Asks the exchange with a remote running against `project` to stop.
@@ -295,6 +295,21 @@ impl Facade {
     /// resolved by hand since it began goes with it — so a surface confirms it first.
     pub fn git_abort_merge(&self, project: ProjectId) -> Result<(), GitWriteError> {
         self.git_change(project, |git, root| git.abort_merge(project, root))
+    }
+
+    /// The one route from a façade to a remote, so which caller may be asked for a credential is
+    /// decided in exactly two places — here for the local user, and in the session-scoped surface
+    /// for a caller nobody is sitting in front of — rather than at each of the three exchanges.
+    ///
+    /// `exchange` is one of [`Git::push`], [`Git::pull`] and [`Git::fetch`]; the rest of the
+    /// shape (root, gate, announce) is [`Facade::git_change`]'s.
+    pub(in crate::facade) fn git_exchange(
+        &self,
+        project: ProjectId,
+        prompting: Prompting,
+        exchange: impl FnOnce(&Git, ProjectId, &Path, Prompting) -> Result<(), GitWriteError>,
+    ) -> Result<(), GitWriteError> {
+        self.git_change(project, |git, root| exchange(git, project, root, prompting))
     }
 
     /// The shape every version-control change shares: resolve the project's root, make the

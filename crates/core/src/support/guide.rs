@@ -245,6 +245,35 @@ tool groups, so they work even with this one off. Authoring any template is the 
                 .to_string(),
         },
         GuideTopic {
+            key: "git",
+            aliases: &["version control", "commit", "branch", "push", "pull request"],
+            title: "Version control",
+            body: "- The git tools act on your effective project's repository and take no project \
+argument, so there is no way to reach another project's repository from them. Read `git_status` \
+first: the paths it reports are what `git_diff`, `git_stage`, `git_unstage` and `git_discard` \
+address, and every hunk `git_diff` returns can be staged or discarded on its own.\n\
+- **Changing a repository needs the user to have trusted the project**, which is a different, \
+wider grant than trusting one command: a commit runs the repository's own hooks. A \
+`project_untrusted` refusal means ask the user to trust the project in Soloist — there is no way \
+around it. Reads are ungated.\n\
+- **There is no confirmation step here.** Discarding a change, deleting a branch and merging a \
+pull request are all irreversible and none of them asks first, because there is nobody to ask; \
+the trust gate is the whole of the guard. Nothing is ever forced: an unmerged branch stays \
+undeletable, and there is no force-push anywhere.\n\
+- Push, pull and fetch run under the user's own credentials and **never stop to ask anyone for \
+one** — where a credential needs a person, they fail promptly rather than waiting on a question \
+nobody is there to answer. The user can also stop an exchange from the app; that comes back as \
+`stopped`, which is what was asked for rather than a failure. Every refusal carries a machine \
+word under `error` beside its sentence, so tell them apart by that word rather than by reading \
+the wording.\n\
+- Pull requests go through the `gh` tool the user installed and signed in to. Call \
+`git_pull_request` before proposing one: it says whether that tool can be reached at all, which \
+branch would be proposed onto which, whether one is already open, and the description shape this \
+repository expects. This group is off by default and enabled under Integrations in Soloist's \
+settings."
+                .to_string(),
+        },
+        GuideTopic {
             key: "yaml",
             aliases: &["config", "solo.yml", "solo-yml"],
             title: "solo.yml configuration",
