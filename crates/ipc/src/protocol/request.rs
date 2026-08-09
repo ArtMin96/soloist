@@ -311,7 +311,11 @@ pub enum IpcRequest {
     /// What the checked-out branch has open on the service, with its checks and conversations.
     GitPullRequestReview,
     /// Proposes what is checked out as a pull request, publishing the branch first if needed.
-    GitCreatePullRequest { new: NewPullRequest },
+    GitCreatePullRequest {
+        new: NewPullRequest,
+        #[serde(default, skip_serializing_if = "not_asked_for")]
+        progress: bool,
+    },
     /// Puts pull request `number`'s commits into its base branch by `method`.
     GitMergePullRequest {
         number: u64,

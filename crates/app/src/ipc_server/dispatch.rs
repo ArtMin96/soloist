@@ -642,9 +642,9 @@ fn dispatch_blocking(
             .git_pull_request_review()
             .map(IpcResponse::GitPullRequestReview)
             .map_err(IpcError::from),
-        IpcRequest::GitCreatePullRequest { new } => facade
+        IpcRequest::GitCreatePullRequest { new, progress } => facade
             .scoped(session)
-            .git_create_pull_request(&new)
+            .git_create_pull_request(&new, &reporting_to(reports, progress))
             .map(IpcResponse::GitPullRequestCreated)
             .map_err(IpcError::from),
         IpcRequest::GitMergePullRequest {

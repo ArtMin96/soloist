@@ -30,12 +30,30 @@ const REPORT_BACKLOG: usize = 8;
 /// Taken as a tool handler's own argument rather than read from somewhere ambient, so a call that
 /// nobody asked about is a value a caller — or a test — can simply hold ([`Reporting::unasked`]),
 /// and the two paths through a tool are told apart by the type rather than by a condition.
-pub(crate) struct Reporting(Option<(Peer<RoleServer>, ProgressToken)>);
+pub(crate) struct Reporting(Option<Listener>);
+
+/// Whoever is listening to a call, and how a remark reaches them.
+enum Listener {
+    /// The client that asked, told through `notifications/progress` against its own token.
+    Client(Peer<RoleServer>, ProgressToken),
+    /// Somebody who asked with nothing to be told through, which only a test has: `rmcp` keeps
+    /// [`Peer`]'s constructor to itself, so what a tool does for a caller that asked would
+    /// otherwise be unreachable. Remarks are dropped — what a notification looks like on the wire
+    /// needs a real client, and is the connection's business rather than a tool's.
+    #[cfg(test)]
+    Untold,
+}
 
 impl Reporting {
     /// Nobody asked. What a request carrying no progress token produces.
     pub(crate) fn unasked() -> Self {
         Self(None)
+    }
+
+    /// Somebody asked, for a test that is about what a tool does when they have.
+    #[cfg(test)]
+    pub(crate) fn asked() -> Self {
+        Self(Some(Listener::Untold))
     }
 
     /// Starts turning remarks into `notifications/progress`, or answers `None` when nobody asked.
@@ -51,24 +69,30 @@ impl Reporting {
     /// is not something anything here can say, and the protocol allows omitting it rather than
     /// inventing one. The remark itself travels as the human-readable `message`.
     pub(crate) fn forwarding(self) -> Option<(mpsc::Sender<String>, JoinHandle<()>)> {
-        let (peer, token) = self.0?;
+        let listener = self.0?;
         let (reports, mut reported) = mpsc::channel(REPORT_BACKLOG);
-        let forwarding = tokio::spawn(async move {
-            let mut made = 0.0;
-            while let Some(note) = reported.recv().await {
-                made += 1.0;
-                let told = peer
-                    .notify_progress(
-                        ProgressNotificationParam::new(token.clone(), made).with_message(note),
-                    )
-                    .await;
-                // A host that has stopped listening is not a failure of the operation being
-                // described, so the forwarding ends quietly and the call it belongs to carries on.
-                if told.is_err() {
-                    break;
+        let forwarding = match listener {
+            Listener::Client(peer, token) => tokio::spawn(async move {
+                let mut made = 0.0;
+                while let Some(note) = reported.recv().await {
+                    made += 1.0;
+                    let told = peer
+                        .notify_progress(
+                            ProgressNotificationParam::new(token.clone(), made).with_message(note),
+                        )
+                        .await;
+                    // A host that has stopped listening is not a failure of the operation being
+                    // described, so the forwarding ends quietly and the call carries on.
+                    if told.is_err() {
+                        break;
+                    }
                 }
+            }),
+            #[cfg(test)]
+            Listener::Untold => {
+                tokio::spawn(async move { while reported.recv().await.is_some() {} })
             }
-        });
+        };
         Some((reports, forwarding))
     }
 }
@@ -80,7 +104,7 @@ where
     fn from_context_part(context: &mut C) -> Result<Self, ErrorData> {
         let context = context.as_request_context();
         Ok(match context.meta.get_progress_token() {
-            Some(token) => Self(Some((context.peer.clone(), token))),
+            Some(token) => Self(Some(Listener::Client(context.peer.clone(), token))),
             None => Self::unasked(),
         })
     }

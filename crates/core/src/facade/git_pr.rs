@@ -14,7 +14,7 @@ use super::git_draft::DraftError;
 use super::{CoordinationError, Facade};
 use crate::agents::AgentTool;
 use crate::git::{
-    NewPullRequest, Prompting, PullRequestError, PullRequestSurface, PullRequestTemplate,
+    NewPullRequest, Progress, Prompting, PullRequestError, PullRequestSurface, PullRequestTemplate,
 };
 use crate::ids::ProjectId;
 use crate::template::TemplateKind;
@@ -48,7 +48,7 @@ impl Facade {
         project: ProjectId,
         new: &NewPullRequest,
     ) -> Result<String, PullRequestError> {
-        self.git_propose(project, new, Prompting::Allowed)
+        self.git_propose(project, new, Prompting::Allowed, &Progress::unwatched())
     }
 
     /// The one route from a façade to a proposal, so which caller may be asked for a credential
@@ -59,11 +59,12 @@ impl Facade {
         project: ProjectId,
         new: &NewPullRequest,
         prompting: Prompting,
+        progress: &Progress,
     ) -> Result<String, PullRequestError> {
         let root = self.pull_request_root(project)?;
         let created = self
             .git
-            .create_pull_request(project, &root, new, prompting)?;
+            .create_pull_request(project, &root, new, prompting, progress)?;
         // Publishing the branch moved how it stands against its upstream, which every
         // version-control surface is watching for.
         self.announce_git(project, &root);

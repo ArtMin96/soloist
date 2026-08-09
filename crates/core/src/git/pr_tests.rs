@@ -10,7 +10,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::git::NoopFileOpener;
-use crate::git::{ForgeError, ForgeReadiness, GitError, SyncOp};
+use crate::git::{ForgeError, ForgeReadiness, GitError, GitWriteError, SyncOp};
 use crate::ids::ProjectId;
 use crate::testing::{
     created_url, git_status, pull_request, pull_request_template, tracking_status, FakeGitForge,
@@ -18,7 +18,7 @@ use crate::testing::{
 };
 use crate::vcs::SyncState;
 
-use super::{Git, NewPullRequest, PullRequestError};
+use super::{Git, NewPullRequest, Progress, PullRequestError};
 
 /// The fakes ignore it — everything here is addressed by project, not by path.
 const ROOT: &str = "/project";
@@ -184,6 +184,7 @@ fn a_project_that_has_not_been_trusted_proposes_nothing_and_pushes_nothing() {
             Path::new(ROOT),
             &proposal(),
             super::Prompting::Allowed,
+            &Progress::unwatched(),
         )
         .unwrap_err();
 
@@ -211,7 +212,13 @@ fn a_proposal_with_nothing_but_space_for_a_title_is_refused_before_anything_runs
     };
 
     let refusal = git
-        .create_pull_request(project, Path::new(ROOT), &blank, super::Prompting::Allowed)
+        .create_pull_request(
+            project,
+            Path::new(ROOT),
+            &blank,
+            super::Prompting::Allowed,
+            &Progress::unwatched(),
+        )
         .unwrap_err();
 
     assert!(
@@ -233,7 +240,13 @@ fn a_base_version_control_would_read_as_an_option_is_refused_rather_than_handed_
     };
 
     let refusal = git
-        .create_pull_request(project, Path::new(ROOT), &dashed, super::Prompting::Allowed)
+        .create_pull_request(
+            project,
+            Path::new(ROOT),
+            &dashed,
+            super::Prompting::Allowed,
+            &Progress::unwatched(),
+        )
         .unwrap_err();
 
     assert!(
@@ -256,6 +269,7 @@ fn a_branch_the_remote_has_never_seen_is_published_before_it_is_proposed() {
             Path::new(ROOT),
             &proposal(),
             super::Prompting::Allowed,
+            &Progress::unwatched(),
         )
         .expect("proposed");
 
@@ -285,6 +299,7 @@ fn a_branch_ahead_of_its_upstream_hands_over_what_it_holds_before_it_is_proposed
         Path::new(ROOT),
         &proposal(),
         super::Prompting::Allowed,
+        &Progress::unwatched(),
     )
     .expect("proposed");
 
@@ -309,6 +324,7 @@ fn a_branch_the_remote_already_holds_as_it_stands_is_proposed_without_being_push
         Path::new(ROOT),
         &proposal(),
         super::Prompting::Allowed,
+        &Progress::unwatched(),
     )
     .expect("proposed");
 
@@ -332,6 +348,7 @@ fn a_proposal_names_the_branch_that_is_checked_out_rather_than_one_it_was_handed
         Path::new(ROOT),
         &proposal(),
         super::Prompting::Allowed,
+        &Progress::unwatched(),
     )
     .expect("proposed");
 
@@ -358,6 +375,7 @@ fn a_detached_head_has_no_branch_to_propose() {
             Path::new(ROOT),
             &proposal(),
             super::Prompting::Allowed,
+            &Progress::unwatched(),
         )
         .unwrap_err();
 
@@ -383,6 +401,7 @@ fn a_forge_that_refuses_says_so_in_its_own_words() {
             Path::new(ROOT),
             &proposal(),
             super::Prompting::Allowed,
+            &Progress::unwatched(),
         )
         .unwrap_err();
 
@@ -410,6 +429,7 @@ fn a_push_that_failed_stops_the_proposal_rather_than_proposing_a_branch_nobody_c
             Path::new(ROOT),
             &proposal(),
             super::Prompting::Allowed,
+            &Progress::unwatched(),
         )
         .unwrap_err();
 
@@ -446,6 +466,52 @@ fn two_readers_never_reach_the_forge_for_one_repository_at_once() {
     );
 }
 
+/// Being told what an exchange is doing must not cost the ability to stop it. The branch tracks
+/// nothing, so the proposal publishes it first and stalls there; the change of mind is armed by the
+/// publish's own first remark, which is what lands it squarely mid-report rather than whenever a
+/// slow machine happened to get there.
+#[test]
+fn a_proposal_being_reported_on_still_stops_when_it_is_asked_to() {
+    let repository = FakeGitRepository::reporting(git_status(BRANCH)).stalling();
+    let forge = FakeGitForge::ready();
+    let project = ProjectId::next();
+    let git = trusting(repository, forge.clone(), project);
+    let stopping = Arc::clone(&git);
+    let progress = Progress::watched_by(Arc::new(move |_remark: &str| {
+        stopping.stop_exchange(project)
+    }));
+
+    let (answered, waiting) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let _ = answered.send(git.create_pull_request(
+            project,
+            Path::new(ROOT),
+            &proposal(),
+            super::Prompting::Allowed,
+            &progress,
+        ));
+    });
+    // Bounded because a proposal that stopped hearing the publish would stop stopping too, and an
+    // unbounded wait would leave that waiting for ever rather than failing.
+    let refusal = match waiting.recv_timeout(PATIENCE) {
+        Ok(outcome) => outcome.expect_err("a stopped proposal produced a pull request"),
+        Err(_) => panic!("the proposal never ended, so nothing stopped it"),
+    };
+
+    assert!(
+        matches!(
+            refusal,
+            PullRequestError::Push(GitWriteError::Git(GitError::Stopped)),
+        ),
+        "being stopped is its own outcome, not a failure: {refusal:?}",
+    );
+    assert_eq!(
+        forge.created(),
+        Vec::new(),
+        "the commits never reached the remote, so there was nothing to propose",
+    );
+}
+
 #[test]
 fn stopping_a_proposal_ends_it_and_frees_the_repository_for_the_next_read() {
     // A service that accepts a connection and then says nothing: the proposal waits until it is
@@ -464,6 +530,7 @@ fn stopping_a_proposal_ends_it_and_frees_the_repository_for_the_next_read() {
                 Path::new(ROOT),
                 &proposal(),
                 super::Prompting::Allowed,
+                &Progress::unwatched(),
             ));
         });
     }

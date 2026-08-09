@@ -15,7 +15,7 @@ use crate::ids::{ProjectId, SessionId};
 use crate::ports::{ProjectRepo, TokioClock, TrustRepo};
 use crate::testing::{
     created_url, git_status, session_in_dir, FakeGitForge, FakeGitRepository, FakeProjectRepo,
-    FakeSpawner, FakeTrustRepo, GitChange,
+    FakeSpawner, FakeTrustRepo, GitChange, REMARK,
 };
 
 use super::ScopedGitError;
@@ -127,7 +127,7 @@ fn a_proposal_an_agent_makes_never_asks_anybody_for_a_credential() {
     let url = opened
         .facade
         .scoped(opened.session)
-        .git_create_pull_request(&proposal())
+        .git_create_pull_request(&proposal(), &Progress::unwatched())
         .expect("propose");
 
     assert_eq!(url, created_url());
@@ -153,7 +153,7 @@ fn a_project_nobody_has_trusted_proposes_and_merges_nothing() {
         opened
             .facade
             .scoped(opened.session)
-            .git_create_pull_request(&proposal()),
+            .git_create_pull_request(&proposal(), &Progress::unwatched()),
         Err(ScopedGitError::PullRequest(PullRequestError::Untrusted)),
     ));
     assert!(matches!(
@@ -199,6 +199,38 @@ fn a_branch_with_nothing_open_reads_back_as_having_nothing_open() {
         .expect("a scoped review read");
 
     assert!(review.is_none());
+}
+
+/// A proposal reaches a remote by publishing the branch, which is the half that takes minutes, so
+/// it is the half an agent waiting on one hears from.
+#[test]
+fn a_proposal_an_agent_asked_to_be_told_about_hears_the_branch_being_published() {
+    let opened = opened(
+        FakeGitRepository::reporting(git_status("topic")),
+        FakeGitForge::ready(),
+    );
+    opened.trusted();
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let collecting = Arc::clone(&heard);
+    let progress = Progress::watched_by(Arc::new(move |remark: &str| {
+        collecting
+            .lock()
+            .expect("nothing panics holding this")
+            .push(remark.to_string())
+    }));
+
+    let url = opened
+        .facade
+        .scoped(opened.session)
+        .git_create_pull_request(&proposal(), &progress)
+        .expect("propose");
+
+    assert_eq!(url, created_url());
+    assert_eq!(
+        *heard.lock().expect("nothing panics holding this"),
+        vec![REMARK.to_string()],
+        "a proposal an agent is waiting on told it nothing while it published the branch",
+    );
 }
 
 #[test]
