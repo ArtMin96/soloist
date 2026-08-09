@@ -1,10 +1,11 @@
 //! What an exchange with a remote is described by: which exchange, whether a person may be asked
-//! for a credential, and the signal that stops it.
+//! for a credential, the signal that stops it, and where it says what it is doing.
 //!
-//! These three travel together across the port because they are one decision each about the same
-//! thing — an operation that reaches a machine Soloist has no say over, may need something only a
-//! person has, and may take longer than anybody is willing to wait.
+//! These travel together across the port because they are one decision each about the same thing —
+//! an operation that reaches a machine Soloist has no say over, may need something only a person
+//! has, may take longer than anybody is willing to wait, and is worth hearing from while it does.
 
+use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -62,5 +63,55 @@ impl Stop {
     /// Whether stopping has been asked for.
     pub fn stopped(&self) -> bool {
         self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// Where an operation says what it is doing while it is still doing it, for a caller that asked to
+/// be told.
+///
+/// **Asked to be told** is the whole of the condition. An operation nobody is listening to reports
+/// nothing, does no extra work to have nothing to report, and behaves exactly as it did before any
+/// of this existed — which is why this is a value carried alongside the operation rather than a
+/// setting somewhere, and why every surface that does not want it holds [`Progress::unwatched`].
+///
+/// What crosses here is whatever the operation said about itself, verbatim and already coalesced to
+/// the latest remark. Nothing decides anything from it: it is prose, from a program Soloist does not
+/// own, on its way to a person or an agent who wants to know the operation is alive and roughly
+/// where it has got to.
+#[derive(Clone, Default)]
+pub struct Progress(Option<Observer>);
+
+/// Whoever is listening to an operation, handed each remark as it is made. Shared rather than owned,
+/// because the operation runs on a thread of the pool's choosing while whoever asked waits elsewhere.
+pub type Observer = Arc<dyn Fn(&str) + Send + Sync>;
+
+impl Progress {
+    /// Nobody is listening. The default, and what every surface that never asked for progress holds.
+    pub fn unwatched() -> Self {
+        Self(None)
+    }
+
+    /// Somebody is listening, and this is where to say it.
+    pub fn watched_by(observer: Observer) -> Self {
+        Self(Some(observer))
+    }
+
+    /// Whether anybody is listening — asked by an adapter deciding whether to make the underlying
+    /// tool produce progress at all, since a tool asked to report to nobody is pure cost.
+    pub fn is_watched(&self) -> bool {
+        self.0.is_some()
+    }
+
+    /// Says `remark` to whoever is listening. Costs nothing when nobody is.
+    pub fn report(&self, remark: &str) {
+        if let Some(observer) = &self.0 {
+            observer(remark);
+        }
+    }
+}
+
+impl fmt::Debug for Progress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Progress").field(&self.is_watched()).finish()
     }
 }

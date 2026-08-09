@@ -44,7 +44,7 @@ mod watch;
 pub use branch::BRANCH_PAGE_SIZE;
 pub use diff::DiffExtent;
 pub use error::{GitDraftError, GitError, GitWriteError};
-pub use exchange::{Prompting, Stop, SyncOp};
+pub use exchange::{Observer, Progress, Prompting, Stop, SyncOp};
 pub use forge::{
     ForgeError, ForgeReadiness, ForgeRepository, GitForge, NewPullRequest, NoopGitForge,
     PullRequest, PullRequestState, PullRequestTemplate,

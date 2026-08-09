@@ -25,8 +25,17 @@
 use std::path::Path;
 
 use soloist_core::{Exchange, GitError, Prompting, SyncOp};
+use soloist_exec::{Watch, REPORT_INTERVAL};
 
 use crate::runner::{self, Run, NETWORK_TIME_LIMIT};
+
+/// What makes version control describe an exchange as it makes it, rather than only when it ends.
+///
+/// It reports on its own when its error stream is a terminal and stays silent when it is not; every
+/// invocation Soloist makes is the second case, so an exchange somebody is waiting on has to ask.
+/// Asked for only when somebody is listening, so an exchange nobody is watching runs the same
+/// invocation it always did.
+const REPORTING: &str = "--progress";
 
 /// The remote a branch that tracks nothing is published to. It is version control's own default —
 /// the name it suggests in the hint it prints when a push has no upstream to go to — and any
@@ -80,22 +89,20 @@ const AUTHENTICATION_MARKERS: &[&str] = &[
 
 /// Exchanges commits with the remote as `exchange` asks.
 pub(crate) fn sync(root: &Path, exchange: Exchange<'_>) -> Result<(), GitError> {
-    let args: &[&str] = match exchange.op {
-        SyncOp::Fetch => &["fetch"],
-        SyncOp::Pull => &["pull"],
-        SyncOp::Push => &["push"],
-        // A branch tracking nothing has no upstream to push to, so the remote and the branch are
-        // both named, and the branch is recorded as tracking it from then on.
-        SyncOp::Publish => &["push", "--set-upstream", DEFAULT_REMOTE, CURRENT],
-    };
+    let args = invocation(exchange.op, exchange.progress.is_watched());
     let stopped = || exchange.stop.stopped();
+    let report = |remark: &str| exchange.progress.report(remark);
     let outcome = runner::run_with(
         root,
-        args,
+        &args,
         Run {
             report_refusal: true,
             time_limit: NETWORK_TIME_LIMIT,
             stopped: Some(&stopped),
+            watching: exchange.progress.is_watched().then_some(Watch {
+                interval: REPORT_INTERVAL,
+                observer: &report,
+            }),
             env: match exchange.prompting {
                 Prompting::Allowed => &[],
                 Prompting::Denied => UNATTENDED,
@@ -125,6 +132,27 @@ pub(crate) fn abort_merge(root: &Path) -> Result<(), GitError> {
         },
     )
     .map(|_| ())
+}
+
+/// What version control is asked to do for `op`, and whether to describe itself while it does it.
+///
+/// The reporting flag is added only where somebody is listening, so an exchange nobody asked about
+/// is invoked with character for character the arguments it was invoked with before any of this
+/// existed — and version control, whose error stream is never a terminal here, stays as silent for
+/// it as it always was.
+fn invocation(op: SyncOp, reporting: bool) -> Vec<&'static str> {
+    let mut args = match op {
+        SyncOp::Fetch => vec!["fetch"],
+        SyncOp::Pull => vec!["pull"],
+        SyncOp::Push => vec!["push"],
+        // A branch tracking nothing has no upstream to push to, so the remote and the branch are
+        // both named, and the branch is recorded as tracking it from then on.
+        SyncOp::Publish => vec!["push", "--set-upstream", DEFAULT_REMOTE, CURRENT],
+    };
+    if reporting {
+        args.push(REPORTING);
+    }
+    args
 }
 
 /// Whether a failed exchange's own account of itself says a credential was the problem.

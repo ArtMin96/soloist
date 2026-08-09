@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::Facade;
-use crate::git::{HandoffSubject, MergeMethod, PullRequestError, PullRequestReview};
+use crate::git::{HandoffSubject, MergeMethod, Progress, PullRequestError, PullRequestReview};
 use crate::ids::{ProcessId, ProjectId};
 use crate::supervisor::SupervisorError;
 
@@ -73,10 +73,11 @@ impl Facade {
         project: ProjectId,
         number: u64,
         method: MergeMethod,
+        progress: &Progress,
     ) -> Result<(), PullRequestError> {
         let root = self.review_root(project)?;
         self.git
-            .merge_pull_request(project, &root, number, method)?;
+            .merge_pull_request(project, &root, number, method, progress)?;
         self.announce_git(project, &root);
         Ok(())
     }

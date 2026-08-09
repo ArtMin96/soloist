@@ -12,7 +12,7 @@ use tempfile::TempDir;
 
 use crate::composition::CorePorts;
 use crate::facade::{Facade, Handoff, HandoffError};
-use crate::git::{CheckState, HandoffSubject, MergeMethod};
+use crate::git::{CheckState, HandoffSubject, MergeMethod, Progress};
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{ProjectRepo, TokioClock};
 use crate::process::ProcStatus;
@@ -270,7 +270,14 @@ async fn merging_reaches_the_service_and_re_reads_what_the_working_tree_now_says
     let before = h.repository.reads();
 
     h.facade
-        .blocking(move |f| f.git_merge_pull_request(h.project, NUMBER, MergeMethod::Squash))
+        .blocking(move |f| {
+            f.git_merge_pull_request(
+                h.project,
+                NUMBER,
+                MergeMethod::Squash,
+                &Progress::unwatched(),
+            )
+        })
         .await
         .expect("merge");
 

@@ -21,7 +21,8 @@ pub use paths::{
     DATA_DIR_ENV,
 };
 pub use protocol::{
-    IpcRequest, IpcResponse, IpcResult, PortWaitOutcome, ProjectStatus, ProjectSummary,
+    IpcReply, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome, ProgressReport, ProjectStatus,
+    ProjectSummary,
 };
 pub use vcs_error::GitRefusal;
 

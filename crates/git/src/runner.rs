@@ -23,7 +23,7 @@ use std::process::{Command, ExitStatus};
 use std::time::Duration;
 
 use soloist_core::GitError;
-use soloist_exec::{Finished, Run as Bounded, RunError};
+use soloist_exec::{Finished, Run as Bounded, RunError, Watch};
 
 /// The command-line tool this adapter drives.
 const GIT: &str = "git";
@@ -68,6 +68,9 @@ pub(crate) struct Run<'a> {
     /// Environment to add on top of what every invocation gets — the invocations that reach a
     /// remote are the only ones that need any, and what they need is not to prompt.
     pub env: &'a [(&'a str, &'a str)],
+    /// Who to tell what the invocation is saying about itself while it runs, for the invocations
+    /// somebody is waiting on the far end of. `None` for every other one, which is most of them.
+    pub watching: Option<Watch<'a>>,
 }
 
 impl Default for Run<'_> {
@@ -79,6 +82,7 @@ impl Default for Run<'_> {
             time_limit: TIME_LIMIT,
             stopped: None,
             env: &[],
+            watching: None,
         }
     }
 }
@@ -123,6 +127,7 @@ pub(crate) fn run_with(root: &Path, args: &[&str], options: Run<'_>) -> Result<V
             input: options.input,
             stopped: options.stopped,
             time_limit: options.time_limit,
+            watching: options.watching,
             output_limit: OUTPUT_LIMIT,
             diagnostics: options.report_refusal.then_some(DIAGNOSTIC_LIMIT),
         },

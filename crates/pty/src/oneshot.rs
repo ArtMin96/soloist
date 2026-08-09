@@ -99,6 +99,9 @@ impl AgentOneShot for ShellAgentOneShot {
                 stopped: None,
                 input: invocation.input.as_deref(),
                 time_limit: self.time_limit,
+                // Nobody waits on a one-shot invocation: it answers in milliseconds, so there is
+                // nothing about its progress worth saying.
+                watching: None,
                 output_limit: ONE_SHOT_REPLY_LIMIT,
                 // Whatever it wrote about itself is prose, and translated. Only the exit status
                 // crosses back, which is what keeps this adapter's behaviour independent of the

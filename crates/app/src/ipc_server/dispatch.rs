@@ -13,10 +13,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use soloist_core::{Facade, IdleMode, ProjectId, RenderRequest, SessionId, WaitForPortError};
+use soloist_core::{
+    Facade, IdleMode, Progress, ProjectId, RenderRequest, SessionId, WaitForPortError,
+};
 use soloist_ipc::{
     IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome, ProjectStatus, ProjectSummary,
 };
+use tokio::sync::mpsc;
+
+/// Where a request that is still running says what it is doing, for the connection serving it to
+/// carry back as its own frame.
+pub(super) type Reports = mpsc::Sender<String>;
 
 /// The port-readiness wait when the caller names no timeout.
 const DEFAULT_PORT_WAIT: Duration = Duration::from_secs(10);
@@ -40,6 +47,7 @@ pub(super) async fn handle_request(
     facade: &Arc<Facade>,
     session: SessionId,
     request: IpcRequest,
+    reports: Reports,
 ) -> IpcResult {
     match request {
         IpcRequest::CloseProcess { process } => {
@@ -90,7 +98,7 @@ pub(super) async fn handle_request(
         _ => {}
     }
     let facade = Arc::clone(facade);
-    tokio::task::spawn_blocking(move || dispatch_blocking(&facade, session, request))
+    tokio::task::spawn_blocking(move || dispatch_blocking(&facade, session, request, &reports))
         .await
         .unwrap_or_else(|err| {
             Err(IpcError::Internal(format!(
@@ -102,7 +110,12 @@ pub(super) async fn handle_request(
 /// The synchronous request dispatch — every request except the three that await the core. Runs on
 /// the blocking pool (see [`handle_request`]) so its durable-store calls never block a runtime
 /// worker.
-fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -> IpcResult {
+fn dispatch_blocking(
+    facade: &Facade,
+    session: SessionId,
+    request: IpcRequest,
+    reports: &Reports,
+) -> IpcResult {
     match request {
         // Handled on the runtime by `handle_request` before reaching here; a value (not a panic)
         // keeps the connection alive if one ever slipped through.
@@ -579,19 +592,19 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .git_commit(&message, amend)
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
-        IpcRequest::GitPush => facade
+        IpcRequest::GitPush { progress } => facade
             .scoped(session)
-            .git_push()
+            .git_push(&reporting_to(reports, progress))
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
-        IpcRequest::GitPull => facade
+        IpcRequest::GitPull { progress } => facade
             .scoped(session)
-            .git_pull()
+            .git_pull(&reporting_to(reports, progress))
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
-        IpcRequest::GitFetch => facade
+        IpcRequest::GitFetch { progress } => facade
             .scoped(session)
-            .git_fetch()
+            .git_fetch(&reporting_to(reports, progress))
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
         IpcRequest::GitCreateBranch { name } => facade
@@ -634,9 +647,13 @@ fn dispatch_blocking(facade: &Facade, session: SessionId, request: IpcRequest) -
             .git_create_pull_request(&new)
             .map(IpcResponse::GitPullRequestCreated)
             .map_err(IpcError::from),
-        IpcRequest::GitMergePullRequest { number, method } => facade
+        IpcRequest::GitMergePullRequest {
+            number,
+            method,
+            progress,
+        } => facade
             .scoped(session)
-            .git_merge_pull_request(number, method)
+            .git_merge_pull_request(number, method, &reporting_to(reports, progress))
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
         IpcRequest::McpToolGroups => facade
@@ -752,6 +769,23 @@ fn project_status(facade: &Facade, session: SessionId, project: Option<ProjectId
     Ok(IpcResponse::ProjectStatus(ProjectStatus {
         project: ProjectSummary::from_view(&view),
         processes,
+    }))
+}
+
+/// Where an operation reports what it is doing, given what the request asked for.
+///
+/// A request that asked for nothing gets [`Progress::unwatched`], which the core and both adapters
+/// treat as "do no extra work and say nothing" — so the operation a caller who never asked runs is
+/// the one it always ran. A request that asked gets a sink that hands each remark to the connection
+/// serving it, dropping rather than waiting when the connection is behind: a report is worth having
+/// only while it is current, and an operation must never be slowed by whoever is watching it.
+fn reporting_to(reports: &Reports, asked: bool) -> Progress {
+    if !asked {
+        return Progress::unwatched();
+    }
+    let reports = reports.clone();
+    Progress::watched_by(Arc::new(move |remark: &str| {
+        let _ = reports.try_send(remark.to_string());
     }))
 }
 

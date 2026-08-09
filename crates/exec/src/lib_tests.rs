@@ -24,6 +24,7 @@ fn bounded(input: Option<&str>) -> Run<'_> {
         input,
         stopped: None,
         time_limit: Duration::from_secs(10),
+        watching: None,
         output_limit: ROOMY,
         diagnostics: None,
     }
@@ -71,6 +72,7 @@ fn a_run_that_will_not_finish_is_stopped_and_reaped() {
                     time_limit: LIMIT,
                     ..bounded(None)
                 },
+                None,
                 None,
             )
             .is_err_and(|err| err == RunError::TimedOut),

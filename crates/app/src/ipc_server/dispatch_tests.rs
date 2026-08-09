@@ -19,6 +19,17 @@ use tokio::sync::broadcast::error::RecvError;
 /// own tests build one. Routing is what we exercise here; the behaviour behind each call
 /// is tested in the core. Returned as an [`Arc`] because [`handle_request`] takes the façade by
 /// shared handle (it clones it onto the blocking pool for the synchronous dispatch).
+/// Serves one request nobody asked to be told about — which is every request here except the ones
+/// that are about being told, and those call the real one with a receiver they keep.
+async fn handle_request(
+    facade: &Arc<Facade>,
+    session: SessionId,
+    request: IpcRequest,
+) -> IpcResult {
+    let (reports, _unheard) = mpsc::channel(1);
+    super::handle_request(facade, session, request, reports).await
+}
+
 fn facade() -> Arc<Facade> {
     Arc::new(Facade::new(
         CorePorts::builder(
@@ -1243,9 +1254,9 @@ async fn each_version_control_request_routes_to_its_own_behaviour() {
             message: "a subject".into(),
             amend: false,
         },
-        IpcRequest::GitPush,
-        IpcRequest::GitPull,
-        IpcRequest::GitFetch,
+        IpcRequest::GitPush { progress: false },
+        IpcRequest::GitPull { progress: false },
+        IpcRequest::GitFetch { progress: false },
         IpcRequest::GitCreateBranch {
             name: "topic".into(),
         },
@@ -1327,4 +1338,56 @@ async fn a_refused_change_crosses_the_wire_as_the_word_that_classifies_it() {
             ..
         }),
     ));
+}
+
+/// Serves `request` with a receiver kept, answering what it did and everything it said about itself
+/// on the way. Bounded by the request itself: the reports channel closes when the request ends, so
+/// the drain cannot outlive it.
+async fn served_reporting(
+    facade: &Arc<Facade>,
+    session: SessionId,
+    request: IpcRequest,
+) -> (IpcResult, Vec<String>) {
+    let (reports, mut reported) = mpsc::channel(8);
+    let answer = super::handle_request(facade, session, request, reports).await;
+    let mut said = Vec::new();
+    while let Some(note) = reported.recv().await {
+        said.push(note);
+    }
+    (answer, said)
+}
+
+#[tokio::test]
+async fn a_push_that_asked_to_be_told_hears_the_exchange_and_one_that_did_not_hears_nothing() {
+    let status = soloist_core::testing::git_status("main");
+    let repository =
+        FakeGitRepository::reporting(status).branching(soloist_core::testing::branches(Vec::new()));
+    let (facade, trust, dir) = git_facade(repository.clone());
+    let project = facade
+        .projects_snapshot()
+        .expect("projects")
+        .first()
+        .expect("one project")
+        .id;
+    trust.set_project_trusted(project).expect("trust");
+    let session = facade.open_session(PeerCredentials::in_dir(
+        dir.path().canonicalize().expect("canonical"),
+    ));
+
+    let (asked, heard) =
+        served_reporting(&facade, session, IpcRequest::GitPush { progress: true }).await;
+    let (unasked, silence) =
+        served_reporting(&facade, session, IpcRequest::GitPush { progress: false }).await;
+
+    assert!(matches!(asked, Ok(IpcResponse::Acked)));
+    assert!(matches!(unasked, Ok(IpcResponse::Acked)));
+    assert_eq!(
+        heard,
+        vec![soloist_core::testing::REMARK.to_string()],
+        "a caller that asked to be told heard nothing",
+    );
+    assert!(
+        silence.is_empty(),
+        "a caller that never asked was told anyway: {silence:?}",
+    );
 }

@@ -24,6 +24,7 @@ use crate::args::{
     GitPathArg,
 };
 use crate::server::SoloistMcp;
+use crate::tools::progress::Reporting;
 use crate::tools::reply::{acked, app_error, structured, unexpected};
 
 #[tool_router(router = git_router, vis = "pub(crate)")]
@@ -125,22 +126,28 @@ impl SoloistMcp {
     #[tool(
         description = "Hand the checked-out branch's commits to its remote, publishing the branch when it tracks nothing yet. Runs under the user's own credentials; where a credential needs a person, this fails promptly rather than waiting, since nobody is at the window to answer. The user can stop it from the app, which comes back as the stopped refusal rather than a failure."
     )]
-    pub(crate) async fn git_push(&self) -> Result<CallToolResult, ErrorData> {
-        self.acked_change(IpcRequest::GitPush).await
+    pub(crate) async fn git_push(&self, reporting: Reporting) -> Result<CallToolResult, ErrorData> {
+        self.reported_change(reporting, |progress| IpcRequest::GitPush { progress })
+            .await
     }
 
     #[tool(
         description = "Bring the remote's commits in and reconcile them with what is checked out, however the user's own configuration says to. Where they have not said how, version control refuses rather than guessing, and its refusal is what comes back; a pull that conflicts leaves the conflict in the working tree to be resolved."
     )]
-    pub(crate) async fn git_pull(&self) -> Result<CallToolResult, ErrorData> {
-        self.acked_change(IpcRequest::GitPull).await
+    pub(crate) async fn git_pull(&self, reporting: Reporting) -> Result<CallToolResult, ErrorData> {
+        self.reported_change(reporting, |progress| IpcRequest::GitPull { progress })
+            .await
     }
 
     #[tool(
         description = "Bring the remote's commits in without touching the working tree, which is what makes the ahead/behind counts git_status reports true again."
     )]
-    pub(crate) async fn git_fetch(&self) -> Result<CallToolResult, ErrorData> {
-        self.acked_change(IpcRequest::GitFetch).await
+    pub(crate) async fn git_fetch(
+        &self,
+        reporting: Reporting,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.reported_change(reporting, |progress| IpcRequest::GitFetch { progress })
+            .await
     }
 
     #[tool(description = "Start a branch at what is currently checked out and switch to it.")]
@@ -235,12 +242,40 @@ impl SoloistMcp {
     pub(crate) async fn git_merge_pull_request(
         &self,
         Parameters(GitMergePullRequestArg { number, method }): Parameters<GitMergePullRequestArg>,
+        reporting: Reporting,
     ) -> Result<CallToolResult, ErrorData> {
-        let request = IpcRequest::GitMergePullRequest {
+        let method = method.into();
+        self.reported_change(reporting, |progress| IpcRequest::GitMergePullRequest {
             number,
-            method: method.into(),
+            method,
+            progress,
+        })
+        .await
+    }
+
+    /// The same, for the changes that reach another machine and can take minutes to do it.
+    ///
+    /// Whether anything is reported is the caller's choice alone, carried by the progress token it
+    /// put on the request: without one this is `acked_change` and the request that goes to the app
+    /// is the one that always went. With one, the app is asked to say what version control is saying
+    /// while it says it, and each remark becomes a notification against that token.
+    async fn reported_change(
+        &self,
+        reporting: Reporting,
+        request: impl FnOnce(bool) -> IpcRequest,
+    ) -> Result<CallToolResult, ErrorData> {
+        let Some((reports, forwarding)) = reporting.forwarding() else {
+            return self.acked_change(request(false)).await;
         };
-        self.acked_change(request).await
+        let answered = self.client.request_reporting(request(true), reports).await;
+        // The request owned the only sender, so awaiting here is what makes the last remark reach
+        // the caller before the answer does — and what stops the forwarding after it.
+        let _ = forwarding.await;
+        match answered {
+            Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
     }
 
     /// The reply every change to a repository shares: the app acknowledges, or refuses with the

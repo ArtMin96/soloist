@@ -21,6 +21,10 @@ use crate::vcs::{Branches, CommitEntry, DiffTarget, FileContent, HunkRange, Proj
 /// than a clock: nothing under test reads it.
 const STALL_STEP: Duration = Duration::from_millis(5);
 
+/// What a fake exchange says about itself while it runs. A real one says whatever version control
+/// wrote; the wording is nothing to depend on, so one fixed line stands in for it.
+pub const REMARK: &str = "Writing objects:  90% (9/10)";
+
 struct Answers {
     queued: Mutex<VecDeque<Result<GitStatus, GitError>>>,
     listing: Mutex<Result<Vec<ProjectFile>, GitError>>,
@@ -397,6 +401,9 @@ impl GitRepository for FakeGitRepository {
     }
 
     fn sync(&self, root: &Path, exchange: Exchange<'_>) -> Result<(), GitError> {
+        // A real exchange says what it is doing while it does it, and only to a caller that asked;
+        // saying it unconditionally is how a test tells the two callers apart by what they heard.
+        exchange.progress.report(REMARK);
         // A real exchange waits on another machine, so a test about stopping one needs a fake that
         // waits too — and the only thing worth waiting for here is being asked to stop.
         if self.answers.stalls.load(Ordering::SeqCst) {

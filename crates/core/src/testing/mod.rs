@@ -60,7 +60,7 @@ pub use filewatch::FakeFileWatcher;
 #[cfg(test)]
 pub use fixtures::facade_with_agent_tool;
 pub use fixtures::{agent_registration, terminal_registration};
-pub use git::FakeGitRepository;
+pub use git::{FakeGitRepository, REMARK};
 pub use git_change::GitChange;
 pub use git_fixtures::{
     branch, branches, check_run, commit_entry, file_change, git_opening, git_over, git_status,

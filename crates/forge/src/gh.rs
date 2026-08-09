@@ -17,7 +17,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use soloist_core::ForgeError;
-use soloist_exec::{Run as Bounded, RunError};
+use soloist_exec::{Run as Bounded, RunError, Watch};
 
 /// The command-line tool this adapter drives.
 const GH: &str = "gh";
@@ -49,6 +49,9 @@ pub(crate) struct Run<'a> {
     pub input: Option<&'a str>,
     /// Looked at while the invocation waits, for the ones somebody may change their mind about.
     pub stopped: Option<&'a dyn Fn() -> bool>,
+    /// Who to tell what the invocation is saying about itself while it runs, for the ones somebody
+    /// is waiting on the far end of.
+    pub watching: Option<Watch<'a>>,
 }
 
 /// Runs `gh args` in `root` and returns what it wrote to standard output.
@@ -82,6 +85,7 @@ pub(crate) fn run_with(
             input: options.input,
             stopped: options.stopped,
             time_limit: TIME_LIMIT,
+            watching: options.watching,
             output_limit: OUTPUT_LIMIT,
             // Always asked for: a refusal's account is the service talking to the user, and it is
             // the only thing that says why a pull request was not opened.

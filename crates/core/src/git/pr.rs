@@ -29,7 +29,7 @@ use crate::vcs::SyncState;
 
 use super::branch::usable_branch_name;
 use super::error::{GitError, GitWriteError};
-use super::exchange::{Prompting, Stop};
+use super::exchange::{Progress, Prompting, Stop};
 use super::forge::{
     ForgeError, ForgeReadiness, GitForge, NewPullRequest, PullRequest, PullRequestTemplate,
 };
@@ -193,7 +193,7 @@ impl Git {
         // goes first — as a publish for a branch it has never seen, which is the same choice
         // pressing push makes and is made from the same remembered status.
         if status.as_ref().is_some_and(unsent) {
-            self.push(project, root, prompting)?;
+            self.push(project, root, prompting, &Progress::unwatched())?;
         }
         Ok(self.asking(project, |forge, stop| forge.create(root, &head, new, stop))?)
     }

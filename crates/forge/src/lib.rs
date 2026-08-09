@@ -23,8 +23,9 @@ use std::path::Path;
 
 use soloist_core::{
     CheckRun, ForgeError, ForgeReadiness, ForgeRepository, GitForge, MergeMethod, NewPullRequest,
-    PullRequest, PullRequestReview, PullRequestTemplate, ReviewLimits, Stop,
+    Progress, PullRequest, PullRequestReview, PullRequestTemplate, ReviewLimits, Stop,
 };
+use soloist_exec::{Watch, REPORT_INTERVAL};
 
 /// The arguments asking which accounts the tool holds, in the one machine-readable form it offers.
 /// It answers with a zero status whether or not there is an account, so the payload is the whole
@@ -106,6 +107,7 @@ impl GitForge for GhForge {
             gh::Run {
                 input: Some(&new.body),
                 stopped: Some(&stopped),
+                watching: None,
             },
         )?;
         address(&output)
@@ -151,8 +153,10 @@ impl GitForge for GhForge {
         number: u64,
         method: MergeMethod,
         stop: &Stop,
+        progress: &Progress,
     ) -> Result<(), ForgeError> {
         let stopped = || stop.stopped();
+        let report = |remark: &str| progress.report(remark);
         let number = number.to_string();
         gh::run_with(
             root,
@@ -160,6 +164,10 @@ impl GitForge for GhForge {
             gh::Run {
                 input: None,
                 stopped: Some(&stopped),
+                watching: progress.is_watched().then_some(Watch {
+                    interval: REPORT_INTERVAL,
+                    observer: &report,
+                }),
             },
         )?;
         Ok(())

@@ -282,11 +282,20 @@ pub enum IpcRequest {
     /// Records the index as a commit carrying `message`, or replaces the last commit when `amend`.
     GitCommit { message: String, amend: bool },
     /// Hands the checked-out branch's commits to its remote, publishing it when it tracks nothing.
-    GitPush,
+    GitPush {
+        #[serde(default, skip_serializing_if = "not_asked_for")]
+        progress: bool,
+    },
     /// Brings the remote's commits in and reconciles them with what is checked out.
-    GitPull,
+    GitPull {
+        #[serde(default, skip_serializing_if = "not_asked_for")]
+        progress: bool,
+    },
     /// Brings the remote's commits in without touching the working tree.
-    GitFetch,
+    GitFetch {
+        #[serde(default, skip_serializing_if = "not_asked_for")]
+        progress: bool,
+    },
     /// Starts a branch called `name` at what is checked out, and switches to it.
     GitCreateBranch { name: String },
     /// Checks out the branch called `name`.
@@ -304,7 +313,12 @@ pub enum IpcRequest {
     /// Proposes what is checked out as a pull request, publishing the branch first if needed.
     GitCreatePullRequest { new: NewPullRequest },
     /// Puts pull request `number`'s commits into its base branch by `method`.
-    GitMergePullRequest { number: u64, method: MergeMethod },
+    GitMergePullRequest {
+        number: u64,
+        method: MergeMethod,
+        #[serde(default, skip_serializing_if = "not_asked_for")]
+        progress: bool,
+    },
     /// The MCP feature-group tool enablement — a global settings read (not project-scoped) the MCP
     /// server consults at startup to decide which feature-tool groups to serve.
     McpToolGroups,
@@ -351,4 +365,10 @@ pub enum IpcRequest {
     SeedTemplateRead { kind: TemplateKind },
     /// Write the agent guide into the session's effective project root as a managed section.
     SetupAgentIntegration { file: IntegrationFile },
+}
+
+/// Whether a request left its progress opt-in unasked-for, so an unasked request stays exactly the
+/// bytes it was before there was anything to ask for.
+fn not_asked_for(progress: &bool) -> bool {
+    !progress
 }

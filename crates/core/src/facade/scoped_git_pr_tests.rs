@@ -2,14 +2,14 @@
 //! proposal, what it may propose or merge, and the one thing it may never do — have somebody asked
 //! for a credential.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tempfile::TempDir;
 
 use crate::composition::CorePorts;
 use crate::facade::Facade;
 use crate::git::{
-    ForgeReadiness, MergeMethod, NewPullRequest, Prompting, PullRequestError, SyncOp,
+    ForgeReadiness, MergeMethod, NewPullRequest, Progress, Prompting, PullRequestError, SyncOp,
 };
 use crate::ids::{ProjectId, SessionId};
 use crate::ports::{ProjectRepo, TokioClock, TrustRepo};
@@ -157,10 +157,11 @@ fn a_project_nobody_has_trusted_proposes_and_merges_nothing() {
         Err(ScopedGitError::PullRequest(PullRequestError::Untrusted)),
     ));
     assert!(matches!(
-        opened
-            .facade
-            .scoped(opened.session)
-            .git_merge_pull_request(7, MergeMethod::Squash),
+        opened.facade.scoped(opened.session).git_merge_pull_request(
+            7,
+            MergeMethod::Squash,
+            &Progress::unwatched()
+        ),
         Err(ScopedGitError::PullRequest(PullRequestError::Untrusted)),
     ));
     assert!(opened.forge.created().is_empty());
@@ -178,7 +179,7 @@ fn merging_reaches_the_service_with_the_method_that_was_asked_for() {
     opened
         .facade
         .scoped(opened.session)
-        .git_merge_pull_request(7, MergeMethod::Rebase)
+        .git_merge_pull_request(7, MergeMethod::Rebase, &Progress::unwatched())
         .expect("merge");
 
     assert_eq!(opened.forge.merged(), vec![(7, MergeMethod::Rebase)]);
@@ -198,4 +199,34 @@ fn a_branch_with_nothing_open_reads_back_as_having_nothing_open() {
         .expect("a scoped review read");
 
     assert!(review.is_none());
+}
+
+#[test]
+fn a_merge_an_agent_asked_to_be_told_about_hears_what_the_service_is_doing() {
+    let said = "Merging pull request #7";
+    let opened = opened(
+        FakeGitRepository::reporting(git_status("topic")),
+        FakeGitForge::ready().saying(&[said]),
+    );
+    opened.trusted();
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let collecting = Arc::clone(&heard);
+    let progress = Progress::watched_by(Arc::new(move |remark: &str| {
+        collecting
+            .lock()
+            .expect("nothing panics holding this")
+            .push(remark.to_string())
+    }));
+
+    opened
+        .facade
+        .scoped(opened.session)
+        .git_merge_pull_request(7, MergeMethod::Rebase, &progress)
+        .expect("merge");
+
+    assert_eq!(
+        *heard.lock().expect("nothing panics holding this"),
+        vec![said.to_string()],
+        "a merge an agent is waiting on told it nothing while it ran",
+    );
 }

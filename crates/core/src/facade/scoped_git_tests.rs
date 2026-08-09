@@ -9,7 +9,7 @@ use tempfile::TempDir;
 
 use crate::composition::CorePorts;
 use crate::facade::Facade;
-use crate::git::{GitError, Prompting, SyncOp};
+use crate::git::{GitError, Progress, Prompting, SyncOp};
 use crate::ids::{ProjectId, SessionId};
 use crate::ports::{ProjectRepo, TokioClock, TrustRepo};
 use crate::testing::{
@@ -176,7 +176,10 @@ fn a_project_nobody_has_trusted_reads_back_but_changes_nothing() {
         opened.facade.scoped(session).git_create_branch("topic"),
         opened.facade.scoped(session).git_delete_branch("topic"),
         opened.facade.scoped(session).git_stash(),
-        opened.facade.scoped(session).git_push(),
+        opened
+            .facade
+            .scoped(session)
+            .git_push(&Progress::unwatched()),
     ] {
         assert!(
             matches!(
@@ -198,9 +201,21 @@ fn an_exchange_an_agent_starts_never_asks_anybody_for_a_credential() {
     let session = opened.session();
     opened.trusted();
 
-    opened.facade.scoped(session).git_push().expect("push");
-    opened.facade.scoped(session).git_pull().expect("pull");
-    opened.facade.scoped(session).git_fetch().expect("fetch");
+    opened
+        .facade
+        .scoped(session)
+        .git_push(&Progress::unwatched())
+        .expect("push");
+    opened
+        .facade
+        .scoped(session)
+        .git_pull(&Progress::unwatched())
+        .expect("pull");
+    opened
+        .facade
+        .scoped(session)
+        .git_fetch(&Progress::unwatched())
+        .expect("fetch");
 
     let asked: Vec<(SyncOp, Prompting)> = opened
         .repository

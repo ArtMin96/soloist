@@ -10,7 +10,10 @@ mod request;
 mod response;
 
 pub use request::IpcRequest;
-pub use response::{IpcResponse, IpcResult, PortWaitOutcome, ProjectStatus, ProjectSummary};
+pub use response::{
+    IpcReply, IpcResponse, IpcResult, PortWaitOutcome, ProgressReport, ProjectStatus,
+    ProjectSummary,
+};
 
 #[cfg(test)]
 #[path = "protocol_tests.rs"]

@@ -17,7 +17,9 @@ use fixture::{
     slow_askpass, write,
 };
 
-use soloist_core::{Exchange, GitError, GitRepository, Prompting, Stop, SyncOp};
+use std::sync::{Arc, Mutex};
+
+use soloist_core::{Exchange, GitError, GitRepository, Progress, Prompting, Stop, SyncOp};
 use soloist_git::CliGitRepository;
 
 /// How long a test allows an exchange that should fail at once to take before calling it a hang. Far
@@ -27,20 +29,28 @@ const PROMPTLY: Duration = Duration::from_secs(20);
 
 /// One exchange as the local user's own door makes it: a person is at the window, so version control
 /// may ask them, and nothing has been stopped.
-fn watched(op: SyncOp, stop: &Stop) -> Exchange<'_> {
+fn watched<'a>(op: SyncOp, stop: &'a Stop, progress: &'a Progress) -> Exchange<'a> {
     Exchange {
         op,
         prompting: Prompting::Allowed,
         stop,
+        progress,
     }
 }
 
+/// An exchange nobody asked to be told about, which is every exchange here except the ones that are
+/// about being told.
+fn unheard() -> Progress {
+    Progress::unwatched()
+}
+
 /// One exchange as a session-scoped caller's door makes it: nobody is watching.
-fn unattended(op: SyncOp, stop: &Stop) -> Exchange<'_> {
+fn unattended<'a>(op: SyncOp, stop: &'a Stop, progress: &'a Progress) -> Exchange<'a> {
     Exchange {
         op,
         prompting: Prompting::Denied,
         stop,
+        progress,
     }
 }
 
@@ -53,7 +63,10 @@ fn pushing_hands_the_branchs_commits_to_the_remote_and_squares_the_standing() {
     assert_eq!(ahead_behind(dir.path()), "+1 -0");
 
     CliGitRepository::new()
-        .sync(dir.path(), watched(SyncOp::Push, &Stop::default()))
+        .sync(
+            dir.path(),
+            watched(SyncOp::Push, &Stop::default(), &unheard()),
+        )
         .expect("push");
 
     assert_eq!(
@@ -82,7 +95,10 @@ fn publishing_a_branch_that_tracks_nothing_gives_it_an_upstream_to_track() {
     );
 
     CliGitRepository::new()
-        .sync(dir.path(), watched(SyncOp::Publish, &Stop::default()))
+        .sync(
+            dir.path(),
+            watched(SyncOp::Publish, &Stop::default(), &unheard()),
+        )
         .expect("publish");
 
     assert!(
@@ -103,7 +119,10 @@ fn fetching_makes_the_standing_true_without_touching_the_working_tree() {
     let before = std::fs::read_to_string(dir.path().join("a.txt")).expect("read");
 
     CliGitRepository::new()
-        .sync(dir.path(), watched(SyncOp::Fetch, &Stop::default()))
+        .sync(
+            dir.path(),
+            watched(SyncOp::Fetch, &Stop::default(), &unheard()),
+        )
         .expect("fetch");
 
     assert_eq!(ahead_behind(dir.path()), "+0 -1");
@@ -124,7 +143,10 @@ fn pulling_brings_the_remotes_commits_into_the_working_tree() {
     git(other.path(), &["push"]);
 
     CliGitRepository::new()
-        .sync(dir.path(), watched(SyncOp::Pull, &Stop::default()))
+        .sync(
+            dir.path(),
+            watched(SyncOp::Pull, &Stop::default(), &unheard()),
+        )
         .expect("pull");
 
     assert!(dir.path().join("b.txt").exists());
@@ -144,7 +166,10 @@ fn a_divergence_the_user_has_not_said_how_to_reconcile_is_refused_rather_than_gu
     let head = git_output(dir.path(), &["rev-parse", "HEAD"]);
 
     let refusal = CliGitRepository::new()
-        .sync(dir.path(), watched(SyncOp::Pull, &Stop::default()))
+        .sync(
+            dir.path(),
+            watched(SyncOp::Pull, &Stop::default(), &unheard()),
+        )
         .unwrap_err();
 
     let GitError::Refused { output } = refusal else {
@@ -174,7 +199,10 @@ fn a_pull_that_conflicts_leaves_the_conflict_to_be_resolved_and_says_a_merge_is_
     let repository = CliGitRepository::new();
 
     let refusal = repository
-        .sync(dir.path(), watched(SyncOp::Pull, &Stop::default()))
+        .sync(
+            dir.path(),
+            watched(SyncOp::Pull, &Stop::default(), &unheard()),
+        )
         .unwrap_err();
 
     assert!(
@@ -234,7 +262,10 @@ fn a_remote_that_demands_a_credential_nobody_can_supply_fails_promptly_rather_th
     let started = Instant::now();
 
     let refusal = CliGitRepository::new()
-        .sync(dir.path(), unattended(SyncOp::Publish, &Stop::default()))
+        .sync(
+            dir.path(),
+            unattended(SyncOp::Publish, &Stop::default(), &unheard()),
+        )
         .unwrap_err();
 
     assert_eq!(
@@ -276,7 +307,8 @@ fn a_credential_only_a_person_could_give_is_asked_for_where_one_is_watching_and_
     };
     let started = Instant::now();
 
-    let outcome = CliGitRepository::new().sync(dir.path(), watched(SyncOp::Publish, &stop));
+    let outcome =
+        CliGitRepository::new().sync(dir.path(), watched(SyncOp::Publish, &stop, &unheard()));
     asking.join().expect("the asking thread");
 
     assert_eq!(
@@ -314,7 +346,10 @@ fn an_exchange_nobody_can_answer_for_is_not_asked_about_at_all() {
     let started = Instant::now();
 
     let refusal = CliGitRepository::new()
-        .sync(dir.path(), unattended(SyncOp::Publish, &Stop::default()))
+        .sync(
+            dir.path(),
+            unattended(SyncOp::Publish, &Stop::default(), &unheard()),
+        )
         .unwrap_err();
 
     assert_eq!(
@@ -350,4 +385,40 @@ fn serve_demanding_credentials() -> u16 {
         }
     });
     port
+}
+
+#[test]
+fn a_push_somebody_asked_about_says_what_version_control_is_doing_while_it_does_it() {
+    let dir = repository_with(&["a.txt"]);
+    let _remote = remote_for(dir.path());
+    write(dir.path(), "a.txt", "changed here\n");
+    commit(dir.path(), "a commit the remote has not seen");
+    let said = Arc::new(Mutex::new(Vec::new()));
+    let collecting = Arc::clone(&said);
+    let progress = Progress::watched_by(Arc::new(move |remark: &str| {
+        collecting
+            .lock()
+            .expect("nothing panics holding this")
+            .push(remark.to_string())
+    }));
+
+    CliGitRepository::new()
+        .sync(
+            dir.path(),
+            watched(SyncOp::Push, &Stop::default(), &progress),
+        )
+        .expect("push");
+
+    let said = said.lock().expect("nothing panics holding this");
+    assert!(
+        !said.is_empty(),
+        "a push nobody could hear is the whole defect this exists to fix",
+    );
+    // Version control's own words about this push, rather than anything composed here. A fixture
+    // push finishes inside a single reporting window, so which of its remarks survives the
+    // coalescing is a matter of timing; that it names the branch it moved is not.
+    assert!(
+        said.iter().any(|remark| remark.contains("main")),
+        "what arrived is not version control's own account of the push: {said:?}",
+    );
 }

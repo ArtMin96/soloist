@@ -7,7 +7,7 @@ mod fixture;
 use fixture::Repository;
 use soloist_core::{
     CheckRun, CheckState, ForgeError, ForgeReadiness, GitForge, MergeMethod, NewPullRequest,
-    PullRequestState, ReviewLimits, Stop,
+    Progress, PullRequestState, ReviewLimits, Stop,
 };
 use soloist_forge::GhForge;
 
@@ -314,7 +314,13 @@ fn a_merge_names_the_pull_request_and_the_way_it_was_asked_for() {
         let repository = Repository::new();
 
         GhForge::new()
-            .merge(repository.path(), 12, method, &Stop::default())
+            .merge(
+                repository.path(),
+                12,
+                method,
+                &Stop::default(),
+                &Progress::unwatched(),
+            )
             .expect("merged");
 
         let asked = repository.asked("pr-merge");
@@ -334,7 +340,13 @@ fn a_merge_the_service_refuses_carries_its_own_account_of_why_back() {
     );
 
     let refusal = GhForge::new()
-        .merge(repository.path(), 12, MergeMethod::Squash, &Stop::default())
+        .merge(
+            repository.path(),
+            12,
+            MergeMethod::Squash,
+            &Stop::default(),
+            &Progress::unwatched(),
+        )
         .unwrap_err();
 
     assert!(

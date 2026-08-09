@@ -11,7 +11,7 @@
 use std::path::Path;
 
 use super::error::GitError;
-use super::exchange::{Prompting, Stop, SyncOp};
+use super::exchange::{Progress, Prompting, Stop, SyncOp};
 use super::status::GitStatus;
 use crate::vcs::{Branches, CommitEntry, DiffTarget, FileContent, HunkRange, ProjectFile};
 
@@ -23,6 +23,9 @@ pub struct Exchange<'a> {
     pub prompting: Prompting,
     /// Looked at while the exchange waits; set, it means stop.
     pub stop: &'a Stop,
+    /// Where to say what the exchange is doing while it does it. Unwatched, an implementation must
+    /// behave exactly as it would have without it.
+    pub progress: &'a Progress,
 }
 
 /// What to do to a branch. A closed set; the name is given alongside, because all three name one.

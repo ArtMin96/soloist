@@ -52,6 +52,7 @@ fn a_stopped_run_ends_at_once_and_leaves_neither_a_child_nor_a_zombie() {
             input: None,
             stopped: Some(&stopped),
             time_limit: UNREACHED,
+            watching: None,
             output_limit: 64 * 1024,
             diagnostics: None,
         },
