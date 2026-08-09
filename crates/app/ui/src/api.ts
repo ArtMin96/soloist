@@ -32,6 +32,7 @@ import type {
   McpToolGroups,
   NotificationLevel,
   Notifications,
+  NewPullRequest,
   NotifierStatus,
   OrchestrationSnapshot,
   Presence,
@@ -43,6 +44,7 @@ import type {
   ProjectSettings,
   ProjectSettingsPage,
   ProjectView,
+  PullRequestSurface,
   RenderedPrompt,
   ScratchpadView,
   Sidebar,
@@ -237,6 +239,29 @@ export function gitStopExchange(project: number): Promise<void> {
 // within that merge, so a surface confirms first.
 export function gitAbortMerge(project: number): Promise<void> {
   return invoke<void>("git_abort_merge", { project });
+}
+
+// Everything the pull-request surface needs in one read: whether the GitHub command-line tool can
+// be reached, the branch that would be proposed and the one it would merge into, the pull request
+// the branch already has, and the description skeletons on offer.
+export function gitPullRequestSurface(project: number): Promise<PullRequestSurface> {
+  return invoke<PullRequestSurface>("git_pull_request_surface", { project });
+}
+
+// Proposes what is checked out as a pull request, publishing the branch first when the remote does
+// not hold it as it stands. Resolves with the address of what was made.
+export function gitCreatePullRequest(project: number, request: NewPullRequest): Promise<string> {
+  return invoke<string>("git_create_pull_request", { project, request });
+}
+
+// Drafts the description this branch would open against `base`, filling `skeleton` when one was
+// offered, by running the agent tool the user picked. Only text comes back — nothing is proposed.
+export function gitDraftPullRequestBody(
+  project: number,
+  base: string,
+  skeleton: string,
+): Promise<string> {
+  return invoke<string>("git_draft_pull_request_body", { project, base, skeleton });
 }
 
 // --- Coordination panels: the scratchpad panel and the to-do board read/write through these.

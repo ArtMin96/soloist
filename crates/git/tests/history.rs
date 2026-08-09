@@ -6,7 +6,7 @@ mod fixture;
 use std::path::Path;
 
 use fixture::{git, repository_with, write, BRANCH};
-use soloist_core::{CommitEntry, GitRepository};
+use soloist_core::{CommitEntry, GitRepository, LogRange};
 use soloist_git::CliGitRepository;
 
 /// Commits `subject` in `dir` after changing `file`.
@@ -18,8 +18,15 @@ fn commit(dir: &Path, file: &str, subject: &str) {
 
 fn history(dir: &Path, skip: usize, limit: usize) -> Vec<CommitEntry> {
     CliGitRepository
-        .log(dir, skip, limit)
+        .log(dir, LogRange::CheckedOut, skip, limit)
         .expect("read the history")
+}
+
+/// What the checked-out branch holds that `base` does not.
+fn proposed(dir: &Path, base: &str) -> Vec<CommitEntry> {
+    CliGitRepository
+        .log(dir, LogRange::Since { base }, 0, 10)
+        .expect("read what the branch proposes")
 }
 
 #[test]
@@ -102,7 +109,7 @@ fn a_folder_outside_any_repository_has_no_history_at_all() {
 
     assert!(
         matches!(
-            CliGitRepository.log(dir.path(), 0, 10),
+            CliGitRepository.log(dir.path(), LogRange::CheckedOut, 0, 10),
             Err(soloist_core::GitError::NotARepo)
         ),
         "not a repository is a different answer from a repository with nothing in it",
@@ -117,4 +124,53 @@ fn a_subject_carrying_what_a_person_writes_survives_the_read() {
     commit(dir.path(), "a.txt", subject);
 
     assert_eq!(history(dir.path(), 0, 1)[0].subject, subject);
+}
+
+#[test]
+fn a_range_reads_only_what_the_branch_holds_and_its_base_does_not() {
+    let dir = repository_with(&["a.txt"]);
+    commit(dir.path(), "a.txt", "Do the shared thing");
+    git(dir.path(), &["checkout", "-b", "side"]);
+    commit(dir.path(), "side.txt", "Do the side thing");
+
+    let proposed = proposed(dir.path(), BRANCH);
+    let subjects: Vec<&str> = proposed.iter().map(|c| c.subject.as_str()).collect();
+
+    assert_eq!(
+        subjects,
+        vec!["Do the side thing"],
+        "what a branch proposes is what its base does not already hold, which is a different \
+         list from its whole history",
+    );
+}
+
+#[test]
+fn a_branch_holding_nothing_its_base_does_not_reads_as_an_empty_range() {
+    let dir = repository_with(&["a.txt"]);
+    commit(dir.path(), "a.txt", "Do the shared thing");
+    git(dir.path(), &["checkout", "-b", "side"]);
+
+    assert_eq!(proposed(dir.path(), BRANCH), Vec::new());
+}
+
+#[test]
+fn a_base_version_control_cannot_resolve_is_a_failure_rather_than_an_empty_range() {
+    let dir = repository_with(&["a.txt"]);
+    commit(dir.path(), "a.txt", "Do the shared thing");
+
+    assert!(
+        matches!(
+            CliGitRepository.log(
+                dir.path(),
+                LogRange::Since {
+                    base: "no-such-branch"
+                },
+                0,
+                10
+            ),
+            Err(soloist_core::GitError::Op { .. }),
+        ),
+        "reporting no commits for a comparison that never happened would say the branch proposes \
+         nothing",
+    );
 }

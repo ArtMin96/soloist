@@ -34,6 +34,7 @@ fn non_default() -> ProjectSettings {
         template_defaults: TemplateDefaults {
             scratchpad: Some(TemplateId::from_raw(3)),
             todo: None,
+            pr: Some(TemplateId::from_raw(4)),
         },
         ..Default::default()
     }

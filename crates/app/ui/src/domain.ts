@@ -21,7 +21,7 @@ export type Readiness = "Ungated" | "Waiting" | "Ready";
 
 // The kind of document a template seeds (mirrors core::TemplateKind, serde snake_case). One
 // unified template aggregate serves all three.
-export type TemplateKind = "prompt" | "scratchpad" | "todo";
+export type TemplateKind = "prompt" | "scratchpad" | "todo" | "pr";
 
 // Which scope a template lives in (mirrors core::TemplateScope). The Settings manager edits the
 // global library; the project scope is reached over MCP.
@@ -67,6 +67,8 @@ export interface RenderedPrompt {
 export interface TemplateDefaults {
   scratchpad: number | null;
   todo: number | null;
+  // The fallback for a pull request's description: a repository carrying one of its own wins.
+  pr: number | null;
 }
 
 export interface ProcessView {
@@ -456,6 +458,54 @@ export interface FileDiff {
 export interface FileContent {
   text: string | null;
   truncated: boolean;
+}
+
+// ── Pull requests (mirrors core::git::forge) ─────────────────────────────────
+
+// Whether pull requests can be reached at all (mirrors core::ForgeReadiness). Each answer has one
+// thing the user can do about it, which is why they are told apart rather than folded into one.
+export type ForgeReadiness = "missing" | "logged_out" | "ready";
+
+// Where a pull request stands (mirrors core::PullRequestState).
+export type PullRequestState = "open" | "closed" | "merged";
+
+// One pull request, as the surface renders it (mirrors core::PullRequest).
+export interface PullRequest {
+  number: number;
+  url: string;
+  title: string;
+  state: PullRequestState;
+  draft: boolean;
+  base: string;
+  head: string;
+}
+
+// One starting shape offered for a description (mirrors core::PullRequestTemplate). A repository
+// offering several is offering a choice, so each keeps the name it is filed under.
+export interface PullRequestTemplate {
+  name: string;
+  body: string;
+}
+
+// Everything the pull-request surface needs to decide what to show, in one read (mirrors
+// core::PullRequestSurface). Anything but a `ready` readiness and the rest is empty: nothing was
+// asked, because nothing could have been answered.
+export interface PullRequestSurface {
+  readiness: ForgeReadiness;
+  head: string | null;
+  base: string | null;
+  existing: PullRequest | null;
+  templates: PullRequestTemplate[];
+}
+
+// What a new pull request is asked for with (mirrors core::NewPullRequest). The head branch is not
+// here: it is whatever the project has checked out, read by the core rather than accepted from a
+// surface.
+export interface NewPullRequest {
+  title: string;
+  body: string;
+  base: string;
+  draft: boolean;
 }
 
 // ── Coordination read-model (mirrors core::coordination view types) ──────────

@@ -1,11 +1,5 @@
-import { useRef, useState, type ReactNode } from "react";
-import {
-  FoldVerticalIcon,
-  GitBranchIcon,
-  PanelRightCloseIcon,
-  PanelRightOpenIcon,
-  UnfoldVerticalIcon,
-} from "lucide-react";
+import { useRef, useState } from "react";
+import { GitBranchIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react";
 import { BranchHeader } from "@/components/git/BranchHeader";
 import type { BranchActions } from "@/components/git/BranchMenu";
 import { ChangesTree, type ChangeActions } from "@/components/git/ChangesTree";
@@ -14,12 +8,18 @@ import { ConfirmDialog } from "@/components/git/ConfirmDialog";
 import { ConflictNotice } from "@/components/git/ConflictNotice";
 import { DiscardDialog, type Discardable } from "@/components/git/DiscardDialog";
 import { FilesTree } from "@/components/git/FilesTree";
+import {
+  RailButton,
+  RailEmpty,
+  RailError,
+  RailMessage,
+  TreeExpansionButton,
+} from "@/components/git/RailChrome";
 import { TrustNotice } from "@/components/git/TrustNotice";
 import type { RepositoryTreeHandle } from "@/components/git/RepositoryTree";
 import { PaneDivider } from "@/components/PaneDivider";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Option } from "@/lib/appearance";
@@ -50,8 +50,6 @@ const RAIL_LABEL = "Version control";
 const COLLAPSE_RAIL_LABEL = "Hide version control";
 const EXPAND_RAIL_LABEL = "Show version control";
 const RESIZE_RAIL_LABEL = "Resize the version control rail";
-const EXPAND_FOLDERS_LABEL = "Expand all folders";
-const COLLAPSE_FOLDERS_LABEL = "Collapse all folders";
 
 /** The two questions the rail asks before it destroys anything. */
 const DELETE_BRANCH_TITLE = "Delete this branch?";
@@ -77,10 +75,13 @@ const NO_FILES = "No files";
 export function GitRail({
   project,
   onOpen,
+  onOpenPullRequest,
 }: {
   project: number;
-  /** A path in either tree was chosen; the diff split shows it. */
+  /** A path in either tree was chosen; the split shows it. */
   onOpen?: (selection: DiffSelection) => void;
+  /** The pull-request view was asked for; the split shows it instead. */
+  onOpenPullRequest?: () => void;
 }) {
   const [layout, setLayout] = useRailLayout();
   const [tab, setTab] = useState<RailTab>(CHANGES_TAB);
@@ -183,6 +184,14 @@ export function GitRail({
                 branchActions={branchActions}
                 onDeleteBranch={setDeletingBranch}
                 onBranchesOpen={setSwitcherOpen}
+                onOpenPullRequest={
+                  // Proposing one pushes the branch and runs the repository's own configuration,
+                  // so it is offered exactly where every other change is: once the project is
+                  // trusted, and not before.
+                  write.trusted === true && onOpenPullRequest !== undefined
+                    ? onOpenPullRequest
+                    : null
+                }
               />
             )}
           </div>
@@ -324,74 +333,6 @@ export function GitRail({
         The working tree goes back to what was checked out before the merge began. Any conflict you
         have already resolved goes with it, and this cannot be undone.
       </ConfirmDialog>
-    </div>
-  );
-}
-
-/** What the last refused change said, stated where the change was asked for. */
-function RailError({ message }: { message: string }) {
-  return (
-    <p
-      role="alert"
-      className="shrink-0 border-t border-sidebar-border px-3 py-2 text-[0.8125rem] text-destructive"
-    >
-      {message}
-    </p>
-  );
-}
-
-/** A compact tree control for either tab; it never changes the version-control rail. */
-function TreeExpansionButton({ expanded, onClick }: { expanded: boolean; onClick: () => void }) {
-  const label = expanded ? COLLAPSE_FOLDERS_LABEL : EXPAND_FOLDERS_LABEL;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="ml-auto"
-          aria-label={label}
-          onClick={onClick}
-        >
-          {expanded ? <FoldVerticalIcon /> : <UnfoldVerticalIcon />}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-/** The existing rail-level control remains separate from the Files tree disclosure control. */
-function RailButton({
-  label,
-  icon,
-  onClick,
-}: {
-  label: string;
-  icon: ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon-xs" aria-label={label} onClick={onClick}>
-          {icon}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function RailMessage({ children }: { children: ReactNode }) {
-  return <p className="text-[0.8125rem] text-muted-foreground">{children}</p>;
-}
-
-/** The quiet line a tab shows when it has nothing in it. */
-function RailEmpty({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex h-full items-center justify-center px-6 text-center">
-      <RailMessage>{children}</RailMessage>
     </div>
   );
 }

@@ -108,10 +108,10 @@ function statusWith(paths: string[]): GitStatus {
   };
 }
 
-function renderRail() {
+function renderRail(onOpenPullRequest?: () => void) {
   return render(
     <TooltipProvider>
-      <GitRail project={PROJECT} />
+      <GitRail project={PROJECT} onOpenPullRequest={onOpenPullRequest} />
     </TooltipProvider>,
   );
 }
@@ -547,5 +547,28 @@ describe("moving between branches and exchanging commits with the remote", () =>
 
     await within(rail()).findByText("Merge in progress");
     expect(within(rail()).queryByText(/needs resolving/)).toBeNull();
+  });
+
+  it("offers no way to reach a pull request until the project is trusted", async () => {
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+
+    renderRail(() => {});
+
+    await waitFor(() => expect(within(rail()).getByText("main")).toBeTruthy());
+    expect(
+      within(rail()).queryByRole("button", { name: "Pull request" }),
+      "proposing one pushes the branch and runs the repository's own configuration",
+    ).toBeNull();
+  });
+
+  it("shows the pull request view when it is asked for", async () => {
+    readTrust.mockResolvedValue(true);
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+    const open = vi.fn();
+
+    renderRail(open);
+
+    fireEvent.click(await within(rail()).findByRole("button", { name: "Pull request" }));
+    expect(open).toHaveBeenCalled();
   });
 });

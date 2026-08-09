@@ -12,6 +12,7 @@ use crate::sync::lock;
 use crate::vcs::CommitEntry;
 
 use super::error::GitError;
+use super::repository::LogRange;
 use super::status::Git;
 
 /// The most commits one page carries. Past this a reader is scrolling, not reading, and a surface
@@ -19,13 +20,13 @@ use super::status::Git;
 pub const LOG_PAGE_SIZE: usize = 50;
 
 impl Git {
-    /// One page of `project`'s history, newest first: `skip` commits passed over, at most `limit`
-    /// returned, and `limit` is itself capped at [`LOG_PAGE_SIZE`] so no caller can ask for the
-    /// whole of it.
+    /// One page of `project`'s history over `range`, newest first: `skip` commits passed over, at
+    /// most `limit` returned, and `limit` is itself capped at [`LOG_PAGE_SIZE`] so no caller can ask
+    /// for the whole of it.
     ///
     /// `None` for a root that is not a repository, as every other read here reports it. An **empty**
     /// list is different and ordinary: a repository with no commits yet has a history, and it is
-    /// empty.
+    /// empty — as is a branch holding nothing its base does not.
     ///
     /// Reads are ungated — looking at what was committed runs nothing the repository carries. Runs
     /// an external tool, so callers reach it through
@@ -34,12 +35,16 @@ impl Git {
         &self,
         project: ProjectId,
         root: &Path,
+        range: LogRange<'_>,
         skip: usize,
         limit: usize,
     ) -> Result<Option<Vec<CommitEntry>>, GitError> {
         let gate = self.gate(project);
         let _running = lock(&gate);
-        match self.repository.log(root, skip, limit.min(LOG_PAGE_SIZE)) {
+        match self
+            .repository
+            .log(root, range, skip, limit.min(LOG_PAGE_SIZE))
+        {
             Ok(page) => Ok(Some(page)),
             Err(GitError::NotARepo) => Ok(None),
             Err(err) => Err(err),

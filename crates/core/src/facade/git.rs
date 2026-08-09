@@ -13,7 +13,9 @@ use std::sync::Arc;
 use super::Facade;
 use crate::agents::{AgentTool, OneShotError};
 use crate::events::DomainEvent;
-use crate::git::{DiffExtent, Git, GitDraftError, GitError, GitStatus, GitWriteError, Prompting};
+use crate::git::{
+    DiffExtent, Git, GitDraftError, GitError, GitStatus, GitWriteError, Prompting, PullRequestError,
+};
 use crate::ids::ProjectId;
 use crate::ports::StoreError;
 use crate::vcs::{Branches, DiffTarget, FileContent, FileDiff, HunkRange, ProjectFile};
@@ -280,7 +282,7 @@ impl Facade {
     pub async fn git_draft_commit_message(
         self: &Arc<Self>,
         project: ProjectId,
-    ) -> Result<String, DraftMessageError> {
+    ) -> Result<String, DraftError> {
         let (tool, root, prompt) = self
             .blocking(move |facade| facade.commit_message_question(project))
             .await?;
@@ -294,20 +296,20 @@ impl Facade {
     fn commit_message_question(
         &self,
         project: ProjectId,
-    ) -> Result<(AgentTool, PathBuf, String), DraftMessageError> {
+    ) -> Result<(AgentTool, PathBuf, String), DraftError> {
         let selected = self
             .settings
             .get(&())?
             .assist
             .tool
-            .ok_or(DraftMessageError::NoAssistTool)?;
+            .ok_or(DraftError::NoAssistTool)?;
         let tool = self
             .agents
             .tool(&selected)?
-            .ok_or(DraftMessageError::UnknownTool)?;
+            .ok_or(DraftError::UnknownTool)?;
         let root = self
             .project_root(project)?
-            .ok_or(DraftMessageError::UnknownProject)?;
+            .ok_or(DraftError::UnknownProject)?;
         let prompt = self.git.commit_message_prompt(project, &root)?;
         Ok((tool, root, prompt))
     }
@@ -323,10 +325,17 @@ impl Facade {
             .project_root(project)?
             .ok_or(GitWriteError::UnknownProject)?;
         change(&self.git, &root)?;
-        if matches!(self.git.refresh(project, &root), Ok(true)) {
+        self.announce_git(project, &root);
+        Ok(())
+    }
+
+    /// Re-reads `project`'s status and announces it only if it turned out different — the half of
+    /// every version-control change that happens after the change itself, so an action and the
+    /// watcher noticing that same action converge on one snapshot rather than racing to two.
+    pub(super) fn announce_git(&self, project: ProjectId, root: &Path) {
+        if matches!(self.git.refresh(project, root), Ok(true)) {
             self.bus.publish(DomainEvent::GitStatusChanged { project });
         }
-        Ok(())
     }
 
     /// The folder a project's repository is read from — one resolution behind every read above,
@@ -349,11 +358,15 @@ pub enum GitReadError {
     Git(#[from] GitError),
 }
 
-/// Why no commit message was drafted: nobody has picked a tool to draft with, the picked tool is
-/// no longer in the registry, the project is not open, there was nothing worth describing, or the
-/// tool itself could not answer.
+/// Why nothing was drafted: nobody has picked a tool to draft with, the picked tool is no longer
+/// in the registry, the project is not open, there was nothing worth describing, or the tool itself
+/// could not answer.
+///
+/// One vocabulary for both drafts — a commit message and a pull request's description — because
+/// they are the same tool run the same way, and differ only in what could not be composed to ask
+/// it about.
 #[derive(Debug, thiserror::Error)]
-pub enum DraftMessageError {
+pub enum DraftError {
     #[error("no agent tool is selected to draft with")]
     NoAssistTool,
     #[error("the agent tool selected to draft with is no longer configured")]
@@ -364,6 +377,8 @@ pub enum DraftMessageError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Draft(#[from] GitDraftError),
+    #[error(transparent)]
+    Description(#[from] PullRequestError),
     #[error(transparent)]
     OneShot(#[from] OneShotError),
 }

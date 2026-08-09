@@ -24,8 +24,9 @@ const EMPTY_LISTS: TemplateLists = {
   prompt: EMPTY_SCOPES,
   scratchpad: EMPTY_SCOPES,
   todo: EMPTY_SCOPES,
+  pr: EMPTY_SCOPES,
 };
-const NO_DEFAULTS: TemplateDefaults = { scratchpad: null, todo: null };
+const NO_DEFAULTS: TemplateDefaults = { scratchpad: null, todo: null, pr: null };
 
 export interface TemplatesStore {
   /** Every template grouped by kind and scope, refreshed live on `TemplateChanged`. */

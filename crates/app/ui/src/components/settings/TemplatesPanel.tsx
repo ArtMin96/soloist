@@ -69,6 +69,8 @@ export function TemplatesPanel({ project }: SettingsPanelProps) {
         return { id: defaults.scratchpad, onChange: (id) => setDefault("scratchpad", id) };
       case "todo":
         return { id: defaults.todo, onChange: (id) => setDefault("todo", id) };
+      case "pr":
+        return { id: defaults.pr, onChange: (id) => setDefault("pr", id) };
       case "prompt":
         return undefined;
     }

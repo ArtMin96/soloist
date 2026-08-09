@@ -20,7 +20,7 @@ use crate::coordination::{
     TodoRepo,
 };
 use crate::filewatch::{FileWatcher, NoopFileWatcher};
-use crate::git::{GitRepository, NoopGitRepository};
+use crate::git::{GitForge, GitRepository, NoopGitForge, NoopGitRepository};
 use crate::ids::ProjectId;
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
 use crate::notify::{NoopNotifier, Notifier};
@@ -68,6 +68,7 @@ pub struct CorePorts {
     pub(crate) port_probe: Arc<dyn PortProbe>,
     pub(crate) file_watcher: Arc<dyn FileWatcher>,
     pub(crate) git_repository: Arc<dyn GitRepository>,
+    pub(crate) git_forge: Arc<dyn GitForge>,
     pub(crate) notifier: Arc<dyn Notifier>,
     pub(crate) agent_tools: Arc<dyn AgentToolRepo>,
     pub(crate) version_probe: Arc<dyn VersionProbe>,
@@ -132,6 +133,7 @@ impl CorePorts {
                 port_probe: Arc::new(NoopPortProbe),
                 file_watcher: Arc::new(NoopFileWatcher),
                 git_repository: Arc::new(NoopGitRepository),
+                git_forge: Arc::new(NoopGitForge),
                 notifier: Arc::new(NoopNotifier),
                 agent_tools: Arc::new(NoopAgentToolRepo),
                 version_probe: Arc::new(NoopVersionProbe),
@@ -259,6 +261,14 @@ impl CorePortsBuilder {
     /// repository, so a project simply shows no version control).
     pub fn git_repository(mut self, git_repository: Arc<dyn GitRepository>) -> Self {
         self.ports.git_repository = git_repository;
+        self
+    }
+
+    /// Overrides the forge the git context reaches a repository's pull requests through (C9;
+    /// defaults to [`NoopGitForge`], which reports the tool as absent, so a surface offers nothing
+    /// and every other version-control action still works).
+    pub fn git_forge(mut self, git_forge: Arc<dyn GitForge>) -> Self {
+        self.ports.git_forge = git_forge;
         self
     }
 

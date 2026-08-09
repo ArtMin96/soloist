@@ -96,7 +96,7 @@ function seed(
   projectOwned: TemplateSummary[] = [],
 ) {
   mockLibraries(globals, projectOwned);
-  defaults.mockResolvedValue({ scratchpad: 1, todo: null });
+  defaults.mockResolvedValue({ scratchpad: 1, todo: null, pr: null });
   handler = undefined;
   subscribe.mockImplementation((fn) => {
     handler = fn;
@@ -116,10 +116,11 @@ describe("TemplatesPanel", () => {
 
     // The row is a real button (the Radix default selector is a combobox, excluded by role).
     await screen.findByRole("button", { name: "Duplicate daily" });
-    // All three kinds are sectioned (the Prompt section delivers the reserved prompt-templates view).
+    // Every kind is sectioned (the Prompt section delivers the reserved prompt-templates view).
     expect(screen.getByRole("heading", { name: "Prompt" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Scratchpad" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Todo" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Pull request" })).toBeTruthy();
     // The default selector appears for the scratchpad kind (this project holds one), not for the
     // empty todo kind and never for prompts.
     expect(screen.getAllByText("Default template")).toHaveLength(1);
@@ -127,7 +128,7 @@ describe("TemplatesPanel", () => {
 
   it("chooses the default from the open project's library", async () => {
     seed([summary(1, "daily", "scratchpad")], [summary(2, "sprint", "scratchpad")]);
-    defaults.mockResolvedValue({ scratchpad: 2, todo: null });
+    defaults.mockResolvedValue({ scratchpad: 2, todo: null, pr: null });
     render(<TemplatesPanel project={OPEN_PROJECT} />);
 
     const picker = await screen.findByRole("combobox", { name: DEFAULT_PICKER });
@@ -138,7 +139,7 @@ describe("TemplatesPanel", () => {
   // selection — not be shown, and silently kept, as what this project seeds from.
   it("does not offer a global template as the default", async () => {
     seed([summary(1, "daily", "scratchpad")], [summary(2, "sprint", "scratchpad")]);
-    defaults.mockResolvedValue({ scratchpad: 1, todo: null });
+    defaults.mockResolvedValue({ scratchpad: 1, todo: null, pr: null });
     render(<TemplatesPanel project={OPEN_PROJECT} />);
 
     const picker = await screen.findByRole("combobox", { name: DEFAULT_PICKER });
@@ -161,7 +162,10 @@ describe("TemplatesPanel", () => {
     render(<TemplatesPanel project={null} />);
     await screen.findByRole("button", { name: "Duplicate daily" });
 
-    expect(screen.getAllByText(NO_PROJECT_DEFAULT)).toHaveLength(2);
+    expect(
+      screen.getAllByText(NO_PROJECT_DEFAULT),
+      "one per seedable kind — scratchpad, todo and pull request; never for prompts",
+    ).toHaveLength(3);
   });
 
   // A project whose library is simply empty is a different state: the user can author a template
@@ -337,5 +341,24 @@ describe("TemplatesPanel", () => {
     const projectGroup = await screen.findByRole("group", { name: PROJECT_GROUP });
     expect(within(projectGroup).getByText("No templates in this project yet.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "sprint" })).toBeNull();
+  });
+
+  it("manages a pull request description template like any other seedable kind", async () => {
+    seed([], [summary(3, "house", "pr")]);
+    list.mockImplementation((kind, project) => {
+      if (kind !== "pr") return Promise.resolve([]);
+      return Promise.resolve(project === OPEN_PROJECT ? [summary(3, "house", "pr")] : []);
+    });
+    defaults.mockResolvedValue({ scratchpad: null, todo: null, pr: 3 });
+    render(<TemplatesPanel project={OPEN_PROJECT} />);
+
+    const group = await screen.findByRole("group", {
+      name: "Pull request templates in this project",
+    });
+    expect(within(group).getByRole("button", { name: "house" })).toBeTruthy();
+    expect(
+      screen.getAllByText("Default template"),
+      "a pull request description is seeded from a default like every other seedable kind",
+    ).toHaveLength(1);
   });
 });

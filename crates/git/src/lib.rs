@@ -24,8 +24,12 @@ use std::path::Path;
 
 use soloist_core::{
     BranchOp, Branches, CommitEntry, DiffTarget, Exchange, FileContent, GitError, GitRepository,
-    GitStatus, HunkRange, ProjectFile, RawFileDiff, StashOp,
+    GitStatus, HunkRange, LogRange, ProjectFile, RawFileDiff, StashOp,
 };
+
+/// What separates the two ends of a revision range: everything the right names that the left does
+/// not.
+const RANGE: &str = "..";
 
 /// The arguments asking for a working tree's state in the one machine-readable form this
 /// adapter reads.
@@ -192,23 +196,40 @@ impl GitRepository for CliGitRepository {
         Ok(Some(content(bytes)))
     }
 
-    fn log(&self, root: &Path, skip: usize, limit: usize) -> Result<Vec<CommitEntry>, GitError> {
+    fn log(
+        &self,
+        root: &Path,
+        range: LogRange<'_>,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<CommitEntry>, GitError> {
+        let mut args = vec![
+            "log".to_string(),
+            "-z".to_string(),
+            log_parse::LOG_FORMAT.to_string(),
+            format!("--skip={skip}"),
+            format!("--max-count={limit}"),
+        ];
+        // A range is one revision argument rather than two, and it is placed last so nothing after
+        // it could be read as one: a base whose name begins with a dash never reaches here, being
+        // refused in the core before the invocation is built.
+        if let LogRange::Since { base } = range {
+            args.push(format!("{base}{RANGE}HEAD"));
+        }
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
         // A repository with no commits yet has nothing to list, and says so through a failure whose
         // only other reading is prose. Ask the yes-or-no question instead, exactly as the status
         // read does for a folder outside any repository.
-        let output = match runner::run(
-            root,
-            &[
-                "log",
-                "-z",
-                log_parse::LOG_FORMAT,
-                &format!("--skip={skip}"),
-                &format!("--max-count={limit}"),
-            ],
-        ) {
+        //
+        // That reading holds only for the whole of what is checked out. A range fails the same way
+        // when its base cannot be resolved — a branch that exists on the remote and was never
+        // fetched — and reading *that* as "no commits" would report a branch as proposing nothing
+        // when the comparison never happened at all.
+        let empty_is_ordinary = matches!(range, LogRange::CheckedOut);
+        let output = match runner::run(root, &args) {
             Ok(output) => output,
             Err(GitError::Op { .. }) if !inside_work_tree(root) => return Err(GitError::NotARepo),
-            Err(GitError::Op { .. }) => return Ok(Vec::new()),
+            Err(GitError::Op { .. }) if empty_is_ordinary => return Ok(Vec::new()),
             Err(err) => return Err(err),
         };
         Ok(log_parse::parse(&output))

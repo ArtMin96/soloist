@@ -7,6 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::git::NoopGitForge;
 use crate::ids::ProjectId;
 use crate::testing::{git_status, untrusting, FakeGitRepository};
 use crate::vcs::{ChangeKind, FileChange, GitFileStatus};
@@ -18,7 +19,11 @@ use crate::git::GitError;
 const ROOT: &str = "/project";
 
 fn git(repository: &FakeGitRepository) -> Git {
-    Git::new(Arc::new(repository.clone()), untrusting())
+    Git::new(
+        Arc::new(repository.clone()),
+        Arc::new(NoopGitForge),
+        untrusting(),
+    )
 }
 
 fn with_change(mut status: GitStatus, path: &str) -> GitStatus {

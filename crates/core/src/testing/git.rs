@@ -11,58 +11,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::git::{
-    BranchOp, Exchange, GitError, GitRepository, GitStatus, Prompting, RawFileDiff, StashOp, SyncOp,
+    BranchOp, Exchange, GitError, GitRepository, GitStatus, LogRange, RawFileDiff, StashOp,
 };
 use crate::sync::lock;
+use crate::testing::GitChange;
 use crate::vcs::{Branches, CommitEntry, DiffTarget, FileContent, HunkRange, ProjectFile};
 
 /// How often a stalled exchange looks at whether it has been asked to stop. A race window rather
 /// than a clock: nothing under test reads it.
 const STALL_STEP: Duration = Duration::from_millis(5);
-
-/// One change a working tree was asked to undergo, as the port received it.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum GitChange {
-    Stage {
-        path: String,
-        original_path: Option<String>,
-    },
-    Unstage {
-        path: String,
-        original_path: Option<String>,
-    },
-    Discard {
-        path: String,
-    },
-    StageHunk {
-        path: String,
-        hunk: HunkRange,
-    },
-    UnstageHunk {
-        path: String,
-        hunk: HunkRange,
-    },
-    DiscardHunk {
-        path: String,
-        hunk: HunkRange,
-    },
-    Commit {
-        message: String,
-        amend: bool,
-    },
-    Branch {
-        op: BranchOp,
-        name: String,
-    },
-    Stash {
-        op: StashOp,
-    },
-    Sync {
-        op: SyncOp,
-        prompting: Prompting,
-    },
-    AbortMerge,
-}
 
 struct Answers {
     queued: Mutex<VecDeque<Result<GitStatus, GitError>>>,
@@ -70,6 +27,7 @@ struct Answers {
     diff: Mutex<Result<RawFileDiff, GitError>>,
     content: Mutex<Result<Option<FileContent>, GitError>>,
     history: Mutex<Result<Vec<CommitEntry>, GitError>>,
+    proposed: Mutex<Result<Vec<CommitEntry>, GitError>>,
     branches: Mutex<Result<Branches, GitError>>,
     stalls: AtomicBool,
     refusal: Mutex<Option<GitError>>,
@@ -131,6 +89,14 @@ impl FakeGitRepository {
     /// empty list is the different, ordinary state of a repository with no commits yet.
     pub fn logging(self, commits: Vec<CommitEntry>) -> Self {
         *lock(&self.answers.history) = Ok(commits);
+        self
+    }
+
+    /// The same repository, where what the checked-out branch holds beyond another branch is
+    /// `commits`. Distinct from its whole history, since that is the distinction the range exists
+    /// to make; an explicitly empty list is a branch that proposes nothing.
+    pub fn proposing(self, commits: Vec<CommitEntry>) -> Self {
+        *lock(&self.answers.proposed) = Ok(commits);
         self
     }
 
@@ -216,6 +182,7 @@ impl FakeGitRepository {
                 diff: Mutex::new(Err(GitError::NotARepo)),
                 content: Mutex::new(Err(GitError::NotARepo)),
                 history: Mutex::new(Err(GitError::NotARepo)),
+                proposed: Mutex::new(Err(GitError::NotARepo)),
                 branches: Mutex::new(Err(GitError::NotARepo)),
                 stalls: AtomicBool::new(false),
                 refusal: Mutex::new(None),
@@ -260,13 +227,23 @@ impl GitRepository for FakeGitRepository {
         self.recorded(|| lock(&self.answers.content).clone())
     }
 
-    fn log(&self, _root: &Path, skip: usize, limit: usize) -> Result<Vec<CommitEntry>, GitError> {
+    fn log(
+        &self,
+        _root: &Path,
+        range: LogRange<'_>,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<CommitEntry>, GitError> {
         // Paged for real, so a caller asking for one page of a longer history is exercised rather
-        // than handed the whole of it.
+        // than handed the whole of it. The range is answered separately, because what a branch
+        // holds beyond another branch is a different list from its whole history — a fake that
+        // returned one for both would let a caller asking the wrong question look right.
         self.recorded(|| {
-            lock(&self.answers.history)
-                .clone()
-                .map(|commits| commits.into_iter().skip(skip).take(limit).collect())
+            let answers = match range {
+                LogRange::CheckedOut => lock(&self.answers.history).clone(),
+                LogRange::Since { .. } => lock(&self.answers.proposed).clone(),
+            };
+            answers.map(|commits| commits.into_iter().skip(skip).take(limit).collect())
         })
     }
 

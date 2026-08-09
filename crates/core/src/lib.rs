@@ -85,15 +85,17 @@ pub use coordination::{
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
-    CoordinationError, CreateTerminalError, DraftMessageError, Facade, GitReadError,
-    LaunchAgentError, LocalCommandError, MoveCommandError, PromptRenderError, ScopedActionError,
-    ScopedFacade, SetupIntegrationError, SpawnAgentError, StatusSummary, TrustCommandError,
+    CoordinationError, CreateTerminalError, DraftError, Facade, GitReadError, LaunchAgentError,
+    LocalCommandError, MoveCommandError, PromptRenderError, ScopedActionError, ScopedFacade,
+    SetupIntegrationError, SpawnAgentError, StatusSummary, TrustCommandError,
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use git::{
-    BranchOp, DiffExtent, Exchange, Git, GitDraftError, GitError, GitRepository, GitStatus,
-    GitStatusWatchReactor, GitWriteError, NoopGitRepository, Prompting, RawFileDiff, RawHunk,
-    StashOp, Stop, SyncOp, BRANCH_PAGE_SIZE, LOG_PAGE_SIZE,
+    BranchOp, DiffExtent, Exchange, ForgeError, ForgeReadiness, Git, GitDraftError, GitError,
+    GitForge, GitRepository, GitStatus, GitStatusWatchReactor, GitWriteError, LogRange,
+    NewPullRequest, NoopGitForge, NoopGitRepository, Prompting, PullRequest, PullRequestError,
+    PullRequestState, PullRequestSurface, PullRequestTemplate, RawFileDiff, RawHunk, StashOp, Stop,
+    SyncOp, BRANCH_PAGE_SIZE, LOG_PAGE_SIZE,
 };
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};
