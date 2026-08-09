@@ -9,7 +9,7 @@
 
 ## Current state
 
-> **LATEST (2026-08-09): the git stack's fifth exchange — a proposal now reports the branch it publishes** (`feat/git-mcp-progress` @ `9137439`). The owner approved adding `git_create_pull_request` to the progress mechanism; it is wired in, gate-green, and the four unpushed branches of the stack are opened as PRs. Top entry below.
+> **LATEST (2026-08-09): the git stack's fifth exchange — a proposal now reports the branch it publishes** (`feat/git-mcp-progress` @ `9137439`). The owner approved adding `git_create_pull_request` to the progress mechanism; it is wired in, gate-green, and the four unpushed branches of the stack are pushed and opened as stacked PRs — **#151** (`feat/git-loose-ends` → `feat/git-pr-review`), **#152** (`feat/git-mcp-tools` → `feat/git-loose-ends`), **#153** (`feat/git-commit-intent` → `feat/git-mcp-tools`), **#154** (`feat/git-mcp-progress` → `feat/git-commit-intent`), on top of the open #141–#150. Nothing in the stack was amended, rebased or squashed. Top entry below.
 >
 > **PHASE 12 (Packaging — `.deb`/`.AppImage`, x86_64) — `Done — pending verify` (2026-06-30, branch `feat/phase-12-packaging`):** v1 rows J1/J2/J3 + the owner-requested J4/J5/tray are gate-green and container-smoked; only the user-only real-desktop GUI walk and the `git tag`→release publish remain. **2026-07-03: both artifacts now also bundle the companion binaries (`soloist-mcp`, `soloist-cli`) — a user-reported gap; fixed + verified, see the top entry. Re-tag/republish so installed apps get them.** **D-11: the supported floor is Ubuntu 22.04+** (20.04 infeasible — Tauri v2 needs WebKitGTK 4.1). Details in the Phase 12 Decisions entry and "Next session should start with".
 >
