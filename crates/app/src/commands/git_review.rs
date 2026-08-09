@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use soloist_core::{
-    Facade, Handoff, HandoffSubject, MergeMethod, ProcessId, ProjectId, PullRequestReview,
+    Facade, Handoff, HandoffSubject, MergeMethod, ProcessId, Progress, ProjectId, PullRequestReview,
 };
 use tauri::State;
 
@@ -39,7 +39,9 @@ pub async fn git_merge_pull_request(
     method: MergeMethod,
 ) -> Result<(), String> {
     facade
-        .blocking(move |f| f.git_merge_pull_request(project, number, method))
+        .blocking(move |f| {
+            f.git_merge_pull_request(project, number, method, &Progress::unwatched())
+        })
         .await
         .map_err(|err| err.to_string())
 }

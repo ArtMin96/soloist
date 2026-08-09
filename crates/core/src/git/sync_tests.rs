@@ -16,7 +16,7 @@ use crate::testing::{
 
 use crate::git::GitError;
 
-use super::{Git, GitWriteError, Prompting, SyncOp};
+use super::{Git, GitWriteError, Progress, Prompting, SyncOp};
 
 /// The fake ignores it — everything here is addressed by project, not by path.
 const ROOT: &str = "/project";
@@ -34,9 +34,12 @@ const WATCHED: Prompting = Prompting::Allowed;
 fn every_exchange(git: &Git, project: ProjectId) -> Vec<GitWriteError> {
     let root = Path::new(ROOT);
     vec![
-        git.fetch(project, root, WATCHED).unwrap_err(),
-        git.pull(project, root, WATCHED).unwrap_err(),
-        git.push(project, root, WATCHED).unwrap_err(),
+        git.fetch(project, root, WATCHED, &Progress::unwatched())
+            .unwrap_err(),
+        git.pull(project, root, WATCHED, &Progress::unwatched())
+            .unwrap_err(),
+        git.push(project, root, WATCHED, &Progress::unwatched())
+            .unwrap_err(),
         git.abort_merge(project, root).unwrap_err(),
     ]
 }
@@ -70,9 +73,12 @@ fn each_exchange_asks_for_the_one_it_was_named_for() {
     let git = git_trusting(repository.clone(), project);
     let root = Path::new(ROOT);
 
-    git.fetch(project, root, WATCHED).expect("fetch");
-    git.pull(project, root, WATCHED).expect("pull");
-    git.push(project, root, WATCHED).expect("push");
+    git.fetch(project, root, WATCHED, &Progress::unwatched())
+        .expect("fetch");
+    git.pull(project, root, WATCHED, &Progress::unwatched())
+        .expect("pull");
+    git.push(project, root, WATCHED, &Progress::unwatched())
+        .expect("push");
 
     assert_eq!(
         repository.changes(),
@@ -99,7 +105,8 @@ fn a_branch_that_tracks_nothing_is_published_rather_than_pushed() {
     let project = ProjectId::next();
     let git = git_trusting(repository.clone(), project);
 
-    git.push(project, Path::new(ROOT), WATCHED).expect("push");
+    git.push(project, Path::new(ROOT), WATCHED, &Progress::unwatched())
+        .expect("push");
 
     assert_eq!(
         repository.changes(),
@@ -129,8 +136,13 @@ fn a_session_scoped_caller_is_told_no_credential_may_be_asked_for() {
     let project = ProjectId::next();
     let git = git_trusting(repository.clone(), project);
 
-    git.fetch(project, Path::new(ROOT), Prompting::Denied)
-        .expect("fetch");
+    git.fetch(
+        project,
+        Path::new(ROOT),
+        Prompting::Denied,
+        &Progress::unwatched(),
+    )
+    .expect("fetch");
 
     assert_eq!(
         repository.changes(),
@@ -155,7 +167,8 @@ fn stopping_an_exchange_ends_it_and_frees_the_repository_for_the_next_read() {
     {
         let git = Arc::clone(&git);
         thread::spawn(move || {
-            let _ = answered.send(git.fetch(project, Path::new(ROOT), WATCHED));
+            let _ =
+                answered.send(git.fetch(project, Path::new(ROOT), WATCHED, &Progress::unwatched()));
         });
     }
     let stopping = {
@@ -210,7 +223,8 @@ fn an_exchange_and_a_read_never_run_against_one_repository_at_once() {
             git.files(project, Path::new(ROOT)).ok();
         })
     };
-    git.fetch(project, Path::new(ROOT), WATCHED).expect("fetch");
+    git.fetch(project, Path::new(ROOT), WATCHED, &Progress::unwatched())
+        .expect("fetch");
     reading.join().expect("read");
 
     assert_eq!(

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use super::Facade;
 use crate::events::DomainEvent;
-use crate::git::{DiffExtent, Git, GitError, GitStatus, GitWriteError, Prompting};
+use crate::git::{DiffExtent, Git, GitError, GitStatus, GitWriteError, Progress, Prompting};
 use crate::ids::ProjectId;
 use crate::ports::StoreError;
 use crate::vcs::{Branches, DiffTarget, FileContent, FileDiff, HunkRange, ProjectFile};
@@ -264,20 +264,20 @@ impl Facade {
     /// remote and stoppable before then ([`Facade::git_stop_exchange`]), so callers reach this
     /// through [`Facade::blocking`].
     pub fn git_push(&self, project: ProjectId) -> Result<(), GitWriteError> {
-        self.git_exchange(project, AT_THE_WINDOW, Git::push)
+        self.git_exchange(project, AT_THE_WINDOW, &Progress::unwatched(), Git::push)
     }
 
     /// Brings the remote's commits into `project` and reconciles them with what is checked out,
     /// however the user's own configuration says to. Where they have not said, version control
     /// refuses rather than choosing, and its refusal is what comes back.
     pub fn git_pull(&self, project: ProjectId) -> Result<(), GitWriteError> {
-        self.git_exchange(project, AT_THE_WINDOW, Git::pull)
+        self.git_exchange(project, AT_THE_WINDOW, &Progress::unwatched(), Git::pull)
     }
 
     /// Brings the remote's commits in without touching `project`'s working tree, which is what
     /// makes its standing against the upstream true again.
     pub fn git_fetch(&self, project: ProjectId) -> Result<(), GitWriteError> {
-        self.git_exchange(project, AT_THE_WINDOW, Git::fetch)
+        self.git_exchange(project, AT_THE_WINDOW, &Progress::unwatched(), Git::fetch)
     }
 
     /// Asks the exchange with a remote running against `project` to stop.
@@ -307,9 +307,12 @@ impl Facade {
         &self,
         project: ProjectId,
         prompting: Prompting,
-        exchange: impl FnOnce(&Git, ProjectId, &Path, Prompting) -> Result<(), GitWriteError>,
+        progress: &Progress,
+        exchange: impl FnOnce(&Git, ProjectId, &Path, Prompting, &Progress) -> Result<(), GitWriteError>,
     ) -> Result<(), GitWriteError> {
-        self.git_change(project, |git, root| exchange(git, project, root, prompting))
+        self.git_change(project, |git, root| {
+            exchange(git, project, root, prompting, progress)
+        })
     }
 
     /// The shape every version-control change shares: resolve the project's root, make the

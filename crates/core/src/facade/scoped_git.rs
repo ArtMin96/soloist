@@ -19,7 +19,9 @@ use std::path::Path;
 
 use super::git::GitReadError;
 use super::scoped::ScopedFacade;
-use crate::git::{DiffExtent, Git, GitStatus, GitWriteError, Prompting, PullRequestError};
+use crate::git::{
+    DiffExtent, Git, GitStatus, GitWriteError, Progress, Prompting, PullRequestError,
+};
 use crate::ids::ProjectId;
 use crate::vcs::{Branches, DiffTarget, FileDiff, HunkRange};
 
@@ -169,30 +171,33 @@ impl ScopedFacade<'_> {
 
     /// Hands the checked-out branch's commits to its remote, publishing the branch when it tracks
     /// nothing yet. Never asks anybody for a credential ([`UNATTENDED`]).
-    pub fn git_push(&self) -> Result<(), ScopedGitError> {
-        self.exchange(Git::push)
+    pub fn git_push(&self, progress: &Progress) -> Result<(), ScopedGitError> {
+        self.exchange(progress, Git::push)
     }
 
     /// Brings the remote's commits in and reconciles them with what is checked out, however the
     /// user's own configuration says to. Never asks anybody for a credential ([`UNATTENDED`]).
-    pub fn git_pull(&self) -> Result<(), ScopedGitError> {
-        self.exchange(Git::pull)
+    pub fn git_pull(&self, progress: &Progress) -> Result<(), ScopedGitError> {
+        self.exchange(progress, Git::pull)
     }
 
     /// Brings the remote's commits in without touching the working tree. Never asks anybody for a
     /// credential ([`UNATTENDED`]).
-    pub fn git_fetch(&self) -> Result<(), ScopedGitError> {
-        self.exchange(Git::fetch)
+    pub fn git_fetch(&self, progress: &Progress) -> Result<(), ScopedGitError> {
+        self.exchange(progress, Git::fetch)
     }
 
     /// The one route from this surface to a remote, so [`UNATTENDED`] is spent in a single place
     /// and no exchange an agent starts can be reached any other way.
     fn exchange(
         &self,
-        exchange: impl FnOnce(&Git, ProjectId, &Path, Prompting) -> Result<(), GitWriteError>,
+        progress: &Progress,
+        exchange: impl FnOnce(&Git, ProjectId, &Path, Prompting, &Progress) -> Result<(), GitWriteError>,
     ) -> Result<(), ScopedGitError> {
         let project = self.git_scope()?;
-        Ok(self.inner.git_exchange(project, UNATTENDED, exchange)?)
+        Ok(self
+            .inner
+            .git_exchange(project, UNATTENDED, progress, exchange)?)
     }
 
     /// The project every call here acts on — the session's effective one — or the refusal when it

@@ -13,6 +13,7 @@ pub(crate) mod kv;
 pub(crate) mod lock;
 pub(crate) mod output;
 pub(crate) mod process;
+pub(crate) mod progress;
 pub(crate) mod project;
 pub(crate) mod prompt_template;
 pub(crate) mod reply;

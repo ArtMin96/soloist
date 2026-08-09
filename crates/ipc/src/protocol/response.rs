@@ -220,3 +220,36 @@ pub struct ProjectStatus {
 /// A framed reply: success or a typed failure. The failure taxonomy and its mappings from the
 /// core's errors live in [`crate::error`].
 pub type IpcResult = Result<IpcResponse, IpcError>;
+
+/// One remark an operation made about itself while it was still running.
+///
+/// Prose from a program Soloist does not own, carried verbatim for whoever asked to be told. Nothing
+/// reads it to decide anything — it exists to tell a waiting caller that work is happening and
+/// roughly where it has got to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProgressReport {
+    /// The latest thing the operation said, already coalesced and rate-limited at its source.
+    pub note: String,
+}
+
+/// What one frame travelling back from the app is: a remark about a request still in flight, or the
+/// answer that ends it.
+///
+/// Untagged, and deliberately: [`IpcResult`] serializes as it always has, so every reply to every
+/// request that never asked for progress is byte for byte the frame it was before this existed. The
+/// two are told apart by shape — a result is keyed `Ok` or `Err`, a remark is keyed `note` — so
+/// neither can be read as the other.
+///
+/// A request that asked for progress may be preceded by any number of remarks, and is always ended
+/// by exactly one answer; a request that did not is answered by one frame, as before.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum IpcReply {
+    /// The operation is still running, and this is the latest thing it said.
+    Progress(ProgressReport),
+    /// The operation ended, and this is its answer. Boxed because an answer is many times the size
+    /// of a remark, and a frame is built once and written once — so the indirection costs one
+    /// allocation on a path that already serializes, and saves carrying an answer's worth of stack
+    /// for every remark.
+    Done(Box<IpcResult>),
+}

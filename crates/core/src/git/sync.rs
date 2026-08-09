@@ -19,7 +19,7 @@ use std::path::Path;
 use crate::ids::ProjectId;
 
 use super::error::GitWriteError;
-use super::exchange::{Prompting, SyncOp};
+use super::exchange::{Progress, Prompting, SyncOp};
 use super::repository::Exchange;
 use super::status::Git;
 
@@ -35,6 +35,7 @@ impl Git {
         project: ProjectId,
         root: &Path,
         prompting: Prompting,
+        progress: &Progress,
     ) -> Result<(), GitWriteError> {
         let tracking = self
             .status(project, root)?
@@ -44,7 +45,7 @@ impl Git {
         } else {
             SyncOp::Publish
         };
-        self.exchange(project, root, op, prompting)
+        self.exchange(project, root, op, prompting, progress)
     }
 
     /// Brings the remote's commits in and reconciles them with what is checked out, however the
@@ -54,8 +55,9 @@ impl Git {
         project: ProjectId,
         root: &Path,
         prompting: Prompting,
+        progress: &Progress,
     ) -> Result<(), GitWriteError> {
-        self.exchange(project, root, SyncOp::Pull, prompting)
+        self.exchange(project, root, SyncOp::Pull, prompting, progress)
     }
 
     /// Brings the remote's commits in without touching the working tree, which is what makes the
@@ -65,8 +67,9 @@ impl Git {
         project: ProjectId,
         root: &Path,
         prompting: Prompting,
+        progress: &Progress,
     ) -> Result<(), GitWriteError> {
-        self.exchange(project, root, SyncOp::Fetch, prompting)
+        self.exchange(project, root, SyncOp::Fetch, prompting, progress)
     }
 
     /// Abandons a merge that is under way, restoring what was checked out before it began.
@@ -89,6 +92,7 @@ impl Git {
         root: &Path,
         op: SyncOp,
         prompting: Prompting,
+        progress: &Progress,
     ) -> Result<(), GitWriteError> {
         self.mutating(project, |repository| {
             let stop = self.arm(project);
@@ -98,6 +102,7 @@ impl Git {
                     op,
                     prompting,
                     stop: &stop,
+                    progress,
                 },
             )
         })

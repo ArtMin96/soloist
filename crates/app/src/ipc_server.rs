@@ -6,14 +6,18 @@
 //! the socket, and gives each connection one identity session. What a request *means* is the
 //! [`dispatch`] module's job; the server holds no business state.
 
+use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::peer_cred;
 use soloist_core::Facade;
-use soloist_ipc::{ensure_socket_path, read_frame, write_frame, IpcRequest};
+use soloist_ipc::{
+    ensure_socket_path, read_frame, write_frame, IpcReply, IpcRequest, ProgressReport,
+};
 use tauri::{AppHandle, Manager};
 use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 mod dispatch;
@@ -27,6 +31,15 @@ const ACCEPT_RETRY_BACKOFF: Duration = Duration::from_millis(100);
 /// logged no-op. A transient condition clears well within this many backed-off retries; one that
 /// never clears is bounded here rather than retried forever (no retry without a ceiling).
 const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 64;
+
+/// How many remarks about a running request may be waiting to be written before the oldest are
+/// dropped rather than kept.
+///
+/// A remark is worth having only while it is current, so a connection that has fallen behind is
+/// better served by the newest few than by a backlog it will never catch up on — and an operation
+/// must never be slowed by whoever is watching it. Small on purpose: the source already coalesces
+/// and rate-limits, so anything past a handful means the connection is not keeping up at all.
+const REPORT_BACKLOG: usize = 8;
 
 /// Binds the IPC socket and serves connections until `shutdown` fires (a live disable of the
 /// integration, or app shutdown), then unlinks the socket so a disabled server leaves nothing to
@@ -139,8 +152,35 @@ async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
                 break;
             }
         };
-        let reply = handle_request(app.state::<Arc<Facade>>().inner(), session, request).await;
-        if let Err(err) = write_frame(&mut stream, &reply).await {
+        let facade = app.state::<Arc<Facade>>();
+        let (reports, mut reported) = mpsc::channel(REPORT_BACKLOG);
+        // Remarks and the answer share one connection, so one loop writes both: whatever the request
+        // says about itself goes out as its own frame while it runs, and the answer that ends it is
+        // always the last frame written for it.
+        let reply = {
+            let mut serving = pin!(handle_request(facade.inner(), session, request, reports));
+            let mut written = Ok(());
+            let answer = loop {
+                let remark = tokio::select! {
+                    answer = &mut serving => break answer,
+                    Some(remark) = reported.recv() => remark,
+                };
+                written = write_frame(
+                    &mut stream,
+                    &IpcReply::Progress(ProgressReport { note: remark }),
+                )
+                .await;
+                if written.is_err() {
+                    break serving.await;
+                }
+            };
+            if let Err(err) = written {
+                eprintln!("soloist: MCP IPC write error: {err}");
+                break;
+            }
+            answer
+        };
+        if let Err(err) = write_frame(&mut stream, &IpcReply::Done(Box::new(reply))).await {
             eprintln!("soloist: MCP IPC write error: {err}");
             break;
         }

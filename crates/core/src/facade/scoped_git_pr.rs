@@ -13,7 +13,7 @@
 
 use super::scoped::ScopedFacade;
 use super::scoped_git::{ScopedGitError, UNATTENDED};
-use crate::git::{MergeMethod, NewPullRequest, PullRequestReview, PullRequestSurface};
+use crate::git::{MergeMethod, NewPullRequest, Progress, PullRequestReview, PullRequestSurface};
 
 impl ScopedFacade<'_> {
     /// What the project's pull-request surface can offer: whether the forge can be reached at all,
@@ -55,9 +55,12 @@ impl ScopedFacade<'_> {
         &self,
         number: u64,
         method: MergeMethod,
+        progress: &Progress,
     ) -> Result<(), ScopedGitError> {
         let project = self.git_scope()?;
-        Ok(self.inner.git_merge_pull_request(project, number, method)?)
+        Ok(self
+            .inner
+            .git_merge_pull_request(project, number, method, progress)?)
     }
 }
 

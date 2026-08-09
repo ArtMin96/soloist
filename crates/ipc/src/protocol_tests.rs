@@ -3,8 +3,8 @@ use super::*;
 use crate::error::IpcError;
 use soloist_core::{
     AcquireOutcome, AgentKind, AgentTool, ExportedTemplate, FeedbackEntry, FireCond,
-    IntegrationFile, IntegrationWrite, LeaseView, MissingPolicy, Origin, ProcStatus, ProcessId,
-    ProcessKind, ProcessView, ProjectId, ProjectRef, ProjectView, PromptMode, Readiness,
+    IntegrationFile, IntegrationWrite, LeaseView, MergeMethod, MissingPolicy, Origin, ProcStatus,
+    ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, ProjectView, PromptMode, Readiness,
     RenderedPrompt, ScratchpadId, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary,
     TemplateId, TemplateKind, TemplateScope, TemplateSummary, TemplateView, TimerId, TimerStatus,
     TimerView, TodoDoc, TodoId, TodoStatus, TodoView, Whoami,
@@ -751,4 +751,86 @@ fn a_project_summary_drops_the_ui_icon() {
     // The serialized shape carries no icon field at all.
     let json = serde_json::to_string(&summary).expect("serialize");
     assert!(!json.contains("icon"), "summary must not ship the UI icon");
+}
+
+#[test]
+fn a_request_that_asked_for_no_progress_is_the_bytes_it_was_before_there_was_anything_to_ask_for() {
+    // Written out rather than derived: the property is that these exact bytes did not change.
+    let unchanged = [
+        (
+            IpcRequest::GitPush { progress: false },
+            r#"{"op":"git_push"}"#,
+        ),
+        (
+            IpcRequest::GitPull { progress: false },
+            r#"{"op":"git_pull"}"#,
+        ),
+        (
+            IpcRequest::GitFetch { progress: false },
+            r#"{"op":"git_fetch"}"#,
+        ),
+        (
+            IpcRequest::GitMergePullRequest {
+                number: 7,
+                method: MergeMethod::Squash,
+                progress: false,
+            },
+            r#"{"op":"git_merge_pull_request","number":7,"method":"squash"}"#,
+        ),
+    ];
+
+    for (request, wire) in unchanged {
+        assert_eq!(
+            serde_json::to_string(&request).expect("serialize"),
+            wire,
+            "a caller that never asked for progress must send exactly what it always sent",
+        );
+        assert_eq!(
+            serde_json::from_str::<IpcRequest>(wire).expect("deserialize"),
+            request,
+            "and the bytes an older caller sends must still read as asking for nothing",
+        );
+    }
+}
+
+#[test]
+fn a_request_that_asked_for_progress_says_so_and_is_read_back_as_having_asked() {
+    let asked = IpcRequest::GitPush { progress: true };
+
+    let wire = serde_json::to_string(&asked).expect("serialize");
+
+    assert_eq!(wire, r#"{"op":"git_push","progress":true}"#);
+    assert_eq!(
+        serde_json::from_str::<IpcRequest>(&wire).expect("deserialize"),
+        asked,
+    );
+}
+
+#[test]
+fn an_answer_travels_as_the_frame_it_always_did() {
+    let answer: IpcResult = Ok(IpcResponse::Acked);
+
+    assert_eq!(
+        serde_json::to_string(&IpcReply::Done(Box::new(answer.clone()))).expect("serialize"),
+        serde_json::to_string(&answer).expect("serialize"),
+        "wrapping the answer must not change one byte of it, or every existing reply changes shape",
+    );
+}
+
+#[test]
+fn a_remark_and_an_answer_are_never_read_as_one_another() {
+    let remark = IpcReply::Progress(ProgressReport {
+        note: "Writing objects:  90% (9/10)".into(),
+    });
+    let answer = IpcReply::Done(Box::new(Ok(IpcResponse::Acked)));
+    let refusal = IpcReply::Done(Box::new(Err(IpcError::NoProjectScope)));
+
+    for frame in [remark, answer, refusal] {
+        let wire = serde_json::to_string(&frame).expect("serialize");
+        assert_eq!(
+            serde_json::from_str::<IpcReply>(&wire).expect("deserialize"),
+            frame,
+            "a frame must read back as the kind of frame it was written as: {wire}",
+        );
+    }
 }

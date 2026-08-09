@@ -10,7 +10,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::git::NoopFileOpener;
-use crate::git::{CheckState, MergeMethod, PullRequestError, REVIEW_LIMITS};
+use crate::git::{CheckState, MergeMethod, Progress, PullRequestError, REVIEW_LIMITS};
 use crate::ids::ProjectId;
 use crate::testing::{
     check_run, git_status, pull_request_review, review_thread, FakeGitForge, FakeGitRepository,
@@ -133,7 +133,13 @@ fn an_untrusted_project_merges_nothing() {
     );
 
     let refused = git
-        .merge_pull_request(project, Path::new(ROOT), NUMBER, MergeMethod::Squash)
+        .merge_pull_request(
+            project,
+            Path::new(ROOT),
+            NUMBER,
+            MergeMethod::Squash,
+            &Progress::unwatched(),
+        )
         .expect_err("an untrusted project may not merge");
 
     assert!(matches!(refused, PullRequestError::Untrusted));
@@ -154,8 +160,14 @@ fn a_merge_reaches_the_service_as_the_pull_request_and_method_it_was_asked_for()
         project,
     );
 
-    git.merge_pull_request(project, Path::new(ROOT), NUMBER, MergeMethod::Rebase)
-        .expect("merge");
+    git.merge_pull_request(
+        project,
+        Path::new(ROOT),
+        NUMBER,
+        MergeMethod::Rebase,
+        &Progress::unwatched(),
+    )
+    .expect("merge");
 
     assert_eq!(forge.merged(), vec![(NUMBER, MergeMethod::Rebase)]);
 }

@@ -23,6 +23,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::testing::{all_feature_groups, handler, handler_with_groups, spawn_fake_app};
+use crate::tools::progress::Reporting;
 
 use crate::args::{
     DiffTargetArg, GitBranchArg, GitCommitArg, GitCreatePullRequestArg, GitDiffArg,
@@ -2658,19 +2659,22 @@ async fn every_version_control_change_sends_its_own_request_and_acknowledges() {
                 amend: false,
             }))
             .await,
-        handler.git_push().await,
-        handler.git_pull().await,
-        handler.git_fetch().await,
+        handler.git_push(Reporting::unasked()).await,
+        handler.git_pull(Reporting::unasked()).await,
+        handler.git_fetch(Reporting::unasked()).await,
         handler.git_create_branch(Parameters(branch())).await,
         handler.git_switch_branch(Parameters(branch())).await,
         handler.git_delete_branch(Parameters(branch())).await,
         handler.git_stash().await,
         handler.git_pop_stash().await,
         handler
-            .git_merge_pull_request(Parameters(GitMergePullRequestArg {
-                number: 7,
-                method: MergeMethodArg::Squash,
-            }))
+            .git_merge_pull_request(
+                Parameters(GitMergePullRequestArg {
+                    number: 7,
+                    method: MergeMethodArg::Squash,
+                }),
+                Reporting::unasked(),
+            )
             .await,
     ] {
         assert_eq!(structured_of(result.expect("the change succeeds")), ok);
@@ -2696,9 +2700,9 @@ async fn every_version_control_change_sends_its_own_request_and_acknowledges() {
                 message: "a subject".into(),
                 amend: false
             },
-            IpcRequest::GitPush,
-            IpcRequest::GitPull,
-            IpcRequest::GitFetch,
+            IpcRequest::GitPush { progress: false },
+            IpcRequest::GitPull { progress: false },
+            IpcRequest::GitFetch { progress: false },
             IpcRequest::GitCreateBranch {
                 name: "topic".into()
             },
@@ -2712,7 +2716,8 @@ async fn every_version_control_change_sends_its_own_request_and_acknowledges() {
             IpcRequest::GitPopStash,
             IpcRequest::GitMergePullRequest {
                 number: 7,
-                method: MergeMethod::Squash
+                method: MergeMethod::Squash,
+                progress: false
             },
         ],
     );
@@ -2894,7 +2899,7 @@ async fn refusal_of(err: GitError) -> CallToolResult {
     });
 
     handler(socket)
-        .git_push()
+        .git_push(Reporting::unasked())
         .await
         .expect("a refusal is a tool result, not a protocol error")
 }

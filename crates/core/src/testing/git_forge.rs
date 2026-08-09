@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use crate::git::{
     CheckRun, ForgeError, ForgeReadiness, ForgeRepository, GitForge, MergeMethod, NewPullRequest,
-    PullRequest, PullRequestReview, PullRequestTemplate, ReviewLimits, Stop,
+    Progress, PullRequest, PullRequestReview, PullRequestTemplate, ReviewLimits, Stop,
 };
 use crate::sync::lock;
 
@@ -39,6 +39,7 @@ struct Answers {
     created: Mutex<Vec<NewPullRequest>>,
     heads: Mutex<Vec<String>>,
     merged: Mutex<Vec<(u64, MergeMethod)>>,
+    remarks: Mutex<Vec<String>>,
     log_limits: Mutex<Vec<usize>>,
     review_limits: Mutex<Vec<ReviewLimits>>,
     asks: AtomicUsize,
@@ -76,6 +77,7 @@ impl FakeGitForge {
                 created: Mutex::new(Vec::new()),
                 heads: Mutex::new(Vec::new()),
                 merged: Mutex::new(Vec::new()),
+                remarks: Mutex::new(Vec::new()),
                 log_limits: Mutex::new(Vec::new()),
                 review_limits: Mutex::new(Vec::new()),
                 asks: AtomicUsize::new(0),
@@ -141,6 +143,13 @@ impl FakeGitForge {
     /// nothing here can reach, which is an ordinary answer.
     pub fn logging(self, log: Option<&str>) -> Self {
         *lock(&self.answers.log) = log.map(str::to_string);
+        self
+    }
+
+    /// The same forge, which says each of `remarks` while it merges — what a real one's tool writes
+    /// about itself as it works.
+    pub fn saying(self, remarks: &[&str]) -> Self {
+        *lock(&self.answers.remarks) = remarks.iter().map(|said| said.to_string()).collect();
         self
     }
 
@@ -263,9 +272,13 @@ impl GitForge for FakeGitForge {
         number: u64,
         method: MergeMethod,
         _stop: &Stop,
+        progress: &Progress,
     ) -> Result<(), ForgeError> {
         self.asked(|| {
             lock(&self.answers.merged).push((number, method));
+            for remark in lock(&self.answers.remarks).iter() {
+                progress.report(remark);
+            }
             Ok(())
         })
     }

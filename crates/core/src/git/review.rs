@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::ProjectId;
 
+use super::exchange::Progress;
 use super::forge::PullRequest;
 use super::pr::PullRequestError;
 use super::status::Git;
@@ -183,12 +184,13 @@ impl Git {
         root: &Path,
         number: u64,
         method: MergeMethod,
+        progress: &Progress,
     ) -> Result<(), PullRequestError> {
         if !self.trusted(project)? {
             return Err(PullRequestError::Untrusted);
         }
         Ok(self.asking(project, |forge, stop| {
-            forge.merge(root, number, method, stop)
+            forge.merge(root, number, method, stop, progress)
         })?)
     }
 

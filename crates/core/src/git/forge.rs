@@ -14,7 +14,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::exchange::Stop;
+use super::exchange::{Progress, Stop};
 use super::review::{CheckRun, MergeMethod, PullRequestReview, ReviewLimits};
 
 /// Whether pull requests can be reached at all, and when not, which of the two fixable things is
@@ -202,13 +202,15 @@ pub trait GitForge: Send + Sync {
     /// [`ForgeError::Refused`] carrying its account, and nothing is merged — there is no way to ask
     /// this to override a repository's rules, deliberately.
     ///
-    /// Stoppable before the time limit, like every other request that reaches a service.
+    /// Stoppable before the time limit, like every other request that reaches a service, and
+    /// reported on while it runs where `progress` is watched.
     fn merge(
         &self,
         root: &Path,
         number: u64,
         method: MergeMethod,
         stop: &Stop,
+        progress: &Progress,
     ) -> Result<(), ForgeError>;
 
     /// The tail of what `check` printed when it failed, at most `limit` bytes, or `None` when the
@@ -277,6 +279,7 @@ impl GitForge for NoopGitForge {
         _number: u64,
         _method: MergeMethod,
         _stop: &Stop,
+        _progress: &Progress,
     ) -> Result<(), ForgeError> {
         Err(ForgeError::Missing)
     }
