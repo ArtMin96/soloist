@@ -7,6 +7,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::git::NoopFileOpener;
 use crate::git::{
     CheckState, HandoffSubject, PullRequestError, CHECK_LOG_LIMIT, HANDOFF_LIMIT, REVIEW_LIMITS,
 };
@@ -28,6 +29,7 @@ fn git_with(forge: FakeGitForge) -> Arc<Git> {
     Arc::new(Git::new(
         Arc::new(FakeGitRepository::reporting(git_status(BRANCH))),
         Arc::new(forge),
+        Arc::new(NoopFileOpener),
         Arc::new(FakeTrustRepo::new()),
     ))
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 // The two reads and the event subscription are the IPC boundary. The viewer and the preview are
@@ -8,6 +8,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 vi.mock("@/api", () => ({
   gitDiff: vi.fn(),
   gitFile: vi.fn(),
+  gitTrusted: vi.fn(() => Promise.resolve(false)),
+  gitOpenFile: vi.fn(() => Promise.resolve()),
   onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
   onResync: vi.fn(() => Promise.resolve(() => {})),
 }));
@@ -20,7 +22,7 @@ vi.mock("@/components/git/FilePreview", () => ({
   FilePreview: ({ path }: { path: string }) => <div data-testid="preview">{path}</div>,
 }));
 
-import { gitDiff, gitFile } from "@/api";
+import { gitDiff, gitFile, gitOpenFile, gitTrusted } from "@/api";
 import { DiffPane } from "@/components/git/DiffPane";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CHANGE, FILE, type DiffSelection } from "@/store/git/useDiffSelection";
@@ -28,6 +30,8 @@ import type { DiffTarget, FileDiff } from "@/domain";
 
 const readDiff = vi.mocked(gitDiff);
 const readFile = vi.mocked(gitFile);
+const readTrust = vi.mocked(gitTrusted);
+const openFile = vi.mocked(gitOpenFile);
 
 const PROJECT = 7;
 const PATH = "src/main.rs";
@@ -36,6 +40,10 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   localStorage.clear();
+});
+
+beforeEach(() => {
+  readTrust.mockResolvedValue(false);
 });
 
 function diffOf(overrides: Partial<FileDiff> = {}): FileDiff {
@@ -213,5 +221,43 @@ describe("DiffPane", () => {
     renderPane({ kind: FILE, path: PATH });
 
     expect(await screen.findByText(/showing the beginning of this file/i)).toBeTruthy();
+  });
+  it("hands a previewed file to the desktop when the reader asks for it elsewhere", async () => {
+    readTrust.mockResolvedValue(true);
+    readFile.mockResolvedValue({ text: "fn main() {}\n", truncated: false });
+
+    renderPane({ kind: FILE, path: PATH });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /open in the default application/i }),
+    );
+
+    await waitFor(() => expect(openFile).toHaveBeenCalledWith(PROJECT, PATH));
+  });
+
+  it("offers no way to open a file in a project nobody has trusted", async () => {
+    // What it would start is a program the desktop picks from the file's own name. The core
+    // refuses that on an untrusted project, so the action is absent rather than offered and
+    // then refused.
+    readFile.mockResolvedValue({ text: "fn main() {}\n", truncated: false });
+
+    renderPane({ kind: FILE, path: PATH });
+
+    await screen.findByTestId("preview");
+    expect(screen.queryByRole("button", { name: /open in the default application/i })).toBeNull();
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it("says why an open was refused rather than doing nothing visible", async () => {
+    readTrust.mockResolvedValue(true);
+    readFile.mockResolvedValue({ text: "fn main() {}\n", truncated: false });
+    openFile.mockRejectedValue("nothing on this machine could open that file");
+
+    renderPane({ kind: FILE, path: PATH });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /open in the default application/i }),
+    );
+
+    expect(await screen.findByText(/nothing on this machine could open that file/i)).toBeTruthy();
   });
 });

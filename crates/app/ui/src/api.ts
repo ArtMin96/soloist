@@ -175,6 +175,20 @@ export function gitCommit(project: number, message: string, amend: boolean): Pro
   return invoke<void>("git_commit", { project, message, amend });
 }
 
+// Hands one of a project's files to whatever this machine has registered to open it. Refused for
+// a project that has not been trusted and for a path that leaves the repository.
+export function gitOpenFile(project: number, path: string): Promise<void> {
+  return invoke<void>("git_open_file", { project, path });
+}
+
+// The message a new commit starts from, as the repository's own configuration supplies it
+// (`commit.template`), already stripped of the guidance lines version control removes from an
+// edited message. `null` where nothing is configured. It is what the message box starts at, never
+// what is committed.
+export function gitCommitTemplate(project: number): Promise<string | null> {
+  return invoke<string | null>("git_commit_template", { project });
+}
+
 // Drafts a commit message describing what is staged, by running the agent tool the user picked for
 // it once, headless. Only text comes back — nothing is staged or committed, and the message box is
 // expected to be edited before it is used. Refused until a tool is selected and the project trusted.

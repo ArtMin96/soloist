@@ -18,7 +18,38 @@ use crate::sync::lock;
 use super::error::GitWriteError;
 use super::status::Git;
 
+/// The most of a configured commit template that is offered as a starting message.
+///
+/// Generous for the handful of lines a template actually is, and bounded because what it fills is
+/// a box somebody edits by hand: past this it is a document rather than a message, and it is
+/// dropped whole rather than cut, since half a template is filled in as though it were all of one.
+pub const COMMIT_TEMPLATE_LIMIT: usize = 8 * 1024;
+
 impl Git {
+    /// The message a new commit in `project` starts from, as the repository's own configuration
+    /// supplies it (`commit.template`). `None` where it supplies none, which is the ordinary case.
+    ///
+    /// Gated on trust, though it reads rather than changes: the configuration consulted is one the
+    /// repository itself can carry, and it names a file anywhere on this disk for Soloist to read
+    /// and show. That is the project deciding what Soloist reads, which is the thing trusting a
+    /// project authorises — so an untrusted project is refused here rather than quietly answering
+    /// with nothing.
+    ///
+    /// Runs an external tool, so callers reach it through
+    /// [`Facade::blocking`](crate::facade::Facade::blocking) rather than a runtime worker.
+    pub fn commit_template(
+        &self,
+        project: ProjectId,
+        root: &Path,
+    ) -> Result<Option<String>, GitWriteError> {
+        self.authorize(project)?;
+        let gate = self.gate(project);
+        let _running = lock(&gate);
+        Ok(self
+            .repository
+            .commit_template(root, COMMIT_TEMPLATE_LIMIT)?)
+    }
+
     /// Records `project`'s index as a commit carrying `message`.
     ///
     /// With `amend`, it replaces the last commit instead of adding one — rewriting what is

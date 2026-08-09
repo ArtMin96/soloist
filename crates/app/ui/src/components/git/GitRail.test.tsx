@@ -17,6 +17,7 @@ vi.mock("@/api", () => ({
   gitUnstageHunk: vi.fn(() => Promise.resolve()),
   gitDiscardHunk: vi.fn(() => Promise.resolve()),
   gitCommit: vi.fn(() => Promise.resolve()),
+  gitCommitTemplate: vi.fn(() => Promise.resolve(null)),
   gitDraftCommitMessage: vi.fn(() => Promise.resolve("")),
   gitBranches: vi.fn(() => Promise.resolve(null)),
   gitCreateBranch: vi.fn(() => Promise.resolve()),
@@ -39,6 +40,7 @@ import {
   gitAbortMerge,
   gitBranches,
   gitCommit,
+  gitCommitTemplate,
   gitDeleteBranch,
   gitFetch,
   gitPush,
@@ -63,6 +65,7 @@ const trustProject = vi.mocked(gitTrustProject);
 const stage = vi.mocked(gitStage);
 const discard = vi.mocked(gitDiscard);
 const commit = vi.mocked(gitCommit);
+const readTemplate = vi.mocked(gitCommitTemplate);
 const draftMessage = vi.mocked(gitDraftCommitMessage);
 const readAssist = vi.mocked(assistSettings);
 const readBranches = vi.mocked(gitBranches);
@@ -86,6 +89,7 @@ afterEach(() => {
 beforeEach(() => {
   readTrust.mockResolvedValue(false);
   readAssist.mockResolvedValue({ tool: null });
+  readTemplate.mockResolvedValue(null);
 });
 
 /** A trusted project with `path` staged, so a commit and a draft both have something to work from. */
@@ -340,6 +344,49 @@ describe("GitRail", () => {
 
     await waitFor(() => expect(commit).toHaveBeenCalledWith(PROJECT, "Record it", false));
     await waitFor(() => expect((message as HTMLTextAreaElement).value).toBe(""));
+  });
+
+  it("starts a message from the template the repository configures, and commits what is left there", async () => {
+    trustedWithStaged("src/a.rs");
+    readTemplate.mockResolvedValue("Refs: \n");
+
+    renderRail();
+    const message = (await within(rail()).findByLabelText("Commit message")) as HTMLTextAreaElement;
+    await waitFor(() => expect(message.value).toBe("Refs: \n"));
+
+    fireEvent.change(message, { target: { value: "Record it\n\nRefs: #1\n" } });
+    fireEvent.click(within(rail()).getByRole("button", { name: /^commit$/i }));
+
+    await waitFor(() =>
+      expect(commit).toHaveBeenCalledWith(PROJECT, "Record it\n\nRefs: #1\n", false),
+    );
+  });
+
+  it("goes back to the template after a commit, so the next one starts from it too", async () => {
+    // The box follows the template until somebody types, so what a recorded commit clears is what
+    // they typed — not the template underneath it, which is where the next message begins.
+    trustedWithStaged("src/a.rs");
+    readTemplate.mockResolvedValue("Refs: \n");
+
+    renderRail();
+    const message = (await within(rail()).findByLabelText("Commit message")) as HTMLTextAreaElement;
+    await waitFor(() => expect(message.value).toBe("Refs: \n"));
+
+    fireEvent.change(message, { target: { value: "Record it" } });
+    fireEvent.click(within(rail()).getByRole("button", { name: /^commit$/i }));
+
+    await waitFor(() => expect(message.value).toBe("Refs: \n"));
+  });
+
+  it("asks a project nobody has trusted for no template at all", async () => {
+    // The core refuses it there, because the configuration behind a template is one the repository
+    // itself can carry. Asking anyway would spend an invocation on a refusal.
+    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
+
+    renderRail();
+
+    await within(rail()).findByRole("button", { name: /trust this project/i });
+    expect(readTemplate).not.toHaveBeenCalled();
   });
 
   it("offers no way to draft a message until a tool is picked to draft with", async () => {

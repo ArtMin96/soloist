@@ -181,6 +181,19 @@ pub trait GitRepository: Send + Sync {
     /// index. Same [`GitError::HunkGone`] meaning as [`GitRepository::stage_hunk`].
     fn discard_hunk(&self, root: &Path, path: &str, hunk: HunkRange) -> Result<(), GitError>;
 
+    /// The message a new commit starts from, as the repository's own configuration supplies it,
+    /// or `None` where it supplies none.
+    ///
+    /// What comes back is what version control would have committed had the configured template
+    /// been left exactly as it was found: the guidance lines it strips from an edited message are
+    /// already gone, because a template's hints exist to be read and replaced, and a message box
+    /// is not an editor session anybody would expect to prune them from by hand.
+    ///
+    /// `None` — rather than a failure — for a configuration that names nothing readable, and for a
+    /// template longer than `limit`, which is the core's ceiling: a template carried in half is
+    /// filled in as though it were the whole of one.
+    fn commit_template(&self, root: &Path, limit: usize) -> Result<Option<String>, GitError>;
+
     /// Records the index as a commit carrying `message`, or replaces the last commit with it
     /// when `amend` — which rewrites what is committed and never touches the working tree.
     ///
@@ -317,6 +330,10 @@ impl GitRepository for NoopGitRepository {
     }
 
     fn discard_hunk(&self, _root: &Path, _path: &str, _hunk: HunkRange) -> Result<(), GitError> {
+        Err(GitError::NotARepo)
+    }
+
+    fn commit_template(&self, _root: &Path, _limit: usize) -> Result<Option<String>, GitError> {
         Err(GitError::NotARepo)
     }
 

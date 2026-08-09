@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::git::DraftError;
+use super::git_draft::DraftError;
 use super::{CoordinationError, Facade};
 use crate::agents::AgentTool;
 use crate::git::{

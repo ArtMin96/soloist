@@ -20,7 +20,9 @@ use crate::coordination::{
     TodoRepo,
 };
 use crate::filewatch::{FileWatcher, NoopFileWatcher};
-use crate::git::{GitForge, GitRepository, NoopGitForge, NoopGitRepository};
+use crate::git::{
+    FileOpener, GitForge, GitRepository, NoopFileOpener, NoopGitForge, NoopGitRepository,
+};
 use crate::ids::ProjectId;
 use crate::metrics::{MetricsProbe, NoopMetricsProbe};
 use crate::notify::{NoopNotifier, Notifier};
@@ -41,7 +43,7 @@ use crate::ports::{
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
 /// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `diagram_repo`,
 /// `todo_repo`, `kv_repo`, `template_repo`, `runtime`, `orphan_control`, `metrics`,
-/// `port_probe`, `file_watcher`, `git_repository`, `notifier`, `agent_tools`, `version_probe`,
+/// `port_probe`, `file_watcher`, `git_repository`, `git_forge`, `file_opener`, `notifier`, `agent_tools`, `version_probe`,
 /// `agent_one_shot`,
 /// `shell_env_probe`, `settings_repo`, `project_settings_repo`, `feedback_repo`)
 /// default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
@@ -69,6 +71,7 @@ pub struct CorePorts {
     pub(crate) file_watcher: Arc<dyn FileWatcher>,
     pub(crate) git_repository: Arc<dyn GitRepository>,
     pub(crate) git_forge: Arc<dyn GitForge>,
+    pub(crate) file_opener: Arc<dyn FileOpener>,
     pub(crate) notifier: Arc<dyn Notifier>,
     pub(crate) agent_tools: Arc<dyn AgentToolRepo>,
     pub(crate) version_probe: Arc<dyn VersionProbe>,
@@ -134,6 +137,7 @@ impl CorePorts {
                 file_watcher: Arc::new(NoopFileWatcher),
                 git_repository: Arc::new(NoopGitRepository),
                 git_forge: Arc::new(NoopGitForge),
+                file_opener: Arc::new(NoopFileOpener),
                 notifier: Arc::new(NoopNotifier),
                 agent_tools: Arc::new(NoopAgentToolRepo),
                 version_probe: Arc::new(NoopVersionProbe),
@@ -269,6 +273,14 @@ impl CorePortsBuilder {
     /// and every other version-control action still works).
     pub fn git_forge(mut self, git_forge: Arc<dyn GitForge>) -> Self {
         self.ports.git_forge = git_forge;
+        self
+    }
+
+    /// Overrides the desktop a file is handed to when a surface asks for one to be opened (C9;
+    /// defaults to [`NoopFileOpener`], which opens nothing, so the action is simply unavailable
+    /// and every other version-control action still works).
+    pub fn file_opener(mut self, file_opener: Arc<dyn FileOpener>) -> Self {
+        self.ports.file_opener = file_opener;
         self
     }
 

@@ -11,7 +11,8 @@ use crate::ids::ProjectId;
 use crate::sync::lock;
 use crate::vcs::{FileContent, ProjectFile};
 
-use super::error::GitError;
+use super::error::{GitError, GitWriteError};
+use super::opener::OpenError;
 use super::path::inside_repository;
 use super::status::Git;
 
@@ -56,6 +57,38 @@ impl Git {
             Ok(content) => Ok(content),
             Err(GitError::NotARepo) => Ok(None),
             Err(err) => Err(err),
+        }
+    }
+
+    /// Hands one of `project`'s files to whatever this machine has registered to open it.
+    ///
+    /// Gated on trust, and for a stronger reason than a change to the working tree is: what this
+    /// starts is an arbitrary program, chosen by the desktop from the file's own name, on contents
+    /// the repository supplied. A project the user has not authorised Soloist to act within does
+    /// not get to pick a program for them.
+    ///
+    /// Two guards, in the only two places each can be made. The path must name something inside
+    /// the repository — refused here, before anything sees it, exactly as every other path from a
+    /// surface is. Where it actually *leads* is the port's to settle, since a link inside a
+    /// repository can point anywhere on the disk and only something holding the filesystem can
+    /// follow one.
+    ///
+    /// Runs outside this process, so callers reach it through
+    /// [`Facade::blocking`](crate::facade::Facade::blocking) rather than a runtime worker.
+    pub fn open_file(
+        &self,
+        project: ProjectId,
+        root: &Path,
+        path: &str,
+    ) -> Result<(), GitWriteError> {
+        self.authorize(project)?;
+        if !inside_repository(path) {
+            return Err(GitWriteError::OutsideRepository);
+        }
+        match self.opener.open(root, path) {
+            Ok(()) => Ok(()),
+            Err(OpenError::Outside) => Err(GitWriteError::OutsideRepository),
+            Err(OpenError::Unopenable) => Err(GitWriteError::Unopenable),
         }
     }
 }

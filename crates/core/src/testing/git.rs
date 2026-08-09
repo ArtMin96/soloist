@@ -29,6 +29,7 @@ struct Answers {
     history: Mutex<Result<Vec<CommitEntry>, GitError>>,
     proposed: Mutex<Result<Vec<CommitEntry>, GitError>>,
     branches: Mutex<Result<Branches, GitError>>,
+    template: Mutex<Result<Option<String>, GitError>>,
     stalls: AtomicBool,
     refusal: Mutex<Option<GitError>>,
     changes: Mutex<Vec<GitChange>>,
@@ -104,6 +105,13 @@ impl FakeGitRepository {
     /// reads as a folder under no version control, matching the status side's default.
     pub fn branching(self, branches: Branches) -> Self {
         *lock(&self.answers.branches) = Ok(branches);
+        self
+    }
+
+    /// The same repository, whose configuration starts a commit message from `template`. Without
+    /// this it configures none, which is what most repositories do.
+    pub fn templating(self, template: &str) -> Self {
+        *lock(&self.answers.template) = Ok(Some(template.to_string()));
         self
     }
 
@@ -184,6 +192,7 @@ impl FakeGitRepository {
                 history: Mutex::new(Err(GitError::NotARepo)),
                 proposed: Mutex::new(Err(GitError::NotARepo)),
                 branches: Mutex::new(Err(GitError::NotARepo)),
+                template: Mutex::new(Ok(None)),
                 stalls: AtomicBool::new(false),
                 refusal: Mutex::new(None),
                 changes: Mutex::new(Vec::new()),
@@ -302,6 +311,16 @@ impl GitRepository for FakeGitRepository {
         self.changed(GitChange::DiscardHunk {
             path: path.to_string(),
             hunk,
+        })
+    }
+
+    fn commit_template(&self, _root: &Path, limit: usize) -> Result<Option<String>, GitError> {
+        // Bounded for real, so a caller handing over a ceiling the adapter is meant to apply is
+        // exercised rather than trusted: a template longer than one is no template at all.
+        self.recorded(|| {
+            lock(&self.answers.template)
+                .clone()
+                .map(|template| template.filter(|text| text.len() <= limit))
         })
     }
 

@@ -8,12 +8,13 @@
 use std::sync::Arc;
 
 use crate::git::{
-    CheckRun, CheckState, Git, GitStatus, NoopGitForge, PullRequest, PullRequestReview,
-    PullRequestState, PullRequestTemplate, RawFileDiff, RawHunk, ReviewComment, ReviewThread,
+    CheckRun, CheckState, Git, GitStatus, NoopFileOpener, NoopGitForge, PullRequest,
+    PullRequestReview, PullRequestState, PullRequestTemplate, RawFileDiff, RawHunk, ReviewComment,
+    ReviewThread,
 };
 use crate::ids::ProjectId;
 use crate::ports::TrustRepo;
-use crate::testing::{FakeGitRepository, FakeTrustRepo};
+use crate::testing::{FakeFileOpener, FakeGitRepository, FakeTrustRepo};
 use crate::vcs::{
     Branch, BranchInfo, Branches, ChangeKind, CommitEntry, FileChange, GitFileStatus, HunkRange,
     ProjectFile, SyncState,
@@ -204,12 +205,13 @@ pub fn untrusting() -> Arc<dyn TrustRepo> {
 /// no project trusted to be changed — so a read behaves as it always does and a change is
 /// refused, which is the state a project starts in.
 ///
-/// No forge: a test about the working tree is not a test about a hosting service, and the no-op
-/// port is what a machine without the tool installed behaves as.
+/// No forge and no desktop: a test about the working tree is not a test about a hosting service
+/// or about opening a file, and the no-op ports are what a machine without either behaves as.
 pub fn git_over(repository: FakeGitRepository) -> Arc<Git> {
     Arc::new(Git::new(
         Arc::new(repository),
         Arc::new(NoopGitForge),
+        Arc::new(NoopFileOpener),
         Arc::new(FakeTrustRepo::new()),
     ))
 }
@@ -220,6 +222,24 @@ pub fn git_trusting(repository: FakeGitRepository, project: ProjectId) -> Arc<Gi
     Arc::new(Git::new(
         Arc::new(repository),
         Arc::new(NoopGitForge),
+        Arc::new(NoopFileOpener),
         Arc::new(FakeTrustRepo::new().trusting_project(project)),
+    ))
+}
+
+/// The git context over `opener`, for a test about handing a file to a desktop rather than about
+/// reading a working tree. `trusted` states whether the project may be acted within at all, which
+/// is the gate such a test is usually about.
+pub fn git_opening(opener: FakeFileOpener, project: ProjectId, trusted: bool) -> Arc<Git> {
+    let trust = FakeTrustRepo::new();
+    Arc::new(Git::new(
+        Arc::new(FakeGitRepository::answering(Vec::new())),
+        Arc::new(NoopGitForge),
+        Arc::new(opener),
+        Arc::new(if trusted {
+            trust.trusting_project(project)
+        } else {
+            trust
+        }),
     ))
 }

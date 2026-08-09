@@ -3,6 +3,7 @@ import {
   gitCommit,
   gitDiscard,
   gitDiscardHunk,
+  gitOpenFile,
   gitStage,
   gitStageHunk,
   gitTrusted,
@@ -35,6 +36,8 @@ export interface GitWriteStore {
   discardHunk: (path: string, hunk: HunkRange) => void;
   /** Resolves true when the commit was recorded, false when it was refused. */
   commit: (message: string, amend: boolean) => Promise<boolean>;
+  /** Hands one path to whatever this machine has registered to open it. */
+  open: (path: string) => void;
 }
 
 /**
@@ -83,6 +86,7 @@ export function useGitWrite(project: number | null): GitWriteStore {
       discardHunk: (path, hunk) =>
         void on(hunkKey(path, hunk), (id) => gitDiscardHunk(id, path, hunk)),
       commit: (message, amend) => on(COMMIT, (id) => gitCommit(id, message, amend)),
+      open: (path) => void on(path, (id) => gitOpenFile(id, path)),
     };
   }, [busy, dismissError, error, project, run, trusted]);
 }

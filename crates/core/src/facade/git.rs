@@ -8,14 +8,10 @@
 //! watcher noticing the same action converge on one snapshot instead of racing to two.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use super::Facade;
-use crate::agents::{AgentTool, OneShotError};
 use crate::events::DomainEvent;
-use crate::git::{
-    DiffExtent, Git, GitDraftError, GitError, GitStatus, GitWriteError, Prompting, PullRequestError,
-};
+use crate::git::{DiffExtent, Git, GitError, GitStatus, GitWriteError, Prompting};
 use crate::ids::ProjectId;
 use crate::ports::StoreError;
 use crate::vcs::{Branches, DiffTarget, FileContent, FileDiff, HunkRange, ProjectFile};
@@ -116,6 +112,21 @@ impl Facade {
         Ok(())
     }
 
+    /// Hands one of `project`'s files to whatever this machine has registered to open it.
+    ///
+    /// Gated on trust in the core, because it starts a program the desktop chooses from a name the
+    /// repository supplied. A path that leaves the repository — by saying so, or by being a link
+    /// that leads out of it — is refused and nothing is opened.
+    ///
+    /// Runs outside this process, so callers reach this through [`Facade::blocking`] rather than a
+    /// runtime worker.
+    pub fn git_open_file(&self, project: ProjectId, path: &str) -> Result<(), GitWriteError> {
+        let root = self
+            .project_root(project)?
+            .ok_or(GitWriteError::UnknownProject)?;
+        self.git.open_file(project, &root, path)
+    }
+
     /// Records everything the working tree holds for `path` in the index.
     ///
     /// Runs an external tool, so callers reach this through [`Facade::blocking`] rather than a
@@ -186,6 +197,25 @@ impl Facade {
         self.git_change(project, |git, root| {
             git.commit(project, root, message, amend)
         })
+    }
+
+    /// The message a new commit in `project` starts from, as the repository's own configuration
+    /// supplies it (`commit.template`), with the guidance lines version control strips from an
+    /// edited message already gone. `Ok(None)` where nothing is configured.
+    ///
+    /// Offered rather than applied: it is the text a message box starts at, and whoever is writing
+    /// the commit replaces it. Nothing is committed here, and the commit itself is unchanged —
+    /// version control consults a template only when it would open an editor, and Soloist commits
+    /// the message it was handed.
+    ///
+    /// Gated on trust like a change, because the configuration read is one the repository can
+    /// carry and it names a file for Soloist to read. Runs an external tool, so callers reach this
+    /// through [`Facade::blocking`] rather than a runtime worker.
+    pub fn git_commit_template(&self, project: ProjectId) -> Result<Option<String>, GitWriteError> {
+        let root = self
+            .project_root(project)?
+            .ok_or(GitWriteError::UnknownProject)?;
+        self.git.commit_template(project, &root)
     }
 
     /// Starts a branch called `name` at what `project` has checked out, and switches to it.
@@ -267,53 +297,6 @@ impl Facade {
         self.git_change(project, |git, root| git.abort_merge(project, root))
     }
 
-    /// Drafts a commit message describing what is staged in `project`, by running the agent tool
-    /// the user picked for it.
-    ///
-    /// Opt-in twice over: it is refused outright until a tool is selected
-    /// ([`Facade::set_assist_settings`]), and the project must be trusted, because what runs is an
-    /// agent CLI with the project as its working directory. The draft is **only text** — nothing
-    /// here stages, commits, or writes anything, and the caller is expected to read and change it
-    /// before it is used.
-    ///
-    /// Composing what to ask reads the repository and the durable settings, so that half goes to
-    /// the blocking pool; the run itself is bounded by the agents context and reaches its tool off
-    /// the runtime. Must run within a `tokio` runtime.
-    pub async fn git_draft_commit_message(
-        self: &Arc<Self>,
-        project: ProjectId,
-    ) -> Result<String, DraftError> {
-        let (tool, root, prompt) = self
-            .blocking(move |facade| facade.commit_message_question(project))
-            .await?;
-        Ok(self.agents.draft(&tool, &root, &prompt).await?)
-    }
-
-    /// What to ask, and of which tool: the selected tool resolved from the registry, the project's
-    /// root, and the prompt composed from what is staged there. Every refusal a draft can produce
-    /// without running anything happens here — which is what keeps an unselected tool from costing
-    /// a subprocess, let alone an agent.
-    fn commit_message_question(
-        &self,
-        project: ProjectId,
-    ) -> Result<(AgentTool, PathBuf, String), DraftError> {
-        let selected = self
-            .settings
-            .get(&())?
-            .assist
-            .tool
-            .ok_or(DraftError::NoAssistTool)?;
-        let tool = self
-            .agents
-            .tool(&selected)?
-            .ok_or(DraftError::UnknownTool)?;
-        let root = self
-            .project_root(project)?
-            .ok_or(DraftError::UnknownProject)?;
-        let prompt = self.git.commit_message_prompt(project, &root)?;
-        Ok((tool, root, prompt))
-    }
-
     /// The shape every version-control change shares: resolve the project's root, make the
     /// change, then re-read the status and announce it if it turned out different.
     fn git_change(
@@ -356,31 +339,6 @@ pub enum GitReadError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Git(#[from] GitError),
-}
-
-/// Why nothing was drafted: nobody has picked a tool to draft with, the picked tool is no longer
-/// in the registry, the project is not open, there was nothing worth describing, or the tool itself
-/// could not answer.
-///
-/// One vocabulary for both drafts — a commit message and a pull request's description — because
-/// they are the same tool run the same way, and differ only in what could not be composed to ask
-/// it about.
-#[derive(Debug, thiserror::Error)]
-pub enum DraftError {
-    #[error("no agent tool is selected to draft with")]
-    NoAssistTool,
-    #[error("the agent tool selected to draft with is no longer configured")]
-    UnknownTool,
-    #[error("no such project")]
-    UnknownProject,
-    #[error(transparent)]
-    Store(#[from] StoreError),
-    #[error(transparent)]
-    Draft(#[from] GitDraftError),
-    #[error(transparent)]
-    Description(#[from] PullRequestError),
-    #[error(transparent)]
-    OneShot(#[from] OneShotError),
 }
 
 #[cfg(test)]

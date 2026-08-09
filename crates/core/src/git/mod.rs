@@ -10,9 +10,10 @@
 //! what an agent is told about a staged change when it is asked to describe it, what
 //! exchanging commits with a remote is allowed to cost, and what proposing a branch's commits as
 //! a pull request needs before it can be offered. Running the tools is an adapter's job
-//! (`crates/git`, over the system `git` command line; `crates/forge`, over the `gh` one); a missing
-//! adapter degrades to [`NoopGitRepository`] or [`NoopGitForge`], and a project simply shows no
-//! version control, or no pull requests.
+//! (`crates/git`, over the system `git` command line; `crates/forge`, over the `gh` one; the Tauri
+//! shell, for handing a file to the desktop); a missing adapter degrades to
+//! [`NoopGitRepository`], [`NoopGitForge`] or [`NoopFileOpener`], and a project simply shows no
+//! version control, no pull requests, or no way to open a file elsewhere.
 //!
 //! Nothing the tool printed reaches here: the adapter parses its machine-readable output into
 //! these types, so the core's behaviour cannot depend on the wording — or the language — of a
@@ -29,6 +30,7 @@ mod forge;
 mod handoff;
 mod history;
 mod message;
+mod opener;
 mod path;
 mod pr;
 mod repository;
@@ -48,6 +50,7 @@ pub use forge::{
 };
 pub use handoff::{HandoffSubject, CHECK_LOG_LIMIT, HANDOFF_LIMIT};
 pub use history::LOG_PAGE_SIZE;
+pub use opener::{FileOpener, NoopFileOpener, OpenError};
 pub use pr::{PullRequestError, PullRequestSurface};
 pub use repository::{
     BranchOp, Exchange, GitRepository, LogRange, NoopGitRepository, RawFileDiff, RawHunk, StashOp,

@@ -1172,6 +1172,28 @@ shape matters: the plugin compiles each `url` with the `glob` crate and matches 
 crosses `/` and `https://*` matches a full URL with a path and query. Enforcement is in the Rust
 process; the webview-side guard is convenience, not the boundary.
 
+**Amended 2026-08-09 — a file can now be opened, and `open_path` is *still* not granted.** The git
+Files tab needed "open this file in the application registered for it", which this entry had
+deliberately withheld the permission for. Revisiting it changed the answer rather than reversing it:
+the withholding stands, and the capability is untouched. Read from `tauri-plugin-opener` 2.5.4's own
+source, the scope check lives entirely in the plugin's `#[tauri::command] open_path`
+(`src/commands.rs`) — the Rust API `Opener::open_path` consults no scope at all. So the grant only
+ever governs the **webview's** route to the desktop, and the webview keeps having none. What was
+built instead is a driven port (`core::git::FileOpener`) with the plugin behind it in the app crate,
+reached through one core method behind the **project trust gate**, with the path refused if it names
+its way out of the repository *or resolves* out of it through a link inside one.
+
+That is strictly narrower than the alternative, and the reason is that no static pattern could
+express what is actually wanted. The plugin's path scope is a list of globs fixed at build time,
+rooted at one of the base directories its schema enumerates (`$HOME`, `$DOCUMENT`, `$APPDATA`, …);
+a project's root is a folder the user picks while the app is running, so "only inside the project
+that is open" cannot be written down there. Granting `opener:allow-open-path` would therefore have
+meant a pattern far wider than the rule — and would have let the webview open a path the core never
+approved. The residual is the mirror of the one below: the trust gate and the containment check are
+exercised headless (`crates/app/src/opener_tests.rs` against real files and real symlinks;
+`crates/core/src/git/files_tests.rs` for the gate), but **no test starts a real desktop program**,
+so that the plugin actually opens anything on this machine remains unobserved.
+
 **Two schemes, and the reason for each exclusion.** `http:` and `https:` only. `file:` would hand a
 local path to the desktop on nothing more than a line of output; `javascript:` and `data:` are script
 chosen by whatever wrote that line. A URL printed by a supervised process is untrusted input.
@@ -1818,3 +1840,42 @@ were all owner-decided (2026-07-24 and 2026-08-05) with no open question straddl
 existing row regresses, and the "git worktrees/sandboxes" exclusion in `plan/02`'s closing section
 still stands. Design of record: the Soloist scratchpad **`git-integration-design`**. Full gap
 decision: `plan/05` §12.
+
+---
+
+## D-36 — An agent handoff is a paste and nothing else: Soloist never presses return 🟢
+
+**Introduced:** the `git-integration` initiative, pull-request review slice (todo 44, branch
+`feat/git-pr-review`); recorded 2026-08-09 on the owner's decision, after the built behaviour and
+the parity row's wording were found to disagree.
+
+**Solo — silent, not contradicted.** `plan/05` documents no pull-request review and no git surface
+of any kind, so nothing here is attributed to Solo. This is an internal decision about a
+[D-35](#d-35--git-is-a-first-class-surface-inside-soloist-a-soloist-extension-) behaviour, kept
+beside it rather than in a design note for the same reason D-35 is.
+
+**What `plan/02` VC9 asked for, and what was built.** The row's Verify read "a handoff delivers the
+**full** context … into the bound agent's session **as one fresh turn**". What ships delivers the
+same context into the same session and then stops: the text lands in the agent's input, no carriage
+return crosses the wire, and the human presses send. The coordination scheduler's timer delivery
+*does* append `\r` (that is what "as one fresh turn" means there), so the two are genuinely
+different and the row said the wrong one. **The built behaviour is the decision; the row is
+amended.**
+
+**Why the paste is the right shape.** Pressing return is not delivery, it is instruction: it makes
+the agent act on something a person has not read yet. Everything a handoff carries came from
+somewhere Soloist does not control — a check's log, a reviewer's comment — and it arrives in a
+session that may be mid-task. Submitting it would let a failing CI job's output start work on the
+user's behalf, in their repository, under their credentials, with the first they hear of it being
+the agent's reply. So the context is composed, fenced and bounded, and what to do about it stays the
+reader's decision. That the return is absent is asserted rather than intended
+(`nothing_is_submitted_on_the_agents_behalf`, `crates/core/src/facade/git_review_tests.rs`).
+
+**Why this is not the timer's rule.** A coordination timer's body is delivered as a fresh turn
+because the lead agent that set it *asked for that*, minutes earlier, naming the condition and the
+text — the submission is the thing it configured. A handoff has no such prior instruction: somebody
+clicked a button next to a comment, and the only thing they said was "give this to the agent".
+
+**Effect on parity:** amends the Verify of `plan/02` **VC9** to state the paste. No row regresses,
+and VC11's MCP git surface is unaffected — an agent reaching a handoff over MCP receives text as a
+tool result, which was never a turn in the first place.

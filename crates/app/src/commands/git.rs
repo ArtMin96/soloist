@@ -111,6 +111,43 @@ pub async fn git_trust_project(
         .map_err(|err| err.to_string())
 }
 
+/// Hands one of a project's files to whatever this machine has registered to open it — the
+/// user's editor, for the kinds of file they read here.
+///
+/// Refused in the core for a project that has not been trusted, and for a path that leaves the
+/// repository: the program that starts is chosen by the desktop from a name the repository
+/// supplied, so the rule is the same one every other change to a repository passes.
+///
+/// Starting a program runs outside this process, so it goes to the blocking pool.
+#[tauri::command]
+pub async fn git_open_file(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+    path: String,
+) -> Result<(), String> {
+    facade
+        .blocking(move |f| f.git_open_file(project, &path))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// The message a new commit starts from, as the repository's own configuration supplies it, with
+/// the guidance lines version control strips from an edited message already gone. `null` where
+/// nothing is configured. Offered as the text the message box starts at, never applied: the
+/// commit itself still carries whatever was typed.
+///
+/// Reading it runs an external tool, so it goes to the blocking pool.
+#[tauri::command]
+pub async fn git_commit_template(
+    facade: State<'_, Arc<Facade>>,
+    project: ProjectId,
+) -> Result<Option<String>, String> {
+    facade
+        .blocking(move |f| f.git_commit_template(project))
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Records everything the working tree holds for one path in the index.
 ///
 /// Changing a repository runs an external tool, so it goes to the blocking pool.
