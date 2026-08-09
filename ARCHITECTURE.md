@@ -45,8 +45,8 @@ headless-testable and is the mechanical guarantee behind *"remove MCP → app st
 | `store` | driven adapter | SQLite: `Store`/`ProjectRepo`/`TrustRepo`/`RuntimeState` + migrations | `core`, `ipc`, `rusqlite` | live |
 | `pty` | driven adapter | `ProcessSpawner`/`PtyIo`/`ProcessControl`/`OrphanControl` over `portable-pty`+`nix` | `core`, `portable-pty`, `nix` | live |
 | `sys` | driven adapter | `MetricsProbe` (CPU/mem) + `PortProbe` (discovery), both over `/proc`; `FileWatcher` over `notify` — monitoring C5 | `core`, `notify`, `libc` | live |
-| `git` | driven adapter | `GitRepository` over the **system `git` CLI** — machine formats, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, fresh process group, bounded timeout, kill+reap — git C9 | `core`, `tokio` | planned (`git-integration`) |
-| `forge` | driven adapter | `GitForge` over the **`gh` CLI** (`gh pr … --json`; `gh auth status` feature detection) — git C9 | `core`, `tokio`, `serde_json` | planned (`git-integration`) |
+| `git` | driven adapter | `GitRepository` over the **system `git` CLI** — machine formats, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, fresh process group, bounded timeout, kill+reap — git C9 | `core`, `soloist-exec` | live (`git-integration`) |
+| `forge` | driven adapter | `GitForge` over the **`gh` CLI** (`gh pr list/create --json`; `gh auth status` feature detection; the repository's own pull-request templates read off disk) — git C9 | `core`, `soloist-exec`, `serde_json` | live (`git-integration`) |
 | `app` | driving + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `sys`, `httpapi`, `tauri` | live |
 | `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | live (P8 skeleton) |
 | `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | live (P10: read API + CORS) |
@@ -100,7 +100,7 @@ the layer those contexts import.
 | **C6** Coordination | `coordination` | scratchpads, todos, diagrams, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos + key-value); **diagrams** (Mermaid source docs, `mermaid-diagrams` initiative) mirror scratchpads; end-to-end orchestration (E7) proven |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
 | **C8** Integration façade | `facade` `identity` | the public command/query API (`Facade`, local authority) + the session-scoped surface (`ScopedFacade`); MCP identity & effective scope | live (`facade`) |
-| **C9** Git | `git/` (+ shared-kernel `vcs`) | working-tree status & diff, staging (file & hunk), commit/amend, sync + ahead/behind, branches & stash, PR create/review/merge, paged log, the per-project status cache and its watch reactor | planned (`git-integration`; `plan/02` §VC, `KNOWN-DIVERGENCES` D-35) |
+| **C9** Git | `git/` (+ shared-kernel `vcs`) | working-tree status & diff, staging (file & hunk), commit/amend, sync + ahead/behind, branches & stash, pull-request create + templates, paged log, the per-project status cache and its watch reactor | live through PR create (`git-integration`; PR review/merge and the MCP surface remain — `plan/02` §VC, `KNOWN-DIVERGENCES` D-35) |
 
 Cross-cutting in `core`: `events` (the `DomainEvent` bus), `composition` (the `CorePorts` set the root
 assembles), `ports` (the traits no single context owns, each with its `Noop` default),
