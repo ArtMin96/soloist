@@ -13,6 +13,7 @@ mod integration_servers;
 mod ipc_server;
 mod notifier;
 mod open_project;
+mod opener;
 #[cfg(feature = "mcp")]
 mod peer_cred;
 mod pty_bridge;
@@ -42,6 +43,7 @@ use tauri_plugin_window_state::StateFlags;
 use tokio::sync::broadcast::error::RecvError;
 
 use notifier::TauriNotifier;
+use opener::DesktopFileOpener;
 use pty_bridge::PtyBridge;
 
 /// The label of the window the app shows its UI in.
@@ -125,6 +127,7 @@ fn build_facade(app: AppHandle) -> Facade {
         .file_watcher(Arc::new(NotifyFileWatcher::new()))
         .git_repository(Arc::new(CliGitRepository::new()))
         .git_forge(Arc::new(GhForge::new()))
+        .file_opener(Arc::new(DesktopFileOpener::new(app.clone())))
         .notifier(Arc::new(TauriNotifier::new(app)))
         .agent_tools(store.clone())
         .version_probe(Arc::new(CommandVersionProbe::new()))
@@ -482,6 +485,7 @@ pub fn run() {
             commands::git_files,
             commands::git_diff,
             commands::git_file,
+            commands::git_open_file,
             commands::git_trusted,
             commands::git_trust_project,
             commands::git_stage,
@@ -491,6 +495,7 @@ pub fn run() {
             commands::git_unstage_hunk,
             commands::git_discard_hunk,
             commands::git_commit,
+            commands::git_commit_template,
             commands::git_draft_commit_message,
             commands::git_branches,
             commands::git_create_branch,

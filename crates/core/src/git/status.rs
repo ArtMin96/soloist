@@ -20,6 +20,7 @@ use crate::vcs::{BranchInfo, FileChange};
 use super::error::{GitError, GitWriteError};
 use super::exchange::Stop;
 use super::forge::GitForge;
+use super::opener::FileOpener;
 use super::repository::GitRepository;
 
 /// A repository's working tree at one moment: what is checked out, and everything that differs
@@ -45,6 +46,10 @@ pub struct Git {
     /// second method on the first, because it is a different machine answering — one the user
     /// may have no tool for and no account on, which is the first thing it is asked.
     pub(super) forge: Arc<dyn GitForge>,
+    /// The desktop this machine is, for handing it a file to open. A third port because it is a
+    /// third thing answering — neither version control nor the hosting service, but whatever
+    /// program the user has registered for that kind of file.
+    pub(super) opener: Arc<dyn FileOpener>,
     /// The durable record of which projects the user has authorised Soloist to change. Held
     /// here, in the context that changes them, so no surface can reach a write without passing
     /// the gate — the same reason the supervisor holds it rather than asking a caller.
@@ -63,17 +68,19 @@ pub struct Git {
 }
 
 impl Git {
-    /// Builds the context over the two ports the composition root chose — the working tree on this
-    /// disk and the service its pull requests live on — and the trust record their write sides are
-    /// gated on.
+    /// Builds the context over the three ports the composition root chose — the working tree on
+    /// this disk, the service its pull requests live on, and the desktop a file can be handed to —
+    /// and the trust record everything behind the gate is spent against.
     pub fn new(
         repository: Arc<dyn GitRepository>,
         forge: Arc<dyn GitForge>,
+        opener: Arc<dyn FileOpener>,
         trust: Arc<dyn TrustRepo>,
     ) -> Self {
         Self {
             repository,
             forge,
+            opener,
             trust,
             cached: Mutex::new(HashMap::new()),
             gates: Mutex::new(HashMap::new()),

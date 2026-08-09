@@ -12,7 +12,7 @@ use crate::vcs::ChangeKind;
 
 use crate::git::{GitError, GitStatus};
 
-use super::GitWriteError;
+use super::{GitWriteError, COMMIT_TEMPLATE_LIMIT};
 
 /// The fake ignores it — a commit is addressed by project here, not by path.
 const ROOT: &str = "/project";
@@ -132,6 +132,53 @@ fn a_project_that_has_not_been_trusted_cannot_commit() {
 
     assert!(matches!(refusal, GitWriteError::Untrusted), "{refusal:?}");
     assert_eq!(repository.changes(), Vec::new());
+}
+
+#[test]
+fn what_the_repository_starts_a_message_from_is_offered_to_whoever_writes_one() {
+    let template = "Refs:\n";
+    let repository = with_something_staged().templating(template);
+    let project = ProjectId::next();
+    let git = git_trusting(repository, project);
+
+    let offered = git
+        .commit_template(project, Path::new(ROOT))
+        .expect("a template read");
+
+    assert_eq!(offered, Some(template.to_string()));
+}
+
+#[test]
+fn a_project_that_has_not_been_trusted_has_its_configuration_left_unread() {
+    // The configuration behind a template is one the repository itself can carry, and it names a
+    // file anywhere on this disk for Soloist to read and put in front of somebody. So it is spent
+    // against the same gate a change is, and an untrusted project is refused rather than answered
+    // with nothing — which would say the repository configures no template.
+    let repository = with_something_staged().templating("Refs:\n");
+    let git = git_over(repository.clone());
+
+    let refusal = git
+        .commit_template(ProjectId::next(), Path::new(ROOT))
+        .unwrap_err();
+
+    assert!(matches!(refusal, GitWriteError::Untrusted), "{refusal:?}");
+    assert_eq!(repository.reads(), 0);
+}
+
+#[test]
+fn a_template_past_the_ceiling_the_core_sets_is_no_template_at_all() {
+    // The ceiling is the core's and the adapter applies it, so a template nobody would edit in a
+    // message box never reaches one — dropped whole, since half of one is filled in as though it
+    // were the whole.
+    let repository = with_something_staged().templating(&"x".repeat(COMMIT_TEMPLATE_LIMIT + 1));
+    let project = ProjectId::next();
+    let git = git_trusting(repository, project);
+
+    let offered = git
+        .commit_template(project, Path::new(ROOT))
+        .expect("a template read");
+
+    assert_eq!(offered, None);
 }
 
 #[test]

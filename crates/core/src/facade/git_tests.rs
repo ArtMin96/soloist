@@ -1,31 +1,23 @@
-//! Behavioural tests for the façade's version-control read — the door every adapter comes
-//! through. They assemble a real [`Facade`] over fakes, so what is asserted is what a Tauri
-//! command, an HTTP route, or a tool would get back.
+//! Behavioural tests for the façade's version-control reads and the file actions behind the
+//! project's trust gate — the door every adapter comes through. They assemble a real [`Facade`]
+//! over fakes, so what is asserted is what a Tauri command, an HTTP route, or a tool would get back.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tempfile::TempDir;
-use tokio::time::timeout;
 
-use crate::agents::{AgentKind, AgentTool, OneShotError, PromptMode};
 use crate::composition::CorePorts;
 use crate::facade::Facade;
-use crate::git::DiffExtent;
+use crate::git::{DiffExtent, GitWriteError};
 use crate::ids::ProjectId;
 use crate::ports::{ProjectRepo, TokioClock};
-use crate::process::ProcStatus;
-use crate::settings::Assist;
-use crate::shellenv::{NoopShellEnvProbe, ShellEnvProbe};
 use crate::testing::{
-    file_change, git_status, raw_diff, wait_all, FakeAgentOneShot, FakeAgentToolRepo,
-    FakeGitRepository, FakeProjectRepo, FakeSettingsRepo, FakeShellEnvProbe, FakeSpawner,
-    FakeTrustRepo,
+    file_change, git_status, raw_diff, FakeFileOpener, FakeGitRepository, FakeProjectRepo,
+    FakeSpawner, FakeTrustRepo,
 };
 use crate::vcs::{ChangeKind, DiffTarget, FileContent};
 
-use super::{DraftError, GitReadError};
+use super::GitReadError;
 
 const PATH: &str = "src/main.rs";
 
@@ -121,221 +113,70 @@ fn without_the_git_adapter_a_project_simply_has_no_version_control() {
         "the default port degrades silently, as every optional driven port does",
     );
 }
-
-const ASSIST_TOOL: &str = "My CLI";
-
-const DRAFTED: &str = "Record the index";
-
-/// A directory an agent CLI is only ever on the user's interactive `PATH` from.
-const VERSION_MANAGER_BIN: &str = "/home/dev/.nvm/versions/node/v20.0.0/bin";
-
-/// Long enough for a fake spawner to report a start, short enough that a launch that never
-/// resolves an environment fails in seconds instead of hanging the suite.
-const SPAWN_WAIT: Duration = Duration::from_secs(10);
-
-fn assist_tool() -> AgentTool {
-    AgentTool {
-        name: ASSIST_TOOL.to_string(),
-        command: "mycli".to_string(),
-        default_args: Vec::new(),
-        kind: AgentKind::Generic,
-        prompt_mode: PromptMode::Stdin,
-    }
-}
-
-/// A façade over a trusted project with one path staged, the given registry, and `one_shot` behind
-/// the drafting port. Durable settings are real (in memory), so what a test selects is what the
-/// façade reads back.
-fn facade_for_drafting(
-    tools: Vec<AgentTool>,
-    one_shot: Arc<FakeAgentOneShot>,
-) -> (Arc<Facade>, ProjectId, TempDir) {
-    facade_for_drafting_capturing(tools, one_shot, Arc::new(NoopShellEnvProbe))
-}
-
-/// The same façade, resolving the environment a launch and a headless run are made in through
-/// `shell_env_probe` — for the test that proves both consult the one cache.
-fn facade_for_drafting_capturing(
-    tools: Vec<AgentTool>,
-    one_shot: Arc<FakeAgentOneShot>,
-    shell_env_probe: Arc<dyn ShellEnvProbe>,
-) -> (Arc<Facade>, ProjectId, TempDir) {
+/// A façade over a trusted project, with `repository` behind the working tree and `opener` behind
+/// the desktop — the two ports the trust-gated file actions reach.
+fn facade_for_a_trusted_project(
+    repository: FakeGitRepository,
+    opener: FakeFileOpener,
+) -> (Facade, ProjectId, TempDir) {
     let dir = tempfile::tempdir().expect("temp dir");
     let projects = Arc::new(FakeProjectRepo::new());
     let root = dir.path().canonicalize().expect("canonical root");
     let project = projects.upsert(&root, None, None).expect("add project").id;
-    let mut status = git_status("main");
-    status
-        .changes
-        .push(file_change(PATH, Some(ChangeKind::Modified), None));
     let ports = CorePorts::builder(
         Arc::new(FakeSpawner::exits_on_terminate()),
         Arc::new(TokioClock),
         Arc::new(FakeTrustRepo::new().trusting_project(project)),
         projects,
     )
-    .git_repository(Arc::new(
-        FakeGitRepository::reporting(status)
-            .diffing(raw_diff(HEADER, &["@@ -1,1 +1,1 @@\n-old\n+new\n"])),
-    ))
-    .agent_tools(Arc::new(FakeAgentToolRepo::new(tools)))
-    .agent_one_shot(one_shot)
-    .shell_env_probe(shell_env_probe)
-    .settings_repo(Arc::new(FakeSettingsRepo::new()));
-    (Arc::new(Facade::new(ports.build())), project, dir)
+    .git_repository(Arc::new(repository))
+    .file_opener(Arc::new(opener));
+    (Facade::new(ports.build()), project, dir)
 }
 
-#[tokio::test]
-async fn with_a_tool_selected_a_draft_comes_back_describing_what_is_staged() {
-    let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
-    let (facade, project, _dir) = facade_for_drafting(vec![assist_tool()], one_shot.clone());
-    facade
-        .set_assist_settings(Assist {
-            tool: Some(ASSIST_TOOL.to_string()),
-        })
-        .expect("select");
-
-    let drafted = facade
-        .git_draft_commit_message(project)
-        .await
-        .expect("a draft");
-
-    assert_eq!(drafted, DRAFTED);
-    let subject = one_shot.subjects().pop().expect("one run");
-    assert!(
-        subject.contains("+new"),
-        "the tool was given the staged change to describe: {subject}",
+#[test]
+fn opening_a_file_reaches_the_desktop_with_the_path_the_reader_named() {
+    let opener = FakeFileOpener::new();
+    let (facade, project, _dir) = facade_for_a_trusted_project(
+        FakeGitRepository::reporting(git_status("main")),
+        opener.clone(),
     );
+
+    facade.git_open_file(project, PATH).expect("open");
+
+    assert_eq!(opener.opened(), vec![PATH.to_string()]);
 }
 
-#[tokio::test]
-async fn a_draft_records_nothing_and_commits_nothing() {
-    // The whole safety property of the feature: what comes back is text for a person to read and
-    // change. Nothing about asking for it touches the index or the history.
-    let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
-    let (facade, project, _dir) = facade_for_drafting(vec![assist_tool()], one_shot);
-    facade
-        .set_assist_settings(Assist {
-            tool: Some(ASSIST_TOOL.to_string()),
-        })
-        .expect("select");
-
-    facade
-        .git_draft_commit_message(project)
-        .await
-        .expect("a draft");
-
-    let status = facade
-        .git_status(project)
-        .expect("read")
-        .expect("a repository");
-    assert_eq!(
-        status.changes.len(),
-        1,
-        "the working tree is exactly as it was",
+#[test]
+fn opening_a_file_in_a_project_that_is_not_open_reaches_no_desktop() {
+    let opener = FakeFileOpener::new();
+    let (facade, _project, _dir) = facade_for_a_trusted_project(
+        FakeGitRepository::reporting(git_status("main")),
+        opener.clone(),
     );
-}
 
-#[tokio::test]
-async fn with_no_tool_selected_nothing_is_run_at_all() {
-    // The opt-in half of the feature, asserted where it matters: not merely that the call is
-    // refused, but that the refusal happens before anything is run — neither the agent, nor the
-    // shell whose environment a run would be made in. Resolving that environment before knowing
-    // there is anything to run would cost a person's machine a shell startup for an action nobody
-    // can take.
-    let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
-    let probe = Arc::new(FakeShellEnvProbe::returning(BTreeMap::new()));
-    let (facade, project, _dir) =
-        facade_for_drafting_capturing(vec![assist_tool()], one_shot.clone(), probe.clone());
-
-    let refusal = facade.git_draft_commit_message(project).await.unwrap_err();
-
-    assert!(matches!(refusal, DraftError::NoAssistTool), "{refusal:?}",);
-    assert!(one_shot.runs().is_empty());
-    assert_eq!(probe.calls(), 0, "and no shell was started either");
-}
-
-#[tokio::test]
-async fn a_selected_tool_that_is_no_longer_configured_is_named_rather_than_guessed_at() {
-    // A tool can be renamed or removed after it was picked. Falling back to another one would run
-    // something the user never chose.
-    let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
-    let (facade, project, _dir) = facade_for_drafting(vec![assist_tool()], one_shot.clone());
-    facade
-        .set_assist_settings(Assist {
-            tool: Some("Some Other CLI".to_string()),
-        })
-        .expect("select");
-
-    let refusal = facade.git_draft_commit_message(project).await.unwrap_err();
-
-    assert!(matches!(refusal, DraftError::UnknownTool), "{refusal:?}",);
-    assert!(one_shot.runs().is_empty());
-}
-
-#[tokio::test]
-async fn a_tool_that_never_answers_surfaces_the_timeout_it_was_stopped_at() {
-    let one_shot = Arc::new(FakeAgentOneShot::refusing(OneShotError::Timeout));
-    let (facade, project, _dir) = facade_for_drafting(vec![assist_tool()], one_shot);
-    facade
-        .set_assist_settings(Assist {
-            tool: Some(ASSIST_TOOL.to_string()),
-        })
-        .expect("select");
-
-    let refusal = facade.git_draft_commit_message(project).await.unwrap_err();
+    let refusal = facade
+        .git_open_file(ProjectId::from_raw(4_242), PATH)
+        .expect_err("no such project");
 
     assert!(
-        matches!(refusal, DraftError::OneShot(OneShotError::Timeout)),
-        "a surface can only say what went wrong if the reason survives the trip: {refusal:?}",
+        matches!(refusal, GitWriteError::UnknownProject),
+        "{refusal:?}"
     );
+    assert_eq!(opener.opened(), Vec::<String>::new());
 }
 
-#[tokio::test]
-async fn a_draft_asked_for_after_a_launch_runs_no_second_shell() {
-    // The one resolver, asserted where it is observable rather than assumed from how the façade is
-    // assembled. A launch resolves the environment it starts a process in; a draft asked for
-    // straight afterwards must find that answer already there. Two resolvers would each capture,
-    // which on a shell that takes seconds to start is a person waiting twice for one commit
-    // message.
-    let probe = Arc::new(FakeShellEnvProbe::returning(BTreeMap::from([(
-        "PATH".to_string(),
-        VERSION_MANAGER_BIN.to_string(),
-    )])));
-    let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
-    let (facade, project, _dir) =
-        facade_for_drafting_capturing(vec![assist_tool()], one_shot.clone(), probe.clone());
-    facade
-        .set_assist_settings(Assist {
-            tool: Some(ASSIST_TOOL.to_string()),
-        })
-        .expect("select");
-    let mut events = facade.subscribe();
-
-    let launched = facade
-        .launch_agent(project, ASSIST_TOOL, Vec::new())
-        .expect("launch");
-    timeout(
-        SPAWN_WAIT,
-        wait_all(&mut events, &[launched], ProcStatus::Running),
-    )
-    .await
-    .expect("the launched process reached Running");
-    assert_eq!(probe.calls(), 1, "the launch captured the shell once");
-
-    facade
-        .git_draft_commit_message(project)
-        .await
-        .expect("a draft");
-
-    assert_eq!(
-        probe.calls(),
-        1,
-        "the draft read the environment the launch had already resolved",
+#[test]
+fn a_message_box_starts_at_what_the_repository_configured_it_to_start_at() {
+    const TEMPLATE: &str = "Refs:\n";
+    let (facade, project, _dir) = facade_for_a_trusted_project(
+        FakeGitRepository::reporting(git_status("main")).templating(TEMPLATE),
+        FakeFileOpener::new(),
     );
-    assert_eq!(
-        one_shot.environments().pop().expect("one run").get("PATH"),
-        Some(&VERSION_MANAGER_BIN.to_string()),
-        "and it is that captured environment the tool was run in",
-    );
+
+    let offered = facade
+        .git_commit_template(project)
+        .expect("a template read");
+
+    assert_eq!(offered, Some(TEMPLATE.to_string()));
 }

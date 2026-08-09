@@ -1,6 +1,6 @@
-import { forwardRef, useMemo } from "react";
+import { useMemo } from "react";
 import { Undo2Icon } from "lucide-react";
-import { RepositoryTree, type RepositoryTreeHandle } from "@/components/git/RepositoryTree";
+import { RepositoryTree } from "@/components/git/RepositoryTree";
 import { StageCheckbox } from "@/components/git/StageCheckbox";
 import { StatusLetter } from "@/components/git/StatusLetter";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TreeItemLabel } from "@/components/ui/tree";
 import { CHANGE } from "@/lib/git";
 import { cn } from "@/lib/utils";
-import { buildChangesTree } from "@/store/git/tree";
+import type { Tree } from "@/store/git/tree";
 import type { FileChange } from "@/domain";
 
 /** Names the tree for a screen reader. */
@@ -34,26 +34,31 @@ export interface ChangeActions {
  * away. Those are absent, not disabled, until the project has been trusted to be changed: an
  * action nobody may take is not an action.
  */
-export const ChangesTree = forwardRef<
-  RepositoryTreeHandle,
-  {
-    changes: FileChange[];
-    /** The actions each file row offers, or null while the project may not be changed. */
-    actions: ChangeActions | null;
-    onExpansionChange?: (allExpanded: boolean) => void;
-    onOpen?: (path: string) => void;
-  }
->(function ChangesTree({ changes, actions, onExpansionChange, onOpen }, ref) {
-  const data = useMemo(() => buildChangesTree(changes), [changes]);
+export function ChangesTree({
+  tree,
+  changes,
+  actions,
+  expanded,
+  onExpandedChange,
+  onOpen,
+}: {
+  /** The shape the rows hang on, built by whoever also owns which folders are open. */
+  tree: Tree;
+  changes: FileChange[];
+  /** The actions each file row offers, or null while the project may not be changed. */
+  actions: ChangeActions | null;
+  expanded: string[];
+  onExpandedChange: (paths: string[] | ((open: string[]) => string[])) => void;
+  onOpen?: (path: string) => void;
+}) {
   const byPath = useMemo(() => new Map(changes.map((change) => [change.path, change])), [changes]);
 
   return (
     <RepositoryTree
-      ref={ref}
-      data={data}
+      data={tree}
       label={LABEL}
-      autoExpand
-      onExpansionChange={onExpansionChange}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
       onOpen={(node) => onOpen?.(node.path)}
       row={(node) => {
         const change = byPath.get(node.path);
@@ -104,4 +109,4 @@ export const ChangesTree = forwardRef<
       }}
     />
   );
-});
+}

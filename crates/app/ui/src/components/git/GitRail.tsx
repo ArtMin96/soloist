@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { GitBranchIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react";
 import { BranchHeader } from "@/components/git/BranchHeader";
 import type { BranchActions } from "@/components/git/BranchMenu";
@@ -16,17 +16,20 @@ import {
   TreeExpansionButton,
 } from "@/components/git/RailChrome";
 import { TrustNotice } from "@/components/git/TrustNotice";
-import type { RepositoryTreeHandle } from "@/components/git/RepositoryTree";
 import { PaneDivider } from "@/components/PaneDivider";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Option } from "@/lib/appearance";
+import type { FileChange } from "@/domain";
 import { CHANGE, FILE, type DiffSelection } from "@/store/git/useDiffSelection";
 import { useGitFiles } from "@/store/git/useGitFiles";
 import { useGitStatus } from "@/store/git/useGitStatus";
 import { useCommitMessageDraft } from "@/store/git/useCommitMessageDraft";
+import { useCommitTemplate } from "@/store/git/useCommitTemplate";
+import { useTreeExpansion } from "@/store/git/useTreeExpansion";
+import { buildChangesTree, buildFilesTree } from "@/store/git/tree";
 import { BRANCH as BRANCH_ACTION, MERGE as MERGE_ACTION, useGitSync } from "@/store/git/useGitSync";
 import { useGitWrite } from "@/store/git/useGitWrite";
 import {
@@ -59,6 +62,10 @@ const ABANDON_MERGE_TITLE = "Abandon this merge?";
 const ABANDON_MERGE_CONFIRM = "Abandon";
 const ABANDON_MERGE_CANCEL = "Keep merging";
 
+/** Stands in for a project with nothing changed, so "no changes" is one list rather than a new one
+ *  every render — which is what keeps the tree built from it from being rebuilt for nothing. */
+const NO_CHANGES: FileChange[] = [];
+
 /** What the rail says when a tab has nothing in it, per state. */
 const NOT_A_REPOSITORY = "Not a git repository";
 const NOTHING_CHANGED = "No changes";
@@ -85,10 +92,6 @@ export function GitRail({
 }) {
   const [layout, setLayout] = useRailLayout();
   const [tab, setTab] = useState<RailTab>(CHANGES_TAB);
-  const [changesFoldersExpanded, setChangesFoldersExpanded] = useState(false);
-  const [filesFoldersExpanded, setFilesFoldersExpanded] = useState(false);
-  const changesTree = useRef<RepositoryTreeHandle>(null);
-  const filesTree = useRef<RepositoryTreeHandle>(null);
   const [discarding, setDiscarding] = useState<Discardable | null>(null);
   const [deletingBranch, setDeletingBranch] = useState<string | null>(null);
   const [abandoningMerge, setAbandoningMerge] = useState(false);
@@ -98,9 +101,19 @@ export function GitRail({
   const write = useGitWrite(project);
   const sync = useGitSync(project, switcherOpen);
   const draft = useCommitMessageDraft(project);
+  const template = useCommitTemplate(project, write.trusted === true);
+  const changes = status.status?.changes ?? NO_CHANGES;
+  // Built here rather than inside each tree, because whoever owns which folders are open needs the
+  // same shape the rows hang on — one fact, one owner.
+  const changesTree = useMemo(() => buildChangesTree(changes), [changes]);
+  const filesTree = useMemo(
+    () => (files.files === null ? null : buildFilesTree(files.files)),
+    [files.files],
+  );
+  const changesFolders = useTreeExpansion(changesTree, true);
+  const filesFolders = useTreeExpansion(filesTree, false);
   // One place a refused action is stated, whichever asked for it.
   const refusal = write.error ?? sync.error ?? draft.error;
-  const changes = status.status?.changes ?? [];
   const actions: ChangeActions | null =
     write.trusted === true
       ? {
@@ -228,16 +241,14 @@ export function GitRail({
               />
               {tab === CHANGES_TAB && changes.length > 0 && (
                 <TreeExpansionButton
-                  expanded={changesFoldersExpanded}
-                  onClick={() =>
-                    changesTree.current?.setAllFoldersExpanded(!changesFoldersExpanded)
-                  }
+                  expanded={changesFolders.allExpanded}
+                  onClick={changesFolders.toggleAll}
                 />
               )}
-              {tab === FILES_TAB && files.files !== null && (
+              {tab === FILES_TAB && filesTree !== null && (
                 <TreeExpansionButton
-                  expanded={filesFoldersExpanded}
-                  onClick={() => filesTree.current?.setAllFoldersExpanded(!filesFoldersExpanded)}
+                  expanded={filesFolders.allExpanded}
+                  onClick={filesFolders.toggleAll}
                 />
               )}
             </div>
@@ -248,24 +259,25 @@ export function GitRail({
                 ) : (
                   <ScrollArea className="h-full">
                     <ChangesTree
-                      ref={changesTree}
+                      tree={changesTree}
                       changes={changes}
                       actions={actions}
-                      onExpansionChange={setChangesFoldersExpanded}
+                      expanded={changesFolders.expanded}
+                      onExpandedChange={changesFolders.setExpanded}
                       onOpen={(path) => onOpen?.({ kind: CHANGE, path })}
                     />
                   </ScrollArea>
                 )}
               </div>
               <div hidden={tab !== FILES_TAB} className="h-full">
-                {files.files === null ? (
+                {filesTree === null ? (
                   <RailEmpty>{files.loading ? "" : NO_FILES}</RailEmpty>
                 ) : (
                   <ScrollArea className="h-full">
                     <FilesTree
-                      ref={filesTree}
-                      files={files.files}
-                      onExpansionChange={setFilesFoldersExpanded}
+                      tree={filesTree}
+                      expanded={filesFolders.expanded}
+                      onExpandedChange={filesFolders.setExpanded}
                       onOpen={(path) => onOpen?.({ kind: FILE, path })}
                     />
                   </ScrollArea>
@@ -286,6 +298,7 @@ export function GitRail({
                 <CommitBox
                   changes={changes}
                   busy={write.committing}
+                  template={template}
                   draft={
                     draft.available ? { drafting: draft.drafting, request: draft.draft } : null
                   }

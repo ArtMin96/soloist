@@ -59,6 +59,7 @@ mod commands;
 mod coordination;
 mod diagram;
 mod git;
+mod git_draft;
 mod git_pr;
 mod git_review;
 mod kv;
@@ -82,7 +83,8 @@ mod todo;
 
 pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
-pub use git::{DraftError, GitReadError};
+pub use git::GitReadError;
+pub use git_draft::DraftError;
 pub use git_review::{Handoff, HandoffError};
 pub use prompt_template::PromptRenderError;
 pub use scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
@@ -149,6 +151,7 @@ impl Facade {
             file_watcher,
             git_repository,
             git_forge,
+            file_opener,
             notifier,
             trust,
             projects,
@@ -188,7 +191,12 @@ impl Facade {
             settings: Arc::new(SettingsStore::new(settings_repo)),
             project_settings: Arc::new(SettingsStore::new(project_settings_repo)),
             feedback: Feedback::new(feedback_repo, clock.clone()),
-            git: Arc::new(Git::new(git_repository, git_forge, trust.clone())),
+            git: Arc::new(Git::new(
+                git_repository,
+                git_forge,
+                file_opener,
+                trust.clone(),
+            )),
             clock,
             metrics,
             port_probe,

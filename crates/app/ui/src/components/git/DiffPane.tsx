@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Columns2Icon, Rows2Icon } from "lucide-react";
+import { Columns2Icon, ExternalLinkIcon, Rows2Icon } from "lucide-react";
 import { DiffViewer, SIDE_BY_SIDE, UNIFIED, type DiffLayout } from "@/components/git/DiffViewer";
 import { DiscardDialog } from "@/components/git/DiscardDialog";
 import { FilePreview } from "@/components/git/FilePreview";
@@ -25,6 +25,7 @@ const PANE_LABEL = "Diff";
 const SIDE_BY_SIDE_LABEL = "Show the two sides side by side";
 const UNIFIED_LABEL = "Show the two sides in one column";
 const LOAD_FULL_LABEL = "Load the whole diff";
+const OPEN_LABEL = "Open in the default application";
 
 /** What the split says when there is nothing in it to render, per state. */
 const NOT_A_REPOSITORY = "Not a git repository";
@@ -105,6 +106,16 @@ export function DiffPane({
               onClick={() => setSplit(split === SIDE_BY_SIDE ? UNIFIED : SIDE_BY_SIDE)}
             />
           )}
+          {/* Absent rather than disabled until the project is trusted: what this starts is a
+              program the desktop picks from the file's own name, which the core refuses to do on
+              a project the user has not authorised Soloist to act within. */}
+          {write.trusted === true && (
+            <SplitButton
+              label={OPEN_LABEL}
+              icon={<ExternalLinkIcon />}
+              onClick={() => write.open(selection.path)}
+            />
+          )}
         </>
       }
       notices={
@@ -121,6 +132,10 @@ export function DiffPane({
             </SplitNotice>
           )}
           {content?.truncated === true && <SplitNotice>{PREVIEW_TRUNCATED}</SplitNotice>}
+          {/* One place a refused action is stated, whichever asked for it — the same shape the
+              rail uses. Cleared when the next action starts, so it never outlives what it is
+              about. */}
+          {write.error !== null && <SplitNotice>{write.error}</SplitNotice>}
         </>
       }
       onClose={onClose}

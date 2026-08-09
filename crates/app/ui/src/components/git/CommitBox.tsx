@@ -24,24 +24,34 @@ const DRAFTING = "Drafting a message…";
  * A drafted message lands in the box like any other and is committed by the same button, because
  * it is a draft: nothing here treats it as more finished than what somebody typed.
  *
+ * The repository's own template is followed rather than copied in: until somebody types, the box
+ * *is* the template, so one arriving after the box was rendered shows up and one that changed
+ * cannot be left stale by state that was seeded once. Typing takes the box over from it, and a
+ * recorded commit hands it back — which is what makes the next commit start from the template
+ * again.
+ *
  * Presentational: it holds the message being typed and nothing else.
  */
 export function CommitBox({
   changes,
   busy,
+  template,
   draft,
   onCommit,
 }: {
   changes: FileChange[];
   busy: boolean;
+  /** What a message starts as where the repository configures one, or `null` where it does not. */
+  template: string | null;
   /** Asking for a message, or `null` when no tool is configured to draft one. */
   draft: { drafting: boolean; request: () => Promise<string | null> } | null;
   /** Resolves true when the commit was recorded, which is when the message is cleared. */
   onCommit: (message: string, amend: boolean) => Promise<boolean>;
 }) {
   const amendId = useId();
-  const [message, setMessage] = useState("");
+  const [typed, setTyped] = useState<string | null>(null);
   const [amend, setAmend] = useState(false);
+  const message = typed ?? template ?? "";
   const staged = changes.some((change) => change.status.staged !== null);
   const ready = message.trim() !== "" && (amend || staged);
   const drafting = draft?.drafting === true;
@@ -49,7 +59,7 @@ export function CommitBox({
   const commit = () => {
     void onCommit(message, amend).then((recorded) => {
       if (recorded) {
-        setMessage("");
+        setTyped(null);
         setAmend(false);
       }
     });
@@ -57,7 +67,7 @@ export function CommitBox({
 
   const requestDraft = () => {
     void draft?.request().then((drafted) => {
-      if (drafted !== null) setMessage(drafted);
+      if (drafted !== null) setTyped(drafted);
     });
   };
 
@@ -69,7 +79,7 @@ export function CommitBox({
         placeholder={PLACEHOLDER}
         rows={3}
         className="resize-none"
-        onChange={(event) => setMessage(event.target.value)}
+        onChange={(event) => setTyped(event.target.value)}
       />
       <div className="flex items-center gap-2">
         <Checkbox

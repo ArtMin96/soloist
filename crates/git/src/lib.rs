@@ -16,6 +16,7 @@ mod patch;
 mod runner;
 mod status_parse;
 mod sync;
+mod template;
 mod write;
 
 use std::fs::File;
@@ -277,6 +278,14 @@ impl GitRepository for CliGitRepository {
     fn discard_hunk(&self, root: &Path, path: &str, hunk: HunkRange) -> Result<(), GitError> {
         let diff = self.diff(root, DiffTarget::Unstaged, path, None)?;
         write::apply_hunk(root, &diff, hunk, write::Apply::Discard)
+    }
+
+    fn commit_template(&self, root: &Path, limit: usize) -> Result<Option<String>, GitError> {
+        match template::commit_template(root, limit) {
+            Ok(template) => Ok(template),
+            Err(GitError::Op { .. }) if !inside_work_tree(root) => Err(GitError::NotARepo),
+            Err(err) => Err(err),
+        }
     }
 
     fn commit(&self, root: &Path, message: &str, amend: bool) -> Result<(), GitError> {

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use crate::git::NoopFileOpener;
 use crate::git::{ForgeError, ForgeReadiness, GitError, SyncOp};
 use crate::ids::ProjectId;
 use crate::testing::{
@@ -36,6 +37,7 @@ fn trusting(repository: FakeGitRepository, forge: FakeGitForge, project: Project
     Arc::new(Git::new(
         Arc::new(repository),
         Arc::new(forge),
+        Arc::new(NoopFileOpener),
         Arc::new(FakeTrustRepo::new().trusting_project(project)),
     ))
 }
@@ -45,6 +47,7 @@ fn untrusting(repository: FakeGitRepository, forge: FakeGitForge) -> Arc<Git> {
     Arc::new(Git::new(
         Arc::new(repository),
         Arc::new(forge),
+        Arc::new(NoopFileOpener),
         Arc::new(FakeTrustRepo::new()),
     ))
 }

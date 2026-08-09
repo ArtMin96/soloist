@@ -7,6 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::git::NoopFileOpener;
 use crate::git::NoopGitForge;
 use crate::ids::ProjectId;
 use crate::testing::{git_status, untrusting, FakeGitRepository};
@@ -22,6 +23,7 @@ fn git(repository: &FakeGitRepository) -> Git {
     Git::new(
         Arc::new(repository.clone()),
         Arc::new(NoopGitForge),
+        Arc::new(NoopFileOpener),
         untrusting(),
     )
 }

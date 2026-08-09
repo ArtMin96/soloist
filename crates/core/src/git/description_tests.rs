@@ -1,6 +1,7 @@
 //! Behavioural tests for what an agent is told about a branch it is asked to describe. They assert
 //! the composed prompt, which is the whole of what the agent sees — nothing here runs one.
 
+use crate::git::NoopFileOpener;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -23,6 +24,7 @@ fn trusting(repository: FakeGitRepository, project: ProjectId) -> Arc<Git> {
     Arc::new(Git::new(
         Arc::new(repository),
         Arc::new(FakeGitForge::ready()),
+        Arc::new(NoopFileOpener),
         Arc::new(FakeTrustRepo::new().trusting_project(project)),
     ))
 }
@@ -61,6 +63,7 @@ fn a_project_that_has_not_been_trusted_composes_nothing_to_ask_an_agent() {
     let git = Arc::new(Git::new(
         Arc::new(repository.clone()),
         Arc::new(FakeGitForge::ready()),
+        Arc::new(NoopFileOpener),
         Arc::new(FakeTrustRepo::new()),
     ));
 

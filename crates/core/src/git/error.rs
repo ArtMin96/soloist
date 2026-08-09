@@ -51,10 +51,11 @@ pub enum GitError {
     Op { status: Option<i32> },
 }
 
-/// Why a change to a project's working tree was not made.
+/// Why something behind a project's trust gate was not done — a change to its working tree, or
+/// one of the few reads gated like one.
 ///
-/// Reads have [`GitReadError`](crate::facade::GitReadError); a change has more ways to be
-/// refused than to fail, and every one of them is decided here in the core rather than by
+/// Ungated reads have [`GitReadError`](crate::facade::GitReadError); what is gated has more ways
+/// to be refused than to fail, and every one of them is decided here in the core rather than by
 /// whichever surface asked — so the UI, an agent over MCP, and a future remote caller are
 /// refused identically.
 #[derive(Debug, thiserror::Error)]
@@ -71,6 +72,10 @@ pub enum GitWriteError {
     /// The path named does not name something inside the repository.
     #[error("that path is not inside the repository")]
     OutsideRepository,
+    /// Nothing on this machine would open the file — no program is registered for it, or the one
+    /// that is could not be started.
+    #[error("nothing on this machine could open that file")]
+    Unopenable,
     /// The path is not tracked, so there is no earlier version of it to be restored from.
     /// Throwing it away would mean deleting a file nothing else holds a copy of.
     #[error("that file is not tracked, so there is nothing to restore it from")]

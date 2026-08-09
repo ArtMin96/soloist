@@ -33,6 +33,7 @@ mod git;
 mod git_change;
 mod git_fixtures;
 mod git_forge;
+mod git_opener;
 mod identity;
 mod lock_releaser;
 mod metrics;
@@ -62,11 +63,12 @@ pub use fixtures::{agent_registration, terminal_registration};
 pub use git::FakeGitRepository;
 pub use git_change::GitChange;
 pub use git_fixtures::{
-    branch, branches, check_run, commit_entry, file_change, git_over, git_status, git_trusting,
-    hunk_range, merge_entry, project_file, pull_request, pull_request_review,
+    branch, branches, check_run, commit_entry, file_change, git_opening, git_over, git_status,
+    git_trusting, hunk_range, merge_entry, project_file, pull_request, pull_request_review,
     pull_request_template, raw_diff, review_thread, tracking_status, untrusting,
 };
 pub use git_forge::{created_url, FakeGitForge};
+pub use git_opener::FakeFileOpener;
 pub use identity::{authentic_session, session_in_dir, TEST_PEER_PGID};
 pub use lock_releaser::RecordingLockReleaser;
 pub use metrics::FakeMetricsProbe;
