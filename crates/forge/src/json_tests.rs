@@ -1,8 +1,8 @@
 //! Tests for reading the tool's machine-readable answers. Every payload here was captured from a
 //! real `gh` on a real repository and then scrubbed of anything naming a person or a project.
 
-use super::{default_base, first_pull_request, signed_in};
-use soloist_core::{ForgeError, PullRequestState};
+use super::{first_pull_request, repository, signed_in};
+use soloist_core::{ForgeError, MergeMethod, PullRequestState};
 
 /// What `gh auth status --json hosts` prints for an account that is signed in.
 const SIGNED_IN: &[u8] = br#"{"hosts":{"github.com":[{"state":"success","active":true,"host":"github.com","login":"octocat","tokenSource":"keyring","scopes":"gist, read:org, repo, workflow","gitProtocol":"https"}]}}"#;
@@ -104,13 +104,52 @@ fn a_field_that_was_asked_for_and_did_not_arrive_is_a_failure_rather_than_a_gues
 #[test]
 fn a_repository_reports_the_branch_it_merges_into_and_says_so_when_it_has_none() {
     assert_eq!(
-        default_base(br#"{"defaultBranchRef":{"name":"main"}}"#).expect("read"),
+        repository(&allowing(br#""defaultBranchRef":{"name":"main"}"#))
+            .expect("read")
+            .default_base,
         Some("main".to_string()),
     );
     assert_eq!(
-        default_base(br#"{"defaultBranchRef":null}"#).expect("read"),
+        repository(&allowing(br#""defaultBranchRef":null"#))
+            .expect("read")
+            .default_base,
         None,
         "a repository with no commits yet has no default branch, which is a state rather than a \
          failure",
     );
+}
+
+/// A repository payload allowing every way of merging, so a test about one field states only it.
+fn allowing(head: &[u8]) -> Vec<u8> {
+    let mut payload = b"{".to_vec();
+    payload.extend_from_slice(head);
+    payload.extend_from_slice(
+        br#","mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"viewerDefaultMergeMethod":"MERGE"}"#,
+    );
+    payload
+}
+
+#[test]
+fn a_repository_offers_only_the_ways_of_merging_it_permits_its_own_first() {
+    let read = repository(
+        br#"{"defaultBranchRef":{"name":"main"},"mergeCommitAllowed":false,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"viewerDefaultMergeMethod":"REBASE"}"#,
+    )
+    .expect("read");
+
+    assert_eq!(
+        read.merge_methods,
+        vec![MergeMethod::Rebase, MergeMethod::Squash],
+        "a repository that forbids merge commits must not be offered one, and the one it prefers \
+         is what a surface should reach for first",
+    );
+}
+
+#[test]
+fn a_preference_this_does_not_recognise_still_leaves_every_permitted_way_on_offer() {
+    let read = repository(
+        br#"{"defaultBranchRef":null,"mergeCommitAllowed":true,"squashMergeAllowed":false,"rebaseMergeAllowed":false,"viewerDefaultMergeMethod":"SOMETHING_NEW"}"#,
+    )
+    .expect("read");
+
+    assert_eq!(read.merge_methods, vec![MergeMethod::Merge]);
 }

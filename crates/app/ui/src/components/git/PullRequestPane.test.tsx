@@ -9,6 +9,9 @@ vi.mock("@/api", () => ({
   gitPullRequestSurface: vi.fn(),
   gitCreatePullRequest: vi.fn(() => Promise.resolve("")),
   gitDraftPullRequestBody: vi.fn(() => Promise.resolve("")),
+  gitPullRequestReview: vi.fn(() => Promise.resolve(null)),
+  gitMergePullRequest: vi.fn(() => Promise.resolve()),
+  gitHandOff: vi.fn(),
   assistSettings: vi.fn(() => Promise.resolve({ tool: null })),
   onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
   onResync: vi.fn(() => Promise.resolve(() => {})),
@@ -20,6 +23,7 @@ import {
   assistSettings,
   gitCreatePullRequest,
   gitDraftPullRequestBody,
+  gitPullRequestReview,
   gitPullRequestSurface,
 } from "@/api";
 import { PullRequestPane } from "@/components/git/PullRequestPane";
@@ -28,6 +32,7 @@ import { openExternal } from "@/lib/opener";
 import type { PullRequest, PullRequestSurface } from "@/domain";
 
 const readSurface = vi.mocked(gitPullRequestSurface);
+const readReview = vi.mocked(gitPullRequestReview);
 const create = vi.mocked(gitCreatePullRequest);
 const draftBody = vi.mocked(gitDraftPullRequestBody);
 const readAssist = vi.mocked(assistSettings);
@@ -56,6 +61,7 @@ function surface(over: Partial<PullRequestSurface> = {}): PullRequestSurface {
     base: BASE,
     existing: null,
     templates: [],
+    merge_methods: [],
     ...over,
   };
 }
@@ -76,7 +82,7 @@ function existing(over: Partial<PullRequest> = {}): PullRequest {
 function renderPane() {
   return render(
     <TooltipProvider>
-      <PullRequestPane project={PROJECT} onClose={() => {}} />
+      <PullRequestPane project={PROJECT} agent={null} onClose={() => {}} />
     </TooltipProvider>,
   );
 }
@@ -186,6 +192,24 @@ describe("PullRequestPane", () => {
     await waitFor(() => expect(within(pane()).getByText("#12")).toBeTruthy());
     expect(within(pane()).getByText("Open")).toBeTruthy();
     expect(within(pane()).queryByLabelText("Title")).toBeNull();
+  });
+
+  it("reads and shows the review of the pull request the branch already has", async () => {
+    readSurface.mockResolvedValue(surface({ existing: existing() }));
+    readReview.mockResolvedValue({
+      pull_request: existing(),
+      checks: [{ name: "build", state: "failed", workflow: null, url: null }],
+      threads: [],
+    });
+
+    renderPane();
+
+    await waitFor(() => expect(within(pane()).getByText("build")).toBeTruthy());
+    expect(readReview).toHaveBeenCalledWith(PROJECT);
+    expect(
+      within(pane()).queryByRole("button", { name: "Merge" }),
+      "the repository permits no way of merging, so the pane offers none — it does not invent one",
+    ).toBeNull();
   });
 
   it("offers a new one where the last was merged, because that branch may propose again", async () => {

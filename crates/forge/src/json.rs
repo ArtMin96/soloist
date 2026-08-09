@@ -10,7 +10,11 @@ use serde::Deserialize;
 use serde_json::from_slice;
 use std::collections::BTreeMap;
 
-use soloist_core::{ForgeError, PullRequest, PullRequestState};
+use soloist_core::{
+    ForgeError, ForgeRepository, MergeMethod, PullRequest, PullRequestReview, PullRequestState,
+};
+
+use crate::review::ReviewPayload;
 
 /// The fields one pull request is asked for, in the tool's own spelling. Requested as one string
 /// and read into [`Payload`], so the request and the reading are the same list.
@@ -35,11 +39,35 @@ struct Payload {
     head_ref_name: String,
 }
 
+/// The fields the repository itself is asked for, in the tool's own spelling.
+pub(crate) const REPOSITORY_FIELDS: &str = "defaultBranchRef,mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed,viewerDefaultMergeMethod";
+
+/// What the tool calls each way of putting a pull request into its base. Its own spelling, matched
+/// exactly; a word this does not know simply orders nothing, since the ways themselves are read
+/// from the three flags beside it.
+const MERGE: &str = "MERGE";
+const SQUASH: &str = "SQUASH";
+const REBASE: &str = "REBASE";
+
 /// What the tool reports about the repository itself.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RepositoryPayload {
     default_branch_ref: Option<NamedRef>,
+    merge_commit_allowed: bool,
+    squash_merge_allowed: bool,
+    rebase_merge_allowed: bool,
+    viewer_default_merge_method: String,
+}
+
+/// One pull request as the tool reports it, together with what it says about its review. Read as
+/// one shape because it arrives as one answer.
+#[derive(Deserialize)]
+struct ReviewedPayload {
+    #[serde(flatten)]
+    pull_request: Payload,
+    #[serde(flatten)]
+    review: ReviewPayload,
 }
 
 #[derive(Deserialize)]
@@ -64,11 +92,53 @@ pub(crate) fn signed_in(output: &[u8]) -> bool {
         .is_ok_and(|auth| auth.hosts.values().any(|accounts| !accounts.is_empty()))
 }
 
-/// The branch a repository merges into unless told otherwise, or `None` where the tool does not say
-/// — which is what a repository with no commits yet answers.
-pub(crate) fn default_base(output: &[u8]) -> Result<Option<String>, ForgeError> {
+/// What the tool says about the repository itself: what it merges into, and how it allows a pull
+/// request to be put there.
+pub(crate) fn repository(output: &[u8]) -> Result<ForgeRepository, ForgeError> {
     let repository: RepositoryPayload = from_slice(output).map_err(|_| unreadable())?;
-    Ok(repository.default_branch_ref.map(|head| head.name))
+    let allowed = [
+        (MergeMethod::Merge, repository.merge_commit_allowed),
+        (MergeMethod::Squash, repository.squash_merge_allowed),
+        (MergeMethod::Rebase, repository.rebase_merge_allowed),
+    ];
+    let preferred = merge_method(&repository.viewer_default_merge_method);
+    let mut merge_methods: Vec<MergeMethod> = allowed
+        .into_iter()
+        .filter_map(|(method, permitted)| permitted.then_some(method))
+        .collect();
+    // The one it prefers goes first, so a surface offering these offers the repository's own answer
+    // without having to know which that is.
+    merge_methods.sort_by_key(|method| Some(*method) != preferred);
+    Ok(ForgeRepository {
+        default_base: repository.default_branch_ref.map(|head| head.name),
+        merge_methods,
+    })
+}
+
+/// Which way of merging a word names, or `None` for one this does not know.
+fn merge_method(reported: &str) -> Option<MergeMethod> {
+    match reported {
+        MERGE => Some(MergeMethod::Merge),
+        SQUASH => Some(MergeMethod::Squash),
+        REBASE => Some(MergeMethod::Rebase),
+        _ => None,
+    }
+}
+
+/// The first listed pull request with what the tool says about its review, or `None` when the list
+/// is empty. The threads that hang on lines of the diff are not here — the tool does not report
+/// them — so what comes back carries only the conversations about the change as a whole.
+pub(crate) fn first_review(output: &[u8]) -> Result<Option<PullRequestReview>, ForgeError> {
+    let listed: Vec<ReviewedPayload> = from_slice(output).map_err(|_| unreadable())?;
+    let Some(first) = listed.into_iter().next() else {
+        return Ok(None);
+    };
+    let (checks, threads) = first.review.into_parts();
+    Ok(Some(PullRequestReview {
+        pull_request: pull_request(first.pull_request)?,
+        checks,
+        threads,
+    }))
 }
 
 /// The first pull request of a list, or `None` when the list is empty — which is the ordinary

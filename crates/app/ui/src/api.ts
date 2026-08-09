@@ -22,12 +22,15 @@ import type {
   FileDiff,
   Branches,
   GitStatus,
+  Handoff,
+  HandoffSubject,
   HotkeyAction,
   HotkeyBindingView,
   HunkRange,
   Integrations,
   LineageEdge,
   McpFeatureGroup,
+  MergeMethod,
   McpSetupInfo,
   McpToolGroups,
   NotificationLevel,
@@ -44,6 +47,7 @@ import type {
   ProjectSettings,
   ProjectSettingsPage,
   ProjectView,
+  PullRequestReview,
   PullRequestSurface,
   RenderedPrompt,
   ScratchpadView,
@@ -262,6 +266,32 @@ export function gitDraftPullRequestBody(
   skeleton: string,
 ): Promise<string> {
   return invoke<string>("git_draft_pull_request_body", { project, base, skeleton });
+}
+
+// What the checked-out branch has open on the service: the pull request, what its checks say, and
+// what people have written on it. Null when the branch has nothing open.
+export function gitPullRequestReview(project: number): Promise<PullRequestReview | null> {
+  return invoke<PullRequestReview | null>("git_pull_request_review", { project });
+}
+
+// Puts a pull request's commits into its base branch. What the service refuses comes back in its
+// own words and nothing is merged.
+export function gitMergePullRequest(
+  project: number,
+  number: number,
+  method: MergeMethod,
+): Promise<void> {
+  return invoke<void>("git_merge_pull_request", { project, number, method });
+}
+
+// Hands what a check or a conversation says to an agent, as text in its session. `target` names
+// which agent; omitting it asks for the project's only running one. Nothing is submitted.
+export function gitHandOff(
+  project: number,
+  subject: HandoffSubject,
+  target: number | null,
+): Promise<Handoff> {
+  return invoke<Handoff>("git_hand_off", { project, subject, target });
 }
 
 // --- Coordination panels: the scratchpad panel and the to-do board read/write through these.

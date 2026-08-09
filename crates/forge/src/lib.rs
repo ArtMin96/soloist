@@ -14,21 +14,22 @@
 
 mod gh;
 mod json;
+mod log;
+mod review;
 mod templates;
+mod threads;
 
 use std::path::Path;
 
 use soloist_core::{
-    ForgeError, ForgeReadiness, GitForge, NewPullRequest, PullRequest, PullRequestTemplate, Stop,
+    CheckRun, ForgeError, ForgeReadiness, ForgeRepository, GitForge, MergeMethod, NewPullRequest,
+    PullRequest, PullRequestReview, PullRequestTemplate, ReviewLimits, Stop,
 };
 
 /// The arguments asking which accounts the tool holds, in the one machine-readable form it offers.
 /// It answers with a zero status whether or not there is an account, so the payload is the whole
 /// signal.
 const AUTH_ARGS: &[&str] = &["auth", "status", "--json", "hosts"];
-
-/// The arguments asking what the repository merges into by default.
-const REPOSITORY_ARGS: &[&str] = &["repo", "view", "--json", "defaultBranchRef"];
 
 /// How many pull requests are asked for when the question is "does this branch have one". One,
 /// because a branch's most recent proposal is the only one a surface has anything to say about.
@@ -57,8 +58,11 @@ impl GitForge for GhForge {
         }
     }
 
-    fn default_base(&self, root: &Path) -> Result<Option<String>, ForgeError> {
-        json::default_base(&gh::run(root, REPOSITORY_ARGS)?)
+    fn repository(&self, root: &Path) -> Result<ForgeRepository, ForgeError> {
+        json::repository(&gh::run(
+            root,
+            &["repo", "view", "--json", json::REPOSITORY_FIELDS],
+        )?)
     }
 
     fn templates(&self, root: &Path) -> Result<Vec<PullRequestTemplate>, ForgeError> {
@@ -66,25 +70,7 @@ impl GitForge for GhForge {
     }
 
     fn pull_request(&self, root: &Path, branch: &str) -> Result<Option<PullRequest>, ForgeError> {
-        // Asked as a list rather than as a view of one, because a list answers "there is none"
-        // with an empty list and a zero status, where a view answers it with a failure that is
-        // told from every other failure only by its prose.
-        let output = gh::run(
-            root,
-            &[
-                "pr",
-                "list",
-                "--head",
-                branch,
-                "--state",
-                "all",
-                "--limit",
-                NEWEST,
-                "--json",
-                json::PR_FIELDS,
-            ],
-        )?;
-        json::first_pull_request(&output)
+        json::first_pull_request(&gh::run(root, &listing(branch, json::PR_FIELDS))?)
     }
 
     fn create(
@@ -123,6 +109,99 @@ impl GitForge for GhForge {
             },
         )?;
         address(&output)
+    }
+
+    fn review(
+        &self,
+        root: &Path,
+        branch: &str,
+        limits: ReviewLimits,
+    ) -> Result<Option<PullRequestReview>, ForgeError> {
+        let fields = format!("{},{}", json::PR_FIELDS, review::REVIEW_FIELDS);
+        let Some(mut reviewed) = json::first_review(&gh::run(root, &listing(branch, &fields))?)?
+        else {
+            return Ok(None);
+        };
+        // The conversations that hang on lines of the diff are the one thing the pull-request
+        // commands do not report, so they are asked for separately — of the service the pull
+        // request's own address names.
+        if let Some(host) = threads::host_of(&reviewed.pull_request.url) {
+            let args = threads::args(
+                host,
+                reviewed.pull_request.number,
+                limits.threads,
+                limits.comments,
+            );
+            let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+            let inline = threads::threads(&gh::run(root, &borrowed)?)?;
+            // Inline first: a comment on a line is what a reader came to read, and a review's own
+            // summary is the frame around it.
+            reviewed.threads = inline.into_iter().chain(reviewed.threads).collect();
+        }
+        reviewed.threads.truncate(limits.threads);
+        for thread in &mut reviewed.threads {
+            thread.comments.truncate(limits.comments);
+        }
+        Ok(Some(reviewed))
+    }
+
+    fn merge(
+        &self,
+        root: &Path,
+        number: u64,
+        method: MergeMethod,
+        stop: &Stop,
+    ) -> Result<(), ForgeError> {
+        let stopped = || stop.stopped();
+        let number = number.to_string();
+        gh::run_with(
+            root,
+            &["pr", "merge", &number, merge_flag(method)],
+            gh::Run {
+                input: None,
+                stopped: Some(&stopped),
+            },
+        )?;
+        Ok(())
+    }
+
+    fn check_log(
+        &self,
+        root: &Path,
+        check: &CheckRun,
+        limit: usize,
+    ) -> Result<Option<String>, ForgeError> {
+        let Some(url) = &check.url else {
+            return Ok(None);
+        };
+        let Some(job) = log::job_of(url) else {
+            return Ok(None);
+        };
+        let args = log::args(job);
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        Ok(Some(log::tail(&gh::run(root, &borrowed)?, limit)))
+    }
+}
+
+/// The arguments listing `branch`'s most recent pull request, asking for `fields`.
+///
+/// Asked as a list rather than as a view of one, because a list answers "there is none" with an
+/// empty list and a zero status, where a view answers it with a failure that is told from every
+/// other failure only by its prose.
+fn listing<'a>(branch: &'a str, fields: &'a str) -> Vec<&'a str> {
+    vec![
+        "pr", "list", "--head", branch, "--state", "all", "--limit", NEWEST, "--json", fields,
+    ]
+}
+
+/// The flag naming each way of putting a pull request into its base. Always passed: with nobody at
+/// a terminal the tool has no way to ask which was meant, and a merge is not something to leave to
+/// a default.
+fn merge_flag(method: MergeMethod) -> &'static str {
+    match method {
+        MergeMethod::Merge => "--merge",
+        MergeMethod::Squash => "--squash",
+        MergeMethod::Rebase => "--rebase",
     }
 }
 

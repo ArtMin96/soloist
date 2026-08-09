@@ -1,4 +1,12 @@
-import type { ChangeKind, GitFileStatus, HunkRange, SyncState } from "@/domain";
+import type {
+  ChangeKind,
+  CheckState,
+  GitFileStatus,
+  HunkRange,
+  MergeMethod,
+  ReviewThread,
+  SyncState,
+} from "@/domain";
 
 /**
  * The single source for turning a version-control change into its display, alongside
@@ -85,6 +93,41 @@ export function stagedState(status: GitFileStatus): StagedState {
  */
 export function hunkKey(path: string, hunk: HunkRange): string {
   return `${path}@${hunk.old_start},${hunk.old_lines},${hunk.new_start},${hunk.new_lines}`;
+}
+
+/**
+ * The single source for turning a check's state into its display, on the same redundant rule the
+ * change map follows — a glyph *and* a tone *and* a word. The exhaustive Record makes the compiler
+ * require an entry for every state the core can report.
+ */
+export interface CheckDisplay {
+  /** What the state is called, which is also the glyph's accessible name. */
+  label: string;
+  /** Tailwind text-color utility, bound to the same `--git-*` tokens the change letters use, so
+   *  version control spends one saturated vocabulary rather than two. */
+  toneClass: string;
+}
+
+export const CHECK: Record<CheckState, CheckDisplay> = {
+  pending: { label: "Running", toneClass: "text-git-modified" },
+  passed: { label: "Passed", toneClass: "text-git-added" },
+  failed: { label: "Failed", toneClass: "text-git-deleted" },
+  skipped: { label: "Skipped", toneClass: "text-git-ignored" },
+  cancelled: { label: "Cancelled", toneClass: "text-git-ignored" },
+  unknown: { label: "Unrecognised", toneClass: "text-git-ignored" },
+};
+
+/** How a merge method is named to somebody choosing one. */
+export const MERGE_METHOD: Record<MergeMethod, string> = {
+  merge: "Create a merge commit",
+  squash: "Squash and merge",
+  rebase: "Rebase and merge",
+};
+
+/** Where a conversation hangs, or null for one about the change as a whole. */
+export function threadPlace(thread: ReviewThread): string | null {
+  if (thread.path === null) return null;
+  return thread.line === null ? thread.path : `${thread.path}:${thread.line}`;
 }
 
 /** How a branch's standing against its upstream reads, or null when there is nothing to say. */

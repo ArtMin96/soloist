@@ -15,6 +15,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::exchange::Stop;
+use super::review::{CheckRun, MergeMethod, PullRequestReview, ReviewLimits};
 
 /// Whether pull requests can be reached at all, and when not, which of the two fixable things is
 /// in the way. A closed set: each answer has one thing the user can do about it, and a surface
@@ -74,6 +75,18 @@ pub struct NewPullRequest {
     pub draft: bool,
 }
 
+/// What the service says about the repository itself, rather than about any one pull request.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct ForgeRepository {
+    /// The branch it merges into unless told otherwise, or `None` where the service does not say —
+    /// which is what a repository with no commits yet answers.
+    pub default_base: Option<String>,
+    /// The ways it allows a pull request to be put into its base branch, the one it prefers first.
+    /// Its own settings, so a surface offers what this repository actually permits rather than
+    /// every method the service has.
+    pub merge_methods: Vec<MergeMethod>,
+}
+
 /// One starting shape offered for a pull request's description, with the name a picker shows it
 /// under. A repository offering several is offering a choice between them, so each keeps its name.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -131,9 +144,9 @@ pub trait GitForge: Send + Sync {
     /// about whether there was an error.
     fn readiness(&self, root: &Path) -> ForgeReadiness;
 
-    /// The branch the repository at `root` merges into unless told otherwise, or `None` where the
-    /// service does not say.
-    fn default_base(&self, root: &Path) -> Result<Option<String>, ForgeError>;
+    /// What the service says about the repository at `root` itself: what it merges into, and how it
+    /// allows pull requests to be put there.
+    fn repository(&self, root: &Path) -> Result<ForgeRepository, ForgeError>;
 
     /// The description skeletons the repository at `root` carries as its own convention, in the
     /// order a picker should offer them, or empty when it carries none.
@@ -167,6 +180,50 @@ pub trait GitForge: Send + Sync {
         new: &NewPullRequest,
         stop: &Stop,
     ) -> Result<String, ForgeError>;
+
+    /// What `branch`'s open pull request looks like under review — the pull request itself, what the
+    /// service's checks say about it, and what people have written on it — or `None` when the branch
+    /// has nothing open.
+    ///
+    /// `limits` is the core's ceiling on how much of somebody else's discussion is carried, applied
+    /// by the implementation to what it asks for as well as to what it returns, so a long argument
+    /// costs a bounded request rather than a bounded slice of an unbounded one.
+    fn review(
+        &self,
+        root: &Path,
+        branch: &str,
+        limits: ReviewLimits,
+    ) -> Result<Option<PullRequestReview>, ForgeError>;
+
+    /// Puts pull request `number`'s commits into its base branch by `method`.
+    ///
+    /// The service's own rules decide whether it may be: a required check that has not passed, a
+    /// review that is owed, a base that has moved. Anything it refuses comes back as
+    /// [`ForgeError::Refused`] carrying its account, and nothing is merged — there is no way to ask
+    /// this to override a repository's rules, deliberately.
+    ///
+    /// Stoppable before the time limit, like every other request that reaches a service.
+    fn merge(
+        &self,
+        root: &Path,
+        number: u64,
+        method: MergeMethod,
+        stop: &Stop,
+    ) -> Result<(), ForgeError>;
+
+    /// The tail of what `check` printed when it failed, at most `limit` bytes, or `None` when the
+    /// check names nothing whose output this can reach.
+    ///
+    /// The tail rather than the head, because a failure is at the end of a log and the beginning of
+    /// one is the machine describing itself. Whether an address names something with a log at all is
+    /// the implementation's business — a check reported by something other than the service's own
+    /// runner has no log here, and that is an ordinary answer rather than a failure.
+    fn check_log(
+        &self,
+        root: &Path,
+        check: &CheckRun,
+        limit: usize,
+    ) -> Result<Option<String>, ForgeError>;
 }
 
 /// A [`GitForge`] that reports the tool as absent — the default until the real adapter is wired
@@ -183,7 +240,7 @@ impl GitForge for NoopGitForge {
         ForgeReadiness::Missing
     }
 
-    fn default_base(&self, _root: &Path) -> Result<Option<String>, ForgeError> {
+    fn repository(&self, _root: &Path) -> Result<ForgeRepository, ForgeError> {
         Err(ForgeError::Missing)
     }
 
@@ -202,6 +259,34 @@ impl GitForge for NoopGitForge {
         _new: &NewPullRequest,
         _stop: &Stop,
     ) -> Result<String, ForgeError> {
+        Err(ForgeError::Missing)
+    }
+
+    fn review(
+        &self,
+        _root: &Path,
+        _branch: &str,
+        _limits: ReviewLimits,
+    ) -> Result<Option<PullRequestReview>, ForgeError> {
+        Err(ForgeError::Missing)
+    }
+
+    fn merge(
+        &self,
+        _root: &Path,
+        _number: u64,
+        _method: MergeMethod,
+        _stop: &Stop,
+    ) -> Result<(), ForgeError> {
+        Err(ForgeError::Missing)
+    }
+
+    fn check_log(
+        &self,
+        _root: &Path,
+        _check: &CheckRun,
+        _limit: usize,
+    ) -> Result<Option<String>, ForgeError> {
         Err(ForgeError::Missing)
     }
 }
