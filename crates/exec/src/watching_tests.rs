@@ -106,12 +106,17 @@ fn a_run_that_will_not_stop_talking_is_reported_on_at_the_interval_rather_than_p
     let observer = move |_remark: &str| {
         counting.fetch_add(1, Ordering::SeqCst);
     };
-    let interval = Duration::from_millis(100);
+    let interval = Duration::from_millis(200);
 
     let started = Instant::now();
     run(
-        // Thousands of remarks, written as fast as a shell can write them.
-        shell("i=0; while [ $i -lt 4000 ]; do printf 'at %s\\r' $i >&2; i=$((i+1)); done"),
+        // Remarks written as fast as a shell can write them, for long enough that the interval is
+        // what bounds the reporting rather than how briefly the run lasted. A run measured in
+        // milliseconds would be bounded by its own brevity and would prove nothing.
+        shell(
+            "end=$(( $(date +%s) + 1 )); i=0; \
+             while [ $(date +%s) -lt $end ]; do printf 'at %s\\r' $i >&2; i=$((i+1)); done",
+        ),
         watched(&observer, interval),
     )
     .expect("finished");
@@ -119,10 +124,10 @@ fn a_run_that_will_not_stop_talking_is_reported_on_at_the_interval_rather_than_p
     // One report per window it ran for, plus the first — which is reported at once rather than
     // waited for, so that a long operation is heard from immediately.
     let windows = started.elapsed().as_millis() / interval.as_millis() + 2;
-    let told = told.load(Ordering::SeqCst);
+    let told = told.load(Ordering::SeqCst) as u128;
     assert!(
-        (told as u128) <= windows,
-        "4000 remarks in {:?} became {told} reports, which is more than the {windows} the interval allows",
+        told <= windows,
+        "a run of {:?} became {told} reports, which is more than the {windows} the interval allows",
         started.elapsed(),
     );
 }
