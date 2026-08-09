@@ -15,7 +15,7 @@ use std::path::Path;
 use crate::ids::ProjectId;
 use crate::sync::lock;
 
-use super::error::GitWriteError;
+use super::error::{GitError, GitWriteError};
 use super::status::Git;
 
 /// The most of a configured commit template that is offered as a starting message.
@@ -43,11 +43,20 @@ impl Git {
         root: &Path,
     ) -> Result<Option<String>, GitWriteError> {
         self.authorize(project)?;
+        Ok(self.configured_template(project, root)?)
+    }
+
+    /// The same template, for a caller that has already passed the gate. One place applies the
+    /// ceiling and asks the port, so what is offered as a starting message and what an agent is
+    /// asked to fill in can never be two different things.
+    pub(super) fn configured_template(
+        &self,
+        project: ProjectId,
+        root: &Path,
+    ) -> Result<Option<String>, GitError> {
         let gate = self.gate(project);
         let _running = lock(&gate);
-        Ok(self
-            .repository
-            .commit_template(root, COMMIT_TEMPLATE_LIMIT)?)
+        self.repository.commit_template(root, COMMIT_TEMPLATE_LIMIT)
     }
 
     /// Records `project`'s index as a commit carrying `message`.
