@@ -72,13 +72,14 @@ fn configured(root: &Path) -> Result<Option<PathBuf>, GitError> {
     Ok((!named.is_empty()).then(|| PathBuf::from(named)))
 }
 
-/// Where `configured` actually is. An absolute path is already there; a relative one is resolved
-/// against the top of the working tree rather than against the folder the project was opened at,
-/// which is only the same path when the project *is* the repository.
+/// Where `configured` actually is: resolved against the top of the working tree rather than against
+/// the folder the project was opened at, which is only the same path when the project *is* the
+/// repository.
+///
+/// An absolute path needs no resolving and takes this route anyway, because joining onto one
+/// replaces the base — so the top is asked for and then discarded, which is one short local
+/// invocation rather than a branch nothing could observe.
 fn resolve(root: &Path, configured: &Path) -> Result<PathBuf, GitError> {
-    if configured.is_absolute() {
-        return Ok(configured.to_path_buf());
-    }
     let toplevel = runner::run(root, TOPLEVEL_ARGS)?;
     let toplevel = String::from_utf8_lossy(&toplevel).trim().to_string();
     Ok(Path::new(&toplevel).join(configured))
