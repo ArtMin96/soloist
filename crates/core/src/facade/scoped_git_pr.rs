@@ -40,10 +40,15 @@ impl ScopedFacade<'_> {
     ///
     /// Gated on the user having trusted the project. The publish half never asks anybody for a
     /// credential, so a branch nobody has arranged credentials for fails promptly rather than
-    /// waiting on a question no one is there to answer.
-    pub fn git_create_pull_request(&self, new: &NewPullRequest) -> Result<String, ScopedGitError> {
+    /// waiting on a question no one is there to answer — and it is the half that reaches a remote
+    /// and can take minutes, so it is what `progress` hears from.
+    pub fn git_create_pull_request(
+        &self,
+        new: &NewPullRequest,
+        progress: &Progress,
+    ) -> Result<String, ScopedGitError> {
         let project = self.git_scope()?;
-        Ok(self.inner.git_propose(project, new, UNATTENDED)?)
+        Ok(self.inner.git_propose(project, new, UNATTENDED, progress)?)
     }
 
     /// Puts pull request `number`'s commits into its base branch by `method`.

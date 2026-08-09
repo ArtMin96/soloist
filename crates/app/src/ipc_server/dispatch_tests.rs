@@ -1,12 +1,12 @@
 use super::*;
 use soloist_core::testing::{
-    terminal_registration, FakeGitRepository, FakeLockRepo, FakeProjectRepo, FakeSettingsRepo,
-    FakeSpawner, FakeTemplateRepo, FakeTrustRepo, GitChange,
+    terminal_registration, FakeGitForge, FakeGitRepository, FakeLockRepo, FakeProjectRepo,
+    FakeSettingsRepo, FakeSpawner, FakeTemplateRepo, FakeTrustRepo, GitChange,
 };
 use soloist_core::{
     AcquireOutcome, BranchOp, CorePorts, DomainEvent, IntegrationFile, McpFeatureGroup,
-    MissingPolicy, Origin, PeerCredentials, ProcStatus, ProcessId, ProjectRepo, Prompting,
-    StartSummary, StashOp, SyncOp, TemplateScope, TokioClock, TrustRepo,
+    MissingPolicy, NewPullRequest, Origin, PeerCredentials, ProcStatus, ProcessId, ProjectRepo,
+    Prompting, StartSummary, StashOp, SyncOp, TemplateScope, TokioClock, TrustRepo,
 };
 use soloist_ipc::GitRefusal;
 use std::collections::BTreeMap;
@@ -1177,8 +1177,9 @@ async fn setup_agent_integration_with_no_scope_is_refused() {
     );
 }
 
-/// A façade over a repository fake with one project open, plus a session sitting in that project's
-/// directory — the routing test's alternate composition root for version control.
+/// A façade over a repository fake and a reachable forge with one project open, plus a session
+/// sitting in that project's directory — the routing test's alternate composition root for version
+/// control. A forge nothing asks anything of costs nothing, so it is always there.
 fn git_facade(repository: FakeGitRepository) -> (Arc<Facade>, Arc<FakeTrustRepo>, TempDir) {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path().canonicalize().expect("canonical root");
@@ -1193,6 +1194,7 @@ fn git_facade(repository: FakeGitRepository) -> (Arc<Facade>, Arc<FakeTrustRepo>
             projects,
         )
         .git_repository(Arc::new(repository))
+        .git_forge(Arc::new(FakeGitForge::ready()))
         .build(),
     ));
     (facade, trust, dir)
@@ -1385,6 +1387,49 @@ async fn a_push_that_asked_to_be_told_hears_the_exchange_and_one_that_did_not_he
         heard,
         vec![soloist_core::testing::REMARK.to_string()],
         "a caller that asked to be told heard nothing",
+    );
+    assert!(
+        silence.is_empty(),
+        "a caller that never asked was told anyway: {silence:?}",
+    );
+}
+
+/// A proposal publishes the branch when the remote does not hold it, so it carries the same slow
+/// exchange a push does — and the same choice about hearing it.
+#[tokio::test]
+async fn a_proposal_that_asked_to_be_told_hears_the_branch_being_published_and_one_that_did_not_hears_nothing(
+) {
+    let status = soloist_core::testing::git_status("main");
+    let (facade, trust, dir) = git_facade(FakeGitRepository::reporting(status));
+    let project = facade
+        .projects_snapshot()
+        .expect("projects")
+        .first()
+        .expect("one project")
+        .id;
+    trust.set_project_trusted(project).expect("trust");
+    let session = facade.open_session(PeerCredentials::in_dir(
+        dir.path().canonicalize().expect("canonical"),
+    ));
+    let proposing = |progress| IpcRequest::GitCreatePullRequest {
+        new: NewPullRequest {
+            title: "Add the thing".into(),
+            body: "It does the thing.".into(),
+            base: "main".into(),
+            draft: false,
+        },
+        progress,
+    };
+
+    let (asked, heard) = served_reporting(&facade, session, proposing(true)).await;
+    let (unasked, silence) = served_reporting(&facade, session, proposing(false)).await;
+
+    assert!(matches!(asked, Ok(IpcResponse::GitPullRequestCreated(_))));
+    assert!(matches!(unasked, Ok(IpcResponse::GitPullRequestCreated(_))));
+    assert_eq!(
+        heard,
+        vec![soloist_core::testing::REMARK.to_string()],
+        "a caller that asked to be told heard nothing while its branch was published",
     );
     assert!(
         silence.is_empty(),

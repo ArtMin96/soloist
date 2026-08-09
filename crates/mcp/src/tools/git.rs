@@ -23,6 +23,7 @@ use crate::args::{
     GitBranchArg, GitCommitArg, GitCreatePullRequestArg, GitDiffArg, GitMergePullRequestArg,
     GitPathArg,
 };
+use crate::client::ClientError;
 use crate::server::SoloistMcp;
 use crate::tools::progress::Reporting;
 use crate::tools::reply::{acked, app_error, structured, unexpected};
@@ -225,9 +226,16 @@ impl SoloistMcp {
     pub(crate) async fn git_create_pull_request(
         &self,
         Parameters(arg): Parameters<GitCreatePullRequestArg>,
+        reporting: Reporting,
     ) -> Result<CallToolResult, ErrorData> {
-        let request = IpcRequest::GitCreatePullRequest { new: arg.into() };
-        match self.client.request(request).await {
+        let new = arg.into();
+        let answered = self
+            .reported(reporting, |progress| IpcRequest::GitCreatePullRequest {
+                new,
+                progress,
+            })
+            .await;
+        match answered {
             Ok(IpcResponse::GitPullRequestCreated(url)) => {
                 structured(&serde_json::json!({ "url": url }))
             }
@@ -253,29 +261,42 @@ impl SoloistMcp {
         .await
     }
 
-    /// The same, for the changes that reach another machine and can take minutes to do it.
-    ///
-    /// Whether anything is reported is the caller's choice alone, carried by the progress token it
-    /// put on the request: without one this is `acked_change` and the request that goes to the app
-    /// is the one that always went. With one, the app is asked to say what version control is saying
-    /// while it says it, and each remark becomes a notification against that token.
+    /// [`acked_change`](Self::acked_change), for the changes that reach another machine and can
+    /// take minutes to do it.
     async fn reported_change(
         &self,
         reporting: Reporting,
         request: impl FnOnce(bool) -> IpcRequest,
     ) -> Result<CallToolResult, ErrorData> {
+        match self.reported(reporting, request).await {
+            Ok(IpcResponse::Acked) => acked(),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    /// One request that says what it is doing while it does it, for whoever asked to be told.
+    ///
+    /// Whether anything is reported is the caller's choice alone, carried by the progress token it
+    /// put on the request: without one this is an ordinary request and what goes to the app is the
+    /// one that always went. With one, the app is asked to say what version control is saying while
+    /// it says it, and each remark becomes a notification against that token.
+    ///
+    /// Answers with the app's own reply rather than a result, because what a reported operation
+    /// comes back with is its own — an acknowledgement for a change, an address for a proposal.
+    async fn reported(
+        &self,
+        reporting: Reporting,
+        request: impl FnOnce(bool) -> IpcRequest,
+    ) -> Result<IpcResponse, ClientError> {
         let Some((reports, forwarding)) = reporting.forwarding() else {
-            return self.acked_change(request(false)).await;
+            return self.client.request(request(false)).await;
         };
         let answered = self.client.request_reporting(request(true), reports).await;
         // The request owned the only sender, so awaiting here is what makes the last remark reach
         // the caller before the answer does — and what stops the forwarding after it.
         let _ = forwarding.await;
-        match answered {
-            Ok(IpcResponse::Acked) => acked(),
-            Ok(_) => Err(unexpected()),
-            Err(err) => app_error(&err),
-        }
+        answered
     }
 
     /// The reply every change to a repository shares: the app acknowledges, or refuses with the

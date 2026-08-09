@@ -3,11 +3,11 @@ use super::*;
 use crate::error::IpcError;
 use soloist_core::{
     AcquireOutcome, AgentKind, AgentTool, ExportedTemplate, FeedbackEntry, FireCond,
-    IntegrationFile, IntegrationWrite, LeaseView, MergeMethod, MissingPolicy, Origin, ProcStatus,
-    ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, ProjectView, PromptMode, Readiness,
-    RenderedPrompt, ScratchpadId, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary,
-    TemplateId, TemplateKind, TemplateScope, TemplateSummary, TemplateView, TimerId, TimerStatus,
-    TimerView, TodoDoc, TodoId, TodoStatus, TodoView, Whoami,
+    IntegrationFile, IntegrationWrite, LeaseView, MergeMethod, MissingPolicy, NewPullRequest,
+    Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, ProjectView,
+    PromptMode, Readiness, RenderedPrompt, ScratchpadId, ScratchpadView, SessionId,
+    SetWhenIdleOutcome, StartSummary, TemplateId, TemplateKind, TemplateScope, TemplateSummary,
+    TemplateView, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoView, Whoami,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -776,6 +776,18 @@ fn a_request_that_asked_for_no_progress_is_the_bytes_it_was_before_there_was_any
                 progress: false,
             },
             r#"{"op":"git_merge_pull_request","number":7,"method":"squash"}"#,
+        ),
+        (
+            IpcRequest::GitCreatePullRequest {
+                new: NewPullRequest {
+                    title: "Add the thing".into(),
+                    body: "It does the thing.".into(),
+                    base: "main".into(),
+                    draft: false,
+                },
+                progress: false,
+            },
+            r#"{"op":"git_create_pull_request","new":{"title":"Add the thing","body":"It does the thing.","base":"main","draft":false}}"#,
         ),
     ];
 

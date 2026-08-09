@@ -2723,6 +2723,80 @@ async fn every_version_control_change_sends_its_own_request_and_acknowledges() {
     );
 }
 
+/// The progress token a caller puts on its request is the only way to ask to be told what its call
+/// is doing, and asking is worth nothing unless it reaches the app. A tool that quietly sent the
+/// unasked request would leave the whole mechanism dead with nothing to show for it — every remark
+/// version control makes would be thrown away at its source, and no other test would notice.
+#[tokio::test]
+async fn every_exchange_a_caller_asked_to_be_told_about_says_so_on_the_request_it_sends() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let seen: Arc<Mutex<Vec<IpcRequest>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&seen);
+    spawn_fake_app(socket.clone(), move |request| {
+        let proposal = matches!(request, IpcRequest::GitCreatePullRequest { .. });
+        recorder.lock().expect("record").push(request);
+        match proposal {
+            true => Ok(IpcResponse::GitPullRequestCreated(
+                "https://forge.example/pull/7".into(),
+            )),
+            false => Ok(IpcResponse::Acked),
+        }
+    });
+    let handler = handler(socket);
+
+    for result in [
+        handler.git_push(Reporting::asked()).await,
+        handler.git_pull(Reporting::asked()).await,
+        handler.git_fetch(Reporting::asked()).await,
+        handler
+            .git_create_pull_request(
+                Parameters(GitCreatePullRequestArg {
+                    title: "Add the thing".into(),
+                    body: "It does the thing.".into(),
+                    base: "main".into(),
+                    draft: false,
+                }),
+                Reporting::asked(),
+            )
+            .await,
+        handler
+            .git_merge_pull_request(
+                Parameters(GitMergePullRequestArg {
+                    number: 7,
+                    method: MergeMethodArg::Squash,
+                }),
+                Reporting::asked(),
+            )
+            .await,
+    ] {
+        result.expect("the exchange succeeds");
+    }
+
+    assert_eq!(
+        seen.lock().expect("read").clone(),
+        vec![
+            IpcRequest::GitPush { progress: true },
+            IpcRequest::GitPull { progress: true },
+            IpcRequest::GitFetch { progress: true },
+            IpcRequest::GitCreatePullRequest {
+                new: NewPullRequest {
+                    title: "Add the thing".into(),
+                    body: "It does the thing.".into(),
+                    base: "main".into(),
+                    draft: false,
+                },
+                progress: true,
+            },
+            IpcRequest::GitMergePullRequest {
+                number: 7,
+                method: MergeMethod::Squash,
+                progress: true,
+            },
+        ],
+    );
+}
+
 /// A hunk named on a staging tool reaches the app as that hunk, so acting on part of a change is
 /// not quietly widened to the whole file.
 #[tokio::test]
@@ -2821,14 +2895,16 @@ async fn git_create_pull_request_answers_with_where_what_it_made_can_be_found() 
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
     spawn_fake_app(socket.clone(), |request| match request {
-        IpcRequest::GitCreatePullRequest { new }
-            if new
-                == (NewPullRequest {
-                    title: "Add the thing".into(),
-                    body: "It does the thing.".into(),
-                    base: "main".into(),
-                    draft: true,
-                }) =>
+        IpcRequest::GitCreatePullRequest {
+            new,
+            progress: false,
+        } if new
+            == (NewPullRequest {
+                title: "Add the thing".into(),
+                body: "It does the thing.".into(),
+                base: "main".into(),
+                draft: true,
+            }) =>
         {
             Ok(IpcResponse::GitPullRequestCreated(
                 "https://forge.example/pull/7".into(),
@@ -2838,12 +2914,15 @@ async fn git_create_pull_request_answers_with_where_what_it_made_can_be_found() 
     });
 
     let result = handler(socket)
-        .git_create_pull_request(Parameters(GitCreatePullRequestArg {
-            title: "Add the thing".into(),
-            body: "It does the thing.".into(),
-            base: "main".into(),
-            draft: true,
-        }))
+        .git_create_pull_request(
+            Parameters(GitCreatePullRequestArg {
+                title: "Add the thing".into(),
+                body: "It does the thing.".into(),
+                base: "main".into(),
+                draft: true,
+            }),
+            Reporting::unasked(),
+        )
         .await
         .expect("propose succeeds");
     assert_eq!(

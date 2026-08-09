@@ -163,7 +163,8 @@ impl Git {
     ///
     /// Gated on the user having trusted the project: it pushes under their credentials and runs the
     /// repository's own configuration. The push half is the same one pressing push runs, so it is
-    /// stoppable and answers to the same `prompting` decision — and so is the proposal itself
+    /// stoppable, answers to the same `prompting` decision, and says what it is doing to whoever
+    /// `progress` is watched by — and so is the proposal itself stoppable
     /// ([`Facade::git_stop_exchange`](crate::facade::Facade::git_stop_exchange)), because a service
     /// that accepts a connection and then says nothing would otherwise be waited out to the limit.
     pub fn create_pull_request(
@@ -172,6 +173,7 @@ impl Git {
         root: &Path,
         new: &NewPullRequest,
         prompting: Prompting,
+        progress: &Progress,
     ) -> Result<String, PullRequestError> {
         if !self.trusted(project)? {
             return Err(PullRequestError::Untrusted);
@@ -191,9 +193,10 @@ impl Git {
             .ok_or(PullRequestError::DetachedHead)?;
         // A proposal is about commits the service can see, so anything the remote does not hold
         // goes first — as a publish for a branch it has never seen, which is the same choice
-        // pressing push makes and is made from the same remembered status.
+        // pressing push makes and is made from the same remembered status. It is also the half
+        // that takes minutes, so it is the half a caller waiting on a proposal hears from.
         if status.as_ref().is_some_and(unsent) {
-            self.push(project, root, prompting, &Progress::unwatched())?;
+            self.push(project, root, prompting, progress)?;
         }
         Ok(self.asking(project, |forge, stop| forge.create(root, &head, new, stop))?)
     }
