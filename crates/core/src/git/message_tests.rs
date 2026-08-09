@@ -515,20 +515,26 @@ fn a_task_written_in_more_than_ascii_is_cut_where_a_character_ends() {
     // A ceiling is a count of bytes and a task is written by a person in whatever alphabet they
     // write in, so the two do not line up. Cutting between the bytes of one character does not
     // produce a shorter string — it produces no string at all.
-    let body = "précisément ça — et voilà. ".repeat(400);
-    let prompt = prompt_about(
-        repository_with(vec![staged("src/main.rs")], HUNK),
-        Some(&intent("Décrire ce qui a changé", &body)),
-    )
-    .expect("prompt");
+    //
+    // Where the ceiling lands inside a character depends on what came before it, so the run of
+    // three-byte characters is shifted rather than placed: one alignment proves nothing about the
+    // other two, and only one of the three is the one that would come apart.
+    for shift in 0..3 {
+        let body = format!("{}{}", "x".repeat(shift), "…".repeat(4_000));
+        let prompt = prompt_about(
+            repository_with(vec![staged("src/main.rs")], HUNK),
+            Some(&intent("Décrire ce qui a changé", &body)),
+        )
+        .expect("prompt");
 
-    assert!(prompt.contains("Décrire ce qui a changé"), "{prompt}");
-    assert!(prompt.contains("précisément ça"), "{prompt}");
-    assert!(
-        prompt.len() <= ONE_SHOT_PROMPT_LIMIT,
-        "composed {} bytes",
-        prompt.len(),
-    );
+        assert!(prompt.contains("Décrire ce qui a changé"), "shift {shift}");
+        assert!(prompt.contains('…'), "shift {shift}");
+        assert!(
+            prompt.len() <= ONE_SHOT_PROMPT_LIMIT,
+            "shift {shift} composed {} bytes",
+            prompt.len(),
+        );
+    }
 }
 
 #[test]

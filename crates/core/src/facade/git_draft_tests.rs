@@ -65,25 +65,36 @@ fn facade_for_drafting(
     tools: Vec<AgentTool>,
     one_shot: Arc<FakeAgentOneShot>,
 ) -> (Arc<Facade>, ProjectId, TempDir) {
-    let (facade, project, _todos, dir) = facade_for_drafting_with_todos(tools, one_shot);
-    (facade, project, dir)
+    let drafting = facade_for_drafting_with_todos(tools, one_shot);
+    (drafting.facade, drafting.project, drafting._dir)
 }
 
-/// The same façade with a durable todo store behind it — for the tests about what a change is said
-/// to have been for, where the answer comes from which of them a running agent holds a lock on.
+/// A drafting façade with a durable todo store behind it, and a second project open beside the one
+/// under test — deliberately not the only one, so a draft that reached for "the project with an
+/// agent in it" is told apart from one that reaches for its own.
+struct Drafting {
+    facade: Arc<Facade>,
+    project: ProjectId,
+    /// The other open project, whose agents and work belong to it and not to `project`.
+    elsewhere: ProjectId,
+    todos: Arc<FakeTodoRepo>,
+    _dir: TempDir,
+    _elsewhere_dir: TempDir,
+}
+
+/// The façade the tests about what a change was said to be for are driven through.
 fn facade_for_drafting_with_todos(
     tools: Vec<AgentTool>,
     one_shot: Arc<FakeAgentOneShot>,
-) -> (Arc<Facade>, ProjectId, Arc<FakeTodoRepo>, TempDir) {
+) -> Drafting {
     let todos = Arc::new(FakeTodoRepo::new());
-    let (facade, project, dir) = facade_for_drafting_over(
+    facade_for_drafting_over(
         tools,
         one_shot,
         Arc::new(NoopShellEnvProbe),
-        todos.clone(),
+        todos,
         FakeSpawner::exits_on_terminate(),
-    );
-    (facade, project, todos, dir)
+    )
 }
 
 /// The same façade, resolving the environment a launch and a headless run are made in through
@@ -93,13 +104,14 @@ fn facade_for_drafting_capturing(
     one_shot: Arc<FakeAgentOneShot>,
     shell_env_probe: Arc<dyn ShellEnvProbe>,
 ) -> (Arc<Facade>, ProjectId, TempDir) {
-    facade_for_drafting_over(
+    let drafting = facade_for_drafting_over(
         tools,
         one_shot,
         shell_env_probe,
         Arc::new(FakeTodoRepo::new()),
         FakeSpawner::exits_on_terminate(),
-    )
+    );
+    (drafting.facade, drafting.project, drafting._dir)
 }
 
 /// Every drafting façade, assembled once.
@@ -109,9 +121,15 @@ fn facade_for_drafting_over(
     shell_env_probe: Arc<dyn ShellEnvProbe>,
     todo_repo: Arc<FakeTodoRepo>,
     spawner: FakeSpawner,
-) -> (Arc<Facade>, ProjectId, TempDir) {
+) -> Drafting {
+    let elsewhere_dir = tempfile::tempdir().expect("temp dir");
     let dir = tempfile::tempdir().expect("temp dir");
     let projects = Arc::new(FakeProjectRepo::new());
+    let elsewhere_root = elsewhere_dir.path().canonicalize().expect("canonical root");
+    let elsewhere = projects
+        .upsert(&elsewhere_root, None, None)
+        .expect("add the other project")
+        .id;
     let root = dir.path().canonicalize().expect("canonical root");
     let project = projects.upsert(&root, None, None).expect("add project").id;
     let mut status = git_status("main");
@@ -121,7 +139,11 @@ fn facade_for_drafting_over(
     let ports = CorePorts::builder(
         Arc::new(spawner),
         Arc::new(TokioClock),
-        Arc::new(FakeTrustRepo::new().trusting_project(project)),
+        Arc::new(
+            FakeTrustRepo::new()
+                .trusting_project(project)
+                .trusting_project(elsewhere),
+        ),
         projects,
     )
     .git_repository(Arc::new(
@@ -131,9 +153,16 @@ fn facade_for_drafting_over(
     .agent_tools(Arc::new(FakeAgentToolRepo::new(tools)))
     .agent_one_shot(one_shot)
     .shell_env_probe(shell_env_probe)
-    .todo_repo(todo_repo)
+    .todo_repo(todo_repo.clone())
     .settings_repo(Arc::new(FakeSettingsRepo::new()));
-    (Arc::new(Facade::new(ports.build())), project, dir)
+    Drafting {
+        facade: Arc::new(Facade::new(ports.build())),
+        project,
+        elsewhere,
+        todos: todo_repo,
+        _dir: dir,
+        _elsewhere_dir: elsewhere_dir,
+    }
 }
 
 #[tokio::test]
@@ -337,8 +366,12 @@ async fn the_task_a_running_agent_holds_is_what_the_change_is_said_to_be_for() {
     // The feature: a diff records what moved and never why, and Soloist is the only thing in the
     // room that knows what the agent making it was asked to do.
     let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
-    let (facade, project, todos, _dir) =
-        facade_for_drafting_with_todos(vec![assist_tool()], one_shot.clone());
+    let Drafting {
+        facade,
+        project,
+        todos,
+        ..
+    } = facade_for_drafting_with_todos(vec![assist_tool()], one_shot.clone());
     drafting_with(&facade);
     let agent = started(&facade, agent_registration(project, "worker")).await;
     let picked_up = task(
@@ -373,8 +406,9 @@ async fn with_no_task_held_the_change_is_described_on_its_own() {
     // one: a running agent with nothing locked leaves the draft exactly as it was before intent
     // existed at all.
     let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
-    let (facade, project, _todos, _dir) =
-        facade_for_drafting_with_todos(vec![assist_tool()], one_shot.clone());
+    let Drafting {
+        facade, project, ..
+    } = facade_for_drafting_with_todos(vec![assist_tool()], one_shot.clone());
     drafting_with(&facade);
     started(&facade, agent_registration(project, "worker")).await;
     task(
@@ -406,8 +440,12 @@ async fn with_several_tasks_held_none_of_them_is_guessed_at() {
     // The refusal to guess, and the load-bearing half of the rule. Naming one of two would attribute
     // a change to work it may have nothing to do with — and state it to a model as fact.
     let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
-    let (facade, project, todos, _dir) =
-        facade_for_drafting_with_todos(vec![assist_tool()], one_shot.clone());
+    let Drafting {
+        facade,
+        project,
+        todos,
+        ..
+    } = facade_for_drafting_with_todos(vec![assist_tool()], one_shot.clone());
     drafting_with(&facade);
     let one = started(&facade, agent_registration(project, "one")).await;
     let other = started(&facade, agent_registration(project, "other")).await;
@@ -440,8 +478,12 @@ async fn a_task_an_agent_left_behind_when_it_stopped_is_not_what_this_change_was
     // owned by a process, so it speaks for work in flight. One left behind speaks for nothing, and
     // a change made hours later must not be attributed to it.
     let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
-    let (facade, project, todos, _dir) =
-        facade_for_drafting_with_todos(vec![assist_tool()], one_shot.clone());
+    let Drafting {
+        facade,
+        project,
+        todos,
+        ..
+    } = facade_for_drafting_with_todos(vec![assist_tool()], one_shot.clone());
     drafting_with(&facade);
     let agent = started(&facade, agent_registration(project, "worker")).await;
     let abandoned = task(&facade, project, "Something from this morning", "");
@@ -475,8 +517,12 @@ async fn a_task_held_by_a_process_that_is_not_an_agent_is_not_what_this_change_w
     // A terminal carries the same process identity an agent does, so it can hold a lock. What it
     // cannot do is be the agent whose work a drafted message is about.
     let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
-    let (facade, project, todos, _dir) =
-        facade_for_drafting_with_todos(vec![assist_tool()], one_shot.clone());
+    let Drafting {
+        facade,
+        project,
+        todos,
+        ..
+    } = facade_for_drafting_with_todos(vec![assist_tool()], one_shot.clone());
     drafting_with(&facade);
     started(&facade, agent_registration(project, "worker")).await;
     let shell = started(
@@ -506,5 +552,35 @@ async fn a_task_held_by_a_process_that_is_not_an_agent_is_not_what_this_change_w
     assert!(
         !subject.contains("Something a shell picked up"),
         "only a running agent's work is taken as the intent: {subject}",
+    );
+}
+
+#[tokio::test]
+async fn a_task_held_by_another_projects_agent_is_not_what_this_change_was_for() {
+    // Which project's work this is has to be part of the question, not a coincidence of only one
+    // being open. Two projects, an agent running in each, and the task held by the wrong one.
+    let one_shot = Arc::new(FakeAgentOneShot::answering(DRAFTED));
+    let Drafting {
+        facade,
+        project,
+        elsewhere,
+        todos,
+        ..
+    } = facade_for_drafting_with_todos(vec![assist_tool()], one_shot.clone());
+    drafting_with(&facade);
+    started(&facade, agent_registration(project, "ours")).await;
+    let theirs = started(&facade, agent_registration(elsewhere, "theirs")).await;
+    let held = task(&facade, project, "Work that belongs to another project", "");
+    todos.lock(project, held, theirs).expect("lock it");
+
+    facade
+        .git_draft_commit_message(project)
+        .await
+        .expect("a draft");
+
+    let subject = one_shot.subjects().pop().expect("one run");
+    assert!(
+        !subject.contains("Work that belongs to another project"),
+        "only this project's own agents speak for what its change was for: {subject}",
     );
 }
