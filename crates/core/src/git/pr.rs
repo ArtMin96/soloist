@@ -33,6 +33,7 @@ use super::exchange::{Prompting, Stop};
 use super::forge::{
     ForgeError, ForgeReadiness, GitForge, NewPullRequest, PullRequest, PullRequestTemplate,
 };
+use super::review::MergeMethod;
 use super::status::Git;
 
 /// Everything a pull-request surface needs to decide what to show, in one read — so it renders
@@ -54,6 +55,10 @@ pub struct PullRequestSurface {
     /// The description skeletons on offer, in the order to show them: the repository's own when it
     /// carries any, otherwise the user's own if they selected one, otherwise none at all.
     pub templates: Vec<PullRequestTemplate>,
+    /// The ways this repository allows a pull request to be put into its base branch, the one it
+    /// prefers first — read here rather than at merge time, so the surface offering the merge
+    /// already knows what this repository permits.
+    pub merge_methods: Vec<MergeMethod>,
 }
 
 /// Why a pull request was not proposed, or not prepared for.
@@ -82,6 +87,13 @@ pub enum PullRequestError {
     /// A pull request was asked for with nothing but blank space for a title.
     #[error("a pull request needs a title")]
     EmptyTitle,
+    /// Something was asked about the branch's pull request and it has none open.
+    #[error("this branch has no pull request")]
+    NoPullRequest,
+    /// The check or conversation a handoff named is not on the pull request — it was renamed,
+    /// deleted, or belongs to a read the caller has since moved past.
+    #[error("that is no longer on this pull request")]
+    NoSuchSubject,
     /// The branch holds nothing its base does not, so there is no change to describe.
     #[error("this branch holds nothing its base does not")]
     NothingToDescribe,
@@ -121,26 +133,28 @@ impl Git {
                 base: None,
                 existing: None,
                 templates: Vec::new(),
+                merge_methods: Vec::new(),
             });
         }
         let head = self
             .status(project, root)?
             .and_then(|status| status.branch.name);
-        let (base, templates, existing) = self.asking(project, |forge, _| {
-            let base = forge.default_base(root)?;
+        let (repository, templates, existing) = self.asking(project, |forge, _| {
+            let repository = forge.repository(root)?;
             let templates = offered(forge.templates(root)?, fallback);
             let existing = match &head {
                 Some(head) => forge.pull_request(root, head)?,
                 None => None,
             };
-            Ok((base, templates, existing))
+            Ok((repository, templates, existing))
         })?;
         Ok(PullRequestSurface {
             readiness,
             head,
-            base,
+            base: repository.default_base,
             existing,
             templates,
+            merge_methods: repository.merge_methods,
         })
     }
 
@@ -187,7 +201,7 @@ impl Git {
     /// One request to the forge, under the project's gate so it never runs beside a read or a
     /// change against the same repository, and with the stop signal armed inside that gate — so
     /// whoever changes their mind reaches the request that is actually running.
-    fn asking<T>(
+    pub(super) fn asking<T>(
         &self,
         project: ProjectId,
         act: impl FnOnce(&dyn GitForge, &Stop) -> Result<T, ForgeError>,

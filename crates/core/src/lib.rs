@@ -85,17 +85,20 @@ pub use coordination::{
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
-    CoordinationError, CreateTerminalError, DraftError, Facade, GitReadError, LaunchAgentError,
-    LocalCommandError, MoveCommandError, PromptRenderError, ScopedActionError, ScopedFacade,
-    SetupIntegrationError, SpawnAgentError, StatusSummary, TrustCommandError,
+    CoordinationError, CreateTerminalError, DraftError, Facade, GitReadError, Handoff,
+    HandoffError, LaunchAgentError, LocalCommandError, MoveCommandError, PromptRenderError,
+    ScopedActionError, ScopedFacade, SetupIntegrationError, SpawnAgentError, StatusSummary,
+    TrustCommandError,
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use git::{
-    BranchOp, DiffExtent, Exchange, ForgeError, ForgeReadiness, Git, GitDraftError, GitError,
-    GitForge, GitRepository, GitStatus, GitStatusWatchReactor, GitWriteError, LogRange,
-    NewPullRequest, NoopGitForge, NoopGitRepository, Prompting, PullRequest, PullRequestError,
-    PullRequestState, PullRequestSurface, PullRequestTemplate, RawFileDiff, RawHunk, StashOp, Stop,
-    SyncOp, BRANCH_PAGE_SIZE, LOG_PAGE_SIZE,
+    BranchOp, CheckRun, CheckState, DiffExtent, Exchange, ForgeError, ForgeReadiness,
+    ForgeRepository, Git, GitDraftError, GitError, GitForge, GitRepository, GitStatus,
+    GitStatusWatchReactor, GitWriteError, HandoffSubject, LogRange, MergeMethod, NewPullRequest,
+    NoopGitForge, NoopGitRepository, Prompting, PullRequest, PullRequestError, PullRequestReview,
+    PullRequestState, PullRequestSurface, PullRequestTemplate, RawFileDiff, RawHunk, ReviewComment,
+    ReviewLimits, ReviewThread, StashOp, Stop, SyncOp, BRANCH_PAGE_SIZE, CHECK_LOG_LIMIT,
+    HANDOFF_LIMIT, LOG_PAGE_SIZE, REVIEW_LIMITS,
 };
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};

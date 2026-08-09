@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { GitPullRequestIcon } from "lucide-react";
 import { PullRequestForm } from "@/components/git/PullRequestForm";
+import { PullRequestReviewView } from "@/components/git/PullRequestReviewView";
 import { PullRequestSummary } from "@/components/git/PullRequestSummary";
 import { SplitMessage, SplitSurface } from "@/components/git/SplitSurface";
 import { openExternal } from "@/lib/opener";
@@ -27,7 +28,20 @@ const DETACHED = "Nothing is checked out by name, so there is no branch to propo
  * else: whether the forge can be reached, which shape wins, whether the branch has to be pushed
  * first, and whether the project may be acted on are every one of them the core's answers.
  */
-export function PullRequestPane({ project, onClose }: { project: number; onClose: () => void }) {
+export function PullRequestPane({
+  project,
+  agent,
+  onClose,
+}: {
+  project: number;
+  /**
+   * The agent a handoff would reach, or null to let the core pick the project's only running one.
+   * Which process the reader is looking at is the one fact the core cannot know, so it is the one
+   * thing that is passed down.
+   */
+  agent: number | null;
+  onClose: () => void;
+}) {
   const { surface, loading, error, proposing, drafting, propose, draft } = usePullRequest(project);
   const assistable = useAssistTool();
   // What has been typed, rather than what is shown: `null` means nobody has touched that field, so
@@ -75,6 +89,9 @@ export function PullRequestPane({ project, onClose }: { project: number; onClose
           </p>
         )}
       </div>
+      {surface?.existing != null && (
+        <PullRequestReviewView project={project} agent={agent} methods={surface.merge_methods} />
+      )}
       <Body
         loading={loading}
         readiness={surface?.readiness ?? null}

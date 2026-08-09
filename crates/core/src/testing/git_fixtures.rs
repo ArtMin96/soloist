@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use crate::git::{
-    Git, GitStatus, NoopGitForge, PullRequest, PullRequestState, PullRequestTemplate, RawFileDiff,
-    RawHunk,
+    CheckRun, CheckState, Git, GitStatus, NoopGitForge, PullRequest, PullRequestReview,
+    PullRequestState, PullRequestTemplate, RawFileDiff, RawHunk, ReviewComment, ReviewThread,
 };
 use crate::ids::ProjectId;
 use crate::ports::TrustRepo;
@@ -147,6 +147,50 @@ pub fn pull_request(number: u64, head: &str) -> PullRequest {
         draft: false,
         base: "main".to_string(),
         head: head.to_string(),
+    }
+}
+
+/// One check the service ran, in whatever state a test is about.
+pub fn check_run(name: &str, state: CheckState) -> CheckRun {
+    CheckRun {
+        name: name.to_string(),
+        state,
+        workflow: Some("Tests".to_string()),
+        url: Some(format!(
+            "https://forge.example/owner/repo/actions/runs/9/job/{}",
+            name.len()
+        )),
+    }
+}
+
+/// One conversation hanging on a line of the diff, carrying one comment.
+pub fn review_thread(id: &str, path: &str, line: u64, body: &str) -> ReviewThread {
+    ReviewThread {
+        id: id.to_string(),
+        url: Some(format!("https://forge.example/pull/12#{id}")),
+        path: Some(path.to_string()),
+        line: Some(line),
+        resolved: false,
+        outdated: false,
+        comments: vec![ReviewComment {
+            author: "octocat".to_string(),
+            body: body.to_string(),
+            url: Some(format!("https://forge.example/pull/12#{id}")),
+        }],
+    }
+}
+
+/// What a branch's open pull request reads back as, with whatever checks and conversations a test
+/// is about.
+pub fn pull_request_review(
+    head: &str,
+    checks: Vec<CheckRun>,
+    threads: Vec<ReviewThread>,
+) -> PullRequestReview {
+    PullRequestReview {
+        pull_request: pull_request(12, head),
+        checks,
+        threads,
     }
 }
 

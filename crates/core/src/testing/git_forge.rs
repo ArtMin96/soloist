@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::git::{
-    ForgeError, ForgeReadiness, GitForge, NewPullRequest, PullRequest, PullRequestTemplate, Stop,
+    CheckRun, ForgeError, ForgeReadiness, ForgeRepository, GitForge, MergeMethod, NewPullRequest,
+    PullRequest, PullRequestReview, PullRequestTemplate, ReviewLimits, Stop,
 };
 use crate::sync::lock;
 
@@ -29,11 +30,17 @@ pub fn created_url() -> String {
 struct Answers {
     readiness: ForgeReadiness,
     base: Mutex<Option<String>>,
+    methods: Mutex<Vec<MergeMethod>>,
     templates: Mutex<Vec<PullRequestTemplate>>,
     existing: Mutex<Option<PullRequest>>,
+    review: Mutex<Option<PullRequestReview>>,
+    log: Mutex<Option<String>>,
     refusal: Mutex<Option<ForgeError>>,
     created: Mutex<Vec<NewPullRequest>>,
     heads: Mutex<Vec<String>>,
+    merged: Mutex<Vec<(u64, MergeMethod)>>,
+    log_limits: Mutex<Vec<usize>>,
+    review_limits: Mutex<Vec<ReviewLimits>>,
     asks: AtomicUsize,
     inside: AtomicUsize,
     peak: AtomicUsize,
@@ -60,11 +67,17 @@ impl FakeGitForge {
             answers: Arc::new(Answers {
                 readiness,
                 base: Mutex::new(None),
+                methods: Mutex::new(Vec::new()),
                 templates: Mutex::new(Vec::new()),
                 existing: Mutex::new(None),
+                review: Mutex::new(None),
+                log: Mutex::new(None),
                 refusal: Mutex::new(None),
                 created: Mutex::new(Vec::new()),
                 heads: Mutex::new(Vec::new()),
+                merged: Mutex::new(Vec::new()),
+                log_limits: Mutex::new(Vec::new()),
+                review_limits: Mutex::new(Vec::new()),
                 asks: AtomicUsize::new(0),
                 inside: AtomicUsize::new(0),
                 peak: AtomicUsize::new(0),
@@ -106,10 +119,44 @@ impl FakeGitForge {
         self
     }
 
+    /// The same forge, whose repository allows `methods` to put a pull request into its base.
+    pub fn allowing(self, methods: Vec<MergeMethod>) -> Self {
+        *lock(&self.answers.methods) = methods;
+        self
+    }
+
     /// The same forge, where the checked-out branch already has `existing` open on it.
     pub fn holding(self, existing: PullRequest) -> Self {
         *lock(&self.answers.existing) = Some(existing);
         self
+    }
+
+    /// The same forge, where the checked-out branch's pull request reads back as `review`.
+    pub fn reviewing(self, review: PullRequestReview) -> Self {
+        *lock(&self.answers.review) = Some(review);
+        self
+    }
+
+    /// The same forge, where every check's output is `log` — `None` being a check whose output
+    /// nothing here can reach, which is an ordinary answer.
+    pub fn logging(self, log: Option<&str>) -> Self {
+        *lock(&self.answers.log) = log.map(str::to_string);
+        self
+    }
+
+    /// Every merge the port was asked for, in order.
+    pub fn merged(&self) -> Vec<(u64, MergeMethod)> {
+        lock(&self.answers.merged).clone()
+    }
+
+    /// The ceiling each log request was made under, in order.
+    pub fn log_limits(&self) -> Vec<usize> {
+        lock(&self.answers.log_limits).clone()
+    }
+
+    /// The ceiling each review request was made under, in order.
+    pub fn review_limits(&self) -> Vec<ReviewLimits> {
+        lock(&self.answers.review_limits).clone()
     }
 
     /// The same forge, refusing every request with `refusal`.
@@ -159,8 +206,13 @@ impl GitForge for FakeGitForge {
         self.answers.readiness
     }
 
-    fn default_base(&self, _root: &Path) -> Result<Option<String>, ForgeError> {
-        self.asked(|| Ok(lock(&self.answers.base).clone()))
+    fn repository(&self, _root: &Path) -> Result<ForgeRepository, ForgeError> {
+        self.asked(|| {
+            Ok(ForgeRepository {
+                default_base: lock(&self.answers.base).clone(),
+                merge_methods: lock(&self.answers.methods).clone(),
+            })
+        })
     }
 
     fn templates(&self, _root: &Path) -> Result<Vec<PullRequestTemplate>, ForgeError> {
@@ -190,6 +242,46 @@ impl GitForge for FakeGitForge {
             lock(&self.answers.created).push(new.clone());
             lock(&self.answers.heads).push(branch.to_string());
             Ok(created_url())
+        })
+    }
+
+    fn review(
+        &self,
+        _root: &Path,
+        _branch: &str,
+        limits: ReviewLimits,
+    ) -> Result<Option<PullRequestReview>, ForgeError> {
+        self.asked(|| {
+            lock(&self.answers.review_limits).push(limits);
+            Ok(lock(&self.answers.review).clone())
+        })
+    }
+
+    fn merge(
+        &self,
+        _root: &Path,
+        number: u64,
+        method: MergeMethod,
+        _stop: &Stop,
+    ) -> Result<(), ForgeError> {
+        self.asked(|| {
+            lock(&self.answers.merged).push((number, method));
+            Ok(())
+        })
+    }
+
+    fn check_log(
+        &self,
+        _root: &Path,
+        _check: &CheckRun,
+        limit: usize,
+    ) -> Result<Option<String>, ForgeError> {
+        self.asked(|| {
+            lock(&self.answers.log_limits).push(limit);
+            Ok(lock(&self.answers.log)
+                .clone()
+                .map(|log| log.chars().rev().take(limit).collect::<String>())
+                .map(|tail| tail.chars().rev().collect()))
         })
     }
 }

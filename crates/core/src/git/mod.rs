@@ -26,11 +26,13 @@ mod error;
 mod exchange;
 mod files;
 mod forge;
+mod handoff;
 mod history;
 mod message;
 mod path;
 mod pr;
 mod repository;
+mod review;
 mod stage;
 mod status;
 mod sync;
@@ -41,13 +43,18 @@ pub use diff::DiffExtent;
 pub use error::{GitDraftError, GitError, GitWriteError};
 pub use exchange::{Prompting, Stop, SyncOp};
 pub use forge::{
-    ForgeError, ForgeReadiness, GitForge, NewPullRequest, NoopGitForge, PullRequest,
-    PullRequestState, PullRequestTemplate,
+    ForgeError, ForgeReadiness, ForgeRepository, GitForge, NewPullRequest, NoopGitForge,
+    PullRequest, PullRequestState, PullRequestTemplate,
 };
+pub use handoff::{HandoffSubject, CHECK_LOG_LIMIT, HANDOFF_LIMIT};
 pub use history::LOG_PAGE_SIZE;
 pub use pr::{PullRequestError, PullRequestSurface};
 pub use repository::{
     BranchOp, Exchange, GitRepository, LogRange, NoopGitRepository, RawFileDiff, RawHunk, StashOp,
+};
+pub use review::{
+    CheckRun, CheckState, MergeMethod, PullRequestReview, ReviewComment, ReviewLimits,
+    ReviewThread, REVIEW_LIMITS,
 };
 pub use status::{Git, GitStatus};
 pub use watch::GitStatusWatchReactor;

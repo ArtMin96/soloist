@@ -36,6 +36,7 @@ import { useProcessRemoval } from "@/store/useProcessRemoval";
 import { useProcessActivationNavigation } from "@/store/useProcessActivationNavigation";
 import { TERMINAL_POOL_CAP, useTerminalPool } from "@/store/useTerminalPool";
 import { PULL_REQUEST, useDiffSelection } from "@/store/git/useDiffSelection";
+import { handoffTarget } from "@/store/git/handoffTarget";
 import { useProjects } from "@/store/projects";
 import { FileDropProvider } from "@/store/FileDropProvider";
 import { SignalsProvider } from "@/store/SignalsProvider";
@@ -339,7 +340,11 @@ export default function App() {
                         {activeProjectId !== null && splitView !== null && (
                           <Suspense fallback={null}>
                             {splitView.kind === PULL_REQUEST ? (
-                              <PullRequestPane project={activeProjectId} onClose={closeSplit} />
+                              <PullRequestPane
+                                project={activeProjectId}
+                                agent={handoffTarget(selected, activeProjectId)}
+                                onClose={closeSplit}
+                              />
                             ) : (
                               <DiffPane
                                 project={activeProjectId}

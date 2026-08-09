@@ -496,7 +496,62 @@ export interface PullRequestSurface {
   base: string | null;
   existing: PullRequest | null;
   templates: PullRequestTemplate[];
+  merge_methods: MergeMethod[];
 }
+
+// How a pull request's commits are put into its base branch (mirrors core::MergeMethod). Which of
+// these a repository allows is its own setting, read with the surface.
+export type MergeMethod = "merge" | "squash" | "rebase";
+
+// Where one check stands (mirrors core::CheckState). Coarser than what the service reports on
+// purpose: every way of not passing is one answer to somebody deciding whether to merge.
+export type CheckState = "pending" | "passed" | "failed" | "skipped" | "cancelled" | "unknown";
+
+// One check the service ran against the pull request's commits (mirrors core::CheckRun).
+export interface CheckRun {
+  name: string;
+  state: CheckState;
+  workflow: string | null;
+  url: string | null;
+}
+
+// One thing a person wrote (mirrors core::ReviewComment).
+export interface ReviewComment {
+  author: string;
+  body: string;
+  url: string | null;
+}
+
+// One conversation on the pull request (mirrors core::ReviewThread) — a line of the diff somebody
+// objected to, a review somebody submitted, or a remark on the change as a whole. `path` is what
+// tells them apart.
+export interface ReviewThread {
+  id: string;
+  url: string | null;
+  path: string | null;
+  line: number | null;
+  resolved: boolean;
+  outdated: boolean;
+  comments: ReviewComment[];
+}
+
+// Everything an open pull request's review surface renders, in one read (mirrors
+// core::PullRequestReview).
+export interface PullRequestReview {
+  pull_request: PullRequest;
+  checks: CheckRun[];
+  threads: ReviewThread[];
+}
+
+// What a handoff is about (mirrors core::HandoffSubject) — named by what the surface can point at,
+// never by text the surface composed itself.
+export type HandoffSubject = { kind: "check"; name: string } | { kind: "thread"; id: string };
+
+// What became of a handoff (mirrors core::Handoff). Having nowhere to deliver it is an answer
+// rather than a failure: an agent is something the user starts when they want one.
+export type Handoff =
+  | { delivery: "delivered"; process: number; text: string }
+  | { delivery: "copy"; text: string };
 
 // What a new pull request is asked for with (mirrors core::NewPullRequest). The head branch is not
 // here: it is whatever the project has checked out, read by the core rather than accepted from a
