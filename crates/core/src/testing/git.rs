@@ -5,7 +5,7 @@
 //! leaves when nothing underneath it is real.
 
 use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -33,6 +33,10 @@ struct Answers {
     stalls: AtomicBool,
     refusal: Mutex<Option<GitError>>,
     changes: Mutex<Vec<GitChange>>,
+    /// The working tree each call named, in order. The port takes a root rather than a project, so
+    /// this is the only place a caller's choice of *which* repository is observable — which is what
+    /// makes "a session acts on its own project and no other" a test rather than a claim.
+    roots: Mutex<Vec<PathBuf>>,
     reads: AtomicUsize,
     inside: AtomicUsize,
     peak: AtomicUsize,
@@ -141,10 +145,16 @@ impl FakeGitRepository {
         lock(&self.answers.changes).clone()
     }
 
+    /// Every working tree the port was pointed at, in order, reads and changes alike.
+    pub fn roots(&self) -> Vec<PathBuf> {
+        lock(&self.answers.roots).clone()
+    }
+
     /// Files one change and answers as the repository was told to. It runs inside the same
     /// window a read does, so a change overlapping a read against one repository is observable
     /// — which is what makes the per-project gate testable rather than assumed.
-    fn changed(&self, change: GitChange) -> Result<(), GitError> {
+    fn changed(&self, root: &Path, change: GitChange) -> Result<(), GitError> {
+        self.at(root);
         self.inside(|| match lock(&self.answers.refusal).clone() {
             Some(refusal) => Err(refusal),
             None => {
@@ -152,6 +162,11 @@ impl FakeGitRepository {
                 Ok(())
             }
         })
+    }
+
+    /// Files which working tree this call named.
+    fn at(&self, root: &Path) {
+        lock(&self.answers.roots).push(root.to_path_buf());
     }
 
     /// The most reads that were ever inside the port at the same time.
@@ -163,7 +178,8 @@ impl FakeGitRepository {
     /// concurrency is measured over. Every read of the port goes through it, so the gate that
     /// keeps one repository to one caller at a time is observable across all of them rather
     /// than only the first.
-    fn recorded<T>(&self, answer: impl FnOnce() -> T) -> T {
+    fn recorded<T>(&self, root: &Path, answer: impl FnOnce() -> T) -> T {
+        self.at(root);
         self.answers.reads.fetch_add(1, Ordering::SeqCst);
         self.inside(answer)
     }
@@ -196,6 +212,7 @@ impl FakeGitRepository {
                 stalls: AtomicBool::new(false),
                 refusal: Mutex::new(None),
                 changes: Mutex::new(Vec::new()),
+                roots: Mutex::new(Vec::new()),
                 reads: AtomicUsize::new(0),
                 inside: AtomicUsize::new(0),
                 peak: AtomicUsize::new(0),
@@ -206,8 +223,8 @@ impl FakeGitRepository {
 }
 
 impl GitRepository for FakeGitRepository {
-    fn status(&self, _root: &Path) -> Result<GitStatus, GitError> {
-        self.recorded(|| {
+    fn status(&self, root: &Path) -> Result<GitStatus, GitError> {
+        self.recorded(root, || {
             let mut queued = lock(&self.answers.queued);
             let answer = if queued.len() > 1 {
                 queued.pop_front()
@@ -218,27 +235,27 @@ impl GitRepository for FakeGitRepository {
         })
     }
 
-    fn list_files(&self, _root: &Path) -> Result<Vec<ProjectFile>, GitError> {
-        self.recorded(|| lock(&self.answers.listing).clone())
+    fn list_files(&self, root: &Path) -> Result<Vec<ProjectFile>, GitError> {
+        self.recorded(root, || lock(&self.answers.listing).clone())
     }
 
     fn diff(
         &self,
-        _root: &Path,
+        root: &Path,
         _target: DiffTarget,
         _path: &str,
         _original_path: Option<&str>,
     ) -> Result<RawFileDiff, GitError> {
-        self.recorded(|| lock(&self.answers.diff).clone())
+        self.recorded(root, || lock(&self.answers.diff).clone())
     }
 
-    fn read_file(&self, _root: &Path, _path: &str) -> Result<Option<FileContent>, GitError> {
-        self.recorded(|| lock(&self.answers.content).clone())
+    fn read_file(&self, root: &Path, _path: &str) -> Result<Option<FileContent>, GitError> {
+        self.recorded(root, || lock(&self.answers.content).clone())
     }
 
     fn log(
         &self,
-        _root: &Path,
+        root: &Path,
         range: LogRange<'_>,
         skip: usize,
         limit: usize,
@@ -247,7 +264,7 @@ impl GitRepository for FakeGitRepository {
         // than handed the whole of it. The range is answered separately, because what a branch
         // holds beyond another branch is a different list from its whole history — a fake that
         // returned one for both would let a caller asking the wrong question look right.
-        self.recorded(|| {
+        self.recorded(root, || {
             let answers = match range {
                 LogRange::CheckedOut => lock(&self.answers.history).clone(),
                 LogRange::Since { .. } => lock(&self.answers.proposed).clone(),
@@ -256,85 +273,106 @@ impl GitRepository for FakeGitRepository {
         })
     }
 
-    fn stage(&self, _root: &Path, path: &str, original_path: Option<&str>) -> Result<(), GitError> {
-        self.changed(GitChange::Stage {
-            path: path.to_string(),
-            original_path: original_path.map(str::to_string),
-        })
+    fn stage(&self, root: &Path, path: &str, original_path: Option<&str>) -> Result<(), GitError> {
+        self.changed(
+            root,
+            GitChange::Stage {
+                path: path.to_string(),
+                original_path: original_path.map(str::to_string),
+            },
+        )
     }
 
     fn unstage(
         &self,
-        _root: &Path,
+        root: &Path,
         path: &str,
         original_path: Option<&str>,
     ) -> Result<(), GitError> {
-        self.changed(GitChange::Unstage {
-            path: path.to_string(),
-            original_path: original_path.map(str::to_string),
-        })
+        self.changed(
+            root,
+            GitChange::Unstage {
+                path: path.to_string(),
+                original_path: original_path.map(str::to_string),
+            },
+        )
     }
 
-    fn discard(&self, _root: &Path, path: &str) -> Result<(), GitError> {
-        self.changed(GitChange::Discard {
-            path: path.to_string(),
-        })
+    fn discard(&self, root: &Path, path: &str) -> Result<(), GitError> {
+        self.changed(
+            root,
+            GitChange::Discard {
+                path: path.to_string(),
+            },
+        )
     }
 
     fn stage_hunk(
         &self,
-        _root: &Path,
+        root: &Path,
         path: &str,
         _original_path: Option<&str>,
         hunk: HunkRange,
     ) -> Result<(), GitError> {
-        self.changed(GitChange::StageHunk {
-            path: path.to_string(),
-            hunk,
-        })
+        self.changed(
+            root,
+            GitChange::StageHunk {
+                path: path.to_string(),
+                hunk,
+            },
+        )
     }
 
     fn unstage_hunk(
         &self,
-        _root: &Path,
+        root: &Path,
         path: &str,
         _original_path: Option<&str>,
         hunk: HunkRange,
     ) -> Result<(), GitError> {
-        self.changed(GitChange::UnstageHunk {
-            path: path.to_string(),
-            hunk,
-        })
+        self.changed(
+            root,
+            GitChange::UnstageHunk {
+                path: path.to_string(),
+                hunk,
+            },
+        )
     }
 
-    fn discard_hunk(&self, _root: &Path, path: &str, hunk: HunkRange) -> Result<(), GitError> {
-        self.changed(GitChange::DiscardHunk {
-            path: path.to_string(),
-            hunk,
-        })
+    fn discard_hunk(&self, root: &Path, path: &str, hunk: HunkRange) -> Result<(), GitError> {
+        self.changed(
+            root,
+            GitChange::DiscardHunk {
+                path: path.to_string(),
+                hunk,
+            },
+        )
     }
 
-    fn commit_template(&self, _root: &Path, limit: usize) -> Result<Option<String>, GitError> {
+    fn commit_template(&self, root: &Path, limit: usize) -> Result<Option<String>, GitError> {
         // Bounded for real, so a caller handing over a ceiling the adapter is meant to apply is
         // exercised rather than trusted: a template longer than one is no template at all.
-        self.recorded(|| {
+        self.recorded(root, || {
             lock(&self.answers.template)
                 .clone()
                 .map(|template| template.filter(|text| text.len() <= limit))
         })
     }
 
-    fn commit(&self, _root: &Path, message: &str, amend: bool) -> Result<(), GitError> {
-        self.changed(GitChange::Commit {
-            message: message.to_string(),
-            amend,
-        })
+    fn commit(&self, root: &Path, message: &str, amend: bool) -> Result<(), GitError> {
+        self.changed(
+            root,
+            GitChange::Commit {
+                message: message.to_string(),
+                amend,
+            },
+        )
     }
 
-    fn branches(&self, _root: &Path, limit: usize) -> Result<Branches, GitError> {
+    fn branches(&self, root: &Path, limit: usize) -> Result<Branches, GitError> {
         // Bounded for real, so a caller asking for one page of a longer list is exercised rather
         // than handed the whole of it.
-        self.recorded(|| {
+        self.recorded(root, || {
             lock(&self.answers.branches)
                 .clone()
                 .map(|branches| Branches {
@@ -344,18 +382,21 @@ impl GitRepository for FakeGitRepository {
         })
     }
 
-    fn branch(&self, _root: &Path, op: BranchOp, name: &str) -> Result<(), GitError> {
-        self.changed(GitChange::Branch {
-            op,
-            name: name.to_string(),
-        })
+    fn branch(&self, root: &Path, op: BranchOp, name: &str) -> Result<(), GitError> {
+        self.changed(
+            root,
+            GitChange::Branch {
+                op,
+                name: name.to_string(),
+            },
+        )
     }
 
-    fn stash(&self, _root: &Path, op: StashOp) -> Result<(), GitError> {
-        self.changed(GitChange::Stash { op })
+    fn stash(&self, root: &Path, op: StashOp) -> Result<(), GitError> {
+        self.changed(root, GitChange::Stash { op })
     }
 
-    fn sync(&self, _root: &Path, exchange: Exchange<'_>) -> Result<(), GitError> {
+    fn sync(&self, root: &Path, exchange: Exchange<'_>) -> Result<(), GitError> {
         // A real exchange waits on another machine, so a test about stopping one needs a fake that
         // waits too — and the only thing worth waiting for here is being asked to stop.
         if self.answers.stalls.load(Ordering::SeqCst) {
@@ -364,13 +405,16 @@ impl GitRepository for FakeGitRepository {
             }
             return Err(GitError::Stopped);
         }
-        self.changed(GitChange::Sync {
-            op: exchange.op,
-            prompting: exchange.prompting,
-        })
+        self.changed(
+            root,
+            GitChange::Sync {
+                op: exchange.op,
+                prompting: exchange.prompting,
+            },
+        )
     }
 
-    fn abort_merge(&self, _root: &Path) -> Result<(), GitError> {
-        self.changed(GitChange::AbortMerge)
+    fn abort_merge(&self, root: &Path) -> Result<(), GitError> {
+        self.changed(root, GitChange::AbortMerge)
     }
 }

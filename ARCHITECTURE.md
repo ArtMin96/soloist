@@ -100,7 +100,7 @@ the layer those contexts import.
 | **C6** Coordination | `coordination` | scratchpads, todos, diagrams, timers, leases, key-value | live (P9: leases + timers + scratchpads + todos + key-value); **diagrams** (Mermaid source docs, `mermaid-diagrams` initiative) mirror scratchpads; end-to-end orchestration (E7) proven |
 | **C7** Notifications | `notify` | crash/attention/idle toasts, unread/bell state | placeholder → P6 |
 | **C8** Integration façade | `facade` `identity` | the public command/query API (`Facade`, local authority) + the session-scoped surface (`ScopedFacade`); MCP identity & effective scope | live (`facade`) |
-| **C9** Git | `git/` (+ shared-kernel `vcs`) | working-tree status & diff, staging (file & hunk), commit/amend, sync + ahead/behind, branches & stash, pull-request create + templates, paged log, the per-project status cache and its watch reactor | live through PR create (`git-integration`; PR review/merge and the MCP surface remain — `plan/02` §VC, `KNOWN-DIVERGENCES` D-35) |
+| **C9** Git | `git/` (+ shared-kernel `vcs`) | working-tree status & diff, staging (file & hunk), commit/amend, sync + ahead/behind, branches & stash, pull-request create/review/merge + templates, paged log, the per-project status cache and its watch reactor | live (`git-integration`; the commit-history surface remains — `plan/02` §VC, `KNOWN-DIVERGENCES` D-35). The session-scoped half is `facade/scoped_git*`, served over MCP as a feature group that is **off** until the user turns it on |
 
 Cross-cutting in `core`: `events` (the `DomainEvent` bus), `composition` (the `CorePorts` set the root
 assembles), `ports` (the traits no single context owns, each with its `Noop` default),

@@ -13,6 +13,8 @@ use soloist_core::{
     TodoId,
 };
 
+use crate::vcs_error::GitRefusal;
+
 /// What an over-cap render is named as in [`IpcError::PayloadTooLarge`], matching how the
 /// coordination write caps name the payload they refused.
 const RENDERED_PROMPT: &str = "the rendered prompt";
@@ -151,6 +153,13 @@ pub enum IpcError {
     /// detail names the file to fix by hand.
     #[error("the instructions file was left untouched: {0}")]
     UnmatchedIntegrationMarkers(String),
+    /// A version-control call produced no result. `reason` is the closed classification a caller
+    /// **matches on** — which is what lets an operation somebody stopped be told from one that
+    /// failed — and `message` is the same refusal in words, the core's own sentence plus whatever
+    /// account the tool or the service wrote. Classified once, in [`crate::vcs_error`]; nothing
+    /// anywhere reads a word version control printed.
+    #[error("{message}")]
+    Git { reason: GitRefusal, message: String },
     /// The app failed to serve the request (e.g. a durable read failed).
     #[error("the app could not serve the request: {0}")]
     Internal(String),
@@ -199,7 +208,12 @@ impl IpcError {
             | IpcError::UnknownTool
             | IpcError::WorkerMayNotSpawn
             | IpcError::InvalidFeedback(_)
-            | IpcError::UnmatchedIntegrationMarkers(_) => true,
+            | IpcError::UnmatchedIntegrationMarkers(_)
+            // Every version-control refusal, without exception: what a caller does about an
+            // untrusted project, a credential nobody arranged, a conflict, or an operation the
+            // user stopped is to say so — and it can only say so if it was told. A refusal
+            // delivered as a protocol error is one the model never sees.
+            | IpcError::Git { .. } => true,
             IpcError::Internal(_) => false,
         }
     }

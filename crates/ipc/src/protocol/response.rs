@@ -5,11 +5,12 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AcquireOutcome, AgentTool, Comment, DiagramSummary, DiagramView, ExportedTemplate,
-    FeedbackEntry, IntegrationWrite, KvEntry, LeaseView, LinkContent, McpToolGroups, ProcessId,
-    ProcessView, ProjectId, ProjectView, RenderedPrompt, ScratchpadSummary, ScratchpadView,
-    SeedTemplate, SetWhenIdleOutcome, StartSummary, TemplateSummary, TemplateView, TimerView,
-    TodoSummary, TodoView, Whoami,
+    AcquireOutcome, AgentTool, Branches, Comment, DiagramSummary, DiagramView, ExportedTemplate,
+    FeedbackEntry, FileDiff, GitStatus, IntegrationWrite, KvEntry, LeaseView, LinkContent,
+    McpToolGroups, ProcessId, ProcessView, ProjectId, ProjectView, PullRequestReview,
+    PullRequestSurface, RenderedPrompt, ScratchpadSummary, ScratchpadView, SeedTemplate,
+    SetWhenIdleOutcome, StartSummary, TemplateSummary, TemplateView, TimerView, TodoSummary,
+    TodoView, Whoami,
 };
 
 use crate::error::IpcError;
@@ -129,6 +130,24 @@ pub enum IpcResponse {
     KvPairs(Vec<KvEntry>),
     /// Whether a kv entry was deleted (answer to [`IpcRequest::KvDelete`]).
     KvDeleted(bool),
+    /// A repository's working-tree status (answer to [`IpcRequest::GitStatus`]). Reuses the core
+    /// read model so the wire shape cannot drift.
+    GitStatus(GitStatus),
+    /// One path's diff, or `None` where the path names nothing inside the repository (answer to
+    /// [`IpcRequest::GitDiff`]).
+    GitDiff(Option<FileDiff>),
+    /// The branches a switcher can offer, and whether anything is stashed (answer to
+    /// [`IpcRequest::GitBranches`]).
+    GitBranches(Branches),
+    /// What can be proposed as a pull request, and what already has been (answer to
+    /// [`IpcRequest::GitPullRequest`]).
+    GitPullRequest(PullRequestSurface),
+    /// An open pull request with its checks and conversations, or `None` when the branch has none
+    /// (answer to [`IpcRequest::GitPullRequestReview`]).
+    GitPullRequestReview(Option<PullRequestReview>),
+    /// The address of a pull request that was just made (answer to
+    /// [`IpcRequest::GitCreatePullRequest`]).
+    GitPullRequestCreated(String),
     /// The MCP feature-group tool enablement (answer to [`IpcRequest::McpToolGroups`]). Reuses the
     /// core type so the wire shape cannot drift.
     McpToolGroups(McpToolGroups),

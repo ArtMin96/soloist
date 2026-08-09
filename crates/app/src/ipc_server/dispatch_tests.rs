@@ -1,15 +1,17 @@
 use super::*;
 use soloist_core::testing::{
-    terminal_registration, FakeLockRepo, FakeProjectRepo, FakeSettingsRepo, FakeSpawner,
-    FakeTemplateRepo, FakeTrustRepo,
+    terminal_registration, FakeGitRepository, FakeLockRepo, FakeProjectRepo, FakeSettingsRepo,
+    FakeSpawner, FakeTemplateRepo, FakeTrustRepo, GitChange,
 };
 use soloist_core::{
-    AcquireOutcome, CorePorts, DomainEvent, IntegrationFile, McpFeatureGroup, MissingPolicy,
-    Origin, PeerCredentials, ProcStatus, ProcessId, ProjectRepo, StartSummary, TemplateScope,
-    TokioClock,
+    AcquireOutcome, BranchOp, CorePorts, DomainEvent, IntegrationFile, McpFeatureGroup,
+    MissingPolicy, Origin, PeerCredentials, ProcStatus, ProcessId, ProjectRepo, Prompting,
+    StartSummary, StashOp, SyncOp, TemplateScope, TokioClock, TrustRepo,
 };
+use soloist_ipc::GitRefusal;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tempfile::TempDir;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -1162,4 +1164,167 @@ async fn setup_agent_integration_with_no_scope_is_refused() {
         .await,
         Err(IpcError::NoProjectScope)
     );
+}
+
+/// A façade over a repository fake with one project open, plus a session sitting in that project's
+/// directory — the routing test's alternate composition root for version control.
+fn git_facade(repository: FakeGitRepository) -> (Arc<Facade>, Arc<FakeTrustRepo>, TempDir) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().canonicalize().expect("canonical root");
+    let projects = Arc::new(FakeProjectRepo::new());
+    projects.upsert(&root, None, None).expect("add project");
+    let trust = Arc::new(FakeTrustRepo::new());
+    let facade = Arc::new(Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            trust.clone(),
+            projects,
+        )
+        .git_repository(Arc::new(repository))
+        .build(),
+    ));
+    (facade, trust, dir)
+}
+
+/// Every version-control request routes to its own scoped behaviour. The dispatch is one flat arm
+/// per request, so the compiler insists each is routed — but not that it is routed to the right
+/// thing, which is what a copy-pasted arm gets wrong and what this catches.
+#[tokio::test]
+async fn each_version_control_request_routes_to_its_own_behaviour() {
+    let mut status = soloist_core::testing::git_status("main");
+    // Staged, so the commit has something to record and reaches the port rather than the core's
+    // nothing-staged guard.
+    status.changes.push(soloist_core::testing::file_change(
+        "src/main.rs",
+        Some(soloist_core::ChangeKind::Modified),
+        None,
+    ));
+    let repository =
+        FakeGitRepository::reporting(status).branching(soloist_core::testing::branches(Vec::new()));
+    let (facade, trust, dir) = git_facade(repository.clone());
+    let project = facade
+        .projects_snapshot()
+        .expect("projects")
+        .first()
+        .expect("one project")
+        .id;
+    trust.set_project_trusted(project).expect("trust");
+    let session = facade.open_session(PeerCredentials::in_dir(
+        dir.path().canonicalize().expect("canonical"),
+    ));
+
+    assert!(matches!(
+        handle_request(&facade, session, IpcRequest::GitStatus).await,
+        Ok(IpcResponse::GitStatus(_)),
+    ));
+    assert!(matches!(
+        handle_request(&facade, session, IpcRequest::GitBranches).await,
+        Ok(IpcResponse::GitBranches(_)),
+    ));
+    let hunk = soloist_core::HunkRange {
+        old_start: 3,
+        old_lines: 2,
+        new_start: 3,
+        new_lines: 4,
+    };
+    for request in [
+        IpcRequest::GitStage {
+            path: "src/main.rs".into(),
+            hunk: None,
+        },
+        // A hunk named on the wire must survive the routing: dropping it here would quietly widen
+        // acting on part of a change into acting on the whole file.
+        IpcRequest::GitStage {
+            path: "src/main.rs".into(),
+            hunk: Some(hunk),
+        },
+        IpcRequest::GitCommit {
+            message: "a subject".into(),
+            amend: false,
+        },
+        IpcRequest::GitPush,
+        IpcRequest::GitPull,
+        IpcRequest::GitFetch,
+        IpcRequest::GitCreateBranch {
+            name: "topic".into(),
+        },
+        IpcRequest::GitStash,
+        IpcRequest::GitPopStash,
+    ] {
+        let routed = handle_request(&facade, session, request.clone()).await;
+        assert!(
+            matches!(routed, Ok(IpcResponse::Acked)),
+            "{request:?} did not route: {routed:?}"
+        );
+    }
+
+    // What each one did, in the order it was asked for — a mis-routed arm reads back as the wrong
+    // change, or as the same change twice.
+    assert_eq!(
+        repository.changes(),
+        vec![
+            GitChange::Stage {
+                path: "src/main.rs".into(),
+                original_path: None,
+            },
+            GitChange::StageHunk {
+                path: "src/main.rs".into(),
+                hunk,
+            },
+            GitChange::Commit {
+                message: "a subject".into(),
+                amend: false,
+            },
+            GitChange::Sync {
+                op: SyncOp::Publish,
+                prompting: Prompting::Denied,
+            },
+            GitChange::Sync {
+                op: SyncOp::Pull,
+                prompting: Prompting::Denied,
+            },
+            GitChange::Sync {
+                op: SyncOp::Fetch,
+                prompting: Prompting::Denied,
+            },
+            GitChange::Branch {
+                op: BranchOp::Create,
+                name: "topic".into(),
+            },
+            GitChange::Stash { op: StashOp::Save },
+            GitChange::Stash { op: StashOp::Pop },
+        ],
+    );
+}
+
+/// A version-control refusal crosses the wire as its own word, so the surface on the other side can
+/// tell one refusal from another without reading the sentence.
+#[tokio::test]
+async fn a_refused_change_crosses_the_wire_as_the_word_that_classifies_it() {
+    let (facade, _trust, dir) = git_facade(FakeGitRepository::reporting(
+        soloist_core::testing::git_status("main"),
+    ));
+    let session = facade.open_session(PeerCredentials::in_dir(
+        dir.path().canonicalize().expect("canonical"),
+    ));
+
+    // The project has not been trusted, which is the refusal every change shares.
+    let refused = handle_request(
+        &facade,
+        session,
+        IpcRequest::GitCommit {
+            message: "a subject".into(),
+            amend: false,
+        },
+    )
+    .await;
+
+    assert!(matches!(
+        refused,
+        Err(IpcError::Git {
+            reason: GitRefusal::ProjectUntrusted,
+            ..
+        }),
+    ));
 }

@@ -924,10 +924,11 @@ export type McpFeatureGroup =
   | "todos"
   | "timers"
   | "key_value"
-  | "prompt_templates";
+  | "prompt_templates"
+  | "git";
 
 // Which MCP feature-tool groups the server exposes (mirrors core::McpToolGroups). Scratchpads,
-// Diagrams, Todos and Timers default on; Key-Value and Prompt Templates default off.
+// Diagrams, Todos and Timers default on; Key-Value, Prompt Templates and Git default off.
 export interface McpToolGroups {
   scratchpads: boolean;
   diagrams: boolean;
@@ -935,6 +936,7 @@ export interface McpToolGroups {
   timers: boolean;
   key_value: boolean;
   prompt_templates: boolean;
+  git: boolean;
 }
 
 // What a generated MCP client snippet needs (mirrors the app's McpSetupInfo): the helper command

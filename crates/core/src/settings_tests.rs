@@ -1,5 +1,5 @@
-//! Unit tests for the generic settings aggregate and the global document — defaults (Key-Value
-//! off, the rest on), per-group enablement, default-on-absent, the `update` write primitive over a
+//! Unit tests for the generic settings aggregate and the global document — defaults (Key-Value,
+//! Prompt Templates and Git off, the rest on), per-group enablement, default-on-absent, the `update` write primitive over a
 //! fake repo, and serde backward-compatibility for a record an older build wrote. The generic base
 //! is exercised here with `K = ()` and `D = Settings`; the per-project `K = ProjectId` surface
 //! reuses the same `get`/`update` and is covered through its own document's tests.
@@ -10,15 +10,32 @@ use super::*;
 use crate::testing::FakeSettingsRepo;
 
 #[test]
-fn the_mcp_tool_group_defaults_serve_every_feature_group_except_key_value_and_templates() {
+fn the_mcp_tool_group_defaults_serve_every_feature_group_except_key_value_templates_and_git() {
     let groups = McpToolGroups::default();
 
     assert!(groups.enabled(McpFeatureGroup::Scratchpads));
     assert!(groups.enabled(McpFeatureGroup::Todos));
     assert!(groups.enabled(McpFeatureGroup::Timers));
-    // Key-Value and Prompt Templates are the feature groups that default off.
+    // Key-Value, Prompt Templates and Git are the feature groups that default off. Git's default
+    // is the safety property of the whole group: its tools change the user's own repository under
+    // whatever credentials their `git` reaches for, so it is granted rather than inherited.
     assert!(!groups.enabled(McpFeatureGroup::KeyValue));
     assert!(!groups.enabled(McpFeatureGroup::PromptTemplates));
+    assert!(!groups.enabled(McpFeatureGroup::Git));
+}
+
+#[test]
+fn a_record_written_before_version_control_existed_still_reads_it_as_off() {
+    // The document an older build stored names no version-control group at all; reading it must
+    // leave that group off rather than fail or, worse, come back on.
+    let stored: Settings = serde_json::from_str(
+        r#"{"mcp_tool_groups":{"scratchpads":true,"diagrams":true,"todos":true,"timers":true,
+             "key_value":true,"prompt_templates":true}}"#,
+    )
+    .expect("an older record still reads");
+
+    assert!(stored.mcp_tool_groups.enabled(McpFeatureGroup::KeyValue));
+    assert!(!stored.mcp_tool_groups.enabled(McpFeatureGroup::Git));
 }
 
 #[test]

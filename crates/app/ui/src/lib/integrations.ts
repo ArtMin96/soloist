@@ -7,7 +7,7 @@
 import type { McpFeatureGroup, McpSetupInfo, McpToolGroups } from "@/domain";
 
 // The pre-load fallback for the enablement: Scratchpads / Diagrams / Todos / Timers default on,
-// Key-Value and Prompt Templates off. The facade's stored value supersedes this on load.
+// Key-Value, Prompt Templates and Git off. The facade's stored value supersedes this on load.
 export const DEFAULT_MCP_TOOL_GROUPS: McpToolGroups = {
   scratchpads: true,
   diagrams: true,
@@ -15,6 +15,7 @@ export const DEFAULT_MCP_TOOL_GROUPS: McpToolGroups = {
   timers: true,
   key_value: false,
   prompt_templates: false,
+  git: false,
 };
 
 export interface McpGroupInfo {
@@ -55,6 +56,12 @@ export const MCP_TOOL_GROUPS: McpGroupInfo[] = [
     group: "prompt_templates",
     label: "Prompt Templates",
     description: "Reusable prompts with placeholder fill-ins. Off by default.",
+  },
+  {
+    group: "git",
+    label: "Git",
+    description:
+      "Read, stage, commit, push and open pull requests in this project's repository. Agents can change your repository under your own credentials, and nothing asks you to confirm — only projects you have trusted are affected. Off by default.",
   },
 ];
 

@@ -10,14 +10,24 @@ use soloist_core::{
     TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary, TodoView, Whoami,
 };
 use soloist_core::{
+    BranchInfo, ChangeKind, DiffExtent, DiffTarget, FileChange, GitError, GitFileStatus, GitStatus,
+    GitWriteError, HunkRange, MergeMethod, NewPullRequest, ScopedGitError, SyncState,
+};
+use soloist_core::{
     FeedbackEntry, IntegrationFile, IntegrationWrite, MissingPolicy, RenderedPrompt, TemplateId,
     TemplateKind, TemplateScope, TemplateView,
 };
 use soloist_ipc::{IpcError, IpcRequest, IpcResponse, PortWaitOutcome, ProjectSummary};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use crate::testing::{all_feature_groups, handler, handler_with_groups, spawn_fake_app};
+
+use crate::args::{
+    DiffTargetArg, GitBranchArg, GitCommitArg, GitCreatePullRequestArg, GitDiffArg,
+    GitMergePullRequestArg, GitPathArg, HunkArg, MergeMethodArg,
+};
 
 use crate::args::{
     DiagramArchiveArg, DiagramNameArg, DiagramTagsArg, DiagramWriteArg, HelpArg,
@@ -180,6 +190,26 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "prompt_template_delete",
     "prompt_template_export",
     "prompt_template_render",
+    // tools/git.rs
+    "git_status",
+    "git_diff",
+    "git_branches",
+    "git_stage",
+    "git_unstage",
+    "git_discard",
+    "git_commit",
+    "git_push",
+    "git_pull",
+    "git_fetch",
+    "git_create_branch",
+    "git_switch_branch",
+    "git_delete_branch",
+    "git_stash",
+    "git_pop_stash",
+    "git_pull_request",
+    "git_pull_request_review",
+    "git_create_pull_request",
+    "git_merge_pull_request",
 ];
 
 /// With every feature group enabled, the router [`SoloistMcp::new`] composes from the per-category
@@ -280,6 +310,56 @@ fn an_error_result_is_left_without_a_suggestion() {
         .iter()
         .filter_map(|content| content.as_text())
         .all(|text| !text.text.starts_with("Next: ")));
+}
+
+/// Every feature group the core defines has a sub-router gated on it. The group list is a
+/// fixed-size array of hand-written rows, so adding a variant to the enum and forgetting the row
+/// compiles cleanly and simply serves nothing — a setting that turns nothing on. Guarded here
+/// rather than trusted to the compiler.
+#[test]
+fn every_feature_group_the_core_defines_gates_a_sub_router() {
+    let gated: HashSet<McpFeatureGroup> = SoloistMcp::tool_groups()
+        .into_iter()
+        .filter_map(|group| match group.gate {
+            GroupGate::Feature(feature) => Some(feature),
+            GroupGate::Core => None,
+        })
+        .collect();
+
+    assert_eq!(
+        gated,
+        McpFeatureGroup::ALL.into_iter().collect::<HashSet<_>>(),
+        "a feature group with no sub-router is a setting that turns nothing on"
+    );
+}
+
+/// The version-control group is off on a fresh install, and turning it on is what serves it. Its
+/// tools change the user's own repository, so the default is the safety property.
+#[test]
+fn git_is_off_by_default_and_appears_only_when_it_is_turned_on() {
+    let off = served_tools(&handler_with_groups(McpToolGroups::default()));
+    assert!(
+        !off.iter().any(|name| name.starts_with("git_")),
+        "no version-control tool is served on a fresh install"
+    );
+
+    let on = served_tools(&handler_with_groups(McpToolGroups {
+        git: true,
+        ..McpToolGroups::default()
+    }));
+    let git: BTreeSet<&str> = EXPECTED_TOOL_SURFACE
+        .iter()
+        .copied()
+        .filter(|name| name.starts_with("git_"))
+        .collect();
+    assert!(!git.is_empty(), "the expected surface names git tools");
+    for tool in git {
+        assert!(on.contains(tool), "{tool} is served once Git is enabled");
+    }
+    assert!(
+        on.contains("whoami"),
+        "the other groups are unaffected by the switch"
+    );
 }
 
 /// The default surface serves every core and on-by-default feature group, but gates Key-Value off
@@ -436,11 +516,7 @@ fn prompt_template_render_is_absent_when_its_group_is_off() {
 fn disabling_a_feature_group_hides_only_its_tools() {
     let groups = McpToolGroups {
         scratchpads: false,
-        diagrams: true,
-        todos: true,
-        timers: true,
-        key_value: false,
-        prompt_templates: false,
+        ..McpToolGroups::default()
     };
     let served = served_tools(&handler_with_groups(groups));
 
@@ -2547,4 +2623,278 @@ async fn a_todo_naming_an_unknown_scratchpad_is_refused() {
         Some(true),
         "an unknown scratchpad name is refused as an actionable tool error"
     );
+}
+
+/// Every version-control tool that changes something sends its own request and reports the
+/// acknowledgement — so a copy-paste that had `git_pull` ask for a fetch, or a change tool inventing
+/// a success shape of its own, fails here rather than shipping.
+#[tokio::test]
+async fn every_version_control_change_sends_its_own_request_and_acknowledges() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let seen: Arc<Mutex<Vec<IpcRequest>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&seen);
+    spawn_fake_app(socket.clone(), move |request| {
+        recorder.lock().expect("record").push(request);
+        Ok(IpcResponse::Acked)
+    });
+    let handler = handler(socket);
+    let ok = serde_json::json!({ "ok": true });
+    let path = || GitPathArg {
+        path: "src/main.rs".into(),
+        hunk: None,
+    };
+    let branch = || GitBranchArg {
+        name: "topic".into(),
+    };
+
+    for result in [
+        handler.git_stage(Parameters(path())).await,
+        handler.git_unstage(Parameters(path())).await,
+        handler.git_discard(Parameters(path())).await,
+        handler
+            .git_commit(Parameters(GitCommitArg {
+                message: "a subject".into(),
+                amend: false,
+            }))
+            .await,
+        handler.git_push().await,
+        handler.git_pull().await,
+        handler.git_fetch().await,
+        handler.git_create_branch(Parameters(branch())).await,
+        handler.git_switch_branch(Parameters(branch())).await,
+        handler.git_delete_branch(Parameters(branch())).await,
+        handler.git_stash().await,
+        handler.git_pop_stash().await,
+        handler
+            .git_merge_pull_request(Parameters(GitMergePullRequestArg {
+                number: 7,
+                method: MergeMethodArg::Squash,
+            }))
+            .await,
+    ] {
+        assert_eq!(structured_of(result.expect("the change succeeds")), ok);
+    }
+
+    let file = |path: &str| path.to_string();
+    assert_eq!(
+        seen.lock().expect("read").clone(),
+        vec![
+            IpcRequest::GitStage {
+                path: file("src/main.rs"),
+                hunk: None
+            },
+            IpcRequest::GitUnstage {
+                path: file("src/main.rs"),
+                hunk: None
+            },
+            IpcRequest::GitDiscard {
+                path: file("src/main.rs"),
+                hunk: None
+            },
+            IpcRequest::GitCommit {
+                message: "a subject".into(),
+                amend: false
+            },
+            IpcRequest::GitPush,
+            IpcRequest::GitPull,
+            IpcRequest::GitFetch,
+            IpcRequest::GitCreateBranch {
+                name: "topic".into()
+            },
+            IpcRequest::GitSwitchBranch {
+                name: "topic".into()
+            },
+            IpcRequest::GitDeleteBranch {
+                name: "topic".into()
+            },
+            IpcRequest::GitStash,
+            IpcRequest::GitPopStash,
+            IpcRequest::GitMergePullRequest {
+                number: 7,
+                method: MergeMethod::Squash
+            },
+        ],
+    );
+}
+
+/// A hunk named on a staging tool reaches the app as that hunk, so acting on part of a change is
+/// not quietly widened to the whole file.
+#[tokio::test]
+async fn naming_a_hunk_carries_it_through_rather_than_staging_the_whole_path() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::GitStage {
+            hunk:
+                Some(HunkRange {
+                    old_start: 3,
+                    old_lines: 2,
+                    new_start: 3,
+                    new_lines: 4,
+                }),
+            ..
+        } => Ok(IpcResponse::Acked),
+        _ => Err(IpcError::Internal(
+            "expected the hunk that was named".into(),
+        )),
+    });
+
+    handler(socket)
+        .git_stage(Parameters(GitPathArg {
+            path: "src/main.rs".into(),
+            hunk: Some(HunkArg {
+                old_start: 3,
+                old_lines: 2,
+                new_start: 3,
+                new_lines: 4,
+            }),
+        }))
+        .await
+        .expect("staging one hunk carries it through");
+}
+
+#[tokio::test]
+async fn git_status_projects_the_working_tree_the_app_reported() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let status = GitStatus {
+        branch: BranchInfo {
+            name: Some("main".into()),
+            upstream: Some("origin/main".into()),
+            sync: SyncState::Ahead { ahead: 2 },
+        },
+        changes: vec![FileChange {
+            path: "src/main.rs".into(),
+            status: GitFileStatus {
+                staged: None,
+                unstaged: Some(ChangeKind::Modified),
+            },
+            original_path: None,
+        }],
+        merging: false,
+    };
+    let canned = status.clone();
+    spawn_fake_app(socket.clone(), move |request| match request {
+        IpcRequest::GitStatus => Ok(IpcResponse::GitStatus(canned.clone())),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket).git_status().await.expect("status succeeds");
+    let back: GitStatus = serde_json::from_value(structured_of(result)).expect("decode status");
+    assert_eq!(back, status);
+}
+
+#[tokio::test]
+async fn git_diff_threads_the_comparison_and_the_extent_through() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    // The fake answers only the exact comparison and extent asked for, so the mapping from the
+    // tool's own vocabulary onto the core's is what makes this succeed.
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::GitDiff {
+            path,
+            target: DiffTarget::Staged,
+            extent: DiffExtent::Full,
+        } if path == "src/main.rs" => Ok(IpcResponse::GitDiff(None)),
+        _ => Err(IpcError::Internal("unexpected comparison".into())),
+    });
+
+    let result = handler(socket)
+        .git_diff(Parameters(GitDiffArg {
+            path: "src/main.rs".into(),
+            target: DiffTargetArg::Staged,
+            full: true,
+        }))
+        .await
+        .expect("diff succeeds");
+    assert_eq!(structured_of(result), serde_json::json!({ "diff": null }));
+}
+
+#[tokio::test]
+async fn git_create_pull_request_answers_with_where_what_it_made_can_be_found() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::GitCreatePullRequest { new }
+            if new
+                == (NewPullRequest {
+                    title: "Add the thing".into(),
+                    body: "It does the thing.".into(),
+                    base: "main".into(),
+                    draft: true,
+                }) =>
+        {
+            Ok(IpcResponse::GitPullRequestCreated(
+                "https://forge.example/pull/7".into(),
+            ))
+        }
+        _ => Err(IpcError::Internal("unexpected proposal".into())),
+    });
+
+    let result = handler(socket)
+        .git_create_pull_request(Parameters(GitCreatePullRequestArg {
+            title: "Add the thing".into(),
+            body: "It does the thing.".into(),
+            base: "main".into(),
+            draft: true,
+        }))
+        .await
+        .expect("propose succeeds");
+    assert_eq!(
+        structured_of(result),
+        serde_json::json!({ "url": "https://forge.example/pull/7" })
+    );
+}
+
+/// A version-control refusal reaches the caller as **data**: the word the core decided, beside the
+/// sentence. Without the word, telling an operation somebody stopped from one that failed would
+/// mean reading the wording — which is what this whole classification exists to avoid.
+#[tokio::test]
+async fn a_stopped_operation_is_told_from_a_failed_one_without_reading_the_wording() {
+    let stopped = refusal_of(GitError::Stopped).await;
+    let failed = refusal_of(GitError::Op { status: Some(128) }).await;
+
+    assert_eq!(stopped.is_error, Some(true), "it did not do what was asked");
+    let word = |result: &CallToolResult| {
+        result
+            .structured_content
+            .as_ref()
+            .and_then(|value| value.get("reason"))
+            .cloned()
+            .expect("a refusal carries the word it is classified by")
+    };
+    assert_eq!(word(&stopped), serde_json::json!("stopped"));
+    assert_ne!(word(&stopped), word(&failed));
+}
+
+/// The sentence stays where a model is shown it, beside the word — a client that reads no
+/// structured data still sees why it was refused.
+#[tokio::test]
+async fn a_refusal_carries_its_sentence_as_well_as_its_word() {
+    let untrusted = refusal_of(GitError::AuthFailed).await;
+
+    let rendered = serde_json::to_value(&untrusted)
+        .expect("serialize the tool result")
+        .to_string();
+    assert!(
+        rendered.contains("no credential the remote would accept"),
+        "the reason reaches the model in words too: {rendered}"
+    );
+}
+
+/// The tool result a push refused with `err` comes back as.
+async fn refusal_of(err: GitError) -> CallToolResult {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), move |_request| {
+        Err(IpcError::from(ScopedGitError::Change(GitWriteError::Git(
+            err.clone(),
+        ))))
+    });
+
+    handler(socket)
+        .git_push()
+        .await
+        .expect("a refusal is a tool result, not a protocol error")
 }

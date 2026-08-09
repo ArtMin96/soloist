@@ -7,6 +7,7 @@
 pub(crate) mod agent;
 pub(crate) mod bulk;
 pub(crate) mod diagram;
+pub(crate) mod git;
 pub(crate) mod identity;
 pub(crate) mod kv;
 pub(crate) mod lock;

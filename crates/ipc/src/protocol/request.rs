@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    IntegrationFile, MissingPolicy, ProcessId, ProjectId, ScratchpadLink, TemplateKind,
-    TemplateScope, TimerId, TodoDoc, TodoId,
+    DiffExtent, DiffTarget, HunkRange, IntegrationFile, MergeMethod, MissingPolicy, NewPullRequest,
+    ProcessId, ProjectId, ScratchpadLink, TemplateKind, TemplateScope, TimerId, TodoDoc, TodoId,
 };
 
 /// A request from an IPC client to the running app. The server resolves identity and
@@ -249,6 +249,62 @@ pub enum IpcRequest {
     KvDelete { key: String },
     /// Every key-value entry in the session's effective project's kv store, ordered by key.
     KvList,
+    /// The working-tree status of the session's effective project's repository.
+    GitStatus,
+    /// How one path differs in the session's effective project, `target` deciding against what and
+    /// `extent` how much of the answer is carried.
+    GitDiff {
+        path: String,
+        target: DiffTarget,
+        extent: DiffExtent,
+    },
+    /// The branches the session's effective project could switch to, and whether it has anything
+    /// stashed.
+    GitBranches,
+    /// Records `path` in the index — or only `hunk` of it — in the session's effective project.
+    GitStage {
+        path: String,
+        #[serde(default)]
+        hunk: Option<HunkRange>,
+    },
+    /// Takes `path` — or only `hunk` of it — back out of the index.
+    GitUnstage {
+        path: String,
+        #[serde(default)]
+        hunk: Option<HunkRange>,
+    },
+    /// Throws away what the working tree holds for `path` — or only `hunk` of it — beyond the index.
+    GitDiscard {
+        path: String,
+        #[serde(default)]
+        hunk: Option<HunkRange>,
+    },
+    /// Records the index as a commit carrying `message`, or replaces the last commit when `amend`.
+    GitCommit { message: String, amend: bool },
+    /// Hands the checked-out branch's commits to its remote, publishing it when it tracks nothing.
+    GitPush,
+    /// Brings the remote's commits in and reconciles them with what is checked out.
+    GitPull,
+    /// Brings the remote's commits in without touching the working tree.
+    GitFetch,
+    /// Starts a branch called `name` at what is checked out, and switches to it.
+    GitCreateBranch { name: String },
+    /// Checks out the branch called `name`.
+    GitSwitchBranch { name: String },
+    /// Removes the branch called `name` (never forced).
+    GitDeleteBranch { name: String },
+    /// Sets what the working tree holds aside.
+    GitStash,
+    /// Puts the most recently stashed changes back.
+    GitPopStash,
+    /// What the session's effective project can propose as a pull request, and what it already has.
+    GitPullRequest,
+    /// What the checked-out branch has open on the service, with its checks and conversations.
+    GitPullRequestReview,
+    /// Proposes what is checked out as a pull request, publishing the branch first if needed.
+    GitCreatePullRequest { new: NewPullRequest },
+    /// Puts pull request `number`'s commits into its base branch by `method`.
+    GitMergePullRequest { number: u64, method: MergeMethod },
     /// The MCP feature-group tool enablement — a global settings read (not project-scoped) the MCP
     /// server consults at startup to decide which feature-tool groups to serve.
     McpToolGroups,

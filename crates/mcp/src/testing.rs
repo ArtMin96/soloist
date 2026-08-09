@@ -42,6 +42,7 @@ pub(crate) fn all_feature_groups() -> McpToolGroups {
         timers: true,
         key_value: true,
         prompt_templates: true,
+        git: true,
     }
 }
 
