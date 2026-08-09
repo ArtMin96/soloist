@@ -19,14 +19,18 @@ pub enum TemplateKind {
     Scratchpad,
     /// A starting shape for a new todo's Markdown body.
     Todo,
+    /// A starting shape for a pull request's Markdown description, kept here rather than in one
+    /// repository so it travels across every repository the user works in.
+    Pr,
 }
 
 impl TemplateKind {
     /// Every kind, in display order — the single source a UI or a persisted-shape check iterates.
-    pub const ALL: [TemplateKind; 3] = [
+    pub const ALL: [TemplateKind; 4] = [
         TemplateKind::Prompt,
         TemplateKind::Scratchpad,
         TemplateKind::Todo,
+        TemplateKind::Pr,
     ];
 
     /// The persisted discriminator stored in the `kind` column, matching the serde `snake_case`
@@ -36,6 +40,7 @@ impl TemplateKind {
             TemplateKind::Prompt => "prompt",
             TemplateKind::Scratchpad => "scratchpad",
             TemplateKind::Todo => "todo",
+            TemplateKind::Pr => "pr",
         }
     }
 
@@ -56,6 +61,7 @@ impl TemplateKind {
             TemplateKind::Prompt => "soloist.prompt-template/v1",
             TemplateKind::Scratchpad => "soloist.scratchpad-template/v1",
             TemplateKind::Todo => "soloist.todo-template/v1",
+            TemplateKind::Pr => "soloist.pr-template/v1",
         }
     }
 }

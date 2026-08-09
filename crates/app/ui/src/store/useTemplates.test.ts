@@ -100,7 +100,7 @@ function setup(
 ) {
   handler = undefined;
   mockLibraries(globals, projectOwned);
-  defaults.mockResolvedValue({ scratchpad: 1, todo: null });
+  defaults.mockResolvedValue({ scratchpad: 1, todo: null, pr: null });
   subscribe.mockImplementation((fn) => {
     handler = fn;
     return Promise.resolve(() => {});
@@ -117,7 +117,7 @@ describe("useTemplates", () => {
     await waitFor(() => expect(result.current.lists.scratchpad.global).toHaveLength(1));
     expect(result.current.lists.prompt.global).toHaveLength(0);
     expect(result.current.lists.todo.global).toHaveLength(0);
-    expect(result.current.defaults).toEqual({ scratchpad: 1, todo: null });
+    expect(result.current.defaults).toEqual({ scratchpad: 1, todo: null, pr: null });
   });
 
   it("separates the global library from the open project's", async () => {
@@ -136,7 +136,7 @@ describe("useTemplates", () => {
 
     // A delete cleared the default in core; the event drives a re-read of both the kind and defaults.
     mockLibraries([], []);
-    defaults.mockResolvedValue({ scratchpad: null, todo: null });
+    defaults.mockResolvedValue({ scratchpad: null, todo: null, pr: null });
     act(() => handler?.({ type: "TemplateChanged", kind: "scratchpad", project: null }));
 
     await waitFor(() => expect(result.current.lists.scratchpad.global).toHaveLength(0));
@@ -197,7 +197,7 @@ describe("useTemplates", () => {
     // The global read landing is the barrier: it is dispatched alongside the defaults read, so once
     // it has settled a defaults read would have had its chance to settle too.
     await waitFor(() => expect(result.current.lists.scratchpad.global).toHaveLength(1));
-    expect(result.current.defaults).toEqual({ scratchpad: null, todo: null });
+    expect(result.current.defaults).toEqual({ scratchpad: null, todo: null, pr: null });
     expect(result.current.error).toBeNull();
   });
 
@@ -207,20 +207,20 @@ describe("useTemplates", () => {
     setup([summary(1, "daily", "scratchpad")], []);
     // Stubbed so that a selection which did go through would settle on a stored value, rather than
     // failing on an unstubbed write — the default landing on screen is what must not happen.
-    setDefault.mockResolvedValue({ scratchpad: 3, todo: null });
+    setDefault.mockResolvedValue({ scratchpad: 3, todo: null, pr: null });
     const { result } = renderHook(() => useTemplates(null));
     await waitFor(() => expect(result.current.lists.scratchpad.global).toHaveLength(1));
 
     act(() => result.current.setDefault("scratchpad", 3));
 
-    expect(result.current.defaults).toEqual({ scratchpad: null, todo: null });
+    expect(result.current.defaults).toEqual({ scratchpad: null, todo: null, pr: null });
   });
 
   it("shows a selected default at once, then settles on what the core stored", async () => {
     setup();
     // The core clamps the selection: `prompt` has no seed default, so the write echoes back a
     // record the optimistic value guessed wrong about.
-    setDefault.mockResolvedValue({ scratchpad: 2, todo: null });
+    setDefault.mockResolvedValue({ scratchpad: 2, todo: null, pr: null });
     const { result } = renderHook(() => useTemplates(OPEN_PROJECT));
     await waitFor(() => expect(result.current.defaults.scratchpad).toBe(1));
 
@@ -235,7 +235,7 @@ describe("useTemplates", () => {
   it("falls back to the stored defaults when the selection fails to persist", async () => {
     setup();
     setDefault.mockRejectedValue("settings are read-only");
-    defaults.mockResolvedValue({ scratchpad: 1, todo: null });
+    defaults.mockResolvedValue({ scratchpad: 1, todo: null, pr: null });
     const { result } = renderHook(() => useTemplates(OPEN_PROJECT));
     await waitFor(() => expect(result.current.defaults.scratchpad).toBe(1));
 

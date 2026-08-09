@@ -19,6 +19,10 @@ pub struct TemplateDefaults {
     pub scratchpad: Option<TemplateId>,
     /// The template a new todo's body is seeded from when created empty, or `None`.
     pub todo: Option<TemplateId>,
+    /// The template a new pull request's description is seeded from, or `None`. It is the
+    /// fallback: a repository carrying a pull-request template of its own is that repository's
+    /// convention, and wins over anything selected here.
+    pub pr: Option<TemplateId>,
 }
 
 impl TemplateDefaults {
@@ -28,6 +32,7 @@ impl TemplateDefaults {
         match kind {
             TemplateKind::Scratchpad => self.scratchpad,
             TemplateKind::Todo => self.todo,
+            TemplateKind::Pr => self.pr,
             TemplateKind::Prompt => None,
         }
     }
@@ -38,6 +43,7 @@ impl TemplateDefaults {
         match kind {
             TemplateKind::Scratchpad => self.scratchpad = template,
             TemplateKind::Todo => self.todo = template,
+            TemplateKind::Pr => self.pr = template,
             TemplateKind::Prompt => {}
         }
     }

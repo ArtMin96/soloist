@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useState } from "react";
-import { assistSettings, gitDraftCommitMessage } from "@/api";
-import { useRepositoryRead } from "@/store/git/useRepositoryRead";
+import { useMemo, useState } from "react";
+import { gitDraftCommitMessage } from "@/api";
+import { useAssistTool } from "@/store/git/useAssistTool";
 
 export interface CommitMessageDraftStore {
   /** Whether a tool is configured to draft with, so the affordance exists at all. */
@@ -19,23 +19,17 @@ export interface CommitMessageDraftStore {
  *
  * Holds no rules of its own. Which tool runs, whether the project permits it, what the agent is
  * shown and what is left out are every one of them the core's; this tracks whether a run is in
- * flight and what the last refusal said. The one thing it reads is whether a tool is selected —
- * asked so the affordance can be absent rather than offered and then refused.
- *
- * The read rides the same refresh every other repository read does, so turning the feature on is
- * noticed without the rail being rebuilt.
+ * flight and what the last refusal said.
  */
 export function useCommitMessageDraft(project: number | null): CommitMessageDraftStore {
   const [drafting, setDrafting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // The selection is global rather than per project, so the request never mentions one.
-  const readAssist = useCallback(() => assistSettings(), []);
-  const { value: assist } = useRepositoryRead("assist", readAssist);
+  const available = useAssistTool();
 
   return useMemo(
     () => ({
-      available: assist?.tool != null,
+      available,
       drafting,
       error,
       dismissError: () => setError(null),
@@ -53,6 +47,6 @@ export function useCommitMessageDraft(project: number | null): CommitMessageDraf
           .finally(() => setDrafting(false));
       },
     }),
-    [assist, drafting, error, project],
+    [available, drafting, error, project],
   );
 }

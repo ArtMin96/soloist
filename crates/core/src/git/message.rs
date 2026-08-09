@@ -30,6 +30,7 @@ use crate::sync::lock;
 use crate::vcs::{BranchInfo, ChangeKind, CommitEntry, DiffTarget, FileChange};
 
 use super::error::{GitDraftError, GitError};
+use super::repository::LogRange;
 use super::status::Git;
 
 /// File names whose contents describe nothing about a change: a dependency resolver's own record of
@@ -185,7 +186,9 @@ impl Git {
     /// on an orphan branch, and a clone shallow enough to hold none all reach it — and a prompt
     /// without examples still asks the same question.
     fn voice(&self, project: ProjectId, root: &Path) -> Result<String, GitError> {
-        let Some(recent) = self.history(project, root, 0, VOICE_EXAMPLE_SCAN)? else {
+        let Some(recent) =
+            self.history(project, root, LogRange::CheckedOut, 0, VOICE_EXAMPLE_SCAN)?
+        else {
             return Ok(String::new());
         };
         let mut block = String::new();

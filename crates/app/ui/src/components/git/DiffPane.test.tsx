@@ -164,7 +164,7 @@ describe("DiffPane", () => {
     renderPane();
     await screen.findByTestId("diff");
 
-    const divider = screen.getByRole("separator", { name: /resize the diff/i });
+    const divider = screen.getByRole("separator", { name: /resize the split/i });
     const before = Number(divider.getAttribute("aria-valuenow"));
     fireEvent.keyDown(divider, { key: "ArrowUp" });
     const after = Number(divider.getAttribute("aria-valuenow"));
@@ -176,7 +176,7 @@ describe("DiffPane", () => {
 
     expect(
       Number(
-        screen.getByRole("separator", { name: /resize the diff/i }).getAttribute("aria-valuenow"),
+        screen.getByRole("separator", { name: /resize the split/i }).getAttribute("aria-valuenow"),
       ),
     ).toBe(after);
   });
@@ -188,7 +188,7 @@ describe("DiffPane", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /fill the area/i }));
     expect(
-      screen.queryByRole("separator", { name: /resize the diff/i }),
+      screen.queryByRole("separator", { name: /resize the split/i }),
       "there is nothing left to resize the split against",
     ).toBeNull();
 

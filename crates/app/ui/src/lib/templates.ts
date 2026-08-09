@@ -5,8 +5,8 @@ import type { TemplateKind, TemplateScope } from "@/domain";
 // `TemplateScope`; keeping it here means a component never hard-codes a kind or scope string.
 
 // The kinds the manager lists, in display order: prompts first (the reserved prompt-templates view),
-// then the two seedable kinds.
-export const TEMPLATE_KINDS: readonly TemplateKind[] = ["prompt", "scratchpad", "todo"];
+// then the seedable kinds.
+export const TEMPLATE_KINDS: readonly TemplateKind[] = ["prompt", "scratchpad", "todo", "pr"];
 
 // The one kind whose {{placeholders}} are substituted (mirrors the core's `RENDERABLE_KIND`). A
 // prompt is applied to an agent with its fill-ins resolved; the seedable kinds start a document the
@@ -18,6 +18,7 @@ export const TEMPLATE_KIND_LABEL: Record<TemplateKind, string> = {
   prompt: "Prompt",
   scratchpad: "Scratchpad",
   todo: "Todo",
+  pr: "Pull request",
 };
 
 export const TEMPLATE_KIND_DESCRIPTION: Record<TemplateKind, string> = {
@@ -25,6 +26,7 @@ export const TEMPLATE_KIND_DESCRIPTION: Record<TemplateKind, string> = {
   scratchpad:
     "A starting shape for new scratchpads. Choose a default and empty scratchpads are seeded from it.",
   todo: "A starting shape for new todos. Choose a default and empty todos are seeded from it.",
+  pr: "A starting shape for pull request descriptions, for the repositories that carry none of their own. A repository's own template always wins.",
 };
 
 // The scopes a template can live in, in display order: the library shared across every project

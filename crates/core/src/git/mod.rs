@@ -7,10 +7,12 @@
 //! [`vcs`](crate::vcs) vocabulary), the per-project cache that serves it, and the
 //! [`GitStatusWatchReactor`] that decides when a repository is worth re-reading, the file
 //! listing a browsing surface reads, how much of one path's diff a reader is handed at once,
-//! what an agent is told about a staged change when it is asked to describe it, and what
-//! exchanging commits with a remote is allowed to cost. Running the tool is an adapter's job
-//! (`crates/git`, over the system `git` command line); a missing adapter degrades to
-//! [`NoopGitRepository`], and a project simply shows no version control.
+//! what an agent is told about a staged change when it is asked to describe it, what
+//! exchanging commits with a remote is allowed to cost, and what proposing a branch's commits as
+//! a pull request needs before it can be offered. Running the tools is an adapter's job
+//! (`crates/git`, over the system `git` command line; `crates/forge`, over the `gh` one); a missing
+//! adapter degrades to [`NoopGitRepository`] or [`NoopGitForge`], and a project simply shows no
+//! version control, or no pull requests.
 //!
 //! Nothing the tool printed reaches here: the adapter parses its machine-readable output into
 //! these types, so the core's behaviour cannot depend on the wording — or the language — of a
@@ -18,13 +20,16 @@
 
 mod branch;
 mod commit;
+mod description;
 mod diff;
 mod error;
 mod exchange;
 mod files;
+mod forge;
 mod history;
 mod message;
 mod path;
+mod pr;
 mod repository;
 mod stage;
 mod status;
@@ -35,9 +40,14 @@ pub use branch::BRANCH_PAGE_SIZE;
 pub use diff::DiffExtent;
 pub use error::{GitDraftError, GitError, GitWriteError};
 pub use exchange::{Prompting, Stop, SyncOp};
+pub use forge::{
+    ForgeError, ForgeReadiness, GitForge, NewPullRequest, NoopGitForge, PullRequest,
+    PullRequestState, PullRequestTemplate,
+};
 pub use history::LOG_PAGE_SIZE;
+pub use pr::{PullRequestError, PullRequestSurface};
 pub use repository::{
-    BranchOp, Exchange, GitRepository, NoopGitRepository, RawFileDiff, RawHunk, StashOp,
+    BranchOp, Exchange, GitRepository, LogRange, NoopGitRepository, RawFileDiff, RawHunk, StashOp,
 };
 pub use status::{Git, GitStatus};
 pub use watch::GitStatusWatchReactor;

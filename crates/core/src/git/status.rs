@@ -19,6 +19,7 @@ use crate::vcs::{BranchInfo, FileChange};
 
 use super::error::{GitError, GitWriteError};
 use super::exchange::Stop;
+use super::forge::GitForge;
 use super::repository::GitRepository;
 
 /// A repository's working tree at one moment: what is checked out, and everything that differs
@@ -40,6 +41,10 @@ pub struct GitStatus {
 /// remembers the answer.
 pub struct Git {
     pub(super) repository: Arc<dyn GitRepository>,
+    /// The hosting service the project's pull requests live on. A second port rather than a
+    /// second method on the first, because it is a different machine answering — one the user
+    /// may have no tool for and no account on, which is the first thing it is asked.
+    pub(super) forge: Arc<dyn GitForge>,
     /// The durable record of which projects the user has authorised Soloist to change. Held
     /// here, in the context that changes them, so no surface can reach a write without passing
     /// the gate — the same reason the supervisor holds it rather than asking a caller.
@@ -58,11 +63,17 @@ pub struct Git {
 }
 
 impl Git {
-    /// Builds the context over the repository port the composition root chose, and the trust
-    /// record its write side is gated on.
-    pub fn new(repository: Arc<dyn GitRepository>, trust: Arc<dyn TrustRepo>) -> Self {
+    /// Builds the context over the two ports the composition root chose — the working tree on this
+    /// disk and the service its pull requests live on — and the trust record their write sides are
+    /// gated on.
+    pub fn new(
+        repository: Arc<dyn GitRepository>,
+        forge: Arc<dyn GitForge>,
+        trust: Arc<dyn TrustRepo>,
+    ) -> Self {
         Self {
             repository,
+            forge,
             trust,
             cached: Mutex::new(HashMap::new()),
             gates: Mutex::new(HashMap::new()),

@@ -4,6 +4,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::git::NoopGitForge;
 use crate::ids::ProjectId;
 use crate::testing::{file_change, git_status, raw_diff, untrusting, FakeGitRepository};
 use crate::vcs::{ChangeKind, DiffTarget, FileChange, FileDiff};
@@ -35,7 +36,11 @@ fn git_over(change: Option<FileChange>, diff: RawFileDiff) -> (Git, FakeGitRepos
     status.changes.extend(change);
     let repository = FakeGitRepository::reporting(status).diffing(diff);
     (
-        Git::new(Arc::new(repository.clone()), untrusting()),
+        Git::new(
+            Arc::new(repository.clone()),
+            Arc::new(NoopGitForge),
+            untrusting(),
+        ),
         repository,
     )
 }
@@ -188,6 +193,7 @@ fn a_path_that_climbs_out_of_the_repository_is_never_read() {
 fn a_project_that_is_not_a_repository_has_no_diff_rather_than_failing() {
     let git = Git::new(
         Arc::new(FakeGitRepository::answering(vec![Err(GitError::NotARepo)])),
+        Arc::new(NoopGitForge),
         untrusting(),
     );
 

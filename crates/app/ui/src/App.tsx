@@ -8,6 +8,7 @@ import {
   OrchestrationPane,
   ProjectSettingsPane,
   QuickActionsPalette,
+  PullRequestPane,
   QuickJumpPalette,
   SettingsOverlay,
   TerminalPane,
@@ -34,7 +35,7 @@ import { useProcesses } from "@/store/useProcesses";
 import { useProcessRemoval } from "@/store/useProcessRemoval";
 import { useProcessActivationNavigation } from "@/store/useProcessActivationNavigation";
 import { TERMINAL_POOL_CAP, useTerminalPool } from "@/store/useTerminalPool";
-import { useDiffSelection } from "@/store/git/useDiffSelection";
+import { PULL_REQUEST, useDiffSelection } from "@/store/git/useDiffSelection";
 import { useProjects } from "@/store/projects";
 import { FileDropProvider } from "@/store/FileDropProvider";
 import { SignalsProvider } from "@/store/SignalsProvider";
@@ -111,12 +112,12 @@ export default function App() {
   // has a terminal open, or the settings / orchestration pane open.
   const activeProjectId = selected?.project ?? selectedProjectId ?? orchestrationProjectId ?? null;
 
-  // What the diff split is showing, if anything. Opening a path in the rail fills it; Escape or
-  // the split's own close empties it.
+  // What the split is showing, if anything. Opening a path in the rail fills it, as does asking
+  // for the pull request; Escape or the split's own close empties it.
   const {
-    selection: diffSelection,
-    open: openDiff,
-    close: closeDiff,
+    selection: splitView,
+    open: openSplit,
+    close: closeSplit,
   } = useDiffSelection(activeProjectId);
 
   // Project views deselect the process without erasing its MRU lifecycle history.
@@ -335,13 +336,17 @@ export default function App() {
                               ))}
                           </Suspense>
                         </div>
-                        {activeProjectId !== null && diffSelection !== null && (
+                        {activeProjectId !== null && splitView !== null && (
                           <Suspense fallback={null}>
-                            <DiffPane
-                              project={activeProjectId}
-                              selection={diffSelection}
-                              onClose={closeDiff}
-                            />
+                            {splitView.kind === PULL_REQUEST ? (
+                              <PullRequestPane project={activeProjectId} onClose={closeSplit} />
+                            ) : (
+                              <DiffPane
+                                project={activeProjectId}
+                                selection={splitView}
+                                onClose={closeSplit}
+                              />
+                            )}
                           </Suspense>
                         )}
                       </main>
@@ -354,7 +359,8 @@ export default function App() {
                           <GitRail
                             key={activeProjectId}
                             project={activeProjectId}
-                            onOpen={openDiff}
+                            onOpen={openSplit}
+                            onOpenPullRequest={() => openSplit({ kind: PULL_REQUEST })}
                           />
                         </Suspense>
                       )}

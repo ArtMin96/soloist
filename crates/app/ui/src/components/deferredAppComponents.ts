@@ -52,3 +52,10 @@ export const GitRail = lazy(() =>
 export const DiffPane = lazy(() =>
   import("@/components/git/DiffPane").then((module) => ({ default: module.DiffPane })),
 );
+// The pull-request view loads apart from both, because it needs neither the tree engine nor the
+// diff viewer — and a session spent reading a repository's changes never opens it.
+export const PullRequestPane = lazy(() =>
+  import("@/components/git/PullRequestPane").then((module) => ({
+    default: module.PullRequestPane,
+  })),
+);

@@ -115,7 +115,7 @@ impl Git {
 
 /// Whether `name` can be handed to version control as a branch name at all. Everything else about
 /// what makes a name legal is version control's own to judge, and it refuses in its own words.
-fn usable_branch_name(name: &str) -> bool {
+pub(super) fn usable_branch_name(name: &str) -> bool {
     !name.trim().is_empty() && !name.starts_with('-')
 }
 

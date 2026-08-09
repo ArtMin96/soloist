@@ -5235,6 +5235,7 @@ dependencies = [
  "serde",
  "serde_json",
  "soloist-core",
+ "soloist-forge",
  "soloist-git",
  "soloist-httpapi",
  "soloist-ipc",
@@ -5303,6 +5304,17 @@ name = "soloist-exec"
 version = "0.11.0"
 dependencies = [
  "nix 0.31.3",
+ "tempfile",
+]
+
+[[package]]
+name = "soloist-forge"
+version = "0.11.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "soloist-core",
+ "soloist-exec",
  "tempfile",
 ]
 

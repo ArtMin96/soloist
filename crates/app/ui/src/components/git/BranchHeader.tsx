@@ -1,5 +1,12 @@
-import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon, GitBranchIcon } from "lucide-react";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  ChevronsUpDownIcon,
+  GitBranchIcon,
+  GitPullRequestIcon,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { syncLabel } from "@/lib/git";
 import { cn } from "@/lib/utils";
@@ -11,6 +18,8 @@ import type { BranchInfo, Branches } from "@/domain";
 /** What a detached head is called where a branch name would go. */
 const DETACHED = "Detached";
 const SWITCH_LABEL = "Switch branch";
+const PULL_REQUEST_LABEL = "Pull request";
+const PULL_REQUEST_HINT = "Open this branch's pull request, or propose one";
 
 /**
  * What is checked out, how it stands against its upstream, and everything that can be done about
@@ -33,6 +42,7 @@ export function BranchHeader({
   branchActions,
   onDeleteBranch,
   onBranchesOpen,
+  onOpenPullRequest,
 }: {
   branch: BranchInfo;
   /** The branches to offer once the switcher is open, or null until that read lands. */
@@ -44,6 +54,8 @@ export function BranchHeader({
   onDeleteBranch: (name: string) => void;
   /** The switcher opened or closed; the branch list is read only while it is open. */
   onBranchesOpen: (open: boolean) => void;
+  /** Show the pull-request view, or null while nothing here may change the repository. */
+  onOpenPullRequest: (() => void) | null;
 }) {
   const name = branch.name ?? DETACHED;
   const standing = syncLabel(branch.sync);
@@ -122,8 +134,24 @@ export function BranchHeader({
             )}
           </span>
         ))}
+      {onOpenPullRequest !== null && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className={standing === null && sync === null ? "ms-auto" : undefined}
+              aria-label={PULL_REQUEST_LABEL}
+              onClick={onOpenPullRequest}
+            >
+              <GitPullRequestIcon />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{PULL_REQUEST_HINT}</TooltipContent>
+        </Tooltip>
+      )}
       {sync !== null && (
-        <div className={standing === null ? "ms-auto" : undefined}>
+        <div className={standing === null && onOpenPullRequest === null ? "ms-auto" : undefined}>
           <SyncActions
             branch={branch}
             exchanging={exchanging}

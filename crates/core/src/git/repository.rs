@@ -38,6 +38,20 @@ pub enum BranchOp {
     Delete,
 }
 
+/// Which commits a history read covers. A closed set, because the two are read for different
+/// reasons: a history somebody scrolls is the whole of what is checked out, while what a branch
+/// proposes is only what it holds and another branch does not.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LogRange<'a> {
+    /// Everything reachable from what is checked out, newest first.
+    CheckedOut,
+    /// Only what is checked out that `base` does not already hold. A `base` version control cannot
+    /// resolve — a branch that exists on the remote and was never fetched — is a
+    /// [`GitError::Op`], not an empty range, so nothing reports "no commits" for a comparison that
+    /// never happened.
+    Since { base: &'a str },
+}
+
 /// Which way the working tree and the stash exchange what is in them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StashOp {
@@ -110,13 +124,19 @@ pub trait GitRepository: Send + Sync {
     /// not there, which is ordinary for a listing read a moment before the file was removed.
     fn read_file(&self, root: &Path, path: &str) -> Result<Option<FileContent>, GitError>;
 
-    /// One page of the checked-out branch's history, newest first: `skip` commits are passed over
-    /// and at most `limit` are returned. Fewer than `limit` means the history ran out.
+    /// One page of history over `range`, newest first: `skip` commits are passed over and at most
+    /// `limit` are returned. Fewer than `limit` means the range ran out.
     ///
     /// An empty list for a repository with no commits yet, which is an ordinary state (a fresh
     /// `git init`, an orphan branch) rather than a failure. Same [`GitError::NotARepo`] meaning as
     /// [`GitRepository::status`].
-    fn log(&self, root: &Path, skip: usize, limit: usize) -> Result<Vec<CommitEntry>, GitError>;
+    fn log(
+        &self,
+        root: &Path,
+        range: LogRange<'_>,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<CommitEntry>, GitError>;
 
     /// Records everything `path` currently holds in the index, so the next commit would carry
     /// it. `original_path` is where a renamed path came from, which has to be named too or its
@@ -244,7 +264,13 @@ impl GitRepository for NoopGitRepository {
         Err(GitError::NotARepo)
     }
 
-    fn log(&self, _root: &Path, _skip: usize, _limit: usize) -> Result<Vec<CommitEntry>, GitError> {
+    fn log(
+        &self,
+        _root: &Path,
+        _range: LogRange<'_>,
+        _skip: usize,
+        _limit: usize,
+    ) -> Result<Vec<CommitEntry>, GitError> {
         Err(GitError::NotARepo)
     }
 

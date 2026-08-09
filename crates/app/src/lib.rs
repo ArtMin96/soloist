@@ -30,6 +30,7 @@ use soloist_core::{
     CompositeLockReleaser, CorePorts, Facade, LeaseReleaser, NoopRuntimeState, RuntimeState,
     TodoLockReleaser, TokioClock,
 };
+use soloist_forge::GhForge;
 use soloist_git::CliGitRepository;
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner, ShellAgentOneShot};
 use soloist_store::{FileRuntimeState, SqliteStore};
@@ -123,6 +124,7 @@ fn build_facade(app: AppHandle) -> Facade {
         .port_probe(Arc::new(ProcPortProbe::new()))
         .file_watcher(Arc::new(NotifyFileWatcher::new()))
         .git_repository(Arc::new(CliGitRepository::new()))
+        .git_forge(Arc::new(GhForge::new()))
         .notifier(Arc::new(TauriNotifier::new(app)))
         .agent_tools(store.clone())
         .version_probe(Arc::new(CommandVersionProbe::new()))
@@ -501,6 +503,9 @@ pub fn run() {
             commands::git_fetch,
             commands::git_stop_exchange,
             commands::git_abort_merge,
+            commands::git_pull_request_surface,
+            commands::git_create_pull_request,
+            commands::git_draft_pull_request_body,
             commands::orchestration_snapshot,
             commands::lineage_edges,
             commands::agent_activity,

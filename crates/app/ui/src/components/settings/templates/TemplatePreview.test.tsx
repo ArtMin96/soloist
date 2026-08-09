@@ -86,7 +86,7 @@ function seed(template: TemplateView = REVIEW) {
   list.mockImplementation((kind, project) =>
     Promise.resolve(kind === stored.kind && project == null ? [stored] : []),
   );
-  defaults.mockResolvedValue({ scratchpad: null, todo: null });
+  defaults.mockResolvedValue({ scratchpad: null, todo: null, pr: null });
   read.mockImplementation(() => Promise.resolve(stored));
   update.mockImplementation((_kind, _project, _name, description, body) => {
     stored = {

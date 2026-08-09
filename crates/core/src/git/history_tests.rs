@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use crate::git::LogRange;
 use crate::ids::ProjectId;
 use crate::testing::{commit_entry, git_over, FakeGitRepository};
 
@@ -28,7 +29,13 @@ fn a_page_starts_where_it_was_asked_to_and_stops_at_the_length_it_was_given() {
     let git = git_over(history_of(10));
 
     let page = git
-        .history(ProjectId::next(), Path::new(ROOT), 4, 3)
+        .history(
+            ProjectId::next(),
+            Path::new(ROOT),
+            LogRange::CheckedOut,
+            4,
+            3,
+        )
         .expect("read")
         .expect("a repository");
 
@@ -46,7 +53,13 @@ fn no_caller_can_ask_for_more_than_one_page() {
     let git = git_over(history_of(LOG_PAGE_SIZE * 3));
 
     let page = git
-        .history(ProjectId::next(), Path::new(ROOT), 0, usize::MAX)
+        .history(
+            ProjectId::next(),
+            Path::new(ROOT),
+            LogRange::CheckedOut,
+            0,
+            usize::MAX,
+        )
         .expect("read")
         .expect("a repository");
 
@@ -60,7 +73,13 @@ fn a_repository_with_no_commits_yet_has_an_empty_history_rather_than_none() {
     let git = git_over(FakeGitRepository::answering(Vec::new()).logging(Vec::new()));
 
     let page = git
-        .history(ProjectId::next(), Path::new(ROOT), 0, LOG_PAGE_SIZE)
+        .history(
+            ProjectId::next(),
+            Path::new(ROOT),
+            LogRange::CheckedOut,
+            0,
+            LOG_PAGE_SIZE,
+        )
         .expect("read");
 
     assert_eq!(page, Some(Vec::new()));
@@ -71,8 +90,14 @@ fn a_folder_under_no_version_control_has_no_history() {
     let git = git_over(FakeGitRepository::answering(Vec::new()));
 
     assert_eq!(
-        git.history(ProjectId::next(), Path::new(ROOT), 0, LOG_PAGE_SIZE)
-            .expect("read"),
+        git.history(
+            ProjectId::next(),
+            Path::new(ROOT),
+            LogRange::CheckedOut,
+            0,
+            LOG_PAGE_SIZE
+        )
+        .expect("read"),
         None,
     );
 }

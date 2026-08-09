@@ -7,6 +7,7 @@ members = [
     "crates/sys",
     "crates/exec",
     "crates/git",
+    "crates/forge",
     "crates/ipc",
     "crates/httpapi",
     "crates/mcp",

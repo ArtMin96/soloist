@@ -7,7 +7,10 @@
 
 use std::sync::Arc;
 
-use crate::git::{Git, GitStatus, RawFileDiff, RawHunk};
+use crate::git::{
+    Git, GitStatus, NoopGitForge, PullRequest, PullRequestState, PullRequestTemplate, RawFileDiff,
+    RawHunk,
+};
 use crate::ids::ProjectId;
 use crate::ports::TrustRepo;
 use crate::testing::{FakeGitRepository, FakeTrustRepo};
@@ -126,6 +129,27 @@ pub fn branches(entries: Vec<Branch>) -> Branches {
     }
 }
 
+/// One description skeleton on offer, as a test states it.
+pub fn pull_request_template(name: &str, body: &str) -> PullRequestTemplate {
+    PullRequestTemplate {
+        name: name.to_string(),
+        body: body.to_string(),
+    }
+}
+
+/// One open pull request on `head`, as a test states it.
+pub fn pull_request(number: u64, head: &str) -> PullRequest {
+    PullRequest {
+        number,
+        url: format!("https://forge.example/pull/{number}"),
+        title: format!("Whatever {head} proposes"),
+        state: PullRequestState::Open,
+        draft: false,
+        base: "main".to_string(),
+        head: head.to_string(),
+    }
+}
+
 /// A trust record with nothing trusted — the state every project starts in, and all a read
 /// needs, since reading a working tree is ungated.
 pub fn untrusting() -> Arc<dyn TrustRepo> {
@@ -135,9 +159,13 @@ pub fn untrusting() -> Arc<dyn TrustRepo> {
 /// The git context over `repository`, shared as the façade and the watch reactor hold it, with
 /// no project trusted to be changed — so a read behaves as it always does and a change is
 /// refused, which is the state a project starts in.
+///
+/// No forge: a test about the working tree is not a test about a hosting service, and the no-op
+/// port is what a machine without the tool installed behaves as.
 pub fn git_over(repository: FakeGitRepository) -> Arc<Git> {
     Arc::new(Git::new(
         Arc::new(repository),
+        Arc::new(NoopGitForge),
         Arc::new(FakeTrustRepo::new()),
     ))
 }
@@ -147,6 +175,7 @@ pub fn git_over(repository: FakeGitRepository) -> Arc<Git> {
 pub fn git_trusting(repository: FakeGitRepository, project: ProjectId) -> Arc<Git> {
     Arc::new(Git::new(
         Arc::new(repository),
+        Arc::new(NoopGitForge),
         Arc::new(FakeTrustRepo::new().trusting_project(project)),
     ))
 }

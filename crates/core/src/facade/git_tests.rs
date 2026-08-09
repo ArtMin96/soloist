@@ -25,7 +25,7 @@ use crate::testing::{
 };
 use crate::vcs::{ChangeKind, DiffTarget, FileContent};
 
-use super::{DraftMessageError, GitReadError};
+use super::{DraftError, GitReadError};
 
 const PATH: &str = "src/main.rs";
 
@@ -250,10 +250,7 @@ async fn with_no_tool_selected_nothing_is_run_at_all() {
 
     let refusal = facade.git_draft_commit_message(project).await.unwrap_err();
 
-    assert!(
-        matches!(refusal, DraftMessageError::NoAssistTool),
-        "{refusal:?}",
-    );
+    assert!(matches!(refusal, DraftError::NoAssistTool), "{refusal:?}",);
     assert!(one_shot.runs().is_empty());
     assert_eq!(probe.calls(), 0, "and no shell was started either");
 }
@@ -272,10 +269,7 @@ async fn a_selected_tool_that_is_no_longer_configured_is_named_rather_than_guess
 
     let refusal = facade.git_draft_commit_message(project).await.unwrap_err();
 
-    assert!(
-        matches!(refusal, DraftMessageError::UnknownTool),
-        "{refusal:?}",
-    );
+    assert!(matches!(refusal, DraftError::UnknownTool), "{refusal:?}",);
     assert!(one_shot.runs().is_empty());
 }
 
@@ -292,7 +286,7 @@ async fn a_tool_that_never_answers_surfaces_the_timeout_it_was_stopped_at() {
     let refusal = facade.git_draft_commit_message(project).await.unwrap_err();
 
     assert!(
-        matches!(refusal, DraftMessageError::OneShot(OneShotError::Timeout)),
+        matches!(refusal, DraftError::OneShot(OneShotError::Timeout)),
         "a surface can only say what went wrong if the reason survives the trip: {refusal:?}",
     );
 }
