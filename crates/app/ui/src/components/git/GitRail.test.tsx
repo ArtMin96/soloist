@@ -38,14 +38,8 @@ vi.mock("@/api", () => ({
 import {
   assistSettings,
   gitAbortMerge,
-  gitBranches,
   gitCommit,
   gitCommitTemplate,
-  gitDeleteBranch,
-  gitFetch,
-  gitPush,
-  gitStopExchange,
-  gitSwitchBranch,
   gitDiscard,
   gitDraftCommitMessage,
   gitFiles,
@@ -68,12 +62,6 @@ const commit = vi.mocked(gitCommit);
 const readTemplate = vi.mocked(gitCommitTemplate);
 const draftMessage = vi.mocked(gitDraftCommitMessage);
 const readAssist = vi.mocked(assistSettings);
-const readBranches = vi.mocked(gitBranches);
-const switchBranch = vi.mocked(gitSwitchBranch);
-const deleteBranch = vi.mocked(gitDeleteBranch);
-const fetch = vi.mocked(gitFetch);
-const push = vi.mocked(gitPush);
-const stopExchange = vi.mocked(gitStopExchange);
 const abortMerge = vi.mocked(gitAbortMerge);
 
 const PROJECT = 7;
@@ -125,15 +113,6 @@ function rail(): HTMLElement {
 }
 
 describe("GitRail", () => {
-  it("shows what is checked out and how far it stands from its upstream", async () => {
-    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
-
-    renderRail();
-
-    await waitFor(() => expect(within(rail()).getByText("main")).toBeTruthy());
-    expect(within(rail()).getByLabelText("2 ahead")).toBeTruthy();
-  });
-
   it("counts the changed files in the shared Git view switcher", async () => {
     readStatus.mockResolvedValue(statusWith(["a.rs", "b.rs", "c.rs"]));
 
@@ -267,7 +246,7 @@ describe("GitRail", () => {
   it("keeps a resized rail at the width it was left, across a relaunch", async () => {
     readStatus.mockResolvedValue(statusWith(["a.rs"]));
     const { container } = renderRail();
-    await waitFor(() => expect(within(rail()).getByText("main")).toBeTruthy());
+    await screen.findByRole("radio", { name: /changes/i });
     const width = () => (container.firstElementChild as HTMLElement).style.width;
     const before = width();
 
@@ -278,7 +257,7 @@ describe("GitRail", () => {
 
     cleanup();
     const relaunched = renderRail();
-    await waitFor(() => expect(within(rail()).getByText("main")).toBeTruthy());
+    await screen.findByRole("radio", { name: /changes/i });
 
     expect((relaunched.container.firstElementChild as HTMLElement).style.width).toBe(widened);
   });
@@ -287,7 +266,7 @@ describe("GitRail", () => {
     readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
 
     renderRail();
-    await waitFor(() => expect(within(rail()).getByText("main")).toBeTruthy());
+    await screen.findByRole("radio", { name: /changes/i });
 
     expect(
       within(rail()).queryByLabelText(/^Stage /),
@@ -400,15 +379,16 @@ describe("GitRail", () => {
     expect(readTemplate).not.toHaveBeenCalled();
   });
 
-  it("offers no way to draft a message until a tool is picked to draft with", async () => {
-    // The opt-in, at the surface: an action nobody may take is absent rather than disabled — and
-    // nothing is asked of an agent that was never configured.
+  it("offers drafting before a tool is picked, and asks no agent about it", async () => {
+    // The opt-in defaults to off, so hiding the control until it is on is how the feature stays
+    // undiscovered. It is present and it leads to the setting that picks a tool — and nothing is
+    // asked of an agent that was never configured.
     trustedWithStaged("src/a.rs");
 
     renderRail();
 
     await within(rail()).findByLabelText("Commit message");
-    expect(within(rail()).queryByRole("button", { name: "Draft a message" })).toBeNull();
+    fireEvent.click(within(rail()).getByRole("button", { name: "Draft…" }));
     expect(draftMessage).not.toHaveBeenCalled();
   });
 
@@ -419,7 +399,7 @@ describe("GitRail", () => {
 
     renderRail();
     const message = (await within(rail()).findByLabelText("Commit message")) as HTMLTextAreaElement;
-    fireEvent.click(await within(rail()).findByRole("button", { name: "Draft a message" }));
+    fireEvent.click(await within(rail()).findByRole("button", { name: "Draft" }));
 
     await waitFor(() => expect(message.value).toBe("Record the index"));
     expect(
@@ -441,7 +421,7 @@ describe("GitRail", () => {
     renderRail();
     const message = (await within(rail()).findByLabelText("Commit message")) as HTMLTextAreaElement;
     fireEvent.change(message, { target: { value: "Half a message" } });
-    fireEvent.click(await within(rail()).findByRole("button", { name: "Draft a message" }));
+    fireEvent.click(await within(rail()).findByRole("button", { name: "Draft" }));
 
     const refusal = await within(rail()).findByRole("alert");
     expect(refusal.textContent).toContain("did not answer within its time limit");
@@ -458,124 +438,13 @@ describe("GitRail", () => {
     renderRail();
 
     const button = (await within(rail()).findByRole("button", {
-      name: "Draft a message",
+      name: "Draft",
     })) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
   });
 });
 
-describe("moving between branches and exchanging commits with the remote", () => {
-  it("offers neither a branch switcher nor a sync action until the project is trusted", async () => {
-    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
-
-    renderRail();
-
-    await within(rail()).findByText("main");
-    expect(
-      within(rail()).queryByRole("button", { name: "Switch branch" }),
-      "an action nobody may take is absent, not disabled",
-    ).toBeNull();
-    expect(within(rail()).queryByRole("button", { name: "Fetch" })).toBeNull();
-    expect(
-      readBranches,
-      "and nothing is read for a switcher that is not offered",
-    ).not.toHaveBeenCalled();
-  });
-
-  it("reads the branches only once the switcher is opened, and switches to the one chosen", async () => {
-    readTrust.mockResolvedValue(true);
-    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
-    readBranches.mockResolvedValue({
-      entries: [
-        { name: "main", upstream: "origin/main", head: true },
-        { name: "feature", upstream: null, head: false },
-      ],
-      stashed: false,
-    });
-
-    renderRail();
-    const switcher = await within(rail()).findByRole("button", { name: "Switch branch" });
-    expect(
-      readBranches,
-      "a list nobody is looking at is a subprocess nobody needed",
-    ).not.toHaveBeenCalled();
-    fireEvent.click(switcher);
-
-    fireEvent.click(await screen.findByText("feature"));
-
-    await waitFor(() => expect(switchBranch).toHaveBeenCalledWith(PROJECT, "feature"));
-    expect(readBranches).toHaveBeenCalledWith(PROJECT);
-  });
-
-  it("confirms before a branch is deleted, and deletes nothing until it is confirmed", async () => {
-    readTrust.mockResolvedValue(true);
-    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
-    readBranches.mockResolvedValue({
-      entries: [
-        { name: "main", upstream: null, head: true },
-        { name: "spike", upstream: null, head: false },
-      ],
-      stashed: false,
-    });
-
-    renderRail();
-    fireEvent.click(await within(rail()).findByRole("button", { name: "Switch branch" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete branch spike" }));
-
-    expect(deleteBranch, "nothing goes before the question is answered").not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(deleteBranch).toHaveBeenCalledWith(PROJECT, "spike"));
-  });
-
-  it("offers to publish a branch that tracks nothing rather than to pull from it", async () => {
-    readTrust.mockResolvedValue(true);
-    const untracked = statusWith(["src/a.rs"]);
-    untracked.branch = { name: "spike", upstream: null, sync: { state: "unknown" } };
-    readStatus.mockResolvedValue(untracked);
-
-    renderRail();
-
-    await within(rail()).findByRole("button", { name: "Publish" });
-    expect(
-      within(rail()).queryByRole("button", { name: "Pull" }),
-      "there is nothing to pull from an upstream that does not exist",
-    ).toBeNull();
-  });
-
-  it("offers to stop an exchange while it is under way, and reports nothing when it is stopped", async () => {
-    readTrust.mockResolvedValue(true);
-    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
-    let refuse: (reason: Error) => void = () => {};
-    push.mockImplementation(() => new Promise((_, reject) => (refuse = reject)));
-
-    renderRail();
-    fireEvent.click(await within(rail()).findByRole("button", { name: "Push" }));
-
-    const stop = await within(rail()).findByRole("button", { name: "Stop" });
-    fireEvent.click(stop);
-    expect(stopExchange).toHaveBeenCalledWith(PROJECT);
-    // The core reports a stopped exchange as refused, because from its side it did not finish.
-    refuse(new Error("the git command was stopped"));
-
-    await within(rail()).findByRole("button", { name: "Push" });
-    expect(
-      within(rail()).queryByRole("alert"),
-      "an exchange the reader stopped is what they asked for, not a failure to report back at them",
-    ).toBeNull();
-  });
-
-  it("states the reason an exchange really failed", async () => {
-    readTrust.mockResolvedValue(true);
-    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
-    fetch.mockRejectedValue(new Error("no credential the remote would accept"));
-
-    renderRail();
-    fireEvent.click(await within(rail()).findByRole("button", { name: "Fetch" }));
-
-    const refusal = await within(rail()).findByRole("alert");
-    expect(refusal.textContent).toContain("no credential the remote would accept");
-  });
-
+describe("a merge that left work unresolved", () => {
   it("says how many files a merge left to resolve, and abandons it only after asking", async () => {
     readTrust.mockResolvedValue(true);
     const conflicted = statusWith(["src/a.rs"]);
@@ -605,28 +474,5 @@ describe("moving between branches and exchanging commits with the remote", () =>
 
     await within(rail()).findByText("Merge in progress");
     expect(within(rail()).queryByText(/needs resolving/)).toBeNull();
-  });
-
-  it("offers no way to reach a pull request until the project is trusted", async () => {
-    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
-
-    renderRail(() => {});
-
-    await waitFor(() => expect(within(rail()).getByText("main")).toBeTruthy());
-    expect(
-      within(rail()).queryByRole("button", { name: "Pull request" }),
-      "proposing one pushes the branch and runs the repository's own configuration",
-    ).toBeNull();
-  });
-
-  it("shows the pull request view when it is asked for", async () => {
-    readTrust.mockResolvedValue(true);
-    readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
-    const open = vi.fn();
-
-    renderRail(open);
-
-    fireEvent.click(await within(rail()).findByRole("button", { name: "Pull request" }));
-    expect(open).toHaveBeenCalled();
   });
 });

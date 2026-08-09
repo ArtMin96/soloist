@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { CHANGE, primaryChange, strongerChange, syncLabel } from "@/lib/git";
-import type { ChangeKind } from "@/domain";
+import { branchStanding, CHANGE, primaryChange, strongerChange } from "@/lib/git";
+import type { ChangeKind, SyncState } from "@/domain";
+
+/** What the core reports when there is no comparison to make, whatever the reason. */
+const UNCOMPARED: SyncState = { state: "unknown" };
 
 const EVERY_KIND: ChangeKind[] = [
   "modified",
@@ -69,15 +72,74 @@ describe("strongerChange", () => {
   });
 });
 
-describe("syncLabel", () => {
-  it("says nothing when there is no comparison to make", () => {
-    expect(syncLabel({ state: "unknown" })).toBeNull();
+describe("branchStanding", () => {
+  it("tells a branch nobody has published from one that matches its upstream, in words", () => {
+    const unpublished = branchStanding({ name: "spike", upstream: null, sync: UNCOMPARED });
+    const matched = branchStanding({
+      name: "main",
+      upstream: "origin/main",
+      sync: { state: "up_to_date" },
+    });
+
+    expect(unpublished.label).toBe("Local only");
+    expect(matched.label).toBe("Up to date");
+    expect(
+      unpublished.label,
+      "the two are a hue apart on screen, so the words are what tells them apart in grayscale",
+    ).not.toBe(matched.label);
+  });
+
+  it("tells tracking nothing from tracking something nothing has fetched, since they want different things", () => {
+    expect(branchStanding({ name: "spike", upstream: null, sync: UNCOMPARED }).label).toBe(
+      "Local only",
+    );
+    expect(
+      branchStanding({ name: "spike", upstream: "origin/spike", sync: UNCOMPARED }).label,
+    ).toBe("Not fetched");
+  });
+
+  it("says nothing beside a detached head, which has no upstream to stand against", () => {
+    expect(branchStanding({ name: null, upstream: null, sync: UNCOMPARED }).label).toBeNull();
   });
 
   it("states each side's distance when the branch and its upstream have both moved", () => {
-    expect(syncLabel({ state: "diverged", ahead: 2, behind: 3 })).toBe("2 ahead, 3 behind");
-    expect(syncLabel({ state: "ahead", ahead: 1 })).toBe("1 ahead");
-    expect(syncLabel({ state: "behind", behind: 4 })).toBe("4 behind");
-    expect(syncLabel({ state: "up_to_date" })).toBe("Up to date");
+    const diverged = branchStanding({
+      name: "main",
+      upstream: "origin/main",
+      sync: { state: "diverged", ahead: 2, behind: 3 },
+    });
+
+    expect(diverged.label).toBe("2 ahead, 3 behind");
+    expect(diverged.ahead).toBe(2);
+    expect(diverged.behind).toBe(3);
+    expect(
+      branchStanding({ name: "main", upstream: "origin/main", sync: { state: "ahead", ahead: 1 } })
+        .label,
+    ).toBe("1 ahead");
+    expect(
+      branchStanding({
+        name: "main",
+        upstream: "origin/main",
+        sync: { state: "behind", behind: 4 },
+      }).label,
+    ).toBe("4 behind");
+  });
+
+  it("spends the matched tone on the one standing that needs nothing doing", () => {
+    const matched = branchStanding({
+      name: "main",
+      upstream: "origin/main",
+      sync: { state: "up_to_date" },
+    });
+    const behind = branchStanding({
+      name: "main",
+      upstream: "origin/main",
+      sync: { state: "behind", behind: 1 },
+    });
+
+    expect(matched.toneClass).not.toBe(behind.toneClass);
+    expect(branchStanding({ name: "spike", upstream: null, sync: UNCOMPARED }).toneClass).toBe(
+      behind.toneClass,
+    );
   });
 });

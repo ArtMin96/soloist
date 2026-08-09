@@ -175,6 +175,12 @@ impl ConfigWatchReactor {
     /// config-path index is rebuilt wholesale so a removed project's `solo.yml` simply
     /// drops out of matching. A failed registry read changes nothing — the next lifecycle
     /// event re-syncs.
+    ///
+    /// Each watch is one non-recursive directory — a single OS registration, whatever the tree's
+    /// size — so it is established here rather than off the runtime, unlike the tree watches that
+    /// walk a whole project. A root the OS refuses is traced and left unwatched: a watch that yields
+    /// no events looks exactly like a `solo.yml` nobody edits, so a swallowed refusal would be a
+    /// reload trigger that quietly stopped working.
     fn resync(
         &self,
         changes_tx: &mpsc::Sender<PathBuf>,
@@ -189,9 +195,22 @@ impl ConfigWatchReactor {
         for record in records {
             open.insert(record.id);
             config_paths.insert(config_path(&record.root), record.id);
-            watches
-                .entry(record.id)
-                .or_insert_with(|| self.watcher.watch_dir(record.root, changes_tx.clone()));
+            if watches.contains_key(&record.id) {
+                continue;
+            }
+            match self
+                .watcher
+                .watch_dir(record.root.clone(), changes_tx.clone())
+            {
+                Ok(handle) => {
+                    watches.insert(record.id, handle);
+                }
+                Err(refusal) => tracing::warn!(
+                    path = %record.root.display(),
+                    %refusal,
+                    "an external edit of this project's solo.yml will not reload it: its root could not be watched",
+                ),
+            }
         }
         watches.retain(|project, _| open.contains(project));
     }

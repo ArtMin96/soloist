@@ -4,8 +4,9 @@ import type { PaletteHintData } from "@/components/palette/PaletteFooter";
 import { useCommandAction } from "@/components/palette/useCommandAction";
 import { buildCommands, type CommandContext } from "@/lib/commands";
 import { useAppearance } from "@/store/appearanceContext";
+import { useBranchCluster } from "@/store/git/branchCluster";
 
-interface CommandPaletteProps extends Omit<CommandContext, "theme" | "setTheme"> {
+interface CommandPaletteProps extends Omit<CommandContext, "theme" | "setTheme" | "git"> {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -16,15 +17,18 @@ const HINTS: PaletteHintData[] = [
 ];
 
 // The command palette (Ctrl+K): a fuzzy-filtered registry of every app-wide action — new
-// agent/terminal, open settings/project, theme, per-project bulk + navigation, and per-process
-// focus + actions. The registry is the pure `buildCommands`, so the palette stays presentational
-// and a new command appears here automatically. Theme is read from the appearance context (the
-// palette renders inside its provider); everything else is wired in from the app shell.
+// agent/terminal, open settings/project, theme, what is checked out, per-project bulk + navigation,
+// and per-process focus + actions. The registry is the pure `buildCommands`, so the palette stays
+// presentational and a new command appears here automatically. Theme is read from the appearance
+// context and the checked-out branch from the projection the chrome renders (so the palette runs the
+// same callbacks those controls do); everything else is wired in from the app shell.
 export function CommandPalette({ open, onOpenChange, ...wiring }: CommandPaletteProps) {
   const { appearance, setAppearance } = useAppearance();
+  const git = useBranchCluster();
   const run = useCommandAction(onOpenChange);
   const groups = buildCommands({
     ...wiring,
+    git,
     theme: appearance.theme,
     setTheme: (theme) => setAppearance({ ...appearance, theme }),
   });

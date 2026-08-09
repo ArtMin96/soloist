@@ -4,9 +4,22 @@
 use super::*;
 
 /// One record as the format prints it: every field NUL-separated, and `-z` making the record
-/// separator a NUL as well.
+/// separator a NUL as well. The body is empty, which is what most commits print.
 fn record(id: &str, author: &str, at: &str, parents: &str, subject: &str) -> Vec<u8> {
-    format!("{id}\0{author}\0{at}\0{parents}\0{subject}\0").into_bytes()
+    described(id, author, at, parents, subject, "")
+}
+
+/// The same record for a commit whose message says more than its subject. `git` ends the body with
+/// the message file's own newline, so the fixture does too.
+fn described(
+    id: &str,
+    author: &str,
+    at: &str,
+    parents: &str,
+    subject: &str,
+    body: &str,
+) -> Vec<u8> {
+    format!("{id}\0{author}\0{at}\0{parents}\0{subject}\0{body}\0").into_bytes()
 }
 
 const ID: &str = "267f5bca317eb3c0d9f28cbbb9bd8631fa06295e";
@@ -29,7 +42,92 @@ fn a_record_reads_back_as_the_commit_it_describes() {
     assert_eq!(commits[0].author, "Ada Lovelace");
     assert_eq!(commits[0].authored_at, 1_786_052_552);
     assert_eq!(commits[0].subject, "Record the negative result");
+    assert_eq!(commits[0].body, "");
     assert!(!commits[0].merge);
+}
+
+#[test]
+fn a_body_reads_back_with_the_paragraphs_it_was_written_in() {
+    let output = described(
+        ID,
+        "Ada Lovelace",
+        "1786052552",
+        PARENT,
+        "Record the negative result",
+        "The engine halted on the second pass.\n\nSo the table is wrong, not the reading.\n",
+    );
+
+    let commits = parse(&output);
+
+    assert_eq!(
+        commits[0].body,
+        "The engine halted on the second pass.\n\nSo the table is wrong, not the reading.",
+        "a body is prose over several lines, and the only thing dropped is the newline the \
+         message file ended with",
+    );
+}
+
+#[test]
+fn a_body_longer_than_one_entry_carries_reads_back_as_none_at_all() {
+    // A commit message has no ceiling of its own — a design document pasted into one is a real thing
+    // — and fifty of them are what a page of history costs a reader.
+    let enormous = "Why it was done, at length. ".repeat(COMMIT_BODY_LIMIT);
+    let output = described(
+        ID,
+        "Ada Lovelace",
+        "1786052552",
+        PARENT,
+        "Record the negative result",
+        &enormous,
+    );
+
+    let commits = parse(&output);
+
+    assert_eq!(
+        commits[0].body, "",
+        "past the ceiling the body is left out whole: a reader is given the message or nothing, \
+         never a sentence stopped in the middle with no sign it was",
+    );
+    assert_eq!(
+        commits[0].subject, "Record the negative result",
+        "and the rest of the entry is untouched",
+    );
+}
+
+#[test]
+fn a_body_that_just_fits_reads_back_whole() {
+    let fits = "x".repeat(COMMIT_BODY_LIMIT);
+    let output = described(ID, "Ada Lovelace", "1786052552", PARENT, "Subject", &fits);
+
+    assert_eq!(parse(&output)[0].body, fits, "the ceiling is inclusive");
+}
+
+#[test]
+fn a_record_after_one_carrying_a_body_reads_back_whole() {
+    // The body is the one field that holds newlines, so a stream misread by a field would put the
+    // next commit's object name where its author belongs — and every commit after it too.
+    let mut output = described(
+        ID,
+        "Ada Lovelace",
+        "1786052552",
+        PARENT,
+        "The newest",
+        "Why it was done.\n\nAnd what it cost.\n",
+    );
+    output.extend(record(
+        PARENT,
+        "Grace Hopper",
+        "1786049897",
+        "ab30fb7",
+        "The one before",
+    ));
+
+    let commits = parse(&output);
+
+    assert_eq!(commits.len(), 2);
+    assert_eq!(commits[1].id, PARENT);
+    assert_eq!(commits[1].author, "Grace Hopper");
+    assert_eq!(commits[1].subject, "The one before");
 }
 
 #[test]

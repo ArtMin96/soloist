@@ -261,7 +261,8 @@ export function gitAbortMerge(project: number): Promise<void> {
 
 // Everything the pull-request surface needs in one read: whether the GitHub command-line tool can
 // be reached, the branch that would be proposed and the one it would merge into, the pull request
-// the branch already has, and the description skeletons on offer.
+// the branch already has, the description skeletons on offer, and what the branch would be proposed
+// as if nobody typed anything — so a one-click proposal costs no second read.
 export function gitPullRequestSurface(project: number): Promise<PullRequestSurface> {
   return invoke<PullRequestSurface>("git_pull_request_surface", { project });
 }

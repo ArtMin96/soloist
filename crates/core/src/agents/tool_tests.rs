@@ -38,24 +38,39 @@ fn every_builtin_command_is_a_bare_binary_with_no_seed_args() {
 }
 
 #[test]
-fn auto_detection_covers_exactly_the_documented_probe_set() {
-    // Solo documents probing `--version` for these five providers.
+fn auto_detection_covers_every_provider_whose_install_state_soloist_needs() {
+    // The five Solo documents probing `--version`, plus Kimi, whose install state drafting has
+    // to resolve before it may be offered.
     for kind in [
         AgentKind::Claude,
         AgentKind::Codex,
         AgentKind::Amp,
         AgentKind::Gemini,
         AgentKind::OpenCode,
+        AgentKind::Kimi,
     ] {
-        assert!(
-            kind.auto_detectable(),
-            "{kind:?} is in the documented probe set"
-        );
+        assert!(kind.auto_detectable(), "{kind:?} is probed");
     }
-    // Copilot and Kimi are built-in tool types but outside that set; Generic is
-    // user-configured. None are auto-detected.
-    for kind in [AgentKind::Copilot, AgentKind::Kimi, AgentKind::Generic] {
+    // Copilot is launchable but cannot be asked a single question, so nothing needs it
+    // resolved; Generic is user-configured with no fixed command to probe.
+    for kind in [AgentKind::Copilot, AgentKind::Generic] {
         assert!(!kind.auto_detectable(), "{kind:?} is not auto-detected");
+    }
+}
+
+#[test]
+fn every_builtin_that_can_draft_is_also_probed() {
+    // Drafting is offered only for a tool a probe found installed. A provider with a documented
+    // one-shot form that is never probed therefore stays unresolved forever and can never be
+    // picked — which is exactly how Kimi became unreachable.
+    for builtin in AgentTool::builtin_defaults() {
+        if builtin.one_shot_invocation("summarise this").is_some() {
+            assert!(
+                builtin.kind.auto_detectable(),
+                "{} can draft, so its CLI must be probed or it can never be selected",
+                builtin.name
+            );
+        }
     }
 }
 

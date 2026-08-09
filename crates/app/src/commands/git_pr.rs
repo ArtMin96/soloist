@@ -13,7 +13,9 @@ use tauri::State;
 
 /// Everything the pull-request surface needs to decide what to show: whether the GitHub
 /// command-line tool can be reached at all, the branch that would be proposed, the branch it would
-/// merge into, the pull request the branch already has, and the description skeletons on offer.
+/// merge into, the pull request the branch already has, the description skeletons on offer, and what
+/// the branch would be proposed as if nobody typed anything — so proposing one can be offered as a
+/// button without a second read.
 ///
 /// Reaches another machine, so it goes to the blocking pool.
 #[tauri::command]

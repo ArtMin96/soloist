@@ -117,6 +117,40 @@ fn a_folder_outside_any_repository_has_no_history_at_all() {
 }
 
 #[test]
+fn a_commit_message_reads_back_split_into_its_subject_and_the_rest_of_what_it_says() {
+    let dir = repository_with(&["a.txt"]);
+    write(dir.path(), "a.txt", "changed\n");
+    git(dir.path(), &["add", "-A"]);
+    git(
+        dir.path(),
+        &[
+            "commit",
+            "-m",
+            "Record the negative result",
+            "-m",
+            "The engine halted on the second pass.\n\nSo the table is wrong, not the reading.",
+        ],
+    );
+
+    let commit = &history(dir.path(), 0, 1)[0];
+
+    assert_eq!(commit.subject, "Record the negative result");
+    assert_eq!(
+        commit.body,
+        "The engine halted on the second pass.\n\nSo the table is wrong, not the reading.",
+        "a body is the rest of the message over as many lines as it was written in",
+    );
+}
+
+#[test]
+fn a_commit_saying_only_its_subject_has_no_body_rather_than_a_blank_one() {
+    let dir = repository_with(&["a.txt"]);
+    commit(dir.path(), "a.txt", "Do the thing");
+
+    assert_eq!(history(dir.path(), 0, 1)[0].body, "");
+}
+
+#[test]
 fn a_subject_carrying_what_a_person_writes_survives_the_read() {
     // The format separates on NUL precisely because a subject may hold anything else.
     let subject = "Answer the \"lowlight\" surface\tand a=b";

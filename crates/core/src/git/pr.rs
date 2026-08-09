@@ -35,9 +35,10 @@ use super::forge::{
 };
 use super::review::MergeMethod;
 use super::status::Git;
+use super::suggestion::PullRequestSuggestion;
 
 /// Everything a pull-request surface needs to decide what to show, in one read — so it renders
-/// once rather than assembling itself from four answers that arrive separately.
+/// once rather than assembling itself from answers that arrive separately.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct PullRequestSurface {
     /// Whether the forge can be reached at all. Anything but [`ForgeReadiness::Ready`] and every
@@ -59,6 +60,11 @@ pub struct PullRequestSurface {
     /// prefers first — read here rather than at merge time, so the surface offering the merge
     /// already knows what this repository permits.
     pub merge_methods: Vec<MergeMethod>,
+    /// What the branch would be proposed as if nobody typed anything, computed from its own commits
+    /// and written into the first of `templates` — so one read is enough to offer the whole
+    /// proposal as a single button. `None` where there is nothing to compute one from: no branch, no
+    /// base to compare against, or a branch holding nothing its base does not.
+    pub suggestion: Option<PullRequestSuggestion>,
 }
 
 /// Why a pull request was not proposed, or not prepared for.
@@ -134,6 +140,7 @@ impl Git {
                 existing: None,
                 templates: Vec::new(),
                 merge_methods: Vec::new(),
+                suggestion: None,
             });
         }
         let head = self
@@ -148,14 +155,44 @@ impl Git {
             };
             Ok((repository, templates, existing))
         })?;
+        let base = repository.default_base;
+        let suggestion = self.suggested(project, root, base.as_deref(), first_shape(&templates))?;
         Ok(PullRequestSurface {
             readiness,
             head,
-            base: repository.default_base,
+            base,
             existing,
             templates,
             merge_methods: repository.merge_methods,
+            suggestion,
         })
+    }
+
+    /// What the branch would be proposed as, or `None` where nothing could be computed.
+    ///
+    /// The three ways there is nothing to suggest — no base to compare against, nothing checked out
+    /// by name, a branch holding nothing its base does not — are states the surface renders rather
+    /// than failures it reports: everything else it carries is still true, and a surface that failed
+    /// outright would show none of it.
+    fn suggested(
+        &self,
+        project: ProjectId,
+        root: &Path,
+        base: Option<&str>,
+        skeleton: &str,
+    ) -> Result<Option<PullRequestSuggestion>, PullRequestError> {
+        let Some(base) = base else {
+            return Ok(None);
+        };
+        match self.pull_request_suggestion(project, root, base, skeleton) {
+            Ok(suggestion) => Ok(Some(suggestion)),
+            Err(
+                PullRequestError::NothingToDescribe
+                | PullRequestError::DetachedHead
+                | PullRequestError::UnusableBranchName,
+            ) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     /// Proposes what `project` has checked out as a pull request, putting the branch on the remote
@@ -225,6 +262,14 @@ fn unsent(status: &super::status::GitStatus) -> bool {
             status.branch.sync,
             SyncState::Ahead { .. } | SyncState::Diverged { .. }
         )
+}
+
+/// The shape a suggested description is written into: the first of what is offered, which is the one
+/// a picker starts on — so what the button would propose is what the surface is already showing.
+fn first_shape(offered: &[PullRequestTemplate]) -> &str {
+    offered
+        .first()
+        .map_or("", |template| template.body.as_str())
 }
 
 /// Which description skeletons to offer: the repository's own whenever it carries any, and the

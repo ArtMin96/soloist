@@ -134,6 +134,13 @@ pub struct FileDiff {
     pub truncated: bool,
 }
 
+/// The most of a commit's message body one entry carries. A message is prose somebody wrote, with no
+/// ceiling of its own — a commit can hold a whole design document, and some do — while a page of fifty
+/// of them crosses to a surface that renders subjects. Generous enough that no message anybody writes
+/// by hand meets it, and past it the body is left out whole rather than cut, so what a reader is given
+/// is either the message or plainly nothing at all.
+pub const COMMIT_BODY_LIMIT: usize = 8 * 1024;
+
 /// One commit, as a history read reports it.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct CommitEntry {
@@ -142,6 +149,10 @@ pub struct CommitEntry {
     pub id: String,
     /// The first line of the message.
     pub subject: String,
+    /// Everything the message says after its subject, as the author wrote it — empty for the many
+    /// commits that say only their subject, which is why it is a string rather than an option, and
+    /// empty as well for one longer than [`COMMIT_BODY_LIMIT`].
+    pub body: String,
     /// Who wrote it, as the name version control recorded.
     pub author: String,
     /// When it was written, in seconds since the epoch. A number rather than a rendering, so a

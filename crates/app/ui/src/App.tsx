@@ -19,10 +19,11 @@ import { OrphanDialog } from "@/components/OrphanDialog";
 import { RemoveProcessDialog } from "@/components/RemoveProcessDialog";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { StartSurface } from "@/components/StartSurface";
-import { AttentionControl } from "@/components/titlebar/AttentionControl";
 import { Titlebar } from "@/components/titlebar/Titlebar";
+import { TitlebarActions } from "@/components/titlebar/TitlebarActions";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TrustDialog } from "@/components/TrustDialog";
+import type { SettingsTabId } from "@/components/settings/tabs";
 import { AppearanceProvider } from "@/store/AppearanceProvider";
 import { HotkeysProvider } from "@/store/HotkeysProvider";
 import { SidebarSettingsProvider } from "@/store/SidebarSettingsProvider";
@@ -42,6 +43,7 @@ import { FileDropProvider } from "@/store/FileDropProvider";
 import { SignalsProvider } from "@/store/SignalsProvider";
 import { useTrust } from "@/store/useTrust";
 import { AttentionContext, useAttentionMarks } from "@/store/attentionContext";
+import { OpenSettingsContext, type OpenSettings } from "@/store/settingsContext";
 import { useAttention } from "@/store/useAttention";
 import { usePresence } from "@/store/usePresence";
 import { useWindowActive } from "@/store/useWindowActive";
@@ -72,6 +74,7 @@ export default function App() {
   const [orchestrationProjectId, setOrchestrationProjectId] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId | null>(null);
   const [quickJumpOpen, setQuickJumpOpen] = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -80,6 +83,18 @@ export default function App() {
   const clearAlternativeView = useCallback(() => {
     setSelectedProjectId(null);
     setOrchestrationProjectId(null);
+  }, []);
+
+  // Settings, on the tab a caller named where it had a reason to name one — the assist setting is
+  // reached from the commit box that needs it. The tab is forgotten on close, so the next opening
+  // that names none lands back wherever the user last left it.
+  const openSettings = useCallback<OpenSettings>((tab) => {
+    setSettingsTab(tab ?? null);
+    setSettingsOpen(true);
+  }, []);
+  const settingsOpenChanged = useCallback((open: boolean) => {
+    setSettingsOpen(open);
+    if (!open) setSettingsTab(null);
   }, []);
   const {
     selectedId,
@@ -193,7 +208,7 @@ export default function App() {
     () => ({
       open_command_palette: () => setCommandPaletteOpen(true),
       new_agent_or_terminal: openPicker,
-      open_settings: () => setSettingsOpen(true),
+      open_settings: () => openSettings(),
       close_agent_or_terminal: () => {
         const id = getSelectedId();
         if (id !== null) stopProcess(id);
@@ -201,7 +216,7 @@ export default function App() {
       quick_jump: () => setQuickJumpOpen(true),
       quick_actions: () => setQuickActionsOpen(true),
     }),
-    [getSelectedId, openPicker, stopProcess],
+    [getSelectedId, openPicker, openSettings, stopProcess],
   );
 
   // Launch an agent and focus its new terminal, so the user lands on the running agent.
@@ -251,221 +266,225 @@ export default function App() {
             <SignalsProvider>
               <AttentionContext value={attentionMarks}>
                 <TooltipProvider delayDuration={400}>
-                  <div className="flex h-screen flex-col bg-background text-foreground">
-                    <Titlebar
-                      appName={info?.name ?? "Soloist"}
-                      appVersion={info?.version}
-                      actions={
-                        <AttentionControl
-                          snapshot={attention.snapshot}
-                          processes={store.processes}
-                          onSelect={selectProcess}
-                          onClearAll={attention.clearAll}
-                        />
-                      }
-                    />
-                    {store.error && (
-                      <ErrorBanner message={store.error} onDismiss={store.clearError} />
-                    )}
-                    <div className="flex min-h-0 flex-1">
-                      <Sidebar
-                        projects={projects.projects}
-                        processes={store.processes}
-                        lineage={lineage}
-                        selectedId={selectedId}
-                        onSelect={selectProcess}
-                        onStart={startProcess}
-                        onStop={stopProcess}
-                        onRestart={restartProcess}
-                        onResume={resumeProcess}
-                        onTrust={reviewById}
-                        onRemove={requestProcessRemoval}
-                        onStartAll={store.startAll}
-                        onRestartRunning={store.restartRunning}
-                        onStopAll={stopProject}
-                        onOpenStart={openStart}
-                        startActive={!selected && !selectedProject && !orchestrationProject}
-                        onOpenSettings={() => setSettingsOpen(true)}
-                        onOpenProjectSettings={openProjectSettings}
-                        onOpenOrchestration={openOrchestration}
-                        onRemoveProject={projects.remove}
-                        onReorderProjects={projects.reorder}
+                  <OpenSettingsContext value={openSettings}>
+                    <div className="flex h-screen flex-col bg-background text-foreground">
+                      <Titlebar
+                        appName={info?.name ?? "Soloist"}
+                        appVersion={info?.version}
+                        actions={
+                          <TitlebarActions
+                            project={activeProjectId}
+                            snapshot={attention.snapshot}
+                            processes={store.processes}
+                            onSelectProcess={selectProcess}
+                            onClearAttention={attention.clearAll}
+                          />
+                        }
                       />
-                      {/* A column, so the diff opens as a split at the foot of the area
+                      {store.error && (
+                        <ErrorBanner message={store.error} onDismiss={store.clearError} />
+                      )}
+                      <div className="flex min-h-0 flex-1">
+                        <Sidebar
+                          projects={projects.projects}
+                          processes={store.processes}
+                          lineage={lineage}
+                          selectedId={selectedId}
+                          onSelect={selectProcess}
+                          onStart={startProcess}
+                          onStop={stopProcess}
+                          onRestart={restartProcess}
+                          onResume={resumeProcess}
+                          onTrust={reviewById}
+                          onRemove={requestProcessRemoval}
+                          onStartAll={store.startAll}
+                          onRestartRunning={store.restartRunning}
+                          onStopAll={stopProject}
+                          onOpenStart={openStart}
+                          startActive={!selected && !selectedProject && !orchestrationProject}
+                          onOpenSettings={() => openSettings()}
+                          onOpenProjectSettings={openProjectSettings}
+                          onOpenOrchestration={openOrchestration}
+                          onRemoveProject={projects.remove}
+                          onReorderProjects={projects.reorder}
+                        />
+                        {/* A column, so the diff opens as a split at the foot of the area
                           rather than in place of what is above it. The panes keep their own
                           region: nothing here remounts the terminal when the split appears. */}
-                      <main className="relative flex min-w-0 flex-1 flex-col">
-                        <div className="relative min-h-0 flex-1">
-                          <Suspense fallback={<div className="h-full w-full bg-background" />}>
-                            {/* Keep-alive pool: every recently-viewed process keeps its terminal mounted
+                        <main className="relative flex min-w-0 flex-1 flex-col">
+                          <div className="relative min-h-0 flex-1">
+                            <Suspense fallback={<div className="h-full w-full bg-background" />}>
+                              {/* Keep-alive pool: every recently-viewed process keeps its terminal mounted
                           (xterm + live stream) so switching back is instant; only the selected one
                           is visible, the rest sit hidden with both their renderer and their byte
                           parsing paused, so a hidden pane costs no per-frame main-thread work. */}
-                            {poolProcesses.map((process) => (
-                              <TerminalPane
-                                key={process.id}
-                                process={process}
-                                visible={process.id === selectedId}
-                                processes={store.processes}
-                                onSelectProcess={selectProcess}
-                                onStart={() => startProcess(process.id)}
-                                onStop={() => stopProcess(process.id)}
-                                onRestart={() => restartProcess(process.id)}
-                                onResume={() => resumeProcess(process.id)}
-                                onTrust={() => reviewById(process.id)}
-                                onRemove={() => requestProcessRemoval(process.id)}
-                              />
-                            ))}
-                            {!selected &&
-                              (selectedProject ? (
-                                <ProjectSettingsPane
-                                  key={selectedProject.id}
-                                  project={selectedProject}
-                                />
-                              ) : orchestrationProject ? (
-                                <OrchestrationPane
-                                  key={orchestrationProject.id}
-                                  project={orchestrationProject}
-                                />
-                              ) : (
-                                <StartSurface
-                                  hasProjects={projects.projects.length > 0}
-                                  onOpenProject={projects.open}
-                                  onLaunchAgent={openPicker}
-                                  notice={projects.notice}
+                              {poolProcesses.map((process) => (
+                                <TerminalPane
+                                  key={process.id}
+                                  process={process}
+                                  visible={process.id === selectedId}
+                                  processes={store.processes}
+                                  onSelectProcess={selectProcess}
+                                  onStart={() => startProcess(process.id)}
+                                  onStop={() => stopProcess(process.id)}
+                                  onRestart={() => restartProcess(process.id)}
+                                  onResume={() => resumeProcess(process.id)}
+                                  onTrust={() => reviewById(process.id)}
+                                  onRemove={() => requestProcessRemoval(process.id)}
                                 />
                               ))}
-                          </Suspense>
-                        </div>
-                        {activeProjectId !== null && splitView !== null && (
-                          <Suspense fallback={null}>
-                            {splitView.kind === PULL_REQUEST ? (
-                              <PullRequestPane
-                                project={activeProjectId}
-                                agent={handoffTarget(selected, activeProjectId)}
-                                onClose={closeSplit}
-                              />
-                            ) : (
-                              <DiffPane
-                                project={activeProjectId}
-                                selection={splitView}
-                                onClose={closeSplit}
-                              />
-                            )}
-                          </Suspense>
-                        )}
-                      </main>
-                      {/* The version-control rail sits beside the main area rather than
+                              {!selected &&
+                                (selectedProject ? (
+                                  <ProjectSettingsPane
+                                    key={selectedProject.id}
+                                    project={selectedProject}
+                                  />
+                                ) : orchestrationProject ? (
+                                  <OrchestrationPane
+                                    key={orchestrationProject.id}
+                                    project={orchestrationProject}
+                                  />
+                                ) : (
+                                  <StartSurface
+                                    hasProjects={projects.projects.length > 0}
+                                    onOpenProject={projects.open}
+                                    onLaunchAgent={openPicker}
+                                    notice={projects.notice}
+                                  />
+                                ))}
+                            </Suspense>
+                          </div>
+                          {activeProjectId !== null && splitView !== null && (
+                            <Suspense fallback={null}>
+                              {splitView.kind === PULL_REQUEST ? (
+                                <PullRequestPane
+                                  project={activeProjectId}
+                                  agent={handoffTarget(selected, activeProjectId)}
+                                  onClose={closeSplit}
+                                />
+                              ) : (
+                                <DiffPane
+                                  project={activeProjectId}
+                                  selection={splitView}
+                                  onClose={closeSplit}
+                                />
+                              )}
+                            </Suspense>
+                          )}
+                        </main>
+                        {/* The version-control rail sits beside the main area rather than
                           replacing it, so a repository's state stays in sight while an agent
                           keeps working. A sibling of <main> rather than a wrapper around it:
                           nothing here remounts the terminal pane when the rail's chunk lands. */}
-                      {activeProjectId !== null && (
-                        <Suspense fallback={null}>
-                          <GitRail
-                            key={activeProjectId}
-                            project={activeProjectId}
-                            onOpen={openSplit}
-                            onOpenPullRequest={() => openSplit({ kind: PULL_REQUEST })}
-                          />
-                        </Suspense>
-                      )}
-                    </div>
-                    <NotificationToasts
-                      processes={store.processes}
-                      onSelectProcess={selectProcess}
-                    />
-                    <OrphanDialog
-                      orphans={orphans.orphans}
-                      onKillOne={orphans.killOne}
-                      onKillAll={orphans.killAll}
-                      onLeave={orphans.leave}
-                    />
-                    <TrustDialog
-                      review={trust.review}
-                      onTrustCommand={(name) => {
-                        if (trust.review) trust.trust(trust.review.project, name);
-                      }}
-                      onTrustAll={trust.trustAll}
-                      onDismiss={trust.dismiss}
-                    />
-                    <RemoveProcessDialog
-                      process={pendingRemoval}
-                      workers={
-                        pendingRemoval
-                          ? liveWorkerCount(lineage, store.processes, pendingRemoval.id)
-                          : 0
-                      }
-                      onConfirm={confirmProcessRemoval}
-                      onDismiss={removal.dismiss}
-                    />
-                    <DeferredOverlay open={pickerOpen}>
-                      <LaunchPicker
-                        open={pickerOpen}
-                        onOpenChange={setPickerOpen}
-                        tools={agents.tools}
-                        projects={projects.projects}
-                        onLaunch={onLaunchAgent}
-                        onCreateTerminal={onCreateTerminal}
-                      />
-                    </DeferredOverlay>
-                    <DeferredOverlay open={settingsOpen}>
-                      <SettingsOverlay
-                        open={settingsOpen}
-                        onOpenChange={setSettingsOpen}
-                        project={activeProjectId}
-                      />
-                    </DeferredOverlay>
-                    <DeferredOverlay open={quickJumpOpen}>
-                      <QuickJumpPalette
-                        open={quickJumpOpen}
-                        onOpenChange={setQuickJumpOpen}
+                        {activeProjectId !== null && (
+                          <Suspense fallback={null}>
+                            <GitRail
+                              key={activeProjectId}
+                              project={activeProjectId}
+                              onOpen={openSplit}
+                              onOpenPullRequest={() => openSplit({ kind: PULL_REQUEST })}
+                            />
+                          </Suspense>
+                        )}
+                      </div>
+                      <NotificationToasts
                         processes={store.processes}
-                        projects={projects.projects}
                         onSelectProcess={selectProcess}
-                        onSelectProject={openProjectSettings}
                       />
-                    </DeferredOverlay>
-                    <DeferredOverlay open={quickActionsOpen}>
-                      <QuickActionsPalette
-                        open={quickActionsOpen}
-                        onOpenChange={setQuickActionsOpen}
-                        processes={store.processes}
-                        projects={projects.projects}
-                        activeProjectId={activeProjectId}
-                        onStart={startProcess}
-                        onStop={stopProcess}
-                        onRestart={restartProcess}
-                        onResume={resumeProcess}
-                        onTrust={trust.requestReview}
-                        onRemove={requestProcessRemoval}
+                      <OrphanDialog
+                        orphans={orphans.orphans}
+                        onKillOne={orphans.killOne}
+                        onKillAll={orphans.killAll}
+                        onLeave={orphans.leave}
                       />
-                    </DeferredOverlay>
-                    <DeferredOverlay open={commandPaletteOpen}>
-                      <CommandPalette
-                        open={commandPaletteOpen}
-                        onOpenChange={setCommandPaletteOpen}
-                        processes={store.processes}
-                        projects={projects.projects}
-                        newAgentOrTerminal={openPicker}
-                        openProject={projects.open}
-                        openSettings={() => setSettingsOpen(true)}
-                        selectProcess={selectProcess}
-                        openProjectSettings={openProjectSettings}
-                        openOrchestration={openOrchestration}
-                        startAll={store.startAll}
-                        stopAll={stopProject}
-                        restartRunning={store.restartRunning}
-                        process={{
-                          onTrust: trust.requestReview,
-                          onResume: resumeProcess,
-                          onStart: startProcess,
-                          onStop: stopProcess,
-                          onRestart: restartProcess,
-                          onRemove: requestProcessRemoval,
+                      <TrustDialog
+                        review={trust.review}
+                        onTrustCommand={(name) => {
+                          if (trust.review) trust.trust(trust.review.project, name);
                         }}
+                        onTrustAll={trust.trustAll}
+                        onDismiss={trust.dismiss}
                       />
-                    </DeferredOverlay>
-                  </div>
+                      <RemoveProcessDialog
+                        process={pendingRemoval}
+                        workers={
+                          pendingRemoval
+                            ? liveWorkerCount(lineage, store.processes, pendingRemoval.id)
+                            : 0
+                        }
+                        onConfirm={confirmProcessRemoval}
+                        onDismiss={removal.dismiss}
+                      />
+                      <DeferredOverlay open={pickerOpen}>
+                        <LaunchPicker
+                          open={pickerOpen}
+                          onOpenChange={setPickerOpen}
+                          tools={agents.tools}
+                          projects={projects.projects}
+                          onLaunch={onLaunchAgent}
+                          onCreateTerminal={onCreateTerminal}
+                        />
+                      </DeferredOverlay>
+                      <DeferredOverlay open={settingsOpen}>
+                        <SettingsOverlay
+                          open={settingsOpen}
+                          onOpenChange={settingsOpenChanged}
+                          project={activeProjectId}
+                          tab={settingsTab}
+                        />
+                      </DeferredOverlay>
+                      <DeferredOverlay open={quickJumpOpen}>
+                        <QuickJumpPalette
+                          open={quickJumpOpen}
+                          onOpenChange={setQuickJumpOpen}
+                          processes={store.processes}
+                          projects={projects.projects}
+                          onSelectProcess={selectProcess}
+                          onSelectProject={openProjectSettings}
+                        />
+                      </DeferredOverlay>
+                      <DeferredOverlay open={quickActionsOpen}>
+                        <QuickActionsPalette
+                          open={quickActionsOpen}
+                          onOpenChange={setQuickActionsOpen}
+                          processes={store.processes}
+                          projects={projects.projects}
+                          activeProjectId={activeProjectId}
+                          onStart={startProcess}
+                          onStop={stopProcess}
+                          onRestart={restartProcess}
+                          onResume={resumeProcess}
+                          onTrust={trust.requestReview}
+                          onRemove={requestProcessRemoval}
+                        />
+                      </DeferredOverlay>
+                      <DeferredOverlay open={commandPaletteOpen}>
+                        <CommandPalette
+                          open={commandPaletteOpen}
+                          onOpenChange={setCommandPaletteOpen}
+                          processes={store.processes}
+                          projects={projects.projects}
+                          newAgentOrTerminal={openPicker}
+                          openProject={projects.open}
+                          openSettings={() => openSettings()}
+                          selectProcess={selectProcess}
+                          openProjectSettings={openProjectSettings}
+                          openOrchestration={openOrchestration}
+                          startAll={store.startAll}
+                          stopAll={stopProject}
+                          restartRunning={store.restartRunning}
+                          process={{
+                            onTrust: trust.requestReview,
+                            onResume: resumeProcess,
+                            onStart: startProcess,
+                            onStop: stopProcess,
+                            onRestart: restartProcess,
+                            onRemove: requestProcessRemoval,
+                          }}
+                        />
+                      </DeferredOverlay>
+                    </div>
+                  </OpenSettingsContext>
                 </TooltipProvider>
               </AttentionContext>
             </SignalsProvider>

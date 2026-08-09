@@ -2,8 +2,9 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-import { BranchMenu, type BranchActions } from "@/components/git/BranchMenu";
+import { BranchMenu } from "@/components/git/BranchMenu";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { BranchActions } from "@/store/git/branchCluster";
 import type { Branches } from "@/domain";
 
 afterEach(cleanup);
@@ -40,6 +41,28 @@ it("marks the branch that is checked out and offers no way to delete it", () => 
   expect(screen.getByText("Checked out")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Delete branch main" })).toBeNull();
   expect(screen.getByRole("button", { name: "Delete branch feature" })).toBeTruthy();
+});
+
+it("lets a reader delete a branch without ever reaching for the mouse", () => {
+  // The control is out of the row's flow and invisible at rest, so that an unhovered row spends none
+  // of its width on it. That must not cost the keyboard its only way in: a control taken out of the
+  // document, made inert, or dropped from the tab order cannot be focused, so this is what stops the
+  // reveal being implemented by removing it.
+  const acts = actions();
+  const onDelete = vi.fn();
+  open(TWO, acts, onDelete);
+
+  const remove = screen.getByRole("button", { name: "Delete branch feature" });
+  remove.focus();
+  expect(document.activeElement, "focus has to be able to land on it").toBe(remove);
+
+  fireEvent.click(remove);
+
+  expect(onDelete).toHaveBeenCalledWith("feature");
+  expect(
+    acts.switchTo,
+    "deleting a branch is not choosing it, however the row was reached",
+  ).not.toHaveBeenCalled();
 });
 
 it("does nothing when the branch already checked out is chosen again", () => {

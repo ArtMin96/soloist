@@ -15,7 +15,7 @@
 //! trusted-only, and running-only all follow from the watch targets and the restart gate.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -27,6 +27,7 @@ use crate::debounce::{sleep_until, Debouncer};
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProcessId;
 use crate::ports::Clock;
+use crate::supervision::run_blocking;
 use crate::supervisor::Supervisor;
 
 use super::policy::{compile, WatchRule};
@@ -83,7 +84,8 @@ impl WatchReactor {
         // project open or removal.
         let mut rules: Vec<WatchRule> = Vec::new();
         let mut watches: HashMap<PathBuf, Box<dyn WatchHandle>> = HashMap::new();
-        self.resync(&supervisor, &changes_tx, &mut rules, &mut watches);
+        self.resync(&supervisor, &changes_tx, &mut rules, &mut watches)
+            .await;
         drop(supervisor);
 
         let mut debouncers: HashMap<ProcessId, Debouncer> = HashMap::new();
@@ -105,7 +107,8 @@ impl WatchReactor {
                             let Some(supervisor) = self.supervisor.upgrade() else {
                                 break;
                             };
-                            self.resync(&supervisor, &changes_tx, &mut rules, &mut watches);
+                            self.resync(&supervisor, &changes_tx, &mut rules, &mut watches)
+                                .await;
                         }
                         Ok(_) => {}
                     }
@@ -152,7 +155,14 @@ impl WatchReactor {
     /// watch-eligible command — its project removed or its commands gone — has its watch
     /// dropped, which releases the OS resources. The rules are rebuilt wholesale so a
     /// command that is gone simply drops out of matching.
-    fn resync(
+    ///
+    /// Registering a watch walks the tree under its root, so it goes to the blocking pool: a large
+    /// project must never park a runtime worker while the OS enumerates its directories. A root the
+    /// OS refuses is traced and left out of the watch set rather than recorded as watched — a watch
+    /// that yields no events looks exactly like a project nobody edits, so a swallowed refusal would
+    /// be a restart trigger that quietly stopped working. Left out, it is asked for again on the next
+    /// re-sync, so a refusal that has since cleared is not permanent.
+    async fn resync(
         &self,
         supervisor: &Supervisor,
         changes_tx: &mpsc::Sender<PathBuf>,
@@ -168,15 +178,38 @@ impl WatchReactor {
             if desired.insert(target.project_root.clone())
                 && !watches.contains_key(&target.project_root)
             {
-                watches.insert(
-                    target.project_root.clone(),
-                    self.watcher
-                        .watch(target.project_root.clone(), changes_tx.clone()),
-                );
+                if let Some(handle) = self
+                    .establish(&target.project_root, changes_tx.clone())
+                    .await
+                {
+                    watches.insert(target.project_root.clone(), handle);
+                }
             }
             rules.push(WatchRule::new(target.id, target.project_root, set));
         }
         watches.retain(|root, _| desired.contains(root));
+    }
+
+    /// A tree watch on `root`, registered off the runtime, or `None` with the refusal traced.
+    async fn establish(
+        &self,
+        root: &Path,
+        changes: mpsc::Sender<PathBuf>,
+    ) -> Option<Box<dyn WatchHandle>> {
+        let watcher = self.watcher.clone();
+        let root = root.to_path_buf();
+        run_blocking(move || match watcher.watch(root.clone(), changes) {
+            Ok(handle) => Some(handle),
+            Err(refusal) => {
+                tracing::warn!(
+                    path = %root.display(),
+                    %refusal,
+                    "a project's watched files will not restart anything: it could not be watched",
+                );
+                None
+            }
+        })
+        .await
     }
 }
 

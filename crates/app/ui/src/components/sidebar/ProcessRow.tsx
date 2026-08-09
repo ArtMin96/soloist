@@ -203,7 +203,7 @@ export function ProcessRow({
         <div
           style={{ gridArea: "stack" }}
           className={cn(
-            "pointer-events-none translate-x-1 opacity-0 transition-[opacity,transform] duration-[var(--dur-fast)] ease-out-quint",
+            "pointer-events-none translate-x-1 opacity-0 transition-[opacity,translate] duration-[var(--dur-fast)] ease-out-quint",
             "group-hover/row:pointer-events-auto group-hover/row:translate-x-0 group-hover/row:opacity-100",
             "group-focus-within/row:pointer-events-auto group-focus-within/row:translate-x-0 group-focus-within/row:opacity-100",
             showControls && "pointer-events-auto translate-x-0 opacity-100",

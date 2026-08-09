@@ -4,12 +4,8 @@ import { DiffViewer, SIDE_BY_SIDE, UNIFIED, type DiffLayout } from "@/components
 import { DiscardDialog } from "@/components/git/DiscardDialog";
 import { FilePreview } from "@/components/git/FilePreview";
 import { HunkActions } from "@/components/git/HunkActions";
-import {
-  SplitButton,
-  SplitMessage,
-  SplitNotice,
-  SplitSurface,
-} from "@/components/git/SplitSurface";
+import { SplitMessage, SplitNotice, SplitSurface } from "@/components/git/SplitSurface";
+import { IconButton } from "@/components/IconButton";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { Button } from "@/components/ui/button";
 import type { Option } from "@/lib/appearance";
@@ -100,7 +96,7 @@ export function DiffPane({
             />
           )}
           {showing && (
-            <SplitButton
+            <IconButton
               label={split === SIDE_BY_SIDE ? UNIFIED_LABEL : SIDE_BY_SIDE_LABEL}
               icon={split === SIDE_BY_SIDE ? <Rows2Icon /> : <Columns2Icon />}
               onClick={() => setSplit(split === SIDE_BY_SIDE ? UNIFIED : SIDE_BY_SIDE)}
@@ -110,7 +106,7 @@ export function DiffPane({
               program the desktop picks from the file's own name, which the core refuses to do on
               a project the user has not authorised Soloist to act within. */}
           {write.trusted === true && (
-            <SplitButton
+            <IconButton
               label={OPEN_LABEL}
               icon={<ExternalLinkIcon />}
               onClick={() => write.open(selection.path)}

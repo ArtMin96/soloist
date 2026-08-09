@@ -12,6 +12,7 @@ import { SidebarPanel } from "@/components/settings/SidebarPanel";
 import { TemplatesPanel } from "@/components/settings/TemplatesPanel";
 import { ToolsPanel } from "@/components/settings/ToolsPanel";
 import {
+  DEFAULT_SETTINGS_TAB,
   SETTINGS_TABS,
   settingsTabButtonId,
   type SettingsPanelProps,
@@ -64,13 +65,29 @@ export function SettingsOverlay({
   open,
   onOpenChange,
   project,
+  tab = null,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The project in view, handed to the panels that address project-scoped state (Templates). */
   project: number | null;
+  /** The tab this opening asked for, or `null` where it asked for Settings in general. */
+  tab?: SettingsTabId | null;
 }) {
-  const [active, setActive] = useState<SettingsTabId>("appearance");
+  const [active, setActive] = useState<SettingsTabId>(DEFAULT_SETTINGS_TAB);
+  // A named tab has to win every time it is asked for, the first time included: the overlay is not
+  // mounted until it is first opened, so its first render already carries that opening's tab, and it
+  // then stays mounted, so what it shows afterwards is wherever it was last left rather than a fresh
+  // default. Starting from "nothing honoured yet" is what makes the first request a request; seeding
+  // this from the incoming tab would count it as already followed and leave the default drawn.
+  // Adjusting during render commits the switch in the same pass the request arrives, so the tab that
+  // was asked for is the first one drawn. Which request has been honoured is what is tracked, so
+  // choosing another tab by hand while it is open is not undone.
+  const [honoured, setHonoured] = useState<SettingsTabId | null>(null);
+  if (tab !== honoured) {
+    setHonoured(tab);
+    if (tab !== null) setActive(tab);
+  }
   const { ref: panelRef, scrolled } = useScrollEdge<HTMLDivElement>();
   const contentRef = useRef<HTMLDivElement>(null);
 

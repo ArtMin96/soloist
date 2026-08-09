@@ -342,13 +342,19 @@
 }
 
 /*
- * The size/leading pairs of the type ramp's Label (11/14) and Title (15/20) rungs. Named `type-*`
- * rather than `text-*` deliberately: `cn` is bare tailwind-merge, which would sort an unrecognised
- * `text-*` class into the text-colour group and drop it when merged against a colour utility.
+ * The size/leading pairs of the type ramp's Label (11/14), Body (13/19) and Title (15/20) rungs.
+ * Named `type-*` rather than `text-*` deliberately: `cn` is bare tailwind-merge, which would sort an
+ * unrecognised `text-*` class into the text-colour group and drop it when merged against a colour
+ * utility.
  */
 @utility type-label {
   font-size: 0.6875rem;
   line-height: 0.875rem;
+}
+
+@utility type-body {
+  font-size: 0.8125rem;
+  line-height: 1.1875rem;
 }
 
 @utility type-title {

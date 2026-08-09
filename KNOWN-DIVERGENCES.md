@@ -1879,3 +1879,46 @@ clicked a button next to a comment, and the only thing they said was "give this 
 **Effect on parity:** amends the Verify of `plan/02` **VC9** to state the paste. No row regresses,
 and VC11's MCP git surface is unaffected — an agent reaching a handoff over MCP receives text as a
 tool result, which was never a turn in the first place.
+
+---
+
+## D-37 — Soloist's `--version` probe set includes Kimi, which Solo's documented set does not 🟢
+
+**Introduced:** the Assist discoverability fix; recorded 2026-08-09, after the setting was found to
+be unreachable for a provider that qualified for it.
+
+**Solo (ref `plan/05` §6):** auto-detect "probes `--version`" for exactly `claude`, `codex`, `amp`,
+`gemini`, `opencode`. Copilot CLI and Kimi CLI are documented as built-in *tool types* in v0.7.1, and
+Solo's docs say nothing about probing either. `plan/05` §6 originally resolved that silence by
+keeping both out of Soloist's probe set too.
+
+**What Soloist does:** probes those five **plus `kimi`**. Copilot stays out.
+
+**Why the earlier resolution could not hold.** Drafting a commit message or a pull request
+description runs the user's own agent CLI once, headless (`plan/05` §12, G-3), and a tool is only
+offered for it when two things are true: Soloist knows a documented one-shot invocation for that
+provider, and a probe found the CLI installed. Kimi satisfies the first — `kimi --print --prompt` is
+its published non-interactive form — but was never probed, so it reported `Detection::Unknown`
+forever and was filtered out of the picker every time. The two rules disagreed, and the provider was
+unselectable by construction rather than by decision. The invariant is now asserted
+(`every_builtin_that_can_draft_is_also_probed`, `crates/core/src/agents/tool_tests.rs`), so a future
+provider cannot gain a one-shot form and quietly become unreachable the same way.
+
+**Why not the other repair — offer an unprobed tool anyway?** Because "not checked" is not "not
+installed", and treating it as good enough would offer every provider on a machine that has none of
+them, and would make the Assist card's install guidance unreachable in turn. Probing the provider
+answers the question instead of routing around it.
+
+**Why Copilot still stays out.** Its `--version` is confirmed, but nothing in Soloist needs its
+install state: it has no documented single-shot print-and-exit form, so it is never offered for
+drafting, and launching an agent has never been gated on detection. Probing it would buy a badge and
+a login-shell startup, so the honest "not checked" (with the hint that says why) stays.
+
+**The `kimi --version` grounding.** `--version` / `-V`, "Show version number and exit", in the
+[kimi-command reference](https://github.com/MoonshotAI/kimi-cli/blob/main/docs/en/reference/kimi-command.md)
+— read 2026-08-09. `plan/05` §6's earlier note called this unconfirmed, which was the second reason
+it gave for leaving Kimi out; that reason no longer stands.
+
+**Effect on parity:** none. No row asserts the probe set's membership; the probe cost is unchanged in
+practice because the sweep runs every probe concurrently, so it still costs about one login-shell
+startup rather than their sum.

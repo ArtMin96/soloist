@@ -188,7 +188,7 @@ export interface AgentTool {
 export type Detection = "Installed" | "Missing" | "Unknown";
 
 // A configured tool paired with what auto-detection found (mirrors core::DetectedTool). Tools
-// outside the probe set (Copilot, Kimi, Generic) always report "Unknown". The picker badges
+// outside the probe set (Copilot, Generic) always report "Unknown". The picker badges
 // installed tools as launchable.
 export interface DetectedTool {
   tool: AgentTool;
@@ -487,6 +487,15 @@ export interface PullRequestTemplate {
   body: string;
 }
 
+// What a pull request would be opened with before anybody types anything (mirrors
+// core::PullRequestSuggestion), computed from the branch's own commits: one commit's subject and
+// message, or the branch's name as a sentence and its commit subjects as a list. Both fields are the
+// user's to change, and a blank title is refused by the same guard that refuses a typed one.
+export interface PullRequestSuggestion {
+  title: string;
+  body: string;
+}
+
 // Everything the pull-request surface needs to decide what to show, in one read (mirrors
 // core::PullRequestSurface). Anything but a `ready` readiness and the rest is empty: nothing was
 // asked, because nothing could have been answered.
@@ -497,6 +506,9 @@ export interface PullRequestSurface {
   existing: PullRequest | null;
   templates: PullRequestTemplate[];
   merge_methods: MergeMethod[];
+  // Null where there is nothing to compute one from: no branch, no base to compare against, or a
+  // branch holding nothing its base does not.
+  suggestion: PullRequestSuggestion | null;
 }
 
 // How a pull request's commits are put into its base branch (mirrors core::MergeMethod). Which of

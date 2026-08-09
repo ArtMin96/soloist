@@ -60,7 +60,7 @@ impl VersionProbe for NoopVersionProbe {
 
 /// A configured agent tool paired with what auto-detection found. The UI shows installed tools
 /// as launchable, flags absent ones, and reports an unanswered probe as such. A tool whose
-/// provider is outside the auto-detect set (Copilot, Kimi, and
+/// provider is outside the auto-detect set (Copilot and
 /// [`AgentKind::Generic`](super::AgentKind)) is never probed and so reports
 /// [`Detection::Unknown`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

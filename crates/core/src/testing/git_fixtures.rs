@@ -68,14 +68,24 @@ pub fn hunk_range(line: u32) -> HunkRange {
     }
 }
 
-/// One commit, as a test states it. Merge commits are stated with [`merge_entry`].
+/// One commit saying only its subject, as a test states it. A commit whose message says more is
+/// stated with [`described_entry`], and one joining two lines of history with [`merge_entry`].
 pub fn commit_entry(id: &str, subject: &str, author: &str) -> CommitEntry {
     CommitEntry {
         id: id.to_string(),
         subject: subject.to_string(),
+        body: String::new(),
         author: author.to_string(),
         authored_at: 1_700_000_000,
         merge: false,
+    }
+}
+
+/// One commit whose message says more than its subject, as a test states it.
+pub fn described_entry(id: &str, subject: &str, body: &str) -> CommitEntry {
+    CommitEntry {
+        body: body.to_string(),
+        ..commit_entry(id, subject, "Somebody")
     }
 }
 

@@ -27,13 +27,14 @@ pub enum AgentKind {
 
 impl AgentKind {
     /// Whether Soloist auto-detects this provider by probing its CLI's `--version`. True for
-    /// the five providers whose `--version` probe is part of the auto-detect set (Claude,
-    /// Codex, Amp, Gemini, OpenCode); false for Copilot and Kimi — built-in tool types that
-    /// are configurable and launchable but outside that probe set — and for
-    /// [`AgentKind::Generic`], which is user-configured with no fixed command to probe.
+    /// every provider whose install state something in Soloist has to know: Claude, Codex, Amp,
+    /// Gemini and OpenCode, plus Kimi, which has a documented one-shot form and so may be
+    /// offered for drafting — an offer that is only made for a CLI a probe found. Copilot is
+    /// launchable but cannot be asked a single question, so nothing needs it resolved, and
+    /// [`AgentKind::Generic`] is user-configured with no fixed command to probe.
     pub fn auto_detectable(self) -> bool {
         use AgentKind::*;
-        matches!(self, Claude | Codex | Amp | Gemini | OpenCode)
+        matches!(self, Claude | Codex | Amp | Gemini | OpenCode | Kimi)
     }
 }
 
@@ -123,9 +124,9 @@ impl AgentTool {
 
     /// The built-in agent providers Soloist seeds into the registry on first run. Each
     /// `command` is the provider's conventional CLI name, and default args are empty until
-    /// the user adds flags. The first five are the providers Solo documents auto-detecting
-    /// (their command is also the binary `--version` probes); Copilot and Kimi are additional
-    /// built-in tool types — configurable and launchable, but outside the auto-detect set.
+    /// the user adds flags. Copilot and Kimi are additional built-in tool types beyond the five
+    /// Solo documents auto-detecting; which of them Soloist probes is
+    /// [`AgentKind::auto_detectable`]'s decision, not this list's.
     pub fn builtin_defaults() -> Vec<AgentTool> {
         [
             ("Claude", "claude", AgentKind::Claude),
