@@ -52,6 +52,21 @@ fn a_link_inside_the_project_that_stays_inside_it_is_still_opened() {
 }
 
 #[test]
+fn a_project_reached_through_a_link_still_opens_its_own_files() {
+    // Both sides are resolved, and this is the half that says why the *root* has to be: opened
+    // through a link, an unresolved root would never be a prefix of the resolved file, and every
+    // file in the project would be refused as though it led somewhere else.
+    let (project, _) = a_project_and_a_secret();
+    let outside = tempfile::tempdir().expect("temp dir");
+    let reached_by = outside.path().join("project");
+    symlink(project.path(), &reached_by).expect("link");
+
+    let led = contained(&reached_by, "readme.md").expect("a file the project holds");
+
+    assert!(led.ends_with("readme.md"), "{led:?}");
+}
+
+#[test]
 fn a_path_that_climbs_out_of_the_project_opens_nothing() {
     let (project, elsewhere) = a_project_and_a_secret();
     let climbing = format!(

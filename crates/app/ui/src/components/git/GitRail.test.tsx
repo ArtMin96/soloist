@@ -253,6 +253,17 @@ describe("GitRail", () => {
     expect(screen.getByRole("radio", { name: /changes/i })).toBeTruthy();
   });
 
+  it("does not claim a tree with no folders in it is fully expanded", async () => {
+    // Every changed path is at the top, so there is nothing to open. Called expanded, the control
+    // would offer to collapse a hierarchy that does not exist and then do nothing.
+    readStatus.mockResolvedValue(statusWith(["notes.md"]));
+
+    renderRail();
+
+    await screen.findByRole("tree", { name: "Changed files" });
+    expect(screen.getByRole("button", { name: "Expand all folders" })).toBeTruthy();
+  });
+
   it("keeps a resized rail at the width it was left, across a relaunch", async () => {
     readStatus.mockResolvedValue(statusWith(["a.rs"]));
     const { container } = renderRail();
