@@ -1,23 +1,19 @@
-//! What an agent is told about a staged change when it is asked to draft a commit message.
+//! What an agent is asked when it is asked to draft a commit message.
 //!
-//! Four rules decide what it sees, and all four exist because the answer is only as good as the
-//! subject.
+//! **A diff says what changed and never why.** So the change arrives with what context is cheap and
+//! honest: the branch it is on, the task somebody set out to do, and the subjects of the
+//! repository's own recent commits — which is the only place the house's way of writing one is
+//! written down. The examples are examples of *form*, stated as such, never material to copy.
 //!
-//! **Not everything staged says anything.** A resolver's own record of what it picked, and a file a
-//! tool wrote rather than a person, describe no intent — they are noise that costs prompt and
-//! misleads a reader of it. They are left out, and a change made only of them has nothing to
-//! describe at all, which is refused before a single subprocess is spent.
-//!
-//! **A diff says what changed and never why.** So the change arrives with what little context is
-//! cheap and honest: the branch it is on, and the subjects of the repository's own recent commits —
-//! which is the only place the house's way of writing one is written down. They are examples of
-//! *form*, stated as such, never material to copy.
+//! **The shape is the repository's to set.** A `commit.template` is what this repository tells
+//! everybody a message should look like, so where there is one it goes in last, under its own
+//! label, and what is asked for is that it be filled in rather than replaced with something the
+//! agent liked better. Where there is none, the form of the answer is stated instead.
 //!
 //! **There is a ceiling, and it falls on a whole path.** A prompt is composed to fit
 //! [`ONE_SHOT_PROMPT_LIMIT`] rather than cut to it, and the parts are budgeted in the order they
 //! matter: what is being asked, then the context, then as much of the change as is left. Past the
-//! ceiling every path is described by name and by what happened to it instead, because a summary of
-//! the whole change is more useful than a complete diff of the first tenth of it.
+//! ceiling every path is described by name and by what happened to it instead.
 //!
 //! **The draft is advisory.** Nothing here or above it commits: the text goes back to whoever asked,
 //! to read and change first. That is why the composition can afford to leave things out.
@@ -26,37 +22,12 @@ use std::path::Path;
 
 use crate::agents::ONE_SHOT_PROMPT_LIMIT;
 use crate::ids::ProjectId;
-use crate::sync::lock;
-use crate::vcs::{BranchInfo, ChangeKind, CommitEntry, DiffTarget, FileChange};
+use crate::vcs::{BranchInfo, CommitEntry, FileChange};
 
 use super::error::{GitDraftError, GitError};
+use super::message_change::{describes_intent, Description};
 use super::repository::LogRange;
 use super::status::Git;
-
-/// File names whose contents describe nothing about a change: a dependency resolver's own record of
-/// what it picked. Each is written by a tool, is often thousands of lines, and says only that
-/// something else changed — which the change that caused it already says better.
-const RESOLVED_NAMES: [&str; 6] = [
-    "package-lock.json",
-    "packages.lock.json",
-    "pnpm-lock.yaml",
-    "bun.lockb",
-    "go.sum",
-    "Package.resolved",
-];
-
-/// Suffixes of paths a tool wrote rather than a person. `.lock`/`.lockfile` covers the resolvers
-/// that name their record after the manifest (`Cargo.lock`, `yarn.lock`, `Gemfile.lock`,
-/// `poetry.lock`, `flake.lock`, `gradle.lockfile`); the rest are build output that mirrors a source
-/// change already in the same commit.
-const GENERATED_SUFFIXES: [&str; 5] = [".lock", ".lockfile", ".min.js", ".min.css", ".map"];
-
-/// How many staged paths are described by their diff before the whole change is summarised instead.
-///
-/// Each one costs a read of the repository, so this bounds the work as well as the prompt: a change
-/// touching hundreds of files is summarised rather than read hundreds of times, which is also the
-/// better description of it.
-const DESCRIBED_PATH_LIMIT: usize = 48;
 
 /// How many recent commit subjects are shown as examples of how this repository writes one.
 const VOICE_EXAMPLES: usize = 10;
@@ -64,9 +35,6 @@ const VOICE_EXAMPLES: usize = 10;
 /// How many recent commits are looked at to find that many. More than [`VOICE_EXAMPLES`], because
 /// the ones nobody authored are passed over and a run of merges would otherwise leave none.
 const VOICE_EXAMPLE_SCAN: usize = 30;
-
-/// Room kept back from the path summary so the line saying how many were left out always fits.
-const REMAINDER_HEADROOM: usize = 64;
 
 /// The prefix version control gives a revert's subject, which is another commit's subject quoted.
 /// Not anybody's writing, so it teaches nothing about the house voice.
@@ -76,14 +44,17 @@ const REVERT_PREFIX: &str = "Revert \"";
 /// to a machine account's name. A commit nobody wrote is not an example of how anybody writes.
 const BOT_SUFFIX: &str = "[bot]";
 
+/// The most of a task's title that is carried. Long enough for any title somebody writes as one,
+/// bounded because a title is a line and what arrives here was typed by an agent.
+const INTENT_TITLE_LIMIT: usize = 256;
+
+/// The most of a task's own description that is carried. A task body is free-form and can run to
+/// pages of specification, while what a commit message needs from it is what it says first.
+const INTENT_BODY_LIMIT: usize = 2 * 1024;
+
 /// What the agent is asked to do, ahead of a change described by its diffs.
 const PATCH_INSTRUCTIONS: &str = "\
 Write a git commit message for the staged change below.
-
-Reply with the message and nothing else: no preamble, no explanation, no code fence. Use a short
-imperative subject line of at most 72 characters. Add a body only if the change needs one, separated
-from the subject by a blank line, wrapped at 72 characters, saying why rather than restating the
-diff.
 
 ";
 
@@ -94,16 +65,33 @@ Write a git commit message for the staged change below.
 The change is too large to include, so only the files it touches are listed. Describe the change at
 that level rather than inventing detail about the contents.
 
+";
+
+/// What form the answer takes where this repository asks for none of its own.
+const OWN_FORM: &str = "\
 Reply with the message and nothing else: no preamble, no explanation, no code fence. Use a short
 imperative subject line of at most 72 characters. Add a body only if the change needs one, separated
-from the subject by a blank line, wrapped at 72 characters.
+from the subject by a blank line, wrapped at 72 characters, saying why rather than restating the
+diff.
 
 ";
 
-/// The line that introduces the change itself, in each of the two forms it can take. It is the last
-/// thing before the subject, so nothing can be read as part of the change that is not the change.
+/// What form the answer takes where the repository configures one. Filling a shape somebody
+/// committed is what honouring it means; writing something like it is not.
+const SKELETON_FORM: &str = "\
+Fill in the template at the end of this message rather than writing a message of your own shape.
+Keep its headings, their order, and any checklist it carries exactly as they are, and replace only
+the parts meant to be filled in. Leave a section out only if it plainly does not apply. Reply with
+the message and nothing else: no preamble, no explanation, no code fence.
+
+";
+
+/// The line that introduces the change itself, in each of the two forms it can take, and the one
+/// that introduces the shape to fill. Everything is under a label of its own, so no part of the
+/// prompt can be read as another part.
 const PATCH_LABEL: &str = "Staged change:\n";
 const PATHS_LABEL: &str = "Staged files:\n";
+const SKELETON_LABEL: &str = "\nTemplate to fill in:\n";
 
 /// The most the fixed text around a description can cost. The choice between the two forms is made
 /// after the budget is set, so the budget has to hold for whichever is chosen.
@@ -129,8 +117,30 @@ below.
 
 ";
 
+/// How the intent is introduced. It says where it came from and what outranks it, because a task is
+/// what somebody set out to do and the diff is what they did — and it is the diff being committed.
+const INTENT_PREAMBLE: &str = "\
+What this work set out to do, from the task the agent making the change is working on. Use it to say
+why the change was made. Where it and the change disagree, the change is what is being committed:
+describe only what the change below actually does.
+
+";
+
+/// What a change was for, in the words of whoever set out to make it.
+///
+/// Composed by whoever knows which work is in flight — this context does not, and must not: what a
+/// project's agents are working on is coordination's fact, not version control's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitIntent {
+    /// What the task is called.
+    pub title: String,
+    /// What the task says to do, free-form and possibly long; only its opening is carried.
+    pub body: String,
+}
+
 impl Git {
-    /// The prompt that asks for a commit message describing what is staged in `project`.
+    /// The prompt that asks for a commit message describing what is staged in `project`, saying
+    /// what the change was for when `intent` names it.
     ///
     /// Gated on the user having trusted the project, for the same reason a change to it is: what
     /// runs is an agent CLI with the project as its working directory, and an agent CLI reads the
@@ -146,6 +156,7 @@ impl Git {
         &self,
         project: ProjectId,
         root: &Path,
+        intent: Option<&CommitIntent>,
     ) -> Result<String, GitDraftError> {
         if !self.trusted(project)? {
             return Err(GitDraftError::Untrusted);
@@ -163,19 +174,35 @@ impl Git {
         }
 
         let context = describe_branch(&status.branch);
+        let purpose = intent.map(describe_intent).unwrap_or_default();
         let voice = self.voice(project, root)?;
-        let budget = ONE_SHOT_PROMPT_LIMIT
-            .saturating_sub(INSTRUCTIONS_HEADROOM + context.len() + voice.len());
+        let shape = match self.configured_template(project, root)? {
+            Some(template) => format!("{SKELETON_LABEL}{template}"),
+            None => String::new(),
+        };
+        let form = if shape.is_empty() {
+            OWN_FORM
+        } else {
+            SKELETON_FORM
+        };
+        let budget = ONE_SHOT_PROMPT_LIMIT.saturating_sub(
+            INSTRUCTIONS_HEADROOM
+                + form.len()
+                + context.len()
+                + purpose.len()
+                + voice.len()
+                + shape.len(),
+        );
         // What is being asked, then the context it is being asked in, then the change — so nothing
-        // ahead of the label can be mistaken for part of the change, and nothing after it for
-        // instructions.
+        // ahead of the change's label can be mistaken for part of it, and only the shape to fill
+        // follows it, under a label of its own.
         Ok(match self.describe(project, root, &staged, budget)? {
-            Description::Patches(patches) => {
-                format!("{PATCH_INSTRUCTIONS}{context}{voice}{PATCH_LABEL}{patches}")
-            }
-            Description::Paths(paths) => {
-                format!("{SUMMARY_INSTRUCTIONS}{context}{voice}{PATHS_LABEL}{paths}")
-            }
+            Description::Patches(patches) => format!(
+                "{PATCH_INSTRUCTIONS}{form}{context}{purpose}{voice}{PATCH_LABEL}{patches}{shape}"
+            ),
+            Description::Paths(paths) => format!(
+                "{SUMMARY_INSTRUCTIONS}{form}{context}{purpose}{voice}{PATHS_LABEL}{paths}{shape}"
+            ),
         })
     }
 
@@ -210,78 +237,6 @@ impl Git {
         }
         Ok(block)
     }
-
-    /// How the staged change is described: by its patches while they fit `budget`, otherwise by its
-    /// paths.
-    ///
-    /// Reading stops as soon as the patches pass the budget, so the fallback costs at most the reads
-    /// already made — and for a change over [`DESCRIBED_PATH_LIMIT`] paths, none at all.
-    fn describe(
-        &self,
-        project: ProjectId,
-        root: &Path,
-        staged: &[&FileChange],
-        budget: usize,
-    ) -> Result<Description, GitError> {
-        if staged.len() > DESCRIBED_PATH_LIMIT {
-            return Ok(Description::Paths(summarise(staged, budget)));
-        }
-        let mut patches = String::new();
-        for change in staged {
-            let Some(patch) = self.staged_patch(project, root, change)? else {
-                continue;
-            };
-            if patches.len() + patch.len() > budget {
-                return Ok(Description::Paths(summarise(staged, budget)));
-            }
-            patches.push_str(&patch);
-        }
-        // Every staged path was either binary or no longer differs from the last commit by the time
-        // it was read, so there is no patch to show — the paths themselves are all that is left to
-        // describe, and they still describe something.
-        if patches.is_empty() {
-            return Ok(Description::Paths(summarise(staged, budget)));
-        }
-        Ok(Description::Patches(patches))
-    }
-
-    /// One staged path's patch, or `None` when there is nothing in it to read: a path holding bytes
-    /// rather than text, or one whose staged side turned out not to differ.
-    fn staged_patch(
-        &self,
-        project: ProjectId,
-        root: &Path,
-        change: &FileChange,
-    ) -> Result<Option<String>, GitError> {
-        let gate = self.gate(project);
-        let _running = lock(&gate);
-        let raw = match self.repository.diff(
-            root,
-            DiffTarget::Staged,
-            &change.path,
-            change.original_path.as_deref(),
-        ) {
-            Ok(raw) => raw,
-            Err(GitError::NotARepo) => return Ok(None),
-            Err(err) => return Err(err),
-        };
-        if raw.binary || raw.hunks.is_empty() {
-            return Ok(None);
-        }
-        let mut patch = raw.header;
-        for hunk in &raw.hunks {
-            patch.push_str(&hunk.text);
-        }
-        Ok(Some(patch))
-    }
-}
-
-/// The form the staged change is described in.
-enum Description {
-    /// The patches themselves, joined as version control produced them.
-    Patches(String),
-    /// One line per path: what happened to it, and where.
-    Paths(String),
 }
 
 /// Where the change is being made, in one line. Cheap — the status already carries it — and worth
@@ -293,6 +248,41 @@ fn describe_branch(branch: &BranchInfo) -> String {
     }
 }
 
+/// What the change was for, bounded: the task's title, and as much of what it says as is worth
+/// carrying beside a diff.
+fn describe_intent(intent: &CommitIntent) -> String {
+    let mut block = String::from(INTENT_PREAMBLE);
+    block.push_str(excerpt(intent.title.trim(), INTENT_TITLE_LIMIT));
+    block.push('\n');
+    let body = excerpt(intent.body.trim(), INTENT_BODY_LIMIT);
+    if !body.is_empty() {
+        block.push('\n');
+        block.push_str(body);
+        block.push('\n');
+    }
+    block.push('\n');
+    block
+}
+
+/// The opening of `text` that fits `limit`, ending at a line boundary where there is one — so what
+/// arrives reads as the beginning of what somebody wrote rather than a sentence stopped mid-word.
+fn excerpt(text: &str, limit: usize) -> &str {
+    if text.len() <= limit {
+        return text;
+    }
+    // Slicing anywhere but a character boundary is not a string; the limit is a byte count, so the
+    // last boundary at or before it is where the cut can be made.
+    let boundary = (0..=limit)
+        .rev()
+        .find(|at| text.is_char_boundary(*at))
+        .unwrap_or(0);
+    let head = &text[..boundary];
+    match head.rfind('\n') {
+        Some(line_end) => &text[..line_end],
+        None => head,
+    }
+}
+
 /// Whether a commit is an example of how somebody here writes one.
 ///
 /// Three are not: a merge records no change anyone authored, a revert's subject is another commit's
@@ -301,62 +291,6 @@ fn is_authored(commit: &CommitEntry) -> bool {
     !commit.merge
         && !commit.subject.starts_with(REVERT_PREFIX)
         && !commit.author.ends_with(BOT_SUFFIX)
-}
-
-/// One line per staged path — what happened, then the path, and where it came from when it moved —
-/// within `budget`, saying how many were left out when it runs out of room.
-fn summarise(staged: &[&FileChange], budget: usize) -> String {
-    let mut summary = String::new();
-    let mut named = 0;
-    for change in staged {
-        let line = summary_line(change);
-        if summary.len() + line.len() + REMAINDER_HEADROOM > budget {
-            break;
-        }
-        summary.push_str(&line);
-        named += 1;
-    }
-    let left_out = staged.len() - named;
-    if left_out > 0 {
-        summary.push_str(&format!("and {left_out} more files\n"));
-    }
-    summary
-}
-
-/// One path's line of the summary.
-fn summary_line(change: &FileChange) -> String {
-    let happened = change.status.staged.map_or(CHANGED, described);
-    match &change.original_path {
-        Some(from) => format!("{happened} {} (from {from})\n", change.path),
-        None => format!("{happened} {}\n", change.path),
-    }
-}
-
-/// What a staged path is said to have had happen to it. Words rather than version control's letters,
-/// because this is read as prose by something that answers in prose.
-fn described(kind: ChangeKind) -> &'static str {
-    match kind {
-        ChangeKind::Modified => "modified",
-        ChangeKind::TypeChanged => "changed type of",
-        ChangeKind::Added => "added",
-        ChangeKind::Deleted => "deleted",
-        ChangeKind::Renamed => "renamed",
-        ChangeKind::Copied => "copied",
-        ChangeKind::Untracked | ChangeKind::Conflicted => CHANGED,
-    }
-}
-
-/// What a path is said to have had happen to it when nothing more precise applies — an unresolved
-/// merge, or an untracked path, neither of which is a staged classification version control reports.
-const CHANGED: &str = "changed";
-
-/// Whether a path's contents say anything about the intent of the change that touched it.
-fn describes_intent(path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    !RESOLVED_NAMES.contains(&name)
-        && !GENERATED_SUFFIXES
-            .iter()
-            .any(|suffix| name.ends_with(suffix))
 }
 
 #[cfg(test)]

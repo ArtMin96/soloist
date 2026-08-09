@@ -5,14 +5,19 @@
 //! tool run the same way and differ only in what is composed to ask it about, so they share one
 //! refusal vocabulary and one place that resolves *which* tool. What each of them composes stays
 //! with the surface it belongs to.
+//!
+//! A commit message is also the one draft that reaches across two contexts: version control knows
+//! what changed, coordination knows what somebody set out to do, and neither may learn the other.
+//! So the join is made here, where both are already in reach — the git context is handed a value,
+//! and never hears that a todo or a process exists.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::Facade;
 use crate::agents::{AgentTool, OneShotError};
-use crate::git::{GitDraftError, PullRequestError};
-use crate::ids::ProjectId;
+use crate::git::{CommitIntent, GitDraftError, PullRequestError};
+use crate::ids::{ProcessId, ProjectId};
 use crate::ports::StoreError;
 
 impl Facade {
@@ -59,8 +64,43 @@ impl Facade {
         let root = self
             .project_root(project)?
             .ok_or(DraftError::UnknownProject)?;
-        let prompt = self.git.commit_message_prompt(project, &root)?;
+        let intent = self.commit_intent(project)?;
+        let prompt = self
+            .git
+            .commit_message_prompt(project, &root, intent.as_ref())?;
         Ok((tool, root, prompt))
+    }
+
+    /// What the staged change was for, where the project answers it without anybody guessing: the
+    /// one todo a running agent of it holds a lock on.
+    ///
+    /// A todo lock is the only record Soloist keeps of work being done *now*. It is process-owned —
+    /// released on every terminal transition and cleared at launch — so unlike a status somebody
+    /// declared, it cannot outlive the work it describes. Which is why the question is asked of the
+    /// lock and not of a label.
+    ///
+    /// **Zero and several both answer `None`**, and the surface loses nothing by it: a draft with no
+    /// intent is the draft that was shipped before this existed. Picking one of several would be
+    /// attributing a change to work it may have nothing to do with, and stating it to a model as
+    /// fact — the same reason a handoff refuses to choose between several running agents.
+    fn commit_intent(&self, project: ProjectId) -> Result<Option<CommitIntent>, StoreError> {
+        let working: Vec<ProcessId> = self.running_agents(project).map(|view| view.id).collect();
+        if working.is_empty() {
+            return Ok(None);
+        }
+        let mut held = self
+            .todos
+            .list(project)?
+            .into_iter()
+            .filter(|todo| todo.locked_by.is_some_and(|owner| working.contains(&owner)));
+        let first = held.next();
+        let Some(only) = first.filter(|_| held.next().is_none()) else {
+            return Ok(None);
+        };
+        Ok(self.todos.get(project, only.id)?.map(|todo| CommitIntent {
+            title: todo.doc.title,
+            body: todo.doc.body,
+        }))
     }
 }
 

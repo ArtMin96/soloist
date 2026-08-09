@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use super::Facade;
 use crate::git::{HandoffSubject, MergeMethod, PullRequestError, PullRequestReview};
 use crate::ids::{ProcessId, ProjectId};
-use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::SupervisorError;
 
 /// What became of a handoff.
@@ -123,11 +122,7 @@ impl Facade {
         project: ProjectId,
         target: Option<ProcessId>,
     ) -> Result<Option<ProcessId>, HandoffError> {
-        let mut running = self.snapshot().into_iter().filter(|view| {
-            view.project == project
-                && view.kind == ProcessKind::Agent
-                && view.status == ProcStatus::Running
-        });
+        let mut running = self.running_agents(project);
         match target {
             Some(named) => running
                 .any(|view| view.id == named)

@@ -12,7 +12,7 @@ use crate::testing::{
 };
 use crate::vcs::{ChangeKind, CommitEntry, FileChange};
 
-use crate::git::{GitDraftError, GitStatus};
+use crate::git::{CommitIntent, GitDraftError, GitStatus};
 
 /// The fake ignores it — a read is addressed by project here, not by path.
 const ROOT: &str = "/project";
@@ -49,9 +49,24 @@ fn long_hunk() -> String {
 }
 
 fn prompt_for(repository: FakeGitRepository) -> Result<String, GitDraftError> {
+    prompt_about(repository, None)
+}
+
+/// The same, for a change whose purpose the project can state.
+fn prompt_about(
+    repository: FakeGitRepository,
+    intent: Option<&CommitIntent>,
+) -> Result<String, GitDraftError> {
     let project = ProjectId::next();
     let git = git_trusting(repository, project);
-    git.commit_message_prompt(project, Path::new(ROOT))
+    git.commit_message_prompt(project, Path::new(ROOT), intent)
+}
+
+fn intent(title: &str, body: &str) -> CommitIntent {
+    CommitIntent {
+        title: title.to_string(),
+        body: body.to_string(),
+    }
 }
 
 #[test]
@@ -82,13 +97,13 @@ fn only_what_is_staged_is_described() {
     let project = ProjectId::next();
     let git = git_trusting(repository.clone(), project);
 
-    git.commit_message_prompt(project, Path::new(ROOT))
+    git.commit_message_prompt(project, Path::new(ROOT), None)
         .expect("prompt");
 
     assert_eq!(
         repository.reads(),
-        3,
-        "the status, the recent history, and one diff — the unstaged path was never asked about",
+        4,
+        "the status, the recent history, the configured shape, and one diff — the unstaged path was never asked about",
     );
 }
 
@@ -108,7 +123,7 @@ fn a_change_made_only_of_files_a_tool_wrote_has_nothing_to_describe() {
     let git = git_trusting(repository.clone(), project);
 
     let refusal = git
-        .commit_message_prompt(project, Path::new(ROOT))
+        .commit_message_prompt(project, Path::new(ROOT), None)
         .unwrap_err();
 
     assert!(
@@ -128,12 +143,12 @@ fn a_resolver_record_beside_a_real_change_is_left_out_of_the_subject() {
     let project = ProjectId::next();
     let git = git_trusting(repository.clone(), project);
 
-    git.commit_message_prompt(project, Path::new(ROOT))
+    git.commit_message_prompt(project, Path::new(ROOT), None)
         .expect("prompt");
 
     assert_eq!(
         repository.reads(),
-        3,
+        4,
         "the source file's diff was read and the lock file's was not",
     );
 }
@@ -177,14 +192,14 @@ fn a_change_touching_more_paths_than_are_ever_read_is_summarised_without_reading
     let git = git_trusting(repository.clone(), project);
 
     let prompt = git
-        .commit_message_prompt(project, Path::new(ROOT))
+        .commit_message_prompt(project, Path::new(ROOT), None)
         .expect("prompt");
 
     assert!(prompt.contains("modified src/f79.rs\n"), "{prompt}");
     assert_eq!(
         repository.reads(),
-        2,
-        "the status and the history — a change of this size is never read path by path",
+        3,
+        "the status, the history and the configured shape — a change of this size is never read path by path",
     );
 }
 
@@ -242,7 +257,7 @@ fn a_project_that_has_not_been_trusted_composes_nothing() {
     let git = git_over(repository.clone());
 
     let refusal = git
-        .commit_message_prompt(ProjectId::next(), Path::new(ROOT))
+        .commit_message_prompt(ProjectId::next(), Path::new(ROOT), None)
         .unwrap_err();
 
     assert!(matches!(refusal, GitDraftError::Untrusted), "{refusal:?}");
@@ -259,7 +274,7 @@ fn a_folder_under_no_version_control_has_nothing_to_describe() {
     let git = git_trusting(FakeGitRepository::answering(Vec::new()), project);
 
     let refusal = git
-        .commit_message_prompt(project, Path::new(ROOT))
+        .commit_message_prompt(project, Path::new(ROOT), None)
         .unwrap_err();
 
     assert!(
@@ -443,6 +458,15 @@ fn the_context_never_costs_the_change_more_room_than_the_ceiling_allows() {
     // so the patch size is swept rather than picked: one fixture proves the ceiling for one size and
     // says nothing about the size just above it. Every size has to compose a prompt within the
     // ceiling, and has to keep the examples — they are budgeted before the change, not after it.
+    //
+    // The widest context there is: a branch, a task, ten examples, and a shape to fill. Every one of
+    // them takes room from the change rather than from the ceiling.
+    let purpose = intent(
+        "Give the message the intent behind the change",
+        &"why. ".repeat(600),
+    );
+    // A shape near its own ceiling, because a small one would hide a budget that never counted it.
+    let template = "Subject:\n\nWhy:\n".repeat(300);
     let recent: Vec<CommitEntry> = (0..VOICE_EXAMPLE_COUNT)
         .map(|n| {
             commit_entry(
@@ -458,8 +482,13 @@ fn the_context_never_costs_the_change_more_room_than_the_ceiling_allows() {
 
     for patch_bytes in (800..1200).step_by(8) {
         let hunk = format!("@@ -1,1 +1,1 @@\n+{}\n", "x".repeat(patch_bytes));
-        let prompt = prompt_for(repository_with(many.clone(), &hunk).logging(recent.clone()))
-            .expect("prompt");
+        let prompt = prompt_about(
+            repository_with(many.clone(), &hunk)
+                .logging(recent.clone())
+                .templating(&template),
+            Some(&purpose),
+        )
+        .expect("prompt");
 
         assert!(
             prompt.len() <= ONE_SHOT_PROMPT_LIMIT,
@@ -470,5 +499,142 @@ fn the_context_never_costs_the_change_more_room_than_the_ceiling_allows() {
             prompt.contains("For style only"),
             "{patch_bytes}-byte patches"
         );
+        assert!(
+            prompt.contains("Give the message the intent behind the change"),
+            "{patch_bytes}-byte patches keep the task the change is for",
+        );
+        assert!(
+            prompt.ends_with(&template),
+            "{patch_bytes}-byte patches keep the shape to fill",
+        );
     }
+}
+
+#[test]
+fn a_task_written_in_more_than_ascii_is_cut_where_a_character_ends() {
+    // A ceiling is a count of bytes and a task is written by a person in whatever alphabet they
+    // write in, so the two do not line up. Cutting between the bytes of one character does not
+    // produce a shorter string — it produces no string at all.
+    let body = "précisément ça — et voilà. ".repeat(400);
+    let prompt = prompt_about(
+        repository_with(vec![staged("src/main.rs")], HUNK),
+        Some(&intent("Décrire ce qui a changé", &body)),
+    )
+    .expect("prompt");
+
+    assert!(prompt.contains("Décrire ce qui a changé"), "{prompt}");
+    assert!(prompt.contains("précisément ça"), "{prompt}");
+    assert!(
+        prompt.len() <= ONE_SHOT_PROMPT_LIMIT,
+        "composed {} bytes",
+        prompt.len(),
+    );
+}
+
+#[test]
+fn the_task_being_worked_on_is_carried_as_what_the_change_was_for() {
+    // The one thing neither the diff nor the log can say. A diff records what moved; the task
+    // records what somebody set out to do, which is what a commit message is supposed to be about.
+    let prompt = prompt_about(
+        repository_with(vec![staged("src/main.rs")], HUNK),
+        Some(&intent(
+            "Open a path's diff in a split beside the terminal",
+            "The rail shows what changed but there is nowhere to read it.",
+        )),
+    )
+    .expect("prompt");
+
+    assert!(
+        prompt.contains("Open a path's diff in a split beside the terminal"),
+        "{prompt}",
+    );
+    assert!(
+        prompt.contains("The rail shows what changed but there is nowhere to read it."),
+        "{prompt}",
+    );
+    let purpose = prompt
+        .find("What this work set out to do")
+        .expect("the intent");
+    let change = prompt.find("Staged change:\n").expect("the change label");
+    assert!(
+        purpose < change,
+        "the intent comes before the change, never inside it: {prompt}",
+    );
+    assert!(
+        prompt[purpose..change].find("@@").is_none(),
+        "no part of the change appears among the intent: {prompt}",
+    );
+}
+
+#[test]
+fn without_a_task_nothing_claims_to_know_what_the_change_was_for() {
+    // The refusal to guess, seen from the prompt: with no task in flight the draft is the one that
+    // shipped before any of this existed, not one that invents a purpose.
+    let prompt = prompt_for(repository_with(vec![staged("src/main.rs")], HUNK)).expect("prompt");
+
+    assert!(
+        !prompt.contains("What this work set out to do"),
+        "no purpose is claimed where none was supplied: {prompt}",
+    );
+    assert!(prompt.contains("-old\n+new\n"), "{prompt}");
+}
+
+#[test]
+fn a_task_that_runs_to_pages_arrives_as_its_opening_rather_than_whole() {
+    // A task body is free-form and written by an agent, so it is the one part of the prompt with no
+    // natural size. Left uncapped it would take the change's room; cut mid-word it would read as
+    // somebody trailing off.
+    let body = format!(
+        "The first thing it says.\n{}",
+        "and a great deal more besides. ".repeat(2_000),
+    );
+    let prompt = prompt_about(
+        repository_with(vec![staged("src/main.rs")], HUNK),
+        Some(&intent("Do the thing", &body)),
+    )
+    .expect("prompt");
+
+    assert!(prompt.contains("The first thing it says."), "{prompt}");
+    assert!(
+        prompt.len() <= ONE_SHOT_PROMPT_LIMIT,
+        "a task nobody bounded composed {} bytes",
+        prompt.len(),
+    );
+    assert!(
+        prompt.contains("-old\n+new\n"),
+        "and the change is still described: {prompt}",
+    );
+}
+
+#[test]
+fn a_repository_that_configures_a_shape_asks_for_it_to_be_filled_in() {
+    // The asymmetry this closes: a drafted description already fills the shape its repository
+    // carries, while a drafted message replaced the one it was prefilled with.
+    const TEMPLATE: &str = "Summary:\n\nWhy this change:\n";
+    let prompt =
+        prompt_for(repository_with(vec![staged("src/main.rs")], HUNK).templating(TEMPLATE))
+            .expect("prompt");
+
+    assert!(
+        prompt.contains("Keep its headings, their order, and any checklist it carries"),
+        "{prompt}",
+    );
+    assert!(
+        prompt.ends_with(&format!("Template to fill in:\n{TEMPLATE}")),
+        "the shape is the last thing read, under its own label: {prompt}",
+    );
+}
+
+#[test]
+fn without_a_configured_shape_the_message_takes_the_form_it_is_asked_for() {
+    let prompt = prompt_for(repository_with(vec![staged("src/main.rs")], HUNK)).expect("prompt");
+
+    assert!(
+        !prompt.contains("Template to fill in"),
+        "no shape is claimed where the repository configures none: {prompt}",
+    );
+    assert!(
+        prompt.contains("imperative subject line of at most 72 characters"),
+        "{prompt}",
+    );
 }

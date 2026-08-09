@@ -30,6 +30,7 @@ mod forge;
 mod handoff;
 mod history;
 mod message;
+mod message_change;
 mod opener;
 mod path;
 mod pr;
@@ -50,6 +51,7 @@ pub use forge::{
 };
 pub use handoff::{HandoffSubject, CHECK_LOG_LIMIT, HANDOFF_LIMIT};
 pub use history::LOG_PAGE_SIZE;
+pub use message::CommitIntent;
 pub use opener::{FileOpener, NoopFileOpener, OpenError};
 pub use pr::{PullRequestError, PullRequestSurface};
 pub use repository::{

@@ -235,6 +235,19 @@ impl Facade {
         self.supervisor.view(id)
     }
 
+    /// The agents of `project` that are running right now.
+    ///
+    /// Defined once because more than one behaviour turns on it and each decides something a
+    /// person sees: which session a handoff lands in, and whose work a drafted message is said to
+    /// be about. Running is the load-bearing word — a process that has stopped speaks for nothing.
+    fn running_agents(&self, project: ProjectId) -> impl Iterator<Item = ProcessView> {
+        self.snapshot().into_iter().filter(move |view| {
+            view.project == project
+                && view.kind == ProcessKind::Agent
+                && view.status == ProcStatus::Running
+        })
+    }
+
     /// The process supervisor (C2) — start/stop/restart and bulk operations.
     pub fn supervisor(&self) -> &Supervisor {
         self.supervisor.as_ref()
