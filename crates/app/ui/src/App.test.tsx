@@ -187,6 +187,14 @@ describe("App dashboard", () => {
                 original_path: null,
               },
             ],
+            merging: false,
+            capabilities: {
+              pull: false,
+              push: true,
+              stash: true,
+              discardablePaths: ["src/main.rs"],
+            },
+            changeCounts: { added: 0, removed: 0 },
           };
         if (cmd === "git_files") return null;
         if (cmd === "git_diff")

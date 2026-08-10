@@ -97,6 +97,13 @@ function statusWith(paths: string[]): GitStatus {
       original_path: null,
     })),
     merging: false,
+    capabilities: {
+      pull: false,
+      push: true,
+      stash: paths.length > 0,
+      discardablePaths: paths,
+    },
+    changeCounts: { added: 0, removed: 0 },
   };
 }
 

@@ -30,7 +30,13 @@ import { useCommitMessageDraft } from "@/store/git/useCommitMessageDraft";
 import { useCommitTemplate } from "@/store/git/useCommitTemplate";
 import { useTreeExpansion } from "@/store/git/useTreeExpansion";
 import { buildChangesTree, buildFilesTree } from "@/store/git/tree";
-import { BRANCH as BRANCH_ACTION, MERGE as MERGE_ACTION, useGitSync } from "@/store/git/useGitSync";
+import {
+  BRANCH as BRANCH_ACTION,
+  EXCHANGE as EXCHANGE_ACTION,
+  MERGE as MERGE_ACTION,
+  STASH as STASH_ACTION,
+  useGitSync,
+} from "@/store/git/useGitSync";
 import { useGitWrite } from "@/store/git/useGitWrite";
 import {
   RAIL_MAX_WIDTH,
@@ -62,6 +68,7 @@ const ABANDON_MERGE_CANCEL = "Keep merging";
 /** Stands in for a project with nothing changed, so "no changes" is one list rather than a new one
  *  every render — which is what keeps the tree built from it from being rebuilt for nothing. */
 const NO_CHANGES: FileChange[] = [];
+const NO_PATHS: string[] = [];
 
 /** What the rail says when a tab has nothing in it, per state. */
 const NOT_A_REPOSITORY = "Not a git repository";
@@ -100,6 +107,8 @@ export function GitRail({
   const draft = useCommitMessageDraft(project);
   const template = useCommitTemplate(project, write.trusted === true);
   const changes = status.status?.changes ?? NO_CHANGES;
+  const discardablePaths = status.status?.capabilities.discardablePaths ?? NO_PATHS;
+  const discardable = useMemo(() => new Set(discardablePaths), [discardablePaths]);
   // Built here rather than inside each tree, because whoever owns which folders are open needs the
   // same shape the rows hang on — one fact, one owner.
   const changesTree = useMemo(() => buildChangesTree(changes), [changes]);
@@ -117,6 +126,7 @@ export function GitRail({
       ? {
           onStage: (path, stage) => (stage ? write.stage(path) : write.unstage(path)),
           onDiscard: (path) => setDiscarding({ path, hunk: false }),
+          discardable,
           busy: write.busy,
         }
       : null;
@@ -124,16 +134,20 @@ export function GitRail({
   // surfaces are one read. Until the project is trusted nothing may change it, so neither the
   // switcher, the exchange with the remote, nor the pull request is offered.
   const branch = status.status?.branch ?? null;
+  const capabilities = status.status?.capabilities ?? null;
+  const changeCounts = status.status?.changeCounts ?? null;
   const trusted = write.trusted === true;
   const cluster = useMemo<BranchClusterView | null>(
     () =>
-      branch === null
+      branch === null || capabilities === null || changeCounts === null
         ? null
         : {
             branch,
+            capabilities,
+            changeCounts,
             branches: sync.branches,
             exchanging: sync.exchanging,
-            busy: sync.busy(BRANCH_ACTION),
+            busy: sync.busy(BRANCH_ACTION) || sync.busy(STASH_ACTION) || sync.busy(EXCHANGE_ACTION),
             exchange: trusted
               ? { fetch: sync.fetch, pull: sync.pull, push: sync.push, stop: sync.stopExchange }
               : null,
@@ -142,7 +156,7 @@ export function GitRail({
                   switchTo: sync.switchBranch,
                   create: sync.createBranch,
                   remove: sync.deleteBranch,
-                  stash: sync.stash,
+                  stash: capabilities.stash ? sync.stash : null,
                   popStash: sync.popStash,
                 }
               : null,
@@ -152,7 +166,7 @@ export function GitRail({
             openPullRequest: trusted && onOpenPullRequest !== undefined ? onOpenPullRequest : null,
             onBranchesOpen: setSwitcherOpen,
           },
-    [branch, onOpenPullRequest, sync, trusted],
+    [branch, capabilities, changeCounts, onOpenPullRequest, sync, trusted],
   );
 
   useEffect(() => {
@@ -265,7 +279,7 @@ export function GitRail({
                 {changes.length === 0 ? (
                   <RailEmpty>{NOTHING_CHANGED}</RailEmpty>
                 ) : (
-                  <ScrollArea className="h-full">
+                  <ScrollArea className="h-full" constrainContent>
                     <ChangesTree
                       tree={changesTree}
                       changes={changes}
@@ -281,7 +295,7 @@ export function GitRail({
                 {filesTree === null ? (
                   <RailEmpty>{files.loading ? "" : NO_FILES}</RailEmpty>
                 ) : (
-                  <ScrollArea className="h-full">
+                  <ScrollArea className="h-full" constrainContent>
                     <FilesTree
                       tree={filesTree}
                       expanded={filesFolders.expanded}

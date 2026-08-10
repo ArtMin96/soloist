@@ -100,27 +100,23 @@ pub fn merge_entry(id: &str, subject: &str) -> CommitEntry {
 /// A clean working tree on `branch`, tracking nothing and merging nothing — the starting point a
 /// test varies.
 pub fn git_status(branch: &str) -> GitStatus {
-    GitStatus {
-        branch: BranchInfo {
+    GitStatus::new(
+        BranchInfo {
             name: Some(branch.to_string()),
             upstream: None,
             sync: SyncState::Unknown,
         },
-        changes: Vec::new(),
-        merging: false,
-    }
+        Vec::new(),
+        false,
+    )
 }
 
 /// The same working tree, tracking `upstream` and standing level with it.
 pub fn tracking_status(branch: &str, upstream: &str) -> GitStatus {
-    GitStatus {
-        branch: BranchInfo {
-            upstream: Some(upstream.to_string()),
-            sync: SyncState::UpToDate,
-            ..git_status(branch).branch
-        },
-        ..git_status(branch)
-    }
+    let mut status = git_status(branch);
+    status.branch.upstream = Some(upstream.to_string());
+    status.branch.sync = SyncState::UpToDate;
+    status
 }
 
 /// One branch a switcher could offer, as a test states it.

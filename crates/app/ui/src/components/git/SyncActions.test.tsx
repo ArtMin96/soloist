@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { SyncActions } from "@/components/git/SyncActions";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { BranchInfo } from "@/domain";
+import type { BranchInfo, GitCapabilities } from "@/domain";
 
 afterEach(cleanup);
 
@@ -16,7 +16,11 @@ const TRACKING: BranchInfo = {
 
 const LOCAL_ONLY: BranchInfo = { name: "spike", upstream: null, sync: { state: "unknown" } };
 
-function show(branch: BranchInfo, exchanging: boolean) {
+function show(
+  branch: BranchInfo,
+  exchanging: boolean,
+  capabilities: Pick<GitCapabilities, "pull" | "push"> = { pull: true, push: true },
+) {
   const handlers = {
     onFetch: vi.fn(),
     onPull: vi.fn(),
@@ -25,7 +29,12 @@ function show(branch: BranchInfo, exchanging: boolean) {
   };
   render(
     <TooltipProvider>
-      <SyncActions branch={branch} exchanging={exchanging} {...handlers} />
+      <SyncActions
+        branch={branch}
+        capabilities={capabilities}
+        exchanging={exchanging}
+        {...handlers}
+      />
     </TooltipProvider>,
   );
   return handlers;
@@ -41,7 +50,7 @@ it("offers to hand a tracking branch's commits to the upstream it has", () => {
 });
 
 it("offers to publish a branch that tracks nothing, and nothing to pull from", () => {
-  const handlers = show(LOCAL_ONLY, false);
+  const handlers = show(LOCAL_ONLY, false, { pull: false, push: true });
 
   fireEvent.click(screen.getByRole("button", { name: "Publish" }));
 
@@ -49,6 +58,14 @@ it("offers to publish a branch that tracks nothing, and nothing to pull from", (
     handlers.onPush,
     "publishing and pushing are one intent, and the core picks which",
   ).toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Pull" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Push" })).toBeNull();
+});
+
+it("omits remote actions the core says cannot advance the branch", () => {
+  show(TRACKING, false, { pull: false, push: false });
+
+  expect(screen.getByRole("button", { name: "Fetch" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Pull" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Push" })).toBeNull();
 });

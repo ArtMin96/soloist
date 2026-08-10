@@ -7,15 +7,16 @@
 //! subprocess against the same repository.
 
 use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::ids::ProjectId;
 use crate::ports::{StoreError, TrustRepo};
 use crate::sync::lock;
-use crate::vcs::{BranchInfo, FileChange};
+use crate::vcs::{BranchInfo, ChangeKind, FileChange, SyncState};
 
 use super::error::{GitError, GitWriteError};
 use super::exchange::Stop;
@@ -26,7 +27,7 @@ use super::repository::GitRepository;
 /// A repository's working tree at one moment: what is checked out, and everything that differs
 /// from the last commit.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub struct GitStatus {
+pub struct GitStatusFacts {
     /// The checked-out branch and how it stands against its upstream.
     pub branch: BranchInfo,
     /// Every path that differs from the last commit, in the order version control reports them.
@@ -36,6 +37,178 @@ pub struct GitStatus {
     /// abandon; a merge can be under way with every conflict already resolved. So a surface reads
     /// the conflicts to say what needs attention, and this to say whether abandoning is on offer.
     pub merging: bool,
+}
+
+/// Repository facts plus the action projection derived from them when the status crosses a wire.
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+pub struct GitStatus {
+    #[serde(flatten)]
+    facts: GitStatusFacts,
+}
+
+/// The actions a surface can offer from one status without asking version control to perform a
+/// known no-op or a change it is known to refuse.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+pub struct GitCapabilities {
+    /// Whether the upstream has commits to bring into the checked-out branch.
+    pub pull: bool,
+    /// Whether the checked-out branch has commits to hand over, including publishing it first.
+    pub push: bool,
+    /// Whether the working tree holds tracked work that can be set aside.
+    pub stash: bool,
+    /// Paths whose unstaged work can be restored from the index.
+    #[serde(rename = "discardablePaths")]
+    pub discardable_paths: Vec<String>,
+}
+
+/// How many changed paths version control reports as created or removed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
+pub struct GitChangeCounts {
+    /// Paths created on either side of the index.
+    pub added: usize,
+    /// Paths removed on either side of the index.
+    pub removed: usize,
+}
+
+impl GitStatus {
+    /// Builds one status from the facts version control reported.
+    pub fn new(branch: BranchInfo, changes: Vec<FileChange>, merging: bool) -> Self {
+        Self {
+            facts: GitStatusFacts {
+                branch,
+                changes,
+                merging,
+            },
+        }
+    }
+
+    /// Takes the repository facts out of the cached status.
+    pub fn into_facts(self) -> GitStatusFacts {
+        self.facts
+    }
+
+    /// Projects action availability from the status facts that prove it. Repository policy,
+    /// credentials, hooks, and concurrent changes remain version control's answer when an action
+    /// is attempted.
+    pub fn capabilities(&self) -> GitCapabilities {
+        let named = self.branch.name.is_some();
+        let (mut pull, push) = if !named {
+            (false, false)
+        } else if self.branch.upstream.is_none() {
+            (false, true)
+        } else {
+            match self.branch.sync {
+                SyncState::Ahead { .. } => (false, true),
+                SyncState::Behind { .. } | SyncState::Diverged { .. } => (true, false),
+                SyncState::Unknown | SyncState::UpToDate => (false, false),
+            }
+        };
+        let conflicted = self.changes.iter().any(|change| {
+            change.status.staged == Some(ChangeKind::Conflicted)
+                || change.status.unstaged == Some(ChangeKind::Conflicted)
+        });
+        if self.merging || conflicted {
+            pull = false;
+        }
+        let stash = !self.merging
+            && !conflicted
+            && self.changes.iter().any(|change| {
+                change.status.staged.is_some()
+                    || change
+                        .status
+                        .unstaged
+                        .is_some_and(|kind| kind != ChangeKind::Untracked)
+            });
+        let discardable_paths = self
+            .changes
+            .iter()
+            .filter(|change| {
+                change.status.unstaged.is_some_and(|kind| {
+                    kind != ChangeKind::Untracked && kind != ChangeKind::Conflicted
+                })
+            })
+            .map(|change| change.path.clone())
+            .collect();
+
+        GitCapabilities {
+            pull,
+            push,
+            stash,
+            discardable_paths,
+        }
+    }
+
+    /// Counts paths created and removed across the staged and unstaged halves of the status.
+    ///
+    /// A copied or untracked path is a created path. A rename is the same file moved, so it is
+    /// neither created nor removed. An unresolved conflict is neither because the adapter
+    /// deliberately collapses git's unmerged modes and therefore cannot state whether the path
+    /// exists. One path contributes at most once to each count, even when both halves classify it
+    /// the same way; an add followed by a delete contributes to both because the status reports
+    /// both changes.
+    pub fn change_counts(&self) -> GitChangeCounts {
+        let mut counts = GitChangeCounts {
+            added: 0,
+            removed: 0,
+        };
+        for change in &self.changes {
+            let mut added = false;
+            let mut removed = false;
+            for kind in [change.status.staged, change.status.unstaged]
+                .into_iter()
+                .flatten()
+            {
+                match kind {
+                    ChangeKind::Added | ChangeKind::Copied | ChangeKind::Untracked => added = true,
+                    ChangeKind::Deleted => removed = true,
+                    ChangeKind::Modified
+                    | ChangeKind::TypeChanged
+                    | ChangeKind::Renamed
+                    | ChangeKind::Conflicted => {}
+                }
+            }
+            counts.added += usize::from(added);
+            counts.removed += usize::from(removed);
+        }
+        counts
+    }
+}
+
+impl Deref for GitStatus {
+    type Target = GitStatusFacts;
+
+    fn deref(&self) -> &Self::Target {
+        &self.facts
+    }
+}
+
+impl DerefMut for GitStatus {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.facts
+    }
+}
+
+impl Serialize for GitStatus {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        #[derive(Serialize)]
+        struct Wire<'a> {
+            #[serde(flatten)]
+            facts: &'a GitStatusFacts,
+            capabilities: GitCapabilities,
+            #[serde(rename = "changeCounts")]
+            change_counts: GitChangeCounts,
+        }
+
+        Wire {
+            facts: &self.facts,
+            capabilities: self.capabilities(),
+            change_counts: self.change_counts(),
+        }
+        .serialize(serializer)
+    }
 }
 
 /// The git context (C9): reads a project's repository through the [`GitRepository`] port and

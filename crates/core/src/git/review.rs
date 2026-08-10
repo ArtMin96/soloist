@@ -203,7 +203,7 @@ impl Git {
     ) -> Result<Option<String>, PullRequestError> {
         Ok(self
             .status(project, root)?
-            .and_then(|status| status.branch.name))
+            .and_then(|status| status.into_facts().branch.name))
     }
 }
 

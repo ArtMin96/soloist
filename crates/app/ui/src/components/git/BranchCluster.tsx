@@ -1,11 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  ArrowDownIcon,
-  ArrowUpIcon,
-  ChevronsUpDownIcon,
-  GitBranchIcon,
-  GitPullRequestIcon,
-} from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
 import { BranchMenu } from "@/components/git/BranchMenu";
 import { ConfirmDialog } from "@/components/git/ConfirmDialog";
 import { SyncActions } from "@/components/git/SyncActions";
@@ -61,12 +55,12 @@ export function BranchCluster() {
 
   if (view === null) return null;
 
-  const { branch, branchActions, exchange, openPullRequest } = view;
+  const { branch, branchActions, capabilities, changeCounts, exchange, openPullRequest } = view;
   const name = branch.name ?? DETACHED;
   const standing = branchStanding(branch);
   const badge = (
     <Badge variant="tinted" className={cn("min-w-0 shrink", standing.toneClass)}>
-      <GitBranchIcon aria-hidden className="size-3.5 shrink-0" />
+      <GitBranchIcon aria-hidden />
       <span className="type-body min-w-0 truncate font-[550] tracking-[var(--tracking-body)]">
         {name}
       </span>
@@ -88,10 +82,9 @@ export function BranchCluster() {
             <TooltipTrigger asChild>
               <PopoverTrigger
                 aria-label={SWITCH_LABEL}
-                className="flex min-w-0 shrink items-center gap-1 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                className="flex min-w-0 shrink items-center rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
               >
                 {badge}
-                <ChevronsUpDownIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
               </PopoverTrigger>
             </TooltipTrigger>
             <TooltipContent>{upstreamLabel(name, branch.upstream)}</TooltipContent>
@@ -105,6 +98,24 @@ export function BranchCluster() {
             />
           </PopoverContent>
         </Popover>
+      )}
+      {(changeCounts.added > 0 || changeCounts.removed > 0) && (
+        <span
+          role="img"
+          aria-label={`${changeCounts.added} added ${changeCounts.added === 1 ? "file" : "files"}, ${changeCounts.removed} removed ${changeCounts.removed === 1 ? "file" : "files"}`}
+          className="type-body flex shrink-0 items-center gap-1 font-mono tabular-nums"
+        >
+          {changeCounts.added > 0 && (
+            <span aria-hidden className="text-git-added">
+              +{changeCounts.added}
+            </span>
+          )}
+          {changeCounts.removed > 0 && (
+            <span aria-hidden className="text-git-deleted">
+              &minus;{changeCounts.removed}
+            </span>
+          )}
+        </span>
       )}
       {standing.label !== null &&
         (standing.ahead === 0 && standing.behind === 0 ? (
@@ -143,6 +154,7 @@ export function BranchCluster() {
       {exchange !== null && (
         <SyncActions
           branch={branch}
+          capabilities={capabilities}
           exchanging={view.exchanging}
           onFetch={exchange.fetch}
           onPull={exchange.pull}

@@ -119,26 +119,30 @@ export function BranchMenu({
             ))}
           </CommandGroup>
         )}
-        <CommandSeparator />
-        <CommandGroup heading={WORKING_TREE_HEADING}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <CommandItem value="stash" disabled={busy} onSelect={actions.stash}>
-                <ArchiveIcon aria-hidden className="text-muted-foreground" />
-                <span>{STASH_LABEL}</span>
-              </CommandItem>
-            </TooltipTrigger>
-            <TooltipContent>{STASH_HINT}</TooltipContent>
-          </Tooltip>
-          {/* Absent when there is nothing set aside: taking back what was never stashed is not an
-              action anybody can take. */}
-          {branches?.stashed === true && (
-            <CommandItem value="restore stash" disabled={busy} onSelect={actions.popStash}>
-              <ArchiveIcon aria-hidden className="text-muted-foreground" />
-              <span>{POP_LABEL}</span>
-            </CommandItem>
-          )}
-        </CommandGroup>
+        {(actions.stash !== null || branches?.stashed === true) && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading={WORKING_TREE_HEADING}>
+              {actions.stash !== null && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <CommandItem value="stash" disabled={busy} onSelect={actions.stash}>
+                      <ArchiveIcon aria-hidden className="text-muted-foreground" />
+                      <span>{STASH_LABEL}</span>
+                    </CommandItem>
+                  </TooltipTrigger>
+                  <TooltipContent>{STASH_HINT}</TooltipContent>
+                </Tooltip>
+              )}
+              {branches?.stashed === true && (
+                <CommandItem value="restore stash" disabled={busy} onSelect={actions.popStash}>
+                  <ArchiveIcon aria-hidden className="text-muted-foreground" />
+                  <span>{POP_LABEL}</span>
+                </CommandItem>
+              )}
+            </CommandGroup>
+          </>
+        )}
       </CommandList>
     </Command>
   );

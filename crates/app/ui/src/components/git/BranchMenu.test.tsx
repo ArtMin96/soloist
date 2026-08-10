@@ -123,3 +123,9 @@ it("offers to set the working tree's changes aside whatever the branches say", (
 
   expect(acts.stash).toHaveBeenCalled();
 });
+
+it("omits stash when the status says there is no tracked work to set aside", () => {
+  open(TWO, { ...actions(), stash: null });
+
+  expect(screen.queryByText("Stash changes")).toBeNull();
+});

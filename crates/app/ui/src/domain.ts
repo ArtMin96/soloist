@@ -386,6 +386,21 @@ export interface BranchInfo {
   sync: SyncState;
 }
 
+// Which actions the core can prove are meaningful from one repository status. Failures that need
+// repository policy, credentials, hooks, or a fresh read remain the backend's answer on attempt.
+export interface GitCapabilities {
+  pull: boolean;
+  push: boolean;
+  stash: boolean;
+  discardablePaths: string[];
+}
+
+// Changed paths the core classifies as created or removed across both sides of the index.
+export interface GitChangeCounts {
+  added: number;
+  removed: number;
+}
+
 // A repository's working tree at one moment. `null` from gitStatus() for a project that is not
 // a repository — an ordinary state, not an error.
 export interface GitStatus {
@@ -394,6 +409,8 @@ export interface GitStatus {
   // Whether a merge is under way, which is a separate fact from there being conflicts: conflicts
   // also arrive from putting stashed changes back, where there is no merge to abandon.
   merging: boolean;
+  capabilities: GitCapabilities;
+  changeCounts: GitChangeCounts;
 }
 
 // One branch a switcher can offer (mirrors core::vcs::Branch).

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ChangesTree } from "@/components/git/ChangesTree";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { buildChangesTree } from "@/store/git/tree";
 import { useTreeExpansion } from "@/store/git/useTreeExpansion";
 import type { ChangeKind, FileChange } from "@/domain";
@@ -112,5 +113,29 @@ describe("ChangesTree", () => {
 
     expect(within(row("gone.rs")).getByText("gone.rs").className).toContain("line-through");
     expect(within(row("src")).getByText("src").className).not.toContain("line-through");
+  });
+
+  it("offers discard only for paths the core says can be restored from the index", () => {
+    const changes = [change("tracked.rs", "modified"), change("new.rs", "untracked")];
+
+    render(
+      <TooltipProvider>
+        <ChangesTree
+          tree={buildChangesTree(changes)}
+          changes={changes}
+          actions={{
+            onStage: vi.fn(),
+            onDiscard: vi.fn(),
+            busy: () => false,
+            discardable: new Set(["tracked.rs"]),
+          }}
+          expanded={[]}
+          onExpandedChange={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Discard the changes to tracked.rs" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Discard the changes to new.rs" })).toBeNull();
   });
 });

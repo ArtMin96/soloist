@@ -292,6 +292,10 @@ describe("PullRequestPane — proposing what the branch already says", () => {
       within(pane()).queryByRole("button", { name: "Open pull request" }),
       "an action nobody can take is absent, not offered and refused",
     ).toBeNull();
+    expect(
+      within(pane()).queryByRole("button", { name: "Edit details…" }),
+      "editing the request must not bypass the core's answer that this branch has no commits to propose",
+    ).toBeNull();
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -372,9 +376,13 @@ describe("PullRequestPane — editing the details first", () => {
     expect(create.mock.calls[0][1].body).toBe(SUGGESTED_BODY);
   });
 
-  it("seeds the description from the shape on offer where nothing could be suggested", async () => {
+  it("seeds the description from the shape on offer where no default base is named", async () => {
     readSurface.mockResolvedValue(
-      surface({ templates: [{ name: "house", body: "## What changed\n" }], suggestion: null }),
+      surface({
+        base: null,
+        templates: [{ name: "house", body: "## What changed\n" }],
+        suggestion: null,
+      }),
     );
 
     renderPane();
@@ -414,10 +422,13 @@ describe("PullRequestPane — editing the details first", () => {
   });
 
   it("refuses to send a proposal with no title, so the core is never asked one it would refuse", async () => {
-    readSurface.mockResolvedValue(surface({ suggestion: null }));
+    readSurface.mockResolvedValue(
+      surface({ suggestion: { title: "Live changes rail", body: "Because." } }),
+    );
 
     renderPane();
     await editDetails();
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "" } });
 
     const propose = screen.getByRole("button", { name: "Open pull request" });
     expect((propose as HTMLButtonElement).disabled).toBe(true);
@@ -443,7 +454,9 @@ describe("PullRequestPane — editing the details first", () => {
 
 describe("PullRequestPane — drafting a description", () => {
   it("offers no way to draft a description until a tool is picked to draft with", async () => {
-    readSurface.mockResolvedValue(surface());
+    readSurface.mockResolvedValue(
+      surface({ suggestion: { title: "Live changes rail", body: "Because." } }),
+    );
 
     renderPane();
     await editDetails();
@@ -455,7 +468,10 @@ describe("PullRequestPane — drafting a description", () => {
   it("puts a drafted description in the box to edit, and proposes nothing by itself", async () => {
     readAssist.mockResolvedValue({ tool: "Claude" });
     readSurface.mockResolvedValue(
-      surface({ templates: [{ name: "house", body: "## What changed\n" }], suggestion: null }),
+      surface({
+        templates: [{ name: "house", body: "## What changed\n" }],
+        suggestion: { title: "Live changes rail", body: "## What changed\n" },
+      }),
     );
     draftBody.mockResolvedValue("## What changed\n\nIt changed the thing.\n");
 

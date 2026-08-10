@@ -25,6 +25,8 @@ function proc(overrides: Partial<ProcessView> = {}): ProcessView {
 function cluster(overrides: Partial<BranchClusterView> = {}): BranchClusterView {
   return {
     branch: { name: "main", upstream: "origin/main", sync: { state: "up_to_date" } },
+    capabilities: { pull: true, push: true },
+    changeCounts: { added: 0, removed: 0 },
     branches: null,
     exchanging: false,
     busy: false,
@@ -189,7 +191,10 @@ describe("buildCommands — what is checked out", () => {
   it("offers publishing rather than pushing on a branch that tracks nothing, and no pull", () => {
     const labels = flat(
       context({
-        git: cluster({ branch: { name: "spike", upstream: null, sync: { state: "unknown" } } }),
+        git: cluster({
+          branch: { name: "spike", upstream: null, sync: { state: "unknown" } },
+          capabilities: { pull: false, push: true },
+        }),
       }),
     ).map((c) => c.label);
 
@@ -198,6 +203,16 @@ describe("buildCommands — what is checked out", () => {
     expect(labels, "there is nothing to pull from an upstream that does not exist").not.toContain(
       "Pull from the upstream",
     );
+  });
+
+  it("omits directions the core says cannot advance the branch", () => {
+    const labels = flat(
+      context({ git: cluster({ capabilities: { pull: false, push: false } }) }),
+    ).map((command) => command.label);
+
+    expect(labels).toContain("Fetch from the remote");
+    expect(labels).not.toContain("Pull from the upstream");
+    expect(labels).not.toContain("Push to the upstream");
   });
 
   it("offers stopping instead of starting another while the remote is being waited on", () => {
