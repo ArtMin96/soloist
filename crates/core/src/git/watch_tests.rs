@@ -199,10 +199,9 @@ fn on_branch(branch: &str) -> GitStatus {
 /// A working tree with one path changed — a status that differs from [`clean`], so reading it
 /// after a change is announced rather than recognised as the same state.
 fn with_change(path: &str, unstaged: ChangeKind) -> GitStatus {
-    GitStatus {
-        changes: vec![file_change(path, None, Some(unstaged))],
-        ..clean()
-    }
+    let mut status = clean();
+    status.changes = vec![file_change(path, None, Some(unstaged))];
+    status
 }
 
 /// Spawns the reactor and awaits the working-tree watch — the last of the three a project needs, so

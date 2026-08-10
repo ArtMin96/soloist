@@ -6,6 +6,48 @@ const CHANGES = '[role="tree"][aria-label="Changed files"]';
 
 /** The version-control rail beside the main area: what has changed under the open project. */
 export const gitRail = {
+  /** Grants the repository trust needed for its changed-path controls to appear. */
+  async trust(): Promise<void> {
+    const trust = await $(RAIL).$("aria/Trust this project");
+    await trust.waitForClickable({ timeout: WAIT.core });
+    await trust.click();
+    await trust.waitForExist({ reverse: true, timeout: WAIT.core });
+  },
+
+  /** Closes and reopens every folder, exercising the nested-row layout a reader sees. */
+  async reexpandFolders(): Promise<void> {
+    const collapse = await $(RAIL).$("aria/Collapse all folders");
+    await collapse.waitForClickable({ timeout: WAIT.core });
+    await collapse.click();
+
+    const expand = await $(RAIL).$("aria/Expand all folders");
+    await expand.waitForClickable({ timeout: WAIT.render });
+    await expand.click();
+  },
+
+  /** The visible right edges of the rail and one changed path's trailing action. */
+  async actionRightEdges(
+    path: string,
+  ): Promise<{ rail: number; action: number }> {
+    const rail = await $(RAIL);
+    const row = await rail.$(CHANGES).$(`aria/${path.split("/").at(-1)}`);
+    await row.waitForDisplayed({ timeout: WAIT.core });
+    await row.moveTo();
+
+    const action = await rail.$(`aria/Discard the changes to ${path}`);
+    await action.waitForDisplayed({ timeout: WAIT.render });
+    const [railX, railWidth, actionX, actionWidth] = await Promise.all([
+      rail.getLocation("x"),
+      rail.getSize("width"),
+      action.getLocation("x"),
+      action.getSize("width"),
+    ]);
+    return {
+      rail: railX + railWidth,
+      action: actionX + actionWidth,
+    };
+  },
+
   /**
    * Opens a changed path, clicking its row the way a reader does.
    *

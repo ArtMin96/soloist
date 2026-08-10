@@ -78,8 +78,8 @@ pub(crate) fn parse(output: &[u8]) -> Option<GitStatus> {
         }
     }
 
-    Some(GitStatus {
-        branch: BranchInfo {
+    Some(GitStatus::new(
+        BranchInfo {
             name,
             upstream,
             // Counts arrive only when the upstream's position is known here, so their absence
@@ -90,8 +90,8 @@ pub(crate) fn parse(output: &[u8]) -> Option<GitStatus> {
         },
         changes,
         // Whether a merge is under way is not in this report; the caller asks for it separately.
-        merging: false,
-    })
+        false,
+    ))
 }
 
 /// A change to a tracked path: the status pair says what happened on each side of the index.

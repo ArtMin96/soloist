@@ -10,8 +10,8 @@ use std::time::Duration;
 use crate::git::NoopFileOpener;
 use crate::git::NoopGitForge;
 use crate::ids::ProjectId;
-use crate::testing::{git_status, untrusting, FakeGitRepository};
-use crate::vcs::{ChangeKind, FileChange, GitFileStatus};
+use crate::testing::{file_change, git_status, untrusting, FakeGitRepository};
+use crate::vcs::{ChangeKind, FileChange, GitFileStatus, SyncState};
 
 use super::{Git, GitStatus};
 use crate::git::GitError;
@@ -38,6 +38,14 @@ fn with_change(mut status: GitStatus, path: &str) -> GitStatus {
         original_path: None,
     });
     status
+}
+
+fn served(status: GitStatus) -> GitStatus {
+    let repository = FakeGitRepository::reporting(status);
+    git(&repository)
+        .status(ProjectId::next(), Path::new(ROOT))
+        .expect("read")
+        .expect("a repository")
 }
 
 #[test]
@@ -179,4 +187,183 @@ async fn reads_against_one_repository_never_overlap() {
         1,
         "one repository is read one call at a time",
     );
+}
+
+#[test]
+fn the_status_projects_only_remote_actions_that_can_advance_the_branch() {
+    let cases = [
+        (None, None, SyncState::Unknown, false, false),
+        (Some("topic"), None, SyncState::Unknown, false, true),
+        (
+            Some("topic"),
+            Some("origin/topic"),
+            SyncState::Unknown,
+            false,
+            false,
+        ),
+        (
+            Some("topic"),
+            Some("origin/topic"),
+            SyncState::UpToDate,
+            false,
+            false,
+        ),
+        (
+            Some("topic"),
+            Some("origin/topic"),
+            SyncState::Ahead { ahead: 2 },
+            false,
+            true,
+        ),
+        (
+            Some("topic"),
+            Some("origin/topic"),
+            SyncState::Behind { behind: 2 },
+            true,
+            false,
+        ),
+        (
+            Some("topic"),
+            Some("origin/topic"),
+            SyncState::Diverged {
+                ahead: 1,
+                behind: 1,
+            },
+            true,
+            false,
+        ),
+    ];
+
+    for (name, upstream, sync, pull, push) in cases {
+        let mut status = git_status("topic");
+        status.branch.name = name.map(str::to_string);
+        status.branch.upstream = upstream.map(str::to_string);
+        status.branch.sync = sync;
+
+        let capabilities = served(status).capabilities();
+        assert_eq!(capabilities.pull, pull, "pull for {sync:?}");
+        assert_eq!(capabilities.push, push, "push for {sync:?}");
+    }
+}
+
+#[test]
+fn the_status_projects_only_working_tree_actions_that_have_an_effect() {
+    let mut status = git_status("main");
+    status.changes = vec![
+        FileChange {
+            path: "tracked.rs".into(),
+            status: GitFileStatus {
+                staged: None,
+                unstaged: Some(ChangeKind::Modified),
+            },
+            original_path: None,
+        },
+        FileChange {
+            path: "staged.rs".into(),
+            status: GitFileStatus {
+                staged: Some(ChangeKind::Modified),
+                unstaged: None,
+            },
+            original_path: None,
+        },
+        FileChange {
+            path: "new.rs".into(),
+            status: GitFileStatus {
+                staged: None,
+                unstaged: Some(ChangeKind::Untracked),
+            },
+            original_path: None,
+        },
+    ];
+
+    let status = served(status);
+    let capabilities = status.capabilities();
+    assert!(capabilities.stash, "tracked work can be set aside");
+    assert_eq!(
+        capabilities.discardable_paths,
+        vec!["tracked.rs"],
+        "only an unstaged tracked change can be restored from the index",
+    );
+
+    let disclosed = serde_json::to_value(&status).expect("status serializes");
+    assert_eq!(
+        disclosed["capabilities"],
+        serde_json::json!({
+            "pull": false,
+            "push": true,
+            "stash": true,
+            "discardablePaths": ["tracked.rs"],
+        }),
+        "the wire carries the core's projection rather than asking a surface to reproduce it",
+    );
+}
+
+#[test]
+fn the_status_counts_paths_created_and_removed_across_both_sides_of_the_index() {
+    let mut status = git_status("main");
+    status.changes = vec![
+        file_change(
+            "added-then-edited.rs",
+            Some(ChangeKind::Added),
+            Some(ChangeKind::Modified),
+        ),
+        file_change("untracked.rs", None, Some(ChangeKind::Untracked)),
+        file_change("copy.rs", Some(ChangeKind::Copied), None),
+        file_change("deleted.rs", None, Some(ChangeKind::Deleted)),
+        file_change("renamed.rs", Some(ChangeKind::Renamed), None),
+        file_change("modified.rs", None, Some(ChangeKind::Modified)),
+        file_change("type-changed.rs", Some(ChangeKind::TypeChanged), None),
+        file_change("conflicted.rs", None, Some(ChangeKind::Conflicted)),
+        file_change(
+            "added-then-deleted.rs",
+            Some(ChangeKind::Added),
+            Some(ChangeKind::Deleted),
+        ),
+    ];
+
+    let status = served(status);
+    let counts = status.change_counts();
+    assert_eq!(counts.added, 4);
+    assert_eq!(counts.removed, 2);
+
+    let disclosed = serde_json::to_value(&status).expect("status serializes");
+    assert_eq!(
+        disclosed["changeCounts"],
+        serde_json::json!({ "added": 4, "removed": 2 }),
+        "the wire carries the core's exhaustive classification",
+    );
+}
+
+#[test]
+fn a_conflict_suppresses_actions_git_cannot_apply_to_an_unmerged_tree() {
+    let mut status = git_status("main");
+    status.changes.push(FileChange {
+        path: "conflicted.rs".into(),
+        status: GitFileStatus {
+            staged: None,
+            unstaged: Some(ChangeKind::Conflicted),
+        },
+        original_path: None,
+    });
+
+    let capabilities = served(status.clone()).capabilities();
+    assert!(!capabilities.stash);
+    assert!(capabilities.discardable_paths.is_empty());
+
+    status.changes.clear();
+    status.merging = true;
+    status.branch.upstream = Some("origin/main".into());
+    status.branch.sync = SyncState::Behind { behind: 1 };
+    status.changes.push(FileChange {
+        path: "resolved.rs".into(),
+        status: GitFileStatus {
+            staged: Some(ChangeKind::Modified),
+            unstaged: None,
+        },
+        original_path: None,
+    });
+
+    let capabilities = served(status).capabilities();
+    assert!(!capabilities.pull);
+    assert!(!capabilities.stash);
 }

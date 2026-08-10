@@ -85,8 +85,22 @@ beforeEach(() => {
   readTrust.mockResolvedValue(false);
 });
 
-function statusWith(branch: GitStatus["branch"]): GitStatus {
-  return { branch, changes: [], merging: false };
+function statusWith(
+  branch: GitStatus["branch"],
+  capabilities: GitStatus["capabilities"] = {
+    pull: false,
+    push: true,
+    stash: false,
+    discardablePaths: [],
+  },
+): GitStatus {
+  return {
+    branch,
+    changes: [],
+    merging: false,
+    capabilities,
+    changeCounts: { added: 0, removed: 0 },
+  };
 }
 
 const MAIN = statusWith({
@@ -251,6 +265,21 @@ describe("the checked-out branch in the window chrome", () => {
 
     await waitFor(() => expect(switchBranch).toHaveBeenCalledWith(PROJECT, "feature"));
     expect(readBranches).toHaveBeenCalledWith(PROJECT);
+  });
+
+  it("shows created and removed file counts immediately after the branch badge", async () => {
+    readStatus.mockResolvedValue({
+      ...MAIN,
+      changeCounts: { added: 3, removed: 1 },
+    });
+
+    renderChrome();
+
+    const counts = await within(chrome()).findByRole("img", {
+      name: "3 added files, 1 removed file",
+    });
+    expect(counts.textContent).toBe("+3−1");
+    expect(counts.previousElementSibling?.getAttribute("data-variant")).toBe("tinted");
   });
 
   it("opens its switcher when a surface with no room for one asks for it", async () => {

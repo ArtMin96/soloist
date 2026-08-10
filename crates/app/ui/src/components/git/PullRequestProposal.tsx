@@ -31,7 +31,8 @@ const NOTHING_AHEAD = (base: string) =>
  * public on a service from words the reader did not type.
  *
  * Presentational: props in, callbacks out. Whether there is anything to propose is the core's
- * answer, and where there is not, this says so and still offers the way to write one by hand.
+ * answer, and where there is not, this says so. A missing default base can still be supplied by the
+ * reader; a branch holding no commits of its own cannot be made proposable by changing the words.
  */
 export function PullRequestProposal({
   head,
@@ -59,9 +60,11 @@ export function PullRequestProposal({
         <p className="max-w-[70ch] type-body text-muted-foreground">
           {base === null ? NO_BASE : NOTHING_AHEAD(base)}
         </p>
-        <Button size="sm" variant="outline" onClick={onEdit}>
-          {EDIT_LABEL}
-        </Button>
+        {base === null && (
+          <Button size="sm" variant="outline" onClick={onEdit}>
+            {EDIT_LABEL}
+          </Button>
+        )}
       </div>
     );
   }

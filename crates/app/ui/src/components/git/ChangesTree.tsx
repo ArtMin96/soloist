@@ -21,6 +21,8 @@ export interface ChangeActions {
   onStage: (path: string, stage: boolean) => void;
   /** Throws away what the working tree holds beyond the index — asked about first. */
   onDiscard: (path: string) => void;
+  /** Paths the core says have unstaged tracked work to restore from the index. */
+  discardable: ReadonlySet<string>;
   /** Whether an action on this path is still running. */
   busy: (path: string) => boolean;
 }
@@ -69,12 +71,13 @@ export function ChangesTree({
             <TreeItemLabel
               className={cn(
                 !node.folder && node.change !== null && CHANGE[node.change].gone && "line-through",
+                actions !== null && change !== undefined ? "pe-16" : "pe-6",
               )}
             >
               {node.name}
             </TreeItemLabel>
-            <div className="ms-auto flex items-center gap-0.5">
-              {actions !== null && change !== undefined && (
+            <div className="absolute inset-e-2 flex items-center gap-0.5">
+              {actions !== null && change !== undefined && actions.discardable.has(node.path) && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button

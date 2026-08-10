@@ -1,12 +1,12 @@
 import { useSyncExternalStore } from "react";
-import type { BranchInfo, Branches } from "@/domain";
+import type { BranchInfo, Branches, GitCapabilities, GitChangeCounts } from "@/domain";
 
 /** What a branch row can be asked to do. */
 export interface BranchActions {
   switchTo: (name: string) => void;
   create: (name: string) => Promise<boolean>;
   remove: (name: string) => void;
-  stash: () => void;
+  stash: (() => void) | null;
   popStash: () => void;
 }
 
@@ -22,6 +22,9 @@ export interface ExchangeActions {
  *  either. */
 export interface BranchClusterView {
   branch: BranchInfo;
+  capabilities: Pick<GitCapabilities, "pull" | "push">;
+  /** Changed paths the core classifies as created or removed. */
+  changeCounts: GitChangeCounts;
   /** The branches to offer once the switcher is open, or null until that read lands. */
   branches: Branches | null;
   exchanging: boolean;

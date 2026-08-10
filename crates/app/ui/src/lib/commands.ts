@@ -100,9 +100,7 @@ function gitCommands(git: BranchClusterView): Command[] {
         keywords: [...GIT_KEYWORDS, "remote", "refresh", "origin"],
         run: exchange.fetch,
       });
-      // Nothing to pull from a branch that tracks nothing, so it is not offered — the same rule the
-      // strip's buttons follow.
-      if (!unpublished) {
+      if (git.capabilities.pull) {
         commands.push({
           id: "git:pull",
           label: PULL,
@@ -110,12 +108,14 @@ function gitCommands(git: BranchClusterView): Command[] {
           run: exchange.pull,
         });
       }
-      commands.push({
-        id: "git:push",
-        label: unpublished ? PUBLISH : PUSH,
-        keywords: [...GIT_KEYWORDS, "remote", "upstream", "outgoing"],
-        run: exchange.push,
-      });
+      if (git.capabilities.push) {
+        commands.push({
+          id: "git:push",
+          label: unpublished ? PUBLISH : PUSH,
+          keywords: [...GIT_KEYWORDS, "remote", "upstream", "outgoing"],
+          run: exchange.push,
+        });
+      }
     }
   }
   if (git.openPullRequest !== null) {

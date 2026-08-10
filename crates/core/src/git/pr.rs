@@ -145,7 +145,7 @@ impl Git {
         }
         let head = self
             .status(project, root)?
-            .and_then(|status| status.branch.name);
+            .and_then(|status| status.into_facts().branch.name);
         let (repository, templates, existing) = self.asking(project, |forge, _| {
             let repository = forge.repository(root)?;
             let templates = offered(forge.templates(root)?, fallback);

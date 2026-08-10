@@ -1,6 +1,6 @@
 import { ArrowDownToLineIcon, ArrowUpFromLineIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
-import type { BranchInfo } from "@/domain";
+import type { BranchInfo, GitCapabilities } from "@/domain";
 
 const FETCH_LABEL = "Fetch";
 const FETCH_HINT = "Bring the remote's commits in without touching the working tree";
@@ -27,6 +27,7 @@ const STOP_HINT = "Stop waiting on the remote";
  */
 export function SyncActions({
   branch,
+  capabilities,
   exchanging,
   onFetch,
   onPull,
@@ -34,6 +35,8 @@ export function SyncActions({
   onStop,
 }: {
   branch: BranchInfo;
+  /** The remote actions the core can prove would advance this branch. */
+  capabilities: Pick<GitCapabilities, "pull" | "push">;
   /** Whether an exchange is under way, which is when stopping is on offer instead. */
   exchanging: boolean;
   onFetch: () => void;
@@ -63,8 +66,7 @@ export function SyncActions({
         icon={<RefreshCwIcon />}
         onClick={onFetch}
       />
-      {/* Nothing to pull from a branch that tracks nothing, so it is not offered. */}
-      {!publishing && (
+      {capabilities.pull && (
         <IconButton
           label={PULL_LABEL}
           hint={PULL_HINT}
@@ -72,12 +74,14 @@ export function SyncActions({
           onClick={onPull}
         />
       )}
-      <IconButton
-        label={publishing ? PUBLISH_LABEL : PUSH_LABEL}
-        hint={publishing ? PUBLISH_HINT : PUSH_HINT}
-        icon={<ArrowUpFromLineIcon />}
-        onClick={onPush}
-      />
+      {capabilities.push && (
+        <IconButton
+          label={publishing ? PUBLISH_LABEL : PUSH_LABEL}
+          hint={publishing ? PUBLISH_HINT : PUSH_HINT}
+          icon={<ArrowUpFromLineIcon />}
+          onClick={onPush}
+        />
+      )}
     </div>
   );
 }

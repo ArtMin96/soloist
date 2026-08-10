@@ -2837,13 +2837,13 @@ async fn naming_a_hunk_carries_it_through_rather_than_staging_the_whole_path() {
 async fn git_status_projects_the_working_tree_the_app_reported() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
-    let status = GitStatus {
-        branch: BranchInfo {
+    let status = GitStatus::new(
+        BranchInfo {
             name: Some("main".into()),
             upstream: Some("origin/main".into()),
             sync: SyncState::Ahead { ahead: 2 },
         },
-        changes: vec![FileChange {
+        vec![FileChange {
             path: "src/main.rs".into(),
             status: GitFileStatus {
                 staged: None,
@@ -2851,8 +2851,8 @@ async fn git_status_projects_the_working_tree_the_app_reported() {
             },
             original_path: None,
         }],
-        merging: false,
-    };
+        false,
+    );
     let canned = status.clone();
     spawn_fake_app(socket.clone(), move |request| match request {
         IpcRequest::GitStatus => Ok(IpcResponse::GitStatus(canned.clone())),

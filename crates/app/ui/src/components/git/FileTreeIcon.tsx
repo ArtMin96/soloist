@@ -59,11 +59,11 @@ interface FileTreeIconProps {
 export function FileTreeIcon({ node, expanded }: FileTreeIconProps) {
   if (node.folder) {
     const Folder = expanded ? FolderOpenIcon : FolderIcon;
-    return <Folder aria-hidden className="size-5 shrink-0 text-primary/80" />;
+    return <Folder aria-hidden className="size-4.5 shrink-0 text-primary/80" />;
   }
 
   const { Icon, className } = iconFor(node.name);
-  return <Icon aria-hidden className={cn("size-4.5 shrink-0", className)} />;
+  return <Icon aria-hidden className={cn("size-4 shrink-0", className)} />;
 }
 
 function iconFor(name: string): { Icon: LucideIcon | IconType; className: string } {

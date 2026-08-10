@@ -54,7 +54,7 @@ impl Git {
         }
         let head = self
             .status(project, root)?
-            .and_then(|status| status.branch.name)
+            .and_then(|status| status.into_facts().branch.name)
             .ok_or(PullRequestError::DetachedHead)?;
         let commits = self
             .history(project, root, LogRange::Since { base }, 0, PROPOSED_COMMITS)?

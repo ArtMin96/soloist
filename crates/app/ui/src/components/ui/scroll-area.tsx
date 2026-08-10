@@ -7,9 +7,13 @@ import { cn } from "@/lib/utils"
 
 function ScrollArea({
   className,
+  constrainContent = false,
   children,
   ...props
-}: React.ComponentProps<typeof ScrollAreaPrimitive.Root>) {
+}: React.ComponentProps<typeof ScrollAreaPrimitive.Root> & {
+  /** Keeps content within the viewport instead of sizing the viewport from its intrinsic width. */
+  constrainContent?: boolean
+}) {
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
@@ -18,7 +22,10 @@ function ScrollArea({
     >
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="size-full rounded-[inherit] transition-[color,box-shadow] duration-[var(--dur-fast)] ease-spring outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-1"
+        className={cn(
+          "size-full rounded-[inherit] transition-[color,box-shadow] duration-[var(--dur-fast)] ease-spring outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-1",
+          constrainContent && "[&>div]:!block [&>div]:w-full"
+        )}
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

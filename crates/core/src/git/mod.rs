@@ -64,6 +64,6 @@ pub use review::{
     CheckRun, CheckState, MergeMethod, PullRequestReview, ReviewComment, ReviewLimits,
     ReviewThread, REVIEW_LIMITS,
 };
-pub use status::{Git, GitStatus};
+pub use status::{Git, GitCapabilities, GitChangeCounts, GitStatus, GitStatusFacts};
 pub use suggestion::PullRequestSuggestion;
 pub use watch::GitStatusWatchReactor;
