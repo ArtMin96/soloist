@@ -1,9 +1,8 @@
 import { useEffect, type ReactNode } from "react";
 import { Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
+import { IconButton } from "@/components/IconButton";
 import { PaneDivider } from "@/components/PaneDivider";
-import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isEditableTarget } from "@/lib/hotkeys";
 import { cn } from "@/lib/utils";
 import {
@@ -75,12 +74,12 @@ export function SplitSurface({
         <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
           {title}
           {controls}
-          <SplitButton
+          <IconButton
             label={layout.maximized ? RESTORE_LABEL : MAXIMIZE_LABEL}
             icon={layout.maximized ? <Minimize2Icon /> : <Maximize2Icon />}
             onClick={() => setLayout({ maximized: !layout.maximized })}
           />
-          <SplitButton label={CLOSE_LABEL} icon={<XIcon />} onClick={onClose} />
+          <IconButton label={CLOSE_LABEL} icon={<XIcon />} onClick={onClose} />
         </div>
         {notices}
         <ScrollArea className="min-h-0 flex-1">{children}</ScrollArea>
@@ -105,33 +104,11 @@ function useEscapeToClose(onClose: () => void): void {
   }, [onClose]);
 }
 
-/** A compact control in the split's header; none of them changes a repository. */
-export function SplitButton({
-  label,
-  icon,
-  onClick,
-}: {
-  label: string;
-  icon: ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon-xs" aria-label={label} onClick={onClick}>
-          {icon}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
 /** A quiet strip stating something about what is below it, with the action that answers it. */
 export function SplitNotice({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex shrink-0 items-center gap-3 border-b border-border bg-muted px-3 py-2">
-      <p className="min-w-0 flex-1 text-[0.8125rem] text-muted-foreground">{children}</p>
+      <p className="type-body min-w-0 flex-1 text-muted-foreground">{children}</p>
       {action}
     </div>
   );
@@ -141,7 +118,7 @@ export function SplitNotice({ children, action }: { children: ReactNode; action?
 export function SplitMessage({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-full items-center justify-center px-6 py-10 text-center">
-      <p className="text-[0.8125rem] text-muted-foreground">{children}</p>
+      <p className="type-body text-muted-foreground">{children}</p>
     </div>
   );
 }

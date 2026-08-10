@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { SearchIcon, CheckIcon } from "lucide-react"
+import { SearchIcon } from "lucide-react"
 
 function Command({
   className,
@@ -152,8 +152,11 @@ function CommandItem({
       )}
       {...props}
     >
+      {/* A row holds what the caller put in it and nothing else. The check this primitive used to
+          reserve was invisible in every row that had one, and its glyph and gap came out of the
+          width the content had to read in — which is what truncated long names. A caller that wants
+          a mark of its own puts one in, the way the branch switcher does. */}
       {children}
-      <CheckIcon className="ml-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[checked=true]/command-item:opacity-100" />
     </CommandPrimitive.Item>
   )
 }

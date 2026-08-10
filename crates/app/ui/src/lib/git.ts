@@ -1,11 +1,11 @@
 import type {
+  BranchInfo,
   ChangeKind,
   CheckState,
   GitFileStatus,
   HunkRange,
   MergeMethod,
   ReviewThread,
-  SyncState,
 } from "@/domain";
 
 /**
@@ -130,18 +130,72 @@ export function threadPlace(thread: ReviewThread): string | null {
   return thread.line === null ? thread.path : `${thread.path}:${thread.line}`;
 }
 
-/** How a branch's standing against its upstream reads, or null when there is nothing to say. */
-export function syncLabel(sync: SyncState): string | null {
-  switch (sync.state) {
+/**
+ * The single source for turning what is checked out into its display, on the same redundant rule the
+ * change map follows: a word beside the tone. Every standing a branch can be in is named, so a
+ * branch nobody has published never reads as one that matches its upstream on hue alone.
+ */
+export interface BranchStanding {
+  /**
+   * How the branch stands against its upstream, in words. `null` only on a detached head, where
+   * there is no branch to have an upstream and the name slot says so itself.
+   */
+  label: string | null;
+  /** Tailwind text-color utility, bound to a `--git-branch-*` token. */
+  toneClass: string;
+  /** Commits the branch holds that its upstream does not, `0` where there is no comparison. */
+  ahead: number;
+  /** Commits the upstream holds that the branch does not, `0` where there is no comparison. */
+  behind: number;
+}
+
+/** The tone a branch known to match its upstream carries. */
+const SYNCED_TONE_CLASS = "text-git-branch-synced";
+/** The tone every other standing carries: nothing to compare against, or something left to settle. */
+const UNSETTLED_TONE_CLASS = "text-git-branch-local";
+
+/** A branch that tracks nothing: it exists here and nowhere else this repository knows of. */
+const LOCAL_ONLY = "Local only";
+/** A branch that tracks something whose position nothing has fetched yet. */
+const NOT_FETCHED = "Not fetched";
+const UP_TO_DATE = "Up to date";
+
+export function branchStanding(branch: BranchInfo): BranchStanding {
+  const settled = { ahead: 0, behind: 0 };
+  // A detached head is not a branch and has no upstream to stand against. The badge names it where
+  // a branch name would go, so there is nothing left for the standing to add beside it.
+  if (branch.name === null) return { label: null, toneClass: UNSETTLED_TONE_CLASS, ...settled };
+  // Tracking nothing and tracking something unfetched are both "no comparison to make", and they
+  // are not the same thing to the reader: the first is published nowhere and wants a push, the
+  // second wants a fetch before anything can be said about it.
+  if (branch.upstream === null) {
+    return { label: LOCAL_ONLY, toneClass: UNSETTLED_TONE_CLASS, ...settled };
+  }
+  switch (branch.sync.state) {
     case "unknown":
-      return null;
+      return { label: NOT_FETCHED, toneClass: UNSETTLED_TONE_CLASS, ...settled };
     case "up_to_date":
-      return "Up to date";
+      return { label: UP_TO_DATE, toneClass: SYNCED_TONE_CLASS, ...settled };
     case "ahead":
-      return `${sync.ahead} ahead`;
+      return {
+        label: `${branch.sync.ahead} ahead`,
+        toneClass: UNSETTLED_TONE_CLASS,
+        ahead: branch.sync.ahead,
+        behind: 0,
+      };
     case "behind":
-      return `${sync.behind} behind`;
+      return {
+        label: `${branch.sync.behind} behind`,
+        toneClass: UNSETTLED_TONE_CLASS,
+        ahead: 0,
+        behind: branch.sync.behind,
+      };
     case "diverged":
-      return `${sync.ahead} ahead, ${sync.behind} behind`;
+      return {
+        label: `${branch.sync.ahead} ahead, ${branch.sync.behind} behind`,
+        toneClass: UNSETTLED_TONE_CLASS,
+        ahead: branch.sync.ahead,
+        behind: branch.sync.behind,
+      };
   }
 }

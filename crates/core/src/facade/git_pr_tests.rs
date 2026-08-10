@@ -13,9 +13,9 @@ use crate::ids::ProjectId;
 use crate::ports::{ProjectRepo, TokioClock};
 use crate::template::TemplateKind;
 use crate::testing::{
-    created_url, git_status, pull_request_template, tracking_status, FakeGitForge,
-    FakeGitRepository, FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTemplateRepo,
-    FakeTrustRepo,
+    commit_entry, created_url, described_entry, git_status, pull_request_template, tracking_status,
+    FakeGitForge, FakeGitRepository, FakeProjectRepo, FakeSettingsRepo, FakeSpawner,
+    FakeTemplateRepo, FakeTrustRepo,
 };
 
 const BRANCH: &str = "feature";
@@ -165,6 +165,99 @@ fn a_proposal_comes_back_with_where_it_can_be_found() {
 
     assert_eq!(created, created_url());
     assert_eq!(forge.created(), vec![proposal()]);
+}
+
+#[test]
+fn one_read_carries_everything_a_proposal_needs_so_it_can_be_offered_as_a_button() {
+    let forge = FakeGitForge::ready().merging_into(BASE);
+    let (facade, project, _dir) = facade_with_project(
+        FakeGitRepository::reporting(tracking_status(BRANCH, "origin/feature")).proposing(vec![
+            described_entry("0", "Add the thing", "Because the other thing needed it."),
+        ]),
+        forge.clone(),
+        true,
+    );
+
+    let surface = facade.git_pull_request_surface(project).expect("surface");
+    let suggestion = surface
+        .suggestion
+        .clone()
+        .expect("a branch carrying a commit has something to propose");
+    let created = facade
+        .git_create_pull_request(
+            project,
+            &NewPullRequest {
+                title: suggestion.title,
+                body: suggestion.body,
+                base: surface.base.expect("a base to merge into"),
+                draft: false,
+            },
+        )
+        .expect("proposed");
+
+    assert_eq!(created, created_url());
+    assert_eq!(
+        forge.created(),
+        vec![NewPullRequest {
+            title: "Add the thing".to_string(),
+            body: "Because the other thing needed it.".to_string(),
+            base: BASE.to_string(),
+            draft: false,
+        }],
+        "nothing was typed, and what the branch already said about itself is what was proposed",
+    );
+}
+
+#[test]
+fn a_branch_holding_nothing_its_base_does_not_is_offered_no_suggestion_rather_than_an_invented_one()
+{
+    let (facade, project, _dir) = facade_with_project(
+        FakeGitRepository::reporting(tracking_status(BRANCH, "origin/feature"))
+            .proposing(Vec::new()),
+        FakeGitForge::ready().merging_into(BASE),
+        true,
+    );
+
+    let surface = facade.git_pull_request_surface(project).expect("surface");
+
+    assert_eq!(surface.suggestion, None);
+    assert_eq!(
+        surface.base.as_deref(),
+        Some(BASE),
+        "the rest of the surface is still true, so it is still answered",
+    );
+}
+
+#[test]
+fn a_suggestion_whose_title_came_out_blank_is_refused_like_any_other_blank_title() {
+    let forge = FakeGitForge::ready().merging_into(BASE);
+    let (facade, project, _dir) = facade_with_project(
+        FakeGitRepository::reporting(tracking_status(BRANCH, "origin/feature"))
+            .proposing(vec![commit_entry("0", "   ", "Somebody")]),
+        forge.clone(),
+        true,
+    );
+
+    let surface = facade.git_pull_request_surface(project).expect("surface");
+    let suggestion = surface.suggestion.expect("a commit was proposed");
+
+    let refusal = facade
+        .git_create_pull_request(
+            project,
+            &NewPullRequest {
+                title: suggestion.title,
+                body: suggestion.body,
+                base: BASE.to_string(),
+                draft: false,
+            },
+        )
+        .unwrap_err();
+
+    assert!(
+        matches!(refusal, PullRequestError::EmptyTitle),
+        "a computed title is input like any other, and a blank one is still refused: {refusal:?}",
+    );
+    assert_eq!(forge.created(), Vec::new());
 }
 
 #[test]

@@ -35,6 +35,9 @@ struct Answers {
     branches: Mutex<Result<Branches, GitError>>,
     template: Mutex<Result<Option<String>, GitError>>,
     stalls: AtomicBool,
+    /// A clock to move on while a read runs, and by how much — a read that costs the caller time
+    /// rather than merely taking a while. `None` for a read that costs nothing, which is most.
+    elapses: Mutex<Option<(crate::testing::MockClock, Duration)>>,
     refusal: Mutex<Option<GitError>>,
     changes: Mutex<Vec<GitChange>>,
     /// The working tree each call named, in order. The port takes a root rather than a project, so
@@ -138,6 +141,17 @@ impl FakeGitRepository {
         self
     }
 
+    /// Makes every read move `clock` on by `elapsed` while it runs — a status run that costs the
+    /// caller real time, which is how a test reaches the case where a deadline computed *before* a
+    /// read has already passed by the time the read comes back.
+    ///
+    /// Set after construction rather than built in, because the clock a test drives and the
+    /// repository it answers from are made together. Distinct from [`Self::slow`]: that widens a
+    /// race window in real time, this moves the clock the code under test reasons about.
+    pub fn each_read_takes(&self, clock: crate::testing::MockClock, elapsed: Duration) {
+        *lock(&self.answers.elapses) = Some((clock, elapsed));
+    }
+
     /// How many reads the port has been asked for.
     pub fn reads(&self) -> usize {
         self.answers.reads.load(Ordering::SeqCst)
@@ -185,6 +199,9 @@ impl FakeGitRepository {
     fn recorded<T>(&self, root: &Path, answer: impl FnOnce() -> T) -> T {
         self.at(root);
         self.answers.reads.fetch_add(1, Ordering::SeqCst);
+        if let Some((clock, elapsed)) = lock(&self.answers.elapses).as_ref() {
+            clock.advance(*elapsed);
+        }
         self.inside(answer)
     }
 
@@ -214,6 +231,7 @@ impl FakeGitRepository {
                 branches: Mutex::new(Err(GitError::NotARepo)),
                 template: Mutex::new(Ok(None)),
                 stalls: AtomicBool::new(false),
+                elapses: Mutex::new(None),
                 refusal: Mutex::new(None),
                 changes: Mutex::new(Vec::new()),
                 roots: Mutex::new(Vec::new()),

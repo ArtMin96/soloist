@@ -34,10 +34,13 @@ mod message_change;
 mod opener;
 mod path;
 mod pr;
+mod proposed;
 mod repository;
 mod review;
+mod skeleton;
 mod stage;
 mod status;
+mod suggestion;
 mod sync;
 mod watch;
 
@@ -62,4 +65,5 @@ pub use review::{
     ReviewThread, REVIEW_LIMITS,
 };
 pub use status::{Git, GitStatus};
+pub use suggestion::PullRequestSuggestion;
 pub use watch::GitStatusWatchReactor;

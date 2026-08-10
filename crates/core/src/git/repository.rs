@@ -133,6 +133,10 @@ pub trait GitRepository: Send + Sync {
     /// An empty list for a repository with no commits yet, which is an ordinary state (a fresh
     /// `git init`, an orphan branch) rather than a failure. Same [`GitError::NotARepo`] meaning as
     /// [`GitRepository::status`].
+    ///
+    /// Each entry's body is bounded at [`crate::vcs::COMMIT_BODY_LIMIT`] — a longer one arrives empty,
+    /// so a page of fifty commits cannot carry a repository's worth of prose to a surface that renders
+    /// subjects.
     fn log(
         &self,
         root: &Path,

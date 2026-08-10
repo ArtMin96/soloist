@@ -5,8 +5,8 @@ import { WindowControls } from "@/components/titlebar/WindowControls";
 interface TitlebarProps {
   appName: string;
   appVersion?: string;
-  /** Contextual controls for the trailing end of the strip, before the window controls. They sit
-   *  outside the drag region so they stay clickable. */
+  /** Contextual controls for the trailing end of the strip, before the window controls. They carry
+   *  no drag attribute of their own, so they stay clickable — only the space around them drags. */
   actions?: ReactNode;
 }
 
@@ -55,7 +55,18 @@ export function Titlebar({ appName, appVersion, actions }: TitlebarProps) {
         </span>
       )}
       <div {...DRAG} className="h-full flex-1" />
-      {actions}
+      {/* The contextual strip and the short divider that separates it from the window controls.
+          Both stand down together when nothing contextual is showing: the strip is `:empty` only
+          when every control in it rendered nothing, which is what makes the divider disappear
+          rather than divide one side from nothing.
+
+          The strip and the divider carry the drag attribute so the space between controls stays a
+          window handle, the way the rest of the bar is. It does not reach the controls inside them:
+          the attribute applies only to the element it is on, never to children. */}
+      <div {...DRAG} className="peer flex min-w-0 items-center gap-2.5 empty:hidden">
+        {actions}
+      </div>
+      <div {...DRAG} aria-hidden className="h-4 w-px shrink-0 bg-border peer-empty:hidden" />
       <WindowControls
         isMaximized={isMaximized}
         onMinimize={minimize}

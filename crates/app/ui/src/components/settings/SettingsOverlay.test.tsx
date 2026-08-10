@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
+import { DeferredOverlay } from "@/components/DeferredOverlay";
 import { SettingsOverlay } from "@/components/settings/SettingsOverlay";
+import { ASSIST_SETTINGS_TAB, type SettingsTabId } from "@/components/settings/tabs";
 import { DEFAULT_APPEARANCE } from "@/lib/appearance";
 import { AppearanceProvider } from "@/store/AppearanceProvider";
 import type { Appearance } from "@/domain";
@@ -127,6 +130,116 @@ describe("Settings — dismissal", () => {
     fireEvent.pointerDown(document.body);
 
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+});
+
+/**
+ * The shell's side of opening Settings, mounted the way the app mounts it: behind the deferral latch,
+ * so the overlay does not exist until it is first opened and then stays mounted for the rest of the
+ * session. Both halves matter to a deep link — the first opening arrives at a brand-new mount that
+ * already carries the tab that was asked for, and every later one arrives at an overlay still showing
+ * wherever it was last left. A harness that mounts the overlay unconditionally has neither, and can
+ * only prove things about itself.
+ */
+function SettingsShell() {
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<SettingsTabId | null>(null);
+  const openOn = (wanted: SettingsTabId | null) => {
+    setTab(wanted);
+    setOpen(true);
+  };
+  return (
+    <AppearanceProvider>
+      <button onClick={() => openOn(null)}>open settings</button>
+      <button onClick={() => openOn(ASSIST_SETTINGS_TAB)}>open the assist setting</button>
+      <DeferredOverlay open={open}>
+        <SettingsOverlay
+          open={open}
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (!next) setTab(null);
+          }}
+          project={null}
+          tab={tab}
+        />
+      </DeferredOverlay>
+    </AppearanceProvider>
+  );
+}
+
+function selectedTab(): string | null {
+  return screen.getByRole("tab", { selected: true }).textContent;
+}
+
+/** Appearance plus what the Agents tab reads, so a deep link can land on a real panel. */
+function mockSettingsAndAgents() {
+  mockIPC((cmd) => {
+    if (cmd === "appearance") return DEFAULT_APPEARANCE;
+    if (cmd === "agent_list") return [];
+    if (cmd === "agent_detect" || cmd === "agent_redetect") return [];
+    if (cmd === "assist_settings") return { tool: null };
+    if (cmd === "hotkeys") return {};
+    return undefined;
+  });
+}
+
+describe("Settings — opening on a named tab", () => {
+  it("opens on the tab the caller asked for on the very first opening of the session", async () => {
+    // The first opening is the one the deep link exists for, and the hardest case: the overlay is
+    // mounted by that same opening, so its first render already sees the named tab. Treating "what
+    // the overlay arrived holding" as a request already honoured leaves Settings on its default
+    // panel — the reader is sent to the setting they could not find and shown Appearance.
+    mockSettingsAndAgents();
+    render(<SettingsShell />);
+
+    fireEvent.click(screen.getByRole("button", { name: "open the assist setting" }));
+
+    await waitFor(() => expect(selectedTab()).toBe("Agents"));
+    expect(screen.getByText("Agent tools"), "the tab it named is the one on screen").toBeTruthy();
+  });
+
+  it("follows the same link again after the reader has moved off that tab", async () => {
+    // The overlay is never torn down between openings, so a tab that is only seeded once is
+    // whichever one was last looked at — the second visit would land on the wrong panel.
+    mockSettingsAndAgents();
+    render(<SettingsShell />);
+
+    fireEvent.click(screen.getByRole("button", { name: "open the assist setting" }));
+    await waitFor(() => expect(selectedTab()).toBe("Agents"));
+    fireEvent.click(screen.getByRole("tab", { name: "Hotkeys" }));
+    await waitFor(() => expect(selectedTab()).toBe("Hotkeys"));
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "open the assist setting" }));
+
+    await waitFor(() => expect(selectedTab()).toBe("Agents"));
+  });
+
+  it("leaves an opening that named no tab wherever the reader last left it", async () => {
+    mockSettingsAndAgents();
+    render(<SettingsShell />);
+
+    fireEvent.click(screen.getByRole("button", { name: "open settings" }));
+    await waitFor(() => expect(selectedTab()).toBe("Appearance"));
+    fireEvent.click(screen.getByRole("tab", { name: "Hotkeys" }));
+    await waitFor(() => expect(selectedTab()).toBe("Hotkeys"));
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "open settings" }));
+
+    await waitFor(() => expect(selectedTab()).toBe("Hotkeys"));
+  });
+
+  it("leaves the tab alone while it is open, so a named one is not re-imposed on the reader", async () => {
+    mockSettingsAndAgents();
+    render(<SettingsShell />);
+
+    fireEvent.click(screen.getByRole("button", { name: "open the assist setting" }));
+    await waitFor(() => expect(selectedTab()).toBe("Agents"));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Sidebar" }));
+
+    await waitFor(() => expect(selectedTab()).toBe("Sidebar"));
   });
 });
 

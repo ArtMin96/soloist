@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/command";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { BranchActions } from "@/store/git/branchCluster";
 import type { Branches } from "@/domain";
 
 const SEARCH_PLACEHOLDER = "Switch or create a branch";
@@ -23,15 +24,6 @@ const STASH_LABEL = "Stash changes";
 const STASH_HINT = "Set the working tree's changes aside; untracked files stay where they are";
 const POP_LABEL = "Restore stashed changes";
 const CHECKED_OUT = "Checked out";
-
-/** What a branch row can be asked to do. */
-export interface BranchActions {
-  switchTo: (name: string) => void;
-  create: (name: string) => Promise<boolean>;
-  remove: (name: string) => void;
-  stash: () => void;
-  popStash: () => void;
-}
 
 /**
  * The branches to move between, and the two things that can be done with what the working tree
@@ -102,13 +94,19 @@ export function BranchMenu({
                 {branch.head ? (
                   <span className="type-label shrink-0 text-muted-foreground">{CHECKED_OUT}</span>
                 ) : (
-                  // The branch that is checked out cannot be removed, so it is not offered — and
-                  // the rest reveal it on hover rather than lining the list with red.
+                  // The branch that is checked out cannot be removed, so it is not offered — and the
+                  // rest reveal it on hover rather than lining the list with a destructive control.
+                  //
+                  // Taken out of the row's flow and pinned to its trailing edge, so an unhovered row
+                  // spends none of its width on a control nobody is looking at: reserving the 24px
+                  // was what truncated every branch name. It stays in the document — a control that
+                  // is not rendered cannot be tabbed to — and carries the row's own fill so the
+                  // revealed button never sits on top of the name behind it.
                   <Button
                     variant="ghost"
                     size="icon-xs"
                     aria-label={`${DELETE_LABEL} ${branch.name}`}
-                    className="shrink-0 opacity-0 transition-opacity group-hover/branch:opacity-100 group-focus-within/branch:opacity-100 focus-visible:opacity-100"
+                    className="absolute inset-y-0 end-0.5 my-auto translate-x-1 bg-accent opacity-0 transition-[opacity,translate] duration-[var(--dur-fast)] ease-out-quint motion-reduce:transition-none pointer-events-none group-hover/branch:pointer-events-auto group-hover/branch:translate-x-0 group-hover/branch:opacity-100 group-focus-within/branch:pointer-events-auto group-focus-within/branch:translate-x-0 group-focus-within/branch:opacity-100 focus-visible:pointer-events-auto focus-visible:translate-x-0 focus-visible:opacity-100"
                     onClick={(event) => {
                       event.stopPropagation();
                       onDelete(branch.name);

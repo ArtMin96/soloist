@@ -177,10 +177,15 @@ implementation); the observable fail-closed nuances are recorded in `KNOWN-DIVER
   appended arg). **Auto-detect probes `--version`** for `claude`, `codex`, `amp`, `gemini`, `opencode`.
   - 🟡 **CLI commands for the two extra built-in types (our grounding — Solo names the *type*, not the
     binary).** Copilot CLI = `copilot` (npm `@github/copilot`, GA 2026-02; `--version` confirmed); Kimi
-    CLI = `kimi` (MoonshotAI `kimi-cli`). Grounded by web search, not Solo docs. They are seeded as
-    launchable built-in tools but stay **outside** the `--version` auto-detect set above (Solo documents
-    probing only the five; we do not invent that it probes Copilot/Kimi, which also sidesteps the
-    unconfirmed `kimi --version`).
+    CLI = `kimi` (MoonshotAI `kimi-cli`; `--version` / `-V` "Show version number and exit" —
+    [kimi-command reference](https://github.com/MoonshotAI/kimi-cli/blob/main/docs/en/reference/kimi-command.md),
+    confirmed 2026-08-09). Grounded by web search, not Solo docs. Both are seeded as launchable
+    built-in tools. **Copilot stays outside the `--version` auto-detect set above** — Solo documents
+    probing only the five, and nothing in Soloist needs Copilot's install state resolved (it has no
+    documented one-shot form, so it is never offered for drafting). **Kimi is in Soloist's probe set**
+    (revised 2026-08-09): it *does* have a documented one-shot form, drafting is only offered for a CLI
+    a probe found, so leaving it unprobed made a capable provider permanently unselectable. Recorded as
+    [D-37](../KNOWN-DIVERGENCES.md).
 - **Launching:** `Cmd+T` picker; right-click → Add agent; "Agent with flags" modal to edit flags for a
   single launch. Agents launch in the selected project's dir; many concurrently.
 - **Idle detection (5 states): `IDLE`, `PERMISSION`, `THINKING`, `WORKING`, `ERROR`.** Heuristics differ

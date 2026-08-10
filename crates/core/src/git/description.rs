@@ -8,11 +8,10 @@
 //!
 //! **What a branch proposes is its commits, not its diff.** They are already somebody's account of
 //! their own work, they are short, and they are in order, so they say more per byte than any patch
-//! could. Only what the branch holds and its base does not is shown: a base merged in along the way
-//! is not part of what is being proposed.
+//! could.
 //!
 //! **There is a ceiling.** The prompt is composed to [`ONE_SHOT_PROMPT_LIMIT`] rather than cut to
-//! it. A template past [`SKELETON_LIMIT`] is dropped whole and a plain description asked for
+//! it. A template past the shape ceiling is dropped whole and a plain description asked for
 //! instead, because half a skeleton would be filled in as if it were the whole of one.
 //!
 //! **The draft is advisory.** Nothing here or above it proposes anything: the text goes back to
@@ -22,21 +21,11 @@ use std::path::Path;
 
 use crate::agents::ONE_SHOT_PROMPT_LIMIT;
 use crate::ids::ProjectId;
-use crate::vcs::CommitEntry;
 
-use super::branch::usable_branch_name;
 use super::pr::PullRequestError;
-use super::repository::LogRange;
+use super::proposed::commit_lines;
+use super::skeleton::shape;
 use super::status::Git;
-
-/// The longest description template that is worth handing over whole. Past it the shape has stopped
-/// being a shape, and a filled-in half of one reads as a complete answer while missing most of what
-/// the repository asked for.
-const SKELETON_LIMIT: usize = 8 * 1024;
-
-/// How many of the branch's commits are shown. Enough to describe any branch somebody opens a pull
-/// request from by hand, and a ceiling on a branch that has been running for months.
-const PROPOSED_COMMITS: usize = 50;
 
 /// What the agent is asked to do when the repository — or the user — supplied a shape to fill.
 const SKELETON_INSTRUCTIONS: &str = "\
@@ -100,24 +89,12 @@ impl Git {
         if !self.trusted(project)? {
             return Err(PullRequestError::Untrusted);
         }
-        if !usable_branch_name(base) {
-            return Err(PullRequestError::UnusableBranchName);
-        }
-        let head = self
-            .status(project, root)?
-            .and_then(|status| status.branch.name)
-            .ok_or(PullRequestError::DetachedHead)?;
-        let proposed = self
-            .history(project, root, LogRange::Since { base }, 0, PROPOSED_COMMITS)?
-            .unwrap_or_default();
-        if proposed.is_empty() {
-            return Err(PullRequestError::NothingToDescribe);
-        }
+        let proposed = self.proposed(project, root, base)?;
 
-        let context = format!("Merging branch {head} into {base}.\n\n");
+        let context = format!("Merging branch {} into {base}.\n\n", proposed.head);
         let budget = ONE_SHOT_PROMPT_LIMIT
             .saturating_sub(INSTRUCTIONS_HEADROOM + context.len() + skeleton.len());
-        let commits = list(&proposed, budget);
+        let commits = commit_lines(&proposed.commits, budget);
         // The shape is last, so the final thing read is the form the answer must take — and
         // everything it is to be filled from has already been read by then.
         Ok(match shape(skeleton) {
@@ -127,26 +104,6 @@ impl Git {
             None => format!("{PLAIN_INSTRUCTIONS}{context}{COMMITS_LABEL}{commits}"),
         })
     }
-}
-
-/// The skeleton to hand over, or `None` where there is none worth handing over: nothing was
-/// supplied, or what was supplied is past the ceiling and would arrive as a fragment.
-fn shape(skeleton: &str) -> Option<&str> {
-    (!skeleton.trim().is_empty() && skeleton.len() <= SKELETON_LIMIT).then_some(skeleton)
-}
-
-/// One line per commit, newest first, within `budget` — dropping the oldest first, since the newest
-/// are what the branch most recently became.
-fn list(proposed: &[CommitEntry], budget: usize) -> String {
-    let mut listed = String::new();
-    for commit in proposed {
-        let line = format!("- {}\n", commit.subject);
-        if listed.len() + line.len() > budget {
-            break;
-        }
-        listed.push_str(&line);
-    }
-    listed
 }
 
 #[cfg(test)]

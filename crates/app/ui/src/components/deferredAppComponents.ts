@@ -46,6 +46,13 @@ export const CommandPalette = lazy(() =>
 export const GitRail = lazy(() =>
   import("@/components/git/GitRail").then((module) => ({ default: module.GitRail })),
 );
+// The branch cluster in the window chrome loads on its own, because the title bar is rendered
+// eagerly and this is the only thing in it that needs the branch switcher — and the switcher needs
+// the command primitive, which nothing in the eager shell otherwise reaches. Loading it with the
+// strip would put that whole matcher in the first bundle for every session, repository or not.
+export const BranchCluster = lazy(() =>
+  import("@/components/git/BranchCluster").then((module) => ({ default: module.BranchCluster })),
+);
 // The diff surface loads apart from the rail, and only once a path is opened: the diff viewer
 // and the syntax highlighter behind it are the heaviest things in the app, and a session spent
 // watching a repository's state never needs either.

@@ -1,7 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { GitBranchIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react";
-import { BranchHeader } from "@/components/git/BranchHeader";
-import type { BranchActions } from "@/components/git/BranchMenu";
 import { ChangesTree, type ChangeActions } from "@/components/git/ChangesTree";
 import { CommitBox } from "@/components/git/CommitBox";
 import { ConfirmDialog } from "@/components/git/ConfirmDialog";
@@ -9,13 +7,14 @@ import { ConflictNotice } from "@/components/git/ConflictNotice";
 import { DiscardDialog, type Discardable } from "@/components/git/DiscardDialog";
 import { FilesTree } from "@/components/git/FilesTree";
 import {
-  RailButton,
   RailEmpty,
   RailError,
   RailMessage,
   TreeExpansionButton,
 } from "@/components/git/RailChrome";
+import { raiseRefusal } from "@/components/git/refusalToast";
 import { TrustNotice } from "@/components/git/TrustNotice";
+import { IconButton } from "@/components/IconButton";
 import { PaneDivider } from "@/components/PaneDivider";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +22,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Option } from "@/lib/appearance";
 import type { FileChange } from "@/domain";
+import { publishBranchCluster, type BranchClusterView } from "@/store/git/branchCluster";
 import { CHANGE, FILE, type DiffSelection } from "@/store/git/useDiffSelection";
 import { useGitFiles } from "@/store/git/useGitFiles";
 import { useGitStatus } from "@/store/git/useGitStatus";
@@ -54,10 +54,7 @@ const COLLAPSE_RAIL_LABEL = "Hide version control";
 const EXPAND_RAIL_LABEL = "Show version control";
 const RESIZE_RAIL_LABEL = "Resize the version control rail";
 
-/** The two questions the rail asks before it destroys anything. */
-const DELETE_BRANCH_TITLE = "Delete this branch?";
-const DELETE_BRANCH_CONFIRM = "Delete";
-const DELETE_BRANCH_CANCEL = "Keep it";
+/** The question the rail asks before it destroys anything. */
 const ABANDON_MERGE_TITLE = "Abandon this merge?";
 const ABANDON_MERGE_CONFIRM = "Abandon";
 const ABANDON_MERGE_CANCEL = "Keep merging";
@@ -72,12 +69,13 @@ const NOTHING_CHANGED = "No changes";
 const NO_FILES = "No files";
 
 /**
- * The version-control rail: what is checked out, what has changed under it, and what can be done
- * about it — kept beside the terminal rather than in place of it.
+ * The version-control rail: what has changed under what is checked out, and what can be done about
+ * it — kept beside the terminal rather than in place of it.
  *
- * The one place in the rail that reaches the core, so the trees and the commit box below stay
- * presentational. Whether a change is allowed at all is the core's answer, asked once here so
- * the rail can offer the trust affordance rather than let an action fail.
+ * The one place any repository surface reaches the core, so the trees and the commit box below stay
+ * presentational and the branch cluster in the window chrome reads the same status this does rather
+ * than asking for its own. Whether a change is allowed at all is the core's answer, asked once here
+ * so the rail can offer the trust affordance rather than let an action fail.
  */
 export function GitRail({
   project,
@@ -93,7 +91,6 @@ export function GitRail({
   const [layout, setLayout] = useRailLayout();
   const [tab, setTab] = useState<RailTab>(CHANGES_TAB);
   const [discarding, setDiscarding] = useState<Discardable | null>(null);
-  const [deletingBranch, setDeletingBranch] = useState<string | null>(null);
   const [abandoningMerge, setAbandoningMerge] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const status = useGitStatus(project);
@@ -112,8 +109,9 @@ export function GitRail({
   );
   const changesFolders = useTreeExpansion(changesTree, true);
   const filesFolders = useTreeExpansion(filesTree, false);
-  // One place a refused action is stated, whichever asked for it.
-  const refusal = write.error ?? sync.error ?? draft.error;
+  // One place a refused change to a path is stated, whichever asked for it. What the remote refused
+  // is not here: those controls live in the window chrome now, which has no line to say it in.
+  const refusal = write.error ?? draft.error;
   const actions: ChangeActions | null =
     write.trusted === true
       ? {
@@ -122,17 +120,55 @@ export function GitRail({
           busy: write.busy,
         }
       : null;
-  // Until the project is trusted nothing here may change it, so none of it is offered.
-  const branchActions: BranchActions | null =
-    write.trusted === true
-      ? {
-          switchTo: sync.switchBranch,
-          create: sync.createBranch,
-          remove: sync.deleteBranch,
-          stash: sync.stash,
-          popStash: sync.popStash,
-        }
-      : null;
+  // What the window chrome shows about the checked-out branch, handed over from here so the two
+  // surfaces are one read. Until the project is trusted nothing may change it, so neither the
+  // switcher, the exchange with the remote, nor the pull request is offered.
+  const branch = status.status?.branch ?? null;
+  const trusted = write.trusted === true;
+  const cluster = useMemo<BranchClusterView | null>(
+    () =>
+      branch === null
+        ? null
+        : {
+            branch,
+            branches: sync.branches,
+            exchanging: sync.exchanging,
+            busy: sync.busy(BRANCH_ACTION),
+            exchange: trusted
+              ? { fetch: sync.fetch, pull: sync.pull, push: sync.push, stop: sync.stopExchange }
+              : null,
+            branchActions: trusted
+              ? {
+                  switchTo: sync.switchBranch,
+                  create: sync.createBranch,
+                  remove: sync.deleteBranch,
+                  stash: sync.stash,
+                  popStash: sync.popStash,
+                }
+              : null,
+            // Proposing one pushes the branch and runs the repository's own configuration, so it is
+            // offered exactly where every other change is: once the project is trusted, and not
+            // before.
+            openPullRequest: trusted && onOpenPullRequest !== undefined ? onOpenPullRequest : null,
+            onBranchesOpen: setSwitcherOpen,
+          },
+    [branch, onOpenPullRequest, sync, trusted],
+  );
+
+  useEffect(() => {
+    publishBranchCluster(cluster);
+    return () => publishBranchCluster(null);
+  }, [cluster]);
+
+  // A refusal from a control that has left the rail has nowhere in the rail to be read, so every
+  // exchange with the remote reports through the alert stack. Cleared once it has been said, so the
+  // next failure of the same action is announced again rather than swallowed as unchanged.
+  const { error: exchangeError, dismissError: dismissExchangeError } = sync;
+  useEffect(() => {
+    if (exchangeError === null) return;
+    raiseRefusal(exchangeError);
+    dismissExchangeError();
+  }, [exchangeError, dismissExchangeError]);
 
   if (layout.collapsed) {
     return (
@@ -140,11 +176,13 @@ export function GitRail({
         aria-label={RAIL_LABEL}
         className="flex shrink-0 flex-col items-center gap-2 border-s border-sidebar-border bg-sidebar py-2"
       >
-        <RailButton
+        <IconButton
           label={EXPAND_RAIL_LABEL}
           icon={<PanelRightOpenIcon />}
           onClick={() => setLayout({ collapsed: false })}
         />
+        {/* What is checked out is in the window chrome whether the rail is open or not, so all a
+            closed rail still owes is how much has changed under it. */}
         {changes.length > 0 && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -174,64 +212,11 @@ export function GitRail({
         aria-label={RAIL_LABEL}
         className="flex min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
       >
-        <div className="flex items-stretch">
-          <div className="min-w-0 flex-1">
-            {status.status === null ? (
-              <div className="h-11 shrink-0 border-b border-sidebar-border" />
-            ) : (
-              <BranchHeader
-                branch={status.status.branch}
-                branches={sync.branches}
-                exchanging={sync.exchanging}
-                busy={sync.busy(BRANCH_ACTION)}
-                sync={
-                  write.trusted === true
-                    ? {
-                        fetch: sync.fetch,
-                        pull: sync.pull,
-                        push: sync.push,
-                        stop: sync.stopExchange,
-                      }
-                    : null
-                }
-                branchActions={branchActions}
-                onDeleteBranch={setDeletingBranch}
-                onBranchesOpen={setSwitcherOpen}
-                onOpenPullRequest={
-                  // Proposing one pushes the branch and runs the repository's own configuration,
-                  // so it is offered exactly where every other change is: once the project is
-                  // trusted, and not before.
-                  write.trusted === true && onOpenPullRequest !== undefined
-                    ? onOpenPullRequest
-                    : null
-                }
-              />
-            )}
-          </div>
-          <div className="flex items-center border-b border-sidebar-border pe-1">
-            <RailButton
-              label={COLLAPSE_RAIL_LABEL}
-              icon={<PanelRightCloseIcon />}
-              onClick={() => setLayout({ collapsed: true })}
-            />
-          </div>
-        </div>
-
-        {/* A project kept out of version control is a choice, not a fault, so the rail says so
-            once and stays quiet — and says nothing at all until the first read has answered,
-            rather than claiming it while the answer is still being fetched. */}
-        {status.status === null ? (
-          status.loading ? (
-            <div className="min-h-0 flex-1" />
-          ) : (
-            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-              <GitBranchIcon aria-hidden className="size-5 text-muted-foreground/60" />
-              <RailMessage>{NOT_A_REPOSITORY}</RailMessage>
-            </div>
-          )
-        ) : (
-          <>
-            <div className="flex h-11 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-3">
+        {/* One chrome row, whatever the rail is showing: the view switch when there is a repository
+            to switch views of, and — always — the control that closes the rail. */}
+        <div className="flex h-11 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-3">
+          {status.status !== null && (
+            <>
               <SegmentedControl<RailTab>
                 value={tab}
                 options={RAIL_TAB_OPTIONS}
@@ -251,7 +236,30 @@ export function GitRail({
                   onClick={filesFolders.toggleAll}
                 />
               )}
+            </>
+          )}
+          <IconButton
+            className="ms-auto"
+            label={COLLAPSE_RAIL_LABEL}
+            icon={<PanelRightCloseIcon />}
+            onClick={() => setLayout({ collapsed: true })}
+          />
+        </div>
+
+        {/* A project kept out of version control is a choice, not a fault, so the rail says so
+            once and stays quiet — and says nothing at all until the first read has answered,
+            rather than claiming it while the answer is still being fetched. */}
+        {status.status === null ? (
+          status.loading ? (
+            <div className="min-h-0 flex-1" />
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+              <GitBranchIcon aria-hidden className="size-5 text-muted-foreground/60" />
+              <RailMessage>{NOT_A_REPOSITORY}</RailMessage>
             </div>
+          )
+        ) : (
+          <>
             <div className="min-h-0 flex-1">
               <div hidden={tab !== CHANGES_TAB} className="h-full">
                 {changes.length === 0 ? (
@@ -317,21 +325,6 @@ export function GitRail({
           setDiscarding(null);
         }}
       />
-      <ConfirmDialog
-        open={deletingBranch !== null}
-        title={DELETE_BRANCH_TITLE}
-        confirm={DELETE_BRANCH_CONFIRM}
-        cancel={DELETE_BRANCH_CANCEL}
-        onCancel={() => setDeletingBranch(null)}
-        onConfirm={() => {
-          if (deletingBranch !== null) sync.deleteBranch(deletingBranch);
-          setDeletingBranch(null);
-        }}
-      >
-        <span className="font-mono">{deletingBranch}</span> will be removed. Version control refuses
-        while it holds commits no other branch holds, and that refusal stands — there is no forced
-        delete here.
-      </ConfirmDialog>
       <ConfirmDialog
         open={abandoningMerge}
         title={ABANDON_MERGE_TITLE}

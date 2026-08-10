@@ -22,44 +22,72 @@ pub(crate) async fn sleep_until(clock: &Arc<dyn Clock>, deadline: Option<Instant
 }
 
 /// Coalesces triggers within a `quiet` window. Construct one per watched source.
+///
+/// A quiet window alone has no ceiling: a source whose triggers keep arriving closer together than
+/// the window re-arms it every time, and the action is postponed for as long as the triggers last.
+/// For sources where that is the right answer — a restart should not fire mid-edit-storm — the
+/// window stands alone. Where the action is a *read* of the state everything is changing, it is not:
+/// [`Debouncer::bounded`] adds a ceiling on the postponement, so a source that never goes quiet is
+/// still acted on, on a bounded schedule.
 pub struct Debouncer {
     quiet: Duration,
+    /// The longest a burst may postpone its action, or `None` for a window that can be postponed
+    /// indefinitely.
+    ceiling: Option<Duration>,
+    /// When the pending burst began — what the ceiling is measured from, as distinct from the last
+    /// trigger the quiet window is measured from.
+    burst_began: Option<Instant>,
     last_trigger: Option<Instant>,
     pending: bool,
 }
 
 impl Debouncer {
-    /// A debouncer with the given quiet window.
+    /// A debouncer with the given quiet window, postponed for as long as its triggers keep coming.
     pub fn new(quiet: Duration) -> Self {
         Self {
             quiet,
+            ceiling: None,
+            burst_began: None,
             last_trigger: None,
             pending: false,
         }
     }
 
-    /// Records a trigger at `now`, (re)starting the quiet window.
+    /// The same, but where a burst that never goes quiet is acted on anyway once it has been running
+    /// for `ceiling` — measured from the burst's first trigger, so a continuously-changing source is
+    /// acted on about once per `ceiling` rather than never.
+    pub fn bounded(quiet: Duration, ceiling: Duration) -> Self {
+        Self {
+            ceiling: Some(ceiling),
+            ..Self::new(quiet)
+        }
+    }
+
+    /// Records a trigger at `now`, (re)starting the quiet window. The first trigger of a burst also
+    /// starts the ceiling, which later triggers do not restart — that is the whole of what makes it
+    /// a ceiling.
     pub fn trigger(&mut self, now: Instant) {
+        self.burst_began = self.burst_began.filter(|_| self.pending).or(Some(now));
         self.last_trigger = Some(now);
         self.pending = true;
     }
 
-    /// The instant the pending trigger becomes due (its quiet window elapses), or `None`
-    /// when nothing is pending. Lets a caller sleep exactly until the next action instead of
-    /// polling on a fixed interval.
+    /// The instant the pending trigger becomes due — its quiet window elapses, or its burst reaches
+    /// the ceiling, whichever is sooner — or `None` when nothing is pending. Lets a caller sleep
+    /// exactly until the next action instead of polling on a fixed interval.
     pub fn due_at(&self) -> Option<Instant> {
-        self.last_trigger
-            .filter(|_| self.pending)
-            .map(|last| last + self.quiet)
+        let quiet_at = self.last_trigger.filter(|_| self.pending)? + self.quiet;
+        match (self.ceiling, self.burst_began) {
+            (Some(ceiling), Some(began)) => Some(quiet_at.min(began + ceiling)),
+            _ => Some(quiet_at),
+        }
     }
 
-    /// Returns `true` exactly once after the quiet window elapses since the last
-    /// trigger with at least one trigger pending, then resets until the next
-    /// trigger. `saturating_duration_since` keeps a non-monotonic instant from
-    /// panicking.
+    /// Returns `true` exactly once the pending burst is due (see [`Self::due_at`]), then resets
+    /// until the next trigger — which begins a fresh burst, and so a fresh ceiling.
     pub fn take_if_due(&mut self, now: Instant) -> bool {
-        match self.last_trigger {
-            Some(last) if self.pending && now.saturating_duration_since(last) >= self.quiet => {
+        match self.due_at() {
+            Some(due) if now >= due => {
                 self.pending = false;
                 true
             }
@@ -69,44 +97,5 @@ impl Debouncer {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ports::Clock;
-    use crate::testing::MockClock;
-
-    #[test]
-    fn fires_once_after_the_quiet_window_and_resets() {
-        let clock = MockClock::new();
-        let mut debouncer = Debouncer::new(Duration::from_millis(500));
-
-        debouncer.trigger(clock.now());
-        assert!(!debouncer.take_if_due(clock.now()), "not due immediately");
-
-        clock.advance(Duration::from_millis(499));
-        assert!(
-            !debouncer.take_if_due(clock.now()),
-            "not due before the window"
-        );
-
-        clock.advance(Duration::from_millis(1));
-        assert!(debouncer.take_if_due(clock.now()), "due at the window");
-        assert!(
-            !debouncer.take_if_due(clock.now()),
-            "fires only once per burst"
-        );
-    }
-
-    #[test]
-    fn a_later_trigger_restarts_the_window() {
-        let clock = MockClock::new();
-        let mut debouncer = Debouncer::new(Duration::from_millis(500));
-
-        debouncer.trigger(clock.now());
-        clock.advance(Duration::from_millis(300));
-        debouncer.trigger(clock.now()); // resets the window
-        clock.advance(Duration::from_millis(300)); // 300 < 500 since the last trigger
-        assert!(!debouncer.take_if_due(clock.now()));
-        clock.advance(Duration::from_millis(200)); // now 500 since the last trigger
-        assert!(debouncer.take_if_due(clock.now()));
-    }
-}
+#[path = "debounce_tests.rs"]
+mod tests;

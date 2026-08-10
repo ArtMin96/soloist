@@ -18,6 +18,13 @@ export interface SettingsTab {
   label: string;
 }
 
+/** Where Settings opens when nothing asked for a tab in particular. */
+export const DEFAULT_SETTINGS_TAB: SettingsTabId = "appearance";
+
+/** The tab carrying the assist-tool selection, named so the surfaces that need one can send the
+ *  reader straight to it rather than to Settings in general. */
+export const ASSIST_SETTINGS_TAB: SettingsTabId = "agents";
+
 export const SETTINGS_TABS: SettingsTab[] = [
   { id: "appearance", label: "Appearance" },
   { id: "sidebar", label: "Sidebar" },

@@ -1,6 +1,5 @@
 import { ArrowDownToLineIcon, ArrowUpFromLineIcon, RefreshCwIcon, XIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { IconButton } from "@/components/IconButton";
 import type { BranchInfo } from "@/domain";
 
 const FETCH_LABEL = "Fetch";
@@ -51,54 +50,34 @@ export function SyncActions({
           aria-hidden
           className="size-3.5 text-muted-foreground motion-safe:animate-spin"
         />
-        <SyncButton label={STOP_LABEL} hint={STOP_HINT} onClick={onStop}>
-          <XIcon />
-        </SyncButton>
+        <IconButton label={STOP_LABEL} hint={STOP_HINT} icon={<XIcon />} onClick={onStop} />
       </div>
     );
   }
 
   return (
     <div className="flex shrink-0 items-center">
-      <SyncButton label={FETCH_LABEL} hint={FETCH_HINT} onClick={onFetch}>
-        <RefreshCwIcon />
-      </SyncButton>
+      <IconButton
+        label={FETCH_LABEL}
+        hint={FETCH_HINT}
+        icon={<RefreshCwIcon />}
+        onClick={onFetch}
+      />
       {/* Nothing to pull from a branch that tracks nothing, so it is not offered. */}
       {!publishing && (
-        <SyncButton label={PULL_LABEL} hint={PULL_HINT} onClick={onPull}>
-          <ArrowDownToLineIcon />
-        </SyncButton>
+        <IconButton
+          label={PULL_LABEL}
+          hint={PULL_HINT}
+          icon={<ArrowDownToLineIcon />}
+          onClick={onPull}
+        />
       )}
-      <SyncButton
+      <IconButton
         label={publishing ? PUBLISH_LABEL : PUSH_LABEL}
         hint={publishing ? PUBLISH_HINT : PUSH_HINT}
+        icon={<ArrowUpFromLineIcon />}
         onClick={onPush}
-      >
-        <ArrowUpFromLineIcon />
-      </SyncButton>
+      />
     </div>
-  );
-}
-
-function SyncButton({
-  label,
-  hint,
-  onClick,
-  children,
-}: {
-  label: string;
-  hint: string;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon-xs" aria-label={label} onClick={onClick}>
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{hint}</TooltipContent>
-    </Tooltip>
   );
 }

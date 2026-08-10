@@ -37,8 +37,10 @@ pub(crate) fn compile(globs: &[String]) -> Option<GlobSet> {
     builder.build().ok()
 }
 
-/// Whether `relative` lies inside a default-ignored directory at any depth.
-fn is_ignored(relative: &Path) -> bool {
+/// Whether `relative` — a path relative to a project root — lies inside a default-ignored
+/// directory at any depth. Shared with the git context's watch, so the trees whose churn is
+/// never worth reacting to are named in exactly one place.
+pub(crate) fn is_ignored(relative: &Path) -> bool {
     relative.components().any(|component| {
         matches!(component, Component::Normal(name)
             if DEFAULT_IGNORES.iter().any(|ignored| name == OsStr::new(ignored)))

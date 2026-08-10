@@ -90,15 +90,18 @@ pub use facade::{
     ScopedActionError, ScopedFacade, ScopedGitError, SetupIntegrationError, SpawnAgentError,
     StatusSummary, TrustCommandError,
 };
-pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
+pub use filewatch::{
+    FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchError, WatchHandle, WatchReactor,
+};
 pub use git::{
     BranchOp, CheckRun, CheckState, DiffExtent, Exchange, FileOpener, ForgeError, ForgeReadiness,
     ForgeRepository, Git, GitDraftError, GitError, GitForge, GitRepository, GitStatus,
     GitStatusWatchReactor, GitWriteError, HandoffSubject, LogRange, MergeMethod, NewPullRequest,
     NoopFileOpener, NoopGitForge, NoopGitRepository, Observer, OpenError, Progress, Prompting,
-    PullRequest, PullRequestError, PullRequestReview, PullRequestState, PullRequestSurface,
-    PullRequestTemplate, RawFileDiff, RawHunk, ReviewComment, ReviewLimits, ReviewThread, StashOp,
-    Stop, SyncOp, BRANCH_PAGE_SIZE, CHECK_LOG_LIMIT, HANDOFF_LIMIT, LOG_PAGE_SIZE, REVIEW_LIMITS,
+    PullRequest, PullRequestError, PullRequestReview, PullRequestState, PullRequestSuggestion,
+    PullRequestSurface, PullRequestTemplate, RawFileDiff, RawHunk, ReviewComment, ReviewLimits,
+    ReviewThread, StashOp, Stop, SyncOp, BRANCH_PAGE_SIZE, CHECK_LOG_LIMIT, HANDOFF_LIMIT,
+    LOG_PAGE_SIZE, REVIEW_LIMITS,
 };
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};
@@ -145,5 +148,5 @@ pub use terminal::{LogLine, PtyChunk, RenderedScreen};
 pub use trust::{Trust, TrustStore};
 pub use vcs::{
     Branch, BranchInfo, Branches, ChangeKind, CommitEntry, DiffTarget, FileChange, FileContent,
-    FileDiff, GitFileStatus, HunkRange, ProjectFile, SyncState,
+    FileDiff, GitFileStatus, HunkRange, ProjectFile, SyncState, COMMIT_BODY_LIMIT,
 };

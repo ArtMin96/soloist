@@ -1,19 +1,33 @@
 import { useId, useState } from "react";
 import { SparklesIcon } from "lucide-react";
+import { ASSIST_SETTINGS_TAB } from "@/components/settings/tabs";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ASSIST_SETUP_HINT } from "@/lib/agents";
+import { useOpenSettings } from "@/store/settingsContext";
 import type { FileChange } from "@/domain";
 
 const PLACEHOLDER = "Message";
 const COMMIT_LABEL = "Commit";
 const AMEND_LABEL = "Amend";
 const AMEND_HINT = "Replace the last commit instead of adding one";
-const NOTHING_STAGED = "Nothing is staged to commit";
-const DRAFT_LABEL = "Draft a message";
+const DRAFT_LABEL = "Draft";
 const DRAFT_HINT = "Describe the staged change with your assist tool, to edit before committing";
+/** The same control where no tool is picked yet, which is where every install starts. The ellipsis
+ *  is the promise it keeps: it leads somewhere before it drafts anything. */
+const SETUP_LABEL = "Draft…";
+
+/** What the box says about what a press would record, one state at a time. */
 const DRAFTING = "Drafting a message…";
+const AMENDING = "Amending the last commit";
+const NOTHING_STAGED = "Nothing is staged to commit";
+
+/** …and how much there is to record, agreeing with the count. */
+function stagedFiles(staged: number): string {
+  return staged === 1 ? "1 file staged" : `${staged} files staged`;
+}
 
 /**
  * The message, and what to do with it. Whether a commit is allowed is the core's answer — this
@@ -49,11 +63,12 @@ export function CommitBox({
   onCommit: (message: string, amend: boolean) => Promise<boolean>;
 }) {
   const amendId = useId();
+  const openSettings = useOpenSettings();
   const [typed, setTyped] = useState<string | null>(null);
   const [amend, setAmend] = useState(false);
   const message = typed ?? template ?? "";
-  const staged = changes.some((change) => change.status.staged !== null);
-  const ready = message.trim() !== "" && (amend || staged);
+  const staged = changes.filter((change) => change.status.staged !== null).length;
+  const ready = message.trim() !== "" && (amend || staged > 0);
   const drafting = draft?.drafting === true;
 
   const commit = () => {
@@ -71,6 +86,25 @@ export function CommitBox({
     });
   };
 
+  // Present whether or not a tool is picked, because a control nobody can find is a feature nobody
+  // has. Not disabled either: what it does where none is picked is take the reader to the one
+  // setting that changes that, which is a real action and is named as one. The pull request's form
+  // offers the same door on the same terms.
+  const assist =
+    draft === null
+      ? {
+          label: SETUP_LABEL,
+          hint: ASSIST_SETUP_HINT,
+          unavailable: false,
+          act: () => openSettings(ASSIST_SETTINGS_TAB),
+        }
+      : {
+          label: DRAFT_LABEL,
+          hint: DRAFT_HINT,
+          unavailable: staged === 0 || drafting || busy,
+          act: requestDraft,
+        };
+
   return (
     <div className="flex shrink-0 flex-col gap-2 border-t border-sidebar-border p-3">
       <Textarea
@@ -81,55 +115,59 @@ export function CommitBox({
         className="resize-none"
         onChange={(event) => setTyped(event.target.value)}
       />
+      {/* One line, always there, at a fixed leading: what a press would record changes as the state
+          does, and the row below it never moves because of it. */}
+      <p className="truncate type-label text-muted-foreground">
+        {recording({ drafting, amend, staged })}
+      </p>
       <div className="flex items-center gap-2">
-        <Checkbox
-          id={amendId}
-          checked={amend}
-          onCheckedChange={(checked) => setAmend(checked === true)}
-        />
-        <label htmlFor={amendId} className="text-[0.8125rem]" title={AMEND_HINT}>
-          {AMEND_LABEL}
-        </label>
-        {drafting ? (
-          <p className="min-w-0 flex-1 truncate text-[0.6875rem] text-muted-foreground">
-            {DRAFTING}
-          </p>
-        ) : (
-          !staged &&
-          !amend && (
-            <p className="min-w-0 flex-1 truncate text-[0.6875rem] text-muted-foreground">
-              {NOTHING_STAGED}
-            </p>
-          )
-        )}
-        {/* Absent rather than disabled where no tool is configured: an action nobody may take is
-            not an action. Disabled is kept for the one that is momentarily pending. */}
-        {draft !== null && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="flex items-center gap-2">
+              <Checkbox
+                id={amendId}
+                checked={amend}
+                onCheckedChange={(checked) => setAmend(checked === true)}
+              />
+              <label htmlFor={amendId} className="type-body">
+                {AMEND_LABEL}
+              </label>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{AMEND_HINT}</TooltipContent>
+        </Tooltip>
+        <div className="ms-auto flex items-center gap-1.5">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="ms-auto"
-                aria-label={DRAFT_LABEL}
-                disabled={!staged || drafting || busy}
-                onClick={requestDraft}
-              >
+              <Button variant="ghost" size="sm" disabled={assist.unavailable} onClick={assist.act}>
                 <SparklesIcon className={drafting ? "motion-safe:animate-pulse" : undefined} />
+                {assist.label}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{DRAFT_HINT}</TooltipContent>
+            <TooltipContent>{assist.hint}</TooltipContent>
           </Tooltip>
-        )}
-        <Button
-          size="sm"
-          className={draft === null ? "ms-auto" : undefined}
-          disabled={!ready || busy || drafting}
-          onClick={commit}
-        >
-          {COMMIT_LABEL}
-        </Button>
+          <Button size="sm" disabled={!ready || busy || drafting} onClick={commit}>
+            {COMMIT_LABEL}
+          </Button>
+        </div>
       </div>
     </div>
   );
+}
+
+/** What a press would record, said in one line: the draft being written, the commit being replaced,
+ *  or how much is staged — including the honest nothing. */
+function recording({
+  drafting,
+  amend,
+  staged,
+}: {
+  drafting: boolean;
+  amend: boolean;
+  staged: number;
+}): string {
+  if (drafting) return DRAFTING;
+  if (amend) return AMENDING;
+  if (staged === 0) return NOTHING_STAGED;
+  return stagedFiles(staged);
 }

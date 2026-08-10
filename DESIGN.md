@@ -15,6 +15,9 @@ colors:
   signal-stopped: "oklch(0.55 0.008 255)"
   signal-crashed: "oklch(0.55 0.20 27)"
   signal-exhausted: "oklch(0.47 0.19 22)"
+  signal-attention: "oklch(0.72 0.17 75)"
+  git-branch-synced: "oklch(0.47 0.15 150)"
+  git-branch-local: "oklch(0.48 0.15 305)"
 typography:
   headline:
     fontFamily: "Geist Variable, system-ui, sans-serif"
@@ -98,10 +101,11 @@ the dark glass around the instruments: it recedes, and the signal stands out.
 
 The system is **near-monochrome by discipline**. A faintly cool slate neutral carries
 almost the entire surface; one calm azure accent marks focus, selection, and the single
-primary action; and saturated color is *spent only on status* — running, transitioning,
-stopped, crashed, exhausted. Color, here, is not decoration: a saturated hue on screen
-means a process is in a state you might need to act on. Density is earned through
-hierarchy, hairline dividers, and a compact type scale — never through cards-everywhere.
+primary action; and saturated color is *spent on state* — a process's (running,
+transitioning, stopped, crashed, exhausted), an agent waiting on you, or the repository's.
+Color, here, is not decoration: a saturated hue on screen means something is in a state you
+might need to act on. Density is earned through hierarchy, hairline dividers, and a compact
+type scale — never through cards-everywhere.
 
 This system explicitly rejects the **generic SaaS dashboard** (no gradient hero-metric
 cards, no identical icon+heading card grids, no purple gradients), the **cream/beige "AI
@@ -126,7 +130,8 @@ overshoot-free — felt, never waited on, never decorative — and always degrad
 chrome; it is never the default transition.
 
 **Key Characteristics:**
-- Near-monochrome cool-slate surface; saturated color reserved for process status.
+- Near-monochrome cool-slate surface; saturated color reserved for state — a process's, an agent's,
+  the repository's.
 - One azure accent, ≤10% of any screen, for focus / selection / the primary action only.
 - Compact fixed type scale (13px body), single family + a mono companion for terminal/data.
 - Flat by default; depth from tonal layering and hairline borders, not shadows.
@@ -136,8 +141,8 @@ chrome; it is never the default transition.
 
 ## 2. Colors
 
-A faintly cool slate neutral with a single azure accent; the only saturated hues on screen
-belong to process status.
+A faintly cool slate neutral with a single azure accent; the saturated hues on screen report
+state — a process's, an agent's, or the repository's — under the rule at the end of this section.
 
 ### Primary
 - **Azure Accent** (`oklch(0.55 0.13 245)`): The one accent. Focus rings, the current
@@ -158,7 +163,7 @@ belong to process status.
 - **Hairline** (`oklch(0.90 0.005 255)`): 1px dividers and rests-state borders. Structure is
   drawn with hairlines, not boxes.
 
-### Status (the saturated vocabulary — used nowhere else)
+### Status (the app chrome's saturated vocabulary)
 One token per meaningful `ProcStatus`. Each is paired with a **distinct glyph and a text
 label** so status survives color blindness and a grayscale screenshot. These map 1:1 to the
 closed `ProcStatus` enum so the UI can never invent a state the core didn't emit.
@@ -182,15 +187,33 @@ IDLE/PERMISSION/THINKING/WORKING/ERROR — extends this same shape+color+label s
 do not introduce a parallel status vocabulary.)*
 
 ### Named Rules
-**The Spent-on-Status Rule.** Saturated color is forbidden except on a status indicator. If a
-border, button, icon, or background is saturated and it is not reporting `ProcStatus`, it is
-wrong — desaturate it to slate or make it the azure accent.
+**The Spent-on-Status Rule.** Saturated color reports state: `ProcStatus` and the attention an agent
+is waiting on, in the app chrome; version-control state — the change a path is in, which branch is
+checked out, how it stands against its upstream — in the repository surfaces. It never decorates. If a
+border, button, icon, or background is saturated and reports none of that, it is wrong: desaturate it
+to slate, or make it the azure accent.
 
-*The one exemption: the terminal's ANSI palette and the Settings swatch row that previews it.*
-There the colour is not the app reporting anything — it is program output the terminal is
-obliged to render, and a preview whose whole subject is that palette. The 16 slots reuse the
-status hues so the emulator reads as one of the instruments rather than a foreign surface, and
-they are the only saturated colour in the app that does not mean `ProcStatus`.
+Color is spent deliberately on two jobs beside state, and they are the whole list. The **destructive
+tone** marks the action that destroys and the words that say something failed; it is the crashed red
+itself, in both themes, because a failure is a failure and a sixth hue would only invite a sixth
+meaning. The **file-language marks** key a language in a dense tree rather than report anything about
+it, and they are scoped to that mark alone — a document, a control, or a panel never wears one. Every
+value in all four families is a named token in `index.css`, which is the one place any of them live.
+
+Whatever the job, the hue is redundant: a glyph, a letter, or a word carries the same fact beside it,
+so a grayscale screenshot and a color-blind reader lose nothing. The branch badge is the whole rule in
+one control — a branch glyph, the name, and the standing in words ("Up to date", "Local only", "Not
+fetched", "2 ahead") — and a tone with no word beside it is a bug, not a shorthand.
+
+*Color the app does not choose.* Some color on screen is content rather than report: the terminal's
+16 ANSI slots (and the Settings swatch row whose whole subject is that palette), the syntax theme over
+a diff or a file preview, and the low-chroma washes the diff viewer paints behind an added or removed
+row. None of it is the app saying anything about a state, so none of it answers to the rule above —
+what each answers to is legibility on its own surface. The ANSI slots are authored from the app's own
+signal hues, so the emulator reads as one of the instruments rather than a foreign surface, and the
+program color the terminal cannot author gets a 4.5:1 floor against the cell behind it. The diff's
+theme pair follows light/dark, and its washes stay low-chroma because the syntax colors are painted
+over them.
 
 **The One-Accent Rule.** Azure covers ≤10% of any screen and means exactly one thing:
 "focused / selected / primary." Two azure things competing for "primary" on one screen is a bug.
@@ -281,11 +304,22 @@ for the genuine appear/disappear of incidental chrome. Bounce/elastic is forbidd
 
 ### Toolbar / Window chrome
 The unified macOS toolbar stands in for the native decorations (turned off in `tauri.conf.json`).
-Leading: the **app logo + "Soloist" wordmark** as a quiet identity anchor. Trailing: the global
-actions as calm bezeled/ghost toolbar buttons, a short divider, then the **window controls** —
-deliberately kept **top-right** (restyled), where a Linux/GNOME user expects them, not faked
-traffic lights on the left. The whole strip is a drag region except the controls; double-click
-toggles maximize. The terminal and orchestration content panes wear the same `h-11` toolbar tone.
+Leading: the **app logo + "Soloist" wordmark** as a quiet identity anchor. Trailing: the
+**contextual strip** as calm bezeled/ghost toolbar buttons, a short divider, then the **window
+controls** — deliberately kept **top-right** (restyled), where a Linux/GNOME user expects them, not
+faked traffic lights on the left. The whole strip is a drag region except the controls; double-click
+toggles maximize.
+
+The contextual strip carries what the window is currently looking at and what is waiting on the
+user: the **checked-out branch** with its standing against its upstream and the controls that settle
+it, then the **attention count**. The branch is scoped to the project in view, because naming what the
+window is on is a title bar's own job; the count is every project's, because an alert must not hide
+behind whichever project happens to be selected. The strip has width the 280px rail did not — there
+the branch name was the only thing left that could shrink, and it shrank to nothing — but the badge is
+still the only item here that gives width up, so at the window's 720px minimum a long name truncates,
+and the badge's tooltip carries it in full when it does. Each control is **absent, never empty**, when
+it has nothing to report, and the divider goes with them: a strip with nothing in it draws no line
+beside the window controls. The terminal and orchestration content panes wear the same `h-11` toolbar tone.
 A content surface that scrolls reveals a 1px hairline under its toolbar only once content slides
 beneath it (the macOS **scroll-edge** effect); the toolbar is borderless at rest.
 
@@ -341,8 +375,8 @@ unmistakably mac-native while keeping the status vocabulary and density rules ab
   Status Indicator and the same one-primary-action plus overflow controls used by the sidebar. A
   "Terminal | Logs" segmented control
   switches the rendered-logs view. The terminal surface and the full 16-slot ANSI palette both
-  follow theme: the palette is authored per theme from the status hues (the Spent-on-Status
-  exemption above) and emitted as hex, since xterm cannot parse `oklch()`. Every slot clears
+  follow theme: the palette is authored per theme from the status hues (color the app does not
+  choose, in §2) and emitted as hex, since xterm cannot parse `oklch()`. Every slot clears
   4.5:1 on its own background bar the one whose ANSI role *is* that theme's surface tone —
   light `white`/`brightWhite`, dark `black`. Colour the palette does not choose (256-colour and
   truecolor output) is left as the PTY sent it, with a 4.5:1 readability floor the renderer
@@ -371,8 +405,9 @@ bordered cards.
 ## 6. Do's and Don'ts
 
 ### Do:
-- **Do** spend saturated color *only* on a Status Indicator; everything else is slate or the one
-  azure accent (The Spent-on-Status Rule).
+- **Do** spend saturated color on state — a process's, an agent's, or version control's — and
+  otherwise only on the destructive tone and the file-language marks; everything else is slate or the
+  one azure accent (The Spent-on-Status Rule).
 - **Do** encode every status with **glyph + color + label** so it survives color blindness and a
   grayscale screenshot — the color-blind-safe encoding confirmed for Phase 5.
 - **Do** keep the azure accent to ≤10% of a screen and to one meaning: focused / selected / primary.

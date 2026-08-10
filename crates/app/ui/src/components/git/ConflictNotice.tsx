@@ -40,7 +40,7 @@ export function ConflictNotice({
       className="flex shrink-0 items-center gap-2 border-t border-sidebar-border bg-git-conflicted/8 px-3 py-2"
     >
       <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0 text-git-conflicted" />
-      <p className="min-w-0 flex-1 text-[0.8125rem] text-git-conflicted">
+      <p className="type-body min-w-0 flex-1 text-git-conflicted">
         {conflicted > 0
           ? `${conflicted} ${conflicted === 1 ? "file needs" : "files need"} resolving`
           : "Merge in progress"}
