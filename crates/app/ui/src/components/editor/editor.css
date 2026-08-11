@@ -137,7 +137,8 @@
 .tiptap-body code {
   padding: 0.1em 0.35em;
   border-radius: calc(var(--radius) - 3px);
-  background: var(--muted);
+  background: var(--theme-code-background);
+  color: var(--theme-code-foreground);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.85em;
 }
@@ -146,7 +147,8 @@
   margin: 0.6rem 0;
   padding: 0.7rem 0.85rem;
   border-radius: var(--radius);
-  background: var(--muted);
+  background: var(--theme-code-background);
+  color: var(--theme-code-foreground);
   overflow-x: auto;
 }
 

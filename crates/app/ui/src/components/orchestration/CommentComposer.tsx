@@ -1,7 +1,9 @@
 import { useState, type KeyboardEvent } from "react";
 import { SendHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { GLASS_CONTROL_SURFACE } from "@/components/ui/glass";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 interface CommentComposerProps {
   /** Posts the comment body; resolves on success (the draft clears), rejects to keep the draft. */
@@ -38,7 +40,7 @@ export function CommentComposer({ onSubmit }: CommentComposerProps) {
   };
 
   return (
-    <div className="flex items-end gap-2">
+    <div className={cn("flex items-end gap-1 rounded-lg border p-1", GLASS_CONTROL_SURFACE)}>
       <Textarea
         value={value}
         onChange={(event) => setValue(event.target.value)}
@@ -46,7 +48,7 @@ export function CommentComposer({ onSubmit }: CommentComposerProps) {
         placeholder="Add a comment…"
         aria-label="Add a comment"
         rows={1}
-        className="min-h-8 flex-1 text-[0.8125rem]"
+        className="min-h-8 flex-1 border-0 bg-transparent text-[0.8125rem] shadow-none focus-visible:ring-0 supports-backdrop-filter:bg-transparent"
       />
       <Button
         size="icon-sm"

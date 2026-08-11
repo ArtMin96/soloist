@@ -23,9 +23,9 @@ function WindowControlButton({
       type="button"
       aria-label={label}
       className={cn(
-        "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none",
+        "inline-flex size-7 items-center justify-center rounded-md bg-toolbar-control text-toolbar-control-foreground outline-none",
         "transition-colors duration-150 motion-reduce:transition-none",
-        "hover:bg-foreground/10 hover:text-foreground",
+        "hover:bg-toolbar-control-hover hover:text-toolbar-control-foreground",
         "focus-visible:ring-2 focus-visible:ring-ring",
         "[&_svg]:size-3.5 [&_svg]:shrink-0",
         danger && "hover:bg-destructive/15 hover:text-destructive",

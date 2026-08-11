@@ -30,6 +30,7 @@ mod notifications;
 mod project;
 mod sidebar;
 mod templates;
+mod theme;
 mod tools;
 
 pub use appearance::{
@@ -44,6 +45,12 @@ pub use notifications::Notifications;
 pub use project::ProjectSettings;
 pub use sidebar::{ProcessCpuThreshold, ProcessMemThreshold, Sidebar};
 pub use templates::TemplateDefaults;
+pub use theme::{
+    built_in_themes, default_theme_colors, soloist_default_theme, GlassOpacity, SelectedThemes,
+    SoloistThemeExtensions, SoloistThemeRole, ThemeAppearance, ThemeColor, ThemeColorRole,
+    ThemeColors, ThemeConflictPolicy, ThemeError, ThemeExtensions, ThemeFile, ThemeMutation,
+    ThemeVariants, DEFAULT_THEME_ID, THEME_FILE_VERSION,
+};
 pub use tools::ToolDefaults;
 
 /// A toggleable MCP feature-tool group. The core groups (Project, Process, Output, Bulk,
@@ -236,6 +243,28 @@ impl<K, D: Default> SettingsStore<K, D> {
         let mut value = self.get(key)?;
         mutator(&mut value);
         self.repo.save(key, &value)?;
+        Ok(value)
+    }
+
+    /// The fallible form of [`Self::update`]. Domain validation runs while the same write lock is
+    /// held, and a rejected mutation is not persisted. `E` combines the domain error with the
+    /// repository error so callers do not need a read-then-write sequence that could lose an
+    /// interleaved settings change.
+    pub fn try_update<E>(
+        &self,
+        key: &K,
+        mutator: impl FnOnce(&mut D) -> Result<(), E>,
+    ) -> Result<D, E>
+    where
+        E: From<StoreError>,
+    {
+        let _guard = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut value = self.get(key).map_err(E::from)?;
+        mutator(&mut value)?;
+        self.repo.save(key, &value).map_err(E::from)?;
         Ok(value)
     }
 }

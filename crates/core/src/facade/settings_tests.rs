@@ -4,8 +4,9 @@ use super::*;
 use crate::composition::CorePorts;
 use crate::ports::TokioClock;
 use crate::settings::{
-    Appearance, Binding, HotkeyAction, Integrations, McpFeatureGroup, Notifications,
-    ProcessCpuThreshold, Sidebar, TerminalAppearance, Theme, ToolDefaults,
+    Appearance, Binding, GlassOpacity, HotkeyAction, Integrations, McpFeatureGroup, Notifications,
+    ProcessCpuThreshold, Sidebar, TerminalAppearance, Theme, ThemeAppearance, ThemeConflictPolicy,
+    ThemeError, ThemeFile, ToolDefaults, DEFAULT_THEME_ID,
 };
 use crate::testing::{FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo};
 
@@ -112,6 +113,107 @@ fn set_appearance_persists_through_the_facade_and_leaves_other_tabs_untouched() 
         facade.mcp_tool_groups().unwrap().scratchpads,
         "writing one tab must not disturb another"
     );
+}
+
+fn custom_theme(id: &str, name: &str, appearance: &str, accent: &str) -> ThemeFile {
+    ThemeFile::from_json(&format!(
+        r##"{{"version":1,"id":"{id}","name":"{name}","appearance":"{appearance}","colors":{{"accent":"{accent}"}}}}"##
+    ))
+    .expect("valid custom theme")
+}
+
+#[test]
+fn task_shaped_theme_actions_persist_only_valid_domain_mutations() {
+    let facade = facade_with_settings();
+
+    let selected = facade
+        .select_theme(ThemeAppearance::Dark, "poimandres-dark-theme")
+        .expect("select built-in dark theme");
+    assert_eq!(selected.selected_themes.dark, "poimandres-dark-theme");
+
+    let rejected = facade.select_theme(ThemeAppearance::Light, "poimandres-dark-theme");
+    assert!(matches!(
+        rejected,
+        Err(AppearanceSettingsError::Theme(
+            ThemeError::UnsupportedAppearance { .. }
+        ))
+    ));
+    assert_eq!(
+        facade.appearance().unwrap().selected_themes.light,
+        DEFAULT_THEME_ID,
+        "a rejected action is not persisted"
+    );
+
+    let created = custom_theme("mine", "Mine", "dark", "#ABC");
+    let after_create = facade.create_theme(created).expect("create custom theme");
+    assert_eq!(after_create.custom_themes[0].id, "mine");
+    assert_eq!(
+        after_create.custom_themes[0]
+            .colors
+            .get(crate::settings::ThemeColorRole::Accent),
+        Some("#aabbcc")
+    );
+
+    let updated = custom_theme("mine", "Mine edited", "dark", "#123456");
+    let after_update = facade.update_theme(updated).expect("update custom theme");
+    assert_eq!(after_update.custom_themes[0].name, "Mine edited");
+
+    let after_import = facade
+        .import_theme(
+            r##"{"version":1,"id":"mine","name":"Imported","appearance":"dark","colors":{"accent":"#654321"}}"##,
+            ThemeConflictPolicy::KeepBoth,
+        )
+        .expect("keep both import");
+    assert_eq!(after_import.custom_themes[1].id, "mine-2");
+}
+
+#[test]
+fn inspect_theme_normalizes_sparse_json_without_persisting_it() {
+    let facade = facade_with_settings();
+    let inspected = facade
+        .inspect_theme(
+            r##"{"version":1,"name":"Sparse","appearance":"dark","colors":{"accent":"#ABC"}}"##,
+        )
+        .expect("inspect sparse theme");
+
+    assert_eq!(inspected.id, "sparse");
+    assert_eq!(
+        inspected
+            .colors
+            .get(crate::settings::ThemeColorRole::Accent),
+        Some("#aabbcc")
+    );
+    assert!(facade.appearance().unwrap().custom_themes.is_empty());
+}
+
+#[test]
+fn duplicate_remove_and_glass_actions_round_trip_through_the_facade() {
+    let facade = facade_with_settings();
+
+    let duplicated = facade
+        .duplicate_theme("poimandres-dark-theme")
+        .expect("duplicate built-in");
+    let copy_id = "poimandres-dark-theme-copy";
+    assert_eq!(duplicated.custom_themes[0].id, copy_id);
+
+    facade
+        .select_theme(ThemeAppearance::Dark, copy_id)
+        .expect("select custom copy");
+    let removed = facade.remove_theme(copy_id).expect("remove custom copy");
+    assert!(removed.custom_themes.is_empty());
+    assert_eq!(removed.selected_themes.dark, DEFAULT_THEME_ID);
+    assert!(matches!(
+        facade.remove_theme(DEFAULT_THEME_ID),
+        Err(AppearanceSettingsError::Theme(
+            ThemeError::BuiltInThemeImmutable(_)
+        ))
+    ));
+
+    let opacity = facade
+        .set_glass_opacity(GlassOpacity::new(65).unwrap())
+        .expect("set glass opacity");
+    assert_eq!(opacity.glass_opacity.get(), 65);
+    assert_eq!(facade.appearance().unwrap().glass_opacity.get(), 65);
 }
 
 #[test]

@@ -4,6 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { AppearancePanel } from "@/components/settings/AppearancePanel";
 import { DEFAULT_APPEARANCE } from "@/lib/appearance";
 import { AppearanceContext } from "@/store/appearanceContext";
+import { fakeAppearanceState } from "@/test/appearanceState";
 import type { Appearance } from "@/domain";
 
 afterEach(cleanup);
@@ -14,7 +15,7 @@ function renderPanel(font_family: string | null) {
     terminal: { ...DEFAULT_APPEARANCE.terminal, font_family },
   };
   return render(
-    <AppearanceContext value={{ appearance, dark: false, setAppearance: () => {} }}>
+    <AppearanceContext value={fakeAppearanceState(appearance, false)}>
       <AppearancePanel />
     </AppearanceContext>,
   );

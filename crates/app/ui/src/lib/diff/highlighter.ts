@@ -8,14 +8,16 @@
 // modules themselves.
 
 import { processAST, type DiffAST, type DiffFileHighlighter } from "@git-diff-view/react";
-import { createHighlighterCore, type HighlighterCore } from "shiki/core";
+import { createHighlighterCore, type HighlighterCore, type ThemeRegistrationRaw } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import { grammarOf, STARTING_LANGUAGES } from "@/lib/diff/language";
+import type { AppliedTheme } from "@/domain";
+import { contrastSafeThemeColor } from "@/theme/derive";
+import { defaultAppliedTheme } from "@/theme/runtime";
 
-// The theme names the diff stylesheet expects on each side of the light/dark flip. Every token
-// carries both, so switching theme recolours the diff already on screen without re-highlighting.
-const LIGHT = "github-light";
-const DARK = "github-dark";
+// One registry slot is replaced whenever the applied palette changes. The token rules are derived
+// from that same palette, so Shiki remains a grammar engine rather than a second theme authority.
+const ACTIVE_THEME = "soloist-active";
 
 // What the diff stylesheet reads each token's colour from. Both sides are emitted as custom
 // properties under this prefix, and the stylesheet picks one by the theme on its wrapper.
@@ -27,6 +29,7 @@ const MAX_LINE_TO_HIGHLIGHT = 2000;
 
 let engine: HighlighterCore | null = null;
 let starting: Promise<HighlighterCore> | null = null;
+let activeThemeSignature = "";
 const loaded = new Map<string, Promise<void>>();
 
 let maxLineToIgnoreSyntax = MAX_LINE_TO_HIGHLIGHT;
@@ -60,7 +63,7 @@ export const HIGHLIGHTER: DiffFileHighlighter = {
   getAST: (raw, _fileName, language) =>
     engine?.codeToHast(raw, {
       lang: language ?? "",
-      themes: { light: LIGHT, dark: DARK },
+      themes: { light: ACTIVE_THEME, dark: ACTIVE_THEME },
       cssVariablePrefix: CSS_VARIABLE_PREFIX,
       // Neither theme is the default one, so every token carries both and the stylesheet
       // chooses — which is how a theme flip recolours without a second pass.
@@ -93,6 +96,19 @@ export async function ensureLanguage(language: string | null): Promise<boolean> 
   return core.getLoadedLanguages().includes(language);
 }
 
+/** Load both the grammar and the live app palette before a highlighted surface is revealed. */
+export async function ensureHighlighting(
+  language: string | null,
+  theme: AppliedTheme,
+): Promise<boolean> {
+  const core = await (starting ??= start());
+  if (activeThemeSignature !== theme.signature) {
+    await core.loadTheme(syntaxTheme(theme));
+    activeThemeSignature = theme.signature;
+  }
+  return ensureLanguage(language);
+}
+
 /**
  * One whole file as highlighted markup, for the preview that shows a file rather than a change
  * to one. `null` when the grammar is not in place — the caller shows the text plainly instead.
@@ -100,18 +116,89 @@ export async function ensureLanguage(language: string | null): Promise<boolean> 
  * The markup is the highlighter's own: it escapes the text it colours, so what comes back is the
  * file rendered, never the file executed.
  */
-export function highlightedHtml(code: string, language: string, dark: boolean): string | null {
+export function highlightedHtml(
+  code: string,
+  language: string,
+  theme: AppliedTheme | boolean,
+): string | null {
   if (engine?.getLoadedLanguages().includes(language) !== true) return null;
-  return engine.codeToHtml(code, { lang: language, theme: dark ? DARK : LIGHT });
+  const applied = typeof theme === "boolean" ? defaultAppliedTheme(theme) : theme;
+  if (activeThemeSignature !== applied.signature) engine.loadThemeSync(syntaxTheme(applied));
+  activeThemeSignature = applied.signature;
+  return engine.codeToHtml(code, { lang: language, theme: ACTIVE_THEME });
 }
 
-/** Builds the engine with the two themes and the languages worth having up front. */
+/** Builds the engine with the default app palette and the languages worth having up front. */
 async function start(): Promise<HighlighterCore> {
+  const initialTheme = defaultAppliedTheme(false);
   const core = await createHighlighterCore({
-    themes: [import("shiki/themes/github-light.mjs"), import("shiki/themes/github-dark.mjs")],
+    themes: [syntaxTheme(initialTheme)],
     langs: STARTING_LANGUAGES.map(grammarOf).filter((grammar) => grammar !== null),
     engine: createJavaScriptRegexEngine({ forgiving: true }),
   });
   engine = core;
+  activeThemeSignature = initialTheme.signature;
   return core;
+}
+
+/** TextMate scopes projected onto semantic colors from the active Soloist palette. */
+function syntaxTheme(theme: AppliedTheme): ThemeRegistrationRaw {
+  const { colors, extensions } = theme;
+  const syntax = (color: string) => contrastSafeThemeColor(color, [colors.codeBackground]);
+  const invalid = contrastSafeThemeColor(colors.errorForeground, [colors.errorSurface]);
+  return {
+    name: ACTIVE_THEME,
+    type: theme.appearance,
+    colors: {
+      "editor.background": colors.codeBackground,
+      "editor.foreground": colors.codeForeground,
+    },
+    settings: [
+      { settings: { background: colors.codeBackground, foreground: colors.codeForeground } },
+      {
+        scope: ["comment", "punctuation.definition.comment", "string.comment"],
+        settings: { foreground: syntax(colors.textMuted), fontStyle: "italic" },
+      },
+      {
+        scope: ["keyword", "storage", "keyword.control", "keyword.operator.new"],
+        settings: { foreground: syntax(colors.error) },
+      },
+      {
+        scope: ["string", "constant.other.symbol", "markup.inline.raw.string"],
+        settings: { foreground: syntax(extensions.statusRunning) },
+      },
+      {
+        scope: ["constant.numeric", "constant.language", "constant.character"],
+        settings: { foreground: syntax(colors.warningForeground) },
+      },
+      {
+        scope: ["entity.name.function", "support.function", "meta.function-call"],
+        settings: { foreground: syntax(colors.update) },
+      },
+      {
+        scope: ["entity.name.type", "entity.name.class", "support.type", "support.class"],
+        settings: { foreground: syntax(extensions.fileLanguageViolet) },
+      },
+      {
+        scope: ["variable", "variable.other", "meta.object-literal.key"],
+        settings: { foreground: syntax(colors.codeForeground) },
+      },
+      {
+        scope: ["entity.name.tag", "support.class.component"],
+        settings: { foreground: syntax(colors.errorForeground) },
+      },
+      {
+        scope: ["entity.other.attribute-name", "support.type.property-name"],
+        settings: { foreground: syntax(colors.accentForeground) },
+      },
+      {
+        scope: ["markup.heading", "markup.bold"],
+        settings: { foreground: syntax(colors.accentForeground), fontStyle: "bold" },
+      },
+      {
+        scope: ["invalid", "invalid.illegal"],
+        settings: { foreground: invalid, background: colors.errorSurface },
+      },
+    ],
+  };
 }

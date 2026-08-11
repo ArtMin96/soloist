@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { ensureLanguage, highlightedHtml } from "@/lib/diff/highlighter";
+import { ensureHighlighting, highlightedHtml } from "@/lib/diff/highlighter";
 import { languageOf } from "@/lib/diff/language";
-import type { FileContent } from "@/domain";
+import type { AppliedTheme, FileContent } from "@/domain";
+import { defaultAppliedTheme } from "@/theme/runtime";
 
 /**
  * Past this many lines a file is shown plainly. Colouring is a per-line walk, and a file long
@@ -23,13 +24,15 @@ export function FilePreview({
   path,
   content,
   dark,
+  theme,
 }: {
   path: string;
   content: FileContent;
   dark: boolean;
+  theme?: AppliedTheme;
 }) {
   const language = useMemo(() => languageOf(path), [path]);
-  const html = useHighlighted(content.text, language, dark);
+  const html = useHighlighted(content.text, language, theme ?? defaultAppliedTheme(dark));
 
   if (content.text === null) return null;
   return html === null ? (
@@ -48,24 +51,24 @@ export function FilePreview({
 function useHighlighted(
   text: string | null,
   language: string | null,
-  dark: boolean,
+  theme: AppliedTheme,
 ): string | null {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setReady(false);
-    void ensureLanguage(language).then((loaded) => {
+    void ensureHighlighting(language, theme).then((loaded) => {
       if (!cancelled) setReady(loaded);
     });
     return () => {
       cancelled = true;
     };
-  }, [language]);
+  }, [language, theme]);
 
   return useMemo(() => {
     if (!ready || text === null || language === null) return null;
     if (text.split("\n", MAX_LINES_TO_HIGHLIGHT + 1).length > MAX_LINES_TO_HIGHLIGHT) return null;
-    return highlightedHtml(text, language, dark);
-  }, [dark, language, ready, text]);
+    return highlightedHtml(text, language, theme);
+  }, [language, ready, text, theme]);
 }

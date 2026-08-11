@@ -1,80 +1,156 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { appearance as readAppearance, setAppearance as writeAppearance } from "@/api";
+import type { Appearance } from "@/domain";
 import {
-  applyDarkClass,
   applyInterfaceRootFont,
   DEFAULT_APPEARANCE,
   readInterfaceScaleHint,
   readThemeHint,
-  resolveDark,
   systemPrefersDark,
   watchSystemDark,
   writeInterfaceScaleHint,
   writeThemeHint,
 } from "@/lib/appearance";
 import { AppearanceContext } from "@/store/appearanceContext";
-import { persistThenReconcile } from "@/store/persist";
+import { createAppearanceMutationQueue } from "@/store/appearanceMutationQueue";
 import { useLoadOnce } from "@/store/useLoadOnce";
-import type { Appearance } from "@/domain";
+import { useThemeLibrary } from "@/store/useThemeLibrary";
+import { BUILT_IN_THEMES, themeDefinitions } from "@/theme/catalog";
+import { GLASS_OPACITY } from "@/theme/constraints";
+import {
+  appliedThemeFromFile,
+  applyTheme,
+  readAppliedThemeHint,
+  resolveAppliedTheme,
+  writeAppliedThemeHint,
+} from "@/theme/runtime";
 
-// Loads the persisted appearance once, tracks the OS light/dark preference, and applies the
-// resolved theme + interface scale to the document root — so the whole app (and the terminal,
-// which reads the same document) restyles together, immediately and after restart. Mounted at
-// the app root so the theme is always applied, not only while the Settings panel is open. This
-// is the sole runtime authority for the `.dark` class; the entry point only seeds the first
-// paint from the theme hint before this mounts.
+function normalizedAppearance(value: Appearance): Appearance {
+  return {
+    ...DEFAULT_APPEARANCE,
+    ...value,
+    selected_themes: value.selected_themes ?? DEFAULT_APPEARANCE.selected_themes,
+    custom_themes: value.custom_themes ?? [],
+    glass_opacity: value.glass_opacity ?? GLASS_OPACITY.default,
+    terminal: { ...DEFAULT_APPEARANCE.terminal, ...value.terminal },
+  };
+}
+
+function appearanceProjection(current: Appearance, next: Appearance) {
+  const patch: Partial<Appearance> = {};
+  if (current.theme !== next.theme) patch.theme = next.theme;
+  if (current.selected_themes !== next.selected_themes)
+    patch.selected_themes = next.selected_themes;
+  if (current.custom_themes !== next.custom_themes) patch.custom_themes = next.custom_themes;
+  if (current.glass_opacity !== next.glass_opacity) patch.glass_opacity = next.glass_opacity;
+  if (current.interface_font_scale !== next.interface_font_scale) {
+    patch.interface_font_scale = next.interface_font_scale;
+  }
+  if (current.terminal !== next.terminal) patch.terminal = next.terminal;
+  return (latest: Appearance): Appearance => normalizedAppearance({ ...latest, ...patch });
+}
+
+// Loads the durable Appearance document, resolves its selected palette against the OS, and applies
+// the complete theme atomically. Library mutations live in useThemeLibrary; this component owns
+// only persistence ordering, prepaint reconciliation, and the live application boundary.
 export function AppearanceProvider({ children }: { children: ReactNode }) {
-  // Seed the theme and interface scale from the same webview-local hints the pre-paint used, so the
-  // provider's first render matches what is already on screen (no flash, no reflow) until the
-  // persisted record loads.
-  const [appearance, setAppearance] = useState<Appearance>(() => ({
+  const [appearance, setAppearanceState] = useState<Appearance>(() => ({
     ...DEFAULT_APPEARANCE,
     theme: readThemeHint() ?? DEFAULT_APPEARANCE.theme,
     interface_font_scale: readInterfaceScaleHint() ?? DEFAULT_APPEARANCE.interface_font_scale,
   }));
   const [systemDark, setSystemDark] = useState(systemPrefersDark);
+  const [loaded, setLoaded] = useState(false);
+  const [prepaintHint] = useState(readAppliedThemeHint);
+  const appearanceRef = useRef(appearance);
 
-  // Adopt an appearance into local state and refresh the pre-paint hints, so the next cold start is
-  // correct. The one place this provider applies a value, whether seeded, loaded, or saved.
-  const adopt = useCallback((next: Appearance) => {
-    setAppearance(next);
+  const adopt = useCallback((value: Appearance) => {
+    const next = normalizedAppearance(value);
+    appearanceRef.current = next;
+    setAppearanceState(next);
     writeThemeHint(next.theme);
     writeInterfaceScaleHint(next.interface_font_scale);
   }, []);
 
-  // The facade returns the documented defaults when nothing is stored, so this resolves to the
-  // authoritative starting values (superseding the seeded hints) and refreshes them.
-  useLoadOnce(readAppearance, adopt);
+  const [mutationQueue] = useState(() =>
+    createAppearanceMutationQueue({
+      write: writeAppearance,
+      read: readAppearance,
+      current: () => appearanceRef.current,
+      adopt,
+    }),
+  );
 
+  useLoadOnce(readAppearance, (next) => {
+    adopt(next);
+    setLoaded(true);
+  });
   useEffect(() => watchSystemDark(setSystemDark), []);
 
-  const dark = resolveDark(appearance.theme, systemDark);
+  const allThemes = useMemo(
+    () => themeDefinitions(appearance.custom_themes),
+    [appearance.custom_themes],
+  );
+  const customThemes = useMemo(
+    () => allThemes.filter(({ source }) => source === "custom"),
+    [allThemes],
+  );
+  const resolved = useMemo(
+    () => resolveAppliedTheme(appearance, allThemes, systemDark),
+    [allThemes, appearance, systemDark],
+  );
+
+  const saveAsync = useCallback(
+    async (next: Appearance) => {
+      const normalized = normalizedAppearance(next);
+      await mutationQueue.update(appearanceProjection(appearance, normalized));
+    },
+    [appearance, mutationQueue],
+  );
+  const save = useCallback((next: Appearance) => void saveAsync(next).catch(() => {}), [saveAsync]);
+  const updateAppearance = useCallback(
+    (project: (current: Appearance) => Appearance) => saveAsync(project(appearanceRef.current)),
+    [saveAsync],
+  );
+  const runThemeCommand = useCallback(
+    (command: () => Promise<Appearance>) => mutationQueue.task(command),
+    [mutationQueue],
+  );
+  const library = useThemeLibrary(appearanceRef, updateAppearance, runThemeCommand);
+
+  const draftApplied = library.themeDraft
+    ? appliedThemeFromFile(
+        library.themeDraft,
+        library.themeDraft.appearance,
+        appearance.glass_opacity,
+      )
+    : null;
+  const appliedTheme = draftApplied ?? (!loaded && prepaintHint ? prepaintHint : resolved);
+  const dark = appliedTheme.appearance === "dark";
 
   useEffect(() => {
-    applyDarkClass(dark);
-  }, [dark]);
-
+    applyTheme(appliedTheme);
+    writeAppliedThemeHint(appliedTheme);
+  }, [appliedTheme]);
   useEffect(() => {
     applyInterfaceRootFont(appearance.interface_font_scale);
   }, [appearance.interface_font_scale]);
 
-  // Optimistic update then persist; the facade auto-saves and echoes the stored value, which
-  // reconciles the local state with what was written. If the persist fails, fall back to the stored
-  // record so the UI never silently diverges (the shared reconcile the other settings hooks use).
-  const save = useCallback(
-    (next: Appearance) => {
-      adopt(next);
-      persistThenReconcile(writeAppearance(next), readAppearance, adopt);
-    },
-    [adopt],
-  );
-
-  // Memoized so a provider re-render (theme, interface scale, or OS light/dark change) only
-  // propagates to consumers when the value they read actually changes — otherwise the fresh
-  // object identity would re-render every consumer, including each live terminal, on every toggle.
   const value = useMemo(
-    () => ({ appearance, dark, setAppearance: save }),
-    [appearance, dark, save],
+    () => ({
+      appearance,
+      dark,
+      setAppearance: save,
+      resolvedAppearance: appliedTheme.appearance,
+      selectedThemes: appearance.selected_themes,
+      builtInThemes: BUILT_IN_THEMES,
+      customThemes,
+      themes: allThemes,
+      appliedTheme,
+      glassOpacity: appearance.glass_opacity,
+      ...library,
+    }),
+    [allThemes, appearance, appliedTheme, customThemes, dark, library, save],
   );
 
   return <AppearanceContext value={value}>{children}</AppearanceContext>;

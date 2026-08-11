@@ -1,6 +1,8 @@
 import { XIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { GLASS_FLOATING_SURFACE } from "@/components/ui/glass";
+import { cn } from "@/lib/utils";
 
 const DISMISS_LABEL = "Dismiss";
 
@@ -28,7 +30,10 @@ export function ToastCard({
   return (
     <div
       role={role}
-      className="flex w-full items-start gap-2 rounded-lg border border-border bg-popover p-2.5 text-popover-foreground shadow-overlay"
+      className={cn(
+        "flex w-full items-start gap-2 rounded-lg border border-border bg-message-surface p-2.5 text-message-foreground",
+        GLASS_FLOATING_SURFACE,
+      )}
     >
       {mark}
       {children}
@@ -37,7 +42,7 @@ export function ToastCard({
         size="icon-xs"
         aria-label={DISMISS_LABEL}
         onClick={onDismiss}
-        className="-mt-0.5 shrink-0"
+        className="-mt-0.5 shrink-0 text-message-action-foreground hover:bg-message-action-hover"
       >
         <XIcon />
       </Button>
@@ -50,7 +55,7 @@ export function ToastLines({ title, body }: { title: string; body: string }) {
   return (
     <>
       <span className="block type-body font-[550]">{title}</span>
-      <span className="mt-0.5 block type-body text-muted-foreground">{body}</span>
+      <span className="mt-0.5 block type-body text-message-foreground/80">{body}</span>
     </>
   );
 }

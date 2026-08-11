@@ -3,6 +3,10 @@ import { Select as SelectPrimitive } from "radix-ui"
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import {
+  GLASS_FLOATING_SURFACE,
+  GLASS_INTERACTIVE_CONTROL_SURFACE,
+} from "@/components/ui/glass"
 
 function Select(props: React.ComponentProps<typeof SelectPrimitive.Root>) {
   return <SelectPrimitive.Root data-slot="select" {...props} />
@@ -29,7 +33,8 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex w-fit items-center justify-between gap-2 rounded-md border border-input bg-background px-2.5 py-1 text-sm whitespace-nowrap transition-[color,background-color,border-color,box-shadow] duration-[var(--dur-fast)] ease-spring outline-none data-[size=default]:h-8 data-[size=sm]:h-7 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-50 data-[placeholder]:text-muted-foreground dark:bg-input/30 dark:hover:bg-input/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "flex w-fit items-center justify-between gap-2 rounded-md border border-border bg-input px-2.5 py-1 text-sm whitespace-nowrap transition-[color,background-color,border-color,box-shadow] duration-[var(--dur-fast)] ease-spring outline-none motion-reduce:transition-none data-[size=default]:h-8 data-[size=sm]:h-7 hover:bg-secondary focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-50 data-[placeholder]:text-placeholder [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-icon-muted",
+        GLASS_INTERACTIVE_CONTROL_SURFACE,
         className,
       )}
       {...props}
@@ -53,7 +58,8 @@ function SelectContent({
       <SelectPrimitive.Content
         data-slot="select-content"
         className={cn(
-          "relative z-50 max-h-(--radix-select-content-available-height) min-w-32 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border border-border bg-popover text-popover-foreground shadow-overlay duration-[var(--dur-fast)] ease-out-quint data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+          "relative z-50 max-h-(--radix-select-content-available-height) min-w-32 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border text-popover-foreground duration-[var(--dur-fast)] ease-out-quint data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 motion-reduce:animate-none",
+          GLASS_FLOATING_SURFACE,
           position === "popper" &&
             "data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1",
           className,

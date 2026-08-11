@@ -1,8 +1,9 @@
 use soloist_core::{
-    Appearance, Assist, Binding, CursorInactiveStyle, CursorStyle, FontScale, FontWeight,
-    HotkeyAction, Hotkeys, Integrations, LetterSpacing, LineHeight, McpFeatureGroup, McpToolGroups,
-    Notifications, ProcessCpuThreshold, ProcessMemThreshold, Settings, SettingsRepo, Sidebar,
-    TerminalAppearance, Theme, ToolDefaults,
+    built_in_themes, Appearance, Assist, Binding, CursorInactiveStyle, CursorStyle, FontScale,
+    FontWeight, GlassOpacity, HotkeyAction, Hotkeys, Integrations, LetterSpacing, LineHeight,
+    McpFeatureGroup, McpToolGroups, Notifications, ProcessCpuThreshold, ProcessMemThreshold,
+    SelectedThemes, Settings, SettingsRepo, Sidebar, TerminalAppearance, Theme, ToolDefaults,
+    DEFAULT_THEME_ID,
 };
 use tempfile::tempdir;
 
@@ -13,6 +14,12 @@ use crate::SqliteStore;
 /// keyed by the `HotkeyAction` enum, so this is the case that exercises enum-keyed-JSON-map
 /// serialization through the real `serde_json` + SQLite path (the unit tests only parse `"{}"`).
 fn fully_populated() -> Settings {
+    let poimandres = built_in_themes()
+        .expect("the checked-in theme catalog is valid")
+        .iter()
+        .find(|theme| theme.id == "poimandres-dark-theme")
+        .expect("Poimandres is built in")
+        .clone();
     let mut hotkeys = Hotkeys::default();
     hotkeys.remap(
         HotkeyAction::QuickJump,
@@ -32,6 +39,12 @@ fn fully_populated() -> Settings {
     Settings {
         appearance: Appearance {
             theme: Theme::Dark,
+            selected_themes: SelectedThemes {
+                light: DEFAULT_THEME_ID.into(),
+                dark: poimandres.id.clone(),
+            },
+            custom_themes: vec![poimandres],
+            glass_opacity: GlassOpacity::new(65).expect("valid opacity step"),
             interface_font_scale: FontScale::Large,
             terminal: TerminalAppearance {
                 focus_on_click: false,
@@ -151,12 +164,12 @@ fn a_record_without_the_cursor_fields_reads_back_with_the_documented_defaults() 
         )
         .expect("seed a settings record written before the cursor fields existed");
 
-    let terminal = store
+    let appearance = store
         .load(&())
         .expect("an older record still parses")
         .expect("the seeded record is found")
-        .appearance
-        .terminal;
+        .appearance;
+    let terminal = appearance.terminal;
 
     assert_eq!(terminal.cursor_style, CursorStyle::Block);
     assert_eq!(terminal.cursor_inactive_style, CursorInactiveStyle::Outline);
@@ -166,6 +179,10 @@ fn a_record_without_the_cursor_fields_reads_back_with_the_documented_defaults() 
     );
     // The fields the older build did write are untouched by the defaulting.
     assert_eq!(terminal.font_scale, FontScale::Large);
+    assert_eq!(appearance.selected_themes.light, DEFAULT_THEME_ID);
+    assert_eq!(appearance.selected_themes.dark, DEFAULT_THEME_ID);
+    assert_eq!(appearance.glass_opacity.get(), 80);
+    assert!(appearance.custom_themes.is_empty());
 }
 
 #[test]

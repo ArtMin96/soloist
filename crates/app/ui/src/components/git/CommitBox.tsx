@@ -3,9 +3,11 @@ import { SparklesIcon } from "lucide-react";
 import { ASSIST_SETTINGS_TAB } from "@/components/settings/tabs";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { GLASS_CONTROL_SURFACE } from "@/components/ui/glass";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ASSIST_SETUP_HINT } from "@/lib/agents";
+import { cn } from "@/lib/utils";
 import { useOpenSettings } from "@/store/settingsContext";
 import type { FileChange } from "@/domain";
 
@@ -112,7 +114,7 @@ export function CommitBox({
         aria-label="Commit message"
         placeholder={PLACEHOLDER}
         rows={3}
-        className="resize-none"
+        className={cn("resize-none", GLASS_CONTROL_SURFACE)}
         onChange={(event) => setTyped(event.target.value)}
       />
       {/* One line, always there, at a fixed leading: what a press would record changes as the state

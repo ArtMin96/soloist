@@ -1,11 +1,11 @@
 import { useCallback } from "react";
 import { NullableSelect } from "@/components/settings/controls/NullableSelect";
-import { SegmentedControl } from "@/components/SegmentedControl";
 import { SettingRow } from "@/components/settings/controls/SettingRow";
 import { SettingSelect } from "@/components/settings/controls/SettingSelect";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { SizeStepper } from "@/components/settings/controls/SizeStepper";
 import { TerminalPreview } from "@/components/settings/TerminalPreview";
+import { ThemeSettings } from "@/components/settings/theme/ThemeSettings";
 import { Switch } from "@/components/ui/switch";
 import {
   CURSOR_INACTIVE_STYLE_OPTIONS,
@@ -14,7 +14,6 @@ import {
   LETTER_SPACING_OPTIONS,
   LINE_HEIGHT_OPTIONS,
   monoFontOptions,
-  THEME_OPTIONS,
 } from "@/lib/appearance";
 import { useAppearance } from "@/store/appearanceContext";
 import type {
@@ -25,7 +24,6 @@ import type {
   LetterSpacing,
   LineHeight,
   TerminalAppearance,
-  Theme,
 } from "@/domain";
 
 // The Appearance tab: theme + interface size, then the terminal typography, with a live preview.
@@ -47,15 +45,9 @@ export function AppearancePanel() {
 
   return (
     <div className="flex flex-col">
+      <ThemeSettings />
+
       <SettingsSection title="Application">
-        <SettingRow label="Theme" description="The application color scheme.">
-          <SegmentedControl<Theme>
-            value={appearance.theme}
-            options={THEME_OPTIONS}
-            onChange={(theme) => set({ theme })}
-            ariaLabel="Theme"
-          />
-        </SettingRow>
         <SettingRow label="Interface size" description="Adjust the size of all interface elements.">
           <SizeStepper
             value={appearance.interface_font_scale}

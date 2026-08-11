@@ -833,11 +833,207 @@ export interface TerminalAppearance {
   cursor_blink: boolean;
 }
 
+export type ThemeAppearance = "light" | "dark";
+
+export type ThemeColorRole =
+  | "canvas"
+  | "chrome"
+  | "toolbar"
+  | "toolbarForeground"
+  | "toolbarBorder"
+  | "toolbarControl"
+  | "toolbarControlForeground"
+  | "toolbarControlHover"
+  | "surface"
+  | "surfaceRaised"
+  | "surfaceOverlay"
+  | "text"
+  | "textMuted"
+  | "border"
+  | "input"
+  | "focus"
+  | "accent"
+  | "accentForeground"
+  | "secondary"
+  | "secondaryForeground"
+  | "muted"
+  | "mutedForeground"
+  | "placeholder"
+  | "secondaryLabel"
+  | "iconMuted"
+  | "error"
+  | "errorForeground"
+  | "errorSurface"
+  | "warning"
+  | "warningForeground"
+  | "warningSurface"
+  | "update"
+  | "updateForeground"
+  | "updateSurface"
+  | "accentSurface"
+  | "accentSurfaceForeground"
+  | "messageSurface"
+  | "messageForeground"
+  | "messageAction"
+  | "messageActionForeground"
+  | "messageActionHover"
+  | "codeBackground"
+  | "codeForeground"
+  | "sidebar"
+  | "sidebarForeground"
+  | "sidebarMutedForeground"
+  | "sidebarControlSurface"
+  | "sidebarRowHover"
+  | "sidebarRowActive"
+  | "sidebarRowSelected"
+  | "sidebarBorder"
+  | "terminalBackground"
+  | "terminalForeground"
+  | "terminalCursor"
+  | "terminalSelection"
+  | "terminalScrollbar"
+  | "terminalScrollbarHover";
+
+export type ThemeColors = Record<ThemeColorRole, string>;
+
+export interface ThemeFile {
+  version: 1;
+  id: string;
+  name: string;
+  appearance: ThemeAppearance;
+  author?: string;
+  colors: ThemeColors;
+  variants?: Partial<Record<ThemeAppearance, ThemeColors>>;
+  sidebarArtwork?: boolean;
+  managed?: boolean;
+  extensions?: {
+    soloist?: Partial<SoloistThemeExtensions>;
+  };
+}
+
+export interface ThemeSelection {
+  light: string;
+  dark: string;
+}
+
+export type ThemeConflictPolicy = "reject" | "replace" | "keep_both";
+
+export interface ThemeDefinition extends ThemeFile {
+  source: "built_in" | "custom";
+}
+
+export interface ThemeExtensions {
+  statusRunning: string;
+  statusTransition: string;
+  statusStopped: string;
+  statusCrashed: string;
+  statusExhausted: string;
+  statusAttention: string;
+  gitModified: string;
+  gitAdded: string;
+  gitDeleted: string;
+  gitConflicted: string;
+  gitIgnored: string;
+  gitBranchSynced: string;
+  gitBranchLocal: string;
+  fileLanguageAmber: string;
+  fileLanguageAzure: string;
+  fileLanguageBlue: string;
+  fileLanguageCyan: string;
+  fileLanguageGreen: string;
+  fileLanguageOrange: string;
+  fileLanguagePink: string;
+  fileLanguageRed: string;
+  fileLanguageViolet: string;
+  overlayScrim: string;
+  shadowInk: string;
+}
+
+// Optional app-specific roles carried beside the T3-v1 base palette. Every field is camelCase on
+// the wire. A sparse extension remains portable: the runtime derives each omitted value from that
+// theme's own base palette, while an explicit value wins exactly.
+export interface SoloistThemeExtensions extends ThemeExtensions {
+  terminalSelectionInactive: string;
+  terminalScrollbarActive: string;
+  terminalOverviewRulerBorder: string;
+  terminalAnsiBlack: string;
+  terminalAnsiRed: string;
+  terminalAnsiGreen: string;
+  terminalAnsiYellow: string;
+  terminalAnsiBlue: string;
+  terminalAnsiMagenta: string;
+  terminalAnsiCyan: string;
+  terminalAnsiWhite: string;
+  terminalAnsiBrightBlack: string;
+  terminalAnsiBrightRed: string;
+  terminalAnsiBrightGreen: string;
+  terminalAnsiBrightYellow: string;
+  terminalAnsiBrightBlue: string;
+  terminalAnsiBrightMagenta: string;
+  terminalAnsiBrightCyan: string;
+  terminalAnsiBrightWhite: string;
+  terminalSearchMatchBackground: string;
+  terminalSearchMatchBorder: string;
+  terminalSearchMatchOverviewRuler: string;
+  terminalSearchActiveMatchBackground: string;
+  terminalSearchActiveMatchBorder: string;
+  terminalSearchActiveMatchOverviewRuler: string;
+}
+
+export interface AppliedTerminalTheme {
+  background: string;
+  foreground: string;
+  cursor: string;
+  cursorAccent: string;
+  selectionBackground: string;
+  selectionInactiveBackground: string;
+  scrollbarSliderBackground: string;
+  scrollbarSliderHoverBackground: string;
+  scrollbarSliderActiveBackground: string;
+  overviewRulerBorder: string;
+  black: string;
+  red: string;
+  green: string;
+  yellow: string;
+  blue: string;
+  magenta: string;
+  cyan: string;
+  white: string;
+  brightBlack: string;
+  brightRed: string;
+  brightGreen: string;
+  brightYellow: string;
+  brightBlue: string;
+  brightMagenta: string;
+  brightCyan: string;
+  brightWhite: string;
+  searchMatchBackground: string;
+  searchMatchBorder: string;
+  searchMatchOverviewRuler: string;
+  searchActiveMatchBackground: string;
+  searchActiveMatchBorder: string;
+  searchActiveMatchOverviewRuler: string;
+}
+
+export interface AppliedTheme {
+  id: string;
+  name: string;
+  appearance: ThemeAppearance;
+  colors: ThemeColors;
+  extensions: ThemeExtensions;
+  terminal: AppliedTerminalTheme;
+  glassOpacity: number;
+  signature: string;
+}
+
 // The Appearance tab document (mirrors core::Appearance).
 export interface Appearance {
   theme: Theme;
   interface_font_scale: FontScale;
   terminal: TerminalAppearance;
+  selected_themes: ThemeSelection;
+  custom_themes: ThemeFile[];
+  glass_opacity: number;
 }
 
 // When a process row shows its CPU/memory read-out (mirrors the core Sidebar threshold enums).

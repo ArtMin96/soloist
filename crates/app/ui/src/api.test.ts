@@ -3,18 +3,30 @@ import { afterEach, describe, expect, it } from "vitest";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import {
   addSharedCommand,
+  createTheme,
+  duplicateTheme,
+  importTheme,
+  inspectTheme,
   makeCommandLocal,
   orchestrationSnapshot,
   projectSettingsPage,
+  removeTheme,
+  selectTheme,
+  setGlassOpacity,
   setProjectAutoStartGate,
+  updateTheme,
 } from "@/api";
 import type {
+  Appearance,
   OrchestrationSnapshot,
   ProcessSpec,
   ProjectSettings,
   ProjectSettingsPage,
   TrustReviewCommand,
+  ThemeFile,
 } from "@/domain";
+import { DEFAULT_APPEARANCE } from "@/lib/appearance";
+import { BUILT_IN_THEMES } from "@/theme/catalog";
 
 afterEach(() => {
   clearMocks();
@@ -143,5 +155,39 @@ describe("api — orchestration read-model wrapper", () => {
 
     expect(seen).toEqual({ cmd: "orchestration_snapshot", args: { project: 4 } });
     expect(result.agents.find((node) => node.id === 2)?.parent).toBe(1);
+  });
+});
+
+describe("api — task-shaped theme commands", () => {
+  it("uses the registered command names and camel-case invoke arguments", async () => {
+    const theme = { ...BUILT_IN_THEMES[1] } as Partial<(typeof BUILT_IN_THEMES)[number]>;
+    delete theme.source;
+    const file = theme as ThemeFile;
+    const appearance: Appearance = { ...DEFAULT_APPEARANCE };
+    const seen: Array<{ cmd: string; args: unknown }> = [];
+    mockIPC((cmd, args) => {
+      seen.push({ cmd, args });
+      return cmd === "inspect_theme" ? file : appearance;
+    });
+
+    await selectTheme("dark", file.id);
+    await createTheme(file);
+    await updateTheme(file);
+    await importTheme("{}", "keep_both");
+    await inspectTheme("{}");
+    await duplicateTheme(file.id);
+    await removeTheme(file.id);
+    await setGlassOpacity(80);
+
+    expect(seen).toEqual([
+      { cmd: "select_theme", args: { appearance: "dark", themeId: file.id } },
+      { cmd: "create_theme", args: { theme: file } },
+      { cmd: "update_theme", args: { theme: file } },
+      { cmd: "import_theme", args: { themeJson: "{}", conflict: "keep_both" } },
+      { cmd: "inspect_theme", args: { themeJson: "{}" } },
+      { cmd: "duplicate_theme", args: { themeId: file.id } },
+      { cmd: "remove_theme", args: { themeId: file.id } },
+      { cmd: "set_glass_opacity", args: { opacity: 80 } },
+    ]);
   });
 });

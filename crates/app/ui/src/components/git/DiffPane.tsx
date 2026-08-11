@@ -62,7 +62,7 @@ export function DiffPane({
 }) {
   const [split, setSplit] = useState<DiffLayout>(SIDE_BY_SIDE);
   const [target, setTarget] = useState<DiffTarget>(UNSTAGED);
-  const { dark } = useAppearance();
+  const { appliedTheme, dark } = useAppearance();
   const showing = selection.kind === CHANGE;
   const {
     diff,
@@ -148,6 +148,7 @@ export function DiffPane({
             diff={diff}
             layout={split}
             dark={dark}
+            theme={appliedTheme}
             actions={
               // A hunk can only be acted on where there is something to act on: an untracked
               // path is not in the index yet, and a project that has not been trusted may not
@@ -172,7 +173,7 @@ export function DiffPane({
       ) : content.text === null ? (
         <SplitMessage>{BINARY}</SplitMessage>
       ) : (
-        <FilePreview path={selection.path} content={content} dark={dark} />
+        <FilePreview path={selection.path} content={content} dark={dark} theme={appliedTheme} />
       )}
       <DiscardDialog
         discarding={discarding === null ? null : { path: selection.path, hunk: true }}

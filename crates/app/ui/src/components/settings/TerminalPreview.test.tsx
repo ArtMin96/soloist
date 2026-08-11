@@ -5,12 +5,13 @@ import { TerminalPreview } from "@/components/settings/TerminalPreview";
 import { DEFAULT_APPEARANCE } from "@/lib/appearance";
 import { ANSI_COLOR_NAMES, ansiColorLabel, terminalColors } from "@/lib/terminalPalette";
 import { AppearanceContext } from "@/store/appearanceContext";
+import { fakeAppearanceState } from "@/test/appearanceState";
 
 afterEach(cleanup);
 
 function renderPreview(dark: boolean) {
   return render(
-    <AppearanceContext value={{ appearance: DEFAULT_APPEARANCE, dark, setAppearance: () => {} }}>
+    <AppearanceContext value={fakeAppearanceState(DEFAULT_APPEARANCE, dark)}>
       <TerminalPreview />
     </AppearanceContext>,
   );

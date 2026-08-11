@@ -59,6 +59,9 @@ import type {
   TodoDoc,
   TodoView,
   ToolDefaults,
+  ThemeAppearance,
+  ThemeConflictPolicy,
+  ThemeFile,
   TrustReviewCommand,
 } from "@/domain";
 
@@ -674,6 +677,38 @@ export function appearance(): Promise<Appearance> {
 
 export function setAppearance(appearance: Appearance): Promise<Appearance> {
   return invoke<Appearance>("set_appearance", { appearance });
+}
+
+export function selectTheme(appearance: ThemeAppearance, themeId: string): Promise<Appearance> {
+  return invoke<Appearance>("select_theme", { appearance, themeId });
+}
+
+export function createTheme(theme: ThemeFile): Promise<Appearance> {
+  return invoke<Appearance>("create_theme", { theme });
+}
+
+export function updateTheme(theme: ThemeFile): Promise<Appearance> {
+  return invoke<Appearance>("update_theme", { theme });
+}
+
+export function importTheme(themeJson: string, conflict: ThemeConflictPolicy): Promise<Appearance> {
+  return invoke<Appearance>("import_theme", { themeJson, conflict });
+}
+
+export function inspectTheme(themeJson: string): Promise<ThemeFile> {
+  return invoke<ThemeFile>("inspect_theme", { themeJson });
+}
+
+export function duplicateTheme(themeId: string): Promise<Appearance> {
+  return invoke<Appearance>("duplicate_theme", { themeId });
+}
+
+export function removeTheme(themeId: string): Promise<Appearance> {
+  return invoke<Appearance>("remove_theme", { themeId });
+}
+
+export function setGlassOpacity(opacity: number): Promise<Appearance> {
+  return invoke<Appearance>("set_glass_opacity", { opacity });
 }
 
 export function sidebarSettings(): Promise<Sidebar> {
