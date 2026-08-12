@@ -35,7 +35,7 @@ export function Titlebar({ appName, appVersion, actions }: TitlebarProps) {
     <header
       {...DRAG}
       onDoubleClick={onDoubleClick}
-      className="flex h-11 shrink-0 items-center gap-2.5 border-b bg-sidebar pr-2 pl-3 [transform:translateZ(0)]"
+      className="flex h-11 shrink-0 items-center gap-2.5 border-b border-toolbar-border bg-toolbar pr-2 pl-3 text-toolbar-foreground [transform:translateZ(0)]"
     >
       <img
         src="/logo.png"
@@ -46,11 +46,11 @@ export function Titlebar({ appName, appVersion, actions }: TitlebarProps) {
         {...DRAG}
         className="size-[18px] shrink-0 rounded-[5px]"
       />
-      <span {...DRAG} className="text-[0.9375rem] font-[550] tracking-[-0.005em] text-foreground">
+      <span {...DRAG} className="text-[0.9375rem] font-[550] tracking-[-0.005em]">
         {appName}
       </span>
       {appVersion && (
-        <span {...DRAG} className="font-mono text-[0.6875rem] text-muted-foreground">
+        <span {...DRAG} className="font-mono text-[0.6875rem] text-icon-muted">
           v{appVersion}
         </span>
       )}
@@ -66,7 +66,11 @@ export function Titlebar({ appName, appVersion, actions }: TitlebarProps) {
       <div {...DRAG} className="peer flex min-w-0 items-center gap-2.5 empty:hidden">
         {actions}
       </div>
-      <div {...DRAG} aria-hidden className="h-4 w-px shrink-0 bg-border peer-empty:hidden" />
+      <div
+        {...DRAG}
+        aria-hidden
+        className="h-4 w-px shrink-0 bg-toolbar-border peer-empty:hidden"
+      />
       <WindowControls
         isMaximized={isMaximized}
         onMinimize={minimize}

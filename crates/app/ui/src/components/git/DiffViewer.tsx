@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { DiffModeEnum, DiffView } from "@git-diff-view/react";
 import "@git-diff-view/react/styles/diff-view.css";
 import "@/components/git/diff-view.css";
-import { ensureLanguage, HIGHLIGHTER } from "@/lib/diff/highlighter";
+import { ensureHighlighting, HIGHLIGHTER } from "@/lib/diff/highlighter";
 import { languageOf } from "@/lib/diff/language";
-import type { FileDiff, HunkRange } from "@/domain";
+import type { AppliedTheme, FileDiff, HunkRange } from "@/domain";
+import { defaultAppliedTheme } from "@/theme/runtime";
 
 /** How the two sides of a change are laid out. */
 export const SIDE_BY_SIDE = "side-by-side" as const;
@@ -28,14 +29,17 @@ export function DiffViewer({
   diff,
   layout,
   dark,
+  theme,
   actions,
 }: {
   diff: FileDiff;
   layout: DiffLayout;
   dark: boolean;
+  theme?: AppliedTheme;
   actions?: (hunk: HunkRange) => ReactNode;
 }) {
   const language = useMemo(() => languageOf(diff.path), [diff.path]);
+  const appliedTheme = useMemo(() => theme ?? defaultAppliedTheme(dark), [theme, dark]);
   const [highlight, setHighlight] = useState(false);
 
   useEffect(() => {
@@ -43,13 +47,13 @@ export function DiffViewer({
     setHighlight(false);
     // A grammar is fetched, so the diff paints plain first and gains its colour a moment later
     // rather than waiting on a module before showing anything at all.
-    void ensureLanguage(language).then((ready) => {
+    void ensureHighlighting(language, appliedTheme).then((ready) => {
       if (!cancelled) setHighlight(ready);
     });
     return () => {
       cancelled = true;
     };
-  }, [language]);
+  }, [appliedTheme, language]);
 
   const attached = useMemo(() => (actions ? attach(diff.hunks) : undefined), [actions, diff.hunks]);
 

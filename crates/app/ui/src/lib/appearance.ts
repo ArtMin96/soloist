@@ -5,6 +5,7 @@
 // values from here — no magic numbers scattered across components.
 
 import type {
+  AppliedTheme,
   Appearance,
   CursorInactiveStyle,
   CursorStyle,
@@ -15,6 +16,7 @@ import type {
   Theme,
 } from "@/domain";
 import { TERMINAL_MINIMUM_CONTRAST_RATIO, terminalColors } from "@/lib/terminalPalette";
+import { GLASS_OPACITY } from "@/theme/constraints";
 
 // Terminal font size (px) per step — xterm takes a px size directly.
 const TERMINAL_FONT_PX: Record<FontScale, number> = {
@@ -94,6 +96,9 @@ const ROOT_FONT_PX = 16;
 export const DEFAULT_APPEARANCE: Appearance = {
   theme: "system",
   interface_font_scale: "medium",
+  selected_themes: { light: "soloist-default", dark: "soloist-default" },
+  custom_themes: [],
+  glass_opacity: GLASS_OPACITY.default,
   terminal: {
     focus_on_click: true,
     copy_on_select: false,
@@ -246,7 +251,7 @@ export const TERMINAL_FIXED_OPTIONS = {
 
 // The xterm.js options derived from the appearance document — applied at creation and pushed
 // live on every change. `dark` is resolved separately (it depends on the OS preference).
-export function terminalOptions(appearance: Appearance, dark: boolean) {
+export function terminalOptions(appearance: Appearance, theme: boolean | AppliedTheme) {
   const t = appearance.terminal;
   return {
     fontFamily: terminalFontFamily(t.font_family),
@@ -258,7 +263,7 @@ export function terminalOptions(appearance: Appearance, dark: boolean) {
     cursorStyle: t.cursor_style,
     cursorInactiveStyle: t.cursor_inactive_style,
     cursorBlink: t.cursor_blink,
-    theme: terminalColors(dark),
+    theme: terminalColors(theme),
   };
 }
 

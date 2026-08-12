@@ -431,6 +431,14 @@ pub fn run() {
             commands::orphans_resolve,
             commands::appearance,
             commands::set_appearance,
+            commands::select_theme,
+            commands::create_theme,
+            commands::update_theme,
+            commands::import_theme,
+            commands::inspect_theme,
+            commands::duplicate_theme,
+            commands::remove_theme,
+            commands::set_glass_opacity,
             commands::sidebar_settings,
             commands::set_sidebar_settings,
             commands::hotkeys,
@@ -553,4 +561,27 @@ pub fn run() {
                 soloist_httpapi::remove_runtime();
             }
         });
+}
+
+#[cfg(test)]
+mod theme_command_registration_tests {
+    #[test]
+    fn every_task_shaped_theme_command_is_registered() {
+        let source = include_str!("lib.rs");
+        for command in [
+            "select_theme",
+            "create_theme",
+            "update_theme",
+            "import_theme",
+            "inspect_theme",
+            "duplicate_theme",
+            "remove_theme",
+            "set_glass_opacity",
+        ] {
+            assert!(
+                source.contains(&format!("commands::{command},")),
+                "missing Tauri registration for {command}"
+            );
+        }
+    }
 }

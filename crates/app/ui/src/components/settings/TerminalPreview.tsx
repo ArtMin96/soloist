@@ -18,9 +18,9 @@ const SWATCH_OUTLINE_ALPHA = "26";
 // renderer reads, so what the panel shows is what the terminal becomes. Not an emulator: a
 // styled sample, cheap to repaint on every change.
 export function TerminalPreview() {
-  const { appearance, dark } = useAppearance();
+  const { appearance, appliedTheme } = useAppearance();
   const t = appearance.terminal;
-  const colors = terminalColors(dark);
+  const colors = terminalColors(appliedTheme);
 
   const style = {
     fontFamily: terminalFontFamily(t.font_family),

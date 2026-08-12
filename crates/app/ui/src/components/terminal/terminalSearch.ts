@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import type { Terminal } from "@xterm/xterm";
+import type { AppliedTheme } from "@/domain";
 import { searchDecorationColors } from "@/lib/terminalPalette";
 
 // Ceiling on how many matches the search addon decorates at once. Each match costs a marker and a
@@ -37,12 +38,12 @@ export interface TerminalSearch {
 // Asking for decorations is what makes every match visible at once, in the output and in the
 // overview ruler — and it is also the only way to learn how many there are: the addon reports no
 // result counts at all for a search that decorates nothing.
-function searchOptions(dark: boolean, incremental = false): ISearchOptions {
+function searchOptions(theme: boolean | AppliedTheme, incremental = false): ISearchOptions {
   return {
     caseSensitive: false,
     regex: false,
     incremental,
-    decorations: searchDecorationColors(dark),
+    decorations: searchDecorationColors(theme),
   };
 }
 
@@ -53,7 +54,7 @@ function searchOptions(dark: boolean, incremental = false): ISearchOptions {
  * disposer that releases the subscription with it. The returned callbacks are stable across
  * remounts — they read the addon through a ref — so a caller keeps one reference to them.
  */
-export function useTerminalSearch(dark: boolean) {
+export function useTerminalSearch(theme: boolean | AppliedTheme) {
   const addonRef = useRef<SearchAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
   // The query the decorations currently on screen were painted for, or null while nothing is
@@ -62,8 +63,11 @@ export function useTerminalSearch(dark: boolean) {
   const [matches, setMatches] = useState<SearchMatches>(NO_MATCHES);
   // The theme, read at the moment a search runs rather than captured, so the callbacks stay stable
   // and a match decorated after a theme flip is drawn in the new palette.
-  const darkRef = useRef(dark);
-  darkRef.current = dark;
+  const themeRef = useRef(theme);
+  useEffect(() => {
+    themeRef.current = theme;
+  }, [theme]);
+  const themeSignature = typeof theme === "boolean" ? String(theme) : theme.signature;
 
   const attach = useCallback((term: Terminal) => {
     const addon = new SearchAddon({ highlightLimit: SEARCH_HIGHLIGHT_LIMIT });
@@ -85,7 +89,7 @@ export function useTerminalSearch(dark: boolean) {
   const findNext = useCallback((query: string) => {
     const addon = addonRef.current;
     if (!addon) return;
-    addon.findNext(query, searchOptions(darkRef.current, true));
+    addon.findNext(query, searchOptions(themeRef.current, true));
     queryRef.current = query;
   }, []);
 
@@ -94,7 +98,7 @@ export function useTerminalSearch(dark: boolean) {
     if (!addon) return;
     // No `incremental` here: the addon expands the current selection only for `findNext`; on
     // `findPrevious` it must step to the prior match, so the flag is deliberately omitted.
-    addon.findPrevious(query, searchOptions(darkRef.current));
+    addon.findPrevious(query, searchOptions(themeRef.current));
     queryRef.current = query;
   }, []);
 
@@ -129,9 +133,9 @@ export function useTerminalSearch(dark: boolean) {
     if (!addon || !term || !query) return;
     const viewport = term.buffer.active.viewportY;
     addon.clearDecorations();
-    addon.findPrevious(query, searchOptions(dark));
+    addon.findPrevious(query, searchOptions(themeRef.current));
     if (term.buffer.active.viewportY !== viewport) term.scrollToLine(viewport);
-  }, [dark]);
+  }, [themeSignature]);
 
   const search: TerminalSearch = { findNext, findPrevious, clear, matches };
   return { attach, search };

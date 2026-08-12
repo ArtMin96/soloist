@@ -10,9 +10,21 @@
 use super::Facade;
 use crate::ports::StoreError;
 use crate::settings::{
-    Appearance, Assist, Binding, HotkeyAction, HotkeyBindingView, Integrations, McpFeatureGroup,
-    McpToolGroups, Notifications, Sidebar, ToolDefaults,
+    built_in_themes, Appearance, Assist, Binding, GlassOpacity, HotkeyAction, HotkeyBindingView,
+    Integrations, McpFeatureGroup, McpToolGroups, Notifications, Sidebar, ThemeAppearance,
+    ThemeConflictPolicy, ThemeError, ThemeFile, ToolDefaults,
 };
+
+#[derive(Debug, thiserror::Error)]
+/// A durable appearance mutation failed in either persistence or theme validation.
+pub enum AppearanceSettingsError {
+    /// The settings document could not be read or written.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// The requested theme mutation violated the theme contract.
+    #[error(transparent)]
+    Theme(#[from] ThemeError),
+}
 
 impl Facade {
     /// The Appearance settings — theme + terminal typography. Absent settings read as the
@@ -28,6 +40,90 @@ impl Facade {
         Ok(self
             .settings
             .update(&(), |s| s.appearance = appearance)?
+            .appearance)
+    }
+
+    /// Selects a built-in or custom theme for one appearance half and persists the result.
+    pub fn select_theme(
+        &self,
+        appearance: ThemeAppearance,
+        theme_id: &str,
+    ) -> Result<Appearance, AppearanceSettingsError> {
+        let built_ins = built_in_themes()?;
+        self.update_appearance(|settings| settings.select_theme(appearance, theme_id, built_ins))
+    }
+
+    /// Installs a new custom theme, rejecting any built-in or custom ID conflict.
+    pub fn create_theme(&self, theme: ThemeFile) -> Result<Appearance, AppearanceSettingsError> {
+        let built_ins = built_in_themes()?;
+        let ids = built_in_ids(built_ins);
+        self.update_appearance(move |settings| {
+            settings
+                .install_custom_theme(theme, ThemeConflictPolicy::Reject, &ids)
+                .map(|_| ())
+        })
+    }
+
+    /// Replaces an existing custom theme while keeping built-in themes immutable.
+    pub fn update_theme(&self, theme: ThemeFile) -> Result<Appearance, AppearanceSettingsError> {
+        let ids = built_in_ids(built_in_themes()?);
+        self.update_appearance(move |settings| {
+            settings.update_custom_theme(theme, &ids).map(|_| ())
+        })
+    }
+
+    /// Parses and installs T3-v1 JSON using the requested conflict policy.
+    pub fn import_theme(
+        &self,
+        theme_json: &str,
+        conflict: ThemeConflictPolicy,
+    ) -> Result<Appearance, AppearanceSettingsError> {
+        let theme = ThemeFile::from_json(theme_json)?;
+        let ids = built_in_ids(built_in_themes()?);
+        self.update_appearance(move |settings| {
+            settings
+                .install_custom_theme(theme, conflict, &ids)
+                .map(|_| ())
+        })
+    }
+
+    /// Parses, validates, and completes a T3-v1 theme without changing durable settings.
+    pub fn inspect_theme(&self, theme_json: &str) -> Result<ThemeFile, AppearanceSettingsError> {
+        Ok(ThemeFile::from_json(theme_json)?)
+    }
+
+    /// Copies a built-in or custom theme under the core's deterministic unique ID.
+    pub fn duplicate_theme(&self, theme_id: &str) -> Result<Appearance, AppearanceSettingsError> {
+        let built_ins = built_in_themes()?;
+        self.update_appearance(|settings| settings.duplicate_theme(theme_id, built_ins).map(|_| ()))
+    }
+
+    /// Removes a custom theme and restores any affected selection to Soloist Default.
+    pub fn remove_theme(&self, theme_id: &str) -> Result<Appearance, AppearanceSettingsError> {
+        let ids = built_in_ids(built_in_themes()?);
+        self.update_appearance(|settings| settings.remove_custom_theme(theme_id, &ids).map(|_| ()))
+    }
+
+    /// Persists the validated opacity used by in-app glass surfaces.
+    pub fn set_glass_opacity(
+        &self,
+        opacity: GlassOpacity,
+    ) -> Result<Appearance, AppearanceSettingsError> {
+        self.update_appearance(|settings| {
+            settings.glass_opacity = opacity;
+            Ok(())
+        })
+    }
+
+    fn update_appearance(
+        &self,
+        mutator: impl FnOnce(&mut Appearance) -> Result<(), ThemeError>,
+    ) -> Result<Appearance, AppearanceSettingsError> {
+        Ok(self
+            .settings
+            .try_update(&(), |settings| {
+                mutator(&mut settings.appearance).map_err(AppearanceSettingsError::from)
+            })?
             .appearance)
     }
 
@@ -171,6 +267,10 @@ impl Facade {
             .update(&(), |s| s.mcp_tool_groups.set(group, enabled))?
             .mcp_tool_groups)
     }
+}
+
+fn built_in_ids(themes: &[ThemeFile]) -> Vec<&str> {
+    themes.iter().map(|theme| theme.id.as_str()).collect()
 }
 
 #[cfg(test)]

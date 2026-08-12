@@ -1922,3 +1922,79 @@ it gave for leaving Kimi out; that reason no longer stands.
 **Effect on parity:** none. No row asserts the probe set's membership; the probe cost is unchanged in
 practice because the sweep runs every probe concurrently, so it still costs about one login-shell
 startup rather than their sum.
+
+---
+
+## D-38 — Themes are a library with 57 semantic roles, and surfaces are glass (a Soloist extension) 🟢
+
+**Introduced:** the `theme-studio` initiative (owner-directed; `plan/02` §TH). Recorded here for the
+same reason as
+[D-35](#d-35--git-is-a-first-class-surface-inside-soloist-a-soloist-extension-) and
+[D-20](#d-20--diagrams-are-a-first-class-coordination-document-rendering-mermaid-a-soloist-extension-):
+so a Soloist original is discoverable beside the parity record rather than buried in a design note.
+
+**Solo — silent, not contradicted.** ⚠️ A **strict-reading exception** to this file's scope, on the
+D-20/D-35 precedent. `plan/05` §10 records an **Appearance** settings tab, and §12's I7f row records
+what the demo showed inside it: a theme control offering **Light / Dark / System**, plus a font-scale
+stepper. The public record describes **no theme library, no importable theme file, no semantic colour
+vocabulary and no translucent surface** — and **no Solo page states that a rebuild may not add one**.
+The record is simply silent, and per `CLAUDE.md` §9 that silence *is* the gap, so the primary decision
+lives in [`plan/05` §12](plan/05-solo-reference-and-sources.md). **Nothing here asserts what Solo does
+or does not do**, and no behaviour below is attributed to Solo.
+
+**The one place this touches a documented behaviour** — hence the entry rather than a §12 row alone:
+Solo's Appearance theme control is documented as Light/Dark/System, a single three-way switch. Ours
+**widens** it: Light/Dark/System becomes an *appearance mode*, and each of light and dark carries its
+own theme id. The observable difference is that choosing "Dark" no longer determines what the app
+looks like — the dark *theme* does. `plan/02` **I5** and **I7f** were narrowed to the mode switch
+they still verify; neither row's pass/fail state changed.
+
+**Soloist:**
+
+- **A theme is a document of 57 semantic colour roles** (`ThemeColorRole`, defined once in the core,
+  mirrored in one `domain.ts`, and exhaustive in `theme/roles.ts` so a new role cannot be half-wired
+  without failing `tsc`), with **per-appearance palettes** in `variants`. Soloist's own non-T3 roles
+  live in a separate `ThemeVariantExtensions` set that is **appearance-scoped like the palette beside
+  it**, and derived from that palette when omitted.
+- **One root `themes/builtins/catalog.json` is the single source of truth** for the six ordered
+  built-ins, read by **both** Rust (`include_str!`) and TypeScript. Two languages, one palette.
+- **The core owns the domain** — parsing, strict validation, sparse completion, id normalization,
+  conflict policy, selection, mutation, deletion fallback, persistence. The frontend holds one
+  exhaustive runtime projection onto CSS custom properties (which also feeds the terminal palette,
+  Shiki/diff highlighting, Mermaid invalidation and the flash-free prepaint) and **no policy**.
+- **No migration.** A theme lives in the existing global settings document, so `SCHEMA_VERSION` stays
+  **20** — the serde-default settings shape absorbing a new sub-document, exactly as `plan/05` §12's
+  settings-persistence row anticipated.
+- **Local-user authority only.** Nine Tauri commands on `Facade`; **no MCP, HTTP or CLI surface** —
+  `crates/mcp`, `crates/http` and `crates/cli` contain no theme code. An agent must not be able to
+  repaint the user's app, and no wire caller has a reason to.
+- **"T3 v1"** is the interchange shape we accept and emit. We record the compatibility decision and
+  **characterize nothing about the format's origin** — no upstream project, spec URL or version
+  history, because we hold no citable source for one. Validation is strict (unknown fields refused)
+  and a rejection **names the offending field or rule**; `description` is accepted and round-trips.
+- **Glass is in-app only.** A restrained elevation ladder — floating, modal, resting-control and
+  ghost-interaction treatments authored once, `supports-backdrop-filter:`-guarded with an opaque
+  fallback, over palette-derived rim and shadow tokens. **The native window stays opaque:** no
+  vibrancy, no compositor call, no transparent-window flag. A translucent desktop window is a macOS
+  idiom; our target is Ubuntu/WebKitGTK (D2), and an opaque shell stays legible against any wallpaper
+  without depending on a compositor being present.
+- **Glass opacity is bounded in the core** — 40–100% in 5-point steps, default 80, an off-step or
+  out-of-range value **refused as a typed error rather than clamped**. The floor is deliberate: below
+  it, text over glass stops clearing its contrast pair, which would leave the accessibility floor at
+  the mercy of a slider. `prefers-reduced-transparency` and `prefers-reduced-motion` both fall back.
+- **The accessibility floor is a single seam.** Seven role pairs at 4.5:1 in `theme/accessibility.ts`,
+  and **every published built-in palette must clear them** (both appearances of a paired theme). The
+  creator's warnings on a user's own draft are advisory and never block a save — a user authoring
+  their own palette owns that trade-off; a shipped built-in does not get the choice.
+
+**Why 🟢 (settled):** the scope, the role vocabulary, the interchange shape, the local-user-only
+authority, the opaque native window and the opacity bounds were all owner-decided, with no open
+question straddling the design. What remains open is **verification**, not a decision — the glass
+`secondary` button was still flat at the 2026-08-12 measurement, and the real-desktop walk on Ubuntu
+has not run. Tracked in `PROGRESS.md`, not here.
+
+**Effect on parity:** a new Soloist-only section **TH** (`plan/02`, rows TH1–TH11) covers it. **I5**
+and **I7f** were narrowed in wording only. **C10** (themed ANSI palette), **C15** (search
+decorations), **DG6** (Mermaid renderer) and **VC2** (diff viewer) each already verify a theme flip
+and now flip over a chosen theme rather than a fixed pair, so their checks are downstream evidence for
+TH8 and must stay green. Full gap decision: `plan/05` §12.

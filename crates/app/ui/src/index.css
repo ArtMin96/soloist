@@ -112,6 +112,43 @@
   --color-file-language-pink: var(--file-language-pink);
   --color-file-language-red: var(--file-language-red);
   --color-file-language-violet: var(--file-language-violet);
+  --color-canvas: var(--theme-canvas);
+  --color-chrome: var(--theme-chrome);
+  --color-toolbar: var(--theme-toolbar);
+  --color-toolbar-foreground: var(--theme-toolbar-foreground);
+  --color-toolbar-border: var(--theme-toolbar-border);
+  --color-toolbar-control: var(--theme-toolbar-control);
+  --color-toolbar-control-foreground: var(--theme-toolbar-control-foreground);
+  --color-toolbar-control-hover: var(--theme-toolbar-control-hover);
+  --color-surface: var(--theme-surface);
+  --color-surface-raised: var(--theme-surface-raised);
+  --color-surface-overlay: var(--theme-surface-overlay);
+  --color-theme-text: var(--theme-text);
+  --color-text-muted: var(--theme-text-muted);
+  --color-placeholder: var(--theme-placeholder);
+  --color-secondary-label: var(--theme-secondary-label);
+  --color-icon-muted: var(--theme-icon-muted);
+  --color-error: var(--theme-error);
+  --color-error-foreground: var(--theme-error-foreground);
+  --color-error-surface: var(--theme-error-surface);
+  --color-warning: var(--theme-warning);
+  --color-warning-foreground: var(--theme-warning-foreground);
+  --color-warning-surface: var(--theme-warning-surface);
+  --color-update: var(--theme-update);
+  --color-update-foreground: var(--theme-update-foreground);
+  --color-update-surface: var(--theme-update-surface);
+  --color-message-surface: var(--theme-message-surface);
+  --color-message-foreground: var(--theme-message-foreground);
+  --color-message-action: var(--theme-message-action);
+  --color-message-action-foreground: var(--theme-message-action-foreground);
+  --color-message-action-hover: var(--theme-message-action-hover);
+  --color-code-background: var(--theme-code-background);
+  --color-code-foreground: var(--theme-code-foreground);
+  --color-sidebar-muted-foreground: var(--theme-sidebar-muted-foreground);
+  --color-sidebar-control-surface: var(--theme-sidebar-control-surface);
+  --color-sidebar-row-hover: var(--theme-sidebar-row-hover);
+  --color-sidebar-row-active: var(--theme-sidebar-row-active);
+  --color-sidebar-row-selected: var(--theme-sidebar-row-selected);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -150,8 +187,8 @@
    * dropdown, menu, select, and the command palette share one overlay, and every modal one
    * dialog shadow — `shadow-overlay` / `shadow-dialog`.
    */
-  --shadow-overlay: 0 8px 24px -8px oklch(0.2 0.02 255 / 0.18);
-  --shadow-dialog: 0 16px 48px -12px oklch(0.2 0.02 255 / 0.28);
+  --shadow-overlay: 0 8px 24px -8px var(--shadow-ink);
+  --shadow-dialog: 0 16px 48px -12px var(--shadow-ink);
 }
 
 /*
@@ -159,24 +196,6 @@
  * accent for focus/selection/primary, saturated color spent only on process status.
  */
 :root {
-  --background: oklch(0.99 0.002 250);
-  --foreground: oklch(0.205 0.01 255);
-  --card: oklch(0.99 0.002 250);
-  --card-foreground: oklch(0.205 0.01 255);
-  --popover: oklch(0.99 0.002 250);
-  --popover-foreground: oklch(0.205 0.01 255);
-  --primary: oklch(0.55 0.13 245);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.955 0.005 250);
-  --secondary-foreground: oklch(0.205 0.01 255);
-  --muted: oklch(0.972 0.004 250);
-  --muted-foreground: oklch(0.515 0.012 255);
-  --accent: oklch(0.955 0.005 250);
-  --accent-foreground: oklch(0.205 0.01 255);
-  --destructive: oklch(0.55 0.2 27);
-  --border: oklch(0.9 0.005 255);
-  --input: oklch(0.9 0.005 255);
-  --ring: oklch(0.55 0.13 245);
   --radius: 0.375rem;
 
   /*
@@ -206,54 +225,14 @@
    * ramp tightens display sizes. */
   --tracking-title: -0.005em;
 
-  --status-running: oklch(0.58 0.15 150);
-  --status-transition: oklch(0.62 0.13 70);
-  --status-stopped: oklch(0.55 0.008 255);
-  --status-crashed: oklch(0.55 0.2 27);
-  --status-exhausted: oklch(0.47 0.19 22);
-  --status-attention: oklch(0.72 0.17 75);
-
-  /* Version control extends the status vocabulary rather than starting a second one: the same
-   * hue families, darkened here because these are read as *text* (a letter beside a path) and
-   * so owe 4.5:1, where a status dot owes only the 3:1 graphical floor. Each clears 4.5:1 on
-   * the rail, on the azure-tinted selection, and on the hover fill — measured, not assumed. */
-  --git-modified: oklch(0.5 0.13 70);
-  --git-added: oklch(0.47 0.15 150);
-  --git-deleted: oklch(0.515 0.2 30);
-  --git-conflicted: oklch(0.47 0.2 12);
-  --git-ignored: oklch(0.495 0.008 255);
-  --git-branch-synced: oklch(0.47 0.15 150);
-  --git-branch-local: oklch(0.48 0.15 305);
-
-  /* File-type colors are deliberately scoped to language marks. They make a dense source tree
-   * scannable without turning generic documents or project controls into a second status system. */
-  --file-language-amber: oklch(0.62 0.14 80);
-  --file-language-azure: oklch(0.53 0.15 245);
-  --file-language-blue: oklch(0.5 0.14 260);
-  --file-language-cyan: oklch(0.51 0.12 205);
-  --file-language-green: oklch(0.48 0.13 150);
-  --file-language-orange: oklch(0.56 0.16 50);
-  --file-language-pink: oklch(0.54 0.17 345);
-  --file-language-red: oklch(0.53 0.18 25);
-  --file-language-violet: oklch(0.49 0.15 300);
-
-  --sidebar: oklch(0.972 0.004 250);
-  --sidebar-foreground: oklch(0.205 0.01 255);
-  --sidebar-primary: oklch(0.55 0.13 245);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.955 0.005 250);
-  --sidebar-accent-foreground: oklch(0.205 0.01 255);
-  --sidebar-border: oklch(0.9 0.005 255);
-  --sidebar-ring: oklch(0.55 0.13 245);
-
   /*
    * Source-list selection fills, derived from the accent and the ink so one definition serves both
    * themes. The "emphasized" pair is the azure tint — kept a tint, not a solid bar, so status hues
    * keep full saturation on it (DESIGN.md spent-on-status rule). The "unemphasized" pair is the
    * neutral AppKit falls back to whenever the selection is not the one the keyboard is driving.
    */
-  --sidebar-sel-fill-emphasized: color-mix(in oklch, var(--primary) 15%, transparent);
-  --sidebar-sel-fill-emphasized-hover: color-mix(in oklch, var(--primary) 22%, transparent);
+  --sidebar-sel-fill-emphasized: var(--theme-sidebar-row-selected);
+  --sidebar-sel-fill-emphasized-hover: var(--theme-sidebar-row-active);
   --sidebar-sel-fill-unemphasized: color-mix(in oklch, var(--foreground) 9%, transparent);
   --sidebar-sel-fill-unemphasized-hover: color-mix(in oklch, var(--foreground) 12%, transparent);
 
@@ -286,61 +265,6 @@
   --sel-fill-hover: var(--sidebar-sel-fill-hover);
 }
 
-.dark {
-  --background: oklch(0.17 0.012 255);
-  --foreground: oklch(0.96 0.003 250);
-  --card: oklch(0.205 0.012 255);
-  --card-foreground: oklch(0.96 0.003 250);
-  --popover: oklch(0.205 0.012 255);
-  --popover-foreground: oklch(0.96 0.003 250);
-  --primary: oklch(0.66 0.13 245);
-  --primary-foreground: oklch(0.18 0.01 255);
-  --secondary: oklch(0.255 0.012 255);
-  --secondary-foreground: oklch(0.96 0.003 250);
-  --muted: oklch(0.235 0.012 255);
-  --muted-foreground: oklch(0.7 0.012 255);
-  --accent: oklch(0.275 0.013 255);
-  --accent-foreground: oklch(0.96 0.003 250);
-  --destructive: oklch(0.68 0.19 25);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.66 0.13 245);
-
-  --status-running: oklch(0.72 0.16 150);
-  --status-transition: oklch(0.78 0.14 75);
-  --status-stopped: oklch(0.62 0.01 255);
-  --status-crashed: oklch(0.68 0.19 25);
-  --status-exhausted: oklch(0.6 0.19 22);
-  --status-attention: oklch(0.81 0.16 78);
-
-  --git-modified: oklch(0.78 0.14 75);
-  --git-added: oklch(0.74 0.16 150);
-  --git-deleted: oklch(0.74 0.17 32);
-  --git-conflicted: oklch(0.7 0.2 12);
-  --git-ignored: oklch(0.665 0.01 255);
-  --git-branch-synced: oklch(0.74 0.16 150);
-  --git-branch-local: oklch(0.76 0.15 305);
-
-  --file-language-amber: oklch(0.8 0.15 82);
-  --file-language-azure: oklch(0.72 0.14 245);
-  --file-language-blue: oklch(0.71 0.14 260);
-  --file-language-cyan: oklch(0.74 0.12 205);
-  --file-language-green: oklch(0.72 0.14 150);
-  --file-language-orange: oklch(0.74 0.16 52);
-  --file-language-pink: oklch(0.75 0.17 345);
-  --file-language-red: oklch(0.7 0.17 25);
-  --file-language-violet: oklch(0.73 0.15 300);
-
-  --sidebar: oklch(0.2 0.012 255);
-  --sidebar-foreground: oklch(0.96 0.003 250);
-  --sidebar-primary: oklch(0.66 0.13 245);
-  --sidebar-primary-foreground: oklch(0.18 0.01 255);
-  --sidebar-accent: oklch(0.275 0.013 255);
-  --sidebar-accent-foreground: oklch(0.96 0.003 250);
-  --sidebar-border: oklch(1 0 0 / 9%);
-  --sidebar-ring: oklch(0.66 0.13 245);
-}
-
 /*
  * The size/leading pairs of the type ramp's Label (11/14), Body (13/19) and Title (15/20) rungs.
  * Named `type-*` rather than `text-*` deliberately: `cn` is bare tailwind-merge, which would sort an
@@ -367,7 +291,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-canvas text-foreground;
     font-family: var(--font-sans);
     font-feature-settings: "kern";
     font-kerning: normal;
@@ -425,6 +349,46 @@
       scroll-behavior: auto !important;
     }
   }
+
+  /*
+   * Reduced-transparency safety net: the glass tokens below resolve to fully opaque colors
+   * (the same ones the no-backdrop-filter fallback already paints), and `!important` is required
+   * to outrank the inline custom properties the theme runtime sets on the root element. Shadows
+   * are untouched — a floating surface's elevation isn't the transparency this preference reduces.
+   */
+  @media (prefers-reduced-transparency: reduce) {
+    :root {
+      --glass-surface: var(--theme-surface-overlay) !important;
+      --glass-control-surface: var(--theme-toolbar-control) !important;
+      --glass-control-hover: var(--theme-toolbar-control-hover) !important;
+      --glass-control-active: var(--theme-toolbar-control-hover) !important;
+    }
+    *,
+    *::before,
+    *::after {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+  }
+}
+
+/* Third-party renderers ship literal fallback paint. Their geometry remains upstream-owned; these
+ * narrowly scoped adapters make every pixel that can become visible read the active theme. */
+.xterm {
+  --vscode-scrollbar-shadow: var(--shadow-ink);
+}
+
+.xterm .composition-view {
+  background: var(--terminal-background) !important;
+  color: var(--terminal-foreground) !important;
+}
+
+.xterm .xterm-viewport {
+  background-color: var(--terminal-background) !important;
+}
+
+[data-sonner-toast]:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring) !important;
 }
 
 @keyframes disclose-down {

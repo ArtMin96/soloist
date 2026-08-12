@@ -267,7 +267,7 @@ export default function App() {
               <AttentionContext value={attentionMarks}>
                 <TooltipProvider delayDuration={400}>
                   <OpenSettingsContext value={openSettings}>
-                    <div className="flex h-screen flex-col bg-background text-foreground">
+                    <div className="flex h-screen flex-col bg-canvas text-foreground">
                       <Titlebar
                         appName={info?.name ?? "Soloist"}
                         appVersion={info?.version}
@@ -311,7 +311,7 @@ export default function App() {
                         {/* A column, so the diff opens as a split at the foot of the area
                           rather than in place of what is above it. The panes keep their own
                           region: nothing here remounts the terminal when the split appears. */}
-                        <main className="relative flex min-w-0 flex-1 flex-col">
+                        <main className="relative flex min-w-0 flex-1 flex-col bg-surface">
                           <div className="relative min-h-0 flex-1">
                             <Suspense fallback={<div className="h-full w-full bg-background" />}>
                               {/* Keep-alive pool: every recently-viewed process keeps its terminal mounted

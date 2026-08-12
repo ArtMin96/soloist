@@ -3,6 +3,7 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { GLASS_MODAL_SURFACE } from "@/components/ui/glass"
 
 function Dialog(props: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
@@ -28,7 +29,7 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-[oklch(0.18_0.02_255_/_0.45)] duration-[var(--dur-sheet)] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[var(--dur-sheet-out)]",
+        "fixed inset-0 z-50 bg-[var(--dialog-overlay)] duration-[var(--dur-sheet)] supports-backdrop-filter:backdrop-blur-sm data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[var(--dur-sheet-out)] motion-reduce:animate-none motion-reduce:backdrop-blur-none",
         className,
       )}
       {...props}
@@ -54,7 +55,8 @@ function DialogContent({
         className={cn(
           presentation === "fullscreen"
             ? "fixed inset-0 z-50 flex max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 bg-background p-0 text-foreground shadow-none outline-none duration-[var(--dur-sheet)] ease-spring data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:slide-out-to-bottom-2 data-[state=closed]:duration-[var(--dur-sheet-out)] motion-reduce:animate-none"
-            : "fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border border-border bg-popover p-5 text-popover-foreground shadow-dialog duration-[var(--dur-sheet)] outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:ease-spring-settle data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:duration-[var(--dur-sheet-out)] data-[state=closed]:ease-out-quint",
+            : "fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] max-h-[calc(100vh-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-lg p-5 text-popover-foreground duration-[var(--dur-sheet)] outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:ease-spring-settle data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:duration-[var(--dur-sheet-out)] data-[state=closed]:ease-out-quint motion-reduce:animate-none",
+          presentation === "modal" && GLASS_MODAL_SURFACE,
           className,
         )}
         {...props}

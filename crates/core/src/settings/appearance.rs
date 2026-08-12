@@ -8,6 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::theme::{GlassOpacity, SelectedThemes, ThemeFile};
+
 /// The application color scheme. `System` follows the OS light/dark preference.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -156,7 +158,13 @@ impl Default for TerminalAppearance {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Appearance {
+    /// The legacy light/dark/system mode selector. It remains on the wire so settings written by
+    /// every released build continue to round-trip while `selected_themes` chooses the palette for
+    /// each resolved appearance.
     pub theme: Theme,
+    pub selected_themes: SelectedThemes,
+    pub custom_themes: Vec<ThemeFile>,
+    pub glass_opacity: GlassOpacity,
     pub interface_font_scale: FontScale,
     pub terminal: TerminalAppearance,
 }

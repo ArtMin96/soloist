@@ -7,7 +7,7 @@ export function ErrorBanner({ message, onDismiss }: { message: string; onDismiss
   return (
     <div
       role="alert"
-      className="flex items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive"
+      className="flex items-center gap-2 border-b border-error bg-error-surface px-3 py-1.5 text-xs text-error-foreground"
     >
       <span className="min-w-0 flex-1 truncate">{message}</span>
       <Button

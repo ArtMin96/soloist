@@ -57,10 +57,10 @@ export function TerminalPane({
   const dropping = useTerminalFileDrop(hostRef, insert, visible);
   const { title, ringing } = useTerminalChrome(process.id);
   const { metrics, restart, activity } = useSignal(process.id);
-  const { dark } = useAppearance();
+  const { appliedTheme } = useAppearance();
   // The emulator's own surface color, so the host bleeds it to every edge — the sub-cell
   // remainder and scrollbar gutter read as terminal margin, not an app-colored frame.
-  const surface = terminalColors(dark).background;
+  const surface = terminalColors(appliedTheme).background;
   const processActionHandlers: ProcessActionHandlers = {
     onTrust: () => onTrust(),
     onResume: () => onResume(),

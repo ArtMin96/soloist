@@ -85,10 +85,10 @@ pub use coordination::{
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
-    CoordinationError, CreateTerminalError, DraftError, Facade, GitReadError, Handoff,
-    HandoffError, LaunchAgentError, LocalCommandError, MoveCommandError, PromptRenderError,
-    ScopedActionError, ScopedFacade, ScopedGitError, SetupIntegrationError, SpawnAgentError,
-    StatusSummary, TrustCommandError,
+    AppearanceSettingsError, CoordinationError, CreateTerminalError, DraftError, Facade,
+    GitReadError, Handoff, HandoffError, LaunchAgentError, LocalCommandError, MoveCommandError,
+    PromptRenderError, ScopedActionError, ScopedFacade, ScopedGitError, SetupIntegrationError,
+    SpawnAgentError, StatusSummary, TrustCommandError,
 };
 pub use filewatch::{
     FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchError, WatchHandle, WatchReactor,
@@ -130,11 +130,15 @@ pub use projects::{
     ReloadError, RemoveProjectError, Visibility,
 };
 pub use settings::{
-    Appearance, Assist, Binding, CursorInactiveStyle, CursorStyle, FontScale, FontWeight,
-    HotkeyAction, HotkeyBindingView, HotkeyScope, Hotkeys, Integrations, LetterSpacing, LineHeight,
+    built_in_themes, default_theme_colors, soloist_default_theme, Appearance, Assist, Binding,
+    CursorInactiveStyle, CursorStyle, FontScale, FontWeight, GlassOpacity, HotkeyAction,
+    HotkeyBindingView, HotkeyScope, Hotkeys, Integrations, LetterSpacing, LineHeight,
     McpFeatureGroup, McpToolGroups, NoopSettingsRepo, NotificationLevel, Notifications,
-    ProcessCpuThreshold, ProcessMemThreshold, ProjectSettings, Settings, SettingsRepo,
-    SettingsStore, Sidebar, TemplateDefaults, TerminalAppearance, Theme, ToolDefaults,
+    ProcessCpuThreshold, ProcessMemThreshold, ProjectSettings, SelectedThemes, Settings,
+    SettingsRepo, SettingsStore, Sidebar, SoloistThemeExtensions, SoloistThemeRole,
+    TemplateDefaults, TerminalAppearance, Theme, ThemeAppearance, ThemeColor, ThemeColorRole,
+    ThemeColors, ThemeConflictPolicy, ThemeError, ThemeExtensions, ThemeFile, ThemeMutation,
+    ThemeVariantExtensions, ThemeVariants, ToolDefaults, DEFAULT_THEME_ID, THEME_FILE_VERSION,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError, SupervisorPorts};

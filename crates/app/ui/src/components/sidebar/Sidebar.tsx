@@ -101,7 +101,7 @@ export function Sidebar({
   });
 
   return (
-    <div className="@container/sidebar flex w-64 shrink-0 flex-col border-r bg-sidebar">
+    <div className="@container/sidebar flex w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground [--muted-foreground:var(--theme-sidebar-muted-foreground)]">
       {sidebar.show_filter_input && (
         <div className="border-b border-sidebar-border p-2">
           <Input
@@ -110,7 +110,7 @@ export function Sidebar({
             onChange={(event) => setFilter(event.target.value)}
             placeholder="Filter processes…"
             aria-label="Filter processes"
-            className="h-7 bg-sidebar-accent/40 text-[0.8125rem]"
+            className="h-7 border-sidebar-border bg-sidebar-control-surface text-[0.8125rem] placeholder:text-sidebar-muted-foreground"
           />
         </div>
       )}

@@ -58,8 +58,8 @@ import { ScratchpadList } from "@/components/orchestration/ScratchpadList";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { SettingsTabRail } from "@/components/settings/SettingsTabRail";
 import { StartSurface } from "@/components/StartSurface";
-import { applyDarkClass } from "@/lib/appearance";
 import { cn } from "@/lib/utils";
+import { applyTheme, defaultAppliedTheme } from "@/theme/runtime";
 import type {
   AgentActivity,
   ProcessView,
@@ -70,7 +70,7 @@ import type {
 import "./index.css";
 
 const params = new URLSearchParams(window.location.search);
-applyDarkClass(params.has("dark"));
+applyTheme(defaultAppliedTheme(params.has("dark")));
 
 const STATUSES: ProcStatus[] = [
   "Running",

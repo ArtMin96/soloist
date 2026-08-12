@@ -1,20 +1,34 @@
 // @vitest-environment jsdom
+/// <reference types="node" />
+import { readdirSync, readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import {
   addSharedCommand,
+  createTheme,
+  duplicateTheme,
+  importTheme,
+  inspectTheme,
   makeCommandLocal,
   orchestrationSnapshot,
   projectSettingsPage,
+  removeTheme,
+  selectTheme,
+  setGlassOpacity,
   setProjectAutoStartGate,
+  updateTheme,
 } from "@/api";
 import type {
+  Appearance,
   OrchestrationSnapshot,
   ProcessSpec,
   ProjectSettings,
   ProjectSettingsPage,
   TrustReviewCommand,
+  ThemeFile,
 } from "@/domain";
+import { DEFAULT_APPEARANCE } from "@/lib/appearance";
+import { BUILT_IN_THEMES } from "@/theme/catalog";
 
 afterEach(() => {
   clearMocks();
@@ -143,5 +157,74 @@ describe("api — orchestration read-model wrapper", () => {
 
     expect(seen).toEqual({ cmd: "orchestration_snapshot", args: { project: 4 } });
     expect(result.agents.find((node) => node.id === 2)?.parent).toBe(1);
+  });
+});
+
+/**
+ * The Rust half of the boundary: the `generate_handler!` registration list, and every command
+ * signature. Read from the source rather than mirrored here, so renaming a command or one of its
+ * parameters on one side cannot leave both sides green.
+ */
+function tauriCommandSource(): { registered: string; signatures: string } {
+  const app = `${process.cwd()}/../src`;
+  const commands = `${app}/commands`;
+  return {
+    registered: readFileSync(`${app}/lib.rs`, "utf8"),
+    signatures: readdirSync(commands)
+      .filter((entry) => entry.endsWith(".rs"))
+      .map((entry) => readFileSync(`${commands}/${entry}`, "utf8"))
+      .join("\n"),
+  };
+}
+
+function snakeCase(name: string): string {
+  return name.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`);
+}
+
+describe("api — task-shaped theme commands", () => {
+  it("reaches a registered command of its own name, by the parameters that command declares", async () => {
+    const theme = { ...BUILT_IN_THEMES[1] } as Partial<(typeof BUILT_IN_THEMES)[number]>;
+    delete theme.source;
+    const file = theme as ThemeFile;
+    const appearance: Appearance = { ...DEFAULT_APPEARANCE };
+    const seen: Array<{ cmd: string; args: Record<string, unknown> }> = [];
+    mockIPC((cmd, args) => {
+      seen.push({ cmd, args: args as Record<string, unknown> });
+      return cmd === "inspect_theme" ? file : appearance;
+    });
+    const { registered, signatures } = tauriCommandSource();
+
+    const calls = [
+      { api: selectTheme, call: () => selectTheme("dark", file.id), answered: appearance },
+      { api: createTheme, call: () => createTheme(file), answered: appearance },
+      { api: updateTheme, call: () => updateTheme(file), answered: appearance },
+      { api: importTheme, call: () => importTheme("{}", "keep_both"), answered: appearance },
+      { api: inspectTheme, call: () => inspectTheme("{}"), answered: file },
+      { api: duplicateTheme, call: () => duplicateTheme(file.id), answered: appearance },
+      { api: removeTheme, call: () => removeTheme(file.id), answered: appearance },
+      { api: setGlassOpacity, call: () => setGlassOpacity(80), answered: appearance },
+    ];
+
+    for (const { api, call, answered } of calls) {
+      seen.length = 0;
+      expect(await call(), api.name).toEqual(answered);
+
+      const [invocation] = seen;
+      expect(invocation, `${api.name} invoked no command`).toBeDefined();
+      expect(invocation.cmd, api.name).toBe(snakeCase(api.name));
+      expect(registered, `${invocation.cmd} is not registered`).toContain(
+        `commands::${invocation.cmd},`,
+      );
+
+      // Tauri hands a camel-case invoke argument to the snake-case parameter of the same name, so
+      // every key has to name a parameter the command declares — a renamed one arrives as nothing.
+      const parameters = signatures.match(
+        new RegExp(String.raw`pub async fn ${invocation.cmd}\(([^)]*)\)`, "u"),
+      )?.[1];
+      expect(parameters, `no Rust signature for ${invocation.cmd}`).toBeDefined();
+      for (const key of Object.keys(invocation.args)) {
+        expect(parameters, `${invocation.cmd} declares no ${key}`).toContain(`${snakeCase(key)}:`);
+      }
+    }
   });
 });

@@ -22,6 +22,7 @@ import {
 import { isActive } from "@/lib/status";
 import { activateTerminalRenderer, type RendererHandle } from "@/lib/terminalRenderer";
 import { useAppearance } from "@/store/appearanceContext";
+import { defaultAppliedTheme } from "@/theme/runtime";
 import type { ProcessView } from "@/domain";
 
 export type TerminalState = "attaching" | "live" | "not-started";
@@ -84,15 +85,21 @@ export function useTerminal(process: ProcessView, visible = true) {
   // scheduling per-frame flushes — and the VT parsing they drive — without re-creating the
   // attachment. Bytes still accumulate (bounded) and drain when the pane is shown again.
   const visibleRef = useRef(visible);
-  visibleRef.current = visible;
+  useEffect(() => {
+    visibleRef.current = visible;
+  }, [visible]);
 
-  const { appearance, dark } = useAppearance();
+  const appearanceState = useAppearance();
+  const { appearance } = appearanceState;
+  const appliedTheme = appearanceState.appliedTheme ?? defaultAppliedTheme(appearanceState.dark);
   // The latest appearance, read by the creation effect to seed the emulator without depending
   // on it — a typography change restyles the live terminal (the effect below), never recreates.
-  const appearanceRef = useRef({ appearance, dark });
-  appearanceRef.current = { appearance, dark };
+  const appearanceRef = useRef({ appearance, appliedTheme });
+  useEffect(() => {
+    appearanceRef.current = { appearance, appliedTheme };
+  }, [appearance, appliedTheme]);
 
-  const { attach: attachSearch, search } = useTerminalSearch(dark);
+  const { attach: attachSearch, search } = useTerminalSearch(appliedTheme);
 
   const id = process.id;
 
@@ -243,7 +250,7 @@ export function useTerminal(process: ProcessView, visible = true) {
       // the fixed set are settled when the pane opens and never move again.
       linkHandler: oscLinkHandler(setLinkTarget),
       ...TERMINAL_FIXED_OPTIONS,
-      ...terminalOptions(seed.appearance, seed.dark),
+      ...terminalOptions(seed.appearance, seed.appliedTheme),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -342,7 +349,7 @@ export function useTerminal(process: ProcessView, visible = true) {
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
-    const options = terminalOptions(appearance, dark);
+    const options = terminalOptions(appearance, appliedTheme);
     term.options.fontFamily = options.fontFamily;
     term.options.fontSize = options.fontSize;
     term.options.fontWeight = options.fontWeight;
@@ -355,7 +362,7 @@ export function useTerminal(process: ProcessView, visible = true) {
     term.options.theme = options.theme;
     // Cell metrics moved with the font change, so re-fit and track the PTY winsize.
     syncSize();
-  }, [appearance, dark, syncSize]);
+  }, [appearance, appliedTheme, syncSize]);
 
   // A process selected before it started has no terminal to attach to; attach once it
   // goes live so its output appears without re-selecting.

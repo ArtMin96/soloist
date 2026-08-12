@@ -1,9 +1,5 @@
-/* The diff viewer's own surfaces, moved onto the app's palette.
- *
- * Only the neutral chrome is reassigned — the page it sits on, the gutter, the rules between
- * rows. The washes behind an added, removed, or expanded line keep the viewer's own low-chroma
- * tints: they classify content rather than report a process's state, the same exemption the
- * terminal's palette holds, and they have to agree with the syntax colours painted over them. */
+/* The diff package owns layout only. This adapter exhaustively replaces every visible upstream
+ * paint hook so dependency defaults can never become a second palette. */
 
 .diff-tailwindcss-wrapper .diff-style-root {
   font-family: var(--font-mono);
@@ -12,10 +8,62 @@
 .diff-tailwindcss-wrapper[data-theme="light"] .diff-style-root,
 .diff-tailwindcss-wrapper[data-theme="dark"] .diff-style-root {
   --diff-border--: var(--border);
-  --diff-plain-content--: var(--background);
+  --diff-add-content--: color-mix(in srgb, var(--git-added) 12%, var(--theme-code-background));
+  --diff-del-content--: color-mix(in srgb, var(--git-deleted) 12%, var(--theme-code-background));
+  --diff-add-lineNumber--: color-mix(in srgb, var(--git-added) 22%, var(--theme-code-background));
+  --diff-del-lineNumber--: color-mix(in srgb, var(--git-deleted) 22%, var(--theme-code-background));
+  --diff-plain-content--: var(--theme-code-background);
+  --diff-expand-content--: var(--theme-surface-raised);
   --diff-plain-lineNumber--: var(--muted);
-  --diff-plain-lineNumber-color--: var(--muted-foreground);
+  --diff-plain-lineNumber-color--: var(--theme-code-foreground);
   --diff-expand-lineNumber--: var(--muted);
   --diff-expand-lineNumber-color--: var(--muted-foreground);
+  --diff-hunk-content--: var(--theme-update-surface);
+  --diff-hunk-lineNumber--: color-mix(
+    in srgb,
+    var(--theme-update) 20%,
+    var(--theme-update-surface)
+  );
+  --diff-hunk-lineNumber-hover--: var(--theme-update);
+  --diff-add-content-highlight--: color-mix(
+    in srgb,
+    var(--git-added) 28%,
+    var(--theme-code-background)
+  );
+  --diff-del-content-highlight--: color-mix(
+    in srgb,
+    var(--git-deleted) 28%,
+    var(--theme-code-background)
+  );
+  --diff-add-widget--: var(--theme-accent);
+  --diff-add-widget-color--: var(--theme-accent-foreground);
   --diff-empty-content--: var(--muted);
+  --diff-multi-select-bg: var(--theme-accent-surface);
+  --diff-multi-select-border: var(--theme-focus);
+  color: var(--theme-code-foreground);
+}
+
+.diff-tailwindcss-wrapper [data-state="diff"],
+.diff-tailwindcss-wrapper [data-state="plain"],
+.diff-tailwindcss-wrapper [data-state="hunk"] {
+  color: var(--theme-code-foreground) !important;
+}
+
+.diff-tailwindcss-wrapper .\!text-red-500 {
+  color: var(--theme-error) !important;
+}
+
+.diff-tailwindcss-wrapper .diff-widget-tooltip::after {
+  background-color: var(--theme-surface-overlay);
+  color: var(--theme-text);
+  border: 1px solid var(--theme-border);
+}
+
+.diff-tailwindcss-wrapper .diff-widget-tooltip::before {
+  border-right-color: var(--theme-border);
+}
+
+.diff-tailwindcss-wrapper .diff-widget-tooltip:hover {
+  background-color: var(--theme-update);
+  color: var(--theme-update-foreground);
 }

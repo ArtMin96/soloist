@@ -35,7 +35,7 @@ export function ProcessToast({ kind, title, body, onOpen, onDismiss }: ProcessTo
       <button
         type="button"
         onClick={onOpen}
-        className="-my-0.5 min-w-0 flex-1 cursor-default rounded-md px-1.5 py-1 text-left transition-colors duration-[var(--dur-fast)] outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-muted/50"
+        className="-my-0.5 min-w-0 flex-1 cursor-default rounded-md px-1.5 py-1 text-left transition-colors duration-[var(--dur-fast)] outline-none hover:bg-message-action-hover focus-visible:ring-2 focus-visible:ring-ring/50"
       >
         <ToastLines title={title} body={body} />
       </button>

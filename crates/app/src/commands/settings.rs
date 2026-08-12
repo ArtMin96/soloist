@@ -10,8 +10,9 @@
 use std::sync::Arc;
 
 use soloist_core::{
-    Appearance, Assist, Binding, Facade, HotkeyAction, HotkeyBindingView, Integrations,
-    McpFeatureGroup, McpToolGroups, Notifications, Sidebar, ToolDefaults,
+    Appearance, Assist, Binding, Facade, GlassOpacity, HotkeyAction, HotkeyBindingView,
+    Integrations, McpFeatureGroup, McpToolGroups, Notifications, Sidebar, ThemeAppearance,
+    ThemeConflictPolicy, ThemeFile, ToolDefaults,
 };
 use tauri::State;
 
@@ -35,6 +36,104 @@ pub async fn set_appearance(
 ) -> Result<Appearance, String> {
     facade
         .blocking(move |f| f.set_appearance(appearance))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Selects a theme for one light or dark preference half.
+#[tauri::command]
+pub async fn select_theme(
+    appearance: ThemeAppearance,
+    theme_id: String,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<Appearance, String> {
+    facade
+        .blocking(move |f| f.select_theme(appearance, &theme_id))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Creates a custom theme after core validation.
+#[tauri::command]
+pub async fn create_theme(
+    theme: ThemeFile,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<Appearance, String> {
+    facade
+        .blocking(move |f| f.create_theme(theme))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Updates an existing custom theme after core validation.
+#[tauri::command]
+pub async fn update_theme(
+    theme: ThemeFile,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<Appearance, String> {
+    facade
+        .blocking(move |f| f.update_theme(theme))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Imports T3-v1 JSON with an explicit conflict policy.
+#[tauri::command]
+pub async fn import_theme(
+    theme_json: String,
+    conflict: ThemeConflictPolicy,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<Appearance, String> {
+    facade
+        .blocking(move |f| f.import_theme(&theme_json, conflict))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Validates and normalizes theme JSON through the core without installing it.
+#[tauri::command]
+pub async fn inspect_theme(
+    theme_json: String,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<ThemeFile, String> {
+    facade
+        .blocking(move |f| f.inspect_theme(&theme_json))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Duplicates a built-in or custom theme under a unique custom ID.
+#[tauri::command]
+pub async fn duplicate_theme(
+    theme_id: String,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<Appearance, String> {
+    facade
+        .blocking(move |f| f.duplicate_theme(&theme_id))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Removes a custom theme and returns the reconciled Appearance document.
+#[tauri::command]
+pub async fn remove_theme(
+    theme_id: String,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<Appearance, String> {
+    facade
+        .blocking(move |f| f.remove_theme(&theme_id))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Stores the validated opacity used by in-app glass surfaces.
+#[tauri::command]
+pub async fn set_glass_opacity(
+    opacity: GlassOpacity,
+    facade: State<'_, Arc<Facade>>,
+) -> Result<Appearance, String> {
+    facade
+        .blocking(move |f| f.set_glass_opacity(opacity))
         .await
         .map_err(|err| err.to_string())
 }

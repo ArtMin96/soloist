@@ -69,7 +69,7 @@ export function SegmentedControl<T extends string>({
       <span
         aria-hidden
         className={cn(
-          "pointer-events-none absolute top-0.5 bottom-0.5 left-0 rounded-md bg-background shadow-[0_1px_2px_-1px_oklch(0.2_0.02_255_/_0.25)]",
+          "pointer-events-none absolute top-0.5 bottom-0.5 left-0 rounded-md bg-background shadow-[0_1px_2px_-1px_var(--shadow-ink)]",
           animated &&
             "transition-[transform,width] duration-[var(--dur-control)] ease-spring-settle",
           thumb ? "opacity-100" : "opacity-0",

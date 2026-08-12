@@ -19,12 +19,13 @@ export function isDarkTheme(): boolean {
 }
 
 /**
- * A cheap value that changes exactly when the diagram palette would change, so a rendered diagram
- * knows to re-render. Light and dark are the only palettes (token values are static within a mode),
- * so the mode name is a sufficient signature.
+ * A cheap value that changes exactly when the applied palette changes. The runtime writes the
+ * palette signature to the root; including the legacy mode fallback keeps focused tests and the
+ * standalone harness reactive even when they only toggle `.dark`.
  */
 export function themeSignature(): string {
-  return isDarkTheme() ? "dark" : "light";
+  const root = document.documentElement;
+  return `${root.dataset.themeSignature ?? "legacy"}:${isDarkTheme() ? "dark" : "light"}`;
 }
 
 /**
