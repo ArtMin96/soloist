@@ -45,7 +45,6 @@ export function ThemeEditor({
   const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const clearRoleHighlight = useRef<() => void>(() => {});
 
-  useEffect(() => onPreview(theme), [onPreview, theme]);
   useEffect(() => () => clearRoleHighlight.current(), []);
 
   useEffect(() => {
@@ -69,24 +68,29 @@ export function ThemeEditor({
   }, [query]);
   const contrastWarnings = useMemo(() => themeContrastWarnings(theme.colors), [theme.colors]);
 
-  const changeAppearance = (appearance: ThemeAppearance) => {
-    setTheme((current) => ({
-      ...current,
-      appearance,
-      colors: deriveThemeColors(appearance, current.colors.canvas, current.colors.accent),
-    }));
+  // Every edit updates the form and the live-preview draft in the same event, so the panel above
+  // never has to re-render a second time to catch up.
+  const change = (next: ThemeFile) => {
+    setTheme(next);
+    onPreview(next);
   };
 
-  const changeSeed = (role: "canvas" | "accent", value: string) => {
-    setTheme((current) => {
-      const background = role === "canvas" ? value : current.colors.canvas;
-      const accent = role === "accent" ? value : current.colors.accent;
-      return { ...current, colors: deriveThemeColors(current.appearance, background, accent) };
+  const changeAppearance = (appearance: ThemeAppearance) => {
+    change({
+      ...theme,
+      appearance,
+      colors: deriveThemeColors(appearance, theme.colors.canvas, theme.colors.accent),
     });
   };
 
+  const changeSeed = (role: "canvas" | "accent", value: string) => {
+    const background = role === "canvas" ? value : theme.colors.canvas;
+    const accent = role === "accent" ? value : theme.colors.accent;
+    change({ ...theme, colors: deriveThemeColors(theme.appearance, background, accent) });
+  };
+
   const changeRole = (role: ThemeColorRole, value: string) => {
-    setTheme((current) => ({ ...current, colors: { ...current.colors, [role]: value } }));
+    change({ ...theme, colors: { ...theme.colors, [role]: value } });
   };
 
   const startDrag = (event: ReactPointerEvent<HTMLElement>) => {
@@ -183,7 +187,7 @@ export function ThemeEditor({
                 <Input
                   id="theme-name"
                   value={theme.name}
-                  onChange={(event) => setTheme({ ...theme, name: event.target.value })}
+                  onChange={(event) => change({ ...theme, name: event.target.value })}
                   placeholder="e.g. Aurora"
                   autoFocus
                 />
@@ -194,7 +198,7 @@ export function ThemeEditor({
                 <Input
                   id="theme-author"
                   value={theme.author ?? ""}
-                  onChange={(event) => setTheme({ ...theme, author: event.target.value })}
+                  onChange={(event) => change({ ...theme, author: event.target.value })}
                   placeholder="Optional"
                 />
               </Field>

@@ -138,7 +138,7 @@ pub use settings::{
     SettingsRepo, SettingsStore, Sidebar, SoloistThemeExtensions, SoloistThemeRole,
     TemplateDefaults, TerminalAppearance, Theme, ThemeAppearance, ThemeColor, ThemeColorRole,
     ThemeColors, ThemeConflictPolicy, ThemeError, ThemeExtensions, ThemeFile, ThemeMutation,
-    ThemeVariants, ToolDefaults, DEFAULT_THEME_ID, THEME_FILE_VERSION,
+    ThemeVariantExtensions, ThemeVariants, ToolDefaults, DEFAULT_THEME_ID, THEME_FILE_VERSION,
 };
 pub use shellenv::{NoopShellEnvProbe, ShellEnvError, ShellEnvProbe};
 pub use supervisor::{Registration, StartSummary, Supervisor, SupervisorError, SupervisorPorts};

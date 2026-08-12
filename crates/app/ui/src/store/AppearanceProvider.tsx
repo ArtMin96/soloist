@@ -12,7 +12,10 @@ import {
   writeThemeHint,
 } from "@/lib/appearance";
 import { AppearanceContext } from "@/store/appearanceContext";
-import { createAppearanceMutationQueue } from "@/store/appearanceMutationQueue";
+import {
+  createAppearanceMutationQueue,
+  type AppearanceMutationTarget,
+} from "@/store/appearanceMutationQueue";
 import { useLoadOnce } from "@/store/useLoadOnce";
 import { useThemeLibrary } from "@/store/useThemeLibrary";
 import { BUILT_IN_THEMES, themeDefinitions } from "@/theme/catalog";
@@ -35,6 +38,11 @@ function normalizedAppearance(value: Appearance): Appearance {
     terminal: { ...DEFAULT_APPEARANCE.terminal, ...value.terminal },
   };
 }
+
+type RunThemeCommand = (
+  command: () => Promise<Appearance>,
+  target?: AppearanceMutationTarget,
+) => Promise<Appearance>;
 
 function appearanceProjection(current: Appearance, next: Appearance) {
   const patch: Partial<Appearance> = {};
@@ -112,19 +120,17 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     (project: (current: Appearance) => Appearance) => saveAsync(project(appearanceRef.current)),
     [saveAsync],
   );
-  const runThemeCommand = useCallback(
-    (command: () => Promise<Appearance>) => mutationQueue.task(command),
+  const runThemeCommand = useCallback<RunThemeCommand>(
+    (command, target) => mutationQueue.task(command, target),
     [mutationQueue],
   );
   const library = useThemeLibrary(appearanceRef, updateAppearance, runThemeCommand);
 
-  const draftApplied = library.themeDraft
-    ? appliedThemeFromFile(
-        library.themeDraft,
-        library.themeDraft.appearance,
-        appearance.glass_opacity,
-      )
-    : null;
+  const draft = library.themeDraft;
+  const draftApplied = useMemo(
+    () => (draft ? appliedThemeFromFile(draft, draft.appearance, appearance.glass_opacity) : null),
+    [appearance.glass_opacity, draft],
+  );
   const appliedTheme = draftApplied ?? (!loaded && prepaintHint ? prepaintHint : resolved);
   const dark = appliedTheme.appearance === "dark";
 

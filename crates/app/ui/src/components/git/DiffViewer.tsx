@@ -39,7 +39,7 @@ export function DiffViewer({
   actions?: (hunk: HunkRange) => ReactNode;
 }) {
   const language = useMemo(() => languageOf(diff.path), [diff.path]);
-  const appliedTheme = theme ?? defaultAppliedTheme(dark);
+  const appliedTheme = useMemo(() => theme ?? defaultAppliedTheme(dark), [theme, dark]);
   const [highlight, setHighlight] = useState(false);
 
   useEffect(() => {

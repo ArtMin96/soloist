@@ -102,8 +102,10 @@ describe("AppearanceProvider theme runtime", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Set glass" }));
-    await waitFor(() => expect(api.setGlassOpacity).toHaveBeenCalledWith(65));
-    expect(document.documentElement.style.getPropertyValue("--glass-opacity")).toBe("0.65");
+    await waitFor(() => {
+      expect(api.setGlassOpacity).toHaveBeenCalledWith(65);
+      expect(document.documentElement.style.getPropertyValue("--glass-opacity")).toBe("0.65");
+    });
   });
 
   it("adopts the authoritative custom-theme identity returned by the core", async () => {

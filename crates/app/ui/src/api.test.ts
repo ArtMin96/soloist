@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+/// <reference types="node" />
+import { readdirSync, readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import {
@@ -158,36 +160,71 @@ describe("api — orchestration read-model wrapper", () => {
   });
 });
 
+/**
+ * The Rust half of the boundary: the `generate_handler!` registration list, and every command
+ * signature. Read from the source rather than mirrored here, so renaming a command or one of its
+ * parameters on one side cannot leave both sides green.
+ */
+function tauriCommandSource(): { registered: string; signatures: string } {
+  const app = `${process.cwd()}/../src`;
+  const commands = `${app}/commands`;
+  return {
+    registered: readFileSync(`${app}/lib.rs`, "utf8"),
+    signatures: readdirSync(commands)
+      .filter((entry) => entry.endsWith(".rs"))
+      .map((entry) => readFileSync(`${commands}/${entry}`, "utf8"))
+      .join("\n"),
+  };
+}
+
+function snakeCase(name: string): string {
+  return name.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`);
+}
+
 describe("api — task-shaped theme commands", () => {
-  it("uses the registered command names and camel-case invoke arguments", async () => {
+  it("reaches a registered command of its own name, by the parameters that command declares", async () => {
     const theme = { ...BUILT_IN_THEMES[1] } as Partial<(typeof BUILT_IN_THEMES)[number]>;
     delete theme.source;
     const file = theme as ThemeFile;
     const appearance: Appearance = { ...DEFAULT_APPEARANCE };
-    const seen: Array<{ cmd: string; args: unknown }> = [];
+    const seen: Array<{ cmd: string; args: Record<string, unknown> }> = [];
     mockIPC((cmd, args) => {
-      seen.push({ cmd, args });
+      seen.push({ cmd, args: args as Record<string, unknown> });
       return cmd === "inspect_theme" ? file : appearance;
     });
+    const { registered, signatures } = tauriCommandSource();
 
-    await selectTheme("dark", file.id);
-    await createTheme(file);
-    await updateTheme(file);
-    await importTheme("{}", "keep_both");
-    await inspectTheme("{}");
-    await duplicateTheme(file.id);
-    await removeTheme(file.id);
-    await setGlassOpacity(80);
+    const calls = [
+      { api: selectTheme, call: () => selectTheme("dark", file.id), answered: appearance },
+      { api: createTheme, call: () => createTheme(file), answered: appearance },
+      { api: updateTheme, call: () => updateTheme(file), answered: appearance },
+      { api: importTheme, call: () => importTheme("{}", "keep_both"), answered: appearance },
+      { api: inspectTheme, call: () => inspectTheme("{}"), answered: file },
+      { api: duplicateTheme, call: () => duplicateTheme(file.id), answered: appearance },
+      { api: removeTheme, call: () => removeTheme(file.id), answered: appearance },
+      { api: setGlassOpacity, call: () => setGlassOpacity(80), answered: appearance },
+    ];
 
-    expect(seen).toEqual([
-      { cmd: "select_theme", args: { appearance: "dark", themeId: file.id } },
-      { cmd: "create_theme", args: { theme: file } },
-      { cmd: "update_theme", args: { theme: file } },
-      { cmd: "import_theme", args: { themeJson: "{}", conflict: "keep_both" } },
-      { cmd: "inspect_theme", args: { themeJson: "{}" } },
-      { cmd: "duplicate_theme", args: { themeId: file.id } },
-      { cmd: "remove_theme", args: { themeId: file.id } },
-      { cmd: "set_glass_opacity", args: { opacity: 80 } },
-    ]);
+    for (const { api, call, answered } of calls) {
+      seen.length = 0;
+      expect(await call(), api.name).toEqual(answered);
+
+      const [invocation] = seen;
+      expect(invocation, `${api.name} invoked no command`).toBeDefined();
+      expect(invocation.cmd, api.name).toBe(snakeCase(api.name));
+      expect(registered, `${invocation.cmd} is not registered`).toContain(
+        `commands::${invocation.cmd},`,
+      );
+
+      // Tauri hands a camel-case invoke argument to the snake-case parameter of the same name, so
+      // every key has to name a parameter the command declares — a renamed one arrives as nothing.
+      const parameters = signatures.match(
+        new RegExp(String.raw`pub async fn ${invocation.cmd}\(([^)]*)\)`, "u"),
+      )?.[1];
+      expect(parameters, `no Rust signature for ${invocation.cmd}`).toBeDefined();
+      for (const key of Object.keys(invocation.args)) {
+        expect(parameters, `${invocation.cmd} declares no ${key}`).toContain(`${snakeCase(key)}:`);
+      }
+    }
   });
 });

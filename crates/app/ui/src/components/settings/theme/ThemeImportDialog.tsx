@@ -12,7 +12,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import type { ThemeFile } from "@/domain";
 import type { ThemeImportConflictPolicy } from "@/store/appearanceContext";
-import { ThemeImportConflictError } from "@/theme/io";
+import { ThemeImportConflictError, themeErrorMessage } from "@/theme/io";
 import { cn } from "@/lib/utils";
 
 export function ThemeImportDialog({
@@ -55,7 +55,7 @@ export function ThemeImportDialog({
       close();
     } catch (caught) {
       if (caught instanceof ThemeImportConflictError) setConflict(caught);
-      else setError(caught instanceof Error ? caught.message : "The theme could not be imported.");
+      else setError(themeErrorMessage(caught, "The theme could not be imported."));
     } finally {
       setBusy(false);
     }
@@ -149,7 +149,7 @@ export function ThemeImportDialog({
                 placeholder={
                   '{\n  "version": 1,\n  "name": "Aurora",\n  "appearance": "dark",\n  "colors": {}\n}'
                 }
-                className="min-h-64 resize-y font-mono text-xs"
+                className="min-h-64 max-h-96 resize-y font-mono text-xs"
                 aria-invalid={error !== null}
               />
             </label>

@@ -165,6 +165,9 @@ describe("Settings — themes", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Theme name" }), {
       target: { value: "Aurora" },
     });
+    fireEvent.change(screen.getByRole("textbox", { name: "Author" }), {
+      target: { value: "Ada" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Minimize theme editor" }));
     expect(screen.queryByRole("textbox", { name: "Theme name" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Expand theme editor" }));

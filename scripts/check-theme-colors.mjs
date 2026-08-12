@@ -39,6 +39,68 @@ const COLOR_PATTERNS = [
   },
 ];
 
+// A CSS selector paints nothing: `.\!text-red-500 { color: var(--theme-error) }` overrides an
+// upstream utility class rather than authoring a pigment, so only what a rule *declares* is
+// inspected. Every prelude — a selector, or an at-rule's condition — is blanked to spaces of the
+// same length, which keeps the reported line numbers true. This is a brace/semicolon walk rather
+// than a CSS parser: a `}` inside a string would desynchronize it, and none of this tree has one.
+function declarationsOnly(source) {
+  let inspected = "";
+  let start = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    const delimiter = source[index];
+    if (delimiter !== "{" && delimiter !== "}" && delimiter !== ";") continue;
+    const segment = source.slice(start, index);
+    inspected += delimiter === "{" ? segment.replace(/[^\n]/gu, " ") : segment;
+    inspected += delimiter;
+    start = index + 1;
+  }
+  return inspected + source.slice(start);
+}
+
+function violationsIn(name, source) {
+  const sentinel = TECHNICAL_SENTINELS.get(name);
+  let inspected = sentinel ? source.replace(sentinel, "") : source;
+  if (extname(name) === ".css") inspected = declarationsOnly(inspected);
+
+  const found = [];
+  for (const { label, expression } of COLOR_PATTERNS) {
+    expression.lastIndex = 0;
+    for (const match of inspected.matchAll(expression)) {
+      found.push(`${name}:${lineNumber(inspected, match.index)} ${label}: ${match[0]}`);
+    }
+  }
+  return found;
+}
+
+// The guard's own proof, run before the tree is walked so the patterns cannot be loosened into
+// silence unnoticed. A pigment authored in any of these forms has to be caught; a class name
+// standing in a selector has to pass.
+const SELF_CHECK = [
+  {
+    name: "fixture.css",
+    source: ".w .\\!text-red-500 {\n  color: var(--theme-error);\n}\n",
+    found: 0,
+  },
+  { name: "fixture.css", source: ".w {\n  color: red;\n}\n", found: 1 },
+  { name: "fixture.css", source: ".w {\n  background: #ff0000;\n}\n", found: 1 },
+  { name: "fixture.css", source: ".w {\n  @apply text-red-500;\n}\n", found: 1 },
+  { name: "fixture.tsx", source: 'const badge = <b className="text-red-500" />;\n', found: 1 },
+];
+
+function selfCheck() {
+  for (const { name, source, found } of SELF_CHECK) {
+    const violations = violationsIn(name, source);
+    if (violations.length === found) continue;
+    console.error(
+      `Theme color guard self-check failed: expected ${found} violation(s) in\n${source}` +
+        `but found ${violations.length}:\n` +
+        violations.map((item) => `  ${item}`).join("\n"),
+    );
+    process.exit(1);
+  }
+}
+
 function isProductionSource(path) {
   const name = relative(sourceRoot, path);
   return (
@@ -63,19 +125,12 @@ function lineNumber(source, offset) {
   return source.slice(0, offset).split("\n").length;
 }
 
+selfCheck();
+
 const violations = [];
 for (const path of await sourceFiles(sourceRoot)) {
   const name = relative(repository, path);
-  let source = await readFile(path, "utf8");
-  const sentinel = TECHNICAL_SENTINELS.get(name);
-  if (sentinel) source = source.replace(sentinel, "");
-
-  for (const { label, expression } of COLOR_PATTERNS) {
-    expression.lastIndex = 0;
-    for (const match of source.matchAll(expression)) {
-      violations.push(`${name}:${lineNumber(source, match.index)} ${label}: ${match[0]}`);
-    }
-  }
+  violations.push(...violationsIn(name, await readFile(path, "utf8")));
 }
 
 if (violations.length > 0) {

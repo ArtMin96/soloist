@@ -10,6 +10,43 @@ pub const THEME_FILE_VERSION: u8 = 1;
 const BUILT_IN_CATALOG: &str = include_str!("../../../../../themes/builtins/catalog.json");
 const RESERVED_PREFERENCE_IDS: &[&str] = &["system", "light", "dark"];
 
+/// The longest theme description accepted. A description is a sentence about the theme rather than
+/// a label, so it is bounded well above the 48-character limit the id, name, and author share —
+/// wide enough that no plausible foreign theme is turned away, narrow enough to stay a one-liner.
+pub(super) const MAX_DESCRIPTION_CHARS: usize = 240;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+/// Optional extension colors authored against one concrete appearance's palette.
+///
+/// An extension color is a literal hex, so it can only be readable against the palette it was
+/// authored for. A paired theme therefore declares a set per appearance rather than one set for
+/// the theme. A supplied-but-empty set is meaningful and distinct from an absent one: it asks for
+/// every role to be derived from that appearance's own palette.
+pub struct ThemeVariantExtensions {
+    /// Extension colors authored against the light palette.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub light: Option<ThemeExtensions>,
+    /// Extension colors authored against the dark palette.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dark: Option<ThemeExtensions>,
+}
+
+impl ThemeVariantExtensions {
+    /// Returns the extension colors authored for a concrete appearance when present.
+    pub fn get(&self, appearance: ThemeAppearance) -> Option<&ThemeExtensions> {
+        match appearance {
+            ThemeAppearance::Light => self.light.as_ref(),
+            ThemeAppearance::Dark => self.dark.as_ref(),
+        }
+    }
+
+    /// Returns whether no appearance declares its own extension colors.
+    pub fn is_empty(&self) -> bool {
+        self.light.is_none() && self.dark.is_none()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 /// Optional palette for the appearance opposite the theme's base palette.
@@ -20,6 +57,9 @@ pub struct ThemeVariants {
     /// Optional dark palette.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dark: Option<ThemeColors>,
+    /// Optional extension colors per appearance, overriding the theme-level set.
+    #[serde(skip_serializing_if = "ThemeVariantExtensions::is_empty")]
+    pub extensions: ThemeVariantExtensions,
 }
 
 impl ThemeVariants {
@@ -61,6 +101,9 @@ pub struct ThemeFile {
     /// Optional theme author.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
+    /// Optional one-line description of the theme.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Complete base palette.
     pub colors: ThemeColors,
     /// Optional opposite-appearance palette.
@@ -87,6 +130,8 @@ struct RawThemeFile {
     appearance: ThemeAppearance,
     #[serde(default)]
     author: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
     colors: ThemeColors,
     #[serde(default)]
     variants: ThemeVariants,
@@ -106,8 +151,14 @@ enum PaletteMode {
 
 impl ThemeFile {
     /// Parses, validates, normalizes, and completes sparse T3-v1 JSON.
+    ///
+    /// Deserializing the raw shape and normalizing it in two steps keeps each reason worded once:
+    /// going through this type's `Deserialize` impl instead would render a `ThemeError` into a serde
+    /// error and then wrap that rendering — prefix and all — in a second `ThemeError`.
     pub fn from_json(json: &str) -> Result<Self, ThemeError> {
-        serde_json::from_str(json).map_err(|error| ThemeError::InvalidFile(error.to_string()))
+        let raw: RawThemeFile = serde_json::from_str(json)
+            .map_err(|error| ThemeError::InvalidFile(error.to_string()))?;
+        Self::from_raw(raw, PaletteMode::CompleteSparse)
     }
 
     /// Serializes normalized T3-v1 JSON with a trailing newline.
@@ -124,6 +175,22 @@ impl ThemeFile {
             Some(&self.colors)
         } else {
             self.variants.get(appearance)
+        }
+    }
+
+    /// Returns the extension colors that apply to a concrete appearance.
+    ///
+    /// The base appearance always uses the theme-level set. Another appearance uses the set it
+    /// declares for itself, and falls back to the theme-level set when it declares none — which is
+    /// what every theme written before appearances could carry their own extensions relies on.
+    pub fn extensions_for(&self, appearance: ThemeAppearance) -> &ThemeExtensions {
+        if appearance == self.appearance {
+            &self.extensions
+        } else {
+            self.variants
+                .extensions
+                .get(appearance)
+                .unwrap_or(&self.extensions)
         }
     }
 
@@ -144,17 +211,15 @@ impl ThemeFile {
         if let Some(author) = &self.author {
             validate_author(author)?;
         }
+        if let Some(description) = &self.description {
+            validate_description(description)?;
+        }
         if !self.colors.is_complete() {
             return Err(ThemeError::InvalidFile(
                 "stored theme colors must contain every supported role".into(),
             ));
         }
-        if self.variants.get(self.appearance).is_some() {
-            return Err(ThemeError::InvalidFile(format!(
-                "theme variants must not repeat the base appearance {:?}",
-                self.appearance
-            )));
-        }
+        reject_base_appearance_variant(&self.variants, self.appearance)?;
         for appearance in [ThemeAppearance::Light, ThemeAppearance::Dark] {
             if self
                 .variants
@@ -187,6 +252,12 @@ impl ThemeFile {
         if let Some(author) = &author {
             validate_author(author)?;
         }
+        let description = raw
+            .description
+            .map(|description| description.trim().to_owned());
+        if let Some(description) = &description {
+            validate_description(description)?;
+        }
         if raw.colors.is_empty() {
             return Err(ThemeError::InvalidFile(
                 "theme colors must contain at least one supported role".into(),
@@ -194,12 +265,7 @@ impl ThemeFile {
         }
         let colors = resolve_colors(raw.colors, raw.appearance, mode)?;
 
-        if raw.variants.get(raw.appearance).is_some() {
-            return Err(ThemeError::InvalidFile(format!(
-                "theme variants must not repeat the base appearance {:?}",
-                raw.appearance
-            )));
-        }
+        reject_base_appearance_variant(&raw.variants, raw.appearance)?;
         let opposite = raw.appearance.opposite();
         if let Some(variant) = raw.variants.take(opposite) {
             if variant.is_empty() {
@@ -217,6 +283,7 @@ impl ThemeFile {
             name,
             appearance: raw.appearance,
             author,
+            description,
             colors,
             variants: raw.variants,
             extensions: raw.extensions,
@@ -354,6 +421,18 @@ fn validate_author(author: &str) -> Result<(), ThemeError> {
     Ok(())
 }
 
+fn validate_description(description: &str) -> Result<(), ThemeError> {
+    if description.is_empty()
+        || description != description.trim()
+        || description.chars().count() > MAX_DESCRIPTION_CHARS
+    {
+        return Err(ThemeError::InvalidFile(format!(
+            "theme descriptions must contain 1-{MAX_DESCRIPTION_CHARS} non-whitespace characters when provided"
+        )));
+    }
+    Ok(())
+}
+
 fn theme_id_from_name(name: &str) -> String {
     let mut id = String::new();
     let mut separator_pending = false;
@@ -384,5 +463,19 @@ fn theme_id_from_name(name: &str) -> String {
 }
 
 fn variants_are_empty(variants: &ThemeVariants) -> bool {
-    variants.light.is_none() && variants.dark.is_none()
+    variants.light.is_none() && variants.dark.is_none() && variants.extensions.is_empty()
+}
+
+/// The base appearance owns `colors` and `extensions`, so a variant repeating it would give the
+/// same appearance two sources for one value.
+fn reject_base_appearance_variant(
+    variants: &ThemeVariants,
+    appearance: ThemeAppearance,
+) -> Result<(), ThemeError> {
+    if variants.get(appearance).is_some() || variants.extensions.get(appearance).is_some() {
+        return Err(ThemeError::InvalidFile(format!(
+            "theme variants must not repeat the base appearance {appearance:?}"
+        )));
+    }
+    Ok(())
 }

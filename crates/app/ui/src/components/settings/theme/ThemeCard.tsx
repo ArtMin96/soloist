@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Copy, Download, Ellipsis, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,7 +22,9 @@ function themePalettes(theme: ThemeDefinition) {
   return palettes;
 }
 
-export function ThemeCard({
+// A card only restyles when its own theme or the selection changes, so it stays out of the renders
+// the panel does while a live draft is being edited.
+export const ThemeCard = memo(function ThemeCard({
   theme,
   selected,
   onSelect,
@@ -100,4 +103,4 @@ export function ThemeCard({
       </div>
     </article>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { SettingRow } from "@/components/settings/controls/SettingRow";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
-import type { ThemeAppearance, ThemeDefinition, ThemeFile } from "@/domain";
+import type { ThemeAppearance, ThemeDefinition, ThemeFile, ThemeSelection } from "@/domain";
 import { writeClipboard } from "@/lib/clipboard";
 import { useAppearance } from "@/store/appearanceContext";
 import { DEFAULT_THEME_ID } from "@/theme/catalog";
@@ -39,83 +39,131 @@ function downloadJson(name: string, json: string) {
   URL.revokeObjectURL(url);
 }
 
+function previewPalette(
+  themes: ThemeDefinition[],
+  builtInThemes: ThemeDefinition[],
+  selected: ThemeSelection,
+  mode: ThemeAppearance,
+) {
+  const chosen = themes.find(({ id }) => id === selected[mode]);
+  const fallback = builtInThemes.find(({ id }) => id === DEFAULT_THEME_ID);
+  const palette = chosen && themeColorsForAppearance(chosen, mode);
+  const fallbackPalette = fallback && themeColorsForAppearance(fallback, mode);
+  if (palette) return palette;
+  if (fallbackPalette) return fallbackPalette;
+  throw new Error(`No ${mode} theme palette is available`);
+}
+
 export function ThemeSettings() {
-  const appearance = useAppearance();
+  const {
+    appearance,
+    appliedTheme,
+    beginThemeDraft,
+    builtInThemes,
+    cancelThemeDraft,
+    commitThemeDraft,
+    duplicateTheme,
+    glassOpacity,
+    importThemeJson,
+    removeCustomTheme,
+    resetGlassOpacity,
+    resolvedAppearance,
+    selectTheme,
+    selectedThemes,
+    serializeTheme,
+    setAppearanceMode,
+    setGlassOpacity,
+    themes,
+    updateThemeDraft,
+  } = useAppearance();
   const [importOpen, setImportOpen] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [remove, setRemove] = useState<ThemeDefinition | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const updateThemeDraft = appearance.updateThemeDraft;
-  const cancelThemeDraft = appearance.cancelThemeDraft;
 
   useEffect(() => () => cancelThemeDraft(), [cancelThemeDraft]);
 
-  const previewPalette = (mode: ThemeAppearance) => {
-    const selected = appearance.themes.find(({ id }) => id === appearance.selectedThemes[mode]);
-    const fallback = appearance.builtInThemes.find(({ id }) => id === DEFAULT_THEME_ID);
-    const palette = selected && themeColorsForAppearance(selected, mode);
-    const fallbackPalette = fallback && themeColorsForAppearance(fallback, mode);
-    if (palette) return palette;
-    if (fallbackPalette) return fallbackPalette;
-    throw new Error(`No ${mode} theme palette is available`);
-  };
+  const lightPalette = useMemo(
+    () => previewPalette(themes, builtInThemes, selectedThemes, "light"),
+    [builtInThemes, selectedThemes, themes],
+  );
+  const darkPalette = useMemo(
+    () => previewPalette(themes, builtInThemes, selectedThemes, "dark"),
+    [builtInThemes, selectedThemes, themes],
+  );
 
   const openCreate = () => {
-    const mode = appearance.resolvedAppearance;
     const colors = deriveThemeColors(
-      mode,
-      appearance.appliedTheme.colors.canvas,
-      appearance.appliedTheme.colors.accent,
+      resolvedAppearance,
+      appliedTheme.colors.canvas,
+      appliedTheme.colors.accent,
     );
     const theme: ThemeFile = {
       version: 1,
       id: THEME_DRAFT_ID,
       name: "",
-      appearance: mode,
+      appearance: resolvedAppearance,
       colors,
     };
-    appearance.beginThemeDraft(theme);
+    beginThemeDraft(theme);
     setEditor({ theme, editing: false });
   };
 
-  const openEdit = (theme: ThemeDefinition) => {
-    appearance.beginThemeDraft(theme);
-    setEditor({ theme, editing: true });
-  };
-
   const closeEditor = () => {
-    appearance.cancelThemeDraft();
+    cancelThemeDraft();
     setEditor(null);
   };
+
+  const saveEditor = async (theme: ThemeFile) => {
+    await commitThemeDraft(theme);
+    setEditor(null);
+  };
+
+  // Every handler a theme card receives keeps a stable identity so the memoized cards sit out the
+  // renders the panel does while a draft is live.
+  const openEdit = useCallback(
+    (theme: ThemeDefinition) => {
+      beginThemeDraft(theme);
+      setEditor({ theme, editing: true });
+    },
+    [beginThemeDraft],
+  );
 
   const previewEditor = useCallback(
     (theme: ThemeFile) => updateThemeDraft(theme),
     [updateThemeDraft],
   );
 
-  const saveEditor = async (theme: ThemeFile) => {
-    await appearance.commitThemeDraft(theme);
-    setEditor(null);
-  };
+  const select = useCallback(
+    (themeId: string, mode: ThemeAppearance) => void selectTheme(themeId, mode),
+    [selectTheme],
+  );
 
-  const duplicate = async (themeId: string) => {
-    setActionError(null);
-    try {
-      const copy = await appearance.duplicateTheme(themeId);
-      appearance.beginThemeDraft(copy);
-      setEditor({ theme: copy, editing: true });
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : "The theme could not be duplicated.");
-    }
-  };
+  const duplicate = useCallback(
+    async (themeId: string) => {
+      setActionError(null);
+      try {
+        const copy = await duplicateTheme(themeId);
+        beginThemeDraft(copy);
+        setEditor({ theme: copy, editing: true });
+      } catch (error) {
+        setActionError(
+          error instanceof Error ? error.message : "The theme could not be duplicated.",
+        );
+      }
+    },
+    [beginThemeDraft, duplicateTheme],
+  );
 
-  const copy = (themeId: string) => {
-    void writeClipboard(appearance.serializeTheme(themeId));
-  };
+  const copy = useCallback(
+    (themeId: string) => void writeClipboard(serializeTheme(themeId)),
+    [serializeTheme],
+  );
 
-  const exportTheme = (themeId: string) => {
-    downloadJson(themeId, appearance.serializeTheme(themeId));
-  };
+  const exportTheme = useCallback(
+    (themeId: string) => downloadJson(themeId, serializeTheme(themeId)),
+    [serializeTheme],
+  );
 
   return (
     <>
@@ -126,10 +174,10 @@ export function ThemeSettings() {
         </p>
         <div className="mt-3">
           <AppearanceModeCards
-            value={appearance.appearance.theme}
-            light={previewPalette("light")}
-            dark={previewPalette("dark")}
-            onChange={(mode) => void appearance.setAppearanceMode(mode)}
+            value={appearance.theme}
+            light={lightPalette}
+            dark={darkPalette}
+            onChange={(mode) => void setAppearanceMode(mode)}
           />
         </div>
       </section>
@@ -149,13 +197,13 @@ export function ThemeSettings() {
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          {appearance.themes.map((theme) => (
+          {themes.map((theme) => (
             <ThemeCard
               key={theme.id}
               theme={theme}
-              selected={appearance.selectedThemes}
-              onSelect={(themeId, mode) => void appearance.selectTheme(themeId, mode)}
-              onDuplicate={(themeId) => void duplicate(themeId)}
+              selected={selectedThemes}
+              onSelect={select}
+              onDuplicate={duplicate}
               onEdit={openEdit}
               onCopy={copy}
               onExport={exportTheme}
@@ -176,9 +224,9 @@ export function ThemeSettings() {
           description="Higher values make future menus, dialogs, and composer surfaces more solid."
         >
           <GlassOpacityControl
-            value={appearance.glassOpacity}
-            onChange={(value) => void appearance.setGlassOpacity(value)}
-            onReset={() => void appearance.resetGlassOpacity()}
+            value={glassOpacity}
+            onChange={setGlassOpacity}
+            onReset={() => void resetGlassOpacity()}
           />
         </SettingRow>
       </SettingsSection>
@@ -186,7 +234,7 @@ export function ThemeSettings() {
       <ThemeImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        onImport={appearance.importThemeJson}
+        onImport={importThemeJson}
       />
 
       {editor && (
@@ -215,7 +263,7 @@ export function ThemeSettings() {
             <AlertDialogAction
               variant="destructive"
               onClick={() => {
-                if (remove) void appearance.removeCustomTheme(remove.id);
+                if (remove) void removeCustomTheme(remove.id);
                 setRemove(null);
               }}
             >

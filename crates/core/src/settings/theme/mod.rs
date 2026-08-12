@@ -10,8 +10,8 @@ use super::Appearance;
 pub use colors::{ThemeColor, ThemeColorRole, ThemeColors};
 pub use extensions::{SoloistThemeExtensions, SoloistThemeRole, ThemeExtensions};
 pub use file::{
-    built_in_themes, default_theme_colors, soloist_default_theme, ThemeFile, ThemeVariants,
-    THEME_FILE_VERSION,
+    built_in_themes, default_theme_colors, soloist_default_theme, ThemeFile,
+    ThemeVariantExtensions, ThemeVariants, THEME_FILE_VERSION,
 };
 
 /// The stable ID of the paired light/dark Soloist Default theme.

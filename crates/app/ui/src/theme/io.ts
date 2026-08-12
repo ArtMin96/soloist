@@ -12,6 +12,17 @@ export class ThemeImportConflictError extends Error {
   }
 }
 
+/**
+ * The message a failed theme command should show. A Tauri command rejects with the bare string its
+ * `Result<_, String>` carried, not an `Error`, so the core's precise reason — which field or rule the
+ * file violated — is only reachable by reading the rejection itself.
+ */
+export function themeErrorMessage(cause: unknown, fallback: string): string {
+  if (cause instanceof Error) return cause.message;
+  if (typeof cause === "string" && cause.trim().length > 0) return cause;
+  return fallback;
+}
+
 export function serializeTheme(theme: ThemeFile): string {
   return `${JSON.stringify(theme, null, 2)}\n`;
 }

@@ -37,6 +37,16 @@ timers, key-value) over **MCP**, so a lead agent can orchestrate worker agents t
 It is **not** a coding agent, **not** a terminal emulator, **not** a worktree orchestrator — it runs the
 agent CLIs the user already has and layers coordination on top.
 
+**Appearance is content, not a display preference.** How Soloist looks is a small library the user
+owns. Built-in themes ship with the app; any of them can be duplicated, edited live, copied to the
+clipboard, exported as a single JSON file, and imported back. A theme is a **portable artifact** — the
+kind of thing a developer commits to a dotfile repo, hands to a teammate, or brings over from the
+editor and terminal they already themed. The format is deliberately not private to us: Soloist reads
+and writes T3-compatible v1 theme JSON, so a palette can travel. What Soloist owns is not the pigment
+but the *contract*: it consumes whatever palette it is handed, names every place a color can land, and
+stays legible — including inside the terminal, whose 16 ANSI slots follow the theme like everything
+else.
+
 **What success looks like:** a developer writes a `solo.yml`, launches Soloist, trusts the commands, and
 starts a multi-process stack (including a real agent) with **one action** — then lets it run reliably
 for days. Crashes self-heal and notify; agents coordinate through the shared workspace; and the
@@ -55,8 +65,11 @@ dashboard makes the live state of *many* processes instantly legible without the
   source-list sidebar, unified toolbar, segmented controls, grouped settings; fast, quiet,
   dense-but-legible, its movement native spring physics that *confirms* an action rather than
   decorating — that you'd trust to babysit a dozen processes for a week. Two pragmatic
-  departures keep it honest on Ubuntu: **no liquid-glass / vibrancy**, and **window controls stay
-  top-right** (restyled), where a Linux/GNOME user expects them — not faked traffic lights.
+  departures keep it honest on Ubuntu: **the window is opaque** — no desktop vibrancy, nothing
+  showing through from behind the app — and **window controls stay top-right** (restyled), where a
+  Linux/GNOME user expects them, not faked traffic lights. Glass is a material Soloist uses
+  *inside* its own window, on the surfaces that genuinely float above the work; it is never the
+  window itself. `DESIGN.md` §4 draws that line precisely.
 
 ## Anti-references
 
@@ -79,24 +92,40 @@ What Soloist must **not** look like (all four confirmed):
    legible. Surface what *changed* (a crash, an agent needing permission, an idle transition); keep
    everything else quiet. Decoration that doesn't carry information is debt.
 2. **Native and invisible.** Feel like a first-class desktop app — a **macOS-faithful AppKit shell on
-   Linux** (no liquid-glass) — that disappears into the workflow. Speed and calm beat flourish; the
-   familiar mac controls earn trust precisely by being unremarkable. A tool kept open for days should
-   feel unremarkable in the best way. Motion obeys the same rule: native spring physics that
+   Linux**, over an opaque window — that disappears into the workflow. Speed and calm beat flourish;
+   the familiar mac controls earn trust precisely by being unremarkable. A tool kept open for days
+   should feel unremarkable in the best way. Motion obeys the same rule: native spring physics that
    *confirms* a state change — a selection settling, a sheet popping, a group unfolding — never a
-   decorative cross-fade, and always reduced-motion-safe.
+   decorative cross-fade, and always reduced-motion-safe. Depth obeys it too: the surfaces that float
+   above the work say so with translucency and a hairline, and the ones that don't stay flat.
 3. **Keyboard-first, expert-respecting.** Every primary action is reachable by keyboard (command
    palette, jump palette, shortcuts). Don't hand-hold; don't gate power behind menus.
 4. **Density with rhythm.** Show a lot — process tree, terminals, status, metrics — without clutter.
    Earn density through hierarchy, spacing, and typography, not through cards-everywhere.
 5. **Honest status.** Status is the product's heartbeat (the real `ProcStatus` / `AgentActivity` state
    machines). Represent it truthfully and immediately — never as decoration, never lagging reality.
+6. **The palette belongs to the user.** Soloist ships a default look and defends legibility on any
+   palette; it does not hold a monopoly on pigment. A theme is data the user can author, exchange, and
+   import, so the app authors no color of its own outside that data — every surface reads a **named
+   role**, and a hard-coded color is a bug, because it is the one thing on screen that will stop
+   matching the moment the user switches themes. Where a user-supplied palette can't be trusted to be
+   legible, the app corrects the color rather than refusing it.
 
 ## Accessibility & Inclusion
 
-- **Contrast:** target **WCAG 2.1 AA** — body text ≥ 4.5:1, large text ≥ 3:1 — on **both** themes
-  (impeccable enforces this; verify it, don't assume).
-- **Theme:** ship **light + dark + system**, defaulting to **follow the OS** (confirmed).
+- **Contrast:** target **WCAG 2.1 AA** — body text ≥ 4.5:1, non-text UI ≥ 3:1 — on **every** palette,
+  not only the ones we ship (impeccable enforces this; verify it, don't assume). Because a palette can
+  now arrive from outside, the target splits into two jobs: the colors Soloist derives it **corrects**
+  to clear the floor, and the colors an author supplied it **reports on** without overriding the
+  author's intent. `DESIGN.md` §2 records which is which; neither may be described as a guarantee the
+  other provides.
+- **Theme:** ship a **library**, not a switch — built-in themes plus anything the user authors or
+  imports, with the light and dark halves selected **independently**, and `system` following the OS by
+  default (confirmed). A theme may publish only one appearance, so a selection must be able to fail
+  honestly rather than silently substitute.
 - **Motion:** every animation has a `prefers-reduced-motion: reduce` fallback (impeccable default).
+- **Transparency:** every translucent surface has a `prefers-reduced-transparency: reduce` fallback
+  that resolves to an opaque equivalent. Glass is an enhancement, never the thing carrying meaning.
 - **Keyboard:** full keyboard operability with a visible focus ring is a product principle (see
   Principle 3), not just an a11y nicety.
 - **Recommended, not yet locked:** **color-blind-safe status encoding** — because the UI leans heavily

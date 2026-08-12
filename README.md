@@ -148,6 +148,8 @@ the human-facing orchestration UI, the deferred coordination sub-tools, and the 
 recipe. It is **UX + formalization + deferred tools, not new primitives** (the mechanism is the passing E7
 test). Charter + the `O`-row matrix expansion: [`plan/orchestrator/README.md`](plan/orchestrator/README.md).
 
+**Soloist-extension tracks (`solo.yml`-independent, owner-directed — not Solo parity):** `DG` Mermaid diagrams · `VC` git & version control · `TH` themes & in-app glass (theme library, 57 semantic colour roles, T3-v1 import/export, bounded in-app glass; Solo's record is silent on all three, so each is recorded as ours — `plan/02` §DG/§VC/§TH, `plan/05` §12, `KNOWN-DIVERGENCES` D-20/D-35/D-38).
+
 ## Build order rationale
 
 Config → skeleton → supervisor → I/O → UI → self-healing → agents → MCP → coordination → API/CLI →

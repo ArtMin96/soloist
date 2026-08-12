@@ -49,7 +49,7 @@ pub use theme::{
     built_in_themes, default_theme_colors, soloist_default_theme, GlassOpacity, SelectedThemes,
     SoloistThemeExtensions, SoloistThemeRole, ThemeAppearance, ThemeColor, ThemeColorRole,
     ThemeColors, ThemeConflictPolicy, ThemeError, ThemeExtensions, ThemeFile, ThemeMutation,
-    ThemeVariants, DEFAULT_THEME_ID, THEME_FILE_VERSION,
+    ThemeVariantExtensions, ThemeVariants, DEFAULT_THEME_ID, THEME_FILE_VERSION,
 };
 pub use tools::ToolDefaults;
 

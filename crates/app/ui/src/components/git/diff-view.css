@@ -38,7 +38,6 @@
   --diff-add-widget--: var(--theme-accent);
   --diff-add-widget-color--: var(--theme-accent-foreground);
   --diff-empty-content--: var(--muted);
-  --diff-hunk-content-color--: var(--theme-update-foreground);
   --diff-multi-select-bg: var(--theme-accent-surface);
   --diff-multi-select-border: var(--theme-focus);
   color: var(--theme-code-foreground);
@@ -51,7 +50,7 @@
 }
 
 .diff-tailwindcss-wrapper .\!text-red-500 {
-  color: var(--theme-error-foreground) !important;
+  color: var(--theme-error) !important;
 }
 
 .diff-tailwindcss-wrapper .diff-widget-tooltip::after {

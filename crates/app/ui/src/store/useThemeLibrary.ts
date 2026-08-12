@@ -11,6 +11,10 @@ import {
 } from "@/api";
 import type { Appearance, Theme, ThemeDefinition, ThemeFile } from "@/domain";
 import type { ThemeImportConflictPolicy, ThemeSelectionTarget } from "@/store/appearanceContext";
+import {
+  APPEARANCE_MUTATION_TARGET,
+  type AppearanceMutationTarget,
+} from "@/store/appearanceMutationQueue";
 import { GLASS_OPACITY } from "@/theme/constraints";
 import { themeDefinitions } from "@/theme/catalog";
 import { themeSupportsAppearance } from "@/theme/derive";
@@ -23,7 +27,10 @@ import {
 
 type AppearanceRef = { current: Appearance };
 type UpdateAppearance = (project: (current: Appearance) => Appearance) => Promise<void>;
-type RunCommand = (command: () => Promise<Appearance>) => Promise<Appearance>;
+type RunCommand = (
+  command: () => Promise<Appearance>,
+  target?: AppearanceMutationTarget,
+) => Promise<Appearance>;
 
 function plainTheme(theme: ThemeFile | ThemeDefinition): ThemeFile {
   const file = { ...theme } as Partial<ThemeDefinition>;
@@ -73,7 +80,7 @@ export function useThemeLibrary(
 
   const setGlassOpacity = useCallback(
     async (opacity: number) => {
-      await runCommand(() => storeGlassOpacity(opacity));
+      await runCommand(() => storeGlassOpacity(opacity), APPEARANCE_MUTATION_TARGET.glassOpacity);
     },
     [runCommand],
   );
@@ -125,16 +132,22 @@ export function useThemeLibrary(
   const importThemeJson = useCallback(
     async (json: string, conflict: ThemeImportConflictPolicy = "error") => {
       const incoming = await inspectTheme(json);
-      const definitions = themeDefinitions(appearanceRef.current.custom_themes);
-      const existing = definitions.find(({ id }) => id === incoming.id);
-      if (conflict === "error" && existing) {
-        throw new ThemeImportConflictError(existing, incoming);
-      }
-
       const before = new Set(appearanceRef.current.custom_themes.map(({ id }) => id));
-      const stored = await runCommand(() =>
-        importTheme(json, conflict === "error" ? "reject" : conflict),
-      );
+      let stored: Appearance;
+      try {
+        stored = await runCommand(() =>
+          importTheme(json, conflict === "error" ? "reject" : conflict),
+        );
+      } catch (error) {
+        // Core's reject policy decides the conflict; the library is consulted only to name the
+        // clashing theme for the dialog that offers the explicit resolutions.
+        const existing = themeDefinitions(appearanceRef.current.custom_themes).find(
+          ({ id }) => id === incoming.id,
+        );
+        if (conflict === "error" && existing)
+          throw new ThemeImportConflictError(existing, incoming);
+        throw error;
+      }
       const installed =
         conflict === "keep_both"
           ? stored.custom_themes.find(({ id }) => !before.has(id))

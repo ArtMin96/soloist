@@ -835,6 +835,8 @@ export interface TerminalAppearance {
 
 export type ThemeAppearance = "light" | "dark";
 
+export const THEME_APPEARANCES = ["light", "dark"] as const satisfies readonly ThemeAppearance[];
+
 export type ThemeColorRole =
   | "canvas"
   | "chrome"
@@ -896,19 +898,33 @@ export type ThemeColorRole =
 
 export type ThemeColors = Record<ThemeColorRole, string>;
 
+export interface ThemeFileExtensions {
+  soloist?: Partial<SoloistThemeExtensions>;
+}
+
+// An extension color is a literal hex, so it can only be readable against the palette it was
+// authored for. The theme-level `extensions` belong to the base `appearance`; a paired theme gives
+// the other appearance its own set here. A supplied-but-empty set is meaningful and distinct from an
+// absent one: it asks for every role to be derived from that appearance's own palette, where an
+// absent one falls back to the theme-level set.
+export interface ThemeVariants {
+  light?: ThemeColors;
+  dark?: ThemeColors;
+  extensions?: Partial<Record<ThemeAppearance, ThemeFileExtensions>>;
+}
+
 export interface ThemeFile {
   version: 1;
   id: string;
   name: string;
   appearance: ThemeAppearance;
   author?: string;
+  description?: string;
   colors: ThemeColors;
-  variants?: Partial<Record<ThemeAppearance, ThemeColors>>;
+  variants?: ThemeVariants;
   sidebarArtwork?: boolean;
   managed?: boolean;
-  extensions?: {
-    soloist?: Partial<SoloistThemeExtensions>;
-  };
+  extensions?: ThemeFileExtensions;
 }
 
 export interface ThemeSelection {

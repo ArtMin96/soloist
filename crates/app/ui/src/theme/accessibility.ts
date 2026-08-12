@@ -1,5 +1,10 @@
-import type { ThemeColors } from "@/domain";
-import { contrastRatio } from "@/theme/derive";
+import {
+  THEME_APPEARANCES,
+  type ThemeAppearance,
+  type ThemeColors,
+  type ThemeFile,
+} from "@/domain";
+import { contrastRatio, themeColorsForAppearance, themeSupportsAppearance } from "@/theme/derive";
 
 interface ContrastPair {
   foreground: keyof ThemeColors;
@@ -55,5 +60,31 @@ export function themeContrastWarnings(colors: ThemeColors): ThemeContrastWarning
   return CONTRAST_PAIRS.flatMap((pair) => {
     const ratio = contrastRatio(colors[pair.foreground], colors[pair.background]);
     return ratio < pair.minimum ? [{ ...pair, ratio }] : [];
+  });
+}
+
+export interface ThemePaletteContrastWarnings {
+  id: string;
+  appearance: ThemeAppearance;
+  warnings: ThemeContrastWarning[];
+}
+
+/**
+ * The same pairs the editor shows, applied to every palette a set of themes publishes. Themes that
+ * clear every pair are absent, so an empty result means the whole set is clean.
+ */
+export function paletteContrastWarnings(
+  themes: readonly ThemeFile[],
+): ThemePaletteContrastWarnings[] {
+  return themes.flatMap((theme) => {
+    const published = THEME_APPEARANCES.filter((appearance) =>
+      themeSupportsAppearance(theme, appearance),
+    );
+    return published.flatMap((appearance) => {
+      const colors = themeColorsForAppearance(theme, appearance);
+      if (!colors) return [];
+      const warnings = themeContrastWarnings(colors);
+      return warnings.length > 0 ? [{ id: theme.id, appearance, warnings }] : [];
+    });
   });
 }

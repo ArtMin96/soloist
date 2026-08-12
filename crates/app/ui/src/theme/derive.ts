@@ -117,6 +117,21 @@ export function themeSupportsAppearance(theme: ThemeFile, appearance: ThemeAppea
   return themeColorsForAppearance(theme, appearance) !== null;
 }
 
+/**
+ * The explicit extension colors that apply to one appearance, mirroring `ThemeFile::extensions_for`.
+ *
+ * The base appearance always uses the theme-level set. Another appearance uses the set it declares
+ * for itself — including an empty one, which asks for every role to be derived from that palette —
+ * and otherwise falls back to the theme-level set.
+ */
+export function themeExtensionsForAppearance(
+  theme: ThemeFile,
+  appearance: ThemeAppearance,
+): Partial<SoloistThemeExtensions> | undefined {
+  if (theme.appearance === appearance) return theme.extensions?.soloist;
+  return (theme.variants?.extensions?.[appearance] ?? theme.extensions)?.soloist;
+}
+
 function defaultColors(appearance: ThemeAppearance): ThemeColors {
   const theme = BUILT_IN_THEMES.find(({ id }) => id === DEFAULT_THEME_ID);
   const colors = theme && themeColorsForAppearance(theme, appearance);
@@ -282,11 +297,11 @@ export function deriveThemeExtensions(
 export function deriveTerminalTheme(
   colors: ThemeColors,
   appearance: ThemeAppearance,
+  extensions: ThemeExtensions,
   explicit: Partial<SoloistThemeExtensions> = {},
 ): AppliedTerminalTheme {
   const background = colors.terminalBackground;
   const foreground = colors.terminalForeground;
-  const extensions = deriveThemeExtensions(colors, appearance, explicit);
   const emphasize = (color: string) =>
     mixHex(color, foreground, appearance === "dark" ? 0.32 : 0.16);
   const derived: AppliedTerminalTheme = {

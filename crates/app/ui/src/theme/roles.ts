@@ -1,4 +1,4 @@
-import type { SoloistThemeExtensions, ThemeColorRole } from "@/domain";
+import type { ThemeColorRole } from "@/domain";
 
 export interface ThemeColorRoleMeta {
   label: string;
@@ -73,59 +73,3 @@ export const THEME_COLOR_GROUPS = (["Main", "Status", "Other"] as const).map((na
   name,
   roles: THEME_COLOR_ROLES.filter((role) => THEME_COLOR_ROLE_META[role].group === name),
 }));
-
-const SOLOIST_EXTENSION_ROLE_SET: Record<keyof SoloistThemeExtensions, true> = {
-  statusRunning: true,
-  statusTransition: true,
-  statusStopped: true,
-  statusCrashed: true,
-  statusExhausted: true,
-  statusAttention: true,
-  gitModified: true,
-  gitAdded: true,
-  gitDeleted: true,
-  gitConflicted: true,
-  gitIgnored: true,
-  gitBranchSynced: true,
-  gitBranchLocal: true,
-  fileLanguageAmber: true,
-  fileLanguageAzure: true,
-  fileLanguageBlue: true,
-  fileLanguageCyan: true,
-  fileLanguageGreen: true,
-  fileLanguageOrange: true,
-  fileLanguagePink: true,
-  fileLanguageRed: true,
-  fileLanguageViolet: true,
-  overlayScrim: true,
-  shadowInk: true,
-  terminalSelectionInactive: true,
-  terminalScrollbarActive: true,
-  terminalOverviewRulerBorder: true,
-  terminalAnsiBlack: true,
-  terminalAnsiRed: true,
-  terminalAnsiGreen: true,
-  terminalAnsiYellow: true,
-  terminalAnsiBlue: true,
-  terminalAnsiMagenta: true,
-  terminalAnsiCyan: true,
-  terminalAnsiWhite: true,
-  terminalAnsiBrightBlack: true,
-  terminalAnsiBrightRed: true,
-  terminalAnsiBrightGreen: true,
-  terminalAnsiBrightYellow: true,
-  terminalAnsiBrightBlue: true,
-  terminalAnsiBrightMagenta: true,
-  terminalAnsiBrightCyan: true,
-  terminalAnsiBrightWhite: true,
-  terminalSearchMatchBackground: true,
-  terminalSearchMatchBorder: true,
-  terminalSearchMatchOverviewRuler: true,
-  terminalSearchActiveMatchBackground: true,
-  terminalSearchActiveMatchBorder: true,
-  terminalSearchActiveMatchOverviewRuler: true,
-};
-
-export const SOLOIST_THEME_EXTENSION_ROLES = Object.keys(SOLOIST_EXTENSION_ROLE_SET) as Array<
-  keyof SoloistThemeExtensions
->;

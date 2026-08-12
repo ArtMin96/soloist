@@ -12,16 +12,20 @@ import {
   deriveTerminalTheme,
   deriveThemeExtensions,
   themeColorsForAppearance,
+  themeExtensionsForAppearance,
 } from "@/theme/derive";
 
 export const APPLIED_THEME_HINT_KEY = "soloist.applied-theme-hint";
 const APPLIED_THEME_HINT_VERSION = 1;
+const APPLIED_THEME_HINT_INTERVAL_MS = 250;
 const MAX_COLOR_PERCENT = 100;
 const GLASS_CONTROL_OPACITY_LIFT = 6;
 const GLASS_HOVER_OPACITY_LIFT = 10;
 const GLASS_ACTIVE_OPACITY_LIFT = 14;
-const GLASS_BORDER_TEXT_MIX = { dark: 18, light: 10 } as const;
-const GLASS_HIGHLIGHT_TEXT_MIX = { dark: 18, light: 28 } as const;
+const GLASS_BORDER_INK_MIX = 4;
+const GLASS_HIGHLIGHT_MIX = { dark: 18, light: 28 } as const;
+const GLASS_VARIABLE_PREFIX = "--glass-";
+const TRANSITION_FREEZE_CSS = "*,*::before,*::after{transition:none!important}";
 
 const THEME_ROLE_CSS_VARIABLE: Record<ThemeColorRole, `--theme-${string}`> = {
   canvas: "--theme-canvas",
@@ -107,14 +111,15 @@ export function appliedThemeFromFile(
 ): AppliedTheme | null {
   const colors = themeColorsForAppearance(theme, appearance);
   if (!colors) return null;
-  const explicit = theme.extensions?.soloist;
+  const explicit = themeExtensionsForAppearance(theme, appearance);
+  const extensions = deriveThemeExtensions(colors, appearance, explicit);
   const resolved = {
     id: theme.id,
     name: theme.name,
     appearance,
     colors,
-    extensions: deriveThemeExtensions(colors, appearance, explicit),
-    terminal: deriveTerminalTheme(colors, appearance, explicit),
+    extensions,
+    terminal: deriveTerminalTheme(colors, appearance, extensions, explicit),
     glassOpacity,
   };
   return { ...resolved, signature: themeSignature(resolved) };
@@ -182,9 +187,11 @@ export function themeCssVariables(theme: AppliedTheme): ThemeCssVariables {
   );
   const hoverOpacity = Math.min(MAX_COLOR_PERCENT, theme.glassOpacity + GLASS_HOVER_OPACITY_LIFT);
   const activeOpacity = Math.min(MAX_COLOR_PERCENT, theme.glassOpacity + GLASS_ACTIVE_OPACITY_LIFT);
-  const borderTextMix = GLASS_BORDER_TEXT_MIX[theme.appearance];
-  const highlightTextMix = GLASS_HIGHLIGHT_TEXT_MIX[theme.appearance];
-  const glassHighlight = `color-mix(in srgb, ${theme.colors.text} ${highlightTextMix}%, transparent)`;
+  // A glass edge catches light, so the highlight is mixed from the palette's light end — the ink in
+  // a dark theme, the canvas in a light one. Mixing it from the ink in a light theme lays a dark
+  // line above the control's own border rather than a highlight above it.
+  const lightEnd = theme.appearance === "dark" ? theme.colors.text : theme.colors.canvas;
+  const glassHighlight = `color-mix(in srgb, ${lightEnd} ${GLASS_HIGHLIGHT_MIX[theme.appearance]}%, transparent)`;
 
   Object.assign(variables, {
     "--background": theme.colors.surface,
@@ -201,7 +208,7 @@ export function themeCssVariables(theme: AppliedTheme): ThemeCssVariables {
     "--muted-foreground": theme.colors.mutedForeground,
     "--accent": theme.colors.accentSurface,
     "--accent-foreground": theme.colors.accentSurfaceForeground,
-    "--destructive": theme.colors.errorForeground,
+    "--destructive": theme.colors.error,
     "--border": theme.colors.border,
     "--input": theme.colors.input,
     "--ring": theme.colors.focus,
@@ -244,7 +251,7 @@ export function themeCssVariables(theme: AppliedTheme): ThemeCssVariables {
     "--glass-control-surface": `color-mix(in srgb, ${theme.colors.toolbarControl} ${controlOpacity}%, transparent)`,
     "--glass-control-hover": `color-mix(in srgb, ${theme.colors.toolbarControlHover} ${hoverOpacity}%, transparent)`,
     "--glass-control-active": `color-mix(in srgb, ${theme.colors.toolbarControlHover} ${activeOpacity}%, transparent)`,
-    "--glass-border": `color-mix(in srgb, ${theme.colors.text} ${borderTextMix}%, ${theme.colors.border})`,
+    "--glass-border": `color-mix(in srgb, ${theme.colors.text} ${GLASS_BORDER_INK_MIX}%, ${theme.colors.border})`,
     "--glass-highlight": glassHighlight,
     "--glass-control-shadow": `inset 0 1px 0 ${glassHighlight}, 0 1px 3px -1px ${theme.extensions.shadowInk}`,
     "--glass-floating-shadow": `inset 0 1px 0 ${glassHighlight}, 0 18px 48px -20px ${theme.extensions.shadowInk}, 0 6px 16px -10px ${theme.extensions.shadowInk}`,
@@ -253,12 +260,31 @@ export function themeCssVariables(theme: AppliedTheme): ThemeCssVariables {
   return variables;
 }
 
+/**
+ * Puts an applied palette on the document root, writing only the variables whose value changed and
+ * touching nothing at all when the root already carries this palette.
+ *
+ * A palette swap additionally suspends transitions across the write, so the many properties that
+ * would otherwise cross-fade between two palettes land in a single paint. A change confined to the
+ * glass tint has no second palette to cross into, so it skips both the document-wide suspension and
+ * the forced recalculation that flushes it — which is what a held opacity slider commits per frame.
+ */
 export function applyTheme(theme: AppliedTheme): void {
   const root = document.documentElement;
-  const freeze = document.createElement("style");
-  freeze.textContent = "*,*::before,*::after{transition:none!important}";
-  document.head.appendChild(freeze);
-  for (const [name, value] of Object.entries(themeCssVariables(theme))) {
+  const changed = Object.entries(themeCssVariables(theme)).filter(
+    ([name, value]) => root.style.getPropertyValue(name) !== value,
+  );
+  if (changed.length === 0 && root.dataset.themeSignature === theme.signature) return;
+  const paletteSwap =
+    root.dataset.themeId !== theme.id ||
+    root.dataset.themeAppearance !== theme.appearance ||
+    changed.some(([name]) => !name.startsWith(GLASS_VARIABLE_PREFIX));
+  const freeze = paletteSwap ? document.createElement("style") : null;
+  if (freeze) {
+    freeze.textContent = TRANSITION_FREEZE_CSS;
+    document.head.appendChild(freeze);
+  }
+  for (const [name, value] of changed) {
     root.style.setProperty(name, value);
   }
   root.classList.toggle("dark", theme.appearance === "dark");
@@ -266,8 +292,10 @@ export function applyTheme(theme: AppliedTheme): void {
   root.dataset.themeAppearance = theme.appearance;
   root.dataset.themeSignature = theme.signature;
   root.style.colorScheme = theme.appearance;
-  void window.getComputedStyle(root).backgroundColor;
-  document.head.removeChild(freeze);
+  if (freeze) {
+    void window.getComputedStyle(root).backgroundColor;
+    freeze.remove();
+  }
 }
 
 export function readAppliedThemeHint(): AppliedTheme | null {
@@ -295,7 +323,10 @@ export function readAppliedThemeHint(): AppliedTheme | null {
   }
 }
 
-export function writeAppliedThemeHint(theme: AppliedTheme): void {
+let hintWriteTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingHint: AppliedTheme | null = null;
+
+function storeAppliedThemeHint(theme: AppliedTheme): void {
   try {
     window.localStorage.setItem(
       APPLIED_THEME_HINT_KEY,
@@ -304,4 +335,25 @@ export function writeAppliedThemeHint(theme: AppliedTheme): void {
   } catch {
     // The persisted core document remains authoritative when webview-local storage is unavailable.
   }
+}
+
+/**
+ * Records the palette the next launch paints before React mounts.
+ *
+ * A change on its own is stored at once. A burst — a held opacity slider commits a palette per frame
+ * — collapses onto one trailing write per interval, so serializing the palette and blocking on
+ * storage costs that rather than one of each per frame. The last value in a burst is always written.
+ */
+export function writeAppliedThemeHint(theme: AppliedTheme): void {
+  if (hintWriteTimer !== null) {
+    pendingHint = theme;
+    return;
+  }
+  storeAppliedThemeHint(theme);
+  hintWriteTimer = setTimeout(() => {
+    hintWriteTimer = null;
+    const trailing = pendingHint;
+    pendingHint = null;
+    if (trailing) writeAppliedThemeHint(trailing);
+  }, APPLIED_THEME_HINT_INTERVAL_MS);
 }

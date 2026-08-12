@@ -78,6 +78,9 @@ jobs:
         run: pnpm run format:check
         working-directory: crates/app/ui
 
+      - name: Theme-color ownership guard
+        run: node scripts/check-theme-colors.mjs
+
       - name: UI tests
         run: pnpm test
         working-directory: crates/app/ui

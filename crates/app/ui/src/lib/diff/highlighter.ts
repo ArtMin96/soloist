@@ -145,7 +145,7 @@ async function start(): Promise<HighlighterCore> {
 function syntaxTheme(theme: AppliedTheme): ThemeRegistrationRaw {
   const { colors, extensions } = theme;
   const syntax = (color: string) => contrastSafeThemeColor(color, [colors.codeBackground]);
-  const invalid = contrastSafeThemeColor(colors.errorForeground, [colors.errorSurface]);
+  const invalid = contrastSafeThemeColor(colors.error, [colors.errorSurface]);
   return {
     name: ACTIVE_THEME,
     type: theme.appearance,
@@ -169,7 +169,7 @@ function syntaxTheme(theme: AppliedTheme): ThemeRegistrationRaw {
       },
       {
         scope: ["constant.numeric", "constant.language", "constant.character"],
-        settings: { foreground: syntax(colors.warningForeground) },
+        settings: { foreground: syntax(colors.warning) },
       },
       {
         scope: ["entity.name.function", "support.function", "meta.function-call"],
@@ -185,15 +185,15 @@ function syntaxTheme(theme: AppliedTheme): ThemeRegistrationRaw {
       },
       {
         scope: ["entity.name.tag", "support.class.component"],
-        settings: { foreground: syntax(colors.errorForeground) },
+        settings: { foreground: syntax(colors.error) },
       },
       {
         scope: ["entity.other.attribute-name", "support.type.property-name"],
-        settings: { foreground: syntax(colors.accentForeground) },
+        settings: { foreground: syntax(colors.accent) },
       },
       {
         scope: ["markup.heading", "markup.bold"],
-        settings: { foreground: syntax(colors.accentForeground), fontStyle: "bold" },
+        settings: { foreground: syntax(colors.accent), fontStyle: "bold" },
       },
       {
         scope: ["invalid", "invalid.illegal"],

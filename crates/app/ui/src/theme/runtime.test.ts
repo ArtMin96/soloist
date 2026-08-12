@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it } from "vitest";
+import type { ThemeColorRole } from "@/domain";
 import { DEFAULT_APPEARANCE } from "@/lib/appearance";
 import { themeSignature as mermaidThemeSignature } from "@/lib/mermaid/theme";
 import { searchDecorationColors, terminalColors } from "@/lib/terminalPalette";
 import { BUILT_IN_THEMES } from "@/theme/catalog";
+import { THEME_COLOR_ROLE_META } from "@/theme/roles";
 import {
   APPLIED_THEME_HINT_KEY,
   appliedThemeFromFile,
@@ -14,6 +16,11 @@ import {
   themeCssVariables,
   writeAppliedThemeHint,
 } from "@/theme/runtime";
+
+/** The naming rule each role's CSS variable follows: `sidebarRowHover` → `sidebar-row-hover`. */
+function kebabCase(role: string): string {
+  return role.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`);
+}
 
 describe("theme runtime", () => {
   beforeEach(() => {
@@ -130,6 +137,51 @@ describe("theme runtime", () => {
     expect(second?.signature).not.toBe(first?.signature);
   });
 
+  it("resolves the extension colors each appearance authored for its own palette", () => {
+    const source = BUILT_IN_THEMES.find(({ id }) => id === "soloist-default");
+    if (!source) throw new Error("missing Soloist Default fixture");
+    const paired = {
+      ...source,
+      extensions: { soloist: { gitModified: "#b06c00", terminalAnsiRed: "#c9372c" } },
+      variants: {
+        dark: source.variants?.dark,
+        extensions: { dark: { soloist: { gitModified: "#eba941", terminalAnsiRed: "#f75d59" } } },
+      },
+    };
+
+    const light = appliedThemeFromFile(paired, "light");
+    const dark = appliedThemeFromFile(paired, "dark");
+
+    expect(light?.extensions.gitModified).toBe("#b06c00");
+    expect(light?.terminal.red).toBe("#c9372c");
+    expect(dark?.extensions.gitModified).toBe("#eba941");
+    expect(dark?.terminal.red).toBe("#f75d59");
+  });
+
+  it("keeps a theme-level extension set on both appearances of a paired theme", () => {
+    const source = BUILT_IN_THEMES.find(({ id }) => id === "soloist-default");
+    if (!source) throw new Error("missing Soloist Default fixture");
+    const shared = {
+      ...source,
+      extensions: { soloist: { gitModified: "#b06c00" } },
+      variants: { dark: source.variants?.dark },
+    };
+
+    expect(appliedThemeFromFile(shared, "light")?.extensions.gitModified).toBe("#b06c00");
+    expect(appliedThemeFromFile(shared, "dark")?.extensions.gitModified).toBe("#b06c00");
+  });
+
+  it("derives the paired default's dark extensions instead of repainting its light ones", () => {
+    const source = BUILT_IN_THEMES.find(({ id }) => id === "soloist-default");
+    if (!source) throw new Error("missing Soloist Default fixture");
+
+    const light = appliedThemeFromFile(source, "light");
+    const dark = appliedThemeFromFile(source, "dark");
+
+    expect(light?.extensions.gitModified).toBe(source.extensions?.soloist?.gitModified);
+    expect(dark?.extensions.gitModified).not.toBe(source.extensions?.soloist?.gitModified);
+  });
+
   it("maps every applied palette field through one exhaustive CSS projection", () => {
     const theme = resolveAppliedTheme(
       {
@@ -145,7 +197,15 @@ describe("theme runtime", () => {
 
     const variables = themeCssVariables(theme);
 
-    expect(Object.keys(variables).length).toBeGreaterThan(80);
+    // Exhaustive against the role vocabulary rather than against a count: every role the editor
+    // and validator know reaches CSS as `--theme-<role>` carrying that role's own colour, so a
+    // role that stops being projected reddens here instead of quietly losing its paint.
+    for (const role of Object.keys(THEME_COLOR_ROLE_META) as ThemeColorRole[]) {
+      const variable: `--${string}` = `--theme-${kebabCase(role)}`;
+      expect(theme.colors[role], role).toBeTruthy();
+      expect(variables[variable], variable).toBe(theme.colors[role]);
+    }
+
     expect(variables["--background"]).toBe(theme.colors.canvas);
     expect(variables["--terminal-background"]).toBe(theme.terminal.background);
     expect(variables["--status-crashed"]).toBe(theme.extensions.statusCrashed);

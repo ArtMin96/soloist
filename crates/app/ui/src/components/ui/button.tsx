@@ -19,10 +19,8 @@ const buttonVariants = cva(
           GLASS_INTERACTIVE_CONTROL_SURFACE,
           "text-toolbar-control-foreground hover:text-foreground aria-expanded:text-foreground"
         ),
-        secondary: cn(
-          GLASS_INTERACTIVE_CONTROL_SURFACE,
-          "text-secondary-foreground aria-expanded:text-secondary-foreground"
-        ),
+        secondary:
+          "bg-secondary text-secondary-foreground [box-shadow:var(--glass-control-shadow)] hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground supports-backdrop-filter:bg-[color-mix(in_srgb,var(--secondary)_calc(var(--glass-opacity)*100%),transparent)] supports-backdrop-filter:backdrop-blur-md supports-backdrop-filter:backdrop-saturate-150",
         ghost: cn(
           GLASS_GHOST_INTERACTION,
           "hover:text-foreground aria-expanded:text-foreground"
