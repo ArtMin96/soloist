@@ -46,6 +46,7 @@ pub enum CommentOutcome {
     Edited(Box<TodoView>),
     NoTodo,
     NoComment,
+    CompletionProtected,
 }
 
 impl Todos {
@@ -101,6 +102,7 @@ impl Todos {
             CommentEdit::Edited(stored) => CommentOutcome::Edited(Box::new(self.view(*stored)?)),
             CommentEdit::NoTodo => CommentOutcome::NoTodo,
             CommentEdit::NoComment => CommentOutcome::NoComment,
+            CommentEdit::CompletionProtected => CommentOutcome::CompletionProtected,
         })
     }
 }

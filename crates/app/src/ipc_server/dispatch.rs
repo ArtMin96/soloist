@@ -14,7 +14,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use soloist_core::{
-    Facade, IdleMode, Progress, ProjectId, RenderRequest, SessionId, WaitForPortError,
+    Facade, IdleMode, Progress, ProjectId, RenderRequest, SessionId, SpawnAgentRequest,
+    WaitForPortError,
 };
 use soloist_ipc::{
     IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome, ProjectStatus, ProjectSummary,
@@ -174,16 +175,74 @@ fn dispatch_blocking(
             .rename_process(process, label)
             .map(|()| IpcResponse::Acked)
             .map_err(IpcError::from),
-        IpcRequest::SpawnAgent { tool, extra_args } => facade
+        IpcRequest::SpawnAgent {
+            tool,
+            extra_args,
+            prompt,
+            todo_id,
+            include_agent_instructions,
+        } => facade
             .scoped(session)
-            .spawn_agent(&tool, extra_args)
-            .map(IpcResponse::Spawned)
+            .spawn_agent_request(SpawnAgentRequest {
+                tool,
+                extra_args,
+                prompt,
+                todo_id,
+                include_agent_instructions,
+            })
+            .map(|outcome| match outcome.initial_message {
+                Some(delivery) => IpcResponse::SpawnedWithMessage {
+                    process: outcome.process,
+                    initial_message_id: delivery.message.id,
+                    delivery: delivery.outcome,
+                },
+                None => IpcResponse::Spawned(outcome.process),
+            })
             .map_err(IpcError::from),
         IpcRequest::ListAgentTools => facade
             .agents()
             .list_tools()
             .map(IpcResponse::AgentTools)
             .map_err(|err| IpcError::Internal(err.to_string())),
+        IpcRequest::AgentRoster => facade
+            .scoped(session)
+            .agent_roster()
+            .map(IpcResponse::AgentRoster)
+            .map_err(IpcError::from),
+        IpcRequest::AgentMessageSend {
+            recipient,
+            body,
+            todo_id,
+        } => facade
+            .scoped(session)
+            .agent_message_send(recipient, body, todo_id)
+            .map(IpcResponse::AgentMessageDelivery)
+            .map_err(IpcError::from),
+        IpcRequest::AgentMessageBroadcast { body, todo_id } => facade
+            .scoped(session)
+            .agent_message_broadcast(body, todo_id)
+            .map(IpcResponse::AgentMessageBroadcast)
+            .map_err(IpcError::from),
+        IpcRequest::AgentMessageList => facade
+            .scoped(session)
+            .agent_message_list()
+            .map(IpcResponse::AgentMessages)
+            .map_err(IpcError::from),
+        IpcRequest::AgentMessageGet { message_id } => facade
+            .scoped(session)
+            .agent_message_get(message_id)
+            .map(IpcResponse::AgentMessage)
+            .map_err(IpcError::from),
+        IpcRequest::AgentMessageAcknowledge { message_id } => facade
+            .scoped(session)
+            .agent_message_acknowledge(message_id)
+            .map(IpcResponse::AgentMessageDelivery)
+            .map_err(IpcError::from),
+        IpcRequest::AgentReportCompletion { todo_id, summary } => facade
+            .scoped(session)
+            .agent_report_completion(todo_id, summary)
+            .map(IpcResponse::AgentCompletion)
+            .map_err(IpcError::from),
         IpcRequest::StartAllCommands => facade
             .scoped(session)
             .start_all_commands()

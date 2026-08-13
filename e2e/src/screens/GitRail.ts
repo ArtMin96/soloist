@@ -28,14 +28,16 @@ export const gitRail = {
   /** The visible right edges of the rail and one changed path's trailing action. */
   async actionRightEdges(
     path: string,
-  ): Promise<{ rail: number; action: number }> {
+  ): Promise<{ rail: number; action: number; actionWidth: number }> {
     const rail = await $(RAIL);
     const row = await rail.$(CHANGES).$(`aria/${path.split("/").at(-1)}`);
     await row.waitForDisplayed({ timeout: WAIT.core });
-    await row.moveTo();
 
     const action = await rail.$(`aria/Discard the changes to ${path}`);
-    await action.waitForDisplayed({ timeout: WAIT.render });
+    // The control reserves real layout space while its hover/focus treatment is transparent. The
+    // walk measures that box, so requiring its transient paint state makes the result depend on
+    // whether a WebKit driver preserves synthetic hover between commands.
+    await action.waitForExist({ timeout: WAIT.render });
     const [railX, railWidth, actionX, actionWidth] = await Promise.all([
       rail.getLocation("x"),
       rail.getSize("width"),
@@ -45,6 +47,7 @@ export const gitRail = {
     return {
       rail: railX + railWidth,
       action: actionX + actionWidth,
+      actionWidth,
     };
   },
 

@@ -7,17 +7,11 @@
 //! convention (an MCP tool error vs a protocol error; later, an HTTP 4xx vs 5xx).
 
 use serde::{Deserialize, Serialize};
-use soloist_core::{
-    CoordinationError, FeedbackError, IdentityError, IntegrationWriteError, LaunchAgentError,
-    PromptRenderError, RenderError, ScopedActionError, SetupIntegrationError, SpawnAgentError,
-    TodoId,
-};
+use soloist_core::TodoId;
 
 use crate::vcs_error::GitRefusal;
 
-/// What an over-cap render is named as in [`IpcError::PayloadTooLarge`], matching how the
-/// coordination write caps name the payload they refused.
-const RENDERED_PROMPT: &str = "the rendered prompt";
+mod conversions;
 
 /// Why a request failed: a typed error the client maps to a clear MCP tool error.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
@@ -45,8 +39,32 @@ pub enum IpcError {
     )]
     NoProjectScope,
     /// A coordination action that needs an owning process was made by a session bound to none.
-    #[error("not bound to a process; bind a session before owning a timer or lease")]
+    #[error("not bound to a process; bind a session before owning coordination state or messaging agents")]
     NoBoundProcess,
+    /// An agent message named a process outside the caller's live orchestration family.
+    #[error("no related agent under that process id")]
+    UnknownRecipient,
+    /// An agent message named a live process that is not the caller's parent, child, or sibling.
+    #[error("that agent is not related to the caller")]
+    UnrelatedRecipient,
+    /// A message action named one that does not exist in the caller's live-run mailbox.
+    #[error("no agent message under that id")]
+    UnknownAgentMessage,
+    /// A message body exceeds the mailbox's bounded payload size.
+    #[error("agent message exceeds the message size limit")]
+    AgentMessageTooLarge,
+    /// The recipient's bounded pending inbox has no room for another message.
+    #[error("the recipient's agent inbox is full")]
+    RecipientQueueFull,
+    /// The project's bounded live-run mailbox has no room for another message.
+    #[error("the project's agent mailbox is full")]
+    ProjectQueueFull,
+    /// The application's bounded live-run mailbox has no room for another message.
+    #[error("the agent mailbox is full")]
+    AgentMailboxFull,
+    /// The application's bounded aggregate message-body budget has been reached.
+    #[error("the agent mailbox byte limit has been reached")]
+    AgentMailboxByteLimit,
     /// A coordination write carried a payload larger than its kind allows; `what` names it and
     /// `max_bytes` is the cap it exceeded.
     #[error("{what} exceeds the {max_bytes} byte cap")]
@@ -180,6 +198,14 @@ impl IpcError {
             | IpcError::ForeignProject
             | IpcError::NoProjectScope
             | IpcError::NoBoundProcess
+            | IpcError::UnknownRecipient
+            | IpcError::UnrelatedRecipient
+            | IpcError::UnknownAgentMessage
+            | IpcError::AgentMessageTooLarge
+            | IpcError::RecipientQueueFull
+            | IpcError::ProjectQueueFull
+            | IpcError::AgentMailboxFull
+            | IpcError::AgentMailboxByteLimit
             | IpcError::PayloadTooLarge { .. }
             | IpcError::InvalidScratchpad(_)
             | IpcError::RevisionConflict { .. }
@@ -215,144 +241,6 @@ impl IpcError {
             // delivered as a protocol error is one the model never sees.
             | IpcError::Git { .. } => true,
             IpcError::Internal(_) => false,
-        }
-    }
-}
-
-impl From<IdentityError> for IpcError {
-    fn from(err: IdentityError) -> Self {
-        match err {
-            IdentityError::UnknownProcess => IpcError::UnknownProcess,
-            IdentityError::ForeignProcess => IpcError::ForeignProcess,
-            IdentityError::UnknownProject => IpcError::UnknownProject,
-            IdentityError::ForeignProject => IpcError::ForeignProject,
-            IdentityError::Store(err) => IpcError::Internal(err.to_string()),
-        }
-    }
-}
-
-impl From<ScopedActionError> for IpcError {
-    fn from(err: ScopedActionError) -> Self {
-        match err {
-            ScopedActionError::UnknownProcess => IpcError::UnknownProcess,
-            ScopedActionError::NoProjectScope => IpcError::NoProjectScope,
-            ScopedActionError::OutOfScope => IpcError::OutOfScope,
-            ScopedActionError::Untrusted => IpcError::Untrusted,
-            ScopedActionError::Store(err) => IpcError::Internal(err.to_string()),
-        }
-    }
-}
-
-impl From<LaunchAgentError> for IpcError {
-    fn from(err: LaunchAgentError) -> Self {
-        match err {
-            LaunchAgentError::UnknownTool => IpcError::UnknownTool,
-            LaunchAgentError::UnknownProject => IpcError::UnknownProject,
-            LaunchAgentError::Store(err) => IpcError::Internal(err.to_string()),
-            LaunchAgentError::Supervisor(err) => IpcError::Internal(err.to_string()),
-        }
-    }
-}
-
-impl From<SpawnAgentError> for IpcError {
-    fn from(err: SpawnAgentError) -> Self {
-        match err {
-            SpawnAgentError::NoProjectScope => IpcError::NoProjectScope,
-            SpawnAgentError::WorkerMayNotSpawn => IpcError::WorkerMayNotSpawn,
-            SpawnAgentError::Launch(err) => err.into(),
-        }
-    }
-}
-
-impl From<FeedbackError> for IpcError {
-    fn from(err: FeedbackError) -> Self {
-        match err {
-            FeedbackError::Empty | FeedbackError::TooLong | FeedbackError::Full => {
-                IpcError::InvalidFeedback(err.to_string())
-            }
-            FeedbackError::Store(err) => IpcError::Internal(err.to_string()),
-        }
-    }
-}
-
-impl From<SetupIntegrationError> for IpcError {
-    fn from(err: SetupIntegrationError) -> Self {
-        match err {
-            SetupIntegrationError::Scope(err) => err.into(),
-            SetupIntegrationError::UnknownProject => IpcError::UnknownProject,
-            SetupIntegrationError::Store(err) => IpcError::Internal(err.to_string()),
-            SetupIntegrationError::Write(err @ IntegrationWriteError::UnmatchedMarkers { .. }) => {
-                IpcError::UnmatchedIntegrationMarkers(err.to_string())
-            }
-            SetupIntegrationError::Write(err) => IpcError::Internal(err.to_string()),
-        }
-    }
-}
-
-impl From<CoordinationError> for IpcError {
-    fn from(err: CoordinationError) -> Self {
-        match err {
-            CoordinationError::NoProjectScope => IpcError::NoProjectScope,
-            CoordinationError::NoBoundProcess => IpcError::NoBoundProcess,
-            CoordinationError::InvalidScratchpad(message) => IpcError::InvalidScratchpad(message),
-            CoordinationError::RevisionConflict { expected, actual } => {
-                IpcError::RevisionConflict { expected, actual }
-            }
-            CoordinationError::UnknownScratchpad => IpcError::UnknownScratchpad,
-            CoordinationError::ScratchpadNameTaken => IpcError::ScratchpadNameTaken,
-            CoordinationError::InvalidDiagram(message) => IpcError::InvalidDiagram(message),
-            CoordinationError::DiagramRevisionConflict { expected, actual } => {
-                IpcError::DiagramRevisionConflict { expected, actual }
-            }
-            CoordinationError::UnknownDiagram => IpcError::UnknownDiagram,
-            CoordinationError::DiagramNameTaken => IpcError::DiagramNameTaken,
-            CoordinationError::InvalidTodo(message) => IpcError::InvalidTodo(message),
-            CoordinationError::TodoRevisionConflict { expected, actual } => {
-                IpcError::TodoRevisionConflict { expected, actual }
-            }
-            CoordinationError::UnknownTodo => IpcError::UnknownTodo,
-            CoordinationError::TodoBlocked { by } => IpcError::TodoBlocked { by },
-            CoordinationError::UnknownBlocker => IpcError::UnknownBlocker,
-            CoordinationError::SelfBlocker => IpcError::SelfBlocker,
-            CoordinationError::UnknownComment => IpcError::UnknownComment,
-            CoordinationError::InvalidTemplate(message) => IpcError::InvalidTemplate(message),
-            CoordinationError::TemplateRevisionConflict { expected, actual } => {
-                IpcError::TemplateRevisionConflict { expected, actual }
-            }
-            CoordinationError::UnknownTemplate => IpcError::UnknownTemplate,
-            CoordinationError::TemplateNameTaken => IpcError::TemplateNameTaken,
-            CoordinationError::MalformedLink => IpcError::MalformedLink,
-            CoordinationError::ForeignScopeLink => IpcError::ForeignScopeLink,
-            CoordinationError::ForeignProject => IpcError::ForeignProject,
-            CoordinationError::UnknownProject => IpcError::UnknownProject,
-            CoordinationError::PayloadTooLarge { what, max_bytes } => IpcError::PayloadTooLarge {
-                what: what.to_owned(),
-                max_bytes,
-            },
-            CoordinationError::Store(err) => IpcError::Internal(err.to_string()),
-        }
-    }
-}
-
-impl From<RenderError> for IpcError {
-    fn from(err: RenderError) -> Self {
-        match err {
-            RenderError::TemplateNotFound => IpcError::UnknownTemplate,
-            RenderError::RenderedTooLarge { cap, .. } => IpcError::PayloadTooLarge {
-                what: RENDERED_PROMPT.to_owned(),
-                max_bytes: cap,
-            },
-            RenderError::MissingValues(names) => IpcError::MissingTemplateValues { names },
-            RenderError::Store(err) => IpcError::Internal(err.to_string()),
-        }
-    }
-}
-
-impl From<PromptRenderError> for IpcError {
-    fn from(err: PromptRenderError) -> Self {
-        match err {
-            PromptRenderError::Scope(err) => err.into(),
-            PromptRenderError::Render(err) => err.into(),
         }
     }
 }

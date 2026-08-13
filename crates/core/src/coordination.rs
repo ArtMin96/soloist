@@ -23,6 +23,7 @@ mod kv;
 mod kv_repo;
 mod lease;
 mod link;
+mod mailbox;
 mod releaser;
 mod repo;
 mod scheduler;
@@ -39,6 +40,7 @@ mod timer_repo;
 mod todo;
 mod todo_blocker;
 mod todo_comment;
+mod todo_completion;
 mod todo_doc;
 mod todo_releaser;
 mod todo_repo;
@@ -55,6 +57,13 @@ pub use kv::{Kv, MAX_KV_VALUE_BYTES};
 pub use kv_repo::{KvEntry, KvRepo, NoopKvRepo};
 pub use lease::{AcquireOutcome, LeaseView, Leases};
 pub use link::{is_link, Link, LinkContent, LinkError, LinkTarget};
+pub use mailbox::{
+    orchestration_guide, AgentBroadcastReceipt, AgentMailbox, AgentMailboxReactor, AgentMessage,
+    AgentMessageDelivery, AgentMessageKind, AgentMessageOutcome, AgentMessageReceipt,
+    AgentRelationship, AgentRosterEntry, MailboxCapacityError, OrchestrationGuide,
+    MAX_AGENT_MESSAGE_BYTES, MAX_PENDING_AGENT_MESSAGES, MAX_PENDING_AGENT_MESSAGE_BYTES,
+    MAX_PENDING_MESSAGES_PER_PROJECT, MAX_PENDING_MESSAGES_PER_RECIPIENT,
+};
 pub use releaser::LeaseReleaser;
 pub use repo::{LockRepo, NoopLockRepo, StoredLease};
 pub use scheduler::TimerScheduler;
@@ -82,6 +91,13 @@ pub use timer::{
 pub use timer_repo::{NewTimer, NoopTimerRepo, StoredTimer, TimerRepo};
 pub use todo::{TodoError, TodoSummary, TodoView, Todos};
 pub use todo_comment::{Comment, CommentAuthor, CommentOutcome};
+pub use todo_completion::{
+    TodoCompletion, TodoCompletionKey, TodoCompletionNotice, TodoCompletionNoticeOutcome,
+    TodoCompletionOccurrence, TodoCompletionOutcome,
+};
 pub use todo_doc::{TodoDoc, TodoStatus, MAX_TODO_DOC_BYTES};
 pub use todo_releaser::TodoLockReleaser;
-pub use todo_repo::{CommentEdit, NoopTodoRepo, StoredTodo, TodoRepo, TodoWriteResult};
+pub use todo_repo::{
+    CommentEdit, NoopTodoRepo, StoredTodo, TodoCompletionAtomicResult, TodoCompletionCompareResult,
+    TodoCompletionContext, TodoCompletionDecision, TodoCompletionIntent, TodoRepo, TodoWriteResult,
+};

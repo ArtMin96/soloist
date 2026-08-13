@@ -239,6 +239,16 @@ Surgical because no other spec writes a scratchpad, completes a todo, or creates
 paths are coordination-only. Each mutation reddened exactly one assertion; `git diff --stat crates/` showed
 none of the three files after restore.
 
+The addressed-agent-messaging walk (`specs/orchestration/agent-messaging.spec.ts`) reuses the bound lead
+fixture with two spawned fixture workers. Its source proof contrasts the wire default with an explicit
+opt-out: the primary serializes `include_agent_instructions: true`, which the protocol omits on the wire,
+and proceeds only after the defaulted briefing arrives as a submitted PTY turn; the peer serializes
+`false` and refuses any such briefing. Prompt Tasks and the direct/group exchange work without a todo
+correlation; the todo is introduced only for the optional durable completion/result leg. Scenario modules
+return after printing their proofs, but the fixture entry point remains pending until cleanup stops it, so
+the sidebar cannot race a short-lived fixture out of `Running`. This source has not yet been executed or
+mutation-verified.
+
 The timers-and-wake-cycle walk (`specs/orchestration/timers-wake-cycle.spec.ts`) drives orch-03's headline
 behavior — token-free waiting — against the real scheduler. It **reuses the lead fixture** via a third arm
 (a dropped timer plan): the bound lead spawns a worker and arms a `fire_when_idle_all` timer over it across the

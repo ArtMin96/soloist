@@ -68,7 +68,9 @@ pub use config::{
 };
 pub use configchange::{ConfigSync, Rename, TrustReviewCommand};
 pub use coordination::{
-    is_link, placeholders, AcquireOutcome, Comment, CommentAuthor, CommentEdit, CommentOutcome,
+    is_link, placeholders, AcquireOutcome, AgentBroadcastReceipt, AgentMailbox, AgentMessage,
+    AgentMessageDelivery, AgentMessageKind, AgentMessageOutcome, AgentMessageReceipt,
+    AgentRelationship, AgentRosterEntry, Comment, CommentAuthor, CommentEdit, CommentOutcome,
     DiagramRef, DiagramRenameError, DiagramRenameResult, DiagramRepo, DiagramSummary, DiagramView,
     DiagramWriteError, DiagramWriteResult, Diagrams, ExportedTemplate, FireCond, IdleMode, Kv,
     KvEntry, KvRepo, LeaseReleaser, LeaseView, Leases, Link, LinkContent, LinkError, LinkTarget,
@@ -78,17 +80,23 @@ pub use coordination::{
     ScratchpadSummary, ScratchpadTransfer, ScratchpadView, Scratchpads, SeedTemplate,
     SetWhenIdleOutcome, StoredDiagram, StoredLease, StoredScratchpad, StoredTemplate, StoredTimer,
     StoredTodo, TemplateRepo, TemplateSummary, TemplateView, TemplateWriteResult, Templates,
-    TimerRepo, TimerScheduler, TimerStatus, TimerView, Timers, TodoDoc, TodoError,
-    TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView, TodoWriteResult, Todos,
-    TransferResult, TransferredScratchpad, WriteError, WriteResult,
+    TimerRepo, TimerScheduler, TimerStatus, TimerView, Timers, TodoCompletion,
+    TodoCompletionAtomicResult, TodoCompletionCompareResult, TodoCompletionContext,
+    TodoCompletionDecision, TodoCompletionIntent, TodoCompletionKey, TodoCompletionNotice,
+    TodoCompletionNoticeOutcome, TodoCompletionOccurrence, TodoCompletionOutcome, TodoDoc,
+    TodoError, TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView, TodoWriteResult,
+    Todos, TransferResult, TransferredScratchpad, WriteError, WriteResult, MAX_AGENT_MESSAGE_BYTES,
+    MAX_PENDING_AGENT_MESSAGES, MAX_PENDING_AGENT_MESSAGE_BYTES, MAX_PENDING_MESSAGES_PER_PROJECT,
+    MAX_PENDING_MESSAGES_PER_RECIPIENT,
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
-    AppearanceSettingsError, CoordinationError, CreateTerminalError, DraftError, Facade,
-    GitReadError, Handoff, HandoffError, LaunchAgentError, LocalCommandError, MoveCommandError,
-    PromptRenderError, ScopedActionError, ScopedFacade, ScopedGitError, SetupIntegrationError,
-    SpawnAgentError, StatusSummary, TrustCommandError,
+    AgentMailboxError, AppearanceSettingsError, CompletionNotification, CompletionReport,
+    CoordinationError, CreateTerminalError, DraftError, Facade, GitReadError, Handoff,
+    HandoffError, LaunchAgentError, LocalCommandError, MoveCommandError, PromptRenderError,
+    ScopedActionError, ScopedFacade, ScopedGitError, SetupIntegrationError, SpawnAgentError,
+    SpawnAgentOutcome, SpawnAgentRequest, StatusSummary, TrustCommandError,
 };
 pub use filewatch::{
     FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchError, WatchHandle, WatchReactor,
@@ -106,8 +114,8 @@ pub use git::{
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};
 pub use ids::{
-    DiagramId, ProcessId, ProjectId, ScratchpadId, SessionId, TemplateId, TimerId, TodoId,
-    PROCESS_ID_ENV,
+    AgentMessageId, DiagramId, ProcessId, ProjectId, ScratchpadId, SessionId, TemplateId, TimerId,
+    TodoId, PROCESS_ID_ENV,
 };
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use notify::{

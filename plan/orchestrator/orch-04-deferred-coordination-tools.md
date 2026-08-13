@@ -1,4 +1,4 @@
-# Orchestrator Phase O4 — Deferred Coordination Tools (C6/C8 + MCP)
+# Orchestrator Phase O4 — Deferred Coordination Tools & Live Agent Messaging (C2/C4/C6/C8 + MCP)
 
 **Goal:** Land the two **tracked deferrals** an orchestration occasionally needs, each blocked only on a
 **security design** that this phase does first: `spawn_process` (spawn an *arbitrary terminal command*
@@ -6,22 +6,28 @@ over MCP, vs the existing known-agent `spawn_agent`) with its **trust treatment*
 `scratchpad_transfer` / `todo_transfer` with **cross-scope authorization**. Both tool *names* are
 documented for Solo ([`05` §7](../05-solo-reference-and-sources.md)); their schemas + safety semantics
 are ours and were explicitly deferred ([`05` §8/§12](../05-solo-reference-and-sources.md), `PROGRESS.md`).
+This phase also adds Soloist's clean-room live-run mailbox: authenticated lineage-root messaging,
+idle-gated wake submission, and atomic durable worker completion reports.
 
-**Delivers:** O9, O10, **O13** (the spawn orchestration-context preamble). **Architecture:** new MCP tools
+**Delivers:** O9, O10, **O13**, O15, O16. **Architecture:** new MCP tools
 as thin handlers over **new `Facade` behavior**, following the add-an-MCP-tool recipe ([`06` §5.3](../06-codebase-blueprint-and-cleanup.md));
 trust + scope enforced **in the core** ([`04` §12](../04-engineering-architecture-and-patterns.md)). Invoke
 `mcp-builder` + confirm against `modelcontextprotocol.io` / `code.claude.com/llms.txt` / `rmcp` docs
 before writing (CLAUDE.md §5).
 
-**Note on O13's independence:** the preamble (Task 6) is **not** gated on the arbitrary-spawn trust design
-(Tasks 1–2) — it is injected content, not a new attack surface, and applies to the already-built,
-already-trusted `spawn_agent`. It is grouped here because this is the spawn-semantics phase, but it can
-land first within the phase (or be pulled earlier) without the O9 security work.
+**Current split:** O13 is implemented for `spawn_agent`. `spawn_process` remains future O9 work, so
+O13 is intentionally partial only for that second spawn surface.
+
+**Note on O13's independence:** onboarding (Task 6) is **not** gated on the arbitrary-spawn trust design
+(Tasks 1–2). It applies now to the already-built `spawn_agent` and reuses O15's bounded wake path. The
+`spawn_process` leg remains partial until future O9 lands; that does not hold back `spawn_agent` or
+widen command authority.
 
 ## Scope
 **In:** the trust-treatment design + implementation for `spawn_process`; the cross-scope authorization
-design + implementation for `scratchpad_transfer` / `todo_transfer`; their clean-room JSON Schemas; tests
-+ the gap-decision records. **Out:** any UI (these are agent-facing MCP tools; the orch-01/02 panels
+design + implementation for `scratchpad_transfer` / `todo_transfer`; their clean-room JSON Schemas; the
+spawn onboarding/task path; live lineage roster; addressed direct/group messages; bounded retrieve/ack;
+atomic completion reporting; tests + the gap-decision records. **Out:** any UI (these are agent-facing MCP tools; the orch-01/02 panels
 *reflect* their effects); the scratchpad free-form/file-io deferrals (`_save_to_file`/`_load_from_file`
 need their own project-root FS-scoping pass — keep deferred, [`05` §12](../05-solo-reference-and-sources.md)).
 
@@ -58,31 +64,54 @@ need their own project-root FS-scoping pass — keep deferred, [`05` §12](../05
 5. **Safety + schemas (O9/O10, [`04` §12](../04-engineering-architecture-and-patterns.md)):** every action
    honors the trust gate + effective scope **in the core**; document each tool's clean-room JSON Schema
    ([`05` §12](../05-solo-reference-and-sources.md) "MCP param schemas"); update the MCP tool-count guard.
-6. **Spawn orchestration-context preamble (O13, [`06` §5.1](../06-codebase-blueprint-and-cleanup.md)):**
-   on spawn — **both** the existing `spawn_agent` and the new `spawn_process` — deliver a first-turn
-   `[SOLO ORCHESTRATION CONTEXT]` preamble to the new worker: its **identity** (Solo process id, process
-   name, project + id, the actor it binds as) and the **coordination tools** it has (`whoami`, scratchpads,
-   todos, locks/leases, kv, `timer_set`/`timer_fire_when_idle`/`timer_cancel`), the **"don't busy-poll —
-   set a fire-when-idle timer and end your turn"** rule, and how **`solo://` links resolve** (O14). The
-   text is a **single clean-room template in `core`** (one source; our words, never Solo's strings),
-   rendered with the worker's identity, and exposed two ways to match the demo's `include_agent_instructions`:
-   returned as the spawn tool's `agent_instructions` result **and/or** delivered as the worker's first input
-   turn via the existing `Supervisor::write_stdin` path (the same delivery the timer wake reuses — one
-   path, [`04` §2](../04-engineering-architecture-and-patterns.md)). A caller may opt out
-   (`include_agent_instructions: false`). This is the **runtime** complement to orch-05's static
-   AGENTS.md/CLAUDE.md guidance (Task 2 there). No trust gating (see the independence note above).
+6. **Spawn onboarding + optional first task (O13, [`06` §5.1](../06-codebase-blueprint-and-cleanup.md)):**
+   after `spawn_agent` records lineage, queue one reusable clean-room orchestration briefing by default
+   (`include_agent_instructions: true`). The caller may opt out. An optional `prompt` queues a bounded
+   addressed `Task`; its `todo_id` correlation is optional, and it never enters provider arguments or
+   startup input. Wait for the worker's first C4 `Idle` transition, then use the O15 semantic
+   wake path to submit one compact envelope naming the pending task ids and the coordination primitives.
+   The worker retrieves and acknowledges the task through MCP. Keep one briefing source in `core`; do
+   not duplicate O13 as another parity row. Apply the same contract to `spawn_process` only when O9 is
+   implemented.
+7. **Authenticated live-run roster + mailbox (O15):** expose `agent_roster`, `agent_message_send`,
+   `agent_message_broadcast`, `agent_message_list`, `agent_message_get`, and
+   `agent_message_acknowledge` through `ScopedFacade`. Derive project, sender, and lineage root from the
+   authenticated bound session. The roster contains only live agents sharing that root. Messages are
+   ephemeral, ordered, and bounded by the core constants: **16 KiB per message, 64 pending per
+   recipient, 1,024 pending per project, 4,096 pending process-wide, and 16 MiB of pending payload
+   process-wide**. Retained lineage edges keep surviving siblings in one authorization root when an
+   ancestor closes, though only live agents appear in the roster. Direct and group sends refuse unrelated/cross-project
+   recipients. A group send checks all capacity before enqueuing any copy. On an `Idle` event, submit a
+   compact wake envelope through `try_submit_turn`; `wake_submitted` records only PTY-channel acceptance.
+   The recipient must retrieve and acknowledge the message before it leaves the inbox. Spawn Tasks,
+   debate, direct/group sends, and acknowledgement work without a todo; optional `todo_id` only correlates
+   live exchange to durable board work.
+8. **Atomic completion report (O16):** add `agent_report_completion(todo_id, summary)` on
+   `ScopedFacade`. One store transaction applies the existing blocker-gated completion and appends one
+   result comment whose author comes from the bound worker. Retrying returns that same record. Queue an
+   ephemeral `Completion` notice to the live parent only after the durable commit; missing parent,
+   mailbox capacity, or deferred PTY wake cannot roll back or duplicate the durable result.
 
 ## Interfaces
 ```rust
 impl Facade {
   // trust-gated, scoped — same guarantee as a manual command start (04 §12):
   async fn spawn_process(&self, scope: ProjectId, owner: ProcessId, command: SpawnSpec) -> Result<ProcessId, SpawnRefused>;
-  // O13: one clean-room template rendered with the worker's identity; returned as `agent_instructions`
-  // and/or written as the worker's first turn when include_agent_instructions is set (applies to spawn_agent too):
-  fn orchestration_preamble(&self, worker: ProcessId) -> String;
   // authorized only when the caller is scope-authenticated to BOTH projects (extends F13):
   fn todo_transfer(&self, from: ProjectId, to: ProjectId, id: TodoId, caller: ProcessId) -> Result<TodoId, TransferRefused>;
   fn scratchpad_transfer(&self, from: ProjectId, to: ProjectId, id: ScratchpadId, caller: ProcessId) -> Result<ScratchpadId, TransferRefused>;
+}
+
+impl Supervisor {
+  // Normalizes trailing CR and submits once; write_stdin remains raw.
+  fn try_submit_turn(&self, worker: ProcessId, body: Vec<u8>) -> Result<bool>;
+}
+
+impl ScopedFacade<'_> {
+  fn agent_roster(&self) -> Result<Vec<AgentRosterEntry>>;
+  fn agent_message_send(&self, recipient: ProcessId, body: String, todo: Option<TodoId>) -> Result<AgentMessageDelivery>;
+  fn agent_message_acknowledge(&self, message: AgentMessageId) -> Result<AgentMessageDelivery>;
+  fn agent_report_completion(&self, todo: TodoId, summary: String) -> Result<CompletionReport>;
 }
 ```
 
@@ -93,10 +122,16 @@ impl Facade {
 - `todo_transfer` to a project the caller is scope-authenticated for moves the todo preserving
   comments/completion and clearing blockers/locks (documented semantics); a transfer to an
   **unauthorized** project is refused (`ForeignProject`).
-- **(O13)** A spawned worker (via `spawn_agent` **or** `spawn_process`, with `include_agent_instructions`)
-  receives the `[SOLO ORCHESTRATION CONTEXT]` preamble — naming its identity + the coordination tools — and
-  can use the primitives (`whoami`, todo/scratchpad/timer) **with no skills loaded**; opting out suppresses
-  it; the preamble text is one `core` template (no per-call string duplication).
+- **(O13)** A `spawn_agent` worker receives default-on reusable instructions after its first idle
+  transition; opting out suppresses them. An optional prompt is a retrievable/acknowledgeable `Task`
+  without requiring a todo, never a CLI argument or startup paste. The `spawn_process` leg is accepted
+  with O9 when that future tool lands.
+- **(O15)** Only authenticated live lineage-root members can exchange messages, with or without an
+  optional todo correlation. Every mailbox limit is enforced without dropping existing records;
+  acknowledgement removes the addressed record. A
+  `wake_submitted` outcome makes no claim that the agent retrieved or acted on the payload.
+- **(O16)** Completion and its authored result are one all-or-nothing durable change, repeated reporting
+  is idempotent, and parent-notification failure cannot change that durable outcome.
 - Each new tool has a documented clean-room JSON Schema; the tool-count guard is updated; the trust/scope
   decisions are recorded in [`05` §12](../05-solo-reference-and-sources.md) (and `KNOWN-DIVERGENCES` if a
   documented behavior is diverged).
@@ -108,9 +143,14 @@ impl Facade {
 - **Integration (MCP over stdio, headless — the Phase 8 harness):** a scripted client spawns a trusted
   command and observes it in the app event stream; an untrusted/cross-project call is refused; a transfer
   honors/refuses scope. Action tools mutate real state.
-- **(O13)** a spawn with `include_agent_instructions` returns/delivers the preamble naming the worker's
-  identity + the coordination tools; opt-out omits it; the template is asserted to render once from the
-  `core` source (no duplicated string in the handler).
+- **(O13/O15)** a `spawn_agent` with default instructions and an optional prompt queues before readiness,
+  writes nothing to the PTY until the child becomes idle, then submits one compact wake; the worker
+  retrieves and acknowledges its no-todo `Task`. Opt-out omits the briefing. Repeat for `spawn_process`
+  when O9 lands.
+- **(O15)** roster/scope/authentication, direct and all-other-members broadcast, ordered list/get/ack,
+  all three capacity refusals, atomic broadcast refusal, idle-deferred wake, and process-removal cleanup.
+- **(O16)** store-failure atomicity, blocker refusal, one authored result on retry, parent-gone/full-mailbox
+  success, and later idle wake where a notification was queued.
 - **Regression:** existing `spawn_agent`, todo/scratchpad, and `crates/pty/tests/orchestration.rs` stay green.
 
 ## Risks & mitigations
@@ -118,9 +158,15 @@ impl Facade {
   unchanged; *no* new bypass; refuse-by-default; the decision is recorded before code (CLAUDE.md §9/§12).
 - **Transfer leaking content across project boundaries** → require scope-auth to **both** ends; default
   refuse; never widen scope silently ([`04` §12](../04-engineering-architecture-and-patterns.md)).
+- **Treating PTY acceptance as delivery** → expose `queued` / `wake_submitted` / `acknowledged` as
+  separate states; only acknowledgement removes the message.
+- **Busy-agent input corruption** → queue payloads in the mailbox and submit only a compact wake after
+  C4 reports `Idle`; never type into an active composer or permission prompt.
+- **Notification failure undoing completed work** → commit the todo + authored result first and keep
+  notification outside the transaction as best-effort ephemeral state.
 - **Scope creep into the FS file-io deferrals** → explicitly out of scope; `_save_to_file`/`_load_from_file`
   stay deferred behind their own security pass ([`05` §12](../05-solo-reference-and-sources.md)).
 
 ## Effort
 ~5–7 days (design-first security work dominates; the implementations are small over existing C2/C6; the
-O13 preamble is a small clean-room template + a delivery toggle on the existing spawn path).
+O13 onboarding reuses O15's mailbox/wake path; O16 composes existing todo writes into one transaction).

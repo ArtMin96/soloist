@@ -20,15 +20,36 @@ use soloist_core::{
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
-    TodoArg, TodoBlockerArg, TodoBlockersArg, TodoCommentCreateArg, TodoCommentEditArg,
-    TodoCommentRefArg, TodoCreateArg, TodoGetArg, TodoRef, TodoTagArg, TodoTransferArg,
-    TodoUpdateArg,
+    AgentCompletionArg, TodoArg, TodoBlockerArg, TodoBlockersArg, TodoCommentCreateArg,
+    TodoCommentEditArg, TodoCommentRefArg, TodoCreateArg, TodoGetArg, TodoRef, TodoTagArg,
+    TodoTransferArg, TodoUpdateArg,
 };
 use crate::server::SoloistMcp;
 use crate::tools::reply::{app_error, structured, unexpected};
 
 #[tool_router(router = todo_router, vis = "pub(crate)")]
 impl SoloistMcp {
+    #[tool(
+        description = "Complete a todo you own and report a concise result to your lead agent. The durable completion succeeds independently of its best-effort live notification, whose queued, pending, or deferred state is returned. Sender, parent, and project are derived from your authenticated session."
+    )]
+    pub(crate) async fn agent_report_completion(
+        &self,
+        Parameters(AgentCompletionArg { todo_id, summary }): Parameters<AgentCompletionArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self
+            .client
+            .request(IpcRequest::AgentReportCompletion {
+                todo_id: TodoId::from_raw(todo_id),
+                summary,
+            })
+            .await
+        {
+            Ok(IpcResponse::AgentCompletion(report)) => structured(&report),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
     #[tool(
         description = "List the todos in your effective project as one-line summaries (id, title, status, tags, blocked, lock, the scratchpad each derives from when it has one, and revision). Todos are durable shared work items that survive restarts."
     )]

@@ -5,9 +5,10 @@
 //! [`ToolRouter`]'s `Add`. The **core** groups are always served; the **feature** groups
 //! (Scratchpads, Diagrams, Todos, Timers, Key-Value, Prompt Templates, Git) are gated by the user's
 //! settings — they are registered only when enabled, so a disabled group's tools are neither listed
-//! nor callable (Key-Value, Prompt Templates and Git default off). Tool *names* mirror Solo for
-//! interop, but the parameter schemas are clean-room — derived from the argument structs in
-//! [`crate::args`]. No domain logic lives in a tool: each
+//! nor callable (Key-Value, Prompt Templates and Git default off). Names on the Solo-compatible
+//! surface mirror Solo for interop; Soloist's agent-messaging family is additive. Every parameter
+//! schema is clean-room and derived from the argument structs in [`crate::args`]. No domain logic
+//! lives in a tool: each
 //! forwards to the app, which resolves identity, scope, and the trust gate in the core, and the
 //! result is returned as structured content.
 
@@ -206,7 +207,7 @@ impl SoloistMcp {
     /// router from and [`tools_summary`](Self::tools_summary) labels its categories with. A group
     /// added here is automatically both served (per its gate) and categorized in the summary, so the
     /// served surface and its categorization can never fall out of sync.
-    fn tool_groups() -> [ToolGroup; 16] {
+    fn tool_groups() -> [ToolGroup; 17] {
         use GroupGate::{Core, Feature};
         [
             ToolGroup {
@@ -227,6 +228,11 @@ impl SoloistMcp {
             ToolGroup {
                 label: "Agents",
                 router: Self::agent_router,
+                gate: Core,
+            },
+            ToolGroup {
+                label: "Agent messaging",
+                router: Self::messaging_router,
                 gate: Core,
             },
             ToolGroup {

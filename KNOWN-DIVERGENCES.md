@@ -1843,42 +1843,31 @@ decision: `plan/05` §12.
 
 ---
 
-## D-36 — An agent handoff is a paste and nothing else: Soloist never presses return 🟢
+## D-36 — An agent handoff is one submitted semantic turn 🟢
 
-**Introduced:** the `git-integration` initiative, pull-request review slice (todo 44, branch
-`feat/git-pr-review`); recorded 2026-08-09 on the owner's decision, after the built behaviour and
-the parity row's wording were found to disagree.
+**Introduced:** the `git-integration` initiative, pull-request review slice; revised when the
+provider-neutral semantic-turn seam became the single delivery path for orchestration wakes and
+agent handoffs.
 
 **Solo — silent, not contradicted.** `plan/05` documents no pull-request review and no git surface
 of any kind, so nothing here is attributed to Solo. This is an internal decision about a
 [D-35](#d-35--git-is-a-first-class-surface-inside-soloist-a-soloist-extension-) behaviour, kept
 beside it rather than in a design note for the same reason D-35 is.
 
-**What `plan/02` VC9 asked for, and what was built.** The row's Verify read "a handoff delivers the
-**full** context … into the bound agent's session **as one fresh turn**". What ships delivers the
-same context into the same session and then stops: the text lands in the agent's input, no carriage
-return crosses the wire, and the human presses send. The coordination scheduler's timer delivery
-*does* append `\r` (that is what "as one fresh turn" means there), so the two are genuinely
-different and the row said the wrong one. **The built behaviour is the decision; the row is
-amended.**
+**Decision.** A handoff action means deliver this bounded, fenced context to the chosen running
+agent now, so it is submitted as exactly one semantic user turn. The supervisor owns the reusable
+operation: it normalizes trailing carriage returns and appends exactly one; raw `write_stdin` stays
+unchanged for terminal input. The coordination scheduler and pull-request handoff route through that
+same operation, so a surface cannot accidentally implement a second meaning of “fresh turn.”
 
-**Why the paste is the right shape.** Pressing return is not delivery, it is instruction: it makes
-the agent act on something a person has not read yet. Everything a handoff carries came from
-somewhere Soloist does not control — a check's log, a reviewer's comment — and it arrives in a
-session that may be mid-task. Submitting it would let a failing CI job's output start work on the
-user's behalf, in their repository, under their credentials, with the first they hear of it being
-the agent's reply. So the context is composed, fenced and bounded, and what to do about it stays the
-reader's decision. That the return is absent is asserted rather than intended
-(`nothing_is_submitted_on_the_agents_behalf`, `crates/core/src/facade/git_review_tests.rs`).
+**Why this changed.** Leaving context pasted but unsubmitted made a successful handoff look complete
+while the agent had received no turn to act on. It also disagreed with the orchestration contract,
+where delivery means a fresh turn. Explicit semantic submission separates intent from raw terminal
+bytes and makes the boundary testable (`a_handoff_is_submitted_as_exactly_one_turn`,
+`crates/core/src/facade/git_review_tests.rs`).
 
-**Why this is not the timer's rule.** A coordination timer's body is delivered as a fresh turn
-because the lead agent that set it *asked for that*, minutes earlier, naming the condition and the
-text — the submission is the thing it configured. A handoff has no such prior instruction: somebody
-clicked a button next to a comment, and the only thing they said was "give this to the agent".
-
-**Effect on parity:** amends the Verify of `plan/02` **VC9** to state the paste. No row regresses,
-and VC11's MCP git surface is unaffected — an agent reaching a handoff over MCP receives text as a
-tool result, which was never a turn in the first place.
+**Effect on parity:** VC9's original “one fresh turn” wording is implemented directly. VC11's MCP
+git result remains a tool result; only the local handoff-to-running-agent path submits a turn.
 
 ---
 
@@ -1998,3 +1987,51 @@ and **I7f** were narrowed in wording only. **C10** (themed ANSI palette), **C15*
 decorations), **DG6** (Mermaid renderer) and **VC2** (diff viewer) each already verify a theme flip
 and now flip over a chosen theme rather than a fixed pair, so their checks are downstream evidence for
 TH8 and must stay green. Full gap decision: `plan/05` §12.
+
+---
+
+## D-39 — Agent peer messaging is a bounded live-run mailbox (a Soloist extension) 🟢
+
+**Introduced:** the authenticated agent-messaging and completion-report slice (`plan/02` O15/O16).
+
+**Solo is silent, not contradicted.** This is a strict-reading exception to this file's usual scope,
+following D-20 and D-35. `plan/05` records Solo's lineage, `spawn_agent`, coordination tools, and timer
+wakes, but no direct or group agent-message tools. No public source says Solo cannot have them. The
+silence is the gap, so the full decision lives in `plan/05` §12 and nothing here attributes the feature
+to Solo.
+
+**The protocol does not supply the missing receive path.** Stable Model Context Protocol (MCP) tools are
+invoked by the client through `tools/call`; the server notification on that surface only reports that
+the tool list changed ([MCP tools, 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)).
+Sampling asks a capable client for a generated message and returns the result to the server; it does not
+append an arbitrary user turn to a coding CLI's active conversation
+([MCP sampling, 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/client/sampling)).
+Soloist therefore uses MCP for authenticated send/retrieve/ack operations and a separate idle-gated PTY
+semantic turn for the wake.
+
+**Soloist's decision:**
+
+- `agent_roster` derives a live retained-lineage-root group from the bound session's authenticated
+  project and process. Closed members are hidden, but retained edges keep surviving siblings related.
+  Direct sends address one related live agent; broadcasts address every other group member.
+- Messages are ephemeral per run and bounded at **16 KiB each**, **64 pending per recipient**, and
+  **1,024 pending per project**, plus **4,096 pending messages** and **16 MiB of pending payload** across
+  the process. There is no TTL. Only the addressed recipient can list, get, or acknowledge one.
+- `queued`, `wake_submitted`, and `acknowledged` are distinct states. `wake_submitted` means only that
+  the bounded PTY input channel accepted a compact wake turn after `Idle`; it does not claim retrieval,
+  acceptance, execution, or completion.
+- O13 reuses this path. Default-on reusable onboarding and an optional addressed `Task` wait until the
+  spawned worker becomes idle. The task never enters CLI arguments or startup terminal input.
+- `agent_report_completion` commits the existing blocker-gated todo completion and one
+  identity-authored result atomically and idempotently. Parent notification is an ephemeral,
+  best-effort operation after the durable commit, so notification failure cannot undo completed work.
+- The supervisor keeps two explicit input meanings. Raw `write_stdin`/MCP `send_input` preserve the
+  caller's bytes. Semantic submit-turn removes trailing carriage returns and appends exactly one. Timer
+  wakes, mailbox wakes, spawn onboarding, and local git handoffs use the semantic operation.
+
+**Why 🟢 (settled):** authentication, lineage scope, bounds, durability split, acknowledgement,
+idle-gated wake, and raw-versus-semantic input are decided. O15/O16 remain unverified until their matrix
+checks have evidence; this status records the decision, not test completion.
+
+**Effect on parity:** O13 is widened in place rather than duplicated. New rows O15/O16 cover the
+mailbox/roster and completion report. No documented Solo row changes.

@@ -1,0 +1,17 @@
+//! The ephemeral, bounded addressed mailbox shared by live agents.
+
+mod onboarding;
+mod reactor;
+mod state;
+mod vocabulary;
+
+pub use onboarding::{orchestration_guide, OrchestrationGuide};
+pub use reactor::AgentMailboxReactor;
+pub use state::AgentMailbox;
+pub use vocabulary::{
+    AgentBroadcastReceipt, AgentMessage, AgentMessageDelivery, AgentMessageKind,
+    AgentMessageOutcome, AgentMessageReceipt, AgentRelationship, AgentRosterEntry,
+    MailboxCapacityError, MAX_AGENT_MESSAGE_BYTES, MAX_PENDING_AGENT_MESSAGES,
+    MAX_PENDING_AGENT_MESSAGE_BYTES, MAX_PENDING_MESSAGES_PER_PROJECT,
+    MAX_PENDING_MESSAGES_PER_RECIPIENT,
+};

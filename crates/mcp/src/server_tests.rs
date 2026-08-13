@@ -3,11 +3,14 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::ServerHandler;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, Comment, DiagramId, DiagramSummary, DiagramView,
-    FireCond, LeaseView, LinkContent, McpToolGroups, Origin, ProcStatus, ProcessId, ProcessKind,
-    ProcessView, ProjectId, ProjectRef, PromptMode, Readiness, ScratchpadId, ScratchpadLink,
-    ScratchpadRef, ScratchpadSummary, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary,
-    TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoSummary, TodoView, Whoami,
+    AcquireOutcome, AgentBroadcastReceipt, AgentKind, AgentMessage, AgentMessageDelivery,
+    AgentMessageId, AgentMessageKind, AgentMessageOutcome, AgentMessageReceipt, AgentRelationship,
+    AgentRosterEntry, AgentTool, Comment, CompletionNotification, CompletionReport, DiagramId,
+    DiagramSummary, DiagramView, FireCond, LeaseView, LinkContent, McpToolGroups, Origin,
+    ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, PromptMode, Readiness,
+    ScratchpadId, ScratchpadLink, ScratchpadRef, ScratchpadSummary, ScratchpadView, SessionId,
+    SetWhenIdleOutcome, StartSummary, TimerId, TimerStatus, TimerView, TodoCompletion, TodoDoc,
+    TodoId, TodoStatus, TodoSummary, TodoView, Whoami,
 };
 use soloist_core::{
     BranchInfo, ChangeKind, DiffExtent, DiffTarget, FileChange, GitError, GitFileStatus, GitStatus,
@@ -31,6 +34,7 @@ use crate::args::{
 };
 
 use crate::args::{
+    AgentCompletionArg, AgentMessageArg, AgentMessageBroadcastArg, AgentMessageSendArg,
     DiagramArchiveArg, DiagramNameArg, DiagramTagsArg, DiagramWriteArg, HelpArg,
     IntegrationFileArg, LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, PromptScopeArg,
     PromptTemplateCreateArg, PromptTemplateRenderArg, PromptTemplateUpdateArg, RenameArg,
@@ -78,6 +82,18 @@ fn sample_view(id: u64) -> ProcessView {
     }
 }
 
+fn sample_agent_message() -> AgentMessage {
+    AgentMessage {
+        id: AgentMessageId::from_raw(3),
+        project: ProjectId::from_raw(1),
+        sender: ProcessId::from_raw(7),
+        recipient: ProcessId::from_raw(12),
+        kind: AgentMessageKind::Direct,
+        body: "Review the adapter".into(),
+        todo_id: Some(TodoId::from_raw(8)),
+    }
+}
+
 /// The tool surface the MCP server is meant to expose, as an explicit list — one entry per
 /// `#[tool]`, grouped by the category file that defines it. This is the single source of the
 /// *intended* surface, kept deliberately separate from the router that produces the *actual*
@@ -103,6 +119,15 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     // tools/agent.rs
     "spawn_agent",
     "list_agent_tools",
+    // tools/messaging.rs
+    "agent_roster",
+    "agent_message_send",
+    "agent_message_broadcast",
+    "agent_message_list",
+    "agent_message_get",
+    "agent_message_acknowledge",
+    // tools/todo.rs
+    "agent_report_completion",
     // tools/bulk.rs
     "start_all_commands",
     "stop_all_commands",
@@ -540,6 +565,32 @@ fn disabling_a_feature_group_hides_only_its_tools() {
     assert!(served.contains("whoami"), "core tools stay regardless");
 }
 
+#[test]
+fn completion_reporting_is_gated_with_todos_while_live_messaging_remains_core() {
+    let served = served_tools(&handler_with_groups(McpToolGroups {
+        todos: false,
+        ..McpToolGroups::default()
+    }));
+
+    assert!(
+        !served.contains("agent_report_completion"),
+        "completion mutates a durable todo and must follow the Todos gate"
+    );
+    for tool in [
+        "agent_roster",
+        "agent_message_send",
+        "agent_message_broadcast",
+        "agent_message_list",
+        "agent_message_get",
+        "agent_message_acknowledge",
+    ] {
+        assert!(
+            served.contains(tool),
+            "{tool} remains a core messaging tool"
+        );
+    }
+}
+
 /// Each seed-template peek is served only where the create it describes is served. The peek exists
 /// so a caller can follow the shape a create would apply, so it belongs to that kind's group and
 /// must never outlive it — turning a kind off leaves no way to read its template.
@@ -887,14 +938,27 @@ async fn send_input_without_a_wait_returns_a_null_tail() {
 }
 
 #[tokio::test]
-async fn spawn_agent_threads_its_arguments_through_and_returns_the_process_id() {
+async fn spawn_agent_threads_its_task_through_and_returns_the_process_id() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
     spawn_fake_app(socket.clone(), |request| match request {
-        IpcRequest::SpawnAgent { tool, extra_args }
-            if tool == "Claude" && extra_args == ["--model", "opus"] =>
+        IpcRequest::SpawnAgent {
+            tool,
+            extra_args,
+            prompt,
+            todo_id,
+            include_agent_instructions,
+        } if tool == "Claude"
+            && extra_args == ["--model", "opus"]
+            && prompt.as_deref() == Some("Review the mailbox change")
+            && todo_id.is_none()
+            && include_agent_instructions =>
         {
-            Ok(IpcResponse::Spawned(ProcessId::from_raw(42)))
+            Ok(IpcResponse::SpawnedWithMessage {
+                process: ProcessId::from_raw(42),
+                initial_message_id: AgentMessageId::from_raw(3),
+                delivery: AgentMessageOutcome::Queued,
+            })
         }
         _ => Err(IpcError::Internal("unexpected request".into())),
     });
@@ -903,10 +967,238 @@ async fn spawn_agent_threads_its_arguments_through_and_returns_the_process_id() 
         .spawn_agent(Parameters(SpawnAgentArg {
             tool: "Claude".into(),
             extra_args: vec!["--model".into(), "opus".into()],
+            prompt: Some("Review the mailbox change".into()),
+            include_agent_instructions: true,
         }))
         .await
         .expect("spawn_agent succeeds");
-    assert_eq!(structured_of(result), serde_json::json!({ "process": 42 }));
+    let value = structured_of(result);
+    assert_eq!(value["process"], 42);
+    assert_eq!(value["initial_message_id"], 3);
+    assert_eq!(value["delivery"], "queued");
+}
+
+#[test]
+fn spawn_agent_instructions_default_on_and_can_be_disabled() {
+    let defaulted: SpawnAgentArg = serde_json::from_value(serde_json::json!({
+        "tool": "Claude",
+        "extra_args": [],
+    }))
+    .expect("legacy spawn arguments still decode");
+    assert!(defaulted.include_agent_instructions);
+
+    let disabled: SpawnAgentArg = serde_json::from_value(serde_json::json!({
+        "tool": "Claude",
+        "include_agent_instructions": false,
+    }))
+    .expect("the onboarding instructions can be disabled");
+    assert!(!disabled.include_agent_instructions);
+}
+
+#[test]
+fn messaging_tool_schemas_never_accept_asserted_identity_or_scope() {
+    let handler = handler(PathBuf::from("unused.sock"));
+    for name in [
+        "agent_roster",
+        "agent_message_send",
+        "agent_message_broadcast",
+        "agent_message_list",
+        "agent_message_get",
+        "agent_message_acknowledge",
+        "agent_report_completion",
+    ] {
+        let tool = handler
+            .tool_router
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == name)
+            .expect("messaging tool is served");
+        let properties = tool
+            .input_schema
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("object-shaped tool arguments");
+        for forbidden in ["sender", "parent", "project"] {
+            assert!(
+                !properties.contains_key(forbidden),
+                "{name} must authenticate {forbidden} from the session"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn agent_roster_projects_the_authenticated_relationships() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let child = AgentRosterEntry {
+        process: ProcessId::from_raw(12),
+        parent: Some(ProcessId::from_raw(7)),
+        root: ProcessId::from_raw(7),
+        relationship: AgentRelationship::Child,
+        label: "reviewer".into(),
+        status: ProcStatus::Running,
+    };
+    let canned = child.clone();
+    spawn_fake_app(socket.clone(), move |request| match request {
+        IpcRequest::AgentRoster => Ok(IpcResponse::AgentRoster(vec![canned.clone()])),
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .agent_roster()
+        .await
+        .expect("agent_roster succeeds");
+    let back: Vec<AgentRosterEntry> =
+        serde_json::from_value(structured_of(result)["agents"].clone()).expect("decode roster");
+    assert_eq!(back, vec![child]);
+}
+
+#[tokio::test]
+async fn agent_message_send_threads_only_recipient_content_and_todo() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::AgentMessageSend {
+            recipient,
+            body,
+            todo_id,
+        } if recipient == ProcessId::from_raw(12)
+            && body == "Review the adapter"
+            && todo_id == Some(TodoId::from_raw(8)) =>
+        {
+            Ok(IpcResponse::AgentMessageDelivery(AgentMessageDelivery {
+                message: sample_agent_message(),
+                outcome: AgentMessageOutcome::Queued,
+            }))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .agent_message_send(Parameters(AgentMessageSendArg {
+            recipient: 12,
+            body: "Review the adapter".into(),
+            todo_id: Some(8),
+        }))
+        .await
+        .expect("agent_message_send succeeds");
+    let back: AgentMessageDelivery =
+        serde_json::from_value(structured_of(result)).expect("decode delivery");
+    assert_eq!(back.message, sample_agent_message());
+}
+
+#[tokio::test]
+async fn group_broadcast_and_inbox_tools_keep_the_core_projections() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::AgentMessageBroadcast { body, todo_id }
+            if body == "Interfaces are stable" && todo_id.is_none() =>
+        {
+            Ok(IpcResponse::AgentMessageBroadcast(AgentBroadcastReceipt {
+                deliveries: vec![AgentMessageReceipt {
+                    message_id: AgentMessageId::from_raw(3),
+                    recipient: ProcessId::from_raw(12),
+                    outcome: AgentMessageOutcome::Queued,
+                }],
+            }))
+        }
+        IpcRequest::AgentMessageList => {
+            Ok(IpcResponse::AgentMessages(vec![sample_agent_message()]))
+        }
+        IpcRequest::AgentMessageGet { message_id } if message_id == AgentMessageId::from_raw(3) => {
+            Ok(IpcResponse::AgentMessage(sample_agent_message()))
+        }
+        IpcRequest::AgentMessageAcknowledge { message_id }
+            if message_id == AgentMessageId::from_raw(3) =>
+        {
+            Ok(IpcResponse::AgentMessageDelivery(AgentMessageDelivery {
+                message: sample_agent_message(),
+                outcome: AgentMessageOutcome::Acknowledged,
+            }))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+    let handler = handler(socket);
+
+    let broadcast = handler
+        .agent_message_broadcast(Parameters(AgentMessageBroadcastArg {
+            body: "Interfaces are stable".into(),
+            todo_id: None,
+        }))
+        .await
+        .expect("broadcast succeeds");
+    let broadcast = structured_of(broadcast);
+    assert_eq!(
+        broadcast["deliveries"]
+            .as_array()
+            .expect("deliveries")
+            .len(),
+        1
+    );
+    assert!(broadcast["deliveries"][0].get("body").is_none());
+    assert_eq!(
+        structured_of(handler.agent_message_list().await.expect("list succeeds"))["messages"]
+            .as_array()
+            .expect("messages")
+            .len(),
+        1
+    );
+    let get = handler
+        .agent_message_get(Parameters(AgentMessageArg { message_id: 3 }))
+        .await
+        .expect("get succeeds");
+    assert_eq!(
+        serde_json::from_value::<AgentMessage>(structured_of(get)).expect("decode message"),
+        sample_agent_message()
+    );
+    let ack = handler
+        .agent_message_acknowledge(Parameters(AgentMessageArg { message_id: 3 }))
+        .await
+        .expect("ack succeeds");
+    let delivery: AgentMessageDelivery =
+        serde_json::from_value(structured_of(ack)).expect("decode acknowledgement");
+    assert_eq!(delivery.outcome, AgentMessageOutcome::Acknowledged);
+}
+
+#[tokio::test]
+async fn completion_report_threads_the_todo_and_summary_and_projects_the_durable_result() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::AgentReportCompletion { todo_id, summary }
+            if todo_id == TodoId::from_raw(8) && summary == "Adapter wired" =>
+        {
+            Ok(IpcResponse::AgentCompletion(CompletionReport {
+                completion: TodoCompletion {
+                    todo_id: TodoId::from_raw(8),
+                    reporter: "reviewer".into(),
+                    summary: "Adapter wired".into(),
+                    comment: 4,
+                },
+                already_reported: false,
+                notification: CompletionNotification::Deferred { recipient: None },
+            }))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .agent_report_completion(Parameters(AgentCompletionArg {
+            todo_id: 8,
+            summary: "Adapter wired".into(),
+        }))
+        .await
+        .expect("completion report succeeds");
+    let back: CompletionReport =
+        serde_json::from_value(structured_of(result)).expect("decode completion");
+    assert_eq!(back.completion.todo_id, TodoId::from_raw(8));
+    assert_eq!(back.completion.comment, 4);
+    assert!(matches!(
+        back.notification,
+        CompletionNotification::Deferred { recipient: None }
+    ));
 }
 
 #[tokio::test]
@@ -924,6 +1216,8 @@ async fn a_workers_spawn_refusal_is_a_tool_error_the_model_can_read() {
         .spawn_agent(Parameters(SpawnAgentArg {
             tool: "worker".into(),
             extra_args: Vec::new(),
+            prompt: None,
+            include_agent_instructions: true,
         }))
         .await
         .expect("a request error is a tool result, not a protocol error");
@@ -2205,6 +2499,8 @@ async fn mcp_tools_summary_categorizes_the_served_tools_without_schemas() {
     };
     // whoami is categorized under identity; the summary tool lists itself under setup.
     assert!(has("Identity & session", "whoami"));
+    assert!(has("Agent messaging", "agent_message_send"));
+    assert!(has("Todos", "agent_report_completion"));
     assert!(has("Setup & support", "mcp_tools_summary"));
 
     // A tool entry carries a name and a one-line summary, and no input schema.

@@ -11,6 +11,7 @@ pub(crate) mod git;
 pub(crate) mod identity;
 pub(crate) mod kv;
 pub(crate) mod lock;
+pub(crate) mod messaging;
 pub(crate) mod output;
 pub(crate) mod process;
 pub(crate) mod progress;

@@ -115,6 +115,12 @@ id_newtype!(
     /// itself is content that persists.
     TodoId
 );
+id_newtype!(
+    /// Identifies an ephemeral addressed agent message within one Soloist run. Mailbox contents
+    /// disappear with the live processes they address, so ids are monotonic per run and are never
+    /// reconstructed across an app restart.
+    AgentMessageId
+);
 
 #[cfg(test)]
 mod tests {

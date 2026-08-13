@@ -14,10 +14,97 @@
 
 use super::scratchpad::ScratchpadRef;
 use super::scratchpad_link::ScratchpadLink;
-use super::todo_comment::{Comment, CommentAuthor};
+use super::todo::TodoError;
+use super::todo_comment::Comment;
+use super::todo_completion::TodoCompletion;
 use super::todo_doc::TodoDoc;
 use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
 use crate::ports::StoreError;
+mod noop;
+
+pub use noop::NoopTodoRepo;
+
+/// One consistent todo-and-blockers snapshot presented to the core completion policy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TodoCompletionContext {
+    todo: StoredTodo,
+    blockers: Vec<StoredTodo>,
+}
+
+impl TodoCompletionContext {
+    /// Builds the snapshot supplied by a repository transaction.
+    pub fn from_storage(todo: StoredTodo, blockers: Vec<StoredTodo>) -> Self {
+        Self { todo, blockers }
+    }
+
+    /// The todo being considered for completion.
+    pub fn todo(&self) -> &StoredTodo {
+        &self.todo
+    }
+
+    /// Existing blocker rows. Missing blocker ids are intentionally absent and count as met.
+    pub fn blockers(&self) -> &[StoredTodo] {
+        &self.blockers
+    }
+}
+
+/// Core-created state change that a repository persists without interpreting its meaning.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TodoCompletionIntent {
+    doc: TodoDoc,
+    comment: Comment,
+    completion: TodoCompletion,
+}
+
+impl TodoCompletionIntent {
+    pub(super) fn new(doc: TodoDoc, comment: Comment, completion: TodoCompletion) -> Self {
+        Self {
+            doc,
+            comment,
+            completion,
+        }
+    }
+
+    /// The terminal document produced by the core policy.
+    pub fn doc(&self) -> &TodoDoc {
+        &self.doc
+    }
+
+    /// The identity-authored result comment produced by the core policy.
+    pub fn comment(&self) -> &Comment {
+        &self.comment
+    }
+
+    /// The durable idempotency record produced by the core policy.
+    pub fn completion(&self) -> &TodoCompletion {
+        &self.completion
+    }
+}
+
+/// Core policy decision evaluated inside one repository transaction.
+#[derive(Debug)]
+pub enum TodoCompletionDecision {
+    Record(TodoCompletionIntent),
+    Existing,
+    Refuse(TodoError),
+}
+
+/// Atomic persistence outcome after the core policy evaluated a consistent snapshot.
+#[derive(Debug)]
+pub enum TodoCompletionAtomicResult {
+    Recorded(Box<StoredTodo>),
+    Existing(Box<StoredTodo>),
+    Refused(TodoError),
+    NotFound,
+}
+
+/// Result of comparing and replacing only the typed durable completion record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TodoCompletionCompareResult {
+    Written(Box<StoredTodo>),
+    Mismatch(Box<StoredTodo>),
+    NotFound,
+}
 
 /// A persisted todo: its store-assigned [`TodoId`] (durable, stable across runs), the project it
 /// belongs to, its document (including its lifecycle status), its tags, the ids of the
@@ -31,6 +118,7 @@ pub struct StoredTodo {
     pub tags: Vec<String>,
     pub blockers: Vec<TodoId>,
     pub comments: Vec<Comment>,
+    pub completion: Option<TodoCompletion>,
     pub locked_by: Option<ProcessId>,
     /// The associated scratchpad, resolved on read. Only its [`ScratchpadId`] is persisted — the
     /// adapter projects the current `name` alongside it, so a rename never breaks the link and a
@@ -48,6 +136,7 @@ pub enum TodoWriteResult {
     Written(Box<StoredTodo>),
     NotFound,
     Conflict { actual: u64 },
+    CompletionProtected,
 }
 
 /// The outcome of a comment edit ([`comment_update`](TodoRepo::comment_update) /
@@ -58,12 +147,32 @@ pub enum CommentEdit {
     Edited(Box<StoredTodo>),
     NoTodo,
     NoComment,
+    CompletionProtected,
 }
 
 /// Durable repository of coordination todos. One row per `(project, id)`, identified durably by a
 /// store-assigned [`TodoId`] that is never reused. Every state-dependent method is atomic with
 /// respect to the others.
 pub trait TodoRepo: Send + Sync {
+    /// Runs `policy` against one transactionally consistent todo-and-blockers snapshot and, only
+    /// when it returns [`TodoCompletionDecision::Record`], persists that intent in the same
+    /// transaction. The repository supplies atomicity; the callback owns every domain decision.
+    fn apply_completion(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        policy: &mut dyn FnMut(&TodoCompletionContext) -> TodoCompletionDecision,
+    ) -> Result<TodoCompletionAtomicResult, StoreError>;
+
+    /// Replaces only the completion record when its current typed value equals `expected`.
+    fn compare_completion(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        expected: &TodoCompletion,
+        replacement: &TodoCompletion,
+    ) -> Result<TodoCompletionCompareResult, StoreError>;
+
     /// Inserts a new todo in `project` with `doc` at revision 1, no tags, blockers, comments, or
     /// lock, associated with `scratchpad` (`None` leaves it unlinked), returning the stored row with
     /// its assigned id.
@@ -221,156 +330,4 @@ pub trait TodoRepo: Send + Sync {
         to: ProjectId,
         id: TodoId,
     ) -> Result<Option<StoredTodo>, StoreError>;
-}
-
-/// A [`TodoRepo`] that stores nothing — the default until the durable adapter is wired, so the core
-/// runs (todos simply never persist) without it. A create echoes a placeholder row back and every
-/// read is empty.
-#[derive(Clone, Copy, Default)]
-pub struct NoopTodoRepo;
-
-impl TodoRepo for NoopTodoRepo {
-    fn create(
-        &self,
-        project: ProjectId,
-        doc: &TodoDoc,
-        _scratchpad: Option<ScratchpadId>,
-    ) -> Result<StoredTodo, StoreError> {
-        Ok(StoredTodo {
-            id: TodoId::from_raw(0),
-            project,
-            doc: doc.clone(),
-            tags: Vec::new(),
-            blockers: Vec::new(),
-            comments: Vec::new(),
-            locked_by: None,
-            scratchpad: None,
-            revision: 1,
-        })
-    }
-    fn read(&self, _project: ProjectId, _id: TodoId) -> Result<Option<StoredTodo>, StoreError> {
-        Ok(None)
-    }
-    fn list(&self, _project: ProjectId) -> Result<Vec<StoredTodo>, StoreError> {
-        Ok(Vec::new())
-    }
-    fn write_doc(
-        &self,
-        _project: ProjectId,
-        _id: TodoId,
-        _doc: &TodoDoc,
-        _scratchpad: ScratchpadLink<ScratchpadId>,
-        _expected: Option<u64>,
-    ) -> Result<TodoWriteResult, StoreError> {
-        Ok(TodoWriteResult::NotFound)
-    }
-    fn delete(&self, _project: ProjectId, _id: TodoId) -> Result<bool, StoreError> {
-        Ok(false)
-    }
-    fn tags(&self, _project: ProjectId) -> Result<Vec<String>, StoreError> {
-        Ok(Vec::new())
-    }
-    fn add_tag(
-        &self,
-        _project: ProjectId,
-        _id: TodoId,
-        _tag: &str,
-    ) -> Result<Option<StoredTodo>, StoreError> {
-        Ok(None)
-    }
-    fn remove_tag(
-        &self,
-        _project: ProjectId,
-        _id: TodoId,
-        _tag: &str,
-    ) -> Result<Option<StoredTodo>, StoreError> {
-        Ok(None)
-    }
-    fn set_blockers(
-        &self,
-        _project: ProjectId,
-        _id: TodoId,
-        _blockers: &[TodoId],
-    ) -> Result<Option<StoredTodo>, StoreError> {
-        Ok(None)
-    }
-    fn add_blocker(
-        &self,
-        _project: ProjectId,
-        _id: TodoId,
-        _blocker: TodoId,
-    ) -> Result<Option<StoredTodo>, StoreError> {
-        Ok(None)
-    }
-    fn remove_blocker(
-        &self,
-        _project: ProjectId,
-        _id: TodoId,
-        _blocker: TodoId,
-    ) -> Result<Option<StoredTodo>, StoreError> {
-        Ok(None)
-    }
-    fn unmet_blockers(
-        &self,
-        _project: ProjectId,
-        _blockers: &[TodoId],
-    ) -> Result<Vec<TodoId>, StoreError> {
-        Ok(Vec::new())
-    }
-    fn lock(
-        &self,
-        _project: ProjectId,
-        _id: TodoId,
-        _owner: ProcessId,
-    ) -> Result<Option<StoredTodo>, StoreError> {
-        Ok(None)
-    }
-    fn unlock(
-        &self,
-        _project: ProjectId,
-        _id: TodoId,
-        _owner: ProcessId,
-    ) -> Result<Option<StoredTodo>, StoreError> {
-        Ok(None)
-    }
-    fn comment_create(
-        &self,
-        _project: ProjectId,
-        _id: TodoId,
-        _body: &str,
-        _author: Option<CommentAuthor>,
-    ) -> Result<Option<(StoredTodo, u64)>, StoreError> {
-        Ok(None)
-    }
-    fn comment_update(
-        &self,
-        _project: ProjectId,
-        _id: TodoId,
-        _comment: u64,
-        _body: &str,
-    ) -> Result<CommentEdit, StoreError> {
-        Ok(CommentEdit::NoTodo)
-    }
-    fn comment_delete(
-        &self,
-        _project: ProjectId,
-        _id: TodoId,
-        _comment: u64,
-    ) -> Result<CommentEdit, StoreError> {
-        Ok(CommentEdit::NoTodo)
-    }
-    fn release_owner(&self, _process: ProcessId) -> Result<usize, StoreError> {
-        Ok(0)
-    }
-    fn clear_locks(&self) -> Result<usize, StoreError> {
-        Ok(0)
-    }
-    fn transfer(
-        &self,
-        _from: ProjectId,
-        _to: ProjectId,
-        _id: TodoId,
-    ) -> Result<Option<StoredTodo>, StoreError> {
-        Ok(None)
-    }
 }

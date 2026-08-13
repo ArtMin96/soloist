@@ -1,4 +1,5 @@
 import { openProject } from "../../src/flows/openProject.js";
+import { captureProof } from "../../src/harness/artifacts.js";
 import { makeRepository } from "../../src/harness/repository.js";
 import { gitRail } from "../../src/screens/GitRail.js";
 import { sidebar } from "../../src/screens/Sidebar.js";
@@ -24,6 +25,8 @@ describe("changed-file tree actions", () => {
     await gitRail.reexpandFolders();
 
     const right = await gitRail.actionRightEdges(CHANGED_PATH);
+    expect(right.actionWidth).toBeGreaterThan(0);
     expect(right.action).toBeLessThanOrEqual(right.rail);
+    await captureProof("nested-tree-action-layout", right);
   });
 });

@@ -388,6 +388,56 @@ async fn a_worker_spawned_by_a_bound_lead_nests_under_it() {
 }
 
 #[tokio::test]
+async fn a_spawn_prompt_becomes_an_addressed_task_the_worker_can_acknowledge() {
+    use crate::coordination::{AgentMessageKind, AgentMessageOutcome};
+    use crate::facade::SpawnAgentRequest;
+
+    let (facade, project) = facade_with_agent_tool();
+    let lead = agent(&facade, project, "lead");
+    let lead_session = authentic_session(&facade, lead, TEST_PEER_PGID);
+    facade
+        .scoped(lead_session)
+        .bind_session_process(lead)
+        .expect("bind lead");
+
+    let spawned = facade
+        .scoped(lead_session)
+        .spawn_agent_request(SpawnAgentRequest {
+            tool: "worker".into(),
+            extra_args: Vec::new(),
+            prompt: Some("implement the parser".into()),
+            todo_id: None,
+            include_agent_instructions: true,
+        })
+        .expect("spawn with task");
+    let delivery = spawned.initial_message.expect("the task was queued");
+    assert_eq!(delivery.outcome, AgentMessageOutcome::Queued);
+
+    let worker_session = authentic_session(&facade, spawned.process, TEST_PEER_PGID + 1);
+    facade
+        .scoped(worker_session)
+        .bind_session_process(spawned.process)
+        .expect("bind worker");
+    let inbox = facade
+        .scoped(worker_session)
+        .agent_message_list()
+        .expect("inbox");
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].message.kind, AgentMessageKind::Task);
+    assert_eq!(inbox[0].message.body, "implement the parser");
+    let acknowledged = facade
+        .scoped(worker_session)
+        .agent_message_acknowledge(delivery.message.id)
+        .expect("acknowledge");
+    assert_eq!(acknowledged.outcome, AgentMessageOutcome::Acknowledged);
+    assert!(facade
+        .scoped(worker_session)
+        .agent_message_list()
+        .expect("empty inbox")
+        .is_empty());
+}
+
+#[tokio::test]
 async fn an_unbound_spawn_is_a_root() {
     let (facade, project) = facade_with_agent_tool();
     // A session with no bound process: it still resolves its scope to the sole project, but has

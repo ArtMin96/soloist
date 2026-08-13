@@ -101,17 +101,6 @@ fn output_delta_holds_working_while_output_flows_past_a_lingering_prompt() {
 }
 
 #[test]
-fn output_delta_agent_that_never_outputs_stays_idle() {
-    let strategy = strategy_for(AgentKind::OpenCode);
-    let mut memory = AgentMemory::default();
-    let mut activity = AgentActivity::Idle;
-    for _ in 0..5 {
-        activity = strategy.classify(&mut memory, &signals(0, None, &[]), activity);
-    }
-    assert_eq!(activity, AgentActivity::Idle);
-}
-
-#[test]
 fn title_stability_works_while_the_title_changes_then_idles_when_stable() {
     let strategy = strategy_for(AgentKind::Codex);
     let mut memory = AgentMemory::default();

@@ -1,8 +1,8 @@
 //! Turning one thing a reviewer or a check said into something an agent can be told.
 //!
-//! This composes text and nothing else. It runs no tool on the agent's behalf, submits nothing, and
-//! decides nothing about what should be done — what comes out is context, clearly fenced, for a
-//! person or an agent to read and act on. That is the whole contract: a one-way paste.
+//! This context composes text and nothing else; the façade decides whether it is copied or submitted
+//! as a semantic turn. Keeping composition here and delivery there prevents version control from
+//! learning what a process is.
 //!
 //! What goes in is bounded twice over, because everything here was written by somebody else. A
 //! check's log is taken from its end and capped; a thread carries a bounded number of comments;
@@ -20,7 +20,7 @@ use super::review::{CheckRun, PullRequestReview, ReviewThread, REVIEW_LIMITS};
 use super::status::Git;
 
 /// The most a composed handoff carries. Generous enough for a failing build's own account of
-/// itself, bounded because this is delivered into somebody's session as one paste.
+/// itself, bounded because this is delivered into somebody's session as one turn.
 pub const HANDOFF_LIMIT: usize = 16 * 1024;
 
 /// The most of a check's log that is carried. The rest of the ceiling above belongs to what the

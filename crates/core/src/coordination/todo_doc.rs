@@ -26,6 +26,15 @@ pub enum TodoStatus {
     Done,
 }
 
+impl TodoStatus {
+    /// The legal terminal transition used by todo completion.
+    pub(crate) const fn completed(self) -> Self {
+        match self {
+            Self::Open | Self::Blocked | Self::InProgress | Self::Done => Self::Done,
+        }
+    }
+}
+
 /// The small document every todo carries — the revision-guarded specification of the work: a title,
 /// a free-form Markdown body, and the lifecycle status. The aggregate validates it on write
 /// ([`validate`](TodoDoc::validate)). Tags, blockers, comments, and the lock are **not** part of the

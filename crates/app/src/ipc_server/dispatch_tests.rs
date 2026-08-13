@@ -1,7 +1,7 @@
 use super::*;
 use soloist_core::testing::{
-    terminal_registration, FakeGitForge, FakeGitRepository, FakeLockRepo, FakeProjectRepo,
-    FakeSettingsRepo, FakeSpawner, FakeTemplateRepo, FakeTrustRepo, GitChange,
+    agent_registration, terminal_registration, FakeGitForge, FakeGitRepository, FakeLockRepo,
+    FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTemplateRepo, FakeTrustRepo, GitChange,
 };
 use soloist_core::{
     AcquireOutcome, BranchOp, CorePorts, DomainEvent, IntegrationFile, McpFeatureGroup,
@@ -240,6 +240,102 @@ fn scoped_terminal(
     id
 }
 
+/// Registers and authentically binds an agent for mailbox routing tests.
+fn scoped_agent(facade: &Facade, session: SessionId, project: ProjectId, name: &str) -> ProcessId {
+    let id = facade
+        .supervisor()
+        .register(agent_registration(project, name));
+    facade.supervisor().assign_test_group(id, PEER_PGID);
+    facade
+        .scoped(session)
+        .bind_session_process(id)
+        .expect("an authentic bind to the agent the caller runs in");
+    id
+}
+
+#[tokio::test]
+async fn agent_messaging_requests_route_through_the_authenticated_scoped_facade() {
+    let facade = facade();
+    let session = grouped_session(&facade);
+    let agent = scoped_agent(&facade, session, ProjectId::from_raw(1), "lead");
+
+    match handle_request(&facade, session, IpcRequest::AgentRoster).await {
+        Ok(IpcResponse::AgentRoster(roster)) => {
+            assert_eq!(roster.len(), 1);
+            assert_eq!(roster[0].process, agent);
+        }
+        other => panic!("expected the authenticated roster, got {other:?}"),
+    }
+
+    let delivery = match handle_request(
+        &facade,
+        session,
+        IpcRequest::AgentMessageSend {
+            recipient: agent,
+            body: "Review the adapter".into(),
+            todo_id: None,
+        },
+    )
+    .await
+    {
+        Ok(IpcResponse::AgentMessageDelivery(delivery)) => delivery,
+        other => panic!("expected a delivery, got {other:?}"),
+    };
+    let message_id = delivery.message.id;
+
+    assert!(matches!(
+        handle_request(&facade, session, IpcRequest::AgentMessageList).await,
+        Ok(IpcResponse::AgentMessages(messages)) if messages.len() == 1
+    ));
+    assert!(matches!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::AgentMessageGet { message_id },
+        )
+        .await,
+        Ok(IpcResponse::AgentMessage(message)) if message.id == message_id
+    ));
+    assert!(matches!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::AgentMessageAcknowledge { message_id },
+        )
+        .await,
+        Ok(IpcResponse::AgentMessageDelivery(delivery))
+            if delivery.outcome == soloist_core::AgentMessageOutcome::Acknowledged
+    ));
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::AgentMessageBroadcast {
+                body: "Interfaces are stable".into(),
+                todo_id: None,
+            },
+        )
+        .await,
+        Ok(IpcResponse::AgentMessageBroadcast(
+            soloist_core::AgentBroadcastReceipt {
+                deliveries: Vec::new(),
+            },
+        ))
+    );
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::AgentReportCompletion {
+                todo_id: soloist_core::TodoId::from_raw(404),
+                summary: "Adapter wired".into(),
+            },
+        )
+        .await,
+        Err(IpcError::UnknownTodo)
+    );
+}
+
 #[tokio::test]
 async fn starting_an_in_scope_process_is_acked() {
     let facade = facade();
@@ -351,6 +447,9 @@ async fn spawning_an_agent_without_scope_is_refused() {
             IpcRequest::SpawnAgent {
                 tool: "Claude".into(),
                 extra_args: Vec::new(),
+                prompt: None,
+                todo_id: None,
+                include_agent_instructions: true,
             },
         )
         .await,

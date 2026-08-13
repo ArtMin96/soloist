@@ -165,9 +165,8 @@ impl TimerScheduler {
 /// body is not delivered; delivery must never stall the loop for every other agent's timers.
 fn deliver(supervisor: &Supervisor, timer: StoredTimer, fired_at_backstop: bool) {
     let header = wake_reason_header(&timer, fired_at_backstop);
-    let mut input = format!("{header}\n{}", timer.body).into_bytes();
-    input.push(b'\r');
-    let _ = supervisor.try_write_stdin(timer.owner, input);
+    let input = format!("{header}\n{}", timer.body).into_bytes();
+    let _ = supervisor.try_submit_turn(timer.owner, input);
 }
 
 /// A compact, clean-room wake-reason header prepended to the delivered body so the woken agent can

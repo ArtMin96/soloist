@@ -8,9 +8,8 @@
 //!
 //! Lineage is **per-run, in-memory** process metadata, never persisted: a parent id is only
 //! meaningful while that process is live, so it is reconstructed from spawns, not restored. A
-//! manual launch records nothing and so reads back as a root. The map is the parent *hint*; the
-//! live registry stays the source of truth for who exists, so a node whose parent has left the
-//! registry reads back as a root with no explicit re-parenting.
+//! manual launch records nothing and so reads back as a root. Edges are retained for the run so a
+//! departed lead does not merge its descendants into unrelated orchestration groups.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -38,16 +37,28 @@ impl AgentLineage {
         lock(&self.parents).insert(child, parent);
     }
 
-    /// The agent that spawned `child`, or `None` if it has no recorded parent (a manual or
-    /// unbound launch). The caller still confirms the parent is live before treating it as an
-    /// edge — a node whose parent has left the registry is a root.
+    /// The agent that spawned `child`, or `None` if it has no retained parent. A dead parent can
+    /// remain here while it connects a live descendant to its authorization root.
     pub fn parent_of(&self, child: ProcessId) -> Option<ProcessId> {
         lock(&self.parents).get(&child).copied()
     }
 
-    /// Every recorded `(child, parent)` pair, sorted by child id for a stable read. The caller
-    /// still filters both ends against the live registry — an edge whose parent has left the
-    /// registry is not a tree edge, exactly as with [`Self::parent_of`].
+    /// The oldest recorded ancestor of `process`, following retained edges and stopping safely if
+    /// corrupt input ever forms a cycle.
+    pub fn root_of(&self, process: ProcessId) -> ProcessId {
+        let parents = lock(&self.parents);
+        let mut root = process;
+        let mut visited = HashSet::new();
+        while visited.insert(root) {
+            let Some(parent) = parents.get(&root) else {
+                break;
+            };
+            root = *parent;
+        }
+        root
+    }
+
+    /// Every retained `(child, parent)` pair, sorted by child id for a stable read.
     pub fn edges(&self) -> Vec<(ProcessId, ProcessId)> {
         let mut edges: Vec<_> = lock(&self.parents)
             .iter()
@@ -57,10 +68,20 @@ impl AgentLineage {
         edges
     }
 
-    /// Drops lineage for any worker no longer in `live` (gone from the registry), so the map
-    /// never outgrows the live process set.
+    /// Keeps live agents and the dead ancestor edges needed to connect them, dropping every dead
+    /// leaf and every lineage group with no live member.
     pub fn retain_live(&self, live: &HashSet<ProcessId>) {
-        lock(&self.parents).retain(|child, _| live.contains(child));
+        let mut parents = lock(&self.parents);
+        let mut needed = live.clone();
+        let mut frontier: Vec<_> = live.iter().copied().collect();
+        while let Some(process) = frontier.pop() {
+            if let Some(parent) = parents.get(&process).copied() {
+                if needed.insert(parent) {
+                    frontier.push(parent);
+                }
+            }
+        }
+        parents.retain(|child, _| needed.contains(child));
     }
 }
 

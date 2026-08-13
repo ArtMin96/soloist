@@ -76,6 +76,17 @@ impl Supervisor {
         self.send_input(id, PtyInput::Write(data)).await
     }
 
+    /// Submits one semantic user turn with internal newlines normalized and one trailing return.
+    /// Raw interactive writes remain available through [`Self::write_stdin`].
+    pub async fn submit_turn(
+        &self,
+        id: ProcessId,
+        mut data: Vec<u8>,
+    ) -> Result<(), SupervisorError> {
+        append_submit(&mut data);
+        self.write_stdin(id, data).await
+    }
+
     /// Like [`Supervisor::write_stdin`] but never blocks: if the input channel is full (the child
     /// has stopped draining its stdin) the write is dropped rather than awaited. Autonomous timer
     /// delivery uses this so one deaf child cannot stall the shared scheduler for every other
@@ -89,6 +100,20 @@ impl Supervisor {
                 let _ = sender.try_send(PtyInput::Write(data));
                 Ok(())
             }
+            None => Err(SupervisorError::NotFound(id)),
+        }
+    }
+
+    /// Best-effort, non-blocking semantic turn submission. Returns `true` only when the bounded
+    /// channel accepted the turn; a full or closed channel returns `false` without blocking.
+    pub fn try_submit_turn(
+        &self,
+        id: ProcessId,
+        mut data: Vec<u8>,
+    ) -> Result<bool, SupervisorError> {
+        append_submit(&mut data);
+        match self.terminals.input(id) {
+            Some(sender) => Ok(sender.try_send(PtyInput::Write(data)).is_ok()),
             None => Err(SupervisorError::NotFound(id)),
         }
     }
@@ -112,4 +137,25 @@ impl Supervisor {
             None => Err(SupervisorError::NotFound(id)),
         }
     }
+}
+
+fn append_submit(data: &mut Vec<u8>) {
+    let mut normalized = Vec::with_capacity(data.len().saturating_add(1));
+    let mut index = 0;
+    while index < data.len() {
+        if data[index] == b'\r' {
+            normalized.push(b'\n');
+            if data.get(index + 1) == Some(&b'\n') {
+                index += 1;
+            }
+        } else {
+            normalized.push(data[index]);
+        }
+        index += 1;
+    }
+    while matches!(normalized.last(), Some(b'\r' | b'\n')) {
+        normalized.pop();
+    }
+    normalized.push(b'\r');
+    *data = normalized;
 }

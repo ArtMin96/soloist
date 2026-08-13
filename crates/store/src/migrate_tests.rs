@@ -1,4 +1,5 @@
 use super::*;
+use soloist_core::AgentTool;
 
 #[test]
 fn migrates_a_fresh_database_to_the_current_schema() {

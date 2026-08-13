@@ -49,12 +49,71 @@ export const COORDINATION = {
 // MCP/IPC wire; the scheduler delivers it (with a wake-reason prefix) to the lead's terminal on fire.
 // camelCase keys match the lead's serde struct — the values live only here.
 export const TIMER = {
+  /** The addressed Task attached atomically to the worker's spawn. */
+  workerTask: "Stay active until the release timer is ready",
   /** The body the lead's fire-when-idle timer delivers on wake — asserted verbatim in the lead's
    *  terminal. ASCII and single-line so it renders on one terminal row for a stable substring read. */
   body: "wake up: resume the release cut",
+  /** Printed only after the stub's line reader receives the submitted timer turn. */
+  submitted: "timer turn submitted",
   /** The max-wait backstop the lead sets — far longer than the walk's bounded waits, so only the
    *  worker going idle (never the backstop) fires the timer within the walk. */
   maxWaitMs: 10 * 60 * 1000,
+} as const;
+
+// The addressed-messaging walk's script, single-sourced here and handed to every fixture agent
+// through the plan file. The compiled fixture acts like three real CLI agents over the real IPC
+// socket; these markers are printed only after the corresponding mailbox operation succeeds, so
+// terminal assertions cannot pass on a wake that was merely pasted but never submitted.
+export const MAILBOX = {
+  /** The first worker's tool and stable sidebar label. */
+  primary: "OpenCode",
+  /** The second worker's tool and stable sidebar label. */
+  peer: "Claude",
+  /** The shared todo the lead creates before spawning the primary worker. */
+  todo: "Verify the release handoff",
+  /** The addressed Task queued atomically with the primary worker's spawn. */
+  task: "Inspect the release handoff and report the result",
+  /** The peer's initial addressed task. */
+  peerTask: "Join the handoff group and answer the primary worker",
+  /** The primary worker's group message. */
+  broadcast: "handoff check is underway",
+  /** The primary worker's direct question to the peer. */
+  direct: "peer, confirm the handoff is clear",
+  /** The peer's direct answer to the primary worker. */
+  directReply: "confirmed: the handoff is clear",
+  /** The file-intent lease shared by the two workers. */
+  leaseKey: "file:crates/app/ui/src/App.tsx",
+  /** The primary's direct signal that it released the lease for the peer. */
+  leaseReady: "file intent released; acquire it now",
+  /** The primary worker's durable completion summary, delivered back to the lead. */
+  completion: "release handoff verified by both workers",
+  /** Printed by the lead only after it retrieves and acknowledges the completion message. */
+  proof: "mailbox journey complete",
+  /** Printed by a worker only after a submitted turn unlocked its stdin reader. */
+  submitted: "submitted wake received",
+  /** The first line of the reusable coordination briefing submitted to a defaulted spawn. */
+  instructions: "[Soloist orchestration context]",
+  /** Printed only after the primary receives the default-on briefing as a submitted turn. */
+  instructionsReceived: "primary received default orchestration instructions",
+  /** Printed after the explicitly opted-out peer handles its messages without receiving a briefing. */
+  instructionsSuppressed: "peer orchestration instructions suppressed",
+  /** Printed after the primary retrieves and acknowledges its initial Task. */
+  taskAcknowledged: "primary task retrieved and acknowledged",
+  /** Printed after the peer retrieves the group/direct messages and answers directly. */
+  peerExchanged: "peer group/direct exchange acknowledged",
+  /** Printed after the primary reports the todo completion. */
+  completionReported: "primary completion reported",
+  /** Printed only after the primary receives an acquired lease response for `leaseKey`. */
+  primaryLeaseAcquired: "primary acquired file intent",
+  /** Printed only after the peer receives a held response naming the primary as current owner. */
+  peerLeaseHeld: "peer observed file intent held by primary",
+  /** Printed only after the primary successfully releases its lease. */
+  primaryLeaseReleased: "primary released file intent",
+  /** Printed only after the peer acquires the released lease. */
+  peerLeaseAcquired: "peer acquired released file intent",
+  /** Printed only after the peer successfully releases its lease. */
+  peerLeaseReleased: "peer released file intent",
 } as const;
 
 // Present in the data dir → the lead runs its coordination arm; its JSON is `COORDINATION`. One
@@ -64,6 +123,10 @@ const COORDINATION_PLAN_FILE = "lead-coordination-plan";
 // Present in the data dir → the lead runs its timers arm; its JSON is `TIMER`. One named const per
 // side (the Rust stub names it `TIMER_PLAN_FILE`).
 const TIMER_PLAN_FILE = "lead-timer-plan";
+
+// Present in the data dir -> the lead and its two children run the addressed-messaging journey.
+// One named const per side (the Rust fixture names it `MAILBOX_PLAN_FILE`).
+const MAILBOX_PLAN_FILE = "lead-mailbox-plan";
 
 // While this file exists in the data dir, the spawned worker outputs (staying Working) so the timer
 // holds its waiting state; deleting it drives the worker Idle, firing the timer. The worker stub
@@ -95,6 +158,12 @@ export async function requestLeadTimer(): Promise<void> {
   const dataDir = await appDataDir();
   writeFileSync(path.join(dataDir, TIMER_PLAN_FILE), JSON.stringify(TIMER));
   writeFileSync(path.join(dataDir, WORKER_HOLD_FILE), "");
+}
+
+/** Selects the fixture's addressed-messaging arm before the lead is launched. */
+export async function requestLeadMailbox(): Promise<void> {
+  const dataDir = await appDataDir();
+  writeFileSync(path.join(dataDir, MAILBOX_PLAN_FILE), JSON.stringify(MAILBOX));
 }
 
 /**

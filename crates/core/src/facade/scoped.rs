@@ -135,6 +135,9 @@ pub enum SpawnAgentError {
     /// The launch itself failed — see [`LaunchAgentError`].
     #[error(transparent)]
     Launch(#[from] LaunchAgentError),
+    /// The optional first task could not enter the bounded mailbox.
+    #[error(transparent)]
+    Mailbox(#[from] super::AgentMailboxError),
 }
 
 impl From<SupervisorError> for ScopedActionError {

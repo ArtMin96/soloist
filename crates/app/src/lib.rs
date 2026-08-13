@@ -311,6 +311,8 @@ pub fn run() {
             // its owning process as a fresh turn, tracking idle state from the event stream (also
             // weakly held, also self-supervised).
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().timer_scheduler_loop());
+            // Keep mailbox readiness delivery independently supervised from timer scheduling.
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().agent_mailbox_loop());
             // Start the notification reactor: it shows a desktop toast on a crash or an
             // exhausted auto-restart via the notification plugin (also weakly held).
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().notifications_loop());

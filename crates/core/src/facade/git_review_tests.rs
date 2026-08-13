@@ -161,7 +161,7 @@ async fn a_handoff_lands_in_the_one_running_agents_session() {
 }
 
 #[tokio::test]
-async fn nothing_is_submitted_on_the_agents_behalf() {
+async fn a_handoff_is_submitted_as_exactly_one_turn() {
     let h = harness(reviewed());
     h.agent("worker").await;
 
@@ -172,9 +172,8 @@ async fn nothing_is_submitted_on_the_agents_behalf() {
 
     let written = h.until(|written| written.contains("end of context")).await;
     assert!(
-        !written.contains('\r'),
-        "a carriage return is the agent CLI's submit, and what to do about this is the reader's \
-         decision, not ours: {written:?}",
+        written.ends_with('\r') && written.matches('\r').count() == 1,
+        "a semantic handoff is submitted exactly once: {written:?}",
     );
 }
 

@@ -18,17 +18,40 @@
 
 use soloist_core::{
     Comment, CommentAuthor, CommentEdit, ProcessId, ProjectId, ScratchpadId, ScratchpadLink,
-    StoreError, StoredTodo, TodoDoc, TodoId, TodoRepo, TodoWriteResult,
+    StoreError, StoredTodo, TodoCompletion, TodoCompletionAtomicResult,
+    TodoCompletionCompareResult, TodoCompletionContext, TodoCompletionDecision, TodoDoc, TodoId,
+    TodoRepo, TodoWriteResult,
 };
 
 use crate::todo_json::{decode_strings, serialize_doc};
 use crate::todo_rows::{
-    current_revision, raw_id, read_one, row_to_todo, stated_link, write_comments, write_live,
-    TODO_COLUMNS, TODO_SOURCE,
+    raw_id, read_one, row_to_todo, stated_link, write_comments, TODO_COLUMNS, TODO_SOURCE,
 };
 use crate::{sql_err, SqliteStore};
 
+mod completion;
+mod mutation;
+
 impl TodoRepo for SqliteStore {
+    fn apply_completion(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        policy: &mut dyn FnMut(&TodoCompletionContext) -> TodoCompletionDecision,
+    ) -> Result<TodoCompletionAtomicResult, StoreError> {
+        completion::apply_completion(self, project, id, policy)
+    }
+
+    fn compare_completion(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        expected: &TodoCompletion,
+        replacement: &TodoCompletion,
+    ) -> Result<TodoCompletionCompareResult, StoreError> {
+        completion::compare_completion(self, project, id, expected, replacement)
+    }
+
     fn create(
         &self,
         project: ProjectId,
@@ -80,9 +103,13 @@ impl TodoRepo for SqliteStore {
         let conn = self.lock();
         // Read the current revision and update under one guard, so the guard check and the write
         // cannot interleave with a concurrent writer.
-        let Some(revision) = current_revision(&conn, project, id)? else {
+        let Some(stored) = read_one(&conn, project, id)? else {
             return Ok(TodoWriteResult::NotFound);
         };
+        if stored.completion.is_some() {
+            return Ok(TodoWriteResult::CompletionProtected);
+        }
+        let revision = stored.revision;
         if let Some(expected) = expected {
             if expected != revision {
                 return Ok(TodoWriteResult::Conflict { actual: revision });
@@ -271,7 +298,7 @@ impl TodoRepo for SqliteStore {
         comment: u64,
         body: &str,
     ) -> Result<CommentEdit, StoreError> {
-        self.edit_comments(project, id, |comments| {
+        self.edit_comments(project, id, comment, |comments| {
             comments.iter_mut().find(|c| c.id == comment).map(|c| {
                 c.body = body.to_owned();
             })
@@ -284,7 +311,7 @@ impl TodoRepo for SqliteStore {
         id: TodoId,
         comment: u64,
     ) -> Result<CommentEdit, StoreError> {
-        self.edit_comments(project, id, |comments| {
+        self.edit_comments(project, id, comment, |comments| {
             let before = comments.len();
             comments.retain(|c| c.id != comment);
             (comments.len() != before).then_some(())
@@ -333,48 +360,6 @@ impl TodoRepo for SqliteStore {
         )
         .map_err(sql_err)?;
         read_one(&conn, to, id)
-    }
-}
-
-impl SqliteStore {
-    /// Reads the todo `(project, id)`, applies `change` to its live columns (tags, blockers,
-    /// comments, lock), writes them back, and returns the updated row — all under one connection
-    /// guard, so a concurrent change is not lost. `None` if the todo does not exist. The document and
-    /// revision are untouched (those are the revision-guarded [`write_doc`] path).
-    fn mutate(
-        &self,
-        project: ProjectId,
-        id: TodoId,
-        change: impl FnOnce(&mut StoredTodo),
-    ) -> Result<Option<StoredTodo>, StoreError> {
-        let conn = self.lock();
-        let Some(mut stored) = read_one(&conn, project, id)? else {
-            return Ok(None);
-        };
-        change(&mut stored);
-        write_live(&conn, project, id, &stored)?;
-        Ok(Some(stored))
-    }
-
-    /// Applies `edit` to the todo's comment list and persists it; `edit` returns `Some(())` when it
-    /// changed a comment and `None` when none matched, mapped to the [`CommentEdit`] outcome.
-    fn edit_comments(
-        &self,
-        project: ProjectId,
-        id: TodoId,
-        edit: impl FnOnce(&mut Vec<Comment>) -> Option<()>,
-    ) -> Result<CommentEdit, StoreError> {
-        let conn = self.lock();
-        let Some(mut stored) = read_one(&conn, project, id)? else {
-            return Ok(CommentEdit::NoTodo);
-        };
-        match edit(&mut stored.comments) {
-            Some(()) => {
-                write_comments(&conn, project, id, &stored.comments)?;
-                Ok(CommentEdit::Edited(Box::new(stored)))
-            }
-            None => Ok(CommentEdit::NoComment),
-        }
     }
 }
 

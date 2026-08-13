@@ -1,6 +1,6 @@
 //! The tool parameter structs. Each derives `schemars::JsonSchema`, which is what rmcp
 //! turns into a tool's clean-room input schema, and `Deserialize` to receive the call's
-//! arguments. They carry no behaviour — the handlers in [`crate::server`] destructure them
+//! arguments. They carry no behaviour — the handlers in [`crate::tools`] destructure them
 //! and forward the values to one IPC request.
 //!
 //! This root holds the supervision and session args; the feature surfaces mirror the
@@ -9,11 +9,13 @@
 
 mod coordination;
 mod git;
+mod messaging;
 mod prompt_template;
 mod setup;
 
 pub(crate) use coordination::*;
 pub(crate) use git::*;
+pub(crate) use messaging::*;
 pub(crate) use prompt_template::*;
 pub(crate) use setup::*;
 
@@ -64,6 +66,16 @@ pub(crate) struct SpawnAgentArg {
     /// Extra command-line flags appended for this one launch ("agent with flags"). Optional.
     #[serde(default)]
     pub(crate) extra_args: Vec<String>,
+    /// The first task to queue for the worker after it starts. Omit to spawn without a task.
+    pub(crate) prompt: Option<String>,
+    /// Whether Soloist should queue its compact agent-coordination instructions for the worker.
+    /// Defaults to true; set false only when the worker already has equivalent instructions.
+    #[serde(default = "default_true")]
+    pub(crate) include_agent_instructions: bool,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 /// Arguments for selecting the session's project scope.
