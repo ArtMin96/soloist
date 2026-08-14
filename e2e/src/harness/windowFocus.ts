@@ -20,9 +20,7 @@ interface WindowBridge {
 export async function requireWindowFocus(): Promise<void> {
   const focused = await browser.execute(
     async () =>
-      await (
-        window as unknown as { __TAURI__: WindowBridge }
-      ).__TAURI__.window
+      await (window as unknown as { __TAURI__: WindowBridge }).__TAURI__.window
         .getCurrentWindow()
         .isFocused(),
   );

@@ -40,7 +40,9 @@ export const toastStack = {
         const root = document.querySelector(stack);
         if (!root) return [];
         return [...root.querySelectorAll(toast)].map((node) => {
-          const lines = [...(node.querySelector(open)?.querySelectorAll(line) ?? [])];
+          const lines = [
+            ...(node.querySelector(open)?.querySelectorAll(line) ?? []),
+          ];
           return {
             title: lines[0]?.textContent ?? null,
             body: lines[1]?.textContent ?? null,
@@ -104,7 +106,9 @@ export const toastStack = {
     const index = toasts.findIndex((toast) => toast.title === title);
     const button = (await $$(`${TOAST} ${OPEN}`))[index];
     if (button === undefined) {
-      throw new Error(`the alert titled ${JSON.stringify(title)} has no clickable card`);
+      throw new Error(
+        `the alert titled ${JSON.stringify(title)} has no clickable card`,
+      );
     }
     await button.waitForClickable({ timeout: WAIT.render });
     await button.click();

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { DiagramPanel } from "@/components/orchestration/DiagramPanel";
+import { MessagesPanel } from "@/components/orchestration/MessagesPanel";
 import { OrchestrationTree } from "@/components/orchestration/OrchestrationTree";
 import { ScratchpadPanel } from "@/components/orchestration/ScratchpadPanel";
 import { TimersPanel } from "@/components/orchestration/TimersPanel";
@@ -11,7 +12,7 @@ import { useOrchestration } from "@/store/useOrchestration";
 import type { Option } from "@/lib/appearance";
 import type { ProjectView } from "@/domain";
 
-type View = "agents" | "todos" | "scratchpads" | "diagrams" | "timers";
+type View = "agents" | "todos" | "scratchpads" | "diagrams" | "timers" | "messages";
 
 const VIEW_OPTIONS: Option<View>[] = [
   { value: "agents", label: "Agents" },
@@ -19,14 +20,15 @@ const VIEW_OPTIONS: Option<View>[] = [
   { value: "scratchpads", label: "Scratchpads" },
   { value: "diagrams", label: "Diagrams" },
   { value: "timers", label: "Timers" },
+  { value: "messages", label: "Messages" },
 ];
 
 // The orchestration surface for one project: a live view of the lead→worker agent tree and the
-// shared coordination documents (todos, scratchpads, timers). Owns the read-model hook — the only
+// shared coordination documents (todos, scratchpads, timers) and the traffic between the agents. Owns the read-model hook — the only
 // place here that reaches IPC — and switches the body between views. Each view is presentational
 // over the one snapshot the hook keeps live (snapshot-then-deltas).
 export function OrchestrationPane({ project }: { project: ProjectView }) {
-  const { tree, agents, todos, scratchpads, diagrams, timers, error } = useOrchestration(
+  const { tree, agents, todos, scratchpads, diagrams, timers, messages, error } = useOrchestration(
     project.id,
   );
   const [view, setView] = useState<View>("agents");
@@ -66,6 +68,7 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
         )}
         {view === "diagrams" && <DiagramPanel project={project.id} diagrams={diagrams} />}
         {view === "timers" && <TimersPanel timers={timers} agents={agents} project={project.id} />}
+        {view === "messages" && <MessagesPanel messages={messages} agents={agents} />}
       </div>
     </section>
   );

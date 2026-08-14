@@ -15,7 +15,9 @@ export const diffPane = {
    */
   async text(): Promise<string> {
     return browser.execute((pane: string) => {
-      return (document.querySelector(pane) as HTMLElement | null)?.innerText ?? "";
+      return (
+        (document.querySelector(pane) as HTMLElement | null)?.innerText ?? ""
+      );
     }, PANE);
   },
 
@@ -31,7 +33,8 @@ export const diffPane = {
         last = await this.text();
         return last.includes(substring);
       },
-      () => `the diff never showed ${JSON.stringify(substring)}; last read:\n${last}`,
+      () =>
+        `the diff never showed ${JSON.stringify(substring)}; last read:\n${last}`,
     );
     return last;
   },
