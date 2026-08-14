@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use soloist_core::{
     Facade, IdleMode, Progress, ProjectId, RenderRequest, SessionId, SpawnAgentRequest,
-    WaitForPortError,
+    SpawnProcessRequest, WaitForPortError,
 };
 use soloist_ipc::{
     IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome, ProjectStatus, ProjectSummary,
@@ -198,6 +198,21 @@ fn dispatch_blocking(
                 },
                 None => IpcResponse::Spawned(outcome.process),
             })
+            .map_err(IpcError::from),
+        IpcRequest::SpawnProcess {
+            command,
+            working_dir,
+            env,
+            label,
+        } => facade
+            .scoped(session)
+            .spawn_process(SpawnProcessRequest {
+                command,
+                working_dir,
+                env,
+                label,
+            })
+            .map(IpcResponse::Spawned)
             .map_err(IpcError::from),
         IpcRequest::ListAgentTools => facade
             .agents()

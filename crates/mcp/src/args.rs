@@ -19,6 +19,8 @@ pub(crate) use messaging::*;
 pub(crate) use prompt_template::*;
 pub(crate) use setup::*;
 
+use std::collections::BTreeMap;
+
 use rmcp::schemars;
 use serde::Deserialize;
 
@@ -76,6 +78,26 @@ pub(crate) struct SpawnAgentArg {
 
 const fn default_true() -> bool {
     true
+}
+
+/// Arguments for spawning a command process.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct SpawnProcessArg {
+    /// The command line to run. It must **already be trusted** in this project — the user
+    /// approves a command's exact command line, working directory, and environment together, and
+    /// any combination they have not approved is refused. In practice that means a command from
+    /// the project's `solo.yml`.
+    pub(crate) command: String,
+    /// Where to run it, relative to the project root. Omit to run at the root. Part of what is
+    /// trusted, so it must match the approved command exactly.
+    pub(crate) working_dir: Option<String>,
+    /// Environment overrides for this process. Part of what is trusted, so it must match the
+    /// approved command exactly.
+    #[serde(default)]
+    pub(crate) env: BTreeMap<String, String>,
+    /// The display label for the new process. Omit to name it after the command's first word.
+    /// A name already used in the project is numbered rather than taken.
+    pub(crate) label: Option<String>,
 }
 
 /// Arguments for selecting the session's project scope.

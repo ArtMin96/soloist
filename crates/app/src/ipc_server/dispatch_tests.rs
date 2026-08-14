@@ -5,8 +5,9 @@ use soloist_core::testing::{
 };
 use soloist_core::{
     AcquireOutcome, BranchOp, CorePorts, DomainEvent, IntegrationFile, McpFeatureGroup,
-    MissingPolicy, NewPullRequest, Origin, PeerCredentials, ProcStatus, ProcessId, ProjectRepo,
-    Prompting, StartSummary, StashOp, SyncOp, TemplateScope, TokioClock, TrustRepo,
+    MissingPolicy, NewPullRequest, Origin, PeerCredentials, ProcStatus, ProcessId, ProcessKind,
+    ProcessSpec, ProjectRepo, Prompting, StartSummary, StashOp, SyncOp, TemplateScope, TokioClock,
+    TrustRepo,
 };
 use soloist_ipc::GitRefusal;
 use std::collections::BTreeMap;
@@ -454,6 +455,95 @@ async fn spawning_an_agent_without_scope_is_refused() {
             },
         )
         .await,
+        Err(IpcError::NoProjectScope)
+    );
+}
+
+/// The command every `spawn_process` routing test below asks to run, and the spec whose variant
+/// the trust repo is seeded with — the two must agree, since the gate keys on the variant.
+const SPAWNABLE: &str = "sleep 60";
+
+fn spawnable_spec() -> ProcessSpec {
+    ProcessSpec {
+        command: SPAWNABLE.into(),
+        working_dir: None,
+        auto_start: false,
+        auto_restart: false,
+        restart_when_changed: Vec::new(),
+        env: BTreeMap::new(),
+    }
+}
+
+fn spawn_the_spawnable() -> IpcRequest {
+    IpcRequest::SpawnProcess {
+        command: SPAWNABLE.into(),
+        working_dir: None,
+        env: BTreeMap::new(),
+        label: None,
+    }
+}
+
+/// A façade with one project loaded and the trust repo returned, so a test can grant the trust
+/// `spawn_process`'s gate looks for. The sole project gives an unbound session its scope.
+fn facade_with_a_project(dir: &TempDir) -> (Arc<Facade>, Arc<FakeTrustRepo>, ProjectId) {
+    let projects = Arc::new(FakeProjectRepo::new());
+    let project = projects
+        .upsert(dir.path(), Some("p"), None)
+        .expect("seed one project")
+        .id;
+    let trust = Arc::new(FakeTrustRepo::new());
+    let facade = Arc::new(Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
+            Arc::new(TokioClock),
+            trust.clone(),
+            projects,
+        )
+        .build(),
+    ));
+    (facade, trust, project)
+}
+
+#[tokio::test]
+async fn spawn_process_routes_into_the_sessions_own_project() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (facade, trust, project) = facade_with_a_project(&dir);
+    trust
+        .set_trusted(project, &spawnable_spec().variant_hash())
+        .expect("trust the variant in the project");
+    let session = grouped_session(&facade);
+
+    match handle_request(&facade, session, spawn_the_spawnable()).await {
+        Ok(IpcResponse::Spawned(id)) => {
+            let view = facade.process_view(id).expect("the process is registered");
+            assert_eq!(
+                view.project, project,
+                "the spawn lands in the caller's scope"
+            );
+            assert_eq!(view.kind, ProcessKind::Command);
+        }
+        other => panic!("expected a Spawned reply, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn spawning_an_untrusted_process_is_refused_as_untrusted() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (facade, _trust, _project) = facade_with_a_project(&dir);
+    let session = grouped_session(&facade);
+
+    assert_eq!(
+        handle_request(&facade, session, spawn_the_spawnable()).await,
+        Err(IpcError::Untrusted)
+    );
+}
+
+#[tokio::test]
+async fn spawning_a_process_without_scope_is_refused() {
+    let facade = facade();
+    let session = grouped_session(&facade);
+    assert_eq!(
+        handle_request(&facade, session, spawn_the_spawnable()).await,
         Err(IpcError::NoProjectScope)
     );
 }

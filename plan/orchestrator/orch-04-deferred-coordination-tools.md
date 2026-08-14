@@ -23,7 +23,7 @@ could be enqueued or woken. Owner decision, 2026-08-14; reasoning in
 
 **Note on O13's independence:** onboarding (Task 6) is **not** gated on the arbitrary-spawn trust design
 (Tasks 1–2). It applies to the already-built `spawn_agent` and reuses O15's bounded wake path. Nothing
-about O13 waits on O9, and O9 adds no O13 leg when it lands.
+about O13 waited on O9, and O9 added no O13 leg.
 
 ## Scope
 **In:** the trust-treatment design + implementation for `spawn_process`; the cross-scope authorization
@@ -34,9 +34,13 @@ atomic completion reporting; tests + the gap-decision records. **Out:** any UI (
 need their own project-root FS-scoping pass — keep deferred, [`05` §12](../05-solo-reference-and-sources.md)).
 
 ## Why these were deferred (and the blocker to clear)
-- **`spawn_process`** lets an agent start an **arbitrary command**, not a vetted agent tool — so it is
+- **`spawn_process`** names an **arbitrary command**, not a vetted agent tool — so it is
   trust-sensitive in a way `spawn_agent` is not. It was deferred *"design its trust treatment first…
-  don't pull forward"* (`PROGRESS.md`; [`05` §8](../05-solo-reference-and-sources.md)).
+  don't pull forward"* (`PROGRESS.md`; [`05` §8](../05-solo-reference-and-sources.md)). What the
+  trust treatment settles on is narrower than the name: because trust is only writable by name
+  against the loaded `solo.yml`, the reachable set is the command variants the user has **already
+  approved** in that project. Widening it is a separate capability with its own approval step
+  ([`05` §12](../05-solo-reference-and-sources.md)).
 - **`*_transfer`** moves a todo/scratchpad **across projects**, which raises the same cross-scope question
   the F13 binding model answers for *acting* but not yet for *moving content* ([`05` §12](../05-solo-reference-and-sources.md);
   `D-6`). The blocker gate (G4) never depended on transfer.
@@ -50,10 +54,11 @@ need their own project-root FS-scoping pass — keep deferred, [`05` §12](../05
    variant must be **trusted there**, else it is refused — the same guarantee a manual command start
    gets, enforced in the core for every adapter. Record the decision before coding.
 2. **Implement `spawn_process` (O9, [`06` §5.3](../06-codebase-blueprint-and-cleanup.md)):** add the
-   `Facade` behavior (create+start a `Terminal`/`Command` subtype in scope via C2, honoring the trust
-   gate) first (§5.1), then a thin MCP handler that parses a clean-room schema and routes to it. It binds
-   the spawned process like `spawn_agent` does (`SOLOIST_PROCESS_ID`) so lineage (orch-01) and
-   coordination attach correctly. No domain logic in the handler.
+   `ScopedFacade` behavior (create+start a `Command` in the session's own scope via C2, honoring the
+   trust gate before anything is registered) first (§5.1), then a thin MCP handler that parses a
+   clean-room schema and routes to it. It binds the spawned process like `spawn_agent` does
+   (`SOLOIST_PROCESS_ID`) so lineage (orch-01) attaches correctly. No domain logic in the handler.
+   The subtype is `Command`, not `Terminal`: only a command registration carries a trust variant.
 3. **Design cross-scope transfer authorization (O10, gap → [`05` §12](../05-solo-reference-and-sources.md)):**
    decide how a transfer between projects is authorized — the caller must be **bound/scope-authenticated
    to both** the source and the target project (extend the F13 model), or the transfer is refused
@@ -110,8 +115,6 @@ need their own project-root FS-scoping pass — keep deferred, [`05` §12](../05
 ## Interfaces
 ```rust
 impl Facade {
-  // trust-gated, scoped — same guarantee as a manual command start (04 §12):
-  async fn spawn_process(&self, scope: ProjectId, owner: ProcessId, command: SpawnSpec) -> Result<ProcessId, SpawnRefused>;
   // authorized only when the caller is scope-authenticated to BOTH projects (extends F13):
   fn todo_transfer(&self, from: ProjectId, to: ProjectId, id: TodoId, caller: ProcessId) -> Result<TodoId, TransferRefused>;
   fn scratchpad_transfer(&self, from: ProjectId, to: ProjectId, id: ScratchpadId, caller: ProcessId) -> Result<ScratchpadId, TransferRefused>;
@@ -123,6 +126,11 @@ impl Supervisor {
 }
 
 impl ScopedFacade<'_> {
+  // trust-gated, and scoped to the session's own project — same guarantee as a manual command
+  // start (04 §12). A session-scoped action, so it lives here and never on `Facade` (CLAUDE.md
+  // §16); sync, like the `spawn_agent_request` it sits beside, since starting spawns the actor
+  // into the ambient runtime:
+  fn spawn_process(&self, request: SpawnProcessRequest) -> Result<ProcessId, SpawnProcessError>;
   fn agent_roster(&self) -> Result<Vec<AgentRosterEntry>>;
   fn agent_message_send(&self, recipient: ProcessId, body: String, todo: Option<TodoId>) -> Result<AgentMessageDelivery>;
   fn agent_message_acknowledge(&self, message: AgentMessageId) -> Result<AgentMessageDelivery>;
@@ -142,7 +150,7 @@ impl ScopedFacade<'_> {
 - **(O13)** A `spawn_agent` worker receives default-on reusable instructions after its first idle
   transition; opting out suppresses them. An optional prompt is a retrievable/acknowledgeable `Task`
   without requiring a todo, never a CLI argument or startup paste. O13 is **complete at `spawn_agent`**:
-  `spawn_process` exposes neither parameter, so there is no leg left to accept when O9 lands.
+  `spawn_process` exposes neither parameter, so there is no leg left for it to accept.
 - **(O15)** Only authenticated live lineage-root members can exchange messages, with or without an
   optional todo correlation. Every mailbox limit is enforced without dropping existing records;
   acknowledgement removes the addressed record. A

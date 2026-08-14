@@ -1,6 +1,7 @@
 //! The request half of the wire protocol: every operation an IPC client can ask of the app.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
@@ -68,6 +69,16 @@ pub enum IpcRequest {
             skip_serializing_if = "is_default_include_agent_instructions"
         )]
         include_agent_instructions: bool,
+    },
+    /// Create and start a command process in the session's effective project (trust-gated).
+    SpawnProcess {
+        command: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        working_dir: Option<PathBuf>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        env: BTreeMap<String, String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
     },
     /// Every configured agent tool that `spawn_agent` can launch (not scope-filtered).
     ListAgentTools,

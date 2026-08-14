@@ -97,7 +97,8 @@ pub use facade::{
     CoordinationError, CreateTerminalError, DraftError, Facade, GitReadError, Handoff,
     HandoffError, LaunchAgentError, LocalCommandError, MoveCommandError, PromptRenderError,
     ScopedActionError, ScopedFacade, ScopedGitError, SetupIntegrationError, SpawnAgentError,
-    SpawnAgentOutcome, SpawnAgentRequest, StatusSummary, TrustCommandError,
+    SpawnAgentOutcome, SpawnAgentRequest, SpawnProcessError, SpawnProcessRequest, StatusSummary,
+    TrustCommandError,
 };
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use git::{

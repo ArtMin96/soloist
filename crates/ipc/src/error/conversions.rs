@@ -1,7 +1,7 @@
 use soloist_core::{
     AgentMailboxError, CoordinationError, FeedbackError, IdentityError, IntegrationWriteError,
     LaunchAgentError, PromptRenderError, RenderError, ScopedActionError, SetupIntegrationError,
-    SpawnAgentError,
+    SpawnAgentError, SpawnProcessError,
 };
 
 use super::IpcError;
@@ -50,6 +50,20 @@ impl From<SpawnAgentError> for IpcError {
             SpawnAgentError::WorkerMayNotSpawn => IpcError::WorkerMayNotSpawn,
             SpawnAgentError::Launch(err) => err.into(),
             SpawnAgentError::Mailbox(err) => err.into(),
+        }
+    }
+}
+
+impl From<SpawnProcessError> for IpcError {
+    fn from(err: SpawnProcessError) -> Self {
+        match err {
+            SpawnProcessError::NoProjectScope => IpcError::NoProjectScope,
+            SpawnProcessError::WorkerMayNotSpawn => IpcError::WorkerMayNotSpawn,
+            SpawnProcessError::UnknownProject => IpcError::UnknownProject,
+            SpawnProcessError::InvalidCommand(err) => IpcError::InvalidCommand(err.to_string()),
+            SpawnProcessError::Untrusted => IpcError::Untrusted,
+            SpawnProcessError::Store(err) => IpcError::Internal(err.to_string()),
+            SpawnProcessError::Supervisor(err) => IpcError::Internal(err.to_string()),
         }
     }
 }

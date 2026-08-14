@@ -9,8 +9,8 @@ use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::Registration;
 use crate::sync::lock;
 use crate::testing::{
-    agent_registration, authentic_session, facade_with_agent_tool, terminal_registration,
-    FakeProjectRepo, FakeSpawner, FakeTrustRepo, TEST_PEER_PGID,
+    agent_registration, authentic_session, bound_session, facade_with_agent_tool,
+    terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo, TEST_PEER_PGID,
 };
 use crate::PeerCredentials;
 use async_trait::async_trait;
@@ -43,17 +43,9 @@ fn terminal_in(facade: &Facade, project: ProjectId, name: &str) -> ProcessId {
         .register(terminal_registration(project, name, "sleep 60"))
 }
 
-/// Opens a session authenticated to `process` and binds it, as the UDS adapter would for an
-/// MCP client running inside that process's group: [`authentic_session`] puts the caller in
-/// the process's group, then this binds it, so the bind passes the façade's authenticity
-/// check. The production scope path, without a real PTY.
+/// The shared bind fixture at this file's default peer group.
 fn scoped_to(facade: &Facade, process: ProcessId) -> SessionId {
-    let session = authentic_session(facade, process, TEST_PEER_PGID);
-    facade
-        .scoped(session)
-        .bind_session_process(process)
-        .expect("an authentic bind to the process the caller runs in");
-    session
+    bound_session(facade, process, TEST_PEER_PGID)
 }
 
 async fn wait_for(rx: &mut broadcast::Receiver<DomainEvent>, target: ProcStatus) {

@@ -96,7 +96,9 @@ pub use mailbox::{
     SpawnAgentRequest,
 };
 pub use prompt_template::PromptRenderError;
-pub use scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
+pub use scoped::{
+    ScopedActionError, ScopedFacade, SpawnAgentError, SpawnProcessError, SpawnProcessRequest,
+};
 pub use scoped_git::ScopedGitError;
 pub use scratchpad::ScratchpadWrite;
 pub use settings::AppearanceSettingsError;

@@ -160,8 +160,13 @@ pub enum IpcError {
     UnknownTool,
     /// A spawn was requested by a session bound to a process that was itself spawned as a
     /// worker — delegation is one level deep.
-    #[error("a worker agent cannot spawn agents; report back to the lead that spawned it")]
+    #[error(
+        "a worker agent cannot spawn agents or processes; report back to the lead that spawned it"
+    )]
     WorkerMayNotSpawn,
+    /// A spawn named a command line or label that cannot be run.
+    #[error("{0}")]
+    InvalidCommand(String),
     /// A feedback submission was refused (empty, oversized, or the store is full); the
     /// detail says why.
     #[error("feedback was not accepted: {0}")]
@@ -233,6 +238,7 @@ impl IpcError {
             | IpcError::Untrusted
             | IpcError::UnknownTool
             | IpcError::WorkerMayNotSpawn
+            | IpcError::InvalidCommand(_)
             | IpcError::InvalidFeedback(_)
             | IpcError::UnmatchedIntegrationMarkers(_)
             // Every version-control refusal, without exception: what a caller does about an

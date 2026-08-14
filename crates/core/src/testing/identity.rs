@@ -25,6 +25,20 @@ pub fn authentic_session(facade: &Facade, process: ProcessId, pgid: i32) -> Sess
     facade.open_session(PeerCredentials::in_group(pgid))
 }
 
+/// [`authentic_session`], then the bind: the session a scoped caller acts through once its MCP
+/// client has claimed the process it runs in, which is what gives it a project scope and an
+/// identity to record lineage against. The production scope path, without a real PTY. Compiled
+/// for the core's own tests only — it asserts via `expect`, which the core denies elsewhere.
+#[cfg(test)]
+pub fn bound_session(facade: &Facade, process: ProcessId, pgid: i32) -> SessionId {
+    let session = authentic_session(facade, process, pgid);
+    facade
+        .scoped(session)
+        .bind_session_process(process)
+        .expect("an authentic bind to the process the caller runs in");
+    session
+}
+
 /// Opens an identity session authenticated by its working directory, as the UDS adapter would for
 /// an agent Soloist did not launch (its group owns no managed process): the session's peer reports
 /// `cwd` and no group, so its effective scope — and a [`select_project`](Facade::select_project) of
