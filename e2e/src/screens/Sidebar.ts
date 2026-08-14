@@ -4,6 +4,7 @@ import { waitUntilOr } from "../harness/waitUntilOr.js";
 import { WAIT } from "../harness/waits.js";
 import { ATTENTION_MARKER } from "./attention.js";
 import { ROW_ACTIVITY, ROW_MARKER, ROW_STATUS, ROW_TEXT } from "./indicatorRow.js";
+import { chooseFromMenu } from "./menu.js";
 import { trustDialog } from "./TrustDialog.js";
 
 const NAV = 'nav[aria-label="Projects"]';
@@ -424,47 +425,13 @@ export const sidebar = {
   /**
    * Runs one of a project's own actions the way a keyboard user does — reveal the project row's
    * ••• actions button, open its menu, and choose the item.
-   *
-   * Two WebKitGTK-under-classic-WebDriver realities shape this: the button is `opacity-0` until the
-   * row is hovered or focused, and the synthetic pointer neither reliably triggers `:hover` nor
-   * fires the `pointerdown` the menu opens on. So the button is focused (the row's `:focus-within`
-   * reveals it) and its menu opened with Enter — the genuine keyboard path — then the view's menu
-   * item is chosen inside the open menu.
-   *
-   * Both the synthetic focus and the Enter are racy on a slow runner: an Enter dispatched before the
-   * focus settles on the button is dropped, and the menu never opens. Pressing once and waiting would
-   * then fail the whole spec — the suite runs with no retries — so the focus+Enter is repeated until
-   * the menu is actually displayed. The re-press is skipped once the menu is open, so a menu that has
-   * opened is never toggled shut.
    */
   async chooseProjectAction(project: string, action: string): Promise<void> {
-    const actions = await $(`aria/Actions for ${project}`);
-    await actions.waitForExist({ timeout: WAIT.render });
-
-    const menu = $('[role="menu"]');
-    await browser.waitUntil(
-      async () => {
-        if (await menu.isDisplayed()) return true;
-        await browser.execute(
-          (element: HTMLElement) => element.focus(),
-          actions,
-        );
-        await browser.keys("Enter");
-        return menu.isDisplayed();
-      },
-      {
-        timeout: WAIT.render,
-        timeoutMsg: `the "${project}" actions menu never opened`,
-      },
+    await chooseFromMenu(
+      `"${project}" actions`,
+      () => $(`aria/Actions for ${project}`),
+      action,
     );
-
-    // Scoped to the open menu rather than looked up globally: a pane this opens can carry the same
-    // name once rendered (the orchestration one names its own view switch "Orchestration views"),
-    // so a global lookup could mis-target on a re-open. Exact text keeps the match on the one menu
-    // item — the menu's wrapper holds every label's text, so it can never match exactly.
-    const item = await menu.$(`div=${action}`);
-    await item.waitForClickable({ timeout: WAIT.render });
-    await item.click();
   },
 
   /**
@@ -492,19 +459,16 @@ export const sidebar = {
       return;
     }
 
-    // Secondary actions are progressively disclosed in the row's shadcn dropdown. Open it via
-    // the genuine keyboard path—the same reliable WebKit strategy used for project actions.
-    const more = await this.rowElement(label).$(
-      `.//button[@aria-label="More actions for ${label}"]`,
+    // Secondary actions are progressively disclosed in the row's shadcn dropdown, opened the same
+    // way a project's own menu is.
+    await chooseFromMenu(
+      `"${label}" more actions`,
+      () =>
+        this.rowElement(label).$(
+          `.//button[@aria-label="More actions for ${label}"]`,
+        ),
+      action,
     );
-    await more.waitForExist({ timeout: WAIT.render });
-    await browser.execute((element: HTMLElement) => element.focus(), more);
-    await browser.keys("Enter");
-    const menu = $('[role="menu"]');
-    await menu.waitForDisplayed({ timeout: WAIT.render });
-    const item = await menu.$(`div=${action}`);
-    await item.waitForClickable({ timeout: WAIT.render });
-    await item.click();
   },
 
   control(label: string, action: RowControl) {
