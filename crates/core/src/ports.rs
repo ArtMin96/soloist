@@ -248,6 +248,24 @@ pub trait ProjectRepo: Send + Sync {
     fn remove(&self, id: ProjectId) -> Result<(), StoreError>;
 }
 
+/// One trusted command variant as the review surface reads it back.
+///
+/// Provenance is nullable because it was added after grants already existed, and because the
+/// distinction it records is real: a grant with no requester is one **the user authored** — they
+/// trusted a command out of their own `solo.yml` — while a grant that names one was made on a
+/// process's behalf, at its asking, for the reason it gave.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrustGrant {
+    /// The variant key, as [`Hash::to_hex`] writes it.
+    pub variant_hash: String,
+    /// The process that asked for this grant, or `None` when the user authored it themselves.
+    pub requested_by: Option<ProcessId>,
+    /// The reason that process gave. Agent-supplied and untrusted — render it as a quotation.
+    pub reason: Option<String>,
+    /// When the grant was made, for a grant that recorded it.
+    pub granted_at_unix_millis: Option<u64>,
+}
+
 /// Durable trust store. Trust comes at two grains, and they answer different questions:
 /// `(project, command-variant hash)` says one exact command variant may run within a project,
 /// and `project` alone says the user has authorised Soloist to change that project on their
@@ -257,6 +275,20 @@ pub trait TrustRepo: Send + Sync {
     fn is_trusted(&self, project: ProjectId, variant: &Hash) -> Result<bool, StoreError>;
     /// Marks `variant` trusted within `project`.
     fn set_trusted(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError>;
+    /// Marks `variant` trusted within `project`, recording which process asked for it, why, and
+    /// when it was granted. The row is the same one [`set_trusted`](Self::set_trusted) writes, so
+    /// the start gate reads it identically; the provenance exists so a grant made on a process's
+    /// behalf is distinguishable from one the user authored.
+    fn set_trusted_with_provenance(
+        &self,
+        project: ProjectId,
+        variant: &Hash,
+        requested_by: ProcessId,
+        reason: &str,
+        granted_at_unix_millis: u64,
+    ) -> Result<(), StoreError>;
+    /// Every trusted variant within `project`, with the provenance of each.
+    fn list_grants(&self, project: ProjectId) -> Result<Vec<TrustGrant>, StoreError>;
     /// Revokes trust for `variant` within `project`.
     fn revoke(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError>;
     /// Whether the user has authorised Soloist to make changes within `project`.

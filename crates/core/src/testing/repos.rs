@@ -3,21 +3,25 @@
 //! closely enough to exercise the trust gate, config sync, and project-registry logic
 //! headless — no real database.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::hash::Hash;
-use crate::ids::ProjectId;
-use crate::ports::{ProjectRecord, ProjectRepo, StoreError, TrustRepo};
+use crate::ids::{ProcessId, ProjectId};
+use crate::ports::{ProjectRecord, ProjectRepo, StoreError, TrustGrant, TrustRepo};
 use crate::sync::lock;
 
 /// An in-memory [`TrustRepo`] keyed by `(project, variant hex)` for command trust and by the
 /// project alone for the authorisation to change it, for headless trust and sync tests.
+///
+/// Provenance is held beside the grant rather than inside it, mirroring the durable store's
+/// nullable columns: a variant trusted without provenance reads back as user-authored.
 #[derive(Default)]
 pub struct FakeTrustRepo {
     trusted: Mutex<HashSet<(u64, String)>>,
+    provenance: Mutex<BTreeMap<(u64, String), (ProcessId, String, u64)>>,
     trusted_projects: Mutex<HashSet<u64>>,
 }
 
@@ -44,8 +48,42 @@ impl TrustRepo for FakeTrustRepo {
         Ok(())
     }
 
+    fn set_trusted_with_provenance(
+        &self,
+        project: ProjectId,
+        variant: &Hash,
+        requested_by: ProcessId,
+        reason: &str,
+        granted_at_unix_millis: u64,
+    ) -> Result<(), StoreError> {
+        lock(&self.trusted).insert((project.get(), variant.to_hex()));
+        lock(&self.provenance).insert(
+            (project.get(), variant.to_hex()),
+            (requested_by, reason.to_owned(), granted_at_unix_millis),
+        );
+        Ok(())
+    }
+
+    fn list_grants(&self, project: ProjectId) -> Result<Vec<TrustGrant>, StoreError> {
+        let provenance = lock(&self.provenance);
+        Ok(lock(&self.trusted)
+            .iter()
+            .filter(|(owner, _)| *owner == project.get())
+            .map(|key| {
+                let recorded = provenance.get(key);
+                TrustGrant {
+                    variant_hash: key.1.clone(),
+                    requested_by: recorded.map(|(process, _, _)| *process),
+                    reason: recorded.map(|(_, reason, _)| reason.clone()),
+                    granted_at_unix_millis: recorded.map(|(_, _, at)| *at),
+                }
+            })
+            .collect())
+    }
+
     fn revoke(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError> {
         lock(&self.trusted).remove(&(project.get(), variant.to_hex()));
+        lock(&self.provenance).remove(&(project.get(), variant.to_hex()));
         Ok(())
     }
 

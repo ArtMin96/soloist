@@ -28,7 +28,7 @@ use crate::identity::Identity;
 use crate::ids::{ProcessId, ProjectId};
 use crate::metrics::MetricsProbe;
 use crate::notify::{AttentionRegistry, Notifier, PresenceCell};
-use crate::ports::{Clock, SpawnSpec, StoreError};
+use crate::ports::{Clock, CompositeLockReleaser, SpawnSpec, StoreError};
 use crate::portscan::{self, PortProbe, WaitForPortError};
 use crate::process::{ProcStatus, ProcessKind, ProcessView};
 use crate::projects::{
@@ -38,7 +38,7 @@ use crate::projects::{
 use crate::settings::{ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::support::Feedback;
-use crate::trust::TrustStore;
+use crate::trust::{TrustRequests, TrustStore};
 
 use serde::Serialize;
 
@@ -77,6 +77,7 @@ mod scoped_git;
 mod scoped_git_pr;
 mod scoped_process;
 mod scoped_todo;
+mod scoped_trust;
 mod scratchpad;
 mod seed_template;
 mod session;
@@ -85,6 +86,7 @@ mod support;
 mod template;
 mod terminal;
 mod todo;
+mod trustrequest;
 
 pub use commands::{LocalCommandError, MoveCommandError};
 pub use coordination::CoordinationError;
@@ -100,12 +102,14 @@ pub use scoped::{
     ScopedActionError, ScopedFacade, SpawnAgentError, SpawnProcessError, SpawnProcessRequest,
 };
 pub use scoped_git::ScopedGitError;
+pub use scoped_trust::{CommandTrustRequest, RequestTrustError};
 pub use scratchpad::ScratchpadWrite;
 pub use settings::AppearanceSettingsError;
 pub use support::SetupIntegrationError;
 pub use template::Seeded;
 pub use terminal::CreateTerminalError;
 pub use todo::TodoCreation;
+pub use trustrequest::{ResolveTrustRequestError, RevokeTrustError};
 
 /// Per-subscriber event buffer. Bounded so a stalled adapter re-syncs from a snapshot
 /// (see [`crate::events`]) rather than growing memory without limit.
@@ -145,6 +149,7 @@ pub struct Facade {
     diagrams: Diagrams,
     todos: Todos,
     templates: Arc<Templates>,
+    trust_requests: Arc<TrustRequests>,
     settings: Arc<SettingsStore<(), Settings>>,
     project_settings: Arc<SettingsStore<ProjectId, ProjectSettings>>,
     feedback: Feedback,
@@ -156,7 +161,18 @@ impl Facade {
     /// store, and the config sync engine, so all three agree on what is trusted.
     pub fn new(ports: CorePorts) -> Self {
         let bus = EventBus::new(EVENT_BUFFER);
-        let supervisor_ports = ports.supervisor_ports();
+        // The pending-request set is assembled here rather than passed through, for the reason the
+        // shell-environment resolver is: two collaborators must share the one instance, and this
+        // constructor is where both are visible. It needs the bus minted just above to announce a
+        // request, and the supervisor needs it as a close hook so a process that dies takes its
+        // unanswered requests with it — so the hook the composition root supplied is extended with
+        // it rather than replaced.
+        let trust_requests = Arc::new(TrustRequests::new(ports.clock.clone(), bus.clone()));
+        let mut supervisor_ports = ports.supervisor_ports();
+        supervisor_ports.locks = Arc::new(CompositeLockReleaser::new(vec![
+            supervisor_ports.locks,
+            trust_requests.clone(),
+        ]));
         // The resolver the supervisor was handed is the one the agents context drafts through, so a
         // spawn and a headless run share a single capture of the user's shell.
         let shell_env = supervisor_ports.shell_env.clone();
@@ -206,6 +222,7 @@ impl Facade {
             diagrams: Diagrams::new(diagram_repo, clock.clone()),
             todos: Todos::new(todo_repo),
             templates: Arc::new(Templates::new(template_repo)),
+            trust_requests,
             settings: Arc::new(SettingsStore::new(settings_repo)),
             project_settings: Arc::new(SettingsStore::new(project_settings_repo)),
             feedback: Feedback::new(feedback_repo, clock.clone()),

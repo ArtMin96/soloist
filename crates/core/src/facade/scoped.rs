@@ -70,6 +70,22 @@ const WORKER_MAY_NOT_SPAWN: &str =
 /// scoped.config();
 /// # }
 /// ```
+///
+/// The same guarantee covers deciding a trust request. A scoped caller may *ask* for a command
+/// variant to be trusted; approving one is the person at the keyboard's authority and lives on
+/// [`Facade`] alone, so a requester can never grant its own request:
+///
+/// ```compile_fail
+/// # fn probe(scoped: soloist_core::ScopedFacade<'_>, id: soloist_core::TrustRequestId) {
+/// scoped.approve_trust_request(id, "");
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn probe(scoped: soloist_core::ScopedFacade<'_>, id: soloist_core::TrustRequestId) {
+/// scoped.deny_trust_request(id);
+/// # }
+/// ```
 pub struct ScopedFacade<'a> {
     // Visible to the sibling modules that carry the rest of this type's methods, and no wider:
     // outside `facade` there is no way to reach the unscoped core through this view.
