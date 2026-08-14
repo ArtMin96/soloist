@@ -100,11 +100,13 @@ struct Watched {
     state_dir: PathBuf,
 }
 
-/// The watches held for one project. `refusal` is the first the OS gave while establishing them,
-/// kept because a re-sync reports every open project's standing answer and does not re-establish
-/// the watches it already holds.
+/// The watches held for one project.
+///
+/// The handles are never read: holding one *is* the watch, and dropping it is what releases the OS
+/// resources. `refusal` is the working tree's, kept because a re-sync reports every open project's
+/// standing answer and does not re-establish the watches it already holds.
 struct Held {
-    handles: Vec<Box<dyn WatchHandle>>,
+    _handles: Vec<Box<dyn WatchHandle>>,
     refusal: Option<WatchError>,
 }
 
@@ -355,7 +357,10 @@ impl GitStatusWatchReactor {
                 }
                 Err(refusal) => Some(refusal),
             };
-            Held { handles, refusal }
+            Held {
+                _handles: handles,
+                refusal,
+            }
         })
         .await
     }
