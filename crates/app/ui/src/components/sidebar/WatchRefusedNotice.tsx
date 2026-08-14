@@ -1,4 +1,5 @@
 import { AdvisoryNotice } from "@/components/AdvisoryNotice";
+import { cn } from "@/lib/utils";
 import type { WatchError } from "@/domain";
 
 // What each refusal leaves the user able to do about it. Only the exhausted budget has a fix, and
@@ -28,7 +29,9 @@ export function WatchRefusedNotice({
   className?: string;
 }) {
   return (
-    <AdvisoryNotice className={className}>
+    // The rail is narrow and the setting to raise is one long unbreakable token, so the strip wraps
+    // inside a word rather than reaching past the sidebar it sits in.
+    <AdvisoryNotice className={cn("items-start break-words", className)}>
       Not watching this project's files, so restart-on-change and live git status have stopped.{" "}
       {CAUSE[reason]}
     </AdvisoryNotice>
