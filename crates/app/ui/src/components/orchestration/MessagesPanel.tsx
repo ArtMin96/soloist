@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,9 @@ interface Props {
 // through says so, and a body cut for display says so.
 export function MessagesPanel({ messages, agents }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const labelOf = agentLabels(agents);
+  // The panel re-renders once per frame under a chatty run, so the id→label index is built per
+  // agent list rather than per render.
+  const labelOf = useMemo(() => agentLabels(agents), [agents]);
   const showAll = useCallback(() => setExpanded(true), []);
 
   if (messages.length === 0) {
