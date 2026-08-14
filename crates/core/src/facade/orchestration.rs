@@ -118,6 +118,7 @@ impl Facade {
             scratchpads: self.scratchpads.list(project)?,
             diagrams: self.diagrams.list(project)?,
             kv: self.kv.list(project)?,
+            messages: self.mailbox.transcript(project),
         })
     }
 }

@@ -171,13 +171,20 @@ impl ScopedFacade<'_> {
             body,
             todo_id,
         )?;
+        // A broadcast reaches the queue through `enqueue_many`, never `send_message`, so it needs
+        // its own record per recipient — otherwise a broadcast is invisible in the transcript.
         for delivery in &mut deliveries {
             let recipient = delivery.message.recipient;
             if self.inner.idle.activity(recipient) == Some(crate::agents::AgentActivity::Idle)
-                && self.inner.mailbox.wake(recipient, self.inner.supervisor())
+                && self
+                    .inner
+                    .mailbox
+                    .wake(recipient, self.inner.supervisor())
+                    .submitted
             {
                 delivery.outcome = AgentMessageOutcome::WakeSubmitted;
             }
+            self.record_and_announce(delivery);
         }
         Ok(AgentBroadcastReceipt {
             deliveries: deliveries
@@ -215,10 +222,13 @@ impl ScopedFacade<'_> {
         message_id: AgentMessageId,
     ) -> Result<AgentMessageDelivery, AgentMailboxError> {
         let (_, recipient) = self.mailbox_identity()?;
-        self.inner
+        let delivery = self
+            .inner
             .mailbox
             .acknowledge(recipient, message_id)
-            .ok_or(AgentMailboxError::UnknownMessage)
+            .ok_or(AgentMailboxError::UnknownMessage)?;
+        self.advance_and_announce(&delivery);
+        Ok(delivery)
     }
 
     /// Reports one addressed task complete, optionally completing its associated todo atomically.
@@ -326,17 +336,16 @@ impl ScopedFacade<'_> {
         body: String,
         todo_id: Option<TodoId>,
     ) -> Result<AgentMessageDelivery, AgentMailboxError> {
-        self.inner
-            .mailbox
-            .enqueue_reserved(
-                project,
-                sender,
-                recipient,
-                AgentMessageKind::Task,
-                body,
-                todo_id,
-            )
-            .map_err(Into::into)
+        let delivery = self.inner.mailbox.enqueue_reserved(
+            project,
+            sender,
+            recipient,
+            AgentMessageKind::Task,
+            body,
+            todo_id,
+        )?;
+        self.record_and_announce(&delivery);
+        Ok(delivery)
     }
 
     fn send_message(
@@ -364,10 +373,15 @@ impl ScopedFacade<'_> {
             .mailbox
             .enqueue(project, sender, recipient, kind, body, todo_id)?;
         if self.inner.idle.activity(recipient) == Some(crate::agents::AgentActivity::Idle)
-            && self.inner.mailbox.wake(recipient, self.inner.supervisor())
+            && self
+                .inner
+                .mailbox
+                .wake(recipient, self.inner.supervisor())
+                .submitted
         {
             delivery.outcome = AgentMessageOutcome::WakeSubmitted;
         }
+        self.record_and_announce(&delivery);
         Ok(delivery)
     }
 
