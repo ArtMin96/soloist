@@ -313,6 +313,12 @@ export type DomainEvent =
   // only: the rail re-reads gitStatus() (coalesced) rather than trusting a payload, so a
   // repository under active change costs one re-query per frame instead of one per file.
   | { type: "GitStatusChanged"; project: number }
+  // Whether the OS is refusing to watch a project's directories changed: `refusal` is set once a
+  // watch is turned down, and null once one it had refused is established again. It carries the
+  // reason rather than pointing at a read model, because there is no record to re-query for which
+  // it was — and because a watch that yields no events looks exactly like a tree nobody edits, so
+  // this is the one degradation nothing else reveals.
+  | { type: "WatchRefusalChanged"; project: number; refusal: WatchError | null }
   // An alert for a user who is looking at Soloist but not at the process that raised it, so it
   // belongs in an in-app toast. The core has already applied the master switch, the notification
   // level, and the focus rules — a surface renders this and decides nothing. Unlike the
@@ -343,6 +349,11 @@ export interface AppInfo {
 // The git rail renders these; enum string values are the core's serde snake_case output.
 
 // What happened to one path, as version control classifies it (mirrors core::ChangeKind).
+// Why the OS would not watch a directory (mirrors core::watch::WatchError). Only
+// `budget_exhausted` has a fix the user can apply, which is why the reason travels rather than a
+// single "not watched" flag.
+export type WatchError = "budget_exhausted" | "unwatchable" | "unavailable";
+
 export type ChangeKind =
   | "modified"
   | "type_changed"

@@ -44,11 +44,12 @@ use tokio::sync::mpsc;
 
 use crate::debounce::{sleep_until, Debouncer};
 use crate::events::{DomainEvent, EventBus};
-use crate::filewatch::{is_ignored, FileWatcher, WatchHandle};
+use crate::filewatch::{is_ignored, FileWatcher, WatchHandle, WatchPurpose, WatchStatus};
 use crate::ids::ProjectId;
 use crate::ports::Clock;
 use crate::projects::Projects;
 use crate::supervision::run_blocking;
+use crate::watch::WatchError;
 
 use super::status::Git;
 
@@ -99,6 +100,14 @@ struct Watched {
     state_dir: PathBuf,
 }
 
+/// The watches held for one project. `refusal` is the first the OS gave while establishing them,
+/// kept because a re-sync reports every open project's standing answer and does not re-establish
+/// the watches it already holds.
+struct Held {
+    handles: Vec<Box<dyn WatchHandle>>,
+    refusal: Option<WatchError>,
+}
+
 /// Turns repository-state changes into debounced status re-reads. Built once by the composition
 /// root (via [`crate::facade::Facade::git_status_watch_loop`]) and spawned on the runtime.
 pub struct GitStatusWatchReactor {
@@ -108,18 +117,20 @@ pub struct GitStatusWatchReactor {
     bus: EventBus,
     git: Weak<Git>,
     projects: Arc<Projects>,
+    status: Arc<WatchStatus>,
 }
 
 impl GitStatusWatchReactor {
     /// Builds a reactor over the file watcher and clock, watching the git context weakly (so it
-    /// never keeps the app alive) and subscribing to the bus for project lifecycle and the
-    /// shutdown signal.
+    /// never keeps the app alive), subscribing to the bus for project lifecycle and the shutdown
+    /// signal, and reporting what the OS refuses through the shared [`WatchStatus`].
     pub fn new(
         clock: Arc<dyn Clock>,
         watcher: Arc<dyn FileWatcher>,
         bus: &EventBus,
         git: Weak<Git>,
         projects: Arc<Projects>,
+        status: Arc<WatchStatus>,
     ) -> Self {
         Self {
             clock,
@@ -128,6 +139,7 @@ impl GitStatusWatchReactor {
             bus: bus.clone(),
             git,
             projects,
+            status,
         }
     }
 
@@ -138,7 +150,7 @@ impl GitStatusWatchReactor {
         // watches alive: dropping a handle stops its watch (the bounded-resource contract), so
         // a handle lives exactly as long as its project is open. `watched` is what a change
         // event is matched against and where a re-read runs.
-        let mut watches: HashMap<ProjectId, Vec<Box<dyn WatchHandle>>> = HashMap::new();
+        let mut watches: HashMap<ProjectId, Held> = HashMap::new();
         let mut watched: HashMap<ProjectId, Watched> = HashMap::new();
         self.resync(&changes_tx, &mut watches, &mut watched).await;
 
@@ -256,10 +268,14 @@ impl GitStatusWatchReactor {
     /// state, a tree watch on the refs inside it, and a tree watch on its working tree, and a
     /// removed one has its handles dropped, releasing the OS resources. A failed registry read
     /// changes nothing — the next lifecycle event re-syncs.
+    ///
+    /// Every open project's standing answer — watched, or the refusal met establishing it — is
+    /// reported to [`WatchStatus`], so a repository whose changes have stopped reporting says so
+    /// rather than looking like one nobody is touching.
     async fn resync(
         &self,
         changes_tx: &mpsc::Sender<PathBuf>,
-        watches: &mut HashMap<ProjectId, Vec<Box<dyn WatchHandle>>>,
+        watches: &mut HashMap<ProjectId, Held>,
         watched: &mut HashMap<ProjectId, Watched>,
     ) {
         let Ok(records) = self.projects.list() else {
@@ -267,15 +283,21 @@ impl GitStatusWatchReactor {
         };
         watched.clear();
         let mut open: HashSet<ProjectId> = HashSet::new();
+        let mut outcomes: Vec<(ProjectId, Option<WatchError>)> = Vec::new();
         for record in records {
             open.insert(record.id);
             let state_dir = record.root.join(STATE_DIR);
-            if let Entry::Vacant(slot) = watches.entry(record.id) {
-                slot.insert(
-                    self.establish(&record.root, &state_dir, changes_tx.clone())
-                        .await,
-                );
-            }
+            let refusal = match watches.entry(record.id) {
+                Entry::Occupied(slot) => slot.get().refusal,
+                Entry::Vacant(slot) => {
+                    slot.insert(
+                        self.establish(&record.root, &state_dir, changes_tx.clone())
+                            .await,
+                    )
+                    .refusal
+                }
+            };
+            outcomes.push((record.id, refusal));
             watched.insert(
                 record.id,
                 Watched {
@@ -285,6 +307,7 @@ impl GitStatusWatchReactor {
             );
         }
         watches.retain(|project, _| open.contains(project));
+        self.status.resynced(WatchPurpose::GitStatus, &outcomes);
     }
 
     /// The watches one project's status needs: its repository state, the refs tree inside it, and
@@ -297,44 +320,61 @@ impl GitStatusWatchReactor {
     /// Each is independent, so what can be watched is. A refused working-tree watch still leaves
     /// what version control itself writes reporting, which is why the repository-state watches are
     /// separate from the tree watch that spans them: the tree watch is the one an exhausted watch
-    /// budget refuses first, and losing it must not take committing and staging down with it. Every
-    /// refusal is traced, because a watch that yields no events is indistinguishable from a tree
-    /// nothing changes in.
+    /// budget refuses first, and losing it must not take committing and staging down with it.
+    ///
+    /// Only the working tree's refusal is carried back to [`WatchStatus`], though every refusal is
+    /// traced. A project that is not a repository has no `.git` to watch, so a state-dir refusal is
+    /// the ordinary case rather than a loss — reporting it would put a notice on every project not
+    /// under version control. The working-tree watch is the one every project has, and the one whose
+    /// silence is indistinguishable from a tree nobody edits.
     async fn establish(
         &self,
         root: &Path,
         state_dir: &Path,
         changes: mpsc::Sender<PathBuf>,
-    ) -> Vec<Box<dyn WatchHandle>> {
+    ) -> Held {
         let watcher = self.watcher.clone();
         let state_dir = state_dir.to_path_buf();
         let refs_dir = state_dir.join(REFS_DIR);
         let root = root.to_path_buf();
         run_blocking(move || {
-            [
+            let mut handles: Vec<Box<dyn WatchHandle>> = [
                 (
                     state_dir.clone(),
                     watcher.watch_dir(state_dir, changes.clone()),
                 ),
                 (refs_dir.clone(), watcher.watch(refs_dir, changes.clone())),
-                (root.clone(), watcher.watch(root, changes)),
             ]
             .into_iter()
-            .filter_map(|(path, established)| match established {
-                Ok(handle) => Some(handle),
-                Err(refusal) => {
-                    tracing::warn!(
-                        path = %path.display(),
-                        %refusal,
-                        "a repository's changes will not report: the directory could not be watched",
-                    );
+            .filter_map(|(path, established)| traced(&path, established).ok())
+            .collect();
+            let refusal = match traced(&root, watcher.watch(root.clone(), changes)) {
+                Ok(handle) => {
+                    handles.push(handle);
                     None
                 }
-            })
-            .collect()
+                Err(refusal) => Some(refusal),
+            };
+            Held { handles, refusal }
         })
         .await
     }
+}
+
+/// Traces a refused watch on `path` and passes the outcome through unchanged, so the watches whose
+/// refusal is only worth logging and the one that is also reported say it the same way.
+fn traced(
+    path: &Path,
+    established: Result<Box<dyn WatchHandle>, WatchError>,
+) -> Result<Box<dyn WatchHandle>, WatchError> {
+    if let Err(refusal) = &established {
+        tracing::warn!(
+            path = %path.display(),
+            %refusal,
+            "a repository's changes will not report: the directory could not be watched",
+        );
+    }
+    established
 }
 
 /// Every watched project whose status `path` is part of — through its repository state or its

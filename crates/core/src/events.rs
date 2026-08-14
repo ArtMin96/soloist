@@ -19,6 +19,7 @@ use crate::ids::{ProcessId, ProjectId, TimerId, TodoId};
 use crate::orphans::OrphanInfo;
 use crate::process::{ProcStatus, ProcessKind};
 use crate::template::TemplateKind;
+use crate::watch::WatchError;
 
 /// A change in domain state, serialized to adapters verbatim. `#[serde(tag = "type")]`
 /// gives each variant a discriminator field so a JS/TS consumer can switch on it.
@@ -227,6 +228,24 @@ pub enum DomainEvent {
     /// payload, so a repository under active change coalesces to one re-query per frame
     /// instead of one per file.
     GitStatusChanged { project: ProjectId },
+    /// Whether the OS is refusing to watch a project's directories changed: `refusal` is `Some`
+    /// once a watch is turned down — its `restart_when_changed` commands stop reloading on a save
+    /// and its git status stops refreshing on its own — and `None` once a watch it had refused is
+    /// established again.
+    ///
+    /// Edge-triggered in both directions, like [`Self::ReadyStateChanged`]: the reactors ask for a
+    /// refused root again on every re-sync, so a signal per attempt would repeat one sentence for
+    /// as long as the condition lasted.
+    ///
+    /// It carries the refusal rather than pointing at a read model, deliberately. An exhausted
+    /// watch budget is the user's to raise and an unreadable directory is not, and there is no
+    /// record to re-query for which it was. This is the one degradation nothing else reveals — a
+    /// watch that yields no events looks exactly like a tree nobody edits — so if it is not said
+    /// here it is not said at all.
+    WatchRefusalChanged {
+        project: ProjectId,
+        refusal: Option<WatchError>,
+    },
 }
 
 /// The outbound event port: anything the core publishes domain events through.

@@ -48,6 +48,7 @@ pub mod template;
 pub mod terminal;
 pub mod trust;
 pub mod vcs;
+pub mod watch;
 
 mod cache;
 mod supervision;
@@ -91,7 +92,8 @@ pub use facade::{
     SpawnAgentError, StatusSummary, TrustCommandError,
 };
 pub use filewatch::{
-    FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchError, WatchHandle, WatchReactor,
+    FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchPurpose, WatchReactor,
+    WatchStatus,
 };
 pub use git::{
     BranchOp, CheckRun, CheckState, DiffExtent, Exchange, FileOpener, ForgeError, ForgeReadiness,
@@ -154,3 +156,4 @@ pub use vcs::{
     Branch, BranchInfo, Branches, ChangeKind, CommitEntry, DiffTarget, FileChange, FileContent,
     FileDiff, GitFileStatus, HunkRange, ProjectFile, SyncState, COMMIT_BODY_LIMIT,
 };
+pub use watch::WatchError;

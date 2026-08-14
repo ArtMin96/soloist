@@ -19,6 +19,7 @@ use crate::process::{ProcStatus, ProcessKind, ProcessView, Readiness};
 use crate::sync::lock;
 
 use super::actor::{ActorMsg, OrphanIdentity};
+use super::monitoring::WatchTarget;
 use super::registration::Labelling;
 
 mod actors;
@@ -360,23 +361,22 @@ impl Registry {
         }
     }
 
-    /// Every `Command` that declares `restart_when_changed` globs, as `(id, project_root,
-    /// globs)` — the file-watch reactor's watch and match inputs. Terminals, agents, and
-    /// commands with no globs are omitted (they are never file-watched). Trust is not checked
-    /// here; the reactor's restart re-checks it (fail-closed), as the crash policy does.
-    pub(crate) fn watch_commands(&self) -> Vec<(ProcessId, PathBuf, Vec<String>)> {
+    /// Every `Command` that declares `restart_when_changed` globs — the file-watch reactor's
+    /// watch and match inputs. Terminals, agents, and commands with no globs are omitted (they
+    /// are never file-watched). Trust is not checked here; the reactor's restart re-checks it
+    /// (fail-closed), as the crash policy does.
+    pub(crate) fn watch_commands(&self) -> Vec<WatchTarget> {
         let guard = lock(&self.inner);
         guard
             .values()
             .filter(|entry| {
                 entry.view.kind == ProcessKind::Command && !entry.restart_when_changed.is_empty()
             })
-            .map(|entry| {
-                (
-                    entry.view.id,
-                    entry.project_root.clone(),
-                    entry.restart_when_changed.clone(),
-                )
+            .map(|entry| WatchTarget {
+                id: entry.view.id,
+                project: entry.view.project,
+                project_root: entry.project_root.clone(),
+                globs: entry.restart_when_changed.clone(),
             })
             .collect()
     }

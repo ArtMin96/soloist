@@ -6,10 +6,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Notify};
 
 use crate::ports::Clock;
 use crate::sync::lock;
+use crate::testing::wait::bounded;
 
 struct Sleeper {
     deadline: Instant,
@@ -34,6 +35,7 @@ struct MockState {
 #[derive(Clone)]
 pub struct MockClock {
     state: Arc<Mutex<MockState>>,
+    armed: Arc<Notify>,
 }
 
 impl MockClock {
@@ -44,7 +46,26 @@ impl MockClock {
                 wall_millis: MOCK_WALL_EPOCH_MILLIS,
                 sleepers: Vec::new(),
             })),
+            armed: Arc::new(Notify::new()),
         }
+    }
+
+    /// Resolves once a deadline is waiting on this clock — the deterministic signal that a
+    /// `Clock`-driven loop has armed its next wake and is parked on it.
+    ///
+    /// A test awaits this before [`Self::advance`], because the two are not interchangeable in
+    /// either order: time this clock moves past a deadline that has not been registered yet is
+    /// time that deadline never sees, and the loop then arms from the *new* now and waits for an
+    /// advance the test has already made. Awaiting a scheduler budget of `yield_now`s instead
+    /// only makes that race rarer, never impossible — the loop is woken across threads (the
+    /// blocking pool), so no number of yields orders the two.
+    pub async fn deadline_armed(&self) {
+        bounded("a deadline to be armed on the mock clock", async {
+            while lock(&self.state).sleepers.is_empty() {
+                self.armed.notified().await;
+            }
+        })
+        .await;
     }
 
     /// Advances time by `by`, completing every sleeper whose deadline has passed.
@@ -95,6 +116,8 @@ impl Clock for MockClock {
             });
             rx
         };
+        // Announced after the lock is released, so a test waking on it observes the sleeper.
+        self.armed.notify_one();
         let _ = rx.await;
     }
 }

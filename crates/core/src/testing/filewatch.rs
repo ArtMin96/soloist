@@ -7,8 +7,10 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::{mpsc, Notify};
 
-use crate::filewatch::{FileWatcher, WatchError, WatchHandle};
+use crate::filewatch::{FileWatcher, WatchHandle};
 use crate::sync::lock;
+use crate::testing::wait::bounded;
+use crate::watch::WatchError;
 
 /// An in-memory [`FileWatcher`] that records the roots it was asked to watch and delivers
 /// [`FakeFileWatcher::change`] to the live watches covering the changed path — recursively for
@@ -108,26 +110,33 @@ impl FakeFileWatcher {
     ///
     /// [`watched`]: Self::watched
     pub async fn established(&self) {
-        self.established.notified().await;
+        bounded(
+            "the reactor to register a watch",
+            self.established.notified(),
+        )
+        .await;
     }
 
     /// Resolves once the reactor has asked to watch `root` — granted or refused. What a test needs
     /// when the reactor registers several watches and the one under test is not the first:
     /// [`Self::established`] fires on whichever arrived, which says nothing about the rest.
     pub async fn asked_for(&self, root: &Path) {
-        while !lock(&self.watches)
-            .requested
-            .iter()
-            .any(|asked| asked == root)
-        {
-            self.established.notified().await;
-        }
+        bounded(&format!("a watch request for {}", root.display()), async {
+            while !lock(&self.watches)
+                .requested
+                .iter()
+                .any(|asked| asked == root)
+            {
+                self.established.notified().await;
+            }
+        })
+        .await;
     }
 
     /// Resolves once the reactor has dropped at least one watch handle — the deterministic
     /// mirror of [`Self::established`] for asserting a watch was released.
     pub async fn released(&self) {
-        self.released.notified().await;
+        bounded("the reactor to drop a watch", self.released.notified()).await;
     }
 
     fn record(
