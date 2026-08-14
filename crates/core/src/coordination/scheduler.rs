@@ -163,10 +163,20 @@ impl TimerScheduler {
 /// agent CLI submits it. Best-effort and non-blocking — the timer is already claimed and removed,
 /// so an owner that has since gone (or a deaf child whose input channel is full) simply means the
 /// body is not delivered; delivery must never stall the loop for every other agent's timers.
+///
+/// A turn the owner would not take is not retried — the timer was claimed and removed before this,
+/// so there is nothing left to fire again — but it is traced, because an agent that was supposed to
+/// wake and never did is otherwise indistinguishable from one that had nothing to wake for.
 fn deliver(supervisor: &Supervisor, timer: StoredTimer, fired_at_backstop: bool) {
     let header = wake_reason_header(&timer, fired_at_backstop);
     let input = format!("{header}\n{}", timer.body).into_bytes();
-    let _ = supervisor.try_submit_turn(timer.owner, input);
+    if !matches!(supervisor.try_submit_turn(timer.owner, input), Ok(true)) {
+        tracing::warn!(
+            timer = timer.id.get(),
+            owner = timer.owner.get(),
+            "a fired timer woke nobody: its owner would not take the turn",
+        );
+    }
 }
 
 /// A compact, clean-room wake-reason header prepended to the delivered body so the woken agent can

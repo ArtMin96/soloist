@@ -1,7 +1,7 @@
 use crate::ids::{ProcessId, ProjectId};
 use crate::sync::lock;
 
-use super::state::AgentMailbox;
+use super::state::{AgentMailbox, PendingWake};
 use super::vocabulary::AgentMessageOutcome;
 
 /// The authenticated context rendered into a spawned agent's orchestration instructions.
@@ -21,9 +21,10 @@ pub fn orchestration_guide(context: OrchestrationGuide<'_>) -> String {
 
 impl AgentMailbox {
     pub(crate) fn queue_onboarding(&self, process: ProcessId, guide: String) {
+        let now = self.now_unix_millis();
         let mut state = lock(&self.state);
         state.onboarding.insert(process, guide);
-        state.wake_attempts.insert(process, 0);
+        state.pending_wakes.insert(process, PendingWake::armed(now));
     }
 
     pub(super) fn claim_wake_envelope(
@@ -71,7 +72,7 @@ impl AgentMailbox {
     ) {
         let mut state = lock(&self.state);
         state.onboarding.remove(&recipient);
-        state.wake_attempts.remove(&recipient);
+        state.pending_wakes.remove(&recipient);
         if let Some(inbox) = state.inboxes.get_mut(&recipient) {
             for pending in inbox {
                 if pending.outcome == AgentMessageOutcome::Queued
@@ -88,9 +89,10 @@ impl AgentMailbox {
     }
 
     pub(super) fn observe_non_idle(&self, recipient: ProcessId) {
+        let now = self.now_unix_millis();
         let mut state = lock(&self.state);
         if state.wake_in_flight.remove(&recipient) {
-            super::state::arm_if_waiting(&mut state, recipient);
+            super::state::arm_if_waiting(&mut state, recipient, now);
         }
     }
 }

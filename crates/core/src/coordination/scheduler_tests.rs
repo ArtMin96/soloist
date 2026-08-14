@@ -22,7 +22,9 @@ use crate::ports::{PtySize, SpawnSpec};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, Supervisor};
 use crate::sync::lock;
-use crate::testing::{FakeProjectRepo, FakeSpawner, FakeTimerRepo, FakeTrustRepo, MockClock};
+use crate::testing::{
+    FakeProjectRepo, FakeSpawner, FakeTimerRepo, FakeTrustRepo, MockClock, WarnFlag,
+};
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);
 
@@ -443,7 +445,36 @@ async fn closing_the_owner_drops_its_timers() {
     settle_until(|| !h.exists(owner, view.id)).await;
 }
 
-/// A minimal stored timer with the given fire condition, for the pure wake-reason header tests.
+#[tokio::test]
+async fn a_wake_its_owner_will_not_take_is_traced_rather_than_lost_in_silence() {
+    let h = harness(FakeSpawner::exits_on_kill());
+    let owner = h.running_process().await;
+
+    // An owner that is there takes the turn, which is the ordinary case and says nothing.
+    let quiet = WarnFlag::default();
+    tracing::subscriber::with_default(quiet.clone(), || {
+        super::deliver(&h.sup, owned_timer(7, owner), false)
+    });
+    assert!(
+        !quiet.was_warned(),
+        "an ordinary wake is not worth remarking on",
+    );
+
+    // An owner that will not take it cannot be woken at all: the timer was claimed and removed
+    // before delivery, so nothing is left to fire again and nobody is told — the one case that
+    // must not pass unremarked.
+    let warned = WarnFlag::default();
+    tracing::subscriber::with_default(warned.clone(), || {
+        super::deliver(&h.sup, owned_timer(8, ProcessId::from_raw(9_999)), false)
+    });
+    assert!(
+        warned.was_warned(),
+        "an agent that was due to wake and never did has to be diagnosable",
+    );
+}
+
+/// A minimal stored timer with the given fire condition, for the tests that need one without
+/// arming it — the pure wake-reason headers, and delivery.
 fn stored_timer(id: u64, fire: FireCond) -> StoredTimer {
     StoredTimer {
         id: TimerId::from_raw(id),
@@ -454,6 +485,14 @@ fn stored_timer(id: u64, fire: FireCond) -> StoredTimer {
         deadline_unix_millis: 1_000,
         status: TimerStatus::Armed,
         remaining_on_pause_millis: None,
+    }
+}
+
+/// The same, owned by `owner` — for the delivery tests, where who it belongs to is the point.
+fn owned_timer(id: u64, owner: ProcessId) -> StoredTimer {
+    StoredTimer {
+        owner,
+        ..stored_timer(id, FireCond::At)
     }
 }
 

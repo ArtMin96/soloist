@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::todo_comment::{Comment, CommentAuthor};
 use super::todo_doc::TodoStatus;
 use super::todo_repo::{
-    StoredTodo, TodoCompletionAtomicResult, TodoCompletionContext, TodoCompletionDecision,
-    TodoCompletionIntent, TodoRepo,
+    TodoCompletionAtomicResult, TodoCompletionContext, TodoCompletionDecision, TodoCompletionIntent,
 };
 use super::{TodoError, Todos};
 use crate::ids::{AgentMessageId, ProcessId, ProjectId, TodoId};
@@ -58,6 +57,24 @@ pub struct TodoCompletion {
 }
 
 impl TodoCompletion {
+    /// Constructs a durable record in a test composition root.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn for_test(
+        todo_id: TodoId,
+        key: TodoCompletionKey,
+        summary: String,
+        comment: u64,
+        notice_queued: bool,
+    ) -> Self {
+        Self {
+            todo_id,
+            key,
+            summary,
+            comment,
+            notice_queued,
+        }
+    }
+
     /// The todo changed by this report.
     pub const fn todo_id(&self) -> TodoId {
         self.todo_id

@@ -40,7 +40,9 @@ keeps the dependency rule intact (UI → Facade, never UI → a context internal
      clean-room instructions and an optional addressed `Task` for `spawn_agent`. A task may correlate
      to a todo but requires none. Both wait for the worker's first idle transition; neither enters
      provider arguments or startup input. This preserves the demo's `include_agent_instructions`
-     intent without copying its text. The `spawn_process` leg stays partial until future O9 lands.
+     intent without copying its text. O13 is **complete at `spawn_agent`**: `spawn_process` carries
+     neither parameter, because a Command holds no mailbox and is never idle-tracked, so neither payload
+     could be enqueued or woken (owner decision 2026-08-14, reasoned in `05` §12).
    - **O14 (`solo://` handoff):** record that the orchestrator slice of the documented `solo://` deep
      links ([`05` §10](../05-solo-reference-and-sources.md)) is **promoted from `later` (I4) to v1** — a
      scratchpad/todo link + resolver for the agent handoff.

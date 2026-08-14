@@ -15,13 +15,15 @@ trust + scope enforced **in the core** ([`04` §12](../04-engineering-architectu
 `mcp-builder` + confirm against `modelcontextprotocol.io` / `code.claude.com/llms.txt` / `rmcp` docs
 before writing (CLAUDE.md §5).
 
-**Current split:** O13 is implemented for `spawn_agent`. `spawn_process` remains future O9 work, so
-O13 is intentionally partial only for that second spawn surface.
+**Current split:** O13 is implemented for `spawn_agent` and is **complete there** — it does not extend
+to `spawn_process`, which takes neither `prompt` nor `include_agent_instructions`. A spawned Command
+cannot hold a mailbox, never appears in `agent_roster`, and is never idle-tracked, so neither payload
+could be enqueued or woken. Owner decision, 2026-08-14; reasoning in
+[`05` §12](../05-solo-reference-and-sources.md).
 
 **Note on O13's independence:** onboarding (Task 6) is **not** gated on the arbitrary-spawn trust design
-(Tasks 1–2). It applies now to the already-built `spawn_agent` and reuses O15's bounded wake path. The
-`spawn_process` leg remains partial until future O9 lands; that does not hold back `spawn_agent` or
-widen command authority.
+(Tasks 1–2). It applies to the already-built `spawn_agent` and reuses O15's bounded wake path. Nothing
+about O13 waits on O9, and O9 adds no O13 leg when it lands.
 
 ## Scope
 **In:** the trust-treatment design + implementation for `spawn_process`; the cross-scope authorization
@@ -71,8 +73,8 @@ need their own project-root FS-scoping pass — keep deferred, [`05` §12](../05
    startup input. Wait for the worker's first C4 `Idle` transition, then use the O15 semantic
    wake path to submit one compact envelope naming the pending task ids and the coordination primitives.
    The worker retrieves and acknowledges the task through MCP. Keep one briefing source in `core`; do
-   not duplicate O13 as another parity row. Apply the same contract to `spawn_process` only when O9 is
-   implemented.
+   not duplicate O13 as another parity row. `spawn_process` takes neither parameter — see the current-split
+   note above and [`05` §12](../05-solo-reference-and-sources.md).
 7. **Authenticated live-run roster + mailbox (O15):** expose `agent_roster`, `agent_message_send`,
    `agent_message_broadcast`, `agent_message_list`, `agent_message_get`, and
    `agent_message_acknowledge` through `ScopedFacade`. Derive project, sender, and lineage root from the
@@ -86,11 +88,24 @@ need their own project-root FS-scoping pass — keep deferred, [`05` §12](../05
    The recipient must retrieve and acknowledge the message before it leaves the inbox. Spawn Tasks,
    debate, direct/group sends, and acknowledgement work without a todo; optional `todo_id` only correlates
    live exchange to durable board work.
-8. **Atomic completion report (O16):** add `agent_report_completion(todo_id, summary)` on
-   `ScopedFacade`. One store transaction applies the existing blocker-gated completion and appends one
-   result comment whose author comes from the bound worker. Retrying returns that same record. Queue an
+8. **Atomic completion report (O16):** add
+   `agent_report_completion(task_message_id, todo_id: Option<TodoId>, summary)` on `ScopedFacade`. The
+   report resolves the addressed task message it answers, which is what supplies the parent to notify;
+   `task_message_id` is therefore **required**. `todo_id` is **optional** — a task need not carry a todo
+   (Task 7) — and when supplied must equal the todo that task message carried, else `UnknownTodo`. With a
+   todo, one store transaction applies the existing blocker-gated completion and appends one result
+   comment whose author comes from the bound worker. `(reporter, task_message_id)` — **not** the todo —
+   is the idempotency key, so retrying returns that same record and adds no second comment, and a
+   no-todo task is idempotent on the same terms. Remember the pair in a bounded per-run ring of notice
+   receipts (`MAX_COMPLETION_NOTICES` = the process-wide pending ceiling, oldest evicted), consulted
+   before the durable per-todo notice flag; keep that flag as the eviction fallback, which an
+   acknowledgement can reach because it decrements the pending count without removing the ring entry.
+   Retire a task receipt with its **reporter** (the task's recipient), never with its **sender** — a lead
+   that exits before its worker reports is exactly the case a durable completion must survive. Queue an
    ephemeral `Completion` notice to the live parent only after the durable commit; missing parent,
-   mailbox capacity, or deferred PTY wake cannot roll back or duplicate the durable result.
+   mailbox capacity, or deferred PTY wake cannot roll back or duplicate the durable result. The required
+   `task_message_id` breaks the `(todo_id, summary)` shape these docs previously specified — recorded as
+   `KNOWN-DIVERGENCES` D-40.
 
 ## Interfaces
 ```rust
@@ -103,7 +118,7 @@ impl Facade {
 }
 
 impl Supervisor {
-  // Normalizes trailing CR and submits once; write_stdin remains raw.
+  // Interior CR -> LF, trailing CR/LF stripped, exactly one CR appended; write_stdin remains raw.
   fn try_submit_turn(&self, worker: ProcessId, body: Vec<u8>) -> Result<bool>;
 }
 
@@ -111,7 +126,9 @@ impl ScopedFacade<'_> {
   fn agent_roster(&self) -> Result<Vec<AgentRosterEntry>>;
   fn agent_message_send(&self, recipient: ProcessId, body: String, todo: Option<TodoId>) -> Result<AgentMessageDelivery>;
   fn agent_message_acknowledge(&self, message: AgentMessageId) -> Result<AgentMessageDelivery>;
-  fn agent_report_completion(&self, todo: TodoId, summary: String) -> Result<CompletionReport>;
+  // task_message_id is required (it names the assignment and resolves the parent); the todo is
+  // optional and, when given, must match the todo that task carried:
+  fn agent_report_completion(&self, task: AgentMessageId, todo: Option<TodoId>, summary: String) -> Result<CompletionReport>;
 }
 ```
 
@@ -124,14 +141,15 @@ impl ScopedFacade<'_> {
   **unauthorized** project is refused (`ForeignProject`).
 - **(O13)** A `spawn_agent` worker receives default-on reusable instructions after its first idle
   transition; opting out suppresses them. An optional prompt is a retrievable/acknowledgeable `Task`
-  without requiring a todo, never a CLI argument or startup paste. The `spawn_process` leg is accepted
-  with O9 when that future tool lands.
+  without requiring a todo, never a CLI argument or startup paste. O13 is **complete at `spawn_agent`**:
+  `spawn_process` exposes neither parameter, so there is no leg left to accept when O9 lands.
 - **(O15)** Only authenticated live lineage-root members can exchange messages, with or without an
   optional todo correlation. Every mailbox limit is enforced without dropping existing records;
   acknowledgement removes the addressed record. A
   `wake_submitted` outcome makes no claim that the agent retrieved or acted on the payload.
-- **(O16)** Completion and its authored result are one all-or-nothing durable change, repeated reporting
-  is idempotent, and parent-notification failure cannot change that durable outcome.
+- **(O16)** Completion and its authored result are one all-or-nothing durable change; repeated reporting
+  is idempotent **with or without a todo**; a lead that closes before its worker reports does not
+  prevent the durable completion; and parent-notification failure cannot change that durable outcome.
 - Each new tool has a documented clean-room JSON Schema; the tool-count guard is updated; the trust/scope
   decisions are recorded in [`05` §12](../05-solo-reference-and-sources.md) (and `KNOWN-DIVERGENCES` if a
   documented behavior is diverged).
@@ -145,12 +163,14 @@ impl ScopedFacade<'_> {
   honors/refuses scope. Action tools mutate real state.
 - **(O13/O15)** a `spawn_agent` with default instructions and an optional prompt queues before readiness,
   writes nothing to the PTY until the child becomes idle, then submits one compact wake; the worker
-  retrieves and acknowledges its no-todo `Task`. Opt-out omits the briefing. Repeat for `spawn_process`
-  when O9 lands.
+  retrieves and acknowledges its no-todo `Task`. Opt-out omits the briefing. `spawn_process` has no such
+  case: it accepts neither parameter, and a Command is absent from every roster and never idle-tracked.
 - **(O15)** roster/scope/authentication, direct and all-other-members broadcast, ordered list/get/ack,
   all three capacity refusals, atomic broadcast refusal, idle-deferred wake, and process-removal cleanup.
-- **(O16)** store-failure atomicity, blocker refusal, one authored result on retry, parent-gone/full-mailbox
-  success, and later idle wake where a notification was queued.
+- **(O16)** store-failure atomicity, blocker refusal, one authored result on retry, retry idempotency for
+  a task carrying **no** todo, a report whose lead closed **after** the task was acknowledged still
+  recording its durable completion, parent-gone/full-mailbox success, and later idle wake where a
+  notification was queued.
 - **Regression:** existing `spawn_agent`, todo/scratchpad, and `crates/pty/tests/orchestration.rs` stay green.
 
 ## Risks & mitigations

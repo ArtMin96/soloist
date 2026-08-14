@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AcquireOutcome, AgentBroadcastReceipt, AgentMessage, AgentMessageDelivery, AgentMessageId,
+    AcquireOutcome, AgentBroadcastReceipt, AgentMessageDelivery, AgentMessageId,
     AgentMessageOutcome, AgentRosterEntry, AgentTool, Branches, Comment, CompletionReport,
     DiagramSummary, DiagramView, ExportedTemplate, FeedbackEntry, FileDiff, GitStatus,
     IntegrationWrite, KvEntry, LeaseView, LinkContent, McpToolGroups, ProcessId, ProcessView,
@@ -65,15 +65,15 @@ pub enum IpcResponse {
     AgentTools(Vec<AgentTool>),
     /// The caller and its related live agents (answer to [`IpcRequest::AgentRoster`]).
     AgentRoster(Vec<AgentRosterEntry>),
-    /// One message delivery (answer to send, get, or acknowledge).
+    /// One message delivery (answer to send or acknowledge).
     AgentMessageDelivery(AgentMessageDelivery),
     /// Compact receipts created by a lineage-group broadcast. Bodies are deliberately omitted so
     /// the bounded response remains far below the IPC frame cap even at the project queue limit.
     AgentMessageBroadcast(AgentBroadcastReceipt),
-    /// One message from the caller's inbox.
-    AgentMessage(AgentMessage),
-    /// The caller's pending, unacknowledged inbox.
-    AgentMessages(Vec<AgentMessage>),
+    /// One message from the caller's inbox, with the delivery state it currently holds.
+    AgentMessage(AgentMessageDelivery),
+    /// The caller's pending, unacknowledged inbox, each message with its delivery state.
+    AgentMessages(Vec<AgentMessageDelivery>),
     /// A durable completion and the queued, pending, or deferred notification state.
     AgentCompletion(CompletionReport),
     /// A bulk start succeeded; the payload reports what started and what was skipped as

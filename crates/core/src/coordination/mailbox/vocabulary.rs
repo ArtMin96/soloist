@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{AgentMessageId, ProcessId, ProjectId, TodoId};
@@ -13,6 +15,17 @@ pub const MAX_PENDING_MESSAGES_PER_PROJECT: usize = 1024;
 pub const MAX_PENDING_AGENT_MESSAGES: usize = 4096;
 /// Maximum UTF-8 body bytes held across the entire running application.
 pub const MAX_PENDING_AGENT_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
+/// The longest a pending wake waits for an idle classification that may never come. A recipient
+/// whose provider emits no evidence is never classified, so an idle-gated wake would wait for it
+/// forever; past this the wake is delivered anyway. This is the ceiling as well as the default —
+/// no caller supplies a wake deadline, so there is one value rather than a pair.
+///
+/// Two minutes is roughly 120 idle samples: long enough that a cold agent CLI has had ample room
+/// to draw its first output or set its first title, short enough that a coordination handoff is
+/// not stalled for a human-noticeable age. It is far below the fire-when-idle timer's hour-long
+/// backstop because the two wait on different things — that one waits for a piece of work to
+/// finish, this one only for a CLI to produce its very first signal.
+pub(crate) const MAX_WAKE_WAIT: Duration = Duration::from_secs(120);
 
 /// Why an addressed message exists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -10,7 +10,8 @@ use soloist_core::{
     ProcessKind, ProcessView, ProjectId, ProjectRef, ProjectView, PromptMode, Readiness,
     RenderedPrompt, ScratchpadId, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary,
     TemplateId, TemplateKind, TemplateScope, TemplateSummary, TemplateView, TimerId, TimerStatus,
-    TimerView, TodoCompletion, TodoDoc, TodoId, TodoStatus, TodoView, Whoami,
+    TimerView, TodoCompletion, TodoCompletionKey, TodoCompletionOccurrence, TodoDoc, TodoId,
+    TodoStatus, TodoView, Whoami,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -46,6 +47,23 @@ fn sample_todo() -> TodoView {
         scratchpad: None,
         revision: 1,
     }
+}
+
+fn sample_agent_delivery() -> AgentMessageDelivery {
+    AgentMessageDelivery {
+        message: sample_agent_message(),
+        outcome: AgentMessageOutcome::Queued,
+    }
+}
+
+fn sample_todo_completion() -> TodoCompletion {
+    TodoCompletion::for_test(
+        TodoId::from_raw(8),
+        TodoCompletionKey::for_test(ProcessId::from_raw(12), AgentMessageId::from_raw(3)),
+        "Adapter wired".into(),
+        4,
+        false,
+    )
 }
 
 fn sample_agent_message() -> AgentMessage {
@@ -136,7 +154,8 @@ fn requests_round_trip_through_json() {
             message_id: soloist_core::AgentMessageId::from_raw(3),
         },
         IpcRequest::AgentReportCompletion {
-            todo_id: TodoId::from_raw(8),
+            task_message_id: AgentMessageId::from_raw(3),
+            todo_id: Some(TodoId::from_raw(8)),
             summary: "Adapter wired".into(),
         },
         IpcRequest::ListAgentTools,
@@ -310,16 +329,11 @@ fn every_response_variant_round_trips_through_json() {
                 outcome: AgentMessageOutcome::Queued,
             }],
         }),
-        IpcResponse::AgentMessage(sample_agent_message()),
-        IpcResponse::AgentMessages(vec![sample_agent_message()]),
+        IpcResponse::AgentMessage(sample_agent_delivery()),
+        IpcResponse::AgentMessages(vec![sample_agent_delivery()]),
         IpcResponse::AgentCompletion(CompletionReport {
-            completion: TodoCompletion {
-                todo_id: TodoId::from_raw(8),
-                reporter: "reviewer".into(),
-                summary: "Adapter wired".into(),
-                comment: 4,
-            },
-            already_reported: false,
+            completion: Some(sample_todo_completion()),
+            occurrence: Some(TodoCompletionOccurrence::Recorded),
             notification: CompletionNotification::Deferred { recipient: None },
         }),
         IpcResponse::BulkStarted(StartSummary {
@@ -475,11 +489,13 @@ fn the_agent_messaging_requests_pin_the_authenticated_wire_shape() {
     );
     pins(
         IpcRequest::AgentReportCompletion {
-            todo_id: TodoId::from_raw(8),
+            task_message_id: soloist_core::AgentMessageId::from_raw(3),
+            todo_id: Some(TodoId::from_raw(8)),
             summary: "Adapter wired".into(),
         },
         serde_json::json!({
             "op": "agent_report_completion",
+            "task_message_id": 3,
             "todo_id": 8,
             "summary": "Adapter wired",
         }),

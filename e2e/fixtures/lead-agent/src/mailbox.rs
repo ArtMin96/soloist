@@ -208,7 +208,8 @@ async fn primary(
     match request(
         stream,
         IpcRequest::AgentReportCompletion {
-            todo_id: todo,
+            task_message_id: task.id,
+            todo_id: Some(todo),
             summary: plan.completion.clone(),
         },
     )

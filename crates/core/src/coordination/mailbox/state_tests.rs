@@ -1,5 +1,19 @@
 use super::*;
 
+use std::time::Duration;
+
+use crate::testing::MockClock;
+
+/// A mailbox over a manually-advanced clock, so the wake backstop only moves when a test says so.
+fn mailbox() -> AgentMailbox {
+    mailbox_on(&MockClock::new())
+}
+
+/// A mailbox sharing `clock`, for the tests that drive the wake backstop.
+fn mailbox_on(clock: &MockClock) -> AgentMailbox {
+    AgentMailbox::new(Arc::new(clock.clone()))
+}
+
 fn enqueue_direct(
     mailbox: &AgentMailbox,
     project: ProjectId,
@@ -19,7 +33,7 @@ fn enqueue_direct(
 
 #[test]
 fn recipient_capacity_refuses_without_dropping_existing_messages() {
-    let mailbox = AgentMailbox::new();
+    let mailbox = mailbox();
     let project = ProjectId::next();
     let sender = ProcessId::next();
     let recipient = ProcessId::next();
@@ -39,7 +53,7 @@ fn recipient_capacity_refuses_without_dropping_existing_messages() {
 
 #[test]
 fn project_capacity_is_shared_across_recipients() {
-    let mailbox = AgentMailbox::new();
+    let mailbox = mailbox();
     let project = ProjectId::next();
     let sender = ProcessId::next();
     for index in 0..MAX_PENDING_MESSAGES_PER_PROJECT {
@@ -56,7 +70,7 @@ fn project_capacity_is_shared_across_recipients() {
 
 #[test]
 fn global_capacity_is_shared_across_projects() {
-    let mailbox = AgentMailbox::new();
+    let mailbox = mailbox();
     let sender = ProcessId::next();
     for index in 0..MAX_PENDING_AGENT_MESSAGES {
         let project =
@@ -80,7 +94,7 @@ fn global_capacity_is_shared_across_projects() {
 
 #[test]
 fn broadcast_capacity_refusal_is_atomic() {
-    let mailbox = AgentMailbox::new();
+    let mailbox = mailbox();
     let project = ProjectId::next();
     let sender = ProcessId::next();
     let full = ProcessId::next();
@@ -105,7 +119,7 @@ fn broadcast_capacity_refusal_is_atomic() {
 
 #[test]
 fn reserved_enqueue_cannot_bypass_recipient_capacity() {
-    let mailbox = AgentMailbox::new();
+    let mailbox = mailbox();
     let project = ProjectId::next();
     let sender = ProcessId::next();
     let recipient = ProcessId::next();
@@ -132,7 +146,7 @@ fn reserved_enqueue_cannot_bypass_recipient_capacity() {
 
 #[test]
 fn list_and_get_expose_each_messages_delivery_state() {
-    let mailbox = AgentMailbox::new();
+    let mailbox = mailbox();
     let project = ProjectId::next();
     let sender = ProcessId::next();
     let recipient = ProcessId::next();
@@ -158,7 +172,7 @@ fn list_and_get_expose_each_messages_delivery_state() {
 
 #[test]
 fn rapid_sends_submit_only_one_wake_until_activity_rearms_the_recipient() {
-    let mailbox = AgentMailbox::new();
+    let mailbox = mailbox();
     let project = ProjectId::next();
     let sender = ProcessId::next();
     let recipient = ProcessId::next();
@@ -177,7 +191,7 @@ fn rapid_sends_submit_only_one_wake_until_activity_rearms_the_recipient() {
 
 #[test]
 fn a_message_enqueued_after_a_wake_claim_is_not_marked_as_submitted() {
-    let mailbox = AgentMailbox::new();
+    let mailbox = mailbox();
     let project = ProjectId::next();
     let sender = ProcessId::next();
     let recipient = ProcessId::next();
@@ -205,7 +219,7 @@ fn a_message_enqueued_after_a_wake_claim_is_not_marked_as_submitted() {
 
 #[test]
 fn acknowledging_the_submitted_batch_rearms_queued_work() {
-    let mailbox = AgentMailbox::new();
+    let mailbox = mailbox();
     let project = ProjectId::next();
     let sender = ProcessId::next();
     let recipient = ProcessId::next();
@@ -224,8 +238,8 @@ fn acknowledging_the_submitted_batch_rearms_queued_work() {
 }
 
 #[test]
-fn acknowledged_tasks_remain_valid_completion_correlations_until_process_cleanup() {
-    let mailbox = AgentMailbox::new();
+fn acknowledged_tasks_remain_valid_completion_correlations_until_the_reporter_is_cleaned_up() {
+    let mailbox = mailbox();
     let project = ProjectId::next();
     let lead = ProcessId::next();
     let worker = ProcessId::next();
@@ -249,5 +263,77 @@ fn acknowledged_tasks_remain_valid_completion_correlations_until_process_cleanup
     assert_eq!(
         mailbox.task_for_completion(project, worker, task.message.id),
         None
+    );
+}
+
+#[test]
+fn a_pending_wake_reaches_its_backstop_only_after_the_full_wait() {
+    let clock = MockClock::new();
+    let mailbox = mailbox_on(&clock);
+    let recipient = ProcessId::next();
+    enqueue_direct(
+        &mailbox,
+        ProjectId::next(),
+        ProcessId::next(),
+        recipient,
+        "review",
+    )
+    .expect("enqueue");
+
+    clock.advance(MAX_WAKE_WAIT - Duration::from_millis(1));
+    assert!(
+        mailbox.backstop_candidates().is_empty(),
+        "the wait is not spent yet"
+    );
+
+    clock.advance(Duration::from_millis(1));
+    assert_eq!(mailbox.backstop_candidates(), vec![recipient]);
+}
+
+#[test]
+fn a_delivered_wake_takes_its_backstop_with_it() {
+    let clock = MockClock::new();
+    let mailbox = mailbox_on(&clock);
+    let recipient = ProcessId::next();
+    enqueue_direct(
+        &mailbox,
+        ProjectId::next(),
+        ProcessId::next(),
+        recipient,
+        "review",
+    )
+    .expect("enqueue");
+    clock.advance(MAX_WAKE_WAIT);
+    assert_eq!(mailbox.backstop_candidates(), vec![recipient]);
+
+    let (_, claimed) = mailbox.claim_wake_envelope(recipient).expect("wake");
+    mailbox.mark_wake_submitted(recipient, &claimed);
+
+    clock.advance(MAX_WAKE_WAIT * 10);
+    assert!(
+        mailbox.backstop_candidates().is_empty(),
+        "a wake that was delivered never comes back, however much more time passes"
+    );
+}
+
+#[test]
+fn later_messages_do_not_push_out_a_waiting_recipients_backstop() {
+    let clock = MockClock::new();
+    let mailbox = mailbox_on(&clock);
+    let project = ProjectId::next();
+    let sender = ProcessId::next();
+    let recipient = ProcessId::next();
+    enqueue_direct(&mailbox, project, sender, recipient, "first").expect("enqueue");
+
+    // A steady trickle of further messages, each arriving before the bound would have elapsed.
+    for _ in 0..4 {
+        clock.advance(MAX_WAKE_WAIT / 2);
+        enqueue_direct(&mailbox, project, sender, recipient, "another").expect("enqueue");
+    }
+
+    assert_eq!(
+        mailbox.backstop_candidates(),
+        vec![recipient],
+        "the wait is measured from the first message, so it cannot be deferred indefinitely"
     );
 }

@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::scoped::ScopedFacade;
 use crate::coordination::{
-    AgentBroadcastReceipt, AgentMessage, AgentMessageDelivery, AgentMessageKind,
-    AgentMessageOutcome, AgentMessageReceipt, AgentRelationship, AgentRosterEntry,
+    AgentBroadcastReceipt, AgentMessageDelivery, AgentMessageKind, AgentMessageOutcome,
+    AgentMessageReceipt, AgentRelationship, AgentRosterEntry, CompletionNoticeState,
     MailboxCapacityError, TodoCompletion, TodoCompletionKey, TodoCompletionNotice,
     TodoCompletionOccurrence, TodoError, MAX_AGENT_MESSAGE_BYTES,
 };
@@ -269,31 +269,46 @@ impl ScopedFacade<'_> {
                     .publish(crate::events::DomainEvent::TodoChanged { project, id });
             }
         }
-        let notification = if outcome
-            .as_ref()
-            .is_some_and(|outcome| outcome.notice == TodoCompletionNotice::AlreadyQueued)
+        // Everything past the durable commit is best effort: the completion is already recorded, so
+        // a lead that has gone, a full mailbox, or a store that refuses the notice flag is reported
+        // through the notification, never as a failed report.
+        let notification = match self
+            .inner
+            .mailbox
+            .completion_notice(sender, task_message_id)
         {
-            CompletionNotification::AlreadyQueued
-        } else if let Some(delivery) =
-            todo_id.and_then(|id| self.inner.mailbox.pending_completion(parent, id))
-        {
-            CompletionNotification::Pending { delivery }
-        } else {
-            match self.send_message(parent, AgentMessageKind::Completion, summary, todo_id) {
-                Ok(delivery) => {
-                    if let Some(outcome) = &outcome {
-                        self.inner
-                            .todos
-                            .mark_completion_notice_queued(project, &outcome.completion)
-                            .map_err(|error| {
-                                AgentMailboxError::Store(StoreError::Backend(error.to_string()))
-                            })?;
+            Some(CompletionNoticeState::Pending(delivery)) => {
+                CompletionNotification::Pending { delivery }
+            }
+            Some(CompletionNoticeState::Acknowledged) => CompletionNotification::AlreadyQueued,
+            None if outcome
+                .as_ref()
+                .is_some_and(|outcome| outcome.notice == TodoCompletionNotice::AlreadyQueued) =>
+            {
+                CompletionNotification::AlreadyQueued
+            }
+            None => {
+                match self.send_message(parent, AgentMessageKind::Completion, summary, todo_id) {
+                    Ok(delivery) => {
+                        self.inner.mailbox.record_completion_notice(
+                            sender,
+                            task_message_id,
+                            &delivery.message,
+                        );
+                        // The notice is in the mailbox either way; the durable flag only spares a
+                        // later run this same lookup.
+                        if let Some(outcome) = &outcome {
+                            let _ = self
+                                .inner
+                                .todos
+                                .mark_completion_notice_queued(project, &outcome.completion);
+                        }
+                        CompletionNotification::Enqueued { delivery }
                     }
-                    CompletionNotification::Enqueued { delivery }
+                    Err(_) => CompletionNotification::Deferred {
+                        recipient: Some(parent),
+                    },
                 }
-                Err(_) => CompletionNotification::Deferred {
-                    recipient: Some(parent),
-                },
             }
         };
         Ok(CompletionReport {

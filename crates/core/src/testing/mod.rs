@@ -46,6 +46,9 @@ mod shellenv;
 mod spawner;
 mod support;
 mod template;
+// Reads back what was traced, which only the core's own tests of its silent-refusal paths need.
+#[cfg(test)]
+mod tracing_capture;
 
 pub use agents::{FakeAgentOneShot, FakeAgentToolRepo, FakeVersionProbe};
 pub use clock::MockClock;
@@ -84,3 +87,5 @@ pub(crate) use spawner::PANIC_FAKE_PGID;
 pub use spawner::{FakeSpawner, ResizeLog};
 pub use support::FakeFeedbackRepo;
 pub use template::FakeTemplateRepo;
+#[cfg(test)]
+pub use tracing_capture::WarnFlag;

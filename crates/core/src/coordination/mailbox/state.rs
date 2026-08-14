@@ -1,14 +1,16 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::ids::{AgentMessageId, ProcessId, ProjectId, TodoId};
+use crate::ports::Clock;
 use crate::sync::lock;
 
+use super::completion_notice::CompletionNotices;
 use super::vocabulary::{
     AgentMessage, AgentMessageDelivery, AgentMessageKind, AgentMessageOutcome,
     MailboxCapacityError, MAX_AGENT_MESSAGE_BYTES, MAX_PENDING_AGENT_MESSAGES,
     MAX_PENDING_AGENT_MESSAGE_BYTES, MAX_PENDING_MESSAGES_PER_PROJECT,
-    MAX_PENDING_MESSAGES_PER_RECIPIENT,
+    MAX_PENDING_MESSAGES_PER_RECIPIENT, MAX_WAKE_WAIT,
 };
 
 #[derive(Clone)]
@@ -27,9 +29,32 @@ pub(super) struct MailboxState {
     project_counts: HashMap<ProjectId, usize>,
     pending_count: usize,
     pending_bytes: usize,
-    pub(super) wake_attempts: HashMap<ProcessId, u8>,
+    pub(super) pending_wakes: HashMap<ProcessId, PendingWake>,
     pub(super) wake_in_flight: HashSet<ProcessId>,
     task_receipts: VecDeque<TaskReceipt>,
+    pub(super) completion_notices: CompletionNotices,
+}
+
+/// One wake owed to a recipient: how many deliveries it has refused, and the wall-clock instant
+/// past which it is delivered without waiting for an idle classification at all.
+pub(super) struct PendingWake {
+    pub(super) attempts: u8,
+    backstop_unix_millis: u64,
+}
+
+impl PendingWake {
+    /// A fresh wake, with its backstop armed [`MAX_WAKE_WAIT`] out from `now`.
+    pub(super) fn armed(now: u64) -> Self {
+        Self {
+            attempts: 0,
+            backstop_unix_millis: now.saturating_add(MAX_WAKE_WAIT.as_millis() as u64),
+        }
+    }
+
+    /// Whether the backstop has passed at `now`.
+    fn backstop_due(&self, now: u64) -> bool {
+        self.backstop_unix_millis <= now
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -44,14 +69,42 @@ struct TaskReceipt {
 const MAX_TASK_RECEIPTS: usize = MAX_PENDING_AGENT_MESSAGES;
 
 /// The per-run mailbox. Acknowledgement removes a pending record; every queue has a hard ceiling.
-#[derive(Default)]
 pub struct AgentMailbox {
     pub(super) state: Mutex<MailboxState>,
+    clock: Arc<dyn Clock>,
 }
 
 impl AgentMailbox {
-    pub fn new() -> Self {
-        Self::default()
+    /// An empty mailbox that arms each pending wake's backstop off `clock`.
+    pub fn new(clock: Arc<dyn Clock>) -> Self {
+        Self {
+            state: Mutex::new(MailboxState::default()),
+            clock,
+        }
+    }
+
+    /// The wall-clock instant a wake arming or backstop check is measured against, so every
+    /// mailbox module reads time through the one injected [`Clock`] rather than the system's.
+    pub(super) fn now_unix_millis(&self) -> u64 {
+        self.clock.now_unix_millis()
+    }
+
+    /// The recipients whose wake has waited out [`MAX_WAKE_WAIT`], excluding any whose wake is
+    /// already in flight. Read-only: the reactor decides whether each is still unclassified, and
+    /// still within its retry bound, before delivering. A wake stays a candidate until it is
+    /// delivered — delivery removes the pending wake outright — so a submission the recipient
+    /// refuses is retried rather than lost.
+    pub(super) fn backstop_candidates(&self) -> Vec<ProcessId> {
+        let now = self.now_unix_millis();
+        let state = lock(&self.state);
+        state
+            .pending_wakes
+            .iter()
+            .filter_map(|(recipient, pending)| {
+                (pending.backstop_due(now) && !state.wake_in_flight.contains(recipient))
+                    .then_some(*recipient)
+            })
+            .collect()
     }
 
     pub(crate) fn enqueue(
@@ -66,6 +119,7 @@ impl AgentMailbox {
         if body.len() > MAX_AGENT_MESSAGE_BYTES {
             return Err(MailboxCapacityError::MessageTooLarge);
         }
+        let now = self.now_unix_millis();
         let mut state = lock(&self.state);
         let recipient_len = state.inboxes.get(&recipient).map_or(0, VecDeque::len);
         if recipient_len >= MAX_PENDING_MESSAGES_PER_RECIPIENT {
@@ -112,7 +166,10 @@ impl AgentMailbox {
         state.pending_count += 1;
         state.pending_bytes += body_bytes;
         *state.project_counts.entry(project).or_default() += 1;
-        state.wake_attempts.entry(recipient).or_insert(0);
+        state
+            .pending_wakes
+            .entry(recipient)
+            .or_insert_with(|| PendingWake::armed(now));
         Ok(AgentMessageDelivery {
             message,
             outcome: AgentMessageOutcome::Queued,
@@ -131,6 +188,7 @@ impl AgentMailbox {
         if body.len() > MAX_AGENT_MESSAGE_BYTES {
             return Err(MailboxCapacityError::MessageTooLarge);
         }
+        let now = self.now_unix_millis();
         let mut state = lock(&self.state);
         if recipients.iter().any(|recipient| {
             state.inboxes.get(recipient).map_or(0, VecDeque::len)
@@ -198,7 +256,10 @@ impl AgentMailbox {
         state.pending_bytes += added_bytes;
         *state.project_counts.entry(project).or_default() += recipients.len();
         for recipient in recipients {
-            state.wake_attempts.entry(*recipient).or_insert(0);
+            state
+                .pending_wakes
+                .entry(*recipient)
+                .or_insert_with(|| PendingWake::armed(now));
         }
         Ok(deliveries)
     }
@@ -251,6 +312,7 @@ impl AgentMailbox {
         body: String,
         todo_id: Option<TodoId>,
     ) -> Result<AgentMessageDelivery, MailboxCapacityError> {
+        let now = self.now_unix_millis();
         let mut state = lock(&self.state);
         release_reservation(&mut state.project_reservations, project);
         state.reserved_count = state.reserved_count.saturating_sub(1);
@@ -281,7 +343,10 @@ impl AgentMailbox {
         state.pending_count += 1;
         state.pending_bytes += body_bytes;
         *state.project_counts.entry(project).or_default() += 1;
-        state.wake_attempts.entry(recipient).or_insert(0);
+        state
+            .pending_wakes
+            .entry(recipient)
+            .or_insert_with(|| PendingWake::armed(now));
         Ok(AgentMessageDelivery {
             message,
             outcome: AgentMessageOutcome::Queued,
@@ -317,30 +382,12 @@ impl AgentMailbox {
             })
     }
 
-    pub(crate) fn pending_completion(
-        &self,
-        recipient: ProcessId,
-        todo_id: TodoId,
-    ) -> Option<AgentMessageDelivery> {
-        lock(&self.state)
-            .inboxes
-            .get(&recipient)?
-            .iter()
-            .find(|pending| {
-                pending.message.kind == AgentMessageKind::Completion
-                    && pending.message.todo_id == Some(todo_id)
-            })
-            .map(|pending| AgentMessageDelivery {
-                message: pending.message.clone(),
-                outcome: pending.outcome,
-            })
-    }
-
     pub(crate) fn acknowledge(
         &self,
         recipient: ProcessId,
         id: AgentMessageId,
     ) -> Option<AgentMessageDelivery> {
+        let now = self.now_unix_millis();
         let mut state = lock(&self.state);
         let inbox = state.inboxes.get_mut(&recipient)?;
         let index = inbox.iter().position(|pending| pending.message.id == id)?;
@@ -363,7 +410,7 @@ impl AgentMailbox {
         }
         if pending.outcome == AgentMessageOutcome::WakeSubmitted {
             state.wake_in_flight.remove(&recipient);
-            arm_if_waiting(&mut state, recipient);
+            arm_if_waiting(&mut state, recipient, now);
         }
         Some(AgentMessageDelivery {
             message: pending.message,
@@ -379,11 +426,15 @@ impl AgentMailbox {
             }
         }
         state.onboarding.remove(&process);
-        state.wake_attempts.remove(&process);
+        state.pending_wakes.remove(&process);
         state.wake_in_flight.remove(&process);
+        // A receipt exists so its recipient can correlate the completion it still owes, so only
+        // that recipient leaving retires it: a lead that exits first is exactly the case a
+        // completion must survive.
         state
             .task_receipts
-            .retain(|receipt| receipt.recipient != process && receipt.sender != process);
+            .retain(|receipt| receipt.recipient != process);
+        state.completion_notices.forget_process(process);
     }
 
     pub(crate) fn task_for_completion(
@@ -416,14 +467,16 @@ impl AgentMailbox {
     }
 }
 
-pub(super) fn arm_if_waiting(state: &mut MailboxState, recipient: ProcessId) {
+pub(super) fn arm_if_waiting(state: &mut MailboxState, recipient: ProcessId, now: u64) {
     let has_queued = state.inboxes.get(&recipient).is_some_and(|inbox| {
         inbox
             .iter()
             .any(|pending| pending.outcome == AgentMessageOutcome::Queued)
     });
     if has_queued || state.onboarding.contains_key(&recipient) {
-        state.wake_attempts.insert(recipient, 0);
+        state
+            .pending_wakes
+            .insert(recipient, PendingWake::armed(now));
     }
 }
 

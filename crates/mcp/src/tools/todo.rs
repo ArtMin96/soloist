@@ -15,7 +15,8 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
 use soloist_core::{
-    LinkContent, ProjectId, ScratchpadLink, TemplateKind, TodoDoc, TodoId, TodoStatus,
+    AgentMessageId, LinkContent, ProjectId, ScratchpadLink, TemplateKind, TodoDoc, TodoId,
+    TodoStatus,
 };
 use soloist_ipc::{IpcRequest, IpcResponse};
 
@@ -30,16 +31,21 @@ use crate::tools::reply::{app_error, structured, unexpected};
 #[tool_router(router = todo_router, vis = "pub(crate)")]
 impl SoloistMcp {
     #[tool(
-        description = "Complete a todo you own and report a concise result to your lead agent. The durable completion succeeds independently of its best-effort live notification, whose queued, pending, or deferred state is returned. Sender, parent, and project are derived from your authenticated session."
+        description = "Report the addressed task you were given complete, and with it the todo that task named, sending a concise result to your lead agent. Name the task by the message id you retrieved it under; reporting the same task twice returns the same durable record rather than a second one. The durable completion succeeds independently of its best-effort live notification, whose queued, pending, or deferred state is returned. Sender, parent, and project are derived from your authenticated session."
     )]
     pub(crate) async fn agent_report_completion(
         &self,
-        Parameters(AgentCompletionArg { todo_id, summary }): Parameters<AgentCompletionArg>,
+        Parameters(AgentCompletionArg {
+            task_message_id,
+            todo_id,
+            summary,
+        }): Parameters<AgentCompletionArg>,
     ) -> Result<CallToolResult, ErrorData> {
         match self
             .client
             .request(IpcRequest::AgentReportCompletion {
-                todo_id: TodoId::from_raw(todo_id),
+                task_message_id: AgentMessageId::from_raw(task_message_id),
+                todo_id: todo_id.map(TodoId::from_raw),
                 summary,
             })
             .await

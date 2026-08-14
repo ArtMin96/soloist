@@ -35,7 +35,8 @@ Solo (CLAUDE.md §9).
    onboarding after idle (O13) → use `agent_roster` and bounded no-todo direct/group messages (O15) →
    optionally correlate messages and assign locked todos → `timer_fire_when_idle(All)` and end the turn →
    wake on the delivered `body` (with its wake-reason prefix) → workers retrieve/acknowledge messages and
-   optionally call `agent_report_completion` (O16) when a durable todo/result exists → the lead verifies
+   call `agent_report_completion` (O16) on the task message they answer, naming its todo when it carried
+   one so the board completion and the authored result land together → the lead verifies
    any durable authored results and dispatches the next slice*. Map each step
    to its primitive + parity row (G/E/F/O) and its UI surface (orch-01/02/03). State that it works
    **heuristic-only** (no summarizer required), and that the **runtime preamble (O13)** — not a loaded

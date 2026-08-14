@@ -9,8 +9,9 @@ use soloist_core::{
     DiagramSummary, DiagramView, FireCond, LeaseView, LinkContent, McpToolGroups, Origin,
     ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, PromptMode, Readiness,
     ScratchpadId, ScratchpadLink, ScratchpadRef, ScratchpadSummary, ScratchpadView, SessionId,
-    SetWhenIdleOutcome, StartSummary, TimerId, TimerStatus, TimerView, TodoCompletion, TodoDoc,
-    TodoId, TodoStatus, TodoSummary, TodoView, Whoami,
+    SetWhenIdleOutcome, StartSummary, TimerId, TimerStatus, TimerView, TodoCompletion,
+    TodoCompletionKey, TodoCompletionOccurrence, TodoDoc, TodoId, TodoStatus, TodoSummary,
+    TodoView, Whoami,
 };
 use soloist_core::{
     BranchInfo, ChangeKind, DiffExtent, DiffTarget, FileChange, GitError, GitFileStatus, GitStatus,
@@ -91,6 +92,13 @@ fn sample_agent_message() -> AgentMessage {
         kind: AgentMessageKind::Direct,
         body: "Review the adapter".into(),
         todo_id: Some(TodoId::from_raw(8)),
+    }
+}
+
+fn sample_agent_delivery() -> AgentMessageDelivery {
+    AgentMessageDelivery {
+        message: sample_agent_message(),
+        outcome: AgentMessageOutcome::Queued,
     }
 }
 
@@ -1105,10 +1113,10 @@ async fn group_broadcast_and_inbox_tools_keep_the_core_projections() {
             }))
         }
         IpcRequest::AgentMessageList => {
-            Ok(IpcResponse::AgentMessages(vec![sample_agent_message()]))
+            Ok(IpcResponse::AgentMessages(vec![sample_agent_delivery()]))
         }
         IpcRequest::AgentMessageGet { message_id } if message_id == AgentMessageId::from_raw(3) => {
-            Ok(IpcResponse::AgentMessage(sample_agent_message()))
+            Ok(IpcResponse::AgentMessage(sample_agent_delivery()))
         }
         IpcRequest::AgentMessageAcknowledge { message_id }
             if message_id == AgentMessageId::from_raw(3) =>
@@ -1150,8 +1158,8 @@ async fn group_broadcast_and_inbox_tools_keep_the_core_projections() {
         .await
         .expect("get succeeds");
     assert_eq!(
-        serde_json::from_value::<AgentMessage>(structured_of(get)).expect("decode message"),
-        sample_agent_message()
+        serde_json::from_value::<AgentMessageDelivery>(structured_of(get)).expect("decode message"),
+        sample_agent_delivery()
     );
     let ack = handler
         .agent_message_acknowledge(Parameters(AgentMessageArg { message_id: 3 }))
@@ -1166,18 +1174,25 @@ async fn group_broadcast_and_inbox_tools_keep_the_core_projections() {
 async fn completion_report_threads_the_todo_and_summary_and_projects_the_durable_result() {
     let dir = tempfile::tempdir().expect("temp dir");
     let socket = dir.path().join("soloist-ipc.sock");
-    spawn_fake_app(socket.clone(), |request| match request {
-        IpcRequest::AgentReportCompletion { todo_id, summary }
-            if todo_id == TodoId::from_raw(8) && summary == "Adapter wired" =>
+    let key = TodoCompletionKey::for_test(ProcessId::from_raw(12), AgentMessageId::from_raw(3));
+    spawn_fake_app(socket.clone(), move |request| match request {
+        IpcRequest::AgentReportCompletion {
+            task_message_id,
+            todo_id,
+            summary,
+        } if task_message_id == AgentMessageId::from_raw(3)
+            && todo_id == Some(TodoId::from_raw(8))
+            && summary == "Adapter wired" =>
         {
             Ok(IpcResponse::AgentCompletion(CompletionReport {
-                completion: TodoCompletion {
-                    todo_id: TodoId::from_raw(8),
-                    reporter: "reviewer".into(),
-                    summary: "Adapter wired".into(),
-                    comment: 4,
-                },
-                already_reported: false,
+                completion: Some(TodoCompletion::for_test(
+                    TodoId::from_raw(8),
+                    key,
+                    "Adapter wired".into(),
+                    4,
+                    false,
+                )),
+                occurrence: Some(TodoCompletionOccurrence::Recorded),
                 notification: CompletionNotification::Deferred { recipient: None },
             }))
         }
@@ -1186,15 +1201,19 @@ async fn completion_report_threads_the_todo_and_summary_and_projects_the_durable
 
     let result = handler(socket)
         .agent_report_completion(Parameters(AgentCompletionArg {
-            todo_id: 8,
+            task_message_id: 3,
+            todo_id: Some(8),
             summary: "Adapter wired".into(),
         }))
         .await
         .expect("completion report succeeds");
     let back: CompletionReport =
         serde_json::from_value(structured_of(result)).expect("decode completion");
-    assert_eq!(back.completion.todo_id, TodoId::from_raw(8));
-    assert_eq!(back.completion.comment, 4);
+    let completion = back.completion.expect("a durable completion");
+    assert_eq!(completion.todo_id(), TodoId::from_raw(8));
+    assert_eq!(completion.comment(), 4);
+    assert_eq!(completion.key(), key);
+    assert_eq!(back.occurrence, Some(TodoCompletionOccurrence::Recorded));
     assert!(matches!(
         back.notification,
         CompletionNotification::Deferred { recipient: None }

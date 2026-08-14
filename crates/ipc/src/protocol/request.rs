@@ -17,7 +17,6 @@ use defaults::{
 
 /// A request from an IPC client to the running app. The server resolves identity and
 /// scope from the connection's session, so requests carry no session of their own.
-#[rustfmt::skip]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum IpcRequest {
@@ -51,7 +50,11 @@ pub enum IpcRequest {
     CloseProcess { process: ProcessId },
     /// Write input to one process's PTY (text or raw control bytes), scoped to the session.
     /// With `wait_ms`, the app waits then returns the rendered tail.
-    SendInput { process: ProcessId, input: String, wait_ms: Option<u64> },
+    SendInput {
+        process: ProcessId,
+        input: String,
+        wait_ms: Option<u64>,
+    },
     /// Spawn a configured agent tool as a worker in the session's effective project, by name.
     SpawnAgent {
         tool: String,
@@ -71,18 +74,31 @@ pub enum IpcRequest {
     /// The caller and its live parent, children, and siblings in the effective project.
     AgentRoster,
     /// Send one message to a related agent. Sender and project are authenticated from the session.
-    AgentMessageSend { recipient: ProcessId, body: String, todo_id: Option<TodoId> },
+    AgentMessageSend {
+        recipient: ProcessId,
+        body: String,
+        todo_id: Option<TodoId>,
+    },
     /// Send one message to every other live agent in the caller's lineage-root orchestration group.
     /// Sender, lineage, and project come from the session.
-    AgentMessageBroadcast { body: String, todo_id: Option<TodoId> },
+    AgentMessageBroadcast {
+        body: String,
+        todo_id: Option<TodoId>,
+    },
     /// The caller's pending, unacknowledged inbox, bounded and ordered by the core.
     AgentMessageList,
     /// One message from the caller's inbox.
     AgentMessageGet { message_id: AgentMessageId },
     /// Acknowledge one message from the caller's inbox.
     AgentMessageAcknowledge { message_id: AgentMessageId },
-    /// Complete a todo and report its result to the caller's lead agent.
-    AgentReportCompletion { todo_id: TodoId, summary: String },
+    /// Report the addressed task `task_message_id` complete to the caller's lead agent, completing
+    /// the todo that task carried when it named one. The core derives the reporter and the lead from
+    /// the session, so `(reporter, task_message_id)` is what makes a repeated report idempotent.
+    AgentReportCompletion {
+        task_message_id: AgentMessageId,
+        todo_id: Option<TodoId>,
+        summary: String,
+    },
     /// Start every trusted command in the session's effective project (trust-gated).
     StartAllCommands,
     /// Gracefully stop every running command in the session's effective project.
@@ -90,13 +106,24 @@ pub enum IpcRequest {
     /// Restart every trusted command in the session's effective project (trust-gated).
     RestartAllCommands,
     /// A process's recent rendered output, bounded to `lines` (server default when omitted).
-    GetProcessOutput { process: ProcessId, lines: Option<usize> },
+    GetProcessOutput {
+        process: ProcessId,
+        lines: Option<usize>,
+    },
     /// A process's raw byte output (control sequences included), bounded by the byte cap.
     GetProcessRawOutput { process: ProcessId },
     /// Rendered output lines of a process matching `query`, bounded to `limit`.
-    SearchOutput { process: ProcessId, query: String, limit: Option<usize> },
+    SearchOutput {
+        process: ProcessId,
+        query: String,
+        limit: Option<usize>,
+    },
     /// Raw output lines of a process matching `query`, bounded to `limit`.
-    SearchRawOutput { process: ProcessId, query: String, limit: Option<usize> },
+    SearchRawOutput {
+        process: ProcessId,
+        query: String,
+        limit: Option<usize>,
+    },
     /// Clear a process's output buffers (not its PTY), scoped to the session's project.
     ClearOutput { process: ProcessId },
     /// Flush a process's terminal-perf buffer (a no-op in Soloist; confirms the process).
@@ -106,7 +133,11 @@ pub enum IpcRequest {
     /// The command processes (services) of the session's effective project.
     ServicesList,
     /// Wait until a process binds `port`, or `timeout_ms` elapses (server-bounded).
-    WaitForBoundPort { process: ProcessId, port: u16, timeout_ms: Option<u64> },
+    WaitForBoundPort {
+        process: ProcessId,
+        port: u16,
+        timeout_ms: Option<u64>,
+    },
     /// Acquire the lease `key` in the session's effective project, owned by its bound process.
     /// `ttl_ms` is the lease lifetime; omit it for the core's default (the default and the bounds
     /// live in the core, so every frontend shares them). Non-blocking: a held key reports its holder.
@@ -120,10 +151,18 @@ pub enum IpcRequest {
     TimerSet { body: String, after_ms: Option<u64> },
     /// Arm a timer that delivers `body` when **any** of `processes` is idle, or `max_wait_ms`
     /// elapses (the core's default backstop when omitted).
-    TimerFireWhenIdleAny { body: String, processes: Vec<ProcessId>, max_wait_ms: Option<u64> },
+    TimerFireWhenIdleAny {
+        body: String,
+        processes: Vec<ProcessId>,
+        max_wait_ms: Option<u64>,
+    },
     /// Arm a timer that delivers `body` when **every** one of `processes` is idle, or
     /// `max_wait_ms` elapses (the core's default backstop when omitted).
-    TimerFireWhenIdleAll { body: String, processes: Vec<ProcessId>, max_wait_ms: Option<u64> },
+    TimerFireWhenIdleAll {
+        body: String,
+        processes: Vec<ProcessId>,
+        max_wait_ms: Option<u64>,
+    },
     /// Cancel a timer the session's bound process owns.
     TimerCancel { timer: TimerId },
     /// Pause a timer the session's bound process owns.
@@ -135,7 +174,11 @@ pub enum IpcRequest {
     /// Create or replace the scratchpad `name` in the session's effective project with the Markdown
     /// `body`, revision-guarded: `expected_revision` is omitted to create or the current revision to
     /// update.
-    ScratchpadWrite { name: String, body: String, expected_revision: Option<u64> },
+    ScratchpadWrite {
+        name: String,
+        body: String,
+        expected_revision: Option<u64>,
+    },
     /// The scratchpad `name` in the session's effective project.
     ScratchpadRead { name: String },
     /// Every scratchpad in the session's effective project, as one-line summaries.
@@ -158,7 +201,11 @@ pub enum IpcRequest {
     /// Create or replace the diagram `name` in the session's effective project with the Mermaid
     /// `source`, revision-guarded: `expected_revision` is omitted to create or the current revision
     /// to update.
-    DiagramWrite { name: String, source: String, expected_revision: Option<u64> },
+    DiagramWrite {
+        name: String,
+        source: String,
+        expected_revision: Option<u64>,
+    },
     /// The diagram `name` in the session's effective project.
     DiagramRead { name: String },
     /// Every diagram in the session's effective project, as one-line summaries.
@@ -223,7 +270,11 @@ pub enum IpcRequest {
     /// Add a comment with `body` to `todo` in the session's effective project.
     TodoCommentCreate { todo: TodoId, body: String },
     /// Update comment `comment` of `todo` in the session's effective project.
-    TodoCommentUpdate { todo: TodoId, comment: u64, body: String },
+    TodoCommentUpdate {
+        todo: TodoId,
+        comment: u64,
+        body: String,
+    },
     /// Delete comment `comment` of `todo` in the session's effective project.
     TodoCommentDelete { todo: TodoId, comment: u64 },
     /// The comments on `todo` in the session's effective project.
@@ -232,7 +283,10 @@ pub enum IpcRequest {
     /// session's effective project (a foreign-scope or malformed link is refused, not resolved).
     ResolveLink { link: String },
     /// Store `value` at `key` in the session's effective project's kv store (create or replace).
-    KvSet { key: String, value: serde_json::Value },
+    KvSet {
+        key: String,
+        value: serde_json::Value,
+    },
     /// The value at `key` in the session's effective project's kv store, or `None` if absent.
     KvGet { key: String },
     /// Remove the entry at `key` from the session's effective project's kv store.
@@ -243,7 +297,11 @@ pub enum IpcRequest {
     GitStatus,
     /// How one path differs in the session's effective project, `target` deciding against what and
     /// `extent` how much of the answer is carried.
-    GitDiff { path: String, target: DiffTarget, extent: DiffExtent },
+    GitDiff {
+        path: String,
+        target: DiffTarget,
+        extent: DiffExtent,
+    },
     /// The branches the session's effective project could switch to, and whether it has anything
     /// stashed.
     GitBranches,

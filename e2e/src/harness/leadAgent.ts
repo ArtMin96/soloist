@@ -65,10 +65,14 @@ export const TIMER = {
 // through the plan file. The compiled fixture acts like three real CLI agents over the real IPC
 // socket; these markers are printed only after the corresponding mailbox operation succeeds, so
 // terminal assertions cannot pass on a wake that was merely pasted but never submitted.
+//
+// Both the markers and the message bodies are the fixture's own stdout. Soloist displays neither,
+// so a walk reading them is evidence the core delivered into the recipient process — never that
+// any window surface showed a message.
 export const MAILBOX = {
-  /** The first worker's tool and stable sidebar label. */
+  /** The first worker's tool and stable sidebar label — the PATH stub, never a real OpenCode. */
   primary: "OpenCode",
-  /** The second worker's tool and stable sidebar label. */
+  /** The second worker's tool and stable sidebar label — the PATH stub, never a real Claude. */
   peer: "Claude",
   /** The shared todo the lead creates before spawning the primary worker. */
   todo: "Verify the release handoff",

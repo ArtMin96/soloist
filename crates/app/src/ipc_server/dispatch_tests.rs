@@ -285,7 +285,7 @@ async fn agent_messaging_requests_route_through_the_authenticated_scoped_facade(
 
     assert!(matches!(
         handle_request(&facade, session, IpcRequest::AgentMessageList).await,
-        Ok(IpcResponse::AgentMessages(messages)) if messages.len() == 1
+        Ok(IpcResponse::AgentMessages(deliveries)) if deliveries.len() == 1
     ));
     assert!(matches!(
         handle_request(
@@ -294,7 +294,7 @@ async fn agent_messaging_requests_route_through_the_authenticated_scoped_facade(
             IpcRequest::AgentMessageGet { message_id },
         )
         .await,
-        Ok(IpcResponse::AgentMessage(message)) if message.id == message_id
+        Ok(IpcResponse::AgentMessage(delivery)) if delivery.message.id == message_id
     ));
     assert!(matches!(
         handle_request(
@@ -327,12 +327,13 @@ async fn agent_messaging_requests_route_through_the_authenticated_scoped_facade(
             &facade,
             session,
             IpcRequest::AgentReportCompletion {
-                todo_id: soloist_core::TodoId::from_raw(404),
+                task_message_id: soloist_core::AgentMessageId::from_raw(404),
+                todo_id: Some(soloist_core::TodoId::from_raw(404)),
                 summary: "Adapter wired".into(),
             },
         )
         .await,
-        Err(IpcError::UnknownTodo)
+        Err(IpcError::UnknownAgentMessage)
     );
 }
 

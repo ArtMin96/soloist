@@ -182,6 +182,7 @@ impl Facade {
             feedback_repo,
             ..
         } = ports;
+        let mailbox = Arc::new(AgentMailbox::new(clock.clone()));
         Self {
             supervisor,
             kv: Kv::new(kv_repo),
@@ -221,7 +222,7 @@ impl Facade {
             config: Arc::new(ConfigEngine::new(trust, bus.clone())),
             idle: Arc::new(IdleTracker::new()),
             lineage: Arc::new(AgentLineage::new()),
-            mailbox: Arc::new(AgentMailbox::new()),
+            mailbox,
             identity: Identity::new(),
             bus,
         }

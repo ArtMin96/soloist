@@ -10,7 +10,8 @@ shows that arrival and the timer leaving the panel ([README](README.md) §1; vid
 **Delivers:** O7, O8. **Architecture:** presentational panel + a lead "timeline" over orch-00's
 read-model + events; the wake is the **existing** `TimerScheduler` delivering its bounded payload via
 `Supervisor::try_submit_turn` ([`06` §4 Scheduler row](../06-codebase-blueprint-and-cleanup.md),
-G7–G9). The semantic seam normalizes trailing carriage returns and appends exactly one; raw terminal
+G7–G9). The semantic seam converts interior carriage returns to newlines, strips trailing
+newlines/carriage returns, and appends exactly one `\r`; raw terminal
 input remains raw. The UI observes this behavior and never reimplements it.
 
 ## Scope

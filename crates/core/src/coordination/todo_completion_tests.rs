@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::coordination::{CommentOutcome, ScratchpadLink, TodoDoc};
+use crate::coordination::{CommentOutcome, ScratchpadLink, TodoDoc, TodoRepo};
 use crate::testing::FakeTodoRepo;
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);

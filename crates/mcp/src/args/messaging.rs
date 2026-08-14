@@ -37,8 +37,11 @@ pub(crate) struct AgentMessageArg {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AgentCompletionArg {
-    /// The todo whose work is complete.
-    pub(crate) todo_id: u64,
+    /// The id of the task message this report resolves, as returned by an inbox read.
+    pub(crate) task_message_id: u64,
+    /// The todo whose work is complete. Omit it when the task named no todo; it must otherwise
+    /// match the todo the task carried.
+    pub(crate) todo_id: Option<u64>,
     /// A concise account of the completed result for the lead agent.
     pub(crate) summary: String,
 }

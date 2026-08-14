@@ -1,10 +1,12 @@
 //! The ephemeral, bounded addressed mailbox shared by live agents.
 
+mod completion_notice;
 mod onboarding;
 mod reactor;
 mod state;
 mod vocabulary;
 
+pub(crate) use completion_notice::CompletionNoticeState;
 pub use onboarding::{orchestration_guide, OrchestrationGuide};
 pub use reactor::AgentMailboxReactor;
 pub use state::AgentMailbox;

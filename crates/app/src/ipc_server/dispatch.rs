@@ -238,9 +238,13 @@ fn dispatch_blocking(
             .agent_message_acknowledge(message_id)
             .map(IpcResponse::AgentMessageDelivery)
             .map_err(IpcError::from),
-        IpcRequest::AgentReportCompletion { todo_id, summary } => facade
+        IpcRequest::AgentReportCompletion {
+            task_message_id,
+            todo_id,
+            summary,
+        } => facade
             .scoped(session)
-            .agent_report_completion(todo_id, summary)
+            .agent_report_completion(task_message_id, todo_id, summary)
             .map(IpcResponse::AgentCompletion)
             .map_err(IpcError::from),
         IpcRequest::StartAllCommands => facade

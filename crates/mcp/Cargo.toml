@@ -17,6 +17,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
 
 [dev-dependencies]
+soloist-core = { path = "../core", features = ["testing"] }
 tempfile = "3"
 # `test-util` provides the paused clock the request-timeout test advances deterministically.
 tokio = { version = "1", features = ["test-util"] }

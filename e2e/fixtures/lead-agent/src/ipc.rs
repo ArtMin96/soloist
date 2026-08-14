@@ -37,22 +37,23 @@ pub(crate) fn spawned_task(
 
 pub(crate) async fn retrieve_and_ack(stream: &mut UnixStream) -> FixtureResult<Vec<AgentMessage>> {
     let pending = match request(stream, IpcRequest::AgentMessageList).await? {
-        IpcResponse::AgentMessages(messages) => messages,
+        IpcResponse::AgentMessages(deliveries) => deliveries,
         other => return Err(format!("expected an agent-message list, got {other:?}").into()),
     };
     let mut accepted = Vec::with_capacity(pending.len());
     for summary in pending {
+        let summary_id = summary.message.id;
         let message = match request(
             stream,
             IpcRequest::AgentMessageGet {
-                message_id: summary.id,
+                message_id: summary_id,
             },
         )
         .await?
         {
-            IpcResponse::AgentMessage(message) => message,
+            IpcResponse::AgentMessage(delivery) => delivery.message,
             other => {
-                return Err(format!("expected agent message {}, got {other:?}", summary.id).into())
+                return Err(format!("expected agent message {summary_id}, got {other:?}").into())
             }
         };
         match request(

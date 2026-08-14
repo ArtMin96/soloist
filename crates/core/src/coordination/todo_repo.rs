@@ -15,7 +15,7 @@
 use super::scratchpad::ScratchpadRef;
 use super::scratchpad_link::ScratchpadLink;
 use super::todo::TodoError;
-use super::todo_comment::Comment;
+use super::todo_comment::{Comment, CommentAuthor};
 use super::todo_completion::TodoCompletion;
 use super::todo_doc::TodoDoc;
 use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};

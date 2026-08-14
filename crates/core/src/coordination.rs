@@ -57,6 +57,7 @@ pub use kv::{Kv, MAX_KV_VALUE_BYTES};
 pub use kv_repo::{KvEntry, KvRepo, NoopKvRepo};
 pub use lease::{AcquireOutcome, LeaseView, Leases};
 pub use link::{is_link, Link, LinkContent, LinkError, LinkTarget};
+pub(crate) use mailbox::CompletionNoticeState;
 pub use mailbox::{
     orchestration_guide, AgentBroadcastReceipt, AgentMailbox, AgentMailboxReactor, AgentMessage,
     AgentMessageDelivery, AgentMessageKind, AgentMessageOutcome, AgentMessageReceipt,
