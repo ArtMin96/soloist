@@ -124,6 +124,8 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "rename_process",
     "close_process",
     "send_input",
+    "request_command_trust",
+    "trust_request_status",
     // tools/agent.rs
     "spawn_agent",
     "spawn_process",

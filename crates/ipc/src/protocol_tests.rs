@@ -11,7 +11,7 @@ use soloist_core::{
     RenderedPrompt, ScratchpadId, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary,
     TemplateId, TemplateKind, TemplateScope, TemplateSummary, TemplateView, TimerId, TimerStatus,
     TimerView, TodoCompletion, TodoCompletionKey, TodoCompletionOccurrence, TodoDoc, TodoId,
-    TodoStatus, TodoView, Whoami,
+    TodoStatus, TodoView, TrustRequestId, TrustRequestOutcome, TrustRequestState, Whoami,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -1131,4 +1131,72 @@ fn a_remark_and_an_answer_are_never_read_as_one_another() {
             "a frame must read back as the kind of frame it was written as: {wire}",
         );
     }
+}
+
+/// The trust-request pair pins its wire shape, optionals and all: `reason` is required (it is the
+/// whole mitigation against an approval nobody read), and the reply carries the id to poll or the
+/// grant that made polling unnecessary.
+#[test]
+fn the_trust_request_pair_pins_its_wire_shape() {
+    pins(
+        IpcRequest::RequestCommandTrust {
+            command: "npm run build".into(),
+            working_dir: None,
+            env: BTreeMap::new(),
+            label: None,
+            reason: "the release build needs it".into(),
+        },
+        serde_json::json!({
+            "op": "request_command_trust",
+            "command": "npm run build",
+            "reason": "the release build needs it",
+        }),
+    );
+    pins(
+        IpcRequest::RequestCommandTrust {
+            command: "npm run build".into(),
+            working_dir: Some(PathBuf::from("web")),
+            env: BTreeMap::from([("CI".to_string(), "1".to_string())]),
+            label: Some("Build".into()),
+            reason: "the release build needs it".into(),
+        },
+        serde_json::json!({
+            "op": "request_command_trust",
+            "command": "npm run build",
+            "working_dir": "web",
+            "env": { "CI": "1" },
+            "label": "Build",
+            "reason": "the release build needs it",
+        }),
+    );
+    pins(
+        IpcRequest::TrustRequestStatus {
+            request: TrustRequestId::from_raw(9),
+        },
+        serde_json::json!({ "op": "trust_request_status", "request": 9 }),
+    );
+    pins(
+        IpcResponse::TrustRequestOpened(TrustRequestOutcome {
+            request_id: Some(TrustRequestId::from_raw(9)),
+            state: TrustRequestState::Pending,
+        }),
+        serde_json::json!({
+            "ok": "trust_request_opened",
+            "data": { "request_id": 9, "state": "pending" },
+        }),
+    );
+    pins(
+        IpcResponse::TrustRequestOpened(TrustRequestOutcome {
+            request_id: None,
+            state: TrustRequestState::Granted,
+        }),
+        serde_json::json!({
+            "ok": "trust_request_opened",
+            "data": { "request_id": null, "state": "granted" },
+        }),
+    );
+    pins(
+        IpcResponse::TrustRequest(TrustRequestState::Withdrawn),
+        serde_json::json!({ "ok": "trust_request", "data": "withdrawn" }),
+    );
 }

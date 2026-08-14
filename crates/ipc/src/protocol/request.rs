@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use soloist_core::{
     AgentMessageId, DiffExtent, DiffTarget, HunkRange, IntegrationFile, MergeMethod, MissingPolicy,
     NewPullRequest, ProcessId, ProjectId, ScratchpadLink, TemplateKind, TemplateScope, TimerId,
-    TodoDoc, TodoId,
+    TodoDoc, TodoId, TrustRequestId,
 };
 
 mod defaults;
@@ -80,6 +80,24 @@ pub enum IpcRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
+    /// Ask the user to trust a command variant in the session's effective project. Recording the
+    /// request is the success; what the user decides is read back with
+    /// [`TrustRequestStatus`](Self::TrustRequestStatus).
+    ///
+    /// Deciding a request is deliberately **not** on this surface. Approval is the local user's
+    /// authority, so a session-scoped caller cannot grant its own request.
+    RequestCommandTrust {
+        command: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        working_dir: Option<PathBuf>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        env: BTreeMap<String, String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        reason: String,
+    },
+    /// Where a trust request the caller opened now stands.
+    TrustRequestStatus { request: TrustRequestId },
     /// Every configured agent tool that `spawn_agent` can launch (not scope-filtered).
     ListAgentTools,
     /// The caller and its live parent, children, and siblings in the effective project.

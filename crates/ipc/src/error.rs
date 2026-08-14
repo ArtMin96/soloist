@@ -65,6 +65,19 @@ pub enum IpcError {
     /// The application's bounded aggregate message-body budget has been reached.
     #[error("the agent mailbox byte limit has been reached")]
     AgentMailboxByteLimit,
+    /// A trust request's reason exceeded the bounded size a person is expected to read.
+    #[error("the reason exceeds the trust request reason size limit")]
+    TrustRequestReasonTooLarge,
+    /// The project already holds as many undecided trust requests as it may. Refused rather than
+    /// evicting: a flood must never displace a request the user has not read yet.
+    #[error("this project already has as many trust requests as it can hold awaiting a decision")]
+    TrustRequestQueueFull,
+    /// The application already holds as many undecided trust requests as it may.
+    #[error("there are already as many trust requests as can await a decision")]
+    TrustRequestsFull,
+    /// No trust request under that id is known in the caller's project.
+    #[error("no trust request under that id")]
+    UnknownTrustRequest,
     /// A coordination write carried a payload larger than its kind allows; `what` names it and
     /// `max_bytes` is the cap it exceeded.
     #[error("{what} exceeds the {max_bytes} byte cap")]
@@ -211,6 +224,10 @@ impl IpcError {
             | IpcError::ProjectQueueFull
             | IpcError::AgentMailboxFull
             | IpcError::AgentMailboxByteLimit
+            | IpcError::TrustRequestReasonTooLarge
+            | IpcError::TrustRequestQueueFull
+            | IpcError::TrustRequestsFull
+            | IpcError::UnknownTrustRequest
             | IpcError::PayloadTooLarge { .. }
             | IpcError::InvalidScratchpad(_)
             | IpcError::RevisionConflict { .. }

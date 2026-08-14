@@ -11,7 +11,8 @@ use soloist_core::{
     IntegrationWrite, KvEntry, LeaseView, LinkContent, McpToolGroups, ProcessId, ProcessView,
     ProjectId, ProjectView, PullRequestReview, PullRequestSurface, RenderedPrompt,
     ScratchpadSummary, ScratchpadView, SeedTemplate, SetWhenIdleOutcome, StartSummary,
-    TemplateSummary, TemplateView, TimerView, TodoSummary, TodoView, Whoami,
+    TemplateSummary, TemplateView, TimerView, TodoSummary, TodoView, TrustRequestOutcome,
+    TrustRequestState, Whoami,
 };
 
 use crate::error::IpcError;
@@ -61,6 +62,11 @@ pub enum IpcResponse {
         initial_message_id: AgentMessageId,
         delivery: AgentMessageOutcome,
     },
+    /// A trust request was recorded, or the variant was already trusted so there was nothing to
+    /// ask (answer to [`IpcRequest::RequestCommandTrust`]).
+    TrustRequestOpened(TrustRequestOutcome),
+    /// Where a trust request stands (answer to [`IpcRequest::TrustRequestStatus`]).
+    TrustRequest(TrustRequestState),
     /// Every configured agent tool (answer to [`IpcRequest::ListAgentTools`]).
     AgentTools(Vec<AgentTool>),
     /// The caller and its related live agents (answer to [`IpcRequest::AgentRoster`]).
