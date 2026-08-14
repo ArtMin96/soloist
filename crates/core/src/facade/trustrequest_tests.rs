@@ -356,6 +356,11 @@ fn a_grant_records_who_asked_for_it_and_can_be_taken_back() {
     assert_eq!(grants.len(), 1);
     assert_eq!(grants[0].requested_by, Some(agent));
     assert_eq!(grants[0].reason.as_deref(), Some(REASON));
+    assert_eq!(
+        grants[0].command.as_deref(),
+        Some(COMMAND),
+        "a review list of bare digests is not something a person can review"
+    );
 
     facade
         .revoke_command_trust(project, &grants[0].variant_hash)

@@ -20,10 +20,16 @@ use crate::sync::lock;
 /// nullable columns: a variant trusted without provenance reads back as user-authored.
 #[derive(Default)]
 pub struct FakeTrustRepo {
-    trusted: Mutex<HashSet<(u64, String)>>,
-    provenance: Mutex<BTreeMap<(u64, String), (ProcessId, String, u64)>>,
+    trusted: Mutex<BTreeMap<GrantKey, String>>,
+    provenance: Mutex<BTreeMap<GrantKey, GrantProvenance>>,
     trusted_projects: Mutex<HashSet<u64>>,
 }
+
+/// How a grant is keyed, matching the durable store's `(project_id, variant_hash)` primary key.
+type GrantKey = (u64, String);
+
+/// What a grant made at a process's asking records: who asked, why, and when it was approved.
+type GrantProvenance = (ProcessId, String, u64);
 
 impl FakeTrustRepo {
     pub fn new() -> Self {
@@ -40,11 +46,16 @@ impl FakeTrustRepo {
 
 impl TrustRepo for FakeTrustRepo {
     fn is_trusted(&self, project: ProjectId, variant: &Hash) -> Result<bool, StoreError> {
-        Ok(lock(&self.trusted).contains(&(project.get(), variant.to_hex())))
+        Ok(lock(&self.trusted).contains_key(&(project.get(), variant.to_hex())))
     }
 
-    fn set_trusted(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError> {
-        lock(&self.trusted).insert((project.get(), variant.to_hex()));
+    fn set_trusted(
+        &self,
+        project: ProjectId,
+        variant: &Hash,
+        command: &str,
+    ) -> Result<(), StoreError> {
+        lock(&self.trusted).insert((project.get(), variant.to_hex()), command.to_owned());
         Ok(())
     }
 
@@ -52,11 +63,12 @@ impl TrustRepo for FakeTrustRepo {
         &self,
         project: ProjectId,
         variant: &Hash,
+        command: &str,
         requested_by: ProcessId,
         reason: &str,
         granted_at_unix_millis: u64,
     ) -> Result<(), StoreError> {
-        lock(&self.trusted).insert((project.get(), variant.to_hex()));
+        lock(&self.trusted).insert((project.get(), variant.to_hex()), command.to_owned());
         lock(&self.provenance).insert(
             (project.get(), variant.to_hex()),
             (requested_by, reason.to_owned(), granted_at_unix_millis),
@@ -68,11 +80,12 @@ impl TrustRepo for FakeTrustRepo {
         let provenance = lock(&self.provenance);
         Ok(lock(&self.trusted)
             .iter()
-            .filter(|(owner, _)| *owner == project.get())
-            .map(|key| {
+            .filter(|((owner, _), _)| *owner == project.get())
+            .map(|(key, command)| {
                 let recorded = provenance.get(key);
                 TrustGrant {
                     variant_hash: key.1.clone(),
+                    command: Some(command.clone()),
                     requested_by: recorded.map(|(process, _, _)| *process),
                     reason: recorded.map(|(_, reason, _)| reason.clone()),
                     granted_at_unix_millis: recorded.map(|(_, _, at)| *at),

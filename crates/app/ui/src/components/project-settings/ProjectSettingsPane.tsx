@@ -144,6 +144,7 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
               {active === "overview" && <OverviewSection page={page} onReload={reload} />}
               {active === "settings" && (
                 <ProjectSettingsSection
+                  project={id}
                   name={project.name}
                   icon={project.icon}
                   settings={page.settings}

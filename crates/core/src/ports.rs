@@ -258,6 +258,10 @@ pub trait ProjectRepo: Send + Sync {
 pub struct TrustGrant {
     /// The variant key, as [`Hash::to_hex`] writes it.
     pub variant_hash: String,
+    /// The command line the grant authorizes, recorded so the review surface can show what is
+    /// trusted rather than a bare digest nobody can act on. `None` for a grant written before the
+    /// column existed.
+    pub command: Option<String>,
     /// The process that asked for this grant, or `None` when the user authored it themselves.
     pub requested_by: Option<ProcessId>,
     /// The reason that process gave. Agent-supplied and untrusted — render it as a quotation.
@@ -273,8 +277,15 @@ pub struct TrustGrant {
 pub trait TrustRepo: Send + Sync {
     /// Whether `variant` is trusted within `project`.
     fn is_trusted(&self, project: ProjectId, variant: &Hash) -> Result<bool, StoreError>;
-    /// Marks `variant` trusted within `project`.
-    fn set_trusted(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError>;
+    /// Marks `variant` trusted within `project`. `command` is the command line the variant
+    /// stands for, kept for the review surface — the digest is the key, and a key is not something
+    /// a person can review.
+    fn set_trusted(
+        &self,
+        project: ProjectId,
+        variant: &Hash,
+        command: &str,
+    ) -> Result<(), StoreError>;
     /// Marks `variant` trusted within `project`, recording which process asked for it, why, and
     /// when it was granted. The row is the same one [`set_trusted`](Self::set_trusted) writes, so
     /// the start gate reads it identically; the provenance exists so a grant made on a process's
@@ -283,6 +294,7 @@ pub trait TrustRepo: Send + Sync {
         &self,
         project: ProjectId,
         variant: &Hash,
+        command: &str,
         requested_by: ProcessId,
         reason: &str,
         granted_at_unix_millis: u64,

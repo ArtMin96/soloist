@@ -247,7 +247,7 @@ async fn run_crash_storm(facade: &Facade, trust: &FakeTrustRepo, spec: &ProcessS
         .supervisor()
         .register(Registration::command(PROJECT, &cwd, "Crasher", spec));
     trust
-        .set_trusted(PROJECT, &spec.variant_hash())
+        .set_trusted(PROJECT, &spec.variant_hash(), &spec.command)
         .expect("trust the crasher");
     facade
         .supervisor()

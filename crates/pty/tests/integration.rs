@@ -708,13 +708,19 @@ impl TrustRepo for NoTrust {
     fn is_trusted(&self, _project: ProjectId, _variant: &Hash) -> Result<bool, StoreError> {
         Ok(false)
     }
-    fn set_trusted(&self, _project: ProjectId, _variant: &Hash) -> Result<(), StoreError> {
+    fn set_trusted(
+        &self,
+        _project: ProjectId,
+        _variant: &Hash,
+        _command: &str,
+    ) -> Result<(), StoreError> {
         Ok(())
     }
     fn set_trusted_with_provenance(
         &self,
         _project: ProjectId,
         _variant: &Hash,
+        _command: &str,
         _requested_by: ProcessId,
         _reason: &str,
         _granted_at_unix_millis: u64,

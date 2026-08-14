@@ -23,6 +23,7 @@ import { Titlebar } from "@/components/titlebar/Titlebar";
 import { TitlebarActions } from "@/components/titlebar/TitlebarActions";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TrustDialog } from "@/components/TrustDialog";
+import { TrustRequestDialog } from "@/components/TrustRequestDialog";
 import type { SettingsTabId } from "@/components/settings/tabs";
 import { AppearanceProvider } from "@/store/AppearanceProvider";
 import { HotkeysProvider } from "@/store/HotkeysProvider";
@@ -42,6 +43,7 @@ import { useProjects } from "@/store/projects";
 import { FileDropProvider } from "@/store/FileDropProvider";
 import { SignalsProvider } from "@/store/SignalsProvider";
 import { useTrust } from "@/store/useTrust";
+import { useTrustRequests } from "@/store/useTrustRequests";
 import { AttentionContext, useAttentionMarks } from "@/store/attentionContext";
 import { useWatchRefusals } from "@/store/useWatchRefusals";
 import { WatchContext } from "@/store/watchContext";
@@ -70,6 +72,7 @@ export default function App() {
   const lineage = useLineage();
   const projects = useProjects(store.reportError);
   const trust = useTrust(store.refresh, store.reportError);
+  const trustRequests = useTrustRequests(store.refresh, store.reportError);
   const orphans = useOrphans(store.reportError);
   const watchRefusals = useWatchRefusals();
   const agents = useAgents(store.reportError);
@@ -411,6 +414,11 @@ export default function App() {
                         }}
                         onTrustAll={trust.trustAll}
                         onDismiss={trust.dismiss}
+                      />
+                      <TrustRequestDialog
+                        requests={trustRequests.requests}
+                        onApprove={trustRequests.approve}
+                        onDeny={trustRequests.deny}
                       />
                       <RemoveProcessDialog
                         process={pendingRemoval}

@@ -318,7 +318,7 @@ async fn a_lead_spawns_a_trusted_command_and_an_untrusted_one_is_refused() {
 
     // The user approves that exact variant, as the trust dialog does, and the spawn goes through.
     trust
-        .set_trusted(project.id, &spawn_spec(&command).variant_hash())
+        .set_trusted(project.id, &spawn_spec(&command).variant_hash(), &command)
         .expect("trust the command variant");
     let spawned = facade
         .scoped(session)

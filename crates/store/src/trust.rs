@@ -25,11 +25,20 @@ impl TrustRepo for SqliteStore {
         Ok(found.is_some())
     }
 
-    fn set_trusted(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError> {
+    fn set_trusted(
+        &self,
+        project: ProjectId,
+        variant: &Hash,
+        command: &str,
+    ) -> Result<(), StoreError> {
+        // The command line is refreshed on every grant while the provenance columns are left
+        // alone, so re-trusting a variant the user authored does not erase the record of an
+        // earlier request for it, and a row written before the column existed gains its command.
         self.lock()
             .execute(
-                "INSERT OR IGNORE INTO trust (project_id, variant_hash) VALUES (?1, ?2)",
-                (project.get() as i64, variant.to_hex()),
+                "INSERT INTO trust (project_id, variant_hash, command) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (project_id, variant_hash) DO UPDATE SET command = excluded.command",
+                (project.get() as i64, variant.to_hex(), command),
             )
             .map(|_| ())
             .map_err(sql_err)
@@ -39,6 +48,7 @@ impl TrustRepo for SqliteStore {
         &self,
         project: ProjectId,
         variant: &Hash,
+        command: &str,
         requested_by: ProcessId,
         reason: &str,
         granted_at_unix_millis: u64,
@@ -48,15 +58,18 @@ impl TrustRepo for SqliteStore {
         // to show. The grant itself is unchanged either way — the row's existence is the trust.
         self.lock()
             .execute(
-                "INSERT INTO trust (project_id, variant_hash, requested_by, reason, granted_at_unix_millis)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO trust
+                     (project_id, variant_hash, command, requested_by, reason, granted_at_unix_millis)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT (project_id, variant_hash) DO UPDATE SET
+                     command = excluded.command,
                      requested_by = excluded.requested_by,
                      reason = excluded.reason,
                      granted_at_unix_millis = excluded.granted_at_unix_millis",
                 (
                     project.get() as i64,
                     variant.to_hex(),
+                    command,
                     requested_by.get() as i64,
                     reason,
                     granted_at_unix_millis as i64,
@@ -70,7 +83,7 @@ impl TrustRepo for SqliteStore {
         let conn = self.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT variant_hash, requested_by, reason, granted_at_unix_millis
+                "SELECT variant_hash, command, requested_by, reason, granted_at_unix_millis
                  FROM trust WHERE project_id = ?1 ORDER BY granted_at_unix_millis DESC, variant_hash",
             )
             .map_err(sql_err)?;
@@ -78,11 +91,12 @@ impl TrustRepo for SqliteStore {
             .query_map([project.get() as i64], |row| {
                 Ok(TrustGrant {
                     variant_hash: row.get(0)?,
+                    command: row.get(1)?,
                     requested_by: row
-                        .get::<_, Option<i64>>(1)?
+                        .get::<_, Option<i64>>(2)?
                         .map(|raw| ProcessId::from_raw(raw as u64)),
-                    reason: row.get(2)?,
-                    granted_at_unix_millis: row.get::<_, Option<i64>>(3)?.map(|raw| raw as u64),
+                    reason: row.get(3)?,
+                    granted_at_unix_millis: row.get::<_, Option<i64>>(4)?.map(|raw| raw as u64),
                 })
             })
             .map_err(sql_err)?;

@@ -21,7 +21,9 @@ fn trust_persists_across_reopen() {
     let project = {
         let store = SqliteStore::open(&db).expect("open");
         let project = project_with_trust(&store, "/projects/app");
-        store.set_trusted(project, &variant).expect("trust");
+        store
+            .set_trusted(project, &variant, "npm run dev")
+            .expect("trust");
         project
     };
 
@@ -40,7 +42,9 @@ fn revoke_and_scope_behave() {
     let b = project_with_trust(&store, "/p/b");
     let variant = content_hash(b"shared command");
 
-    store.set_trusted(a, &variant).expect("trust a");
+    store
+        .set_trusted(a, &variant, "shared command")
+        .expect("trust a");
     assert!(store.is_trusted(a, &variant).expect("a trusted"));
     assert!(
         !store.is_trusted(b, &variant).expect("b untrusted"),
@@ -94,7 +98,9 @@ fn removing_a_project_cascades_its_trust() {
     let store = SqliteStore::open(&dir.path().join("soloist.db")).expect("open");
     let project = project_with_trust(&store, "/p/cascade");
     let variant = content_hash(b"command");
-    store.set_trusted(project, &variant).expect("trust");
+    store
+        .set_trusted(project, &variant, "command")
+        .expect("trust");
 
     store.remove(project).expect("remove project");
     assert!(
@@ -113,7 +119,14 @@ fn a_grant_records_its_requester_and_reason() {
         let store = SqliteStore::open(&db).expect("open");
         let project = project_with_trust(&store, "/projects/asked");
         store
-            .set_trusted_with_provenance(project, &variant, requester, "the release build", 1_700)
+            .set_trusted_with_provenance(
+                project,
+                &variant,
+                "npm run build",
+                requester,
+                "the release build",
+                1_700,
+            )
             .expect("grant with provenance");
         project
     };
@@ -124,6 +137,7 @@ fn a_grant_records_its_requester_and_reason() {
         reopened.list_grants(project).expect("list grants"),
         vec![TrustGrant {
             variant_hash: variant.to_hex(),
+            command: Some("npm run build".into()),
             requested_by: Some(requester),
             reason: Some("the release build".into()),
             granted_at_unix_millis: Some(1_700),
@@ -144,7 +158,12 @@ fn an_existing_grant_survives_the_migration_as_user_authored() {
     let project = {
         let conn = rusqlite::Connection::open(&db).expect("open raw");
         crate::migrate::migrate(&conn).expect("migrate to current");
-        for column in ["requested_by", "reason", "granted_at_unix_millis"] {
+        for column in [
+            "command",
+            "requested_by",
+            "reason",
+            "granted_at_unix_millis",
+        ] {
             conn.execute_batch(&format!("ALTER TABLE trust DROP COLUMN {column};"))
                 .expect("undo the provenance columns");
         }
@@ -177,6 +196,7 @@ fn an_existing_grant_survives_the_migration_as_user_authored() {
         upgraded.list_grants(project).expect("list grants"),
         vec![TrustGrant {
             variant_hash: variant.to_hex(),
+            command: None,
             requested_by: None,
             reason: None,
             granted_at_unix_millis: None,
@@ -192,7 +212,14 @@ fn revoking_a_grant_makes_the_variant_untrusted_again() {
     let project = project_with_trust(&store, "/projects/revoked");
     let variant = content_hash(b"npm run build|web|");
     store
-        .set_trusted_with_provenance(project, &variant, ProcessId::from_raw(7), "because", 1)
+        .set_trusted_with_provenance(
+            project,
+            &variant,
+            "npm run build",
+            ProcessId::from_raw(7),
+            "because",
+            1,
+        )
         .expect("grant");
 
     let listed = store.list_grants(project).expect("list grants");

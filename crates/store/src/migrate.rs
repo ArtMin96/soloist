@@ -361,6 +361,7 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         // that already existed keeps its row and reads back as what it is — one the user authored
         // themselves. Guarded per column so a re-run is a no-op.
         for (column, definition) in [
+            ("command", "TEXT"),
             ("requested_by", "INTEGER"),
             ("reason", "TEXT"),
             ("granted_at_unix_millis", "INTEGER"),

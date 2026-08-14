@@ -18,7 +18,7 @@ fn command(h: &Harness, name: &str, line: &str, auto_start: bool, trusted: bool)
         .register(Registration::command(PROJECT, Path::new("/p"), name, &spec));
     if trusted {
         h.trust
-            .set_trusted(PROJECT, &spec.variant_hash())
+            .set_trusted(PROJECT, &spec.variant_hash(), &spec.command)
             .expect("trust command");
     }
     id
@@ -52,10 +52,14 @@ async fn start_all_starts_only_trusted_auto_start_commands() {
     let term = terminal(&h.sup, "bash");
 
     h.trust
-        .set_trusted(PROJECT, &auto_trusted.variant_hash())
+        .set_trusted(PROJECT, &auto_trusted.variant_hash(), &auto_trusted.command)
         .expect("trust a");
     h.trust
-        .set_trusted(PROJECT, &manual_trusted.variant_hash())
+        .set_trusted(
+            PROJECT,
+            &manual_trusted.variant_hash(),
+            &manual_trusted.command,
+        )
         .expect("trust c");
 
     let summary = h.sup.start_all(PROJECT).expect("start_all");

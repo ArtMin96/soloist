@@ -509,7 +509,7 @@ async fn spawn_process_routes_into_the_sessions_own_project() {
     let dir = tempfile::tempdir().expect("temp dir");
     let (facade, trust, project) = facade_with_a_project(&dir);
     trust
-        .set_trusted(project, &spawnable_spec().variant_hash())
+        .set_trusted(project, &spawnable_spec().variant_hash(), SPAWNABLE)
         .expect("trust the variant in the project");
     let session = grouped_session(&facade);
 
@@ -1676,7 +1676,7 @@ async fn requesting_trust_for_an_already_trusted_variant_asks_nobody() {
     let dir = tempfile::tempdir().expect("temp dir");
     let (facade, trust, project) = facade_with_a_project(&dir);
     trust
-        .set_trusted(project, &spawnable_spec().variant_hash())
+        .set_trusted(project, &spawnable_spec().variant_hash(), SPAWNABLE)
         .expect("trust the variant in the project");
     let session = grouped_session(&facade);
     scoped_terminal(&facade, session, project, "shell");

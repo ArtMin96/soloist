@@ -349,7 +349,7 @@ mod tests {
             &spec,
         ));
         h.trust
-            .set_trusted(PROJECT, &spec.variant_hash())
+            .set_trusted(PROJECT, &spec.variant_hash(), &spec.command)
             .expect("trust");
         id
     }
@@ -522,7 +522,7 @@ mod tests {
             &plain,
         ));
         h.trust
-            .set_trusted(PROJECT, &plain.variant_hash())
+            .set_trusted(PROJECT, &plain.variant_hash(), &plain.command)
             .expect("trust");
         assert_eq!(
             h.sup.auto_restart_after_crash(no_restart),

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { SettingRow } from "@/components/settings/controls/SettingRow";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
+import { TrustedCommandsSection } from "@/components/project-settings/TrustedCommandsSection";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -11,6 +12,7 @@ import type { ProjectSettings } from "@/domain";
 // commit on blur or Enter. An empty editor field clears the override (falls back to the global
 // default); the icon field accepts a `solo.yml` icon path and surfaces a rejected format inline.
 export function ProjectSettingsSection({
+  project,
   name,
   icon,
   settings,
@@ -20,6 +22,7 @@ export function ProjectSettingsSection({
   onEditorOverride,
   onSetIcon,
 }: {
+  project: number;
   name: string;
   icon: string | null;
   settings: ProjectSettings;
@@ -70,6 +73,8 @@ export function ProjectSettingsSection({
           />
         </SettingRow>
       </SettingsSection>
+
+      <TrustedCommandsSection project={project} />
 
       <SettingsSection title="Tools">
         <SettingRow

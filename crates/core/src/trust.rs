@@ -59,7 +59,8 @@ impl TrustStore {
 
     /// Trusts `spec`'s variant within `project`.
     pub fn trust(&self, project: ProjectId, spec: &ProcessSpec) -> Result<(), StoreError> {
-        self.repo.set_trusted(project, &spec.variant_hash())
+        self.repo
+            .set_trusted(project, &spec.variant_hash(), &spec.command)
     }
 
     /// Trusts `spec`'s variant within `project`, recording that a process asked for it and why.
@@ -80,6 +81,7 @@ impl TrustStore {
         self.repo.set_trusted_with_provenance(
             project,
             &spec.variant_hash(),
+            &spec.command,
             requested_by,
             reason,
             granted_at_unix_millis,
