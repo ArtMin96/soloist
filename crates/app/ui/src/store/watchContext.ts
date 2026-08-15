@@ -1,8 +1,8 @@
 import { createContext, use } from "react";
-import type { WatchError } from "@/domain";
+import type { PurposeRefusals } from "@/domain";
 
-/** The projects the OS is currently refusing to watch, and why. */
-export type WatchRefusals = ReadonlyMap<number, WatchError>;
+/** The projects the OS is currently refusing watches for, and which of their watches it turned down. */
+export type WatchRefusals = ReadonlyMap<number, PurposeRefusals>;
 
 const NOTHING_REFUSED: WatchRefusals = new Map();
 
@@ -13,7 +13,7 @@ const NOTHING_REFUSED: WatchRefusals = new Map();
 // rather than throwing.
 export const WatchContext = createContext<WatchRefusals>(NOTHING_REFUSED);
 
-/** Why this project's directories are not being watched, or `undefined` while they are. */
-export function useWatchRefusal(id: number): WatchError | undefined {
+/** Which of this project's watches are refused and why, or `undefined` while it holds them all. */
+export function useWatchRefusal(id: number): PurposeRefusals | undefined {
   return use(WatchContext).get(id);
 }

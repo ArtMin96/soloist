@@ -12,6 +12,7 @@
 //! themselves run on the blocking pool, so the helpers below advance and then wait a bounded
 //! moment for the announcement rather than assuming a fixed number of scheduler turns.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,7 +30,7 @@ use crate::testing::{
     FakeProjectRepo,
 };
 use crate::vcs::ChangeKind;
-use crate::watch::WatchError;
+use crate::watch::{WatchError, WatchPurpose};
 
 use super::GitStatusWatchReactor;
 
@@ -569,15 +570,17 @@ async fn a_working_tree_the_os_refuses_is_reported_instead_of_a_rail_that_stops_
     )
     .await
     .expect("the refusal reaches the surfaces");
+    // Only the git rail is named. This project declares no `restart_when_changed` command, so the
+    // restart policy never asks for a watch over it and nothing there has stopped — saying so would
+    // report a consequence that did not follow.
+    let expected = BTreeMap::from([(WatchPurpose::GitStatus, WatchError::BudgetExhausted)]);
     assert!(
         matches!(
-            announced,
-            DomainEvent::WatchRefusalChanged {
-                project,
-                refusal: Some(WatchError::BudgetExhausted),
-            } if project == s.project
+            &announced,
+            DomainEvent::WatchRefusalChanged { project, refusals }
+                if *project == s.project && *refusals == expected
         ),
-        "the user is told which project's changes stopped reporting, and why: {announced:?}",
+        "the user is told which of the project's watches stopped reporting, and why: {announced:?}",
     );
 }
 

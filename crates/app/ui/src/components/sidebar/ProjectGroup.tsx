@@ -97,7 +97,7 @@ export function ProjectGroup({
 }: ProjectGroupProps) {
   const { project, kinds, count } = tree;
   const unread = useUnreadProject(project.id);
-  const watchRefusal = useWatchRefusal(project.id);
+  const watchRefusals = useWatchRefusal(project.id);
   // The menus only *open* the confirm; the removal itself runs solely from the dialog's
   // destructive action, so a destructive menu click can never remove anything by itself.
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -282,7 +282,7 @@ export function ProjectGroup({
       </ContextMenu>
       {/* Outside the collapsible content on purpose: a project whose watches are gone must say so
           whether or not its processes are unfolded, since the loss is one nothing else reveals. */}
-      {watchRefusal && <WatchRefusedNotice reason={watchRefusal} className="mt-1 ml-3" />}
+      {watchRefusals && <WatchRefusedNotice refusals={watchRefusals} className="mt-1 ml-3" />}
       <RemoveProjectDialog
         open={confirmRemove}
         onOpenChange={setConfirmRemove}

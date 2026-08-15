@@ -2,9 +2,9 @@
 //! real [`Supervisor`] over fakes plus a [`FakeFileWatcher`] feeding synthetic change events.
 //! Waits are event-driven — they await a status transition on the bus ([`wait_all`]), the
 //! watcher's `established` signal, a `FileRestart`, or the reactor arming its debounce deadline
-//! ([`MockClock::deadline_armed`]) — and the debounce window is then advanced on the mock clock,
-//! so there is no real filesystem, no real time, and no reliance on scheduler timing (which is
-//! what makes a `yield_now` budget flake under load).
+//! ([`MockClock::deadline_armed_at`]) — and the debounce window is then advanced on the mock
+//! clock, so there is no real filesystem, no real time, and no reliance on scheduler timing (which
+//! is what makes a `yield_now` budget flake under load).
 //!
 //! The one remaining `yield_now` budget is [`yield_many`], and only where the assertion is that
 //! nothing happens: there is no event to await for an effect that must never occur, and a budget
@@ -22,16 +22,16 @@ use crate::config::ProcessSpec;
 use crate::configchange::ConfigSync;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::{PtySize, SpawnSpec, TrustRepo};
+use crate::ports::{Clock, PtySize, SpawnSpec, TrustRepo};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, Supervisor};
 use crate::testing::{
     next_matching, wait_all, FakeFileWatcher, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
     MockClock,
 };
-use crate::watch::WatchError;
+use crate::watch::{WatchError, WatchPurpose};
 
-use super::{WatchReactor, WatchStatus};
+use super::{WatchReactor, WatchStatus, QUIET};
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);
 const ROOT: &str = "/project";
@@ -138,12 +138,14 @@ async fn start_reactor(s: &Setup) {
 /// fed; advancing the mock clock past the quiet window wakes the reactor's debounce, which
 /// then restarts the command and emits the event the test awaits.
 ///
-/// The advance waits for the reactor to have armed that window first. Feeding a change only puts
-/// it on the channel — the reactor is woken to consume it from another thread — so advancing
-/// straight away can move time before any deadline exists, leaving the burst armed one whole
-/// window in the future with no advance left to reach it.
+/// The advance waits for the reactor to have armed that window first — the window this burst
+/// opened, named as the clock's current reading plus [`QUIET`], since the mock clock has not moved
+/// since the changes were fed. Feeding a change only puts it on the channel — the reactor is woken
+/// to consume it from another thread — so advancing straight away can move time before any
+/// deadline exists, leaving the burst armed one whole window in the future with no advance left to
+/// reach it.
 async fn next_file_restart(s: &mut Setup) -> ProcessId {
-    s.clock.deadline_armed().await;
+    s.clock.deadline_armed_at(s.clock.now() + QUIET).await;
     s.clock.advance(STEP);
     match next_matching(&mut s.rx, |e| matches!(e, DomainEvent::FileRestart { .. })).await {
         DomainEvent::FileRestart { id } => id,
@@ -335,15 +337,14 @@ async fn a_root_the_os_refuses_is_reported_instead_of_quietly_not_restarting() {
         matches!(e, DomainEvent::WatchRefusalChanged { .. })
     })
     .await;
+    let expected = BTreeMap::from([(WatchPurpose::Restarts, WatchError::BudgetExhausted)]);
     assert!(
         matches!(
-            announced,
-            DomainEvent::WatchRefusalChanged {
-                project,
-                refusal: Some(WatchError::BudgetExhausted),
-            } if project == PROJECT
+            &announced,
+            DomainEvent::WatchRefusalChanged { project, refusals }
+                if *project == PROJECT && *refusals == expected
         ),
-        "the user is told which project stopped being watched, and why: {announced:?}",
+        "the user is told which of the project's watches stopped, and why: {announced:?}",
     );
 
     // ...and the save it cannot see restarts nothing, which is the thing being reported.

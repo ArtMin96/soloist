@@ -26,14 +26,14 @@ use tokio::sync::mpsc;
 
 use crate::debounce::{sleep_until, Debouncer};
 use crate::events::{DomainEvent, EventBus};
-use crate::ids::{ProcessId, ProjectId};
+use crate::ids::ProcessId;
 use crate::ports::Clock;
 use crate::supervision::run_blocking;
 use crate::supervisor::Supervisor;
-use crate::watch::WatchError;
+use crate::watch::{WatchError, WatchOutcome, WatchPurpose};
 
 use super::policy::{compile, WatchRule};
-use super::status::{WatchPurpose, WatchStatus};
+use super::status::WatchStatus;
 use super::watcher::{FileWatcher, WatchHandle};
 
 /// The quiet window a burst of changes is coalesced into before a restart fires. Long enough
@@ -59,7 +59,7 @@ impl WatchReactor {
     /// Builds a reactor over the file watcher and clock, watching the given supervisor weakly
     /// (so it never keeps the app alive), subscribing to the bus for the shutdown signal, and
     /// reporting what the OS refuses through the shared [`WatchStatus`].
-    pub fn new(
+    pub(crate) fn new(
         clock: Arc<dyn Clock>,
         watcher: Arc<dyn FileWatcher>,
         bus: &EventBus,
@@ -182,7 +182,7 @@ impl WatchReactor {
     ) {
         rules.clear();
         let mut desired: HashSet<PathBuf> = HashSet::new();
-        let mut outcomes: Vec<(ProjectId, Option<WatchError>)> = Vec::new();
+        let mut outcomes: Vec<WatchOutcome> = Vec::new();
         for target in supervisor.watch_targets() {
             let Some(set) = compile(&target.globs) else {
                 continue;
@@ -203,7 +203,10 @@ impl WatchReactor {
                         }
                     }
                 };
-                outcomes.push((target.project, refusal));
+                outcomes.push(WatchOutcome {
+                    project: target.project,
+                    refusal,
+                });
             }
             rules.push(WatchRule::new(target.id, target.project_root, set));
         }

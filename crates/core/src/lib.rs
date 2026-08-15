@@ -91,10 +91,7 @@ pub use facade::{
     PromptRenderError, ScopedActionError, ScopedFacade, ScopedGitError, SetupIntegrationError,
     SpawnAgentError, StatusSummary, TrustCommandError,
 };
-pub use filewatch::{
-    FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchPurpose, WatchReactor,
-    WatchStatus,
-};
+pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use git::{
     BranchOp, CheckRun, CheckState, DiffExtent, Exchange, FileOpener, ForgeError, ForgeReadiness,
     ForgeRepository, Git, GitDraftError, GitError, GitForge, GitRepository, GitStatus,
@@ -156,4 +153,4 @@ pub use vcs::{
     Branch, BranchInfo, Branches, ChangeKind, CommitEntry, DiffTarget, FileChange, FileContent,
     FileDiff, GitFileStatus, HunkRange, ProjectFile, SyncState, COMMIT_BODY_LIMIT,
 };
-pub use watch::WatchError;
+pub use watch::{WatchError, WatchPurpose};

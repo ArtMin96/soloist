@@ -1,18 +1,13 @@
 //! The live-status trigger: a [`Clock`]-driven reactor that turns changes to a repository — to
 //! its own state files and to the working tree beside them — into debounced status re-reads.
 //!
-//! The reactor watches two things per open project, because a status has two sources. The
-//! repository state says what is committed and staged: the files directly inside `.git` (`HEAD`,
-//! `index`, `packed-refs`, `MERGE_HEAD`, `FETCH_HEAD`) plus the `refs` tree, which is nested. The
-//! working tree says what differs from it, and a file edited, added, or deleted there touches
-//! nothing under `.git` — so the tree is watched too, as a tree, minus the directories whose
-//! churn is never a change worth reading (the shared [`is_ignored`], so the build and dependency
-//! trees are named in one place). Both sources feed **one** quiet window per project through the
-//! shared [`crate::debounce::Debouncer`], so an operation that touches both — `git add` writing
-//! the index beside the file it staged — coalesces into a single re-read of that project's status
-//! through [`Git`]. It announces [`DomainEvent::GitStatusChanged`] only when the re-read differs
-//! from what was already known, so churn that leaves the working tree looking the same wakes no
-//! surface.
+//! Where those changes come from is [`super::watched`]'s: it holds the watches and decides which
+//! projects a changed path belongs to. This module decides when one is worth reading. Both sources
+//! feed **one** quiet window per project through the shared [`crate::debounce::Debouncer`], so an
+//! operation that touches both — `git add` writing the index beside the file it staged — coalesces
+//! into a single re-read of that project's status through [`Git`]. It announces
+//! [`DomainEvent::GitStatusChanged`] only when the re-read differs from what was already known, so
+//! churn that leaves the working tree looking the same wakes no surface.
 //!
 //! Two rules keep it from fighting the tool it observes. The lock files git creates and removes
 //! around every write are ignored: the write they guard reports separately when it lands, and
@@ -24,17 +19,11 @@
 //! otherwise never be read: an agent writing file after file re-arms the window before it elapses,
 //! and coalescing would turn into never refreshing at all.
 //!
-//! It watches a project's own root and `.git`; a project that is a subdirectory of a repository
-//! keeps its status, and its own files still report, but the state above the watched root does
-//! not.
-//!
 //! Like the other filesystem reactors it re-syncs on [`DomainEvent::ProjectOpened`] and
 //! [`DomainEvent::ProjectRemoved`], holds the context weakly so it never keeps the app alive,
 //! and ends when the bus closes.
 
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -44,14 +33,15 @@ use tokio::sync::mpsc;
 
 use crate::debounce::{sleep_until, Debouncer};
 use crate::events::{DomainEvent, EventBus};
-use crate::filewatch::{is_ignored, FileWatcher, WatchHandle, WatchPurpose, WatchStatus};
+use crate::filewatch::{FileWatcher, WatchStatus};
 use crate::ids::ProjectId;
 use crate::ports::Clock;
 use crate::projects::Projects;
 use crate::supervision::run_blocking;
-use crate::watch::WatchError;
+use crate::watch::{WatchOutcome, WatchPurpose};
 
 use super::status::Git;
+use super::watched::{is_lock, Watches};
 
 /// The quiet window a burst of changes is coalesced into before one status read. Long enough to
 /// absorb the several files a single `git` invocation writes, short enough that a commit made in
@@ -84,32 +74,6 @@ const MAX_POSTPONE: Duration = Duration::from_secs(1);
 /// status the tree actually has.
 const CHANGE_BUFFER: usize = 256;
 
-/// The directory in a project root holding its repository state.
-const STATE_DIR: &str = ".git";
-
-/// The subdirectory of [`STATE_DIR`] holding refs. Watched as a tree, because a branch or a
-/// remote-tracking ref sits one or more levels inside it.
-const REFS_DIR: &str = "refs";
-
-/// The extension git gives the lock files it creates and removes around every write.
-const LOCK_EXTENSION: &str = "lock";
-
-/// A watched project: where to read its status from, and the repository state that says when to.
-struct Watched {
-    root: PathBuf,
-    state_dir: PathBuf,
-}
-
-/// The watches held for one project.
-///
-/// The handles are never read: holding one *is* the watch, and dropping it is what releases the OS
-/// resources. `refusal` is the working tree's, kept because a re-sync reports every open project's
-/// standing answer and does not re-establish the watches it already holds.
-struct Held {
-    _handles: Vec<Box<dyn WatchHandle>>,
-    refusal: Option<WatchError>,
-}
-
 /// Turns repository-state changes into debounced status re-reads. Built once by the composition
 /// root (via [`crate::facade::Facade::git_status_watch_loop`]) and spawned on the runtime.
 pub struct GitStatusWatchReactor {
@@ -126,7 +90,7 @@ impl GitStatusWatchReactor {
     /// Builds a reactor over the file watcher and clock, watching the git context weakly (so it
     /// never keeps the app alive), subscribing to the bus for project lifecycle and the shutdown
     /// signal, and reporting what the OS refuses through the shared [`WatchStatus`].
-    pub fn new(
+    pub(crate) fn new(
         clock: Arc<dyn Clock>,
         watcher: Arc<dyn FileWatcher>,
         bus: &EventBus,
@@ -148,13 +112,11 @@ impl GitStatusWatchReactor {
     /// Runs the reactor until the bus closes (app shutdown) or the git context is dropped.
     pub async fn run(mut self) {
         let (changes_tx, mut changes_rx) = mpsc::channel(CHANGE_BUFFER);
-        // The watch state, held for the reactor's lifetime. `watches` keeps each project's OS
-        // watches alive: dropping a handle stops its watch (the bounded-resource contract), so
-        // a handle lives exactly as long as its project is open. `watched` is what a change
-        // event is matched against and where a re-read runs.
-        let mut watches: HashMap<ProjectId, Held> = HashMap::new();
-        let mut watched: HashMap<ProjectId, Watched> = HashMap::new();
-        self.resync(&changes_tx, &mut watches, &mut watched).await;
+        // The watch set, held for the reactor's lifetime: it keeps each project's OS watches alive,
+        // and `resync` reconciles it to the registry — once now, then again on each project open or
+        // removal.
+        let mut watches = Watches::new(self.watcher.clone(), changes_tx);
+        self.resync(&mut watches).await;
 
         let mut debouncers: HashMap<ProjectId, Debouncer> = HashMap::new();
         // The projects whose pending read is already a retry, so a repository that keeps failing
@@ -174,8 +136,8 @@ impl GitStatusWatchReactor {
                         // have been replaced since (a fresh clone over a deleted checkout is a
                         // new inode), which silently invalidates the OS watch.
                         Ok(DomainEvent::ProjectOpened { id }) => {
-                            watches.remove(&id);
-                            self.resync(&changes_tx, &mut watches, &mut watched).await;
+                            watches.release(id);
+                            self.resync(&mut watches).await;
                         }
                         Ok(DomainEvent::ProjectRemoved { id }) => {
                             if let Some(git) = self.git.upgrade() {
@@ -183,13 +145,13 @@ impl GitStatusWatchReactor {
                             }
                             debouncers.remove(&id);
                             retried.remove(&id);
-                            self.resync(&changes_tx, &mut watches, &mut watched).await;
+                            self.resync(&mut watches).await;
                         }
                         // A lag may have hidden an open whose directory was replaced, so rebuild
                         // every watch rather than trust the ones we hold.
                         Err(RecvError::Lagged(_)) => {
-                            watches.clear();
-                            self.resync(&changes_tx, &mut watches, &mut watched).await;
+                            watches.release_all();
+                            self.resync(&mut watches).await;
                         }
                         Ok(_) => {}
                     }
@@ -202,7 +164,7 @@ impl GitStatusWatchReactor {
                     };
                     if !is_lock(&path) {
                         let now = self.clock.now();
-                        for project in projects_of(&watched, &path) {
+                        for project in watches.projects_of(&path) {
                             debouncers
                                 .entry(project)
                                 .or_insert_with(|| Debouncer::bounded(QUIET, MAX_POSTPONE))
@@ -224,7 +186,7 @@ impl GitStatusWatchReactor {
                         debouncer.due_at().is_some()
                     });
                     for project in due {
-                        let Some(root) = watched.get(&project).map(|w| w.root.clone()) else {
+                        let Some(root) = watches.root_of(project) else {
                             continue;
                         };
                         // Reading a repository runs an external tool, so it goes to the blocking
@@ -265,153 +227,27 @@ impl GitStatusWatchReactor {
         drop(watches);
     }
 
-    /// Reconciles the per-project OS watches to the registry: a project already watched keeps
-    /// its watches (no churn), a newly-opened one gains a non-recursive watch on its repository
-    /// state, a tree watch on the refs inside it, and a tree watch on its working tree, and a
-    /// removed one has its handles dropped, releasing the OS resources. A failed registry read
-    /// changes nothing — the next lifecycle event re-syncs.
+    /// Reconciles the watches to the registry: a newly-opened project gains them, an already
+    /// watched one keeps the ones it holds, and a removed one has its handles dropped, releasing
+    /// the OS resources. A failed registry read changes nothing — the next lifecycle event
+    /// re-syncs.
     ///
     /// Every open project's standing answer — watched, or the refusal met establishing it — is
     /// reported to [`WatchStatus`], so a repository whose changes have stopped reporting says so
     /// rather than looking like one nobody is touching.
-    async fn resync(
-        &self,
-        changes_tx: &mpsc::Sender<PathBuf>,
-        watches: &mut HashMap<ProjectId, Held>,
-        watched: &mut HashMap<ProjectId, Watched>,
-    ) {
+    async fn resync(&self, watches: &mut Watches) {
         let Ok(records) = self.projects.list() else {
             return;
         };
-        watched.clear();
         let mut open: HashSet<ProjectId> = HashSet::new();
-        let mut outcomes: Vec<(ProjectId, Option<WatchError>)> = Vec::new();
+        let mut outcomes: Vec<WatchOutcome> = Vec::new();
         for record in records {
             open.insert(record.id);
-            let state_dir = record.root.join(STATE_DIR);
-            let refusal = match watches.entry(record.id) {
-                Entry::Occupied(slot) => slot.get().refusal,
-                Entry::Vacant(slot) => {
-                    slot.insert(
-                        self.establish(&record.root, &state_dir, changes_tx.clone())
-                            .await,
-                    )
-                    .refusal
-                }
-            };
-            outcomes.push((record.id, refusal));
-            watched.insert(
-                record.id,
-                Watched {
-                    root: record.root,
-                    state_dir,
-                },
-            );
+            outcomes.push(watches.establish(record.id, record.root).await);
         }
-        watches.retain(|project, _| open.contains(project));
+        watches.retain(&open);
         self.status.resynced(WatchPurpose::GitStatus, &outcomes);
     }
-
-    /// The watches one project's status needs: its repository state, the refs tree inside it, and
-    /// its working tree.
-    ///
-    /// Registering them reads the filesystem — the working-tree watch walks the whole tree — so all
-    /// three go to the blocking pool together: a large repository must never park a runtime worker
-    /// while the OS enumerates its directories.
-    ///
-    /// Each is independent, so what can be watched is. A refused working-tree watch still leaves
-    /// what version control itself writes reporting, which is why the repository-state watches are
-    /// separate from the tree watch that spans them: the tree watch is the one an exhausted watch
-    /// budget refuses first, and losing it must not take committing and staging down with it.
-    ///
-    /// Only the working tree's refusal is carried back to [`WatchStatus`], though every refusal is
-    /// traced. A project that is not a repository has no `.git` to watch, so a state-dir refusal is
-    /// the ordinary case rather than a loss — reporting it would put a notice on every project not
-    /// under version control. The working-tree watch is the one every project has, and the one whose
-    /// silence is indistinguishable from a tree nobody edits.
-    async fn establish(
-        &self,
-        root: &Path,
-        state_dir: &Path,
-        changes: mpsc::Sender<PathBuf>,
-    ) -> Held {
-        let watcher = self.watcher.clone();
-        let state_dir = state_dir.to_path_buf();
-        let refs_dir = state_dir.join(REFS_DIR);
-        let root = root.to_path_buf();
-        run_blocking(move || {
-            let mut handles: Vec<Box<dyn WatchHandle>> = [
-                (
-                    state_dir.clone(),
-                    watcher.watch_dir(state_dir, changes.clone()),
-                ),
-                (refs_dir.clone(), watcher.watch(refs_dir, changes.clone())),
-            ]
-            .into_iter()
-            .filter_map(|(path, established)| traced(&path, established).ok())
-            .collect();
-            let refusal = match traced(&root, watcher.watch(root.clone(), changes)) {
-                Ok(handle) => {
-                    handles.push(handle);
-                    None
-                }
-                Err(refusal) => Some(refusal),
-            };
-            Held {
-                _handles: handles,
-                refusal,
-            }
-        })
-        .await
-    }
-}
-
-/// Traces a refused watch on `path` and passes the outcome through unchanged, so the watches whose
-/// refusal is only worth logging and the one that is also reported say it the same way.
-fn traced(
-    path: &Path,
-    established: Result<Box<dyn WatchHandle>, WatchError>,
-) -> Result<Box<dyn WatchHandle>, WatchError> {
-    if let Err(refusal) = &established {
-        tracing::warn!(
-            path = %path.display(),
-            %refusal,
-            "a repository's changes will not report: the directory could not be watched",
-        );
-    }
-    established
-}
-
-/// Every watched project whose status `path` is part of — through its repository state or its
-/// working tree.
-///
-/// More than one can match, because projects nest: a repository opened inside another project's
-/// tree shares its files, so a file changed there changes what both statuses say. Each is armed,
-/// since each is a status of its own with a rail of its own — and a project whose status turns out
-/// not to have changed announces nothing, so the extra read costs a subprocess and no more.
-///
-/// The working tree is matched by the project root minus the ignored directories, and `.git` is
-/// one of them, so a repository-state path can only ever match a project through its `state_dir`.
-/// That is what keeps the tree watch (which spans `.git` too, being recursive over the root) from
-/// making one `.git` write look like two different changes.
-fn projects_of<'a>(
-    watched: &'a HashMap<ProjectId, Watched>,
-    path: &'a Path,
-) -> impl Iterator<Item = ProjectId> + 'a {
-    watched
-        .iter()
-        .filter(move |(_, repo)| {
-            path.starts_with(&repo.state_dir)
-                || path
-                    .strip_prefix(&repo.root)
-                    .is_ok_and(|relative| !is_ignored(relative))
-        })
-        .map(|(&project, _)| project)
-}
-
-/// Whether `path` is one of the lock files git writes around its own writes.
-fn is_lock(path: &Path) -> bool {
-    path.extension().is_some_and(|ext| ext == LOCK_EXTENSION)
 }
 
 #[cfg(test)]

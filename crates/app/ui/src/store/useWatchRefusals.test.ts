@@ -20,7 +20,7 @@ const API = 2;
 const refused: DomainEvent = {
   type: "WatchRefusalChanged",
   project: STOREFRONT,
-  refusal: "budget_exhausted",
+  refusals: { restarts: "budget_exhausted" },
 };
 
 afterEach(() => vi.clearAllMocks());
@@ -38,24 +38,53 @@ describe("useWatchRefusals", () => {
     expect(result.current.size).toBe(0);
   });
 
-  it("reports why a project's watches were refused", () => {
+  it("reports which of a project's watches were refused, and why", () => {
     const { result } = renderHook(() => useWatchRefusals());
     fire(refused);
-    expect(result.current.get(STOREFRONT)).toBe("budget_exhausted");
+    expect(result.current.get(STOREFRONT)).toEqual({ restarts: "budget_exhausted" });
   });
 
-  it("keeps each project's refusal to itself", () => {
+  it("keeps each project's refusals to itself", () => {
     const { result } = renderHook(() => useWatchRefusals());
     fire(refused);
-    fire({ type: "WatchRefusalChanged", project: API, refusal: "unwatchable" });
-    expect(result.current.get(STOREFRONT)).toBe("budget_exhausted");
-    expect(result.current.get(API)).toBe("unwatchable");
+    fire({
+      type: "WatchRefusalChanged",
+      project: API,
+      refusals: { git_status: "unwatchable" },
+    });
+    expect(result.current.get(STOREFRONT)).toEqual({ restarts: "budget_exhausted" });
+    expect(result.current.get(API)).toEqual({ git_status: "unwatchable" });
+  });
+
+  it("reports a refusal that has since changed its reason", () => {
+    const { result } = renderHook(() => useWatchRefusals());
+    fire(refused);
+    fire({
+      type: "WatchRefusalChanged",
+      project: STOREFRONT,
+      refusals: { restarts: "unavailable" },
+    });
+    expect(result.current.get(STOREFRONT)).toEqual({ restarts: "unavailable" });
+  });
+
+  // A repeat carries a fresh object, so a hook that took the new one anyway would hand every
+  // project header a new map and re-render the sidebar for an announcement that said nothing.
+  it("holds its map still when an announcement repeats what it already reports", () => {
+    const { result } = renderHook(() => useWatchRefusals());
+    fire(refused);
+    const reported = result.current;
+    fire({
+      type: "WatchRefusalChanged",
+      project: STOREFRONT,
+      refusals: { restarts: "budget_exhausted" },
+    });
+    expect(result.current).toBe(reported);
   });
 
   it("stops reporting a project whose watches were established again", () => {
     const { result } = renderHook(() => useWatchRefusals());
     fire(refused);
-    fire({ type: "WatchRefusalChanged", project: STOREFRONT, refusal: null });
+    fire({ type: "WatchRefusalChanged", project: STOREFRONT, refusals: {} });
     expect(result.current.has(STOREFRONT)).toBe(false);
   });
 

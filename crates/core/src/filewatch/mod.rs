@@ -14,5 +14,5 @@ mod watcher;
 
 pub(crate) use policy::is_ignored;
 pub use reactor::WatchReactor;
-pub use status::{WatchPurpose, WatchStatus};
+pub(crate) use status::WatchStatus;
 pub use watcher::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle};

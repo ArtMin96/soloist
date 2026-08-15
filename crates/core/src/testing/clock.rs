@@ -50,8 +50,16 @@ impl MockClock {
         }
     }
 
-    /// Resolves once a deadline is waiting on this clock — the deterministic signal that a
-    /// `Clock`-driven loop has armed its next wake and is parked on it.
+    /// Resolves once a deadline is waiting on this clock at exactly `deadline` — the deterministic
+    /// signal that the `Clock`-driven loop under test has armed the wake the test is about to
+    /// advance past.
+    ///
+    /// The instant, rather than "any deadline at all": one clock is shared by everything a test
+    /// builds over it, so a wait satisfied by whichever sleeper happened to arrive first is correct
+    /// only while the loop under test is the only thing arming one — a precondition nothing checks
+    /// and any added sampler or timer quietly breaks. Time here moves only when a test advances it,
+    /// so the instant a debounce arms at is one the test can name: the clock's reading plus that
+    /// loop's quiet window.
     ///
     /// A test awaits this before [`Self::advance`], because the two are not interchangeable in
     /// either order: time this clock moves past a deadline that has not been registered yet is
@@ -59,9 +67,13 @@ impl MockClock {
     /// advance the test has already made. Awaiting a scheduler budget of `yield_now`s instead
     /// only makes that race rarer, never impossible — the loop is woken across threads (the
     /// blocking pool), so no number of yields orders the two.
-    pub async fn deadline_armed(&self) {
+    pub async fn deadline_armed_at(&self, deadline: Instant) {
         bounded("a deadline to be armed on the mock clock", async {
-            while lock(&self.state).sleepers.is_empty() {
+            while !lock(&self.state)
+                .sleepers
+                .iter()
+                .any(|sleeper| sleeper.deadline == deadline)
+            {
                 self.armed.notified().await;
             }
         })

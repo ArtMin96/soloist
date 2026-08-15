@@ -1,11 +1,21 @@
 import { useEffect, useState } from "react";
 import { onDomainEvent } from "@/api";
+import type { PurposeRefusals, WatchPurpose } from "@/domain";
 import type { WatchRefusals } from "@/store/watchContext";
 
-// Tracks which projects the OS has refused a filesystem watch for, so the sidebar can say that a
-// project's restart-on-change and live git status have stopped. Fed by WatchRefusalChanged, which
-// the core edge-triggers in both directions: a refusal arrives once however many times the
-// reactors retry it, and a watch established later arrives as a null refusal that clears the row.
+// Whether an announcement says anything the row does not already hold. It arrives as a fresh object
+// however many times the core repeats it, so recognizing a repeat by identity would hand every
+// project header a new map and re-render the sidebar for nothing.
+function alreadyHeld(held: PurposeRefusals | undefined, announced: PurposeRefusals): boolean {
+  const purposes = Object.keys(announced) as WatchPurpose[];
+  if (purposes.length !== Object.keys(held ?? {}).length) return false;
+  return purposes.every((purpose) => held?.[purpose] === announced[purpose]);
+}
+
+// Tracks which of each project's filesystem watches the OS has refused, so the sidebar can say what
+// stopped working. Fed by WatchRefusalChanged, which the core edge-triggers in both directions: a
+// refusal arrives once however many times the reactors retry it, and a watch established later
+// arrives as an empty set of refusals that clears the row.
 //
 // A removed project is dropped as well, because the core withdraws a refusal only for a project it
 // still knows about — its rows go with it either way, and a stale key would keep a notice alive for
@@ -21,11 +31,11 @@ export function useWatchRefusals(): WatchRefusals {
     let unlisten: (() => void) | undefined;
     onDomainEvent((event) => {
       if (event.type === "WatchRefusalChanged") {
-        const { project, refusal } = event;
+        const { project, refusals: announced } = event;
         setRefusals((prev) => {
-          if (prev.get(project) === (refusal ?? undefined)) return prev;
+          if (alreadyHeld(prev.get(project), announced)) return prev;
           const next = new Map(prev);
-          if (refusal) next.set(project, refusal);
+          if (Object.keys(announced).length > 0) next.set(project, announced);
           else next.delete(project);
           return next;
         });
