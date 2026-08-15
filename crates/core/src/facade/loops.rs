@@ -104,6 +104,7 @@ impl Facade {
             self.file_watcher.clone(),
             &self.bus,
             Arc::downgrade(&self.supervisor),
+            self.watch_status.clone(),
         )
         .run()
     }
@@ -145,6 +146,7 @@ impl Facade {
             &self.bus,
             Arc::downgrade(&self.git),
             self.projects.clone(),
+            self.watch_status.clone(),
         )
         .run()
     }

@@ -23,7 +23,11 @@ describe("changed-file tree actions", () => {
   it("keeps a nested row's actions inside the rail after its directories expand", async () => {
     await gitRail.reexpandFolders();
 
-    const right = await gitRail.actionRightEdges(CHANGED_PATH);
-    expect(right.action).toBeLessThanOrEqual(right.rail);
+    const placement = await gitRail.actionPlacement(CHANGED_PATH);
+    expect(placement.actionsRight).toBeLessThanOrEqual(placement.railRight);
+    // Two halves of one claim. A row wide enough to carry its actions past the rail's edge has
+    // them clipped away rather than merely misplaced, so the reader is left with a control they
+    // can see no part of and cannot press — which the edges alone would not say.
+    expect(placement.reachable).toBe(true);
   });
 });

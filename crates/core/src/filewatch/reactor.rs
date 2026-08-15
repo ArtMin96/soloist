@@ -14,6 +14,7 @@
 //! ends when the event bus closes (app shutdown), like the crash reactor; command-only,
 //! trusted-only, and running-only all follow from the watch targets and the restart gate.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
@@ -29,8 +30,10 @@ use crate::ids::ProcessId;
 use crate::ports::Clock;
 use crate::supervision::run_blocking;
 use crate::supervisor::Supervisor;
+use crate::watch::{WatchError, WatchOutcome, WatchPurpose};
 
 use super::policy::{compile, WatchRule};
+use super::status::WatchStatus;
 use super::watcher::{FileWatcher, WatchHandle};
 
 /// The quiet window a burst of changes is coalesced into before a restart fires. Long enough
@@ -49,22 +52,26 @@ pub struct WatchReactor {
     watcher: Arc<dyn FileWatcher>,
     events: broadcast::Receiver<DomainEvent>,
     supervisor: Weak<Supervisor>,
+    status: Arc<WatchStatus>,
 }
 
 impl WatchReactor {
     /// Builds a reactor over the file watcher and clock, watching the given supervisor weakly
-    /// (so it never keeps the app alive) and subscribing to the bus for the shutdown signal.
-    pub fn new(
+    /// (so it never keeps the app alive), subscribing to the bus for the shutdown signal, and
+    /// reporting what the OS refuses through the shared [`WatchStatus`].
+    pub(crate) fn new(
         clock: Arc<dyn Clock>,
         watcher: Arc<dyn FileWatcher>,
         bus: &EventBus,
         supervisor: Weak<Supervisor>,
+        status: Arc<WatchStatus>,
     ) -> Self {
         Self {
             clock,
             watcher,
             events: bus.subscribe(),
             supervisor,
+            status,
         }
     }
 
@@ -158,10 +165,14 @@ impl WatchReactor {
     ///
     /// Registering a watch walks the tree under its root, so it goes to the blocking pool: a large
     /// project must never park a runtime worker while the OS enumerates its directories. A root the
-    /// OS refuses is traced and left out of the watch set rather than recorded as watched — a watch
-    /// that yields no events looks exactly like a project nobody edits, so a swallowed refusal would
-    /// be a restart trigger that quietly stopped working. Left out, it is asked for again on the next
-    /// re-sync, so a refusal that has since cleared is not permanent.
+    /// OS refuses is left out of the watch set rather than recorded as watched, so it is asked for
+    /// again on the next re-sync and a refusal that has since cleared is not permanent — and it is
+    /// reported to [`WatchStatus`], because a watch that yields no events looks exactly like a
+    /// project nobody edits, so a refusal nobody is told about is a restart trigger that stopped
+    /// working in silence.
+    ///
+    /// Every eligible project is reported each time, watched or refused, so the status can withdraw
+    /// a refusal for a project that is no longer watched at all.
     async fn resync(
         &self,
         supervisor: &Supervisor,
@@ -171,43 +182,55 @@ impl WatchReactor {
     ) {
         rules.clear();
         let mut desired: HashSet<PathBuf> = HashSet::new();
+        let mut outcomes: Vec<WatchOutcome> = Vec::new();
         for target in supervisor.watch_targets() {
             let Some(set) = compile(&target.globs) else {
                 continue;
             };
-            if desired.insert(target.project_root.clone())
-                && !watches.contains_key(&target.project_root)
-            {
-                if let Some(handle) = self
-                    .establish(&target.project_root, changes_tx.clone())
-                    .await
-                {
-                    watches.insert(target.project_root.clone(), handle);
-                }
+            if desired.insert(target.project_root.clone()) {
+                let refusal = match watches.entry(target.project_root.clone()) {
+                    Entry::Occupied(_) => None,
+                    Entry::Vacant(slot) => {
+                        match self
+                            .establish(&target.project_root, changes_tx.clone())
+                            .await
+                        {
+                            Ok(handle) => {
+                                slot.insert(handle);
+                                None
+                            }
+                            Err(refusal) => Some(refusal),
+                        }
+                    }
+                };
+                outcomes.push(WatchOutcome {
+                    project: target.project,
+                    refusal,
+                });
             }
             rules.push(WatchRule::new(target.id, target.project_root, set));
         }
         watches.retain(|root, _| desired.contains(root));
+        self.status.resynced(WatchPurpose::Restarts, &outcomes);
     }
 
-    /// A tree watch on `root`, registered off the runtime, or `None` with the refusal traced.
+    /// A tree watch on `root`, registered off the runtime, or the refusal the OS gave — traced
+    /// here so the log carries the path, and returned so the caller can report it.
     async fn establish(
         &self,
         root: &Path,
         changes: mpsc::Sender<PathBuf>,
-    ) -> Option<Box<dyn WatchHandle>> {
+    ) -> Result<Box<dyn WatchHandle>, WatchError> {
         let watcher = self.watcher.clone();
         let root = root.to_path_buf();
-        run_blocking(move || match watcher.watch(root.clone(), changes) {
-            Ok(handle) => Some(handle),
-            Err(refusal) => {
+        run_blocking(move || {
+            watcher.watch(root.clone(), changes).inspect_err(|refusal| {
                 tracing::warn!(
                     path = %root.display(),
                     %refusal,
                     "a project's watched files will not restart anything: it could not be watched",
                 );
-                None
-            }
+            })
         })
         .await
     }

@@ -9,8 +9,10 @@
 
 mod policy;
 mod reactor;
+mod status;
 mod watcher;
 
 pub(crate) use policy::is_ignored;
 pub use reactor::WatchReactor;
-pub use watcher::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchError, WatchHandle};
+pub(crate) use status::WatchStatus;
+pub use watcher::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle};

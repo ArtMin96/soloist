@@ -20,7 +20,7 @@ use crate::config::ConfigEngine;
 use crate::configchange::{ConfigSync, TrustReviewCommand};
 use crate::coordination::{Diagrams, Kv, Leases, Scratchpads, Templates, Timers, Todos};
 use crate::events::{DomainEvent, EventBus};
-use crate::filewatch::FileWatcher;
+use crate::filewatch::{FileWatcher, WatchStatus};
 use crate::git::Git;
 use crate::identity::Identity;
 use crate::ids::{ProcessId, ProjectId};
@@ -109,6 +109,9 @@ pub struct Facade {
     metrics: Arc<dyn MetricsProbe>,
     port_probe: Arc<dyn PortProbe>,
     file_watcher: Arc<dyn FileWatcher>,
+    // Shared by both watch reactors, so a project the OS refuses is reported once whichever of
+    // them met the refusal.
+    watch_status: Arc<WatchStatus>,
     // `Arc`, like the supervisor: the git status watch reactor shares it beyond `&self`.
     git: Arc<Git>,
     notifier: Arc<dyn Notifier>,
@@ -201,6 +204,7 @@ impl Facade {
                 file_opener,
                 trust.clone(),
             )),
+            watch_status: Arc::new(WatchStatus::new(bus.clone())),
             clock,
             metrics,
             port_probe,

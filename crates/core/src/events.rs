@@ -9,6 +9,8 @@
 //! gap-filled stream. The channel is bounded so a stalled subscriber can never grow
 //! memory without limit.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 use tokio::sync::broadcast;
 
@@ -19,6 +21,7 @@ use crate::ids::{ProcessId, ProjectId, TimerId, TodoId};
 use crate::orphans::OrphanInfo;
 use crate::process::{ProcStatus, ProcessKind};
 use crate::template::TemplateKind;
+use crate::watch::{WatchError, WatchPurpose};
 
 /// A change in domain state, serialized to adapters verbatim. `#[serde(tag = "type")]`
 /// gives each variant a discriminator field so a JS/TS consumer can switch on it.
@@ -227,6 +230,30 @@ pub enum DomainEvent {
     /// payload, so a repository under active change coalesces to one re-query per frame
     /// instead of one per file.
     GitStatusChanged { project: ProjectId },
+    /// Which of a project's watches the OS is refusing changed: `refusals` names a reason for each
+    /// [`WatchPurpose`] turned down, and is empty once every watch it had refused is established
+    /// again.
+    ///
+    /// Keyed by purpose because the two watches fail into different sentences — a refused restart
+    /// watch stops a `restart_when_changed` command reloading on a save, a refused git watch stops
+    /// a status refreshing on its own — and a project can meet one without the other, or ask for
+    /// only one of them. Handed a single reason for the pair, a surface could only claim both,
+    /// including on a project that declares no `restart_when_changed` and never asks for that
+    /// watch at all.
+    ///
+    /// Edge-triggered in both directions, like [`Self::ReadyStateChanged`]: the reactors ask for a
+    /// refused root again on every re-sync, so a signal per attempt would repeat one sentence for
+    /// as long as the condition lasted.
+    ///
+    /// It carries the refusals rather than pointing at a read model, deliberately. An exhausted
+    /// watch budget is the user's to raise and an unreadable directory is not, and there is no
+    /// record to re-query for which it was. This is the one degradation nothing else reveals — a
+    /// watch that yields no events looks exactly like a tree nobody edits — so if it is not said
+    /// here it is not said at all.
+    WatchRefusalChanged {
+        project: ProjectId,
+        refusals: BTreeMap<WatchPurpose, WatchError>,
+    },
 }
 
 /// The outbound event port: anything the core publishes domain events through.
@@ -271,19 +298,5 @@ impl EventSink for EventBus {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ids::ProcessId;
-
-    #[tokio::test]
-    async fn published_events_reach_a_subscriber() {
-        let bus = EventBus::new(16);
-        let mut rx = bus.subscribe();
-        let id = ProcessId::next();
-        bus.publish(DomainEvent::ProcessRemoved { id });
-        match rx.recv().await {
-            Ok(DomainEvent::ProcessRemoved { id: got }) => assert_eq!(got, id),
-            other => panic!("unexpected event: {other:?}"),
-        }
-    }
-}
+#[path = "events_tests.rs"]
+mod tests;

@@ -43,6 +43,8 @@ import { FileDropProvider } from "@/store/FileDropProvider";
 import { SignalsProvider } from "@/store/SignalsProvider";
 import { useTrust } from "@/store/useTrust";
 import { AttentionContext, useAttentionMarks } from "@/store/attentionContext";
+import { useWatchRefusals } from "@/store/useWatchRefusals";
+import { WatchContext } from "@/store/watchContext";
 import { OpenSettingsContext, type OpenSettings } from "@/store/settingsContext";
 import { useAttention } from "@/store/useAttention";
 import { usePresence } from "@/store/usePresence";
@@ -69,6 +71,7 @@ export default function App() {
   const projects = useProjects(store.reportError);
   const trust = useTrust(store.refresh, store.reportError);
   const orphans = useOrphans(store.reportError);
+  const watchRefusals = useWatchRefusals();
   const agents = useAgents(store.reportError);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [orchestrationProjectId, setOrchestrationProjectId] = useState<number | null>(null);
@@ -285,29 +288,33 @@ export default function App() {
                         <ErrorBanner message={store.error} onDismiss={store.clearError} />
                       )}
                       <div className="flex min-h-0 flex-1">
-                        <Sidebar
-                          projects={projects.projects}
-                          processes={store.processes}
-                          lineage={lineage}
-                          selectedId={selectedId}
-                          onSelect={selectProcess}
-                          onStart={startProcess}
-                          onStop={stopProcess}
-                          onRestart={restartProcess}
-                          onResume={resumeProcess}
-                          onTrust={reviewById}
-                          onRemove={requestProcessRemoval}
-                          onStartAll={store.startAll}
-                          onRestartRunning={store.restartRunning}
-                          onStopAll={stopProject}
-                          onOpenStart={openStart}
-                          startActive={!selected && !selectedProject && !orchestrationProject}
-                          onOpenSettings={() => openSettings()}
-                          onOpenProjectSettings={openProjectSettings}
-                          onOpenOrchestration={openOrchestration}
-                          onRemoveProject={projects.remove}
-                          onReorderProjects={projects.reorder}
-                        />
+                        {/* Scoped to the rail: a refused watch is announced on the project header
+                            it belongs to, and nothing outside the sidebar reads it. */}
+                        <WatchContext value={watchRefusals}>
+                          <Sidebar
+                            projects={projects.projects}
+                            processes={store.processes}
+                            lineage={lineage}
+                            selectedId={selectedId}
+                            onSelect={selectProcess}
+                            onStart={startProcess}
+                            onStop={stopProcess}
+                            onRestart={restartProcess}
+                            onResume={resumeProcess}
+                            onTrust={reviewById}
+                            onRemove={requestProcessRemoval}
+                            onStartAll={store.startAll}
+                            onRestartRunning={store.restartRunning}
+                            onStopAll={stopProject}
+                            onOpenStart={openStart}
+                            startActive={!selected && !selectedProject && !orchestrationProject}
+                            onOpenSettings={() => openSettings()}
+                            onOpenProjectSettings={openProjectSettings}
+                            onOpenOrchestration={openOrchestration}
+                            onRemoveProject={projects.remove}
+                            onReorderProjects={projects.reorder}
+                          />
+                        </WatchContext>
                         {/* A column, so the diff opens as a split at the foot of the area
                           rather than in place of what is above it. The panes keep their own
                           region: nothing here remounts the terminal when the split appears. */}
