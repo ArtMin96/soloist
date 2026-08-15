@@ -2,12 +2,16 @@ use super::*;
 
 use crate::error::IpcError;
 use soloist_core::{
-    AcquireOutcome, AgentKind, AgentTool, ExportedTemplate, FeedbackEntry, FireCond,
-    IntegrationFile, IntegrationWrite, LeaseView, MergeMethod, MissingPolicy, NewPullRequest,
-    Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, ProjectView,
-    PromptMode, Readiness, RenderedPrompt, ScratchpadId, ScratchpadView, SessionId,
-    SetWhenIdleOutcome, StartSummary, TemplateId, TemplateKind, TemplateScope, TemplateSummary,
-    TemplateView, TimerId, TimerStatus, TimerView, TodoDoc, TodoId, TodoStatus, TodoView, Whoami,
+    AcquireOutcome, AgentBroadcastReceipt, AgentKind, AgentMailboxError, AgentMessage,
+    AgentMessageDelivery, AgentMessageId, AgentMessageKind, AgentMessageOutcome,
+    AgentMessageReceipt, AgentRelationship, AgentRosterEntry, AgentTool, CompletionNotification,
+    CompletionReport, ExportedTemplate, FeedbackEntry, FireCond, IntegrationFile, IntegrationWrite,
+    LeaseView, MergeMethod, MissingPolicy, NewPullRequest, Origin, ProcStatus, ProcessId,
+    ProcessKind, ProcessView, ProjectId, ProjectRef, ProjectView, PromptMode, Readiness,
+    RenderedPrompt, ScratchpadId, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary,
+    TemplateId, TemplateKind, TemplateScope, TemplateSummary, TemplateView, TimerId, TimerStatus,
+    TimerView, TodoCompletion, TodoCompletionKey, TodoCompletionOccurrence, TodoDoc, TodoId,
+    TodoStatus, TodoView, Whoami,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -42,6 +46,35 @@ fn sample_todo() -> TodoView {
         locked_by: None,
         scratchpad: None,
         revision: 1,
+    }
+}
+
+fn sample_agent_delivery() -> AgentMessageDelivery {
+    AgentMessageDelivery {
+        message: sample_agent_message(),
+        outcome: AgentMessageOutcome::Queued,
+    }
+}
+
+fn sample_todo_completion() -> TodoCompletion {
+    TodoCompletion::for_test(
+        TodoId::from_raw(8),
+        TodoCompletionKey::for_test(ProcessId::from_raw(12), AgentMessageId::from_raw(3)),
+        "Adapter wired".into(),
+        4,
+        false,
+    )
+}
+
+fn sample_agent_message() -> AgentMessage {
+    AgentMessage {
+        id: AgentMessageId::from_raw(3),
+        project: ProjectId::from_raw(1),
+        sender: ProcessId::from_raw(7),
+        recipient: ProcessId::from_raw(12),
+        kind: AgentMessageKind::Task,
+        body: "Review the adapter".into(),
+        todo_id: Some(TodoId::from_raw(8)),
     }
 }
 
@@ -99,6 +132,31 @@ fn requests_round_trip_through_json() {
         IpcRequest::SpawnAgent {
             tool: "Claude".into(),
             extra_args: vec!["--model".into(), "opus".into()],
+            prompt: Some("Review the mailbox change".into()),
+            todo_id: Some(TodoId::from_raw(8)),
+            include_agent_instructions: false,
+        },
+        IpcRequest::AgentRoster,
+        IpcRequest::AgentMessageSend {
+            recipient: ProcessId::from_raw(12),
+            body: "Please review the adapter".into(),
+            todo_id: Some(TodoId::from_raw(8)),
+        },
+        IpcRequest::AgentMessageBroadcast {
+            body: "Interfaces are stable".into(),
+            todo_id: None,
+        },
+        IpcRequest::AgentMessageList,
+        IpcRequest::AgentMessageGet {
+            message_id: soloist_core::AgentMessageId::from_raw(3),
+        },
+        IpcRequest::AgentMessageAcknowledge {
+            message_id: soloist_core::AgentMessageId::from_raw(3),
+        },
+        IpcRequest::AgentReportCompletion {
+            task_message_id: AgentMessageId::from_raw(3),
+            todo_id: Some(TodoId::from_raw(8)),
+            summary: "Adapter wired".into(),
         },
         IpcRequest::ListAgentTools,
         IpcRequest::StartAllCommands,
@@ -252,6 +310,32 @@ fn every_response_variant_round_trips_through_json() {
             kind: AgentKind::Claude,
             prompt_mode: PromptMode::AppendedArg,
         }]),
+        IpcResponse::AgentRoster(vec![AgentRosterEntry {
+            process: ProcessId::from_raw(12),
+            parent: Some(ProcessId::from_raw(7)),
+            root: ProcessId::from_raw(7),
+            relationship: AgentRelationship::Child,
+            label: "reviewer".into(),
+            status: ProcStatus::Running,
+        }]),
+        IpcResponse::AgentMessageDelivery(AgentMessageDelivery {
+            message: sample_agent_message(),
+            outcome: AgentMessageOutcome::WakeSubmitted,
+        }),
+        IpcResponse::AgentMessageBroadcast(AgentBroadcastReceipt {
+            deliveries: vec![AgentMessageReceipt {
+                message_id: AgentMessageId::from_raw(3),
+                recipient: ProcessId::from_raw(12),
+                outcome: AgentMessageOutcome::Queued,
+            }],
+        }),
+        IpcResponse::AgentMessage(sample_agent_delivery()),
+        IpcResponse::AgentMessages(vec![sample_agent_delivery()]),
+        IpcResponse::AgentCompletion(CompletionReport {
+            completion: Some(sample_todo_completion()),
+            occurrence: Some(TodoCompletionOccurrence::Recorded),
+            notification: CompletionNotification::Deferred { recipient: None },
+        }),
         IpcResponse::BulkStarted(StartSummary {
             started: vec![ProcessId::from_raw(3), ProcessId::from_raw(4)],
             skipped_untrusted: vec![ProcessId::from_raw(5)],
@@ -354,6 +438,131 @@ where
     assert_eq!(
         serde_json::from_value::<T>(json).expect("deserialize"),
         value
+    );
+}
+
+#[test]
+fn the_agent_messaging_requests_pin_the_authenticated_wire_shape() {
+    pins(
+        IpcRequest::AgentRoster,
+        serde_json::json!({ "op": "agent_roster" }),
+    );
+    pins(
+        IpcRequest::AgentMessageSend {
+            recipient: ProcessId::from_raw(12),
+            body: "Review the adapter".into(),
+            todo_id: Some(TodoId::from_raw(8)),
+        },
+        serde_json::json!({
+            "op": "agent_message_send",
+            "recipient": 12,
+            "body": "Review the adapter",
+            "todo_id": 8,
+        }),
+    );
+    pins(
+        IpcRequest::AgentMessageBroadcast {
+            body: "Interfaces are stable".into(),
+            todo_id: None,
+        },
+        serde_json::json!({
+            "op": "agent_message_broadcast",
+            "body": "Interfaces are stable",
+            "todo_id": null,
+        }),
+    );
+    pins(
+        IpcRequest::AgentMessageList,
+        serde_json::json!({ "op": "agent_message_list" }),
+    );
+    pins(
+        IpcRequest::AgentMessageGet {
+            message_id: soloist_core::AgentMessageId::from_raw(3),
+        },
+        serde_json::json!({ "op": "agent_message_get", "message_id": 3 }),
+    );
+    pins(
+        IpcRequest::AgentMessageAcknowledge {
+            message_id: soloist_core::AgentMessageId::from_raw(3),
+        },
+        serde_json::json!({ "op": "agent_message_acknowledge", "message_id": 3 }),
+    );
+    pins(
+        IpcRequest::AgentReportCompletion {
+            task_message_id: soloist_core::AgentMessageId::from_raw(3),
+            todo_id: Some(TodoId::from_raw(8)),
+            summary: "Adapter wired".into(),
+        },
+        serde_json::json!({
+            "op": "agent_report_completion",
+            "task_message_id": 3,
+            "todo_id": 8,
+            "summary": "Adapter wired",
+        }),
+    );
+}
+
+#[test]
+fn spawn_agent_keeps_the_old_wire_shape_without_an_initial_task() {
+    pins(
+        IpcRequest::SpawnAgent {
+            tool: "Claude".into(),
+            extra_args: Vec::new(),
+            prompt: None,
+            todo_id: None,
+            include_agent_instructions: true,
+        },
+        serde_json::json!({
+            "op": "spawn_agent",
+            "tool": "Claude",
+            "extra_args": [],
+        }),
+    );
+}
+
+#[test]
+fn spawn_agent_pins_legacy_and_initial_message_response_shapes() {
+    pins(
+        IpcResponse::Spawned(ProcessId::from_raw(12)),
+        serde_json::json!({ "ok": "spawned", "data": 12 }),
+    );
+    pins(
+        IpcResponse::SpawnedWithMessage {
+            process: ProcessId::from_raw(12),
+            initial_message_id: AgentMessageId::from_raw(3),
+            delivery: AgentMessageOutcome::Queued,
+        },
+        serde_json::json!({
+            "ok": "spawned_with_message",
+            "data": {
+                "process": 12,
+                "initial_message_id": 3,
+                "delivery": "queued",
+            },
+        }),
+    );
+}
+
+#[test]
+fn broadcast_response_is_compact_and_omits_message_bodies() {
+    pins(
+        IpcResponse::AgentMessageBroadcast(AgentBroadcastReceipt {
+            deliveries: vec![AgentMessageReceipt {
+                message_id: AgentMessageId::from_raw(3),
+                recipient: ProcessId::from_raw(12),
+                outcome: AgentMessageOutcome::WakeSubmitted,
+            }],
+        }),
+        serde_json::json!({
+            "ok": "agent_message_broadcast",
+            "data": {
+                "deliveries": [{
+                    "message_id": 3,
+                    "recipient": 12,
+                    "outcome": "wake_submitted",
+                }],
+            },
+        }),
     );
 }
 
@@ -590,6 +799,9 @@ fn a_typed_error_round_trips() {
         IpcError::Untrusted,
         IpcError::UnknownTool,
         IpcError::WorkerMayNotSpawn,
+        IpcError::UnknownAgentMessage,
+        IpcError::AgentMailboxFull,
+        IpcError::AgentMailboxByteLimit,
         IpcError::InvalidFeedback("feedback message is empty".into()),
         IpcError::UnmatchedIntegrationMarkers("AGENTS.md has unmatched markers".into()),
         IpcError::Internal("disk full".into()),
@@ -615,6 +827,9 @@ fn request_errors_are_distinguished_from_server_errors() {
         IpcError::Untrusted,
         IpcError::UnknownTool,
         IpcError::WorkerMayNotSpawn,
+        IpcError::UnknownAgentMessage,
+        IpcError::AgentMailboxFull,
+        IpcError::AgentMailboxByteLimit,
         IpcError::InvalidFeedback("feedback message is empty".into()),
         IpcError::UnmatchedIntegrationMarkers("AGENTS.md has unmatched markers".into()),
     ] {
@@ -623,6 +838,14 @@ fn request_errors_are_distinguished_from_server_errors() {
     assert!(
         !IpcError::Internal("disk full".into()).is_request_error(),
         "a server failure is not request-caused"
+    );
+}
+
+#[test]
+fn mailbox_message_lookup_has_one_not_found_wire_error() {
+    assert_eq!(
+        IpcError::from(AgentMailboxError::UnknownMessage),
+        IpcError::UnknownAgentMessage
     );
 }
 

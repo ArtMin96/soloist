@@ -261,7 +261,7 @@ impl ScopedFacade<'_> {
     /// bound process (its id plus the label resolved now and kept durably), an external caller (its
     /// label), or `None` for an unbound caller. The caller never supplies this, so the author of a
     /// comment cannot be forged.
-    fn comment_author(&self) -> Option<CommentAuthor> {
+    pub(in crate::facade) fn comment_author(&self) -> Option<CommentAuthor> {
         match self.inner.identity.origin(self.session) {
             Origin::Process(id) => Some(CommentAuthor::Process {
                 id,

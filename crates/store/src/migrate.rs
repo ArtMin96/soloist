@@ -1,12 +1,16 @@
 //! Versioned, idempotent SQLite migrations for the durable store.
 
-use rusqlite::{Connection, OptionalExtension};
-use soloist_core::{AgentTool, StoreError};
+use rusqlite::Connection;
+use soloist_core::StoreError;
 
 use crate::sql_err;
 
+mod helpers;
+
+use helpers::{column_exists, seed_builtin_agent_tools, table_exists};
+
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 20;
+pub(crate) const SCHEMA_VERSION: i64 = 21;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -345,54 +349,15 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
         .map_err(sql_err)?;
     }
 
+    if version < 21 && table_exists(conn, "todos")? && !column_exists(conn, "todos", "completion")?
+    {
+        conn.execute_batch("ALTER TABLE todos ADD COLUMN completion TEXT;")
+            .map_err(sql_err)?;
+    }
+
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(sql_err)?;
-    }
-    Ok(())
-}
-
-/// Whether a table of `name` exists — used by the guarded rename in the v14 step so it stays a
-/// no-op on a re-run.
-fn table_exists(conn: &Connection, name: &str) -> Result<bool, StoreError> {
-    conn.query_row(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
-        [name],
-        |_| Ok(()),
-    )
-    .optional()
-    .map(|found| found.is_some())
-    .map_err(sql_err)
-}
-
-/// Whether `table` has a column named `column` — used by the guarded `ADD COLUMN` steps (SQLite has
-/// no `ADD COLUMN IF NOT EXISTS`) so each stays a no-op on a re-run. `table` is a code
-/// literal here, never caller input, so interpolating it into the `PRAGMA` is safe.
-fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, StoreError> {
-    let mut stmt = conn
-        .prepare(&format!("PRAGMA table_info({table})"))
-        .map_err(sql_err)?;
-    let mut names = stmt
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(sql_err)?;
-    names
-        .try_fold(false, |found, name| Ok(found || name? == column))
-        .map_err(sql_err)
-}
-
-/// Seeds the built-in agent providers into a fresh `agent_tools` table, preserving their
-/// canonical order via `position`. The definition is the tool's JSON, so the persisted shape
-/// is exactly the domain type and cannot drift from it. `INSERT OR IGNORE` keeps the step
-/// idempotent and never clobbers a tool the user has since edited under the same name.
-fn seed_builtin_agent_tools(conn: &Connection) -> Result<(), StoreError> {
-    for (position, tool) in AgentTool::builtin_defaults().iter().enumerate() {
-        let definition = serde_json::to_string(tool)
-            .map_err(|err| StoreError::Backend(format!("serialize agent tool: {err}")))?;
-        conn.execute(
-            "INSERT OR IGNORE INTO agent_tools (name, position, definition) VALUES (?1, ?2, ?3)",
-            (&tool.name, position as i64, &definition),
-        )
-        .map_err(sql_err)?;
     }
     Ok(())
 }

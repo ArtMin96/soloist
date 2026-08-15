@@ -47,6 +47,9 @@ mod shellenv;
 mod spawner;
 mod support;
 mod template;
+// Reads back what was traced, which only the core's own tests of its silent-refusal paths need.
+#[cfg(test)]
+mod tracing_capture;
 mod wait;
 
 pub use agents::{FakeAgentOneShot, FakeAgentToolRepo, FakeVersionProbe};
@@ -72,6 +75,8 @@ pub use git_fixtures::{
 };
 pub use git_forge::{created_url, FakeGitForge};
 pub use git_opener::FakeFileOpener;
+#[cfg(test)]
+pub use identity::bound_agent;
 pub use identity::{authentic_session, session_in_dir, TEST_PEER_PGID};
 pub use lock_releaser::RecordingLockReleaser;
 pub use metrics::FakeMetricsProbe;
@@ -86,3 +91,5 @@ pub(crate) use spawner::PANIC_FAKE_PGID;
 pub use spawner::{FakeSpawner, ResizeLog};
 pub use support::FakeFeedbackRepo;
 pub use template::FakeTemplateRepo;
+#[cfg(test)]
+pub use tracing_capture::WarnFlag;

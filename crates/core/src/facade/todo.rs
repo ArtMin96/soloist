@@ -246,6 +246,9 @@ fn map_todo_error(err: TodoError) -> CoordinationError {
         TodoError::Blocked { by } => CoordinationError::TodoBlocked { by },
         TodoError::UnknownBlocker => CoordinationError::UnknownBlocker,
         TodoError::SelfBlocker => CoordinationError::SelfBlocker,
+        protected @ (TodoError::CompletionProtected | TodoError::CompletionConflict) => {
+            CoordinationError::InvalidTodo(protected.to_string())
+        }
         TodoError::Store(err) => CoordinationError::Store(err),
     }
 }
@@ -256,6 +259,9 @@ pub(super) fn map_comment(outcome: CommentOutcome) -> Result<TodoView, Coordinat
         CommentOutcome::Edited(view) => Ok(*view),
         CommentOutcome::NoTodo => Err(CoordinationError::UnknownTodo),
         CommentOutcome::NoComment => Err(CoordinationError::UnknownComment),
+        CommentOutcome::CompletionProtected => Err(CoordinationError::InvalidTodo(
+            "the completion result comment cannot be changed".into(),
+        )),
     }
 }
 

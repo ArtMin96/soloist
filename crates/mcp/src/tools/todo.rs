@@ -15,20 +15,47 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
 use soloist_core::{
-    LinkContent, ProjectId, ScratchpadLink, TemplateKind, TodoDoc, TodoId, TodoStatus,
+    AgentMessageId, LinkContent, ProjectId, ScratchpadLink, TemplateKind, TodoDoc, TodoId,
+    TodoStatus,
 };
 use soloist_ipc::{IpcRequest, IpcResponse};
 
 use crate::args::{
-    TodoArg, TodoBlockerArg, TodoBlockersArg, TodoCommentCreateArg, TodoCommentEditArg,
-    TodoCommentRefArg, TodoCreateArg, TodoGetArg, TodoRef, TodoTagArg, TodoTransferArg,
-    TodoUpdateArg,
+    AgentCompletionArg, TodoArg, TodoBlockerArg, TodoBlockersArg, TodoCommentCreateArg,
+    TodoCommentEditArg, TodoCommentRefArg, TodoCreateArg, TodoGetArg, TodoRef, TodoTagArg,
+    TodoTransferArg, TodoUpdateArg,
 };
 use crate::server::SoloistMcp;
 use crate::tools::reply::{app_error, structured, unexpected};
 
 #[tool_router(router = todo_router, vis = "pub(crate)")]
 impl SoloistMcp {
+    #[tool(
+        description = "Report the addressed task you were given complete, and with it the todo that task named, sending a concise result to your lead agent. Name the task by the message id you retrieved it under; reporting the same task twice returns the same durable record rather than a second one. The durable completion succeeds independently of its best-effort live notification, whose queued, pending, or deferred state is returned. Sender, parent, and project are derived from your authenticated session."
+    )]
+    pub(crate) async fn agent_report_completion(
+        &self,
+        Parameters(AgentCompletionArg {
+            task_message_id,
+            todo_id,
+            summary,
+        }): Parameters<AgentCompletionArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self
+            .client
+            .request(IpcRequest::AgentReportCompletion {
+                task_message_id: AgentMessageId::from_raw(task_message_id),
+                todo_id: todo_id.map(TodoId::from_raw),
+                summary,
+            })
+            .await
+        {
+            Ok(IpcResponse::AgentCompletion(report)) => structured(&report),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
     #[tool(
         description = "List the todos in your effective project as one-line summaries (id, title, status, tags, blocked, lock, the scratchpad each derives from when it has one, and revision). Todos are durable shared work items that survive restarts."
     )]

@@ -30,9 +30,10 @@ impl Classifier {
     /// Feeds one terminal sample. Returns `Some(activity)` when the classification changed
     /// (the edge to emit) — including the very first sample — and `None` when it held steady.
     pub(super) fn observe(&mut self, signals: &TerminalActivity) -> Option<AgentActivity> {
-        // Before the first sample treat the agent as idle, so a brief pause settles to the
-        // previous state rather than flapping (see the strategies' `current` handling).
-        let previous = self.current.unwrap_or(AgentActivity::Idle);
+        if self.current.is_none() && !self.strategy.has_evidence(signals) {
+            return None;
+        }
+        let previous = self.current.unwrap_or(AgentActivity::Working);
         let next = self.strategy.classify(&mut self.memory, signals, previous);
         if self.current == Some(next) {
             None

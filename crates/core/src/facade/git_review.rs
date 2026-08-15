@@ -6,8 +6,7 @@
 //! knows the other — C9 never learns what a process is, and supervision never learns what a pull
 //! request is — and what crosses between them is a string.
 //!
-//! Nothing here runs anything on an agent's behalf. The context arrives in the session as text, the
-//! way a person pasting it would leave it, and what to do about it is the reader's decision.
+//! A handoff is a semantic turn: it arrives in the chosen agent's session and is submitted once.
 
 use std::path::PathBuf;
 
@@ -26,7 +25,7 @@ use crate::supervisor::SupervisorError;
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "delivery")]
 pub enum Handoff {
-    /// It went into the session of the agent named here, as text nobody has submitted.
+    /// It went into the session of the agent named here as one submitted turn.
     Delivered { process: ProcessId, text: String },
     /// No agent was running to take it, so the text comes back for the user to do with as they
     /// like. Never a silent no-op, and never a failure: there was simply nowhere to put it.
@@ -89,9 +88,7 @@ impl Facade {
     /// which is an answer rather than a failure.
     ///
     /// Composing reaches the service, so callers come through [`Facade::blocking`]; delivery is a
-    /// write to a terminal that is already open and costs nothing. **Nothing is submitted**: the
-    /// context lands where a person's paste would land, and pressing return stays the reader's
-    /// decision.
+    /// submitted semantic turn to a terminal that is already open and costs nothing.
     pub async fn git_hand_off(
         &self,
         project: ProjectId,
@@ -104,7 +101,7 @@ impl Facade {
             return Ok(Handoff::Copy { text });
         };
         self.supervisor()
-            .write_stdin(agent, text.clone().into_bytes())
+            .submit_turn(agent, text.clone().into_bytes())
             .await?;
         Ok(Handoff::Delivered {
             process: agent,

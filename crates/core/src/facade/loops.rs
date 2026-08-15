@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use super::Facade;
 use crate::agents::IdleSampler;
-use crate::coordination::TemplateEvictor;
+use crate::coordination::{AgentMailboxReactor, TemplateEvictor};
 use crate::filewatch::WatchReactor;
 use crate::git::GitStatusWatchReactor;
 use crate::metrics::MetricsSampler;
@@ -74,6 +74,19 @@ impl Facade {
         self.timers
             .scheduler(self.bus.clone(), Arc::downgrade(&self.supervisor))
             .run()
+    }
+
+    /// The self-supervised addressed-mailbox wake reactor, separate from timer delivery so a fault
+    /// or retry in either coordination mechanism cannot stop the other.
+    pub fn agent_mailbox_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        AgentMailboxReactor::new(
+            self.mailbox.clone(),
+            self.bus.clone(),
+            Arc::downgrade(&self.supervisor),
+            self.idle.clone(),
+            self.clock.clone(),
+        )
+        .run()
     }
 
     /// The port-discovery scanner loop (monitoring C5), returned for the composition root to

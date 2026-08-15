@@ -25,6 +25,28 @@ pub fn authentic_session(facade: &Facade, process: ProcessId, pgid: i32) -> Sess
     facade.open_session(PeerCredentials::in_group(pgid))
 }
 
+/// Registers an agent named `label` in `project` and binds it to its own authenticated session —
+/// the setup every mailbox operation needs, since each is authorized from the caller's bound
+/// process. Each agent in one test needs its own `pgid`. Compiled for the core's own tests only —
+/// it asserts via `expect`, which the core denies outside test builds.
+#[cfg(test)]
+pub fn bound_agent(
+    facade: &Facade,
+    project: crate::ids::ProjectId,
+    label: &str,
+    pgid: i32,
+) -> (ProcessId, SessionId) {
+    let process = facade
+        .supervisor()
+        .register(crate::testing::agent_registration(project, label));
+    let session = authentic_session(facade, process, pgid);
+    facade
+        .scoped(session)
+        .bind_session_process(process)
+        .expect("bind the agent to its own process");
+    (process, session)
+}
+
 /// Opens an identity session authenticated by its working directory, as the UDS adapter would for
 /// an agent Soloist did not launch (its group owns no managed process): the session's peer reports
 /// `cwd` and no group, so its effective scope — and a [`select_project`](Facade::select_project) of

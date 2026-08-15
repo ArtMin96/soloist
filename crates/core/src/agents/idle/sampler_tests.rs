@@ -168,3 +168,30 @@ async fn an_agent_that_never_runs_is_not_classified() {
     }
     assert!(!classified, "a stopped agent is not classified");
 }
+
+#[tokio::test]
+async fn a_running_agent_that_has_not_emitted_provider_evidence_is_not_idle() {
+    let mut s = setup(FakeSpawner::streams_then_stays_alive(Vec::new()));
+    let id = s.agent();
+    s.sup.start(id).expect("start");
+    wait_for_running(&mut s.rx, id).await;
+    s.spawn_sampler();
+
+    for _ in 0..5 {
+        s.clock.advance(SAMPLE_INTERVAL);
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    assert_eq!(s.tracker.activity(id), None);
+    while let Ok(event) = s.rx.try_recv() {
+        assert!(!matches!(
+            event,
+            DomainEvent::AgentActivityChanged {
+                id: got,
+                state: AgentActivity::Idle,
+            } if got == id
+        ));
+    }
+}

@@ -71,13 +71,18 @@ fn harness(forge: FakeGitForge) -> Harness {
 
 /// A forge whose branch has one failing check and one conversation open on it.
 fn reviewed() -> FakeGitForge {
+    reviewed_printing("error: the thing is wrong")
+}
+
+/// The same forge, where the failing check printed `log`.
+fn reviewed_printing(log: &str) -> FakeGitForge {
     FakeGitForge::ready()
         .reviewing(pull_request_review(
             BRANCH,
             vec![check_run(CHECK, CheckState::Failed)],
             vec![review_thread(THREAD, "src/main.rs", 42, "this leaks")],
         ))
-        .logging(Some("error: the thing is wrong"))
+        .logging(Some(log))
 }
 
 impl Harness {
@@ -161,7 +166,7 @@ async fn a_handoff_lands_in_the_one_running_agents_session() {
 }
 
 #[tokio::test]
-async fn nothing_is_submitted_on_the_agents_behalf() {
+async fn a_handoff_is_submitted_as_exactly_one_turn() {
     let h = harness(reviewed());
     h.agent("worker").await;
 
@@ -172,9 +177,40 @@ async fn nothing_is_submitted_on_the_agents_behalf() {
 
     let written = h.until(|written| written.contains("end of context")).await;
     assert!(
-        !written.contains('\r'),
-        "a carriage return is the agent CLI's submit, and what to do about this is the reader's \
-         decision, not ours: {written:?}",
+        written.ends_with('\r') && written.matches('\r').count() == 1,
+        "a semantic handoff is submitted exactly once: {written:?}",
+    );
+}
+
+#[tokio::test]
+async fn a_check_that_printed_carriage_returns_is_still_submitted_as_exactly_one_turn() {
+    // What a build job printed is the case that matters: its output was written to a terminal, so
+    // its lines are separated by the returns a terminal separates lines with. Carried through as
+    // they are, each one submits the handoff early and the rest of it arrives as several turns of
+    // its own — so what an agent gets is a fragment, then somebody else's build log as commands.
+    let h = harness(reviewed_printing(
+        "error: first\r\nerror: second\rerror: third\r\n",
+    ));
+    h.agent("worker").await;
+
+    h.facade
+        .git_hand_off(h.project, Harness::check(), None)
+        .await
+        .expect("hand off");
+
+    // The closing fence is the last of the composed text, so a buffer holding it and ending in a
+    // return holds every one of the log's returns too — whatever order the writes arrived in.
+    let written = h
+        .until(|written| written.contains("end of context") && written.ends_with('\r'))
+        .await;
+    assert_eq!(
+        written.matches('\r').count(),
+        1,
+        "only the submit is a return; every return the check printed became a newline: {written:?}",
+    );
+    assert!(
+        written.contains("error: first\nerror: second\nerror: third"),
+        "the log arrives whole, its lines still separated: {written:?}",
     );
 }
 

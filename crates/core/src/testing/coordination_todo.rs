@@ -11,8 +11,9 @@ use std::sync::{Arc, Mutex};
 use super::coordination_scratchpad::FakeScratchpadRepo;
 
 use crate::coordination::{
-    Comment, CommentAuthor, CommentEdit, ScratchpadLink, ScratchpadRef, StoredTodo, TodoDoc,
-    TodoRepo, TodoStatus, TodoWriteResult,
+    Comment, CommentAuthor, CommentEdit, ScratchpadLink, ScratchpadRef, StoredTodo, TodoCompletion,
+    TodoCompletionAtomicResult, TodoCompletionCompareResult, TodoCompletionContext,
+    TodoCompletionDecision, TodoDoc, TodoRepo, TodoStatus, TodoWriteResult,
 };
 use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
 use crate::ports::StoreError;
@@ -77,6 +78,77 @@ impl FakeTodoRepo {
 }
 
 impl TodoRepo for FakeTodoRepo {
+    fn apply_completion(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        policy: &mut dyn FnMut(&TodoCompletionContext) -> TodoCompletionDecision,
+    ) -> Result<TodoCompletionAtomicResult, StoreError> {
+        let mut rows = lock(&self.rows);
+        let Some(current) = rows
+            .get(&id.get())
+            .filter(|todo| todo.project == project)
+            .cloned()
+        else {
+            return Ok(TodoCompletionAtomicResult::NotFound);
+        };
+        let blockers = current
+            .blockers
+            .iter()
+            .filter_map(|blocker| {
+                rows.get(&blocker.get())
+                    .filter(|todo| todo.project == project)
+                    .cloned()
+            })
+            .collect::<Vec<_>>();
+        match policy(&TodoCompletionContext::from_storage(
+            current.clone(),
+            blockers,
+        )) {
+            TodoCompletionDecision::Existing => Ok(TodoCompletionAtomicResult::Existing(Box::new(
+                self.projected(current),
+            ))),
+            TodoCompletionDecision::Refuse(error) => Ok(TodoCompletionAtomicResult::Refused(error)),
+            TodoCompletionDecision::Record(intent) => {
+                let todo = rows.get_mut(&id.get()).ok_or_else(|| {
+                    StoreError::Backend("todo vanished while reporting completion".into())
+                })?;
+                todo.doc = intent.doc().clone();
+                todo.comments.push(intent.comment().clone());
+                todo.completion = Some(intent.completion().clone());
+                todo.revision += 1;
+                Ok(TodoCompletionAtomicResult::Recorded(Box::new(
+                    self.projected(todo.clone()),
+                )))
+            }
+        }
+    }
+
+    fn compare_completion(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        expected: &TodoCompletion,
+        replacement: &TodoCompletion,
+    ) -> Result<TodoCompletionCompareResult, StoreError> {
+        let mut rows = lock(&self.rows);
+        let Some(todo) = rows
+            .get_mut(&id.get())
+            .filter(|todo| todo.project == project)
+        else {
+            return Ok(TodoCompletionCompareResult::NotFound);
+        };
+        if todo.completion.as_ref() != Some(expected) {
+            return Ok(TodoCompletionCompareResult::Mismatch(Box::new(
+                self.projected(todo.clone()),
+            )));
+        }
+        todo.completion = Some(replacement.clone());
+        Ok(TodoCompletionCompareResult::Written(Box::new(
+            self.projected(todo.clone()),
+        )))
+    }
+
     fn create(
         &self,
         project: ProjectId,
@@ -91,6 +163,7 @@ impl TodoRepo for FakeTodoRepo {
             tags: Vec::new(),
             blockers: Vec::new(),
             comments: Vec::new(),
+            completion: None,
             locked_by: None,
             scratchpad: Self::stored_link(scratchpad),
             revision: 1,
@@ -136,6 +209,7 @@ impl TodoRepo for FakeTodoRepo {
             .filter(|todo| todo.project == project)
         {
             Some(todo) => match expected {
+                _ if todo.completion.is_some() => Ok(TodoWriteResult::CompletionProtected),
                 Some(rev) if rev != todo.revision => Ok(TodoWriteResult::Conflict {
                     actual: todo.revision,
                 }),
@@ -408,7 +482,18 @@ impl FakeTodoRepo {
         else {
             return Ok(CommentEdit::NoTodo);
         };
+        let protected = todo.completion.as_ref().map(TodoCompletion::comment);
+        let before = todo.comments.clone();
         match edit(&mut todo.comments) {
+            Some(())
+                if protected.is_some_and(|id| {
+                    before.iter().find(|comment| comment.id == id)
+                        != todo.comments.iter().find(|comment| comment.id == id)
+                }) =>
+            {
+                todo.comments = before;
+                Ok(CommentEdit::CompletionProtected)
+            }
             Some(()) => Ok(CommentEdit::Edited(Box::new(self.projected(todo.clone())))),
             None => Ok(CommentEdit::NoComment),
         }

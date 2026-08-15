@@ -31,6 +31,10 @@ single small backend addition; everything else is presentation over orch-00's sn
    `ProcessId` (the session owner from `bind_session_process`, [`05` §7](../05-solo-reference-and-sources.md)).
    Lineage is ephemeral process metadata (per-run ids, like leases/timers — [`05` §12](../05-solo-reference-and-sources.md));
    no migration. A spawn with no bound lead (external/manual launch) has `parent: None` (a root).
+   O15 reuses the retained lineage edges as an authorization boundary. `agent_roster` returns only live
+   `Agent` processes in the authenticated caller's project that share its retained root. A closed
+   ancestor is hidden and may be re-rooted for display, but its edge remains for authorization so
+   surviving siblings stay related. The roster never creates a second lineage model.
 2. **Surface lineage in the read-model (O3):** fill `AgentNode.parent` in orch-00's `OrchestrationSnapshot`;
    add a `ProcessLineageChanged` `DomainEvent` (or reuse the existing process lifecycle event) so the
    tree restructures live when a worker spawns or closes ([`06` §5.6](../06-codebase-blueprint-and-cleanup.md)).
@@ -69,6 +73,9 @@ tree renders from one self-contained projection rather than joining a second rea
 - Each agent row reflects its **live** 5-state activity (transitions Working↔Idle↔Permission visible
   without a refresh or flicker), reusing `ProcessIndicator`.
 - Closing a worker removes its node and (if it had children) re-parents them to root — no stranded nodes.
+- The O15 roster derives self/parent/child/sibling relationships from retained lineage; a closed or
+  foreign-project process never remains addressable, but closing an ancestor does not split its surviving
+  agents into unrelated authorization groups.
 - The component issues **no `invoke`** and holds **no business logic** (review-checked); the Tauri
   handler is a one-line `Facade` call; `tsc`/ESLint/clippy green.
 

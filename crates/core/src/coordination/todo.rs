@@ -93,6 +93,12 @@ pub enum TodoError {
     /// A durable read or write failed.
     #[error(transparent)]
     Store(#[from] StoreError),
+    /// A recorded completion is terminal and protects both its document and result comment.
+    #[error("the todo has a recorded completion and cannot be changed by this operation")]
+    CompletionProtected,
+    /// A different authenticated task has already reported this todo complete.
+    #[error("the todo completion belongs to a different task")]
+    CompletionConflict,
 }
 
 /// The todo aggregate over the durable [`TodoRepo`]. The repo persists and makes each state-dependent
@@ -283,6 +289,7 @@ impl Todos {
                 expected,
                 actual: Some(actual),
             }),
+            TodoWriteResult::CompletionProtected => Err(TodoError::CompletionProtected),
         }
     }
 

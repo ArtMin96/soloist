@@ -49,6 +49,8 @@ impl AgentMemory {
 /// A provider's idle rule. `current` is the last activity reported for the agent (so a brief
 /// pause holds the previous state rather than flapping); the result is this sample's activity.
 pub(super) trait IdleStrategy: Sync {
+    fn has_evidence(&self, signals: &TerminalActivity) -> bool;
+
     fn classify(
         &self,
         memory: &mut AgentMemory,
@@ -63,6 +65,10 @@ pub(super) trait IdleStrategy: Sync {
 struct OutputDelta;
 
 impl IdleStrategy for OutputDelta {
+    fn has_evidence(&self, signals: &TerminalActivity) -> bool {
+        signals.output_seq > 0
+    }
+
     fn classify(
         &self,
         memory: &mut AgentMemory,
@@ -101,6 +107,10 @@ impl IdleStrategy for OutputDelta {
 struct TitleStability;
 
 impl IdleStrategy for TitleStability {
+    fn has_evidence(&self, signals: &TerminalActivity) -> bool {
+        signals.title.is_some()
+    }
+
     fn classify(
         &self,
         memory: &mut AgentMemory,
@@ -127,6 +137,10 @@ impl IdleStrategy for TitleStability {
 struct TitleStatus;
 
 impl IdleStrategy for TitleStatus {
+    fn has_evidence(&self, signals: &TerminalActivity) -> bool {
+        signals.title.is_some()
+    }
+
     fn classify(
         &self,
         memory: &mut AgentMemory,

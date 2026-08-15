@@ -8,7 +8,7 @@
 use rusqlite::{Connection, OptionalExtension, Row};
 use soloist_core::{
     Comment, ProcessId, ProjectId, ScratchpadId, ScratchpadLink, ScratchpadRef, StoreError,
-    StoredTodo, TodoId,
+    StoredTodo, TodoCompletion, TodoId,
 };
 
 use crate::sql_err;
@@ -20,7 +20,7 @@ use crate::todo_json::{
 /// The columns every read selects, in order, so [`row_to_todo`] decodes one shape. Only the
 /// scratchpad's id is stored; its current `name` rides along from the join below.
 pub(crate) const TODO_COLUMNS: &str = "t.id, t.project_id, t.doc, t.tags, t.blockers, t.comments, \
-                                       t.locked_by, t.revision, t.scratchpad_id, s.name";
+                                       t.locked_by, t.revision, t.scratchpad_id, s.name, t.completion";
 
 /// The source every read selects from: the todo row with its associated scratchpad's handle
 /// resolved. The join is outer because the association is optional, and because a scratchpad the
@@ -69,22 +69,6 @@ pub(crate) fn write_comments(
     Ok(())
 }
 
-/// The current revision of `(project, id)` over an already-held guard, or `None` if absent.
-pub(crate) fn current_revision(
-    conn: &Connection,
-    project: ProjectId,
-    id: TodoId,
-) -> Result<Option<u64>, StoreError> {
-    conn.query_row(
-        "SELECT revision FROM todos WHERE project_id = ?1 AND id = ?2",
-        (project.get() as i64, id.get() as i64),
-        |row| row.get::<_, i64>(0),
-    )
-    .optional()
-    .map_err(sql_err)
-    .map(|revision| revision.map(|revision| revision as u64))
-}
-
 /// One todo by `(project, id)` over an already-held guard, or `None` if absent.
 pub(crate) fn read_one(
     conn: &Connection,
@@ -115,6 +99,7 @@ pub(crate) fn row_to_todo(row: &Row<'_>) -> rusqlite::Result<Result<StoredTodo, 
     let revision: i64 = row.get(7)?;
     let scratchpad_id: Option<i64> = row.get(8)?;
     let scratchpad_name: Option<String> = row.get(9)?;
+    let completion_json: Option<String> = row.get(10)?;
     Ok(decode_doc(&doc_json).and_then(|doc| {
         Ok(StoredTodo {
             id: TodoId::from_raw(id as u64),
@@ -123,6 +108,13 @@ pub(crate) fn row_to_todo(row: &Row<'_>) -> rusqlite::Result<Result<StoredTodo, 
             tags: decode_strings(&tags_json)?,
             blockers: decode_blockers(&blockers_json)?,
             comments: decode_comments(&comments_json)?,
+            completion: completion_json
+                .map(|json| {
+                    serde_json::from_str::<TodoCompletion>(&json).map_err(|error| {
+                        StoreError::Backend(format!("deserialize todo completion: {error}"))
+                    })
+                })
+                .transpose()?,
             locked_by: locked_by.map(|owner| ProcessId::from_raw(owner as u64)),
             scratchpad: scratchpad_id
                 .zip(scratchpad_name)

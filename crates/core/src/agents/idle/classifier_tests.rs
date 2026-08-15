@@ -21,12 +21,30 @@ fn the_first_sample_always_emits() {
 }
 
 #[test]
-fn a_quiet_agent_first_emits_idle() {
+fn an_agent_without_provider_evidence_is_not_classified() {
     let mut classifier = Classifier::new(AgentKind::Claude);
-    assert_eq!(
-        classifier.observe(&signals(0, None, &[])),
-        Some(AgentActivity::Idle)
-    );
+    assert_eq!(classifier.observe(&signals(0, None, &[])), None);
+    assert_eq!(classifier.current(), None);
+}
+
+#[test]
+fn title_provider_without_a_title_is_not_classified() {
+    let mut classifier = Classifier::new(AgentKind::Codex);
+    assert_eq!(classifier.observe(&signals(9, None, &["starting"])), None);
+    assert_eq!(classifier.current(), None);
+}
+
+#[test]
+fn an_agent_that_never_outputs_is_never_classified() {
+    // Silence is not availability: an agent that produces its provider's signal at no point in
+    // the run stays unclassified for the whole run rather than settling to Idle, so nothing
+    // gated on idle — a queued briefing, an addressed task, a fire-when-idle quorum — is woken
+    // by an agent Soloist has heard nothing from.
+    let mut classifier = Classifier::new(AgentKind::OpenCode);
+    for _ in 0..5 {
+        assert_eq!(classifier.observe(&signals(0, None, &[])), None);
+    }
+    assert_eq!(classifier.current(), None);
 }
 
 #[test]

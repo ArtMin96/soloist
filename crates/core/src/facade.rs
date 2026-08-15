@@ -18,7 +18,9 @@ use crate::agents::{AgentLineage, Agents, IdleTracker};
 use crate::composition::CorePorts;
 use crate::config::ConfigEngine;
 use crate::configchange::{ConfigSync, TrustReviewCommand};
-use crate::coordination::{Diagrams, Kv, Leases, Scratchpads, Templates, Timers, Todos};
+use crate::coordination::{
+    AgentMailbox, Diagrams, Kv, Leases, Scratchpads, Templates, Timers, Todos,
+};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::{FileWatcher, WatchStatus};
 use crate::git::Git;
@@ -65,6 +67,8 @@ mod git_review;
 mod kv;
 mod link;
 mod loops;
+mod mailbox;
+mod mailbox_transcript;
 mod orchestration;
 mod output;
 mod project_settings;
@@ -88,6 +92,10 @@ pub use coordination::CoordinationError;
 pub use git::GitReadError;
 pub use git_draft::DraftError;
 pub use git_review::{Handoff, HandoffError};
+pub use mailbox::{
+    AgentMailboxError, CompletionNotification, CompletionReport, SpawnAgentOutcome,
+    SpawnAgentRequest,
+};
 pub use prompt_template::PromptRenderError;
 pub use scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
 pub use scoped_git::ScopedGitError;
@@ -127,6 +135,7 @@ pub struct Facade {
     agents: Agents,
     idle: Arc<IdleTracker>,
     lineage: Arc<AgentLineage>,
+    mailbox: Arc<AgentMailbox>,
     identity: Identity,
     kv: Kv,
     leases: Leases,
@@ -177,6 +186,7 @@ impl Facade {
             feedback_repo,
             ..
         } = ports;
+        let mailbox = Arc::new(AgentMailbox::new(clock.clone()));
         Self {
             supervisor,
             kv: Kv::new(kv_repo),
@@ -217,6 +227,7 @@ impl Facade {
             config: Arc::new(ConfigEngine::new(trust, bus.clone())),
             idle: Arc::new(IdleTracker::new()),
             lineage: Arc::new(AgentLineage::new()),
+            mailbox,
             identity: Identity::new(),
             bus,
         }

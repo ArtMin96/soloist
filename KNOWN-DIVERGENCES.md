@@ -166,6 +166,13 @@ constant or module keeps it fixture-tested and easy to tune. The activity signal
 (notifications now, fire-when-idle timers in Phase 9); it never auto-acts, so an occasional
 misclassification degrades gracefully.
 
+**⚠️ "It never auto-acts" no longer holds (2026-08-14).** Idle-gated wake delivery (a spawned worker's
+onboarding briefing, a queued mailbox message) submits a turn into the agent's terminal on the `Idle`
+transition, so the activity signal now *acts* rather than only informing. The consequence for the
+pre-evidence default is recorded in
+[D-41](#d-41--an-agent-is-unclassified-until-its-providers-evidence-appears-never-assumed-idle-);
+the thresholds and cues this entry owns are unchanged.
+
 **Effect on parity:** E5 ("state tracks a real agent") holds — a real agent transitions to `WORKING`
 under output, `IDLE` when quiet, and `PERMISSION` on a recognised prompt. A difference from Solo would
 only show as a different quiet-window latency or a permission prompt phrased outside our cue set
@@ -1843,42 +1850,86 @@ decision: `plan/05` §12.
 
 ---
 
-## D-36 — An agent handoff is a paste and nothing else: Soloist never presses return 🟢
+## D-36 — An agent handoff is one submitted semantic turn 🟢
 
 **Introduced:** the `git-integration` initiative, pull-request review slice (todo 44, branch
-`feat/git-pr-review`); recorded 2026-08-09 on the owner's decision, after the built behaviour and
-the parity row's wording were found to disagree.
+`feat/git-pr-review`); recorded 2026-08-09 as *"a handoff is a paste and nothing else: Soloist never
+presses return."*
+
+**⚠️ Reversed on the repo owner's decision, 2026-08-14.** A handoff is now **submitted**. The earlier
+decision, its reasoning, and the security cost this reversal accepts are kept below rather than
+deleted, because the risk that argued for the paste did not go away — it was weighed and accepted.
+The entry stays 🟢 (this is the live behaviour) rather than ⚪ (which this file reserves for entries
+that are only history).
 
 **Solo — silent, not contradicted.** `plan/05` documents no pull-request review and no git surface
 of any kind, so nothing here is attributed to Solo. This is an internal decision about a
 [D-35](#d-35--git-is-a-first-class-surface-inside-soloist-a-soloist-extension-) behaviour, kept
 beside it rather than in a design note for the same reason D-35 is.
 
-**What `plan/02` VC9 asked for, and what was built.** The row's Verify read "a handoff delivers the
-**full** context … into the bound agent's session **as one fresh turn**". What ships delivers the
-same context into the same session and then stops: the text lands in the agent's input, no carriage
-return crosses the wire, and the human presses send. The coordination scheduler's timer delivery
-*does* append `\r` (that is what "as one fresh turn" means there), so the two are genuinely
-different and the row said the wrong one. **The built behaviour is the decision; the row is
-amended.**
+**The behaviour.** A handoff delivers its bounded, fenced context into the chosen running agent's
+session as **exactly one semantic user turn**. The supervisor owns the one reusable operation
+(`Supervisor::submit_turn` / `try_submit_turn`, `crates/core/src/supervisor/terminal_io.rs`): it
+converts every carriage return inside the payload to a newline (so `\r\n` collapses to `\n`), strips
+trailing newlines and carriage returns, and appends exactly one `\r`. Raw `write_stdin` and MCP
+`send_input` stay byte-for-byte raw for terminal input. The coordination scheduler's timer wake, the
+mailbox wake, spawn onboarding and this handoff all route through that same operation, so no surface
+can implement a second meaning of "fresh turn."
 
-**Why the paste is the right shape.** Pressing return is not delivery, it is instruction: it makes
-the agent act on something a person has not read yet. Everything a handoff carries came from
-somewhere Soloist does not control — a check's log, a reviewer's comment — and it arrives in a
-session that may be mid-task. Submitting it would let a failing CI job's output start work on the
-user's behalf, in their repository, under their credentials, with the first they hear of it being
-the agent's reply. So the context is composed, fenced and bounded, and what to do about it stays the
-reader's decision. That the return is absent is asserted rather than intended
-(`nothing_is_submitted_on_the_agents_behalf`, `crates/core/src/facade/git_review_tests.rs`).
+**Why the reversal.** Leaving the context pasted but unsubmitted made a successful handoff look
+finished while the agent had received nothing to act on, and it disagreed with the orchestration
+contract, where delivery *is* a fresh turn. Owner's call: one delivery meaning across every surface
+is worth more than the per-surface distinction the paste drew.
 
-**Why this is not the timer's rule.** A coordination timer's body is delivered as a fresh turn
-because the lead agent that set it *asked for that*, minutes earlier, naming the condition and the
-text — the submission is the thing it configured. A handoff has no such prior instruction: somebody
-clicked a button next to a comment, and the only thing they said was "give this to the agent".
+**What the earlier decision said, and why it still matters.** The original entry argued:
 
-**Effect on parity:** amends the Verify of `plan/02` **VC9** to state the paste. No row regresses,
-and VC11's MCP git surface is unaffected — an agent reaching a handoff over MCP receives text as a
-tool result, which was never a turn in the first place.
+> Pressing return is not delivery, it is instruction: it makes the agent act on something a person
+> has not read yet. Everything a handoff carries came from somewhere Soloist does not control — a
+> check's log, a reviewer's comment — and it arrives in a session that may be mid-task. Submitting it
+> would let a failing CI job's output start work on the user's behalf, in their repository, under
+> their credentials, with the first they hear of it being the agent's reply.
+
+It also drew a line at the timer, which the reversal deliberately erases: *"A coordination timer's
+body is delivered as a fresh turn because the lead agent that set it asked for that, minutes earlier,
+naming the condition and the text — the submission is the thing it configured. A handoff has no such
+prior instruction: somebody clicked a button next to a comment, and the only thing they said was
+'give this to the agent'."*
+
+**The accepted cost.** That is the trade this entry buys, and it is **accepted, not mitigated**:
+clicking a handoff can now start an agent working on third-party text the user has not read, in their
+repository, under their credentials. Nothing below removes that; what the code does provide is a
+narrower blast radius.
+
+**What the code actually does provide** (`crates/core/src/git/handoff.rs`,
+`crates/core/src/facade/git_review.rs`):
+
+- **One submission, whatever the payload contains — proven end to end.** `append_submit`
+  (`crates/core/src/supervisor/terminal_io.rs`) converts every interior carriage return to a newline
+  (collapsing `\r\n` to `\n`), strips trailing newlines and carriage returns, and appends exactly one
+  `\r`. This is the property the whole reversal leans on: a check's output was written to a terminal,
+  so its lines are separated by the returns a terminal separates lines with — carried through
+  unchanged, the first one would submit a fragment and the rest of the log would arrive as further
+  turns, i.e. somebody else's build output entering the session as commands.
+  `a_check_that_printed_carriage_returns_is_still_submitted_as_exactly_one_turn`
+  (`crates/core/src/facade/git_review_tests.rs`) drives a real handoff through the façade and
+  supervisor over a log of `"error: first\r\nerror: second\rerror: third\r\n"` — both a `\r\n` pair
+  and a bare interior `\r` — and asserts the observable bytes: exactly one `\r` in the whole payload,
+  and the body reading `error: first\nerror: second\nerror: third`. So a multi-line payload lands as
+  one submitted turn and cannot fragment into several.
+- **Nothing a caller wrote is delivered as though the service had said it.** `HandoffSubject` names a
+  check or a thread by id; `handoff_context` composes from a fresh read of the forge, so no surface
+  can hand an agent text it made up.
+- **Bounded and fenced.** `HANDOFF_LIMIT` 16 KiB overall, `CHECK_LOG_LIMIT` 12 KiB of log, dropped by
+  whole lines; the block is wrapped in `--- context from Soloist (nothing has been run) ---` …
+  `--- end of context ---` so the agent and the reader can both tell quoted material from the session.
+- **A target is resolved, never guessed.** `handoff_target` delivers only to a named running agent of
+  that project, or to the project's *sole* running agent; with several running and none named it
+  returns `Handoff::Copy` and nothing is written.
+- **Only the local path submits.** VC11's MCP git surface returns the same text as a tool result,
+  which was never a turn.
+
+**Effect on parity:** `plan/02` **VC9** states the submitted semantic turn, which is what ships. No
+row regresses. VC11 is unaffected.
 
 ---
 
@@ -1998,3 +2049,240 @@ and **I7f** were narrowed in wording only. **C10** (themed ANSI palette), **C15*
 decorations), **DG6** (Mermaid renderer) and **VC2** (diff viewer) each already verify a theme flip
 and now flip over a chosen theme rather than a fixed pair, so their checks are downstream evidence for
 TH8 and must stay green. Full gap decision: `plan/05` §12.
+
+---
+
+## D-39 — Agent peer messaging is a bounded live-run mailbox (a Soloist extension) 🟢
+
+**Introduced:** the authenticated agent-messaging and completion-report slice (`plan/02` O15/O16).
+
+**Solo is silent, not contradicted.** This is a strict-reading exception to this file's usual scope,
+following D-20 and D-35. `plan/05` records Solo's lineage, `spawn_agent`, coordination tools, and timer
+wakes, but no direct or group agent-message tools. No public source says Solo cannot have them. The
+silence is the gap, so the full decision lives in `plan/05` §12 and nothing here attributes the feature
+to Solo.
+
+**The protocol does not supply the missing receive path.** Stable Model Context Protocol (MCP) tools are
+invoked by the client through `tools/call`; the server notification on that surface only reports that
+the tool list changed ([MCP tools, 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)).
+Sampling asks a capable client for a generated message and returns the result to the server; it does not
+append an arbitrary user turn to a coding CLI's active conversation
+([MCP sampling, 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/client/sampling)).
+Soloist therefore uses MCP for authenticated send/retrieve/ack operations and a separate idle-gated PTY
+semantic turn for the wake.
+
+**Soloist's decision:**
+
+- `agent_roster` derives a live retained-lineage-root group from the bound session's authenticated
+  project and process. Closed members are hidden, but retained edges keep surviving siblings related.
+  Direct sends address one related live agent; broadcasts address every other group member.
+- Messages are ephemeral per run and bounded at **16 KiB each**, **64 pending per recipient**, and
+  **1,024 pending per project**, plus **4,096 pending messages** and **16 MiB of pending payload** across
+  the process. There is no TTL. Only the addressed recipient can list, get, or acknowledge one.
+- `queued`, `wake_submitted`, and `acknowledged` are distinct states. `wake_submitted` means only that
+  the bounded PTY input channel accepted a compact wake turn after `Idle`; it does not claim retrieval,
+  acceptance, execution, or completion.
+- O13 reuses this path. Default-on reusable onboarding and an optional addressed `Task` wait until the
+  spawned worker becomes idle. The task never enters CLI arguments or startup terminal input.
+- `agent_report_completion(task_message_id, todo_id: Option<_>, summary)` resolves an addressed task
+  message; `todo_id` is optional and, when given, must equal the todo that task carried. With a todo it
+  commits the existing blocker-gated completion and one identity-authored result atomically, keyed for
+  idempotency on `(reporter, task_message_id)` — the pair every report carries — so a task with **no**
+  todo is idempotent on the same terms. The pair is held in a bounded per-run ring of notice receipts
+  (`MAX_COMPLETION_NOTICES`, the 4,096 process-wide pending ceiling, oldest evicted), read before the
+  durable per-todo notice flag that remains as the eviction fallback. A task receipt is retired with its
+  **reporter**, never with its **sender**, so a lead that exits before its worker reports cannot strand
+  the completion. Parent notification is an ephemeral, best-effort
+  operation after the durable commit, so notification failure cannot undo completed work. See
+  [D-40](#d-40--agent_report_completion-requires-task_message_id-a-breaking-mcp-tool-surface-change-)
+  for the tool-surface break this shape introduced.
+- The supervisor keeps two explicit input meanings. Raw `write_stdin`/MCP `send_input` preserve the
+  caller's bytes. Semantic submit-turn converts interior carriage returns to newlines, strips trailing
+  newlines/carriage returns, and appends exactly one `\r`. Timer wakes, mailbox wakes, spawn onboarding,
+  and local git handoffs use the semantic operation.
+
+**Why 🟢 (settled):** authentication, lineage scope, bounds, durability split, acknowledgement,
+idle-gated wake, and raw-versus-semantic input are decided. O15/O16 remain unverified until their matrix
+checks have evidence; this status records the decision, not test completion.
+
+**Effect on parity:** O13 is widened in place rather than duplicated. New rows O15/O16 cover the
+mailbox/roster and completion report. No documented Solo row changes.
+
+---
+
+## D-40 — `agent_report_completion` requires `task_message_id` (a breaking MCP tool-surface change) 🟢
+
+**Introduced:** the authenticated agent-messaging and completion-report slice, 2026-08-14, alongside
+[D-39](#d-39--agent-peer-messaging-is-a-bounded-live-run-mailbox-a-soloist-extension-).
+
+**Solo — silent, not contradicted.** ⚠️ Like D-39, this is a **strict-reading exception** to this
+file's scope: `agent_report_completion` is a Soloist original with no counterpart in `plan/05`, so
+nothing here describes or contradicts Solo. It is recorded here because a tool-surface break is
+exactly the kind of thing a reader comes to this file to find, and because the argument shape was
+*specified* before it was built.
+
+**What the docs specified, and what shipped.** `plan/orchestrator/orch-04` and `plan/05` §12 both
+described `agent_report_completion(todo_id, summary)` — a todo id and a summary, both required. What
+ships is `agent_report_completion(task_message_id, todo_id: Option<TodoId>, summary)`:
+
+- **`task_message_id` is required.** A completion report resolves *one addressed task message*, which
+  is what identifies the reporting worker's assignment and supplies the parent to notify.
+- **`todo_id` is now optional**, because a task need not carry a todo at all (D-39: a todo is
+  correlation, never a prerequisite). When it *is* supplied it must equal the todo the task message
+  carried, otherwise the report is refused with `UnknownTodo` — a report cannot complete a todo its
+  task did not name.
+- **`(reporter, task_message_id)` is the idempotency key** (`TodoCompletionKey`,
+  `crates/core/src/coordination/todo_completion.rs`), so a retry returns the same record and appends
+  no second result. Keying on the pair rather than on the todo is what makes the **no-todo** report
+  path idempotent, which it previously was not — a retry enqueued a second notice every time.
+
+**The break.** `AgentCompletionArg` (`crates/mcp/src/args/messaging.rs`) is deserialized through
+rmcp's `Parameters` extractor, so a call carrying the old `{todo_id, summary}` shape fails on the
+**missing required field `task_message_id`** before the handler runs — a hard argument error, not a
+default. Separately, the struct carries `#[serde(deny_unknown_fields)]`, which means the surface can
+never quietly accept a superseded or misspelled argument by ignoring it; that attribute is a
+correctness guard, not the cause of this break.
+
+**Scope of the break, honestly.** The tool does not exist in any released Soloist — the whole
+messaging surface is new in this slice — so **no shipped client is broken**. What breaks is any agent
+written against the *documented* signature above (both plan docs, now corrected) or against an
+earlier build of this branch, which did serve `{todo_id, summary}`: the core method took the task id
+from the start, while the MCP tool and the IPC request it rides on carried only the todo, so the tool
+could not name the assignment its own core contract required. Closing that gap is what put
+`task_message_id` on the wire. The cost of the shape change is therefore paid now and only now — the
+window closes at the first release that serves the tool.
+
+**A second surface change, recorded because it is observable.** Moving idempotency onto the
+`(reporter, task_message_id)` ring (`crates/core/src/coordination/mailbox/completion_notice.rs`) also
+changes which discriminant a *retry* returns. The ring is consulted **before** the durable per-todo
+notice flag, so a retry made while the first notice is still **unread** now reports
+`CompletionNotification::Pending { delivery }` where it previously reported `AlreadyQueued`;
+`AlreadyQueued` now means the recipient has acknowledged it, or the ring entry was evicted and the
+durable flag answered instead. That fallback arm stays reachable on purpose — an acknowledgement
+decrements the pending count without removing the ring entry, so eviction is a real path, not dead
+code. This is **not** a break in the sense above: no caller consumes the discriminant today, and the
+durable outcome is identical either way. It is recorded so a future consumer reads `Pending` as "the
+notice is still sitting unread in the lead's inbox" rather than as a second delivery.
+
+**Why the required id is right anyway.** The alternative is a report addressed only by todo, which
+cannot say *which* assignment it answers, cannot resolve the parent to notify without guessing, and
+cannot be made idempotent per assignment. Making the task the subject and the todo the optional
+correlation is the same rule D-39 applies everywhere else in the mailbox.
+
+**Effect on parity:** `plan/02` O16 verifies against the shipped signature. No documented Solo row
+changes.
+
+---
+
+## D-41 — An agent is unclassified until its provider's evidence appears, never assumed idle 🟢
+
+**Introduced:** the authenticated agent-messaging slice, 2026-08-14, when idle-gated delivery
+(`spawn_agent` onboarding, mailbox wakes) made the pre-evidence assumption load-bearing.
+
+**Solo (ref `plan/05` §6):** Solo documents the five activity states and the *signal* each provider
+family is read from, and nothing about what a just-launched agent reads as before its first signal
+arrives. That silence is already covered by
+[D-5](#d-5--agent-idle-detection-thresholds--cues-are-our-own-approximation-), which owns the
+thresholds and cues; this entry records the one decision D-5 left implicit.
+
+**What changed.** The per-provider heuristics are **untouched** — `IdleStrategy::classify` still
+reads output deltas, title stability and title status exactly as before, and a quiet agent still
+settles to `Idle` after `IDLE_AFTER_QUIET_SAMPLES`. What changed is one layer up, in the
+`Classifier`: it now **declines to classify at all** until the provider's own evidence signal has
+appeared at least once.
+
+- Each strategy answers `has_evidence` for its signal: any output at all for the output-delta
+  providers (Claude, OpenCode, Copilot, Kimi, Generic), any OSC title for the title providers (Codex,
+  Amp, Gemini).
+- Before the first sample carrying evidence, `Classifier::observe` returns `None` and `current()`
+  stays `None` — no `AgentActivityChanged` is emitted, and the agent has no activity anywhere in the
+  read model.
+- Once evidence has appeared, the pre-sample assumption used to seed the strategies' "hold the
+  previous state" behaviour is `Working` rather than `Idle`, so a settling agent is never briefly
+  reported free.
+
+**Why.** `Idle` is not a neutral default here — it is an instruction. A just-launched agent CLI that
+has printed nothing yet is *starting*, not available, but the old seed reported `Idle` on its very
+first sample. Everything gated on idle then fired against a worker that was not ready: a
+`spawn_agent` onboarding briefing and its optional first `Task` would be submitted into a terminal
+still drawing its banner, and a `timer_fire_when_idle_*` quorum could be satisfied by a worker that
+had not begun. "I have no evidence yet" and "this agent is free" are different facts, and only the
+second should wake anything.
+
+**What it costs.** An agent whose provider signal never arrives is now `None` **forever** rather than
+`Idle`:
+
+- It never satisfies a `timer_fire_when_idle_any`/`_all` quorum, because `plan/05` §12's own rule is
+  that a running-but-unclassified process is not idle. Such a timer now reaches its **max-wait
+  backstop** (default 1 hour, ceiling 24 h) instead of firing early. The backstop is what keeps this
+  from being a deadlock, which is why it is not optional.
+- A mailbox message or spawn briefing addressed to such a worker waits for an idle transition that
+  never comes, so its wake carries its own **backstop** (`MAX_WAKE_WAIT`, two minutes): past that
+  wait the wake envelope is submitted anyway. The backstop is claimed as it fires, so a pending wake
+  reaches it once rather than on a repeating interval, and it is scoped to the never-classified
+  case — an agent the classifier reports busy has real evidence behind that report, and interrupting
+  it is exactly what the evidence gate exists to prevent.
+- The UI shows the agent running with no activity rather than showing it idle. A silent-but-alive
+  agent reads as "unknown", which is honest, where it used to read as "free", which was not.
+
+The exposure is narrow — an agent that produces no output *and* sets no title is one Soloist has no
+signal from at all — but note what it is *not* bounded by any more. D-5's original comfort was that
+"the activity signal only *informs* … it never auto-acts," so a misclassification degraded gracefully.
+Idle-gated wake delivery ends that: an `Idle` transition now **writes a submitted turn into a
+terminal**. That is precisely why the pre-evidence assumption had to change — the old default's cost
+was small while nothing acted on it, and is not small now.
+
+**Evidence:** `an_agent_that_is_never_classified_is_woken_once_its_wake_has_waited_out_the_backstop`,
+`a_wake_is_not_delivered_before_its_backstop_elapses`,
+`an_agent_that_reaches_idle_is_woken_without_waiting_for_the_backstop` and
+`the_backstop_delivers_one_wake_however_long_the_agent_stays_unclassified`
+(`crates/core/src/coordination/mailbox/reactor_tests.rs`),
+`a_pending_wake_reaches_its_backstop_only_after_the_full_wait`,
+`a_pending_wakes_backstop_is_claimed_once_however_often_it_is_swept` and
+`later_messages_do_not_push_out_a_waiting_recipients_backstop`
+(`crates/core/src/coordination/mailbox/state_tests.rs`),
+`an_agent_without_provider_evidence_is_not_classified` and
+`an_agent_that_never_outputs_is_never_classified` (`crates/core/src/agents/idle/classifier_tests.rs`),
+`a_running_agent_that_has_not_emitted_provider_evidence_is_not_idle`
+(`crates/core/src/agents/idle/sampler_tests.rs`), and the strategy-level contract in
+`output_delta_has_no_evidence_until_output_arrives` /
+`title_strategies_have_no_evidence_without_a_title`
+(`crates/core/src/agents/idle/strategy_tests.rs`).
+
+**Effect on parity:** **E5** ("state tracks a real agent") still verifies — a real agent transitions
+to `Working` under output, `Idle` when quiet, `Permission` on a recognised prompt. The observable
+difference is only at the start of a run: an agent reports no activity until its first signal instead
+of reporting `Idle`. **G8** (`timer_fire_when_idle_any`/`_all`) is unaffected for any agent that
+produces a signal, and the backstop covers those that never do — as does the mailbox's own wake
+backstop for **O13**/**O15** delivery.
+
+## D-42 — Agent-to-agent traffic is retained for display in a bounded transcript (a Soloist extension) 🟢
+
+**Introduced:** the agent-message transcript and Messages view (`plan/02` O17).
+
+**Solo is silent, not contradicted.** As with D-39, `plan/05` records Solo's coordination tools but
+says nothing about what becomes of a message after its recipient acknowledges it, and nothing about a
+surface for reading agent-to-agent traffic. No public source says Solo cannot have one. The silence is
+the gap; the full decision lives in `plan/05` §12 and nothing here attributes the feature to Solo.
+
+**Soloist's decision:**
+
+- The mailbox retains each exchange — sender, recipient, kind, body, delivery outcome, recorded time —
+  in a per-project log alongside the delivery queue, and the orchestration pane reads it through the
+  existing `orchestration_snapshot` as a read-only Messages view. There is no way to compose a message
+  from the UI.
+- **The two ceilings over that one aggregate have opposite policies, deliberately.** The delivery queue
+  refuses overflow (O15), because dropping a queued message loses work an agent is waiting on. The
+  transcript evicts its oldest entry, because refusing there would fail a send over a display record.
+  Recording therefore returns nothing and cannot fail. The limits are 512 entries per project, 4,096
+  across the application, and 4 KiB of retained body per entry; only the retained copy is truncated, so
+  the delivered message is always whole.
+- **Lifecycle follows the project, not the process.** Closing a recipient clears its inbox but leaves
+  its messages readable — a closed worker's exchanges are exactly what a human wants to read. Only
+  `ProjectRemoved` forgets a transcript.
+- **The log is in-memory**, like the mailbox it belongs to, so it survives a webview reload and not an
+  app restart. A `ProcessId` is minted per run, so a persisted transcript would render senders and
+  recipients its roster could no longer resolve.
+- **No message body reaches the event bus.** `AgentMessageChanged` carries the project and message id
+  only; the retained record is the body's single source, and the bus fans out to every subscriber of a
+  public subscription.

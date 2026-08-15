@@ -13,7 +13,12 @@ const CONFIG = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
-const IDENTITY = ["-c", "user.name=Soloist e2e", "-c", "user.email=e2e@example.invalid"];
+const IDENTITY = [
+  "-c",
+  "user.name=Soloist e2e",
+  "-c",
+  "user.email=e2e@example.invalid",
+];
 
 /** A path the repository holds twice: as the last commit left it, and as it stands now. */
 export interface RepositoryChange {
@@ -57,7 +62,11 @@ function git(root: string, ...args: string[]): void {
   try {
     execFileSync("git", ["-C", root, ...args], { env: CONFIG, stdio: "pipe" });
   } catch (reason) {
-    const said = (reason as { stderr?: Buffer }).stderr?.toString().trim() ?? String(reason);
-    throw new Error(`preparing the fixture repository failed: git ${args.join(" ")} — ${said}`);
+    const said =
+      (reason as { stderr?: Buffer }).stderr?.toString().trim() ??
+      String(reason);
+    throw new Error(
+      `preparing the fixture repository failed: git ${args.join(" ")} — ${said}`,
+    );
   }
 }

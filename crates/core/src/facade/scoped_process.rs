@@ -8,6 +8,7 @@
 
 use std::time::Duration;
 
+use super::mailbox::{SpawnAgentOutcome, SpawnAgentRequest};
 use super::scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
 use crate::ids::{ProcessId, ProjectId};
 use crate::process::ProcessView;
@@ -108,6 +109,24 @@ impl ScopedFacade<'_> {
         tool: &str,
         extra_args: Vec<String>,
     ) -> Result<ProcessId, SpawnAgentError> {
+        Ok(self
+            .spawn_agent_request(SpawnAgentRequest {
+                tool: tool.to_owned(),
+                extra_args,
+                prompt: None,
+                todo_id: None,
+                include_agent_instructions: true,
+            })?
+            .process)
+    }
+
+    /// Spawns a worker and optionally queues an addressed first task after its lineage is recorded.
+    /// The task is never placed in CLI arguments or written during process startup; the mailbox
+    /// reactor submits a compact wake envelope after the child's idle transition proves readiness.
+    pub fn spawn_agent_request(
+        &self,
+        request: SpawnAgentRequest,
+    ) -> Result<SpawnAgentOutcome, SpawnAgentError> {
         let project = self
             .inner
             .effective_project(self.session)
@@ -127,13 +146,68 @@ impl ScopedFacade<'_> {
         if caller_is_worker {
             return Err(SpawnAgentError::WorkerMayNotSpawn);
         }
-        let worker = self.inner.launch_agent(project, tool, extra_args)?;
+        let task_sender = match request.prompt.as_ref() {
+            Some(prompt) => {
+                if prompt.len() > crate::coordination::MAX_AGENT_MESSAGE_BYTES {
+                    return Err(super::AgentMailboxError::MessageTooLarge.into());
+                }
+                let (message_project, sender) = self.mailbox_identity()?;
+                if message_project != project {
+                    return Err(super::AgentMailboxError::NoProjectScope.into());
+                }
+                self.inner
+                    .mailbox
+                    .reserve_project_slot(project, prompt.len())
+                    .map_err(super::AgentMailboxError::from)?;
+                Some(sender)
+            }
+            None => None,
+        };
+        let worker = match self
+            .inner
+            .launch_agent(project, &request.tool, request.extra_args)
+        {
+            Ok(worker) => worker,
+            Err(error) => {
+                if task_sender.is_some() {
+                    self.inner.mailbox.cancel_project_reservation(
+                        project,
+                        request.prompt.as_ref().map_or(0, String::len),
+                    );
+                }
+                return Err(error.into());
+            }
+        };
         // A worker spawned by a bound lead nests under it in the orchestration tree; an
         // unbound or external caller's spawn records no parent and so reads back as a root.
         if let Some(lead) = self.inner.identity.origin(self.session).process() {
             self.inner.lineage.record(worker, lead);
         }
-        Ok(worker)
+        if request.include_agent_instructions {
+            let label = self
+                .inner
+                .process_view(worker)
+                .map_or_else(|| request.tool.clone(), |view| view.label);
+            self.inner.mailbox.queue_onboarding(
+                worker,
+                crate::coordination::orchestration_guide(crate::coordination::OrchestrationGuide {
+                    process: worker,
+                    project,
+                    label: &label,
+                }),
+            );
+        }
+        let initial_message = request
+            .prompt
+            .zip(task_sender)
+            .map(|(prompt, sender)| {
+                self.queue_spawned_task(project, sender, worker, prompt, request.todo_id)
+            })
+            .transpose()?;
+        Ok(SpawnAgentOutcome {
+            process: worker,
+            initial_message,
+        })
     }
 
     /// Starts every trusted command in the session's effective project, regardless of

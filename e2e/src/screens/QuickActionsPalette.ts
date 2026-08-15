@@ -40,7 +40,9 @@ export const quickActionsPalette = {
       // Reports what had focus, because the usual cause is a focused terminal eating the chord
       // before it reaches the app's window handler — an answer, rather than a bare timeout.
       async () => {
-        const focused = await browser.execute(() => document.activeElement?.tagName ?? "none");
+        const focused = await browser.execute(
+          () => document.activeElement?.tagName ?? "none",
+        );
         return `the quick-actions palette never opened (focus was on ${focused})`;
       },
     );
@@ -70,10 +72,14 @@ export const quickActionsPalette = {
     const wanted = `${label} ${action} `.toLowerCase();
     const values: string[] = await browser.execute(
       (selector: string) =>
-        [...document.querySelectorAll(selector)].map((node) => node.getAttribute("data-value") ?? ""),
+        [...document.querySelectorAll(selector)].map(
+          (node) => node.getAttribute("data-value") ?? "",
+        ),
       ITEM,
     );
-    const value = values.find((candidate) => candidate.toLowerCase().startsWith(wanted));
+    const value = values.find((candidate) =>
+      candidate.toLowerCase().startsWith(wanted),
+    );
     if (value === undefined) {
       throw new Error(
         `the palette offered no "${action}" for "${label}"; entries: ${JSON.stringify(values)}`,

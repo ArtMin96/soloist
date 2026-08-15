@@ -17,7 +17,7 @@ use tokio::sync::broadcast;
 use crate::attention::AttentionKind;
 use crate::configchange::{ConfigSync, TrustReviewCommand};
 use crate::idle::AgentActivity;
-use crate::ids::{ProcessId, ProjectId, TimerId, TodoId};
+use crate::ids::{AgentMessageId, ProcessId, ProjectId, TimerId, TodoId};
 use crate::orphans::OrphanInfo;
 use crate::process::{ProcStatus, ProcessKind};
 use crate::template::TemplateKind;
@@ -157,6 +157,15 @@ pub enum DomainEvent {
     /// carrying ids only: the orchestration UI re-reads the snapshot rather than trusting a
     /// payload, so a chatty run coalesces to one re-query per frame.
     TodoChanged { project: ProjectId, id: TodoId },
+    /// A recorded agent-to-agent exchange in `project` changed — queued, woken, or acknowledged. A
+    /// change-notification carrying ids only: the orchestration UI re-reads the snapshot rather
+    /// than trusting a payload, so a chatty run coalesces to one re-query per frame. The body
+    /// deliberately stays off the bus — the retained record is its single source, and this bus
+    /// fans out to every subscriber of a public subscription.
+    AgentMessageChanged {
+        project: ProjectId,
+        id: AgentMessageId,
+    },
     /// A coordination timer owned by `owner` was armed (created or set fire-when-idle). Carries the
     /// owner and timer id so the orchestration UI re-reads that owner's timers.
     TimerArmed { owner: ProcessId, id: TimerId },

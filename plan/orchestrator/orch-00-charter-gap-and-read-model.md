@@ -27,7 +27,7 @@ keeps the dependency rule intact (UI → Facade, never UI → a context internal
 ## Tasks
 1. **Record the gap + expand the matrix (O-rows) + fold in the three demo-fidelity decisions:** add an
    "Orchestrator (clean-room composition)" gap row to [`05` §12](../05-solo-reference-and-sources.md) (the
-   concept is undocumented for Solo — it is ours; [README](README.md) §1); add rows **O1–O14** to
+   concept is undocumented for Solo — it is ours; [README](README.md) §1); add rows **O1–O16** to
    [`02-feature-parity-matrix.md`](../02-feature-parity-matrix.md) with a new `O — Orchestrator` group
    header; cross-link the demo as the `🟡` UX source. **Then record the three 2026-06-28 re-verification
    decisions (the demo's small load-bearing details, owner-approved as v1 — [README](README.md) §0/§1):**
@@ -36,16 +36,26 @@ keeps the dependency rule intact (UI → Facade, never UI → a context internal
      `todo_get` showing `author`/`author_actor_id` — this **reverses** that row's earlier "no author
      attribution" decision (it is a correction toward the demo, so it *removes* a latent divergence rather
      than adding one).
-   - **O13 (spawn orchestration-context preamble):** add a gap-decision recording that `spawn_agent`/
-     `spawn_process` inject a first-turn `[SOLO ORCHESTRATION CONTEXT]` preamble (identity + the
-     coordination tools), citing the demo's `include_agent_instructions`. Net-new behavior toward the
-     demo; clean-room content (our preamble text, not Solo's).
+   - **O13 (spawn onboarding + optional task):** add a gap decision recording default-on reusable
+     clean-room instructions and an optional addressed `Task` for `spawn_agent`. A task may correlate
+     to a todo but requires none. Both wait for the worker's first idle transition; neither enters
+     provider arguments or startup input. This preserves the demo's `include_agent_instructions`
+     intent without copying its text. O13 is **complete at `spawn_agent`**: `spawn_process` carries
+     neither parameter, because a Command holds no mailbox and is never idle-tracked, so neither payload
+     could be enqueued or woken (owner decision 2026-08-14, reasoned in `05` §12).
    - **O14 (`solo://` handoff):** record that the orchestrator slice of the documented `solo://` deep
      links ([`05` §10](../05-solo-reference-and-sources.md)) is **promoted from `later` (I4) to v1** — a
      scratchpad/todo link + resolver for the agent handoff.
-   Add a `KNOWN-DIVERGENCES.md` entry **only** where we observably differ from a *documented* Solo
-   behavior (none is expected — net-new UI/tools and these three corrections move us toward the demo, not
-   away; the disciplined-schema choices remain `D-7`/`D-8`). No source code in this task.
+   - **O15 (authenticated live-run messaging):** record that direct/group peer communication is a
+     Soloist-original bounded mailbox. Todo correlation is optional: debate, direct/group exchange,
+     retrieve, and acknowledgement remain complete without durable board work. Stable MCP tools are
+     client-initiated and do not push arbitrary turns into a connected coding CLI, so MCP carries
+     send/retrieve/ack while an idle-gated semantic PTY turn carries only the wake envelope.
+   - **O16 (atomic completion report):** record the optional durable-board path: one transaction
+     completes an existing todo and appends the authenticated worker's result once. Parent notification
+     happens after commit through the ephemeral mailbox and is best-effort.
+   Record the Soloist-original mailbox in `KNOWN-DIVERGENCES.md` under the D-20/D-35 strict-reading
+   precedent so nobody later attributes it to Solo. No source code in this task.
 2. **`OrchestrationSnapshot` read-model (O1, [`04` §5](../04-engineering-architecture-and-patterns.md)):**
    a serde read type in `core` projecting, for an effective project: the **agent lineage tree** (each
    managed `Agent`/`Command`/`Terminal` with `ProcStatus`, and — once orch-01 lands lineage — its
@@ -87,10 +97,10 @@ enum DomainEvent { /* …existing… */ TodoChanged{project:ProjectId,id:TodoId}
 ```
 
 ## Acceptance criteria
-- `02`/`05 §12` carry the **O1–O14** rows + the orchestrator gap decision; the matrix has an `O` group;
-  the three re-verification decisions are recorded (O12 comment-author reversal, O13 spawn preamble, O14
-  `solo://` promotion); no `KNOWN-DIVERGENCES` entry was forced where there is no documented-behavior
-  divergence.
+- `02`/`05 §12` carry the **O1–O16** rows + the orchestrator gap decision; the matrix has an `O` group.
+  The demo-fidelity decisions are recorded for O12–O14, and the clean-room messaging/completion
+  decisions are recorded for O15/O16. `KNOWN-DIVERGENCES` D-39 distinguishes the Soloist-original
+  mailbox from documented Solo behavior.
 - `orchestration_snapshot(project)` returns the live tree + todos + timers + leases + scratchpads + kv,
   scoped to the project, assembled purely from existing reads.
 - Creating/completing a todo, arming/firing a timer, acquiring/releasing a lease, and writing a

@@ -140,6 +140,9 @@ export const config: WebdriverIO.Config = {
       "wdio:tauriServiceOptions": {
         appBinaryPath: appBinary,
         driverProvider: "embedded",
+        // Startup failures otherwise discard the app's stderr and leave only "exited code 101".
+        // The service's documented backend capture keeps the first failure diagnosable.
+        captureBackendLogs: true,
       },
     },
   ],

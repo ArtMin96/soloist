@@ -391,7 +391,7 @@ mod tests {
         command_spec, harness, harness_with_shell_env, next_change, next_to, spawn_spec, status_of,
         terminal, wait_all, PROJECT,
     };
-    use crate::testing::{FakeShellEnvProbe, FakeSpawner, PANIC_FAKE_PGID};
+    use crate::testing::{FakeShellEnvProbe, FakeSpawner, WarnFlag, PANIC_FAKE_PGID};
     use std::collections::BTreeMap;
     use std::path::Path;
     use std::time::Duration;
@@ -1006,36 +1006,6 @@ mod tests {
             h.sup.resize(unknown, 80, 24).await,
             Err(SupervisorError::NotFound(_))
         ));
-    }
-
-    /// A minimal `tracing` subscriber that only records whether a `WARN` event was emitted — just
-    /// enough to prove the illegal-transition path traces rather than staying silent, without a
-    /// subscriber dependency.
-    #[derive(Clone, Default)]
-    struct WarnFlag(Arc<std::sync::atomic::AtomicBool>);
-
-    impl WarnFlag {
-        fn was_warned(&self) -> bool {
-            self.0.load(std::sync::atomic::Ordering::SeqCst)
-        }
-    }
-
-    impl tracing::Subscriber for WarnFlag {
-        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
-            true
-        }
-        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-            tracing::span::Id::from_u64(1)
-        }
-        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
-        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
-        fn event(&self, event: &tracing::Event<'_>) {
-            if *event.metadata().level() == tracing::Level::WARN {
-                self.0.store(true, std::sync::atomic::Ordering::SeqCst);
-            }
-        }
-        fn enter(&self, _: &tracing::span::Id) {}
-        fn exit(&self, _: &tracing::span::Id) {}
     }
 
     #[test]

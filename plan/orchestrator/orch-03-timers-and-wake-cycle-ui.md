@@ -8,9 +8,11 @@ backstop elapses) the scheduler delivers the `body` to the lead **as a fresh use
 shows that arrival and the timer leaving the panel ([README](README.md) §1; video `WAKGhlzpYgs`).
 
 **Delivers:** O7, O8. **Architecture:** presentational panel + a lead "timeline" over orch-00's
-read-model + events; the wake is the **existing** `TimerScheduler` delivering `body` via
-`Supervisor::write_stdin(body + "\r")` ([`06` §4 Scheduler row](../06-codebase-blueprint-and-cleanup.md),
-G7–G9) — observed, not re-implemented.
+read-model + events; the wake is the **existing** `TimerScheduler` delivering its bounded payload via
+`Supervisor::try_submit_turn` ([`06` §4 Scheduler row](../06-codebase-blueprint-and-cleanup.md),
+G7–G9). The semantic seam converts interior carriage returns to newlines, strips trailing
+newlines/carriage returns, and appends exactly one `\r`; raw terminal
+input remains raw. The UI observes this behavior and never reimplements it.
 
 ## Scope
 **In:** a **timers panel** per lead (armed timers, `FireCond`, `waiting_on`, live countdown to the
@@ -46,8 +48,8 @@ block forever — surfacing it turns an invisible safety net into an observable 
    `already_idle` flag if the condition was met at arm time. Pause shows frozen remaining time; resume
    re-arms it (pause/resume semantics are the core's, [`05` §12](../05-solo-reference-and-sources.md)).
 4. **Wake-cycle visibility (O8):** on `TimerFired`, surface the delivered `body` on the **lead** — it
-   arrives as a real fresh turn in the lead's PTY (the scheduler already writes it via
-   `Supervisor::write_stdin`); the UI marks the wake on a small **orchestration timeline** (armed →
+   arrives as a real fresh turn in the lead's PTY (the scheduler already sends it via
+   `Supervisor::try_submit_turn`); the UI marks the wake on a small **orchestration timeline** (armed →
    waiting on N → fired → delivered) and removes the timer from the panel. The UI **does not** inject the
    turn — it observes the existing delivery (one behavior, one path, [`04` §2](../04-engineering-architecture-and-patterns.md)).
    **Wake-reason prefix (the demo's `[Solo timer #id] [wait for all: all watched idle: …]` header):** the
@@ -66,7 +68,7 @@ block forever — surfacing it turns an invisible safety net into an observable 
 enum FireCond { At(Instant), WhenIdleAny(Vec<ProcessId>), WhenIdleAll(Vec<ProcessId>) }
 struct TimerView { id: TimerId, owner: ProcessId, fire: FireCond, waiting_on: Vec<ProcessId>, deadline: UnixMillis, body: String, already_idle: bool }
 // wake is the EXISTING scheduler path — UI only observes TimerFired + the lead's PTY:
-// TimerScheduler --(on fire)--> Supervisor::write_stdin(owner, body + "\r")  // [06 §4], G7–G9
+// TimerScheduler --(on fire)--> Supervisor::try_submit_turn(owner, wake_reason + body) // [06 §4], G7–G9
 ```
 
 ## Acceptance criteria

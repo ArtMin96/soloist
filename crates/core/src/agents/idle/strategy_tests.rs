@@ -101,14 +101,24 @@ fn output_delta_holds_working_while_output_flows_past_a_lingering_prompt() {
 }
 
 #[test]
-fn output_delta_agent_that_never_outputs_stays_idle() {
+fn output_delta_has_no_evidence_until_output_arrives() {
+    // The signal this provider family is read from is visible output, so a terminal that has a
+    // title and a banner but has printed nothing through the PTY still offers nothing to
+    // classify — the classifier holds off rather than reading the silence as availability.
     let strategy = strategy_for(AgentKind::OpenCode);
-    let mut memory = AgentMemory::default();
-    let mut activity = AgentActivity::Idle;
-    for _ in 0..5 {
-        activity = strategy.classify(&mut memory, &signals(0, None, &[]), activity);
+    assert!(!strategy.has_evidence(&signals(0, Some("opencode"), &["starting…"])));
+    assert!(strategy.has_evidence(&signals(1, None, &[])));
+}
+
+#[test]
+fn title_strategies_have_no_evidence_without_a_title() {
+    // Mirrors the rule above for the providers read from the OSC title: output alone is not
+    // their signal, so a chatty agent that has never set a title is still unclassifiable.
+    for kind in [AgentKind::Codex, AgentKind::Gemini] {
+        let strategy = strategy_for(kind);
+        assert!(!strategy.has_evidence(&signals(40, None, &["plenty of output"])));
+        assert!(strategy.has_evidence(&signals(0, Some("building 1/3"), &[])));
     }
-    assert_eq!(activity, AgentActivity::Idle);
 }
 
 #[test]

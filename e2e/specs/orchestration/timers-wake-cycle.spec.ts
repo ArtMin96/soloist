@@ -1,5 +1,10 @@
 import type { ProcStatus, ProjectView } from "@domain";
-import { LEAD_AGENT, TIMER, releaseWorkerToIdle, requestLeadTimer } from "../../src/harness/leadAgent.js";
+import {
+  LEAD_AGENT,
+  TIMER,
+  releaseWorkerToIdle,
+  requestLeadTimer,
+} from "../../src/harness/leadAgent.js";
 import { launchAgent } from "../../src/flows/launch.js";
 import { openProject } from "../../src/flows/openProject.js";
 import { orchestrationPane } from "../../src/screens/OrchestrationPane.js";
@@ -71,11 +76,12 @@ describe("timers and the wake cycle", () => {
     // real PTY prefixed with the wake-reason header, and the lead echoed it, so it is in the lead's
     // terminal. Switch to the lead's terminal and read it there.
     await sidebar.select(LEAD);
-    const terminal = await terminalPane.waitForText(TIMER.body);
+    const terminal = await terminalPane.waitForText(TIMER.submitted);
 
     // The body arrived, with the prefix that tells the agent it woke, and the reason that says its
     // peers went idle — not that the backstop elapsed (which would read "backstop elapsed").
     expect(terminal).toContain(WAKE_PREFIX);
     expect(terminal).toContain(WAKE_REASON_ALL_IDLE);
+    expect(terminal).toContain(TIMER.body);
   });
 });

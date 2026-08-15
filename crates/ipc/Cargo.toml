@@ -20,6 +20,7 @@ getrandom = "0.4"
 hex = "0.4"
 
 [dev-dependencies]
+soloist-core = { path = "../core", features = ["testing"] }
 # The framing tests drive an in-memory duplex pipe under a small runtime.
 tokio = { version = "1", default-features = false, features = ["io-util", "macros", "rt"] }
 # The runtime-file tests write into a throwaway directory.

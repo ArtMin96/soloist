@@ -5,15 +5,28 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    AcquireOutcome, AgentTool, Branches, Comment, DiagramSummary, DiagramView, ExportedTemplate,
-    FeedbackEntry, FileDiff, GitStatus, IntegrationWrite, KvEntry, LeaseView, LinkContent,
-    McpToolGroups, ProcessId, ProcessView, ProjectId, ProjectView, PullRequestReview,
-    PullRequestSurface, RenderedPrompt, ScratchpadSummary, ScratchpadView, SeedTemplate,
-    SetWhenIdleOutcome, StartSummary, TemplateSummary, TemplateView, TimerView, TodoSummary,
-    TodoView, Whoami,
+    AcquireOutcome, AgentBroadcastReceipt, AgentMessageDelivery, AgentMessageId,
+    AgentMessageOutcome, AgentRosterEntry, AgentTool, Branches, Comment, CompletionReport,
+    DiagramSummary, DiagramView, ExportedTemplate, FeedbackEntry, FileDiff, GitStatus,
+    IntegrationWrite, KvEntry, LeaseView, LinkContent, McpToolGroups, ProcessId, ProcessView,
+    ProjectId, ProjectView, PullRequestReview, PullRequestSurface, RenderedPrompt,
+    ScratchpadSummary, ScratchpadView, SeedTemplate, SetWhenIdleOutcome, StartSummary,
+    TemplateSummary, TemplateView, TimerView, TodoSummary, TodoView, Whoami,
 };
 
 use crate::error::IpcError;
+use crate::frame::MAX_FRAME;
+
+/// A conservative serialized upper bound for one compact broadcast receipt row: two `u64` ids,
+/// the longest delivery tag, field names, punctuation, and slack for JSON framing.
+const MAX_BROADCAST_RECEIPT_ROW_BYTES: usize = 128;
+const MAX_BROADCAST_RECEIPT_ROWS: usize = soloist_core::MAX_PENDING_MESSAGES_PER_PROJECT;
+const MAX_BROADCAST_RECEIPT_ENVELOPE_BYTES: usize = 256;
+const _: () = assert!(
+    MAX_BROADCAST_RECEIPT_ROW_BYTES * MAX_BROADCAST_RECEIPT_ROWS
+        + MAX_BROADCAST_RECEIPT_ENVELOPE_BYTES
+        < MAX_FRAME as usize
+);
 
 /// A successful reply. The server always returns the variant matching the request.
 ///
@@ -39,10 +52,30 @@ pub enum IpcResponse {
     Stopped(bool),
     /// Input was written; the rendered tail when `wait_ms` was given, else `None`.
     InputSent(Option<String>),
-    /// An agent worker was spawned and started; the payload is its new process id.
+    /// An agent worker was spawned and started without initial-message metadata. Kept as the exact
+    /// legacy response for promptless spawns.
     Spawned(ProcessId),
+    /// An agent worker was spawned and an initial onboarding/task message was queued for it.
+    SpawnedWithMessage {
+        process: ProcessId,
+        initial_message_id: AgentMessageId,
+        delivery: AgentMessageOutcome,
+    },
     /// Every configured agent tool (answer to [`IpcRequest::ListAgentTools`]).
     AgentTools(Vec<AgentTool>),
+    /// The caller and its related live agents (answer to [`IpcRequest::AgentRoster`]).
+    AgentRoster(Vec<AgentRosterEntry>),
+    /// One message delivery (answer to send or acknowledge).
+    AgentMessageDelivery(AgentMessageDelivery),
+    /// Compact receipts created by a lineage-group broadcast. Bodies are deliberately omitted so
+    /// the bounded response remains far below the IPC frame cap even at the project queue limit.
+    AgentMessageBroadcast(AgentBroadcastReceipt),
+    /// One message from the caller's inbox, with the delivery state it currently holds.
+    AgentMessage(AgentMessageDelivery),
+    /// The caller's pending, unacknowledged inbox, each message with its delivery state.
+    AgentMessages(Vec<AgentMessageDelivery>),
+    /// A durable completion and the queued, pending, or deferred notification state.
+    AgentCompletion(CompletionReport),
     /// A bulk start succeeded; the payload reports what started and what was skipped as
     /// untrusted (answer to [`IpcRequest::StartAllCommands`]).
     BulkStarted(StartSummary),

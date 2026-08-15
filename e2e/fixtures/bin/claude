@@ -10,5 +10,9 @@ if [ "${1:-}" = "--version" ]; then
   exit 0
 fi
 
+if [[ "${1:-}" == --soloist-e2e-mailbox-role=* ]]; then
+  exec "${SOLOIST_E2E_LEAD_BIN:?the e2e harness must set SOLOIST_E2E_LEAD_BIN}" "$@"
+fi
+
 echo "stub agent ready"
 exec sleep infinity

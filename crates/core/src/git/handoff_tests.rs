@@ -1,8 +1,8 @@
 //! Behavioural tests for composing a handoff — what an agent is told about a failing check or a
 //! comment, and what it is never told.
 //!
-//! Everything asserted here is the text itself, because the text is the whole behaviour: it is
-//! delivered as one paste and read by somebody who was not looking at the pull request.
+//! Everything asserted here is the composed text; delivery as a semantic turn is tested at the
+//! façade seam.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -162,7 +162,7 @@ fn a_branch_with_nothing_open_has_nothing_to_hand_over() {
 #[test]
 fn a_conversation_longer_than_there_is_room_for_is_still_handed_over_whole_lines() {
     // A long argument is the ordinary case rather than the pathological one: twenty comments is
-    // what the read's own ceiling permits, and twenty long ones is more than one paste can carry.
+    // what the read's own ceiling permits, and twenty long ones is more than one turn can carry.
     let mut long = review_thread(THREAD, "src/main.rs", 42, "the first word on it");
     let said = "a paragraph of review that goes on at some length about the change".repeat(20);
     long.comments = std::iter::repeat_with(|| {

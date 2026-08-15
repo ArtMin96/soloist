@@ -4,8 +4,15 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use soloist_core::{
-    DiffExtent, DiffTarget, HunkRange, IntegrationFile, MergeMethod, MissingPolicy, NewPullRequest,
-    ProcessId, ProjectId, ScratchpadLink, TemplateKind, TemplateScope, TimerId, TodoDoc, TodoId,
+    AgentMessageId, DiffExtent, DiffTarget, HunkRange, IntegrationFile, MergeMethod, MissingPolicy,
+    NewPullRequest, ProcessId, ProjectId, ScratchpadLink, TemplateKind, TemplateScope, TimerId,
+    TodoDoc, TodoId,
+};
+
+mod defaults;
+
+use defaults::{
+    include_agent_instructions_by_default, is_default_include_agent_instructions, not_asked_for,
 };
 
 /// A request from an IPC client to the running app. The server resolves identity and
@@ -52,9 +59,46 @@ pub enum IpcRequest {
     SpawnAgent {
         tool: String,
         extra_args: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prompt: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        todo_id: Option<TodoId>,
+        #[serde(
+            default = "include_agent_instructions_by_default",
+            skip_serializing_if = "is_default_include_agent_instructions"
+        )]
+        include_agent_instructions: bool,
     },
     /// Every configured agent tool that `spawn_agent` can launch (not scope-filtered).
     ListAgentTools,
+    /// The caller and its live parent, children, and siblings in the effective project.
+    AgentRoster,
+    /// Send one message to a related agent. Sender and project are authenticated from the session.
+    AgentMessageSend {
+        recipient: ProcessId,
+        body: String,
+        todo_id: Option<TodoId>,
+    },
+    /// Send one message to every other live agent in the caller's lineage-root orchestration group.
+    /// Sender, lineage, and project come from the session.
+    AgentMessageBroadcast {
+        body: String,
+        todo_id: Option<TodoId>,
+    },
+    /// The caller's pending, unacknowledged inbox, bounded and ordered by the core.
+    AgentMessageList,
+    /// One message from the caller's inbox.
+    AgentMessageGet { message_id: AgentMessageId },
+    /// Acknowledge one message from the caller's inbox.
+    AgentMessageAcknowledge { message_id: AgentMessageId },
+    /// Report the addressed task `task_message_id` complete to the caller's lead agent, completing
+    /// the todo that task carried when it named one. The core derives the reporter and the lead from
+    /// the session, so `(reporter, task_message_id)` is what makes a repeated report idempotent.
+    AgentReportCompletion {
+        task_message_id: AgentMessageId,
+        todo_id: Option<TodoId>,
+        summary: String,
+    },
     /// Start every trusted command in the session's effective project (trust-gated).
     StartAllCommands,
     /// Gracefully stop every running command in the session's effective project.
@@ -369,10 +413,4 @@ pub enum IpcRequest {
     SeedTemplateRead { kind: TemplateKind },
     /// Write the agent guide into the session's effective project root as a managed section.
     SetupAgentIntegration { file: IntegrationFile },
-}
-
-/// Whether a request left its progress opt-in unasked-for, so an unasked request stays exactly the
-/// bytes it was before there was anything to ask for.
-fn not_asked_for(progress: &bool) -> bool {
-    !progress
 }

@@ -239,6 +239,36 @@ Surgical because no other spec writes a scratchpad, completes a todo, or creates
 paths are coordination-only. Each mutation reddened exactly one assertion; `git diff --stat crates/` showed
 none of the three files after restore.
 
+The addressed-agent-messaging walk (`specs/orchestration/agent-messaging.spec.ts`) reuses the bound lead
+fixture with two spawned fixture workers. Its source proof contrasts the wire default with an explicit
+opt-out: the primary serializes `include_agent_instructions: true`, which the protocol omits on the wire,
+and proceeds only after the defaulted briefing arrives as a submitted PTY turn; the peer serializes
+`false` and refuses any such briefing. Prompt Tasks and the direct/group exchange work without a todo
+correlation; the todo is introduced only for the optional durable completion/result leg. Scenario modules
+return after printing their proofs, but the fixture entry point remains pending until cleanup stops it, so
+the sidebar cannot race a short-lived fixture out of `Running`.
+
+**What the walk reads is each agent's own terminal output.** The app renders no message bodies anywhere, so
+the assertions are evidence that the core carried a message into the recipient *process* — never that a
+window surface displayed one. The bodies are legible only because the fixture echoes what it received, which
+no real agent CLI does. Making that traffic visible is a separate piece of work; nothing here covers it.
+
+**First execution reddened it, and the cause was the fixture rather than the app.** The lead stands in for a
+provider read by the OSC title, and `Classifier::observe` declines to classify an agent whose provider signal
+has never appeared — so a title-less lead is never idle, and the idle-gated wake carrying its completion
+notice never arrives. Its two workers are read by visible output, so they were woken and their whole leg
+passed; only the lead's leg hung. (The timers walk passes with the same fixture binary because the
+scheduler's PTY delivery is not idle-gated.) The lead now sets one steady title, as the CLI it shadows does,
+which is also what makes its idle state deterministic. Its product-mutation pass is done, each mutation
+reverted byte-clean:
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| `include_agent_instructions_by_default()` → `false` (`crates/ipc/src/protocol/request/defaults.rs`) — the omitted-on-the-wire default stops meaning "include", so a defaulted spawn gets no briefing | only this walk fails, on the primary's first submitted turn | exactly that: the primary's first submitted turn was the addressed-message notification instead of `[Soloist orchestration context]`, the fixture refused it, and the walk failed at `never showed "primary completion reported"`; every other spec file passed but `remove-terminal`, which flaked once on a click wait unreachable from this mutation and passed in every other run |
+| Broadcast to nobody in `agent_message_broadcast` (`crates/core/src/facade/mailbox.rs`) — the call still succeeds and enqueues nothing | only this walk fails, and later: the briefing still arrives, the peer never hears the group message | exactly that: the terminal shows the briefing and the primary's task notification arriving normally, then the same `never showed "primary completion reported"` — the peer never completed its exchange, so its direct reply never came back; every other spec file passed in that run |
+
+Surgical because no other spec broadcasts or spawns with the instructions default in play.
+
 The timers-and-wake-cycle walk (`specs/orchestration/timers-wake-cycle.spec.ts`) drives orch-03's headline
 behavior — token-free waiting — against the real scheduler. It **reuses the lead fixture** via a third arm
 (a dropped timer plan): the bound lead spawns a worker and arms a `fire_when_idle_all` timer over it across the

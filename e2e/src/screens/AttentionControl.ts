@@ -24,7 +24,9 @@ export const attentionControl = {
     const text = (await control.getText()).trim();
     const total = Number.parseInt(text, 10);
     if (Number.isNaN(total)) {
-      throw new Error(`the unread count read ${JSON.stringify(text)}, which is not a number`);
+      throw new Error(
+        `the unread count read ${JSON.stringify(text)}, which is not a number`,
+      );
     }
     return total;
   },
