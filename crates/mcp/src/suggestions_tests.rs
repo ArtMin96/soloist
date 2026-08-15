@@ -21,14 +21,15 @@ fn a_tool_without_a_suggestion_never_shows_one() {
 
 #[test]
 fn tools_sharing_a_hint_share_its_decay_budget() {
-    // start_process and restart_process point to the same hint, so together they exhaust one budget
-    // rather than two — the caller sees the "don't poll for readiness" nudge a bounded number of
-    // times regardless of which of the two it uses.
+    // Every tool that brings a process up points to the same hint, so together they exhaust one
+    // budget rather than three — the caller sees the "don't poll for readiness" nudge a bounded
+    // number of times regardless of which of them it uses.
     let suggestions = Suggestions::default();
     assert_eq!(hint_for("start_process"), hint_for("restart_process"));
+    assert_eq!(hint_for("start_process"), hint_for("spawn_process"));
     assert!(suggestions.take("start_process").is_some());
     assert!(suggestions.take("restart_process").is_some());
-    assert!(suggestions.take("start_process").is_none());
+    assert!(suggestions.take("spawn_process").is_none());
 }
 
 #[test]

@@ -97,16 +97,23 @@ pub enum InvalidCommand {
 /// cannot start.
 pub fn check_command(name: &str, spec: &ProcessSpec) -> Result<(), InvalidCommand> {
     check_command_name(name)?;
-    if spec.command.trim().is_empty() {
-        return Err(InvalidCommand::BlankCommand);
-    }
-    Ok(())
+    check_command_line(spec)
 }
 
 /// The name half of [`check_command`], for a rename — which sets a name without touching the spec.
 pub fn check_command_name(name: &str) -> Result<(), InvalidCommand> {
     if name.trim().is_empty() {
         return Err(InvalidCommand::BlankName);
+    }
+    Ok(())
+}
+
+/// The command-line half of [`check_command`], for a caller whose name is *derived from* the
+/// command line. Such a caller checks the line first, so a blank command is refused as the blank
+/// command it is rather than as the blank name it would have produced.
+pub fn check_command_line(spec: &ProcessSpec) -> Result<(), InvalidCommand> {
+    if spec.command.trim().is_empty() {
+        return Err(InvalidCommand::BlankCommand);
     }
     Ok(())
 }

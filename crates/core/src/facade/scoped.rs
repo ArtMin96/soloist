@@ -14,11 +14,22 @@
 //! `ScopedFacade` exposes no accessor, so there is no ungated door to pick by accident. Binding
 //! the session once also takes it out of every signature — a caller cannot pass the wrong one.
 
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
 use super::{Facade, LaunchAgentError};
+use crate::config::InvalidCommand;
 use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::ports::StoreError;
 use crate::process::ProcessView;
 use crate::supervisor::SupervisorError;
+
+/// The refusal the one-level delegation gate returns. Both spawn taxonomies below render it, so
+/// the sentence a worker reads back is written once rather than drifting between them.
+const WORKER_MAY_NOT_SPAWN: &str =
+    "a worker agent cannot spawn agents or processes; report back to the lead that spawned it";
 
 /// The session-scoped view of the core: one caller's authority, bound to its session.
 ///
@@ -130,7 +141,7 @@ pub enum SpawnAgentError {
     NoProjectScope,
     /// The calling session is bound to a process that was itself spawned as a worker this
     /// run — delegation is one level deep, so a worker may not spawn its own workers.
-    #[error("a worker agent cannot spawn agents; report back to the lead that spawned it")]
+    #[error("{}", WORKER_MAY_NOT_SPAWN)]
     WorkerMayNotSpawn,
     /// The launch itself failed — see [`LaunchAgentError`].
     #[error(transparent)]
@@ -138,6 +149,59 @@ pub enum SpawnAgentError {
     /// The optional first task could not enter the bounded mailbox.
     #[error(transparent)]
     Mailbox(#[from] super::AgentMailboxError),
+}
+
+/// What a scoped caller asks for when it spawns a command process into its own project.
+///
+/// `working_dir` is the caller's value **as written**, relative to the project root, and is
+/// carried that way all the way to the trust gate: it is one of the three inputs to a command's
+/// trust variant, so resolving it against the root before hashing would key the gate on a digest
+/// no trusted variant can equal, and every spawn would be refused. [`Registration::command`] does
+/// the resolution afterwards, once the gate has passed.
+///
+/// [`Registration::command`]: crate::supervisor::Registration::command
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpawnProcessRequest {
+    /// The command line to run.
+    pub command: String,
+    /// Where to run it, relative to the project root; `None` is the root itself.
+    pub working_dir: Option<PathBuf>,
+    /// Environment overrides for this process.
+    pub env: BTreeMap<String, String>,
+    /// The display label; `None` names the process after the command's first word.
+    pub label: Option<String>,
+}
+
+/// Why spawning a command process over a scoped session was refused.
+///
+/// Distinct from [`ScopedActionError`], which acts on a process that already exists: this
+/// taxonomy carries the refusals only a creation can produce — the delegation depth gate, an
+/// inadmissible command, and a project that resolved to nothing.
+#[derive(Debug, thiserror::Error)]
+pub enum SpawnProcessError {
+    /// The session has no project in scope to spawn the process into.
+    #[error("no project is in scope; select one first")]
+    NoProjectScope,
+    /// The calling session is bound to a process that was itself spawned as a worker this
+    /// run — delegation is one level deep, so a worker may not spawn processes either.
+    #[error("{}", WORKER_MAY_NOT_SPAWN)]
+    WorkerMayNotSpawn,
+    /// The session's scope resolved to a project that is no longer open.
+    #[error("no such project")]
+    UnknownProject,
+    /// The command line or the label it would be filed under is not admissible.
+    #[error(transparent)]
+    InvalidCommand(#[from] InvalidCommand),
+    /// The command variant is not trusted to run in this project. Refused before anything is
+    /// registered, so a refusal leaves no process behind.
+    #[error("command is not trusted to run in this project")]
+    Untrusted,
+    /// A durable read failed while resolving the project or its trust — refused, never assumed.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// The supervisor refused to start the registered process.
+    #[error(transparent)]
+    Supervisor(#[from] SupervisorError),
 }
 
 impl From<SupervisorError> for ScopedActionError {

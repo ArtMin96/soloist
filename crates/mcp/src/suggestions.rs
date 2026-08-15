@@ -23,7 +23,7 @@ fn hint_for(tool: &str) -> Option<&'static str> {
             "You spawned a worker. Arm `timer_fire_when_idle_any` to be woken when it \
 goes quiet, rather than polling its output in a loop."
         }
-        "start_process" | "restart_process" => {
+        "start_process" | "restart_process" | "spawn_process" => {
             "Use `wait_for_bound_port` to block until its port \
 is up, or a fire-when-idle timer to be woken — don't poll the output waiting for it to be ready."
         }

@@ -9,10 +9,13 @@
 use std::time::Duration;
 
 use super::mailbox::{SpawnAgentOutcome, SpawnAgentRequest};
-use super::scoped::{ScopedActionError, ScopedFacade, SpawnAgentError};
+use super::scoped::{
+    ScopedActionError, ScopedFacade, SpawnAgentError, SpawnProcessError, SpawnProcessRequest,
+};
+use crate::config::ProcessSpec;
 use crate::ids::{ProcessId, ProjectId};
 use crate::process::ProcessView;
-use crate::supervisor::StartSummary;
+use crate::supervisor::{Registration, StartSummary};
 
 /// How many trailing rendered lines `send_input`'s `wait_ms` snapshot returns — a bounded
 /// tail (about a screenful), never the whole scrollback, so the reply stays small.
@@ -131,19 +134,7 @@ impl ScopedFacade<'_> {
             .inner
             .effective_project(self.session)
             .ok_or(SpawnAgentError::NoProjectScope)?;
-        // Delegation is one level deep: a caller recorded as a spawned worker is refused for
-        // its whole run — deliberately unfiltered by parent liveness, so a closed lead never
-        // promotes its workers to spawners. Refusal precedes the launch: nothing is spawned,
-        // registered, or recorded. The caller is resolved from the kernel-reported peer group
-        // as well as from its own binding, so a worker cannot lift the gate by never binding.
-        let caller_is_worker = [
-            self.home_process(),
-            self.inner.identity.origin(self.session).process(),
-        ]
-        .into_iter()
-        .flatten()
-        .any(|caller| self.inner.lineage.parent_of(caller).is_some());
-        if caller_is_worker {
+        if self.caller_is_spawned_worker() {
             return Err(SpawnAgentError::WorkerMayNotSpawn);
         }
         let task_sender = match request.prompt.as_ref() {
@@ -208,6 +199,92 @@ impl ScopedFacade<'_> {
             process: worker,
             initial_message,
         })
+    }
+
+    /// Whether the calling session's process was itself spawned as a worker this run.
+    ///
+    /// Delegation is one level deep, and this is the gate that keeps it there — spent by every
+    /// spawn path, so the rule is written once. Deliberately unfiltered by parent liveness, so a
+    /// closed lead never promotes its workers to spawners. The caller is resolved from the
+    /// kernel-reported peer group as well as from its own binding, so a worker cannot lift the
+    /// gate by never binding.
+    fn caller_is_spawned_worker(&self) -> bool {
+        [
+            self.home_process(),
+            self.inner.identity.origin(self.session).process(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|caller| self.inner.lineage.parent_of(caller).is_some())
+    }
+
+    /// Creates and starts a command process in the session's effective project, returning its
+    /// process id — an agent starting a build, dev server, or test runner that `solo.yml` did not
+    /// already register.
+    ///
+    /// Trust-gated exactly as a manual command start is, and gated **here, before anything is
+    /// registered**: [`Supervisor::register`](crate::supervisor::Supervisor::register) announces
+    /// the process before [`start`](crate::supervisor::Supervisor::start) consults the gate, so
+    /// checking later would leave a refused spawn behind as a permanent row. The supervisor still
+    /// re-checks on every start, which is what makes a later revocation refuse a restart.
+    ///
+    /// The process is a [`ProcessKind::Command`](crate::process::ProcessKind::Command), never a
+    /// terminal: only [`Registration::command`] carries a trust variant, so a terminal would be
+    /// ungated by construction and there would be nothing for a restart to key on. The label is
+    /// numbered against the project's existing labels, so a spawn can never take a configured
+    /// command's name and inherit its orphan-adoption identity.
+    ///
+    /// Scope comes from the session, never a parameter, so a caller cannot spawn into another
+    /// project. Delegation is one level deep: a caller that was itself spawned is refused with
+    /// [`SpawnProcessError::WorkerMayNotSpawn`], and the spawned process's lineage is recorded
+    /// under a bound lead so the same rule closes over it. A command holds no mailbox and is
+    /// never idle-tracked, so nothing is queued for it and it carries no onboarding briefing.
+    /// Must run within a `tokio` runtime (starting spawns the actor).
+    pub fn spawn_process(
+        &self,
+        request: SpawnProcessRequest,
+    ) -> Result<ProcessId, SpawnProcessError> {
+        let project = self
+            .inner
+            .effective_project(self.session)
+            .ok_or(SpawnProcessError::NoProjectScope)?;
+        if self.caller_is_spawned_worker() {
+            return Err(SpawnProcessError::WorkerMayNotSpawn);
+        }
+        let spec = ProcessSpec {
+            command: request.command,
+            working_dir: request.working_dir,
+            auto_start: false,
+            auto_restart: false,
+            restart_when_changed: Vec::new(),
+            env: request.env,
+        };
+        crate::config::check_command_line(&spec)?;
+        let label = request
+            .label
+            .unwrap_or_else(|| default_label(&spec.command));
+        crate::config::check_command_name(&label)?;
+        let root = self
+            .inner
+            .project_root(project)?
+            .ok_or(SpawnProcessError::UnknownProject)?;
+        // A store failure fails closed, matching the supervisor's own start gate: a variant that
+        // cannot be verified is not trusted.
+        if !self.inner.trust.is_trusted(project, &spec)? {
+            return Err(SpawnProcessError::Untrusted);
+        }
+        let id = self
+            .inner
+            .supervisor()
+            .register(Registration::command(project, &root, &label, &spec).numbered());
+        self.inner.supervisor().start(id)?;
+        // A process spawned by a bound lead nests under it in the orchestration tree, which is
+        // also what extends the one-level delegation rule to it; an unbound or external caller's
+        // spawn records no parent and so reads back as a root.
+        if let Some(lead) = self.inner.identity.origin(self.session).process() {
+            self.inner.lineage.record(id, lead);
+        }
+        Ok(id)
     }
 
     /// Starts every trusted command in the session's effective project, regardless of
@@ -301,3 +378,14 @@ impl ScopedFacade<'_> {
         self.resolve_in_scope(process)
     }
 }
+
+/// The label a spawned process takes when its caller names none: the command's first word, which
+/// the registry then numbers against the labels already in the project. The command line has
+/// already been checked non-blank, so there is always a word to take.
+fn default_label(command: &str) -> String {
+    command.split_whitespace().next().unwrap_or_default().into()
+}
+
+#[cfg(test)]
+#[path = "scoped_process_tests.rs"]
+mod tests;

@@ -136,6 +136,18 @@ fn requests_round_trip_through_json() {
             todo_id: Some(TodoId::from_raw(8)),
             include_agent_instructions: false,
         },
+        IpcRequest::SpawnProcess {
+            command: "npm run dev".into(),
+            working_dir: Some(PathBuf::from("web")),
+            env: BTreeMap::from([("PORT".to_string(), "3000".to_string())]),
+            label: Some("Web".into()),
+        },
+        IpcRequest::SpawnProcess {
+            command: "npm run dev".into(),
+            working_dir: None,
+            env: BTreeMap::new(),
+            label: None,
+        },
         IpcRequest::AgentRoster,
         IpcRequest::AgentMessageSend {
             recipient: ProcessId::from_raw(12),
@@ -520,6 +532,39 @@ fn spawn_agent_keeps_the_old_wire_shape_without_an_initial_task() {
     );
 }
 
+/// The optionals are omitted when unset, so an absent `working_dir`/`env`/`label` is the same
+/// wire shape a caller that never named them sends — and the reply is the plain spawned id.
+#[test]
+fn spawn_process_omits_its_unset_optionals() {
+    pins(
+        IpcRequest::SpawnProcess {
+            command: "npm run dev".into(),
+            working_dir: None,
+            env: BTreeMap::new(),
+            label: None,
+        },
+        serde_json::json!({
+            "op": "spawn_process",
+            "command": "npm run dev",
+        }),
+    );
+    pins(
+        IpcRequest::SpawnProcess {
+            command: "npm run dev".into(),
+            working_dir: Some(PathBuf::from("web")),
+            env: BTreeMap::from([("PORT".to_string(), "3000".to_string())]),
+            label: Some("Web".into()),
+        },
+        serde_json::json!({
+            "op": "spawn_process",
+            "command": "npm run dev",
+            "working_dir": "web",
+            "env": { "PORT": "3000" },
+            "label": "Web",
+        }),
+    );
+}
+
 #[test]
 fn spawn_agent_pins_legacy_and_initial_message_response_shapes() {
     pins(
@@ -886,7 +931,7 @@ fn core_action_errors_map_to_the_wire_error() {
 
 #[test]
 fn core_spawn_errors_map_to_the_wire_error() {
-    use soloist_core::{LaunchAgentError, SpawnAgentError};
+    use soloist_core::{LaunchAgentError, SpawnAgentError, SpawnProcessError};
     assert_eq!(
         IpcError::from(SpawnAgentError::NoProjectScope),
         IpcError::NoProjectScope
@@ -903,6 +948,24 @@ fn core_spawn_errors_map_to_the_wire_error() {
         IpcError::from(LaunchAgentError::UnknownProject),
         IpcError::UnknownProject
     );
+    assert_eq!(
+        IpcError::from(SpawnProcessError::Untrusted),
+        IpcError::Untrusted
+    );
+    assert_eq!(
+        IpcError::from(SpawnProcessError::WorkerMayNotSpawn),
+        IpcError::WorkerMayNotSpawn
+    );
+    // A blank command is the caller's to fix, so it must reach the model as a tool result
+    // rather than a protocol error.
+    let blank = IpcError::from(SpawnProcessError::InvalidCommand(
+        soloist_core::InvalidCommand::BlankCommand,
+    ));
+    assert_eq!(
+        blank,
+        IpcError::InvalidCommand(soloist_core::InvalidCommand::BlankCommand.to_string())
+    );
+    assert!(blank.is_request_error());
 }
 
 #[test]

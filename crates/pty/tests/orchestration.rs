@@ -11,6 +11,7 @@
 //! multi-threaded runtime, as the app does, so the background loops and process actors make steady
 //! progress alongside the test even when the machine is busy with the rest of the suite.
 
+use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,7 +22,8 @@ use soloist_core::testing::{
 };
 use soloist_core::{
     AgentActivity, AgentKind, AgentSignal, AgentTool, CorePorts, Facade, IdleMode, PeerCredentials,
-    ProcStatus, ProcessId, PromptMode, TodoDoc, TodoStatus, TokioClock,
+    ProcStatus, ProcessId, ProcessKind, ProcessSpec, PromptMode, SpawnProcessRequest, TodoDoc,
+    TodoStatus, TokioClock, TrustRepo,
 };
 use soloist_pty::PtyProcessSpawner;
 use tokio::time::{sleep, timeout};
@@ -244,4 +246,139 @@ async fn read_rendered_until(
     })
     .await
     .unwrap_or(false)
+}
+
+/// A lead spawns a **trusted command** into its own project on a real PTY: the child actually
+/// runs, and the orchestration tree nests it under the lead that asked for it. An untrusted
+/// variant is refused, and — the half that matters — nothing is registered for it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_lead_spawns_a_trusted_command_and_an_untrusted_one_is_refused() {
+    let dir = tempfile::tempdir().expect("temp dir");
+
+    // A command that announces itself and then waits, so its output proves the real child ran.
+    let script = dir.path().join("serve.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nprintf 'SERVICE LISTENING\\n'\nexec sleep 600\n",
+    )
+    .expect("write the command stub");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod the command stub");
+    let command = script.to_string_lossy().into_owned();
+
+    let trust = Arc::new(FakeTrustRepo::new());
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(PtyProcessSpawner),
+            Arc::new(TokioClock),
+            trust.clone(),
+            Arc::new(FakeProjectRepo::new()),
+        )
+        .build(),
+    );
+    let project = facade
+        .projects()
+        .add(dir.path(), None, None)
+        .expect("register the project");
+
+    // The lead is a real process, bound the way the UDS adapter binds an MCP client from its peer
+    // credentials — which is what gives the spawn its scope and its parent.
+    let lead = facade
+        .supervisor()
+        .register(terminal_registration(project.id, "lead", "cat"));
+    facade.supervisor().start(lead).expect("the lead starts");
+    assert!(
+        await_status(&facade, lead, ProcStatus::Running).await,
+        "the lead reaches Running"
+    );
+    let pgid = facade
+        .supervisor()
+        .pgid_of(lead)
+        .expect("the running lead has a live group");
+    let session = facade.open_session(PeerCredentials::in_group(pgid));
+    facade
+        .scoped(session)
+        .bind_session_process(lead)
+        .expect("bind the session to the lead it shares a group with");
+
+    // Untrusted first: the refusal must leave the registry exactly as it was.
+    let registered_before = facade.snapshot().len();
+    assert!(
+        facade
+            .scoped(session)
+            .spawn_process(spawn_request(&command))
+            .is_err(),
+        "an untrusted command variant is refused"
+    );
+    assert_eq!(
+        facade.snapshot().len(),
+        registered_before,
+        "the refusal registered nothing"
+    );
+
+    // The user approves that exact variant, as the trust dialog does, and the spawn goes through.
+    trust
+        .set_trusted(project.id, &spawn_spec(&command).variant_hash())
+        .expect("trust the command variant");
+    let spawned = facade
+        .scoped(session)
+        .spawn_process(spawn_request(&command))
+        .expect("a trusted command spawns");
+
+    assert!(
+        await_status(&facade, spawned, ProcStatus::Running).await,
+        "the spawned command reaches Running"
+    );
+    assert!(
+        read_rendered_until(
+            &facade,
+            spawned,
+            "SERVICE LISTENING",
+            Duration::from_secs(30)
+        )
+        .await,
+        "the real child ran and wrote to its own PTY"
+    );
+
+    let snapshot = facade
+        .orchestration_snapshot(project.id)
+        .expect("the orchestration read model");
+    let node = snapshot
+        .agents
+        .iter()
+        .find(|node| node.id == spawned)
+        .expect("the spawned command is a node in the tree");
+    assert_eq!(node.parent, Some(lead), "it nests under the lead");
+    assert_eq!(node.kind, ProcessKind::Command);
+
+    facade.supervisor().stop(spawned);
+    facade.supervisor().stop(lead);
+    for id in [spawned, lead] {
+        assert!(
+            await_status(&facade, id, ProcStatus::Stopped).await,
+            "the {id:?} stub is reaped"
+        );
+    }
+}
+
+/// The spec whose variant the trust dialog approves, and the request that asks to run it — the
+/// same three fields, so the two digests agree.
+fn spawn_spec(command: &str) -> ProcessSpec {
+    ProcessSpec {
+        command: command.into(),
+        working_dir: None,
+        auto_start: false,
+        auto_restart: false,
+        restart_when_changed: Vec::new(),
+        env: BTreeMap::new(),
+    }
+}
+
+fn spawn_request(command: &str) -> SpawnProcessRequest {
+    SpawnProcessRequest {
+        command: command.into(),
+        working_dir: None,
+        env: BTreeMap::new(),
+        label: None,
+    }
 }

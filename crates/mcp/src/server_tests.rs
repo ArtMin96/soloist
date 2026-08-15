@@ -23,7 +23,7 @@ use soloist_core::{
 };
 use soloist_ipc::{IpcError, IpcRequest, IpcResponse, PortWaitOutcome, ProjectSummary};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::testing::{all_feature_groups, handler, handler_with_groups, spawn_fake_app};
@@ -40,9 +40,9 @@ use crate::args::{
     IntegrationFileArg, LockAcquireArg, LockKeyArg, OutputArg, ProcessArg, PromptScopeArg,
     PromptTemplateCreateArg, PromptTemplateRenderArg, PromptTemplateUpdateArg, RenameArg,
     ScratchpadArchiveArg, ScratchpadNameArg, ScratchpadTagsArg, ScratchpadWriteArg, SearchArg,
-    SelectProjectArg, SendInputArg, SetupAgentIntegrationArg, SpawnAgentArg, SubmitFeedbackArg,
-    TimerArg, TimerFireWhenIdleArg, TimerSetArg, TodoArg, TodoCommentCreateArg, TodoCreateArg,
-    TodoGetArg, TodoRef, TodoStatusArg, TodoUpdateArg, WaitForPortArg,
+    SelectProjectArg, SendInputArg, SetupAgentIntegrationArg, SpawnAgentArg, SpawnProcessArg,
+    SubmitFeedbackArg, TimerArg, TimerFireWhenIdleArg, TimerSetArg, TodoArg, TodoCommentCreateArg,
+    TodoCreateArg, TodoGetArg, TodoRef, TodoStatusArg, TodoUpdateArg, WaitForPortArg,
 };
 
 /// The tool names the composed router actually serves.
@@ -126,6 +126,7 @@ const EXPECTED_TOOL_SURFACE: &[&str] = &[
     "send_input",
     // tools/agent.rs
     "spawn_agent",
+    "spawn_process",
     "list_agent_tools",
     // tools/messaging.rs
     "agent_roster",
@@ -984,6 +985,51 @@ async fn spawn_agent_threads_its_task_through_and_returns_the_process_id() {
     assert_eq!(value["process"], 42);
     assert_eq!(value["initial_message_id"], 3);
     assert_eq!(value["delivery"], "queued");
+}
+
+#[tokio::test]
+async fn spawn_process_threads_its_arguments_through_and_returns_the_process_id() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    spawn_fake_app(socket.clone(), |request| match request {
+        IpcRequest::SpawnProcess {
+            command,
+            working_dir,
+            env,
+            label,
+        } if command == "npm run dev"
+            && working_dir.as_deref() == Some(Path::new("web"))
+            && env == BTreeMap::from([("PORT".to_string(), "3000".to_string())])
+            && label.as_deref() == Some("Web") =>
+        {
+            Ok(IpcResponse::Spawned(ProcessId::from_raw(7)))
+        }
+        _ => Err(IpcError::Internal("unexpected request".into())),
+    });
+
+    let result = handler(socket)
+        .spawn_process(Parameters(SpawnProcessArg {
+            command: "npm run dev".into(),
+            working_dir: Some("web".into()),
+            env: BTreeMap::from([("PORT".to_string(), "3000".to_string())]),
+            label: Some("Web".into()),
+        }))
+        .await
+        .expect("spawn_process succeeds");
+    assert_eq!(structured_of(result)["process"], 7);
+}
+
+/// The three optionals may all be omitted; the tool then asks for the command alone.
+#[test]
+fn spawn_process_arguments_decode_without_their_optionals() {
+    let bare: SpawnProcessArg = serde_json::from_value(serde_json::json!({
+        "command": "npm run dev",
+    }))
+    .expect("a command-only spawn decodes");
+    assert_eq!(bare.command, "npm run dev");
+    assert!(bare.working_dir.is_none());
+    assert!(bare.env.is_empty());
+    assert!(bare.label.is_none());
 }
 
 #[test]
