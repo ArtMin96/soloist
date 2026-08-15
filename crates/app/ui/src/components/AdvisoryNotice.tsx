@@ -4,7 +4,9 @@ import { cn } from "@/lib/utils";
 // An inline advisory strip: something about the surface needs the user's attention, but nothing is
 // broken and nothing was lost. It wears the transition tone — the same amber that marks a reversible
 // in-flight process state — because that is exactly its severity: a gap the user can close, not a
-// failure. A refusal the core reported is a destructive-text line instead; this is not that.
+// failure. What separates it from the destructive-text line is whose act was rejected: an action the
+// user asked for and did not get is destructive, while a capability that quietly reduced — a save to
+// reload, a filesystem watch the OS turned down — is this.
 //
 // `action` carries the one control that resolves the notice (a Reload for a stale revision), and is
 // omitted when the notice is purely something to know.

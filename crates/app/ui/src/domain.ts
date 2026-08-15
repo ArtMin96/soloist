@@ -313,6 +313,12 @@ export type DomainEvent =
   // only: the rail re-reads gitStatus() (coalesced) rather than trusting a payload, so a
   // repository under active change costs one re-query per frame instead of one per file.
   | { type: "GitStatusChanged"; project: number }
+  // Which of a project's watches the OS is refusing changed: one entry per purpose it turned down,
+  // and empty once every watch the project asks for is held again. It carries the reasons rather
+  // than pointing at a read model, because there is no record to re-query for what they were — and
+  // because a watch that yields no events looks exactly like a tree nobody edits, so this is the
+  // one degradation nothing else reveals.
+  | { type: "WatchRefusalChanged"; project: number; refusals: PurposeRefusals }
   // An alert for a user who is looking at Soloist but not at the process that raised it, so it
   // belongs in an in-app toast. The core has already applied the master switch, the notification
   // level, and the focus rules — a surface renders this and decides nothing. Unlike the
@@ -338,6 +344,24 @@ export interface AppInfo {
   name: string;
   version: string;
 }
+
+// ── Filesystem watches (mirrors core::filewatch and core::watch) ─────────────
+
+// Why the OS would not watch a directory (mirrors core::watch::WatchError). Only
+// `budget_exhausted` has a fix the user can apply, which is why the reason travels rather than a
+// single "not watched" flag. Declared as values with the type derived from them, so a new reason
+// reaches everything that has to answer for one without being restated anywhere.
+export const WATCH_ERRORS = ["budget_exhausted", "unwatchable", "unavailable"] as const;
+
+export type WatchError = (typeof WATCH_ERRORS)[number];
+
+// What a watch on a project's root was established for (mirrors core::WatchPurpose). The two
+// reactors register separately over the same tree, so the OS can grant one and refuse the other.
+export type WatchPurpose = "restarts" | "git_status";
+
+// A project's standing refusals, one entry per purpose the OS turned down. Empty means every watch
+// the project asks for is held.
+export type PurposeRefusals = Partial<Record<WatchPurpose, WatchError>>;
 
 // ── Version control (mirrors core::vcs and core::git) ────────────────────────
 // The git rail renders these; enum string values are the core's serde snake_case output.

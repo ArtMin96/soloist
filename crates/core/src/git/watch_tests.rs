@@ -12,6 +12,7 @@
 //! themselves run on the blocking pool, so the helpers below advance and then wait a bounded
 //! moment for the announcement rather than assuming a fixed number of scheduler turns.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,13 +21,16 @@ use tempfile::TempDir;
 use tokio::sync::broadcast;
 
 use crate::events::{DomainEvent, EventBus};
+use crate::filewatch::WatchStatus;
 use crate::git::{Git, GitError, GitStatus};
 use crate::ids::ProjectId;
 use crate::projects::Projects;
 use crate::testing::{
-    file_change, git_over, git_status, FakeFileWatcher, FakeGitRepository, FakeProjectRepo,
+    file_change, git_over, git_status, next_matching, FakeFileWatcher, FakeGitRepository,
+    FakeProjectRepo,
 };
 use crate::vcs::ChangeKind;
+use crate::watch::{WatchError, WatchPurpose};
 
 use super::GitStatusWatchReactor;
 
@@ -214,6 +218,7 @@ async fn start_reactor(s: &Setup) {
             &s.bus,
             Arc::downgrade(&s.git),
             s.projects.clone(),
+            Arc::new(WatchStatus::new(s.bus.clone())),
         )
         .run(),
     );
@@ -545,4 +550,58 @@ async fn removing_a_project_releases_its_watches_and_stops_its_reads() {
     s.repository_wrote("index");
     s.assert_nothing_announced().await;
     assert_eq!(s.repository.reads(), 0);
+}
+
+#[tokio::test]
+async fn a_working_tree_the_os_refuses_is_reported_instead_of_a_rail_that_stops_keeping_up() {
+    let s = setup(FakeGitRepository::reporting(clean()));
+    // The OS is out of watch descriptors: the tree watch is the largest of the three a project
+    // needs and the first an exhausted budget turns down. Nothing under the root will report, so
+    // the rail silently stops following the working tree unless the refusal is said out loud.
+    s.watcher.refuse(s.root.clone());
+    let mut rx = s.bus.subscribe();
+    start_reactor(&s).await;
+
+    let announced = tokio::time::timeout(
+        SETTLE,
+        next_matching(&mut rx, |e| {
+            matches!(e, DomainEvent::WatchRefusalChanged { .. })
+        }),
+    )
+    .await
+    .expect("the refusal reaches the surfaces");
+    // Only the git rail is named. This project declares no `restart_when_changed` command, so the
+    // restart policy never asks for a watch over it and nothing there has stopped — saying so would
+    // report a consequence that did not follow.
+    let expected = BTreeMap::from([(WatchPurpose::GitStatus, WatchError::BudgetExhausted)]);
+    assert!(
+        matches!(
+            &announced,
+            DomainEvent::WatchRefusalChanged { project, refusals }
+                if *project == s.project && *refusals == expected
+        ),
+        "the user is told which of the project's watches stopped reporting, and why: {announced:?}",
+    );
+}
+
+#[tokio::test]
+async fn a_project_that_is_not_a_repository_reports_no_refusal() {
+    let s = setup(FakeGitRepository::reporting(clean()));
+    // A project with no `.git` at all. Its two repository-state watches cannot be established and
+    // never will be, and that is ordinary rather than a degradation: the working tree is watched,
+    // so restart-on-change still fires and the rail is not missing anything a repository would
+    // report. Reporting it would put a notice on every project that is not under version control,
+    // claiming two things that are both false.
+    s.watcher.refuse(s.root.join(".git"));
+    s.watcher.refuse(s.root.join(".git").join("refs"));
+    let mut rx = s.bus.subscribe();
+    start_reactor(&s).await;
+    tokio::time::sleep(SETTLE).await;
+
+    while let Ok(event) = rx.try_recv() {
+        assert!(
+            !matches!(event, DomainEvent::WatchRefusalChanged { .. }),
+            "a project with no repository state is not one whose watching failed: {event:?}",
+        );
+    }
 }

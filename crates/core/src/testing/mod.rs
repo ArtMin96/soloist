@@ -10,7 +10,8 @@
 //! the toasts the notification reactor composes, the [`terminal_registration`]
 //! fixture for driving the supervisor thread, and (in the core's own tests) the
 //! `wait_all`/`next_matching` event waiters that let a test await an asynchronous effect
-//! deterministically. Together they let
+//! deterministically — every one of them under the ceiling in [`wait`], so a wait that can
+//! never be satisfied fails the test instead of parking it. Together they let
 //! every actor transition, the grace window, panic isolation, the trust gate, and the
 //! sync logic be exercised deterministically — no real time elapsed, no real processes
 //! spawned, no SQLite. One submodule per cohesive concern; this root only re-exports them.
@@ -49,6 +50,7 @@ mod template;
 // Reads back what was traced, which only the core's own tests of its silent-refusal paths need.
 #[cfg(test)]
 mod tracing_capture;
+mod wait;
 
 pub use agents::{FakeAgentOneShot, FakeAgentToolRepo, FakeVersionProbe};
 pub use clock::MockClock;

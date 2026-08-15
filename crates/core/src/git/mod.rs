@@ -43,6 +43,7 @@ mod status;
 mod suggestion;
 mod sync;
 mod watch;
+mod watched;
 
 pub use branch::BRANCH_PAGE_SIZE;
 pub use diff::DiffExtent;
