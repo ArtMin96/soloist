@@ -10,17 +10,21 @@ vi.mock("@/api", () => ({
   onResync: vi.fn(() => Promise.resolve(() => {})),
 }));
 
-import { onResync, orchestrationSnapshot } from "@/api";
-import type { OrchestrationSnapshot } from "@/domain";
+import { onDomainEvent, onResync, orchestrationSnapshot } from "@/api";
+import type { AgentMessageRecord, OrchestrationSnapshot } from "@/domain";
 import { useOrchestration } from "@/store/useOrchestration";
 
 const read = vi.mocked(orchestrationSnapshot);
 const resync = vi.mocked(onResync);
+const domainEvent = vi.mocked(onDomainEvent);
 
 afterEach(() => vi.clearAllMocks());
 
 // A snapshot whose only varying part is its agent set, enough to observe a re-read landing.
-function snapshotWith(agentIds: number[]): OrchestrationSnapshot {
+function snapshotWith(
+  agentIds: number[],
+  messages: AgentMessageRecord[] = [],
+): OrchestrationSnapshot {
   return {
     project: 1,
     agents: agentIds.map((id) => ({
@@ -37,7 +41,34 @@ function snapshotWith(agentIds: number[]): OrchestrationSnapshot {
     scratchpads: [],
     diagrams: [],
     kv: [],
+    messages,
   };
+}
+
+function record(id: number): AgentMessageRecord {
+  return {
+    delivery: {
+      message: {
+        id,
+        project: 1,
+        sender: 1,
+        recipient: 2,
+        kind: "direct",
+        body: "review the parser",
+        todo_id: null,
+      },
+      outcome: "queued",
+    },
+    at_unix_millis: 1_700_000_000_000,
+    truncated: false,
+  };
+}
+
+/** The hook's own domain-event subscriber, as the Tauri bridge would call it. */
+function emit(event: Parameters<Parameters<typeof onDomainEvent>[0]>[0]) {
+  const handler = domainEvent.mock.calls[0]?.[0];
+  if (!handler) throw new Error("no domain-event subscriber registered");
+  act(() => handler(event));
 }
 
 describe("useOrchestration", () => {
@@ -59,5 +90,36 @@ describe("useOrchestration", () => {
     if (!handler) throw new Error("no resync subscriber registered");
     act(() => handler());
     await waitFor(() => expect(result.current.agents).toHaveLength(1));
+  });
+
+  it("re-reads the snapshot when a recorded agent message changes", async () => {
+    read.mockResolvedValue(snapshotWith([1, 2]));
+    const { result } = renderHook(() => useOrchestration(1));
+    await waitFor(() => expect(result.current.agents).toHaveLength(2));
+    expect(result.current.messages).toHaveLength(0);
+
+    read.mockResolvedValue(snapshotWith([1, 2], [record(10)]));
+    emit({ type: "AgentMessageChanged", project: 1, id: 10 });
+
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    expect(result.current.messages[0]?.delivery.message.body).toBe("review the parser");
+  });
+
+  it("coalesces a burst of message changes into one re-read", async () => {
+    read.mockResolvedValue(snapshotWith([1, 2]));
+    const { result } = renderHook(() => useOrchestration(1));
+    await waitFor(() => expect(result.current.agents).toHaveLength(2));
+    const seeded = read.mock.calls.length;
+
+    read.mockResolvedValue(snapshotWith([1, 2], [record(10), record(11), record(12)]));
+    for (const id of [10, 11, 12]) {
+      emit({ type: "AgentMessageChanged", project: 1, id });
+    }
+
+    await waitFor(() => expect(result.current.messages).toHaveLength(3));
+    expect(
+      read.mock.calls.length - seeded,
+      "a chatty run costs one re-read per frame, not one per message",
+    ).toBe(1);
   });
 });

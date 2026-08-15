@@ -61,7 +61,9 @@ export const templatesPanel = {
     const back = $(PANEL).$(BACK);
     await back.waitForClickable({ timeout: WAIT.render });
     await back.click();
-    await $(PANEL).$(EDITOR_MARKER).waitForDisplayed({ timeout: WAIT.render, reverse: true });
+    await $(PANEL)
+      .$(EDITOR_MARKER)
+      .waitForDisplayed({ timeout: WAIT.render, reverse: true });
   },
 
   /**
@@ -73,7 +75,9 @@ export const templatesPanel = {
    */
   async placeholders(): Promise<string[]> {
     return browser.execute((prefix: string) => {
-      const fields = document.querySelectorAll(`input[aria-label^="${prefix}"]`);
+      const fields = document.querySelectorAll(
+        `input[aria-label^="${prefix}"]`,
+      );
       return [...fields].map((field) =>
         (field.getAttribute("aria-label") ?? "").slice(prefix.length),
       );
@@ -106,7 +110,8 @@ export const templatesPanel = {
         last = await this.readPreview();
         return last.prompt === expected;
       },
-      () => `the preview never rendered "${expected}"; last seen: ${JSON.stringify(last.prompt)}`,
+      () =>
+        `the preview never rendered "${expected}"; last seen: ${JSON.stringify(last.prompt)}`,
     );
     return last;
   },
@@ -182,7 +187,9 @@ export const templatesPanel = {
 
   /** One placeholder's value field, by the accessible name the preview gives it. */
   valueField(placeholder: string) {
-    return $(PANEL).$(`input[aria-label="${VALUE_LABEL_PREFIX}${placeholder}"]`);
+    return $(PANEL).$(
+      `input[aria-label="${VALUE_LABEL_PREFIX}${placeholder}"]`,
+    );
   },
 
   /** The open editor's description field. */

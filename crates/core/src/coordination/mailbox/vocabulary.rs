@@ -15,6 +15,15 @@ pub const MAX_PENDING_MESSAGES_PER_PROJECT: usize = 1024;
 pub const MAX_PENDING_AGENT_MESSAGES: usize = 4096;
 /// Maximum UTF-8 body bytes held across the entire running application.
 pub const MAX_PENDING_AGENT_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
+/// Maximum retained transcript entries held for one project. Overflow evicts the oldest.
+pub const MAX_TRANSCRIPT_ENTRIES_PER_PROJECT: usize = 512;
+/// Maximum retained transcript entries held across the entire running application. Sized to one
+/// full mailbox-worth, so the record can cover every message the delivery queue is able to hold.
+pub const MAX_TRANSCRIPT_ENTRIES: usize = MAX_PENDING_AGENT_MESSAGES;
+/// Maximum UTF-8 body bytes retained in one transcript entry; a longer body is truncated. A
+/// quarter of [`MAX_AGENT_MESSAGE_BYTES`], because retaining [`MAX_TRANSCRIPT_ENTRIES`] full-size
+/// bodies would exceed the whole application's idle memory budget on its own.
+pub const MAX_TRANSCRIPT_BODY_BYTES: usize = 4 * 1024;
 /// The longest a pending wake waits for an idle classification that may never come. A recipient
 /// whose provider emits no evidence is never classified, so an idle-gated wake would wait for it
 /// forever; past this the wake is delivered anyway. This is the ceiling as well as the default —
@@ -66,6 +75,22 @@ pub struct AgentMessage {
 pub struct AgentMessageDelivery {
     pub message: AgentMessage,
     pub outcome: AgentMessageOutcome,
+}
+
+/// One recorded exchange, retained for display after delivery. Unlike a pending message — which
+/// leaves the queue the moment its recipient acknowledges it — a record stays readable for the rest
+/// of the run, including after its recipient closes. `delivery.outcome` is updated in place as the
+/// message moves, so the transcript shows live delivery state rather than a stale first reading.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentMessageRecord {
+    pub delivery: AgentMessageDelivery,
+    /// Wall-clock time the exchange was recorded, from [`Clock::now_unix_millis`].
+    ///
+    /// [`Clock::now_unix_millis`]: crate::ports::Clock::now_unix_millis
+    pub at_unix_millis: u64,
+    /// True when the retained body was cut at [`MAX_TRANSCRIPT_BODY_BYTES`]. The **delivered**
+    /// message is never truncated — only this display copy is.
+    pub truncated: bool,
 }
 
 /// Compact delivery state used by broadcast responses without repeating the shared message body.

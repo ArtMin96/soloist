@@ -14,8 +14,9 @@ use crate::facade::Facade;
 use crate::ids::{ProjectId, ScratchpadId, SessionId};
 use crate::ports::ProjectRepo;
 use crate::testing::{
-    agent_registration, authentic_session, drain, facade_with_agent_tool, FakeAgentToolRepo,
-    FakeProjectRepo, FakeSpawner, FakeTodoRepo, FakeTrustRepo, MockClock, TEST_PEER_PGID,
+    agent_registration, authentic_session, bound_agent, drain, facade_with_agent_tool,
+    FakeAgentToolRepo, FakeProjectRepo, FakeSpawner, FakeTodoRepo, FakeTrustRepo, MockClock,
+    TEST_PEER_PGID,
 };
 
 fn agent(facade: &crate::facade::Facade, project: crate::ids::ProjectId, label: &str) -> ProcessId {
@@ -88,22 +89,6 @@ async fn roster_keeps_surviving_siblings_in_the_dead_ancestors_authorization_gro
         entry.process == second && entry.relationship == AgentRelationship::Sibling
     }));
     assert!(roster.iter().all(|entry| entry.root == lead));
-}
-
-/// An agent with an authenticated session of its own bound to it, as its own MCP client binds.
-fn bound_agent(
-    facade: &Facade,
-    project: ProjectId,
-    label: &str,
-    pgid: i32,
-) -> (ProcessId, SessionId) {
-    let process = agent(facade, project, label);
-    let session = authentic_session(facade, process, pgid);
-    facade
-        .scoped(session)
-        .bind_session_process(process)
-        .expect("bind the agent to its own process");
-    (process, session)
 }
 
 /// The bodies pending for `process`, read by process id so a recipient with no session of its own —

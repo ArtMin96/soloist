@@ -149,7 +149,10 @@ const SCRATCHPAD_REWRITE_FILE = "lead-scratchpad-rewrite";
  */
 export async function requestLeadCoordination(): Promise<void> {
   const dataDir = await appDataDir();
-  writeFileSync(path.join(dataDir, COORDINATION_PLAN_FILE), JSON.stringify(COORDINATION));
+  writeFileSync(
+    path.join(dataDir, COORDINATION_PLAN_FILE),
+    JSON.stringify(COORDINATION),
+  );
 }
 
 /**

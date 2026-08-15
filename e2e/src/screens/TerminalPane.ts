@@ -50,7 +50,9 @@ export const terminalPane = {
         if (!host) return "";
         const rowsText = (container: Element | null) =>
           container
-            ? [...container.children].map((row) => (row as HTMLElement).textContent ?? "").join("\n")
+            ? [...container.children]
+                .map((row) => (row as HTMLElement).textContent ?? "")
+                .join("\n")
             : "";
         const a11y = rowsText(host.querySelector(".xterm-accessibility-tree"));
         if (a11y.trim() !== "") return a11y;
@@ -78,7 +80,8 @@ export const terminalPane = {
         last = await this.text();
         return last.includes(substring);
       },
-      () => `the visible terminal never showed ${JSON.stringify(substring)}; last read:\n${last}`,
+      () =>
+        `the visible terminal never showed ${JSON.stringify(substring)}; last read:\n${last}`,
     );
     return last;
   },

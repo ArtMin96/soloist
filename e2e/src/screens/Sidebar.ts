@@ -124,23 +124,25 @@ export const sidebar = {
       META,
       ROW_MARKER,
     );
-    return snapshots.map(({ label, status, hasActivity, selected, meta, unread }) => {
-      if (status === null && !hasActivity) {
-        throw new Error(
-          `sidebar row "${label}" renders neither data-status nor data-activity — ` +
-            `the indicator markup changed and the harness can no longer read its status`,
-        );
-      }
-      // The attribute is written from the typed `ProcStatus` the UI renders, so the string is
-      // trusted rather than re-validated against a second copy of the enum's values.
-      return {
-        label,
-        status: status === null ? RUNNING : (status as ProcStatus),
-        selected,
-        port: portOf(meta),
-        unread,
-      };
-    });
+    return snapshots.map(
+      ({ label, status, hasActivity, selected, meta, unread }) => {
+        if (status === null && !hasActivity) {
+          throw new Error(
+            `sidebar row "${label}" renders neither data-status nor data-activity — ` +
+              `the indicator markup changed and the harness can no longer read its status`,
+          );
+        }
+        // The attribute is written from the typed `ProcStatus` the UI renders, so the string is
+        // trusted rather than re-validated against a second copy of the enum's values.
+        return {
+          label,
+          status: status === null ? RUNNING : (status as ProcStatus),
+          selected,
+          port: portOf(meta),
+          unread,
+        };
+      },
+    );
   },
 
   /** Waits until a row labelled exactly `label` is rendered, then returns it. */
@@ -198,7 +200,8 @@ export const sidebar = {
         selected = rows.filter((row) => row.selected).map((row) => row.label);
         return selected.includes(label);
       },
-      () => `sidebar row "${label}" never became the selected one; selected: ${JSON.stringify(selected)}`,
+      () =>
+        `sidebar row "${label}" never became the selected one; selected: ${JSON.stringify(selected)}`,
     );
   },
 
@@ -288,7 +291,8 @@ export const sidebar = {
     try {
       await waitUntilOr(
         async () =>
-          (await this.rows()).find((candidate) => candidate.label === label)?.status !== STOPPED,
+          (await this.rows()).find((candidate) => candidate.label === label)
+            ?.status !== STOPPED,
         () => "",
         WAIT.render,
       );
@@ -324,7 +328,8 @@ export const sidebar = {
         seen = (await this.rows()).map((row) => row.label);
         return !seen.includes(label);
       },
-      () => `sidebar row "${label}" never left; rendered rows: ${JSON.stringify(seen)}`,
+      () =>
+        `sidebar row "${label}" never left; rendered rows: ${JSON.stringify(seen)}`,
     );
   },
 

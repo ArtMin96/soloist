@@ -61,9 +61,11 @@ pub(crate) use mailbox::CompletionNoticeState;
 pub use mailbox::{
     orchestration_guide, AgentBroadcastReceipt, AgentMailbox, AgentMailboxReactor, AgentMessage,
     AgentMessageDelivery, AgentMessageKind, AgentMessageOutcome, AgentMessageReceipt,
-    AgentRelationship, AgentRosterEntry, MailboxCapacityError, OrchestrationGuide,
-    MAX_AGENT_MESSAGE_BYTES, MAX_PENDING_AGENT_MESSAGES, MAX_PENDING_AGENT_MESSAGE_BYTES,
-    MAX_PENDING_MESSAGES_PER_PROJECT, MAX_PENDING_MESSAGES_PER_RECIPIENT,
+    AgentMessageRecord, AgentRelationship, AgentRosterEntry, MailboxCapacityError,
+    OrchestrationGuide, MAX_AGENT_MESSAGE_BYTES, MAX_PENDING_AGENT_MESSAGES,
+    MAX_PENDING_AGENT_MESSAGE_BYTES, MAX_PENDING_MESSAGES_PER_PROJECT,
+    MAX_PENDING_MESSAGES_PER_RECIPIENT, MAX_TRANSCRIPT_BODY_BYTES, MAX_TRANSCRIPT_ENTRIES,
+    MAX_TRANSCRIPT_ENTRIES_PER_PROJECT,
 };
 pub use releaser::LeaseReleaser;
 pub use repo::{LockRepo, NoopLockRepo, StoredLease};

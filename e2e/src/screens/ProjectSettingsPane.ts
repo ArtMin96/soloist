@@ -11,7 +11,11 @@ const LEVELS = '[role="radiogroup"][aria-label="Notify me about"]';
 const LEVEL = '[role="radio"]';
 
 /** The pane's sections, by the name each is called in the app. */
-export type ProjectSection = "Overview" | "Settings" | "Notifications" | "Commands";
+export type ProjectSection =
+  | "Overview"
+  | "Settings"
+  | "Notifications"
+  | "Commands";
 
 /** The per-project settings pane: choosing a section, and reading or setting a notify-me level. */
 export const projectSettingsPane = {
@@ -79,7 +83,8 @@ export const projectSettingsPane = {
     await radio.click();
     await waitUntilOr(
       async () => (await this.chosenLevel()) === label,
-      async () => `choosing "${label}" left "${await this.chosenLevel()}" chosen`,
+      async () =>
+        `choosing "${label}" left "${await this.chosenLevel()}" chosen`,
       WAIT.core,
     );
   },
@@ -96,7 +101,8 @@ export const projectSettingsPane = {
         if (!root) return null;
         return [...root.querySelectorAll(item)].map((node) => {
           const labelled = node.getAttribute("aria-labelledby");
-          const label = labelled === null ? null : document.getElementById(labelled);
+          const label =
+            labelled === null ? null : document.getElementById(labelled);
           return {
             id: node.id,
             label: label?.textContent?.trim() ?? "",

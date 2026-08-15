@@ -13,7 +13,10 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
  * binary from the app — `cargo tauri build` produces only the desktop one — so the config builds it
  * too and checks it landed here.
  */
-export const soloistCli = path.resolve(dir, "../../../target/e2e/debug/soloist-cli");
+export const soloistCli = path.resolve(
+  dir,
+  "../../../target/e2e/debug/soloist-cli",
+);
 
 // The file the running HTTP server records itself in — its bound port and the launch's auth token —
 // inside the app's data directory. The one definition on this side of the boundary; the app's own

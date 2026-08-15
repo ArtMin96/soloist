@@ -76,6 +76,8 @@ pub use git_fixtures::{
 pub use git_forge::{created_url, FakeGitForge};
 pub use git_opener::FakeFileOpener;
 #[cfg(test)]
+pub use identity::bound_agent;
+#[cfg(test)]
 pub use identity::bound_session;
 pub use identity::{authentic_session, session_in_dir, TEST_PEER_PGID};
 pub use lock_releaser::RecordingLockReleaser;

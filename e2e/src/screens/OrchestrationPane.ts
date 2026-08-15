@@ -23,6 +23,7 @@ const VIEW_LABEL = {
   todos: "To-dos",
   scratchpads: "Scratchpads",
   timers: "Timers",
+  messages: "Messages",
 } as const;
 
 /** The views the orchestration pane switches between. */
@@ -81,7 +82,13 @@ export const orchestrationPane = {
    */
   async nodes(): Promise<TreeNode[]> {
     const raw: RawNode[] = await browser.execute(
-      (treeSel: string, nodeSel: string, groupSel: string, activitySel: string, textSel: string) => {
+      (
+        treeSel: string,
+        nodeSel: string,
+        groupSel: string,
+        activitySel: string,
+        textSel: string,
+      ) => {
         const tree = document.querySelector(treeSel);
         if (!tree) return [];
         return [...tree.querySelectorAll(nodeSel)].map((node) => {
@@ -93,14 +100,18 @@ export const orchestrationPane = {
           // structurally, so the read reflects the real nesting rather than a coincidence of order.
           let parent: string | null = null;
           const group = node.closest(groupSel);
-          const owner = group?.parentElement?.querySelector(`:scope > ${nodeSel}`);
+          const owner = group?.parentElement?.querySelector(
+            `:scope > ${nodeSel}`,
+          );
           if (owner) parent = owner.getAttribute("data-process-id");
           return {
             id: node.getAttribute("data-process-id"),
             label: texts[0] ?? "",
             kind: texts[1] ?? "",
             level: node.getAttribute("aria-level"),
-            activity: node.querySelector(activitySel)?.getAttribute("data-activity") ?? null,
+            activity:
+              node.querySelector(activitySel)?.getAttribute("data-activity") ??
+              null,
             parent,
           };
         });
@@ -143,7 +154,9 @@ export const orchestrationPane = {
     let last: AgentActivity | null | undefined;
     await waitUntilOr(
       async () => {
-        const node = (await this.nodes()).find((candidate) => candidate.label === label);
+        const node = (await this.nodes()).find(
+          (candidate) => candidate.label === label,
+        );
         last = node?.activity;
         return last === activity;
       },
@@ -163,7 +176,9 @@ export const orchestrationPane = {
     let node: TreeNode | undefined;
     await waitUntilOr(
       async () => {
-        node = (await this.nodes()).find((candidate) => candidate.label === label);
+        node = (await this.nodes()).find(
+          (candidate) => candidate.label === label,
+        );
         return node !== undefined && node.parent === parent;
       },
       () =>

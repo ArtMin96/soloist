@@ -3,6 +3,7 @@ import { onDomainEvent, orchestrationSnapshot } from "@/api";
 import { buildOrchestrationTree, type OrchestrationTreeNode } from "@/store/orchestrationTree";
 import { useReconcile } from "@/store/useReconcile";
 import type {
+  AgentMessageRecord,
   AgentNode,
   DiagramSummary,
   DomainEvent,
@@ -13,7 +14,7 @@ import type {
 
 // Domain events that change anything the orchestration surface renders: a process entering or
 // leaving the registry, a status / label / activity change (the agent tree), or a todo, scratchpad,
-// diagram, or timer mutation (the coordination panels). The snapshot is derived on read and its
+// diagram, timer, or agent-message mutation (the coordination panels). The snapshot is derived on read and its
 // events carry ids only, so the hook re-reads the one snapshot rather than folding deltas. Timer
 // pause/resume events are included so the panel reflects the new status without polling.
 const SNAPSHOT_EVENTS: ReadonlySet<DomainEvent["type"]> = new Set([
@@ -23,6 +24,7 @@ const SNAPSHOT_EVENTS: ReadonlySet<DomainEvent["type"]> = new Set([
   "ProcessRenamed",
   "AgentActivityChanged",
   "TodoChanged",
+  "AgentMessageChanged",
   "ScratchpadChanged",
   "DiagramChanged",
   "TimerArmed",
@@ -42,6 +44,8 @@ export interface OrchestrationStore {
   diagrams: DiagramSummary[];
   /** Armed and paused timers in the project, ordered by id. */
   timers: TimerView[];
+  /** Recorded agent-to-agent exchanges in the project, oldest first. */
+  messages: AgentMessageRecord[];
   error: string | null;
   refresh: () => void;
 }
@@ -56,6 +60,7 @@ const EMPTY: Snapshot = {
   scratchpads: [],
   diagrams: [],
   timers: [],
+  messages: [],
 };
 
 // The orchestration read model for one project — the agent tree plus the coordination state the
@@ -82,6 +87,7 @@ export function useOrchestration(project: number | null): OrchestrationStore {
           scratchpads: snap.scratchpads,
           diagrams: snap.diagrams,
           timers: snap.timers,
+          messages: snap.messages,
         }),
       )
       .catch(fail);
@@ -140,6 +146,7 @@ export function useOrchestration(project: number | null): OrchestrationStore {
     scratchpads: view.scratchpads,
     diagrams: view.diagrams,
     timers: view.timers,
+    messages: view.messages,
     error,
     refresh,
   };

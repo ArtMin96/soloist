@@ -2255,3 +2255,34 @@ difference is only at the start of a run: an agent reports no activity until its
 of reporting `Idle`. **G8** (`timer_fire_when_idle_any`/`_all`) is unaffected for any agent that
 produces a signal, and the backstop covers those that never do — as does the mailbox's own wake
 backstop for **O13**/**O15** delivery.
+
+## D-42 — Agent-to-agent traffic is retained for display in a bounded transcript (a Soloist extension) 🟢
+
+**Introduced:** the agent-message transcript and Messages view (`plan/02` O17).
+
+**Solo is silent, not contradicted.** As with D-39, `plan/05` records Solo's coordination tools but
+says nothing about what becomes of a message after its recipient acknowledges it, and nothing about a
+surface for reading agent-to-agent traffic. No public source says Solo cannot have one. The silence is
+the gap; the full decision lives in `plan/05` §12 and nothing here attributes the feature to Solo.
+
+**Soloist's decision:**
+
+- The mailbox retains each exchange — sender, recipient, kind, body, delivery outcome, recorded time —
+  in a per-project log alongside the delivery queue, and the orchestration pane reads it through the
+  existing `orchestration_snapshot` as a read-only Messages view. There is no way to compose a message
+  from the UI.
+- **The two ceilings over that one aggregate have opposite policies, deliberately.** The delivery queue
+  refuses overflow (O15), because dropping a queued message loses work an agent is waiting on. The
+  transcript evicts its oldest entry, because refusing there would fail a send over a display record.
+  Recording therefore returns nothing and cannot fail. The limits are 512 entries per project, 4,096
+  across the application, and 4 KiB of retained body per entry; only the retained copy is truncated, so
+  the delivered message is always whole.
+- **Lifecycle follows the project, not the process.** Closing a recipient clears its inbox but leaves
+  its messages readable — a closed worker's exchanges are exactly what a human wants to read. Only
+  `ProjectRemoved` forgets a transcript.
+- **The log is in-memory**, like the mailbox it belongs to, so it survives a webview reload and not an
+  app restart. A `ProcessId` is minted per run, so a persisted transcript would render senders and
+  recipients its roster could no longer resolve.
+- **No message body reaches the event bus.** `AgentMessageChanged` carries the project and message id
+  only; the retained record is the body's single source, and the bus fans out to every subscriber of a
+  public subscription.

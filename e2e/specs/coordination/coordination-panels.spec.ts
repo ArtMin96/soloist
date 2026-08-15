@@ -55,7 +55,10 @@ describe("the coordination panels", () => {
     // The lead re-writes the same scratchpad over the wire, bumping its revision under our stale
     // editor. Wait for that concurrent write to land — the roster moves off the opened revision.
     await triggerScratchpadRewrite();
-    const bumped = await scratchpadPanel.waitForRevisionChange(COORDINATION.scratchpad, opened);
+    const bumped = await scratchpadPanel.waitForRevisionChange(
+      COORDINATION.scratchpad,
+      opened,
+    );
     expect(bumped).toBeGreaterThan(opened);
 
     // Our edit, saved against the now-stale revision, is refused by the core — and the conflict
@@ -78,7 +81,9 @@ describe("the coordination panels", () => {
     // named — surfaced verbatim, never pre-empted by the UI.
     await todoBoard.waitForBlocked(COORDINATION.blocked, true);
     await todoBoard.complete(COORDINATION.blocked);
-    expect(await todoBoard.waitForRefusal(COORDINATION.blocked)).not.toHaveLength(0);
+    expect(
+      await todoBoard.waitForRefusal(COORDINATION.blocked),
+    ).not.toHaveLength(0);
     expect(await todoBoard.status(COORDINATION.blocked)).not.toBe(DONE);
 
     // Complete the blocker; the gate then clears live (a real TodoChanged re-refresh), and the

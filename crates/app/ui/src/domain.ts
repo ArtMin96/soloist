@@ -330,6 +330,9 @@ export type DomainEvent =
   // Coordination change-notifications (C6) for the orchestration read-model. Each carries ids
   // only — the UI re-reads orchestration_snapshot (coalesced) rather than trusting a payload.
   | { type: "TodoChanged"; project: number; id: number }
+  // A recorded agent-to-agent exchange changed — queued, woken, or acknowledged. The body stays
+  // off the bus; the retained record on the snapshot is its single source.
+  | { type: "AgentMessageChanged"; project: number; id: number }
   | { type: "TimerArmed"; owner: number; id: number }
   // A timer fired: its body was delivered to the owner as a fresh turn and it left the armed set.
   | { type: "TimerFired"; owner: number; id: number }
@@ -808,6 +811,43 @@ export interface KvEntry {
   value: unknown;
 }
 
+// ── Agent mailbox (mirrors core::coordination::mailbox) ──────────────────────
+// Why an addressed message exists: one agent writing to another, a task handed to a spawned
+// worker, or a worker's completion report travelling back to its lead.
+export type AgentMessageKind = "direct" | "task" | "completion";
+
+// How far an addressed message has travelled: queued in its recipient's inbox, carried to the
+// recipient's CLI as a fresh turn, or accepted by the recipient.
+export type AgentMessageOutcome = "queued" | "wake_submitted" | "acknowledged";
+
+// One addressed message. `sender` and `recipient` are process ids resolved to labels against the
+// snapshot's agent list.
+export interface AgentMessage {
+  id: number;
+  project: number;
+  sender: number;
+  recipient: number;
+  kind: AgentMessageKind;
+  body: string;
+  todo_id: number | null;
+}
+
+// A message paired with the delivery state it has reached.
+export interface AgentMessageDelivery {
+  message: AgentMessage;
+  outcome: AgentMessageOutcome;
+}
+
+// One recorded exchange, retained for display after delivery. `delivery.outcome` moves in place as
+// the message travels, so a record shows live delivery state. The retained log is bounded: the
+// oldest exchanges of a long run are evicted, and `truncated` marks a body that was cut for
+// display only — the delivered message is always whole.
+export interface AgentMessageRecord {
+  delivery: AgentMessageDelivery;
+  at_unix_millis: number;
+  truncated: boolean;
+}
+
 // ── Orchestration read-model (mirrors core::orchestration) ───────────────────
 // One node in the agent lineage tree: a worker nests under the lead that spawned it (`parent`); a
 // manually launched agent, a command, or a terminal is a root (`parent` null). A node whose parent
@@ -841,6 +881,8 @@ export interface OrchestrationSnapshot {
   scratchpads: ScratchpadSummary[];
   diagrams: DiagramSummary[];
   kv: KvEntry[];
+  /** Recorded agent-to-agent exchanges in the project, oldest first. */
+  messages: AgentMessageRecord[];
 }
 
 // ── Settings (mirrors core::settings) ───────────────────────────────────────
