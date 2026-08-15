@@ -381,7 +381,7 @@ async fn a_spawned_process_is_queued_no_onboarding_briefing() {
         .expect("a lead spawns a process");
 
     assert!(
-        !facade.mailbox.wake(id, facade.supervisor()),
+        !facade.mailbox.wake(id, facade.supervisor()).submitted,
         "a spawned command has nothing queued to wake it with",
     );
 }
