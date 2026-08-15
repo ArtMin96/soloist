@@ -5,7 +5,7 @@ use tokio::sync::broadcast::error::RecvError;
 
 use crate::agents::{AgentActivity, IdleTracker};
 use crate::events::{DomainEvent, EventBus};
-use crate::ids::ProcessId;
+use crate::ids::{AgentMessageId, ProcessId, ProjectId};
 use crate::ports::Clock;
 use crate::supervision;
 use crate::supervisor::Supervisor;
@@ -16,19 +16,36 @@ use super::state::AgentMailbox;
 const MAX_WAKE_RETRIES: u8 = 8;
 const WAKE_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
+/// What one wake attempt did: whether the envelope reached the recipient, and which already
+/// recorded exchanges it moved to [`WakeSubmitted`](crate::coordination::AgentMessageOutcome).
+/// The mailbox holds no bus, so the advanced entries travel back to the caller that has one.
+pub(crate) struct WakeOutcome {
+    pub(crate) submitted: bool,
+    pub(crate) advanced: Vec<(ProjectId, AgentMessageId)>,
+}
+
+impl WakeOutcome {
+    fn refused() -> Self {
+        Self {
+            submitted: false,
+            advanced: Vec::new(),
+        }
+    }
+}
+
 impl AgentMailbox {
-    pub(crate) fn wake(&self, recipient: ProcessId, supervisor: &Supervisor) -> bool {
+    pub(crate) fn wake(&self, recipient: ProcessId, supervisor: &Supervisor) -> WakeOutcome {
         let Some((envelope, claimed)) = self.claim_wake_envelope(recipient) else {
-            return false;
+            return WakeOutcome::refused();
         };
         match supervisor.try_submit_turn(recipient, envelope.into_bytes()) {
-            Ok(true) => {
-                self.mark_wake_submitted(recipient, &claimed);
-                true
-            }
+            Ok(true) => WakeOutcome {
+                submitted: true,
+                advanced: self.mark_wake_submitted(recipient, &claimed),
+            },
             Ok(false) | Err(_) => {
                 self.release_wake_claim(recipient);
-                false
+                WakeOutcome::refused()
             }
         }
     }
@@ -105,6 +122,7 @@ impl AgentMailboxReactor {
                     self.mailbox.observe_non_idle(id);
                 }
                 Ok(DomainEvent::ProcessRemoved { id }) => self.mailbox.remove_process(id),
+                Ok(DomainEvent::ProjectRemoved { id }) => self.mailbox.forget_project(id),
                 Err(RecvError::Lagged(_)) => self.reconcile_snapshot(),
                 Ok(_) => {}
                 Err(RecvError::Closed) => return,
@@ -149,8 +167,15 @@ impl AgentMailboxReactor {
         let Some(supervisor) = self.supervisor.upgrade() else {
             return;
         };
-        if !self.mailbox.wake(recipient, &supervisor) {
+        let outcome = self.mailbox.wake(recipient, &supervisor);
+        if !outcome.submitted {
             self.mailbox.record_wake_failure(recipient);
+        }
+        // A wake delivered here lands long after the send recorded its exchange, so this is the
+        // only place the transcript's move to WakeSubmitted can be announced.
+        for (project, id) in outcome.advanced {
+            self.bus
+                .publish(DomainEvent::AgentMessageChanged { project, id });
         }
     }
 }

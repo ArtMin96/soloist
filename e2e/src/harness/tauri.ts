@@ -1,7 +1,9 @@
 import { browser } from "@wdio/globals";
 
 interface TauriBridge {
-  core: { invoke(command: string, args: Record<string, unknown>): Promise<unknown> };
+  core: {
+    invoke(command: string, args: Record<string, unknown>): Promise<unknown>;
+  };
 }
 
 /**
@@ -21,7 +23,9 @@ export async function invoke<T>(
 ): Promise<T> {
   const result = await browser.execute(
     async (cmd: string, a: Record<string, unknown>) =>
-      await (window as unknown as { __TAURI__: TauriBridge }).__TAURI__.core.invoke(cmd, a),
+      await (
+        window as unknown as { __TAURI__: TauriBridge }
+      ).__TAURI__.core.invoke(cmd, a),
     command,
     args,
   );

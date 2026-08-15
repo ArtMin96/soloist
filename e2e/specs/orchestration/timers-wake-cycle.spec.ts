@@ -1,5 +1,10 @@
 import type { ProcStatus, ProjectView } from "@domain";
-import { LEAD_AGENT, TIMER, releaseWorkerToIdle, requestLeadTimer } from "../../src/harness/leadAgent.js";
+import {
+  LEAD_AGENT,
+  TIMER,
+  releaseWorkerToIdle,
+  requestLeadTimer,
+} from "../../src/harness/leadAgent.js";
 import { launchAgent } from "../../src/flows/launch.js";
 import { openProject } from "../../src/flows/openProject.js";
 import { orchestrationPane } from "../../src/screens/OrchestrationPane.js";

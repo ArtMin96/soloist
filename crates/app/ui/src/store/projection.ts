@@ -70,6 +70,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "AgentActivityChanged":
     case "OrphansFound":
     case "TodoChanged":
+    case "AgentMessageChanged":
     case "TimerArmed":
     case "TimerFired":
     case "TimerCleared":

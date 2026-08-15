@@ -32,6 +32,7 @@ What is **missing** is everything *around* the mechanism:
 | `solo://` copy-link handoff — paste a scratchpad/todo link to an agent (the demo's core human handoff) | no addressable link; deep links (I4) were `later` | orch-02 (O14) |
 | Authenticated peer communication | lineage is visible, but a live agent cannot list its lineage-root group or send a bounded addressed message to another member | orch-04 (O15) |
 | Durable worker result reporting | a worker can call the existing todo and comment tools separately, but no atomic one-result completion path or best-effort parent notice exists | orch-04 (O16) |
+| Reading agent-to-agent traffic | messages exist on the MCP surface only; nothing in the app shows a human what one agent told another | orch-04 (O17) |
 
 **The track remains centered on UX + formalization + deferred tools.** O15 adds one small bounded,
 per-run mailbox because standard MCP has no arbitrary server-push turn; O16 composes existing durable
@@ -97,6 +98,7 @@ propagates them into `../02-feature-parity-matrix.md`. `Src`: `✅` documented �
 | O14 | **`solo://` copy-link handoff** — a stable `solo://proj/<id>/scratchpad|todo/<id>` link + a UI "Copy link" affordance + a core resolver so a receiving agent reads the target; promotes the orchestrator slice of I4 to v1 | 🟡 name (`../05` §10) / ❓ shape | orch-02 | v1 | Copy a scratchpad's link; a bound agent given the link reads it; a malformed / foreign-scope link is refused |
 | O15 | **Authenticated live-run agent messaging** — lineage-root roster, direct/all-other-members sends, bounded ephemeral list/get/ack mailbox, and idle-gated wake envelope; todos are optional correlation, not a messaging prerequisite | ❓ | orch-04 | v1 | Authenticated related agents exchange and acknowledge messages with no todo; unrelated/cross-project access and every configured capacity overflow are refused |
 | O16 | **Atomic worker completion report** — complete an existing todo + append one identity-authored result in one durable transaction; parent notification is best-effort after commit | ❓ | orch-04 | v1 | The durable pair is all-or-nothing and idempotent; notification failure cannot roll it back or duplicate it |
+| O17 | **Agent-message transcript & Messages view** — the mailbox retains each exchange per project behind its own display ceilings (evict-oldest, never refusing a send), and the orchestration pane gains a read-only Messages view over it; the change-notification carries ids only, so no body reaches the event bus | ❓ (clean-room — `../05` §12) | orch-04 | v1 | Two agents exchange a direct message and a broadcast; both bodies are readable in the Messages view without opening a terminal; a closed worker's messages remain readable; an overflowing transcript evicts oldest without failing a send |
 
 `later` (tracked, non-gating — do **not** gold-plate): a deep cross-project "Activity Monitor" (I12),
 prompt-template UI (I13), and LLM auto-summarization of worker output (E6, OFF by default — the core

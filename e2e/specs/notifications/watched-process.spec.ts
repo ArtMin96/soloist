@@ -72,7 +72,9 @@ describe("watching the process that fails", () => {
 
     // And nothing is left waiting on the user for it — an alert that had merely gone to the
     // desktop instead would still have marked the row and counted here.
-    const marked = (await sidebar.rows()).filter((row) => row.unread).map((row) => row.label);
+    const marked = (await sidebar.rows())
+      .filter((row) => row.unread)
+      .map((row) => row.label);
     expect(marked).toEqual([SIGNALLER]);
     await attentionControl.open();
     expect(await attentionControl.entries()).toEqual([SIGNALLER]);

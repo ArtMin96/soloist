@@ -104,6 +104,41 @@ impl Harness {
             .to_string()
     }
 
+    /// Queues one direct message in `project` and records it, exactly as a facade send does, so a
+    /// later transition has an entry to move.
+    fn queue_recorded(
+        &self,
+        project: ProjectId,
+        recipient: ProcessId,
+        body: &str,
+    ) -> AgentMessageId {
+        let delivery = self
+            .mailbox
+            .enqueue(
+                project,
+                ProcessId::next(),
+                recipient,
+                AgentMessageKind::Direct,
+                body.to_owned(),
+                None,
+            )
+            .expect("queue a message");
+        self.mailbox.record(&delivery);
+        delivery.message.id
+    }
+
+    fn recorded_outcome(
+        &self,
+        project: ProjectId,
+        id: AgentMessageId,
+    ) -> Option<AgentMessageOutcome> {
+        self.mailbox
+            .transcript(project)
+            .into_iter()
+            .find(|record| record.delivery.message.id == id)
+            .map(|record| record.delivery.outcome)
+    }
+
     fn submitted_input(&self) -> String {
         String::from_utf8_lossy(&lock(&self.input)).into_owned()
     }
@@ -267,5 +302,61 @@ async fn a_backstop_wake_the_agent_refuses_is_delivered_once_it_can_be_accepted(
         h.outcome(recipient),
         AgentMessageOutcome::WakeSubmitted,
         "a delivery the agent refused left the wake owed rather than spending it"
+    );
+}
+
+#[tokio::test]
+async fn removing_a_project_forgets_its_transcript() {
+    let h = harness();
+    let kept = ProjectId::from_raw(PROJECT.get() + 1);
+    let recipient = h.registered_agent("worker");
+    h.queue_recorded(PROJECT, recipient, "in the removed project");
+    h.queue_recorded(kept, recipient, "in the kept project");
+    h.spawn_reactor();
+    settle().await;
+
+    h.bus.publish(DomainEvent::ProjectRemoved { id: PROJECT });
+    settle_until(|| h.mailbox.transcript(PROJECT).is_empty()).await;
+
+    assert_eq!(
+        h.mailbox.transcript(kept).len(),
+        1,
+        "only the removed project's history is forgotten",
+    );
+}
+
+#[tokio::test]
+async fn a_wake_the_reactor_delivers_moves_the_record_and_announces_it() {
+    let h = harness();
+    let recipient = h.unclassified_agent("worker").await;
+    let message = h.queue_recorded(PROJECT, recipient, "review the parser");
+    h.spawn_reactor();
+    settle().await;
+    // The send that recorded this exchange found the recipient unclassified, so the record starts
+    // out merely queued and only the reactor's later delivery can move it.
+    assert_eq!(
+        h.recorded_outcome(PROJECT, message),
+        Some(AgentMessageOutcome::Queued),
+    );
+    let mut rx = h.bus.subscribe();
+
+    h.bus.publish(DomainEvent::AgentActivityChanged {
+        id: recipient,
+        state: AgentActivity::Idle,
+    });
+    settle_until(|| h.submitted_input().contains(&message.to_string())).await;
+
+    assert_eq!(
+        h.recorded_outcome(PROJECT, message),
+        Some(AgentMessageOutcome::WakeSubmitted),
+        "the transcript follows the wake the reactor delivered, not only the one a send delivers",
+    );
+    assert!(
+        crate::testing::drain(&mut rx).iter().any(|event| matches!(
+            event,
+            DomainEvent::AgentMessageChanged { project, id }
+                if *project == PROJECT && *id == message
+        )),
+        "the reactor announces the transition it caused",
     );
 }

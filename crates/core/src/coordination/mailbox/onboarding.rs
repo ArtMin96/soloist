@@ -65,23 +65,41 @@ impl AgentMailbox {
         Some((envelope, queued))
     }
 
+    /// Moves the claimed messages to [`WakeSubmitted`](AgentMessageOutcome::WakeSubmitted) and
+    /// reports which of them a retained record was updated for. Every wake path runs through here
+    /// — the synchronous one a send takes when its recipient is already idle, and the reactor's
+    /// idle-driven and backstop deliveries — so the record stays truthful without the mailbox
+    /// holding a bus. A send records its own exchange only after its wake attempt, so nothing is
+    /// reported back to it; the reactor, which wakes long after the record exists, gets the
+    /// entries to announce.
     pub(crate) fn mark_wake_submitted(
         &self,
         recipient: ProcessId,
         claimed: &[crate::ids::AgentMessageId],
-    ) {
+    ) -> Vec<(ProjectId, crate::ids::AgentMessageId)> {
         let mut state = lock(&self.state);
         state.onboarding.remove(&recipient);
         state.pending_wakes.remove(&recipient);
+        let mut woken = Vec::new();
         if let Some(inbox) = state.inboxes.get_mut(&recipient) {
             for pending in inbox {
                 if pending.outcome == AgentMessageOutcome::Queued
                     && claimed.contains(&pending.message.id)
                 {
                     pending.outcome = AgentMessageOutcome::WakeSubmitted;
+                    woken.push((pending.message.project, pending.message.id));
                 }
             }
         }
+        woken.retain(|(project, id)| {
+            super::transcript::advance_recorded_outcome(
+                &mut state,
+                *project,
+                *id,
+                AgentMessageOutcome::WakeSubmitted,
+            )
+        });
+        woken
     }
 
     pub(super) fn release_wake_claim(&self, recipient: ProcessId) {

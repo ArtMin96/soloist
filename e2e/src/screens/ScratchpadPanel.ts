@@ -66,24 +66,25 @@ export const scratchpadPanel = {
    * re-render and dies on a stale element reference.
    */
   async rows(): Promise<RosterRow[]> {
-    const raw: { name: string; revision: string | null }[] = await browser.execute(
-      (rosterSel: string, optionSel: string, nameAttr: string) => {
-        const roster = document.querySelector(rosterSel);
-        if (!roster) return [];
-        return [...roster.querySelectorAll(optionSel)].map((option) => {
-          // The row's first inner wrapper span holds the title then the `rN` revision, in order;
-          // the name is the handle attribute, since the title is the humanized reading of it.
-          const wrapper = option.querySelector("span");
-          return {
-            name: option.getAttribute(nameAttr) ?? "",
-            revision: wrapper?.children[1]?.textContent?.trim() ?? null,
-          };
-        });
-      },
-      ROSTER,
-      OPTION,
-      NAME_ATTR,
-    );
+    const raw: { name: string; revision: string | null }[] =
+      await browser.execute(
+        (rosterSel: string, optionSel: string, nameAttr: string) => {
+          const roster = document.querySelector(rosterSel);
+          if (!roster) return [];
+          return [...roster.querySelectorAll(optionSel)].map((option) => {
+            // The row's first inner wrapper span holds the title then the `rN` revision, in order;
+            // the name is the handle attribute, since the title is the humanized reading of it.
+            const wrapper = option.querySelector("span");
+            return {
+              name: option.getAttribute(nameAttr) ?? "",
+              revision: wrapper?.children[1]?.textContent?.trim() ?? null,
+            };
+          });
+        },
+        ROSTER,
+        OPTION,
+        NAME_ATTR,
+      );
     return raw.map(({ name, revision }) => ({
       name,
       revision: parseRosterRevision(revision) ?? Number.NaN,
@@ -101,7 +102,8 @@ export const scratchpadPanel = {
         row = rows.find((candidate) => candidate.name === name);
         return row !== undefined;
       },
-      () => `no scratchpad row named "${name}" appeared; rendered rows: ${JSON.stringify(seen)}`,
+      () =>
+        `no scratchpad row named "${name}" appeared; rendered rows: ${JSON.stringify(seen)}`,
     );
     return (row as RosterRow).revision;
   },
@@ -115,11 +117,14 @@ export const scratchpadPanel = {
     let revision = previous;
     await waitUntilOr(
       async () => {
-        const row = (await this.rows()).find((candidate) => candidate.name === name);
+        const row = (await this.rows()).find(
+          (candidate) => candidate.name === name,
+        );
         revision = row?.revision ?? previous;
         return revision !== previous && !Number.isNaN(revision);
       },
-      () => `scratchpad "${name}" never moved off revision ${previous}; last seen: r${revision}`,
+      () =>
+        `scratchpad "${name}" never moved off revision ${previous}; last seen: r${revision}`,
     );
     return revision;
   },
@@ -175,7 +180,8 @@ export const scratchpadPanel = {
         // prose; a containment check reads the concurrent writer's content without coupling to it.
         return last.includes(expected);
       },
-      () => `the editor body never settled on "${expected}"; last seen: "${last}"`,
+      () =>
+        `the editor body never settled on "${expected}"; last seen: "${last}"`,
     );
   },
 
@@ -199,7 +205,9 @@ export const scratchpadPanel = {
     const text = await $(CONFLICT).getText();
     const revision = parseRevision(text);
     if (revision === null) {
-      throw new Error(`the conflict banner named no revision; its text was "${text}"`);
+      throw new Error(
+        `the conflict banner named no revision; its text was "${text}"`,
+      );
     }
     return revision;
   },
@@ -217,7 +225,10 @@ export const scratchpadPanel = {
         await $(RELOAD).click();
         return !(await conflict.isDisplayed());
       },
-      { timeout: WAIT.core, timeoutMsg: "the conflict banner never cleared after Reload" },
+      {
+        timeout: WAIT.core,
+        timeoutMsg: "the conflict banner never cleared after Reload",
+      },
     );
   },
 

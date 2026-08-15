@@ -1,7 +1,14 @@
 import type { ProcStatus } from "@domain";
 import { openProject } from "../../src/flows/openProject.js";
-import { openLaunchPicker, openTerminal, TERMINAL_LABEL } from "../../src/flows/launch.js";
-import { launchPicker, TERMINAL_ENTRY } from "../../src/screens/LaunchPicker.js";
+import {
+  openLaunchPicker,
+  openTerminal,
+  TERMINAL_LABEL,
+} from "../../src/flows/launch.js";
+import {
+  launchPicker,
+  TERMINAL_ENTRY,
+} from "../../src/screens/LaunchPicker.js";
 import { sidebar } from "../../src/screens/Sidebar.js";
 import { terminalPane } from "../../src/screens/TerminalPane.js";
 import { browser } from "@wdio/globals";

@@ -7,7 +7,7 @@ use crate::sync::lock;
 
 use super::completion_notice::CompletionNotices;
 use super::vocabulary::{
-    AgentMessage, AgentMessageDelivery, AgentMessageKind, AgentMessageOutcome,
+    AgentMessage, AgentMessageDelivery, AgentMessageKind, AgentMessageOutcome, AgentMessageRecord,
     MailboxCapacityError, MAX_AGENT_MESSAGE_BYTES, MAX_PENDING_AGENT_MESSAGES,
     MAX_PENDING_AGENT_MESSAGE_BYTES, MAX_PENDING_MESSAGES_PER_PROJECT,
     MAX_PENDING_MESSAGES_PER_RECIPIENT, MAX_WAKE_WAIT,
@@ -33,6 +33,8 @@ pub(super) struct MailboxState {
     pub(super) wake_in_flight: HashSet<ProcessId>,
     task_receipts: VecDeque<TaskReceipt>,
     pub(super) completion_notices: CompletionNotices,
+    pub(super) transcript: HashMap<ProjectId, VecDeque<AgentMessageRecord>>,
+    pub(super) transcript_count: usize,
 }
 
 /// One wake owed to a recipient: how many deliveries it has refused, and the wall-clock instant

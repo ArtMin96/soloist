@@ -1,5 +1,8 @@
 import type { ProjectLoad, ProjectView } from "@domain";
-import { isScratchPath, materializeProject } from "../harness/fixtureProject.js";
+import {
+  isScratchPath,
+  materializeProject,
+} from "../harness/fixtureProject.js";
 import { invoke } from "../harness/tauri.js";
 import { sidebar } from "../screens/Sidebar.js";
 
@@ -45,7 +48,9 @@ export async function openProject(
 
   const project = projects.find((view) => view.id === id);
   if (!project) {
-    throw new Error(`project_load reported id ${id}, but project_list does not list it`);
+    throw new Error(
+      `project_load reported id ${id}, but project_list does not list it`,
+    );
   }
 
   await sidebar.waitUntilReady();

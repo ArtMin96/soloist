@@ -62,7 +62,9 @@ describe("alerting about processes the user is not watching", () => {
     // The count is the barrier — it and both markers render from the one snapshot.
     await attentionControl.waitForCount(1);
 
-    const row = (await sidebar.rows()).find((candidate) => candidate.label === FAULTY);
+    const row = (await sidebar.rows()).find(
+      (candidate) => candidate.label === FAULTY,
+    );
 
     expect(row?.unread).toBe(true);
     expect(await sidebar.projectUnread(project.name)).toBe(true);

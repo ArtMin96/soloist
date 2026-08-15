@@ -38,15 +38,19 @@ export const todoBoard = {
       // The row's trigger is the Collapsible button whose first plain span (no badge marker) is the
       // title; the last plain span is the declared status label. The derived blocked gate is an
       // outline badge, distinct from the muted lock badge and from the status label.
-      const triggers = [...document.querySelectorAll('button[aria-expanded]')];
+      const triggers = [...document.querySelectorAll("button[aria-expanded]")];
       for (const trigger of triggers) {
         const plain = [...trigger.children].filter(
-          (child) => child.tagName === "SPAN" && !child.hasAttribute("data-slot"),
+          (child) =>
+            child.tagName === "SPAN" && !child.hasAttribute("data-slot"),
         );
         if (plain[0]?.textContent?.trim() !== todoTitle) continue;
         return {
           status: plain[plain.length - 1]?.textContent?.trim() ?? "",
-          blocked: trigger.querySelector('[data-slot="badge"][data-variant="outline"]') !== null,
+          blocked:
+            trigger.querySelector(
+              '[data-slot="badge"][data-variant="outline"]',
+            ) !== null,
         };
       }
       return null;
@@ -75,13 +79,16 @@ export const todoBoard = {
   /** Every rendered todo title, for reporting a miss. */
   async titles(): Promise<string[]> {
     return browser.execute(() =>
-      [...document.querySelectorAll('button[aria-expanded]')]
+      [...document.querySelectorAll("button[aria-expanded]")]
         .map((trigger) => {
           const plain = [...trigger.children].filter(
-            (child) => child.tagName === "SPAN" && !child.hasAttribute("data-slot"),
+            (child) =>
+              child.tagName === "SPAN" && !child.hasAttribute("data-slot"),
           );
           // Only rows carrying a declared status label (two plain spans) are todos.
-          return plain.length >= 2 ? (plain[0].textContent?.trim() ?? "") : null;
+          return plain.length >= 2
+            ? (plain[0].textContent?.trim() ?? "")
+            : null;
         })
         .filter((title): title is string => title !== null),
     );
@@ -96,7 +103,8 @@ export const todoBoard = {
         last = (await this.read(title))?.status;
         return last === want;
       },
-      () => `todo "${title}" never reported status "${want}"; last seen: ${last ?? "no such todo"}`,
+      () =>
+        `todo "${title}" never reported status "${want}"; last seen: ${last ?? "no such todo"}`,
     );
   },
 
@@ -108,7 +116,8 @@ export const todoBoard = {
         last = (await this.read(title))?.blocked;
         return last === blocked;
       },
-      () => `todo "${title}" never showed blocked=${blocked}; last seen: ${last ?? "no such todo"}`,
+      () =>
+        `todo "${title}" never showed blocked=${blocked}; last seen: ${last ?? "no such todo"}`,
     );
   },
 
@@ -119,9 +128,12 @@ export const todoBoard = {
     if ((await trigger.getAttribute("aria-expanded")) === "true") return;
     await trigger.click();
     await trigger.waitForClickable({ timeout: WAIT.render });
-    await browser.waitUntil(async () => (await trigger.getAttribute("aria-expanded")) === "true", {
-      timeout: WAIT.render,
-    });
+    await browser.waitUntil(
+      async () => (await trigger.getAttribute("aria-expanded")) === "true",
+      {
+        timeout: WAIT.render,
+      },
+    );
   },
 
   /** Expands the row and clicks its Complete action — the write that routes to the core's gate. */
@@ -154,7 +166,9 @@ export const todoBoard = {
    * handle, as in the sidebar), anchored on the Collapsible trigger the item uniquely carries.
    */
   itemElement(title: string) {
-    return $(`//li[.//button[@aria-expanded][.//span[normalize-space(text())="${title}"]]]`);
+    return $(
+      `//li[.//button[@aria-expanded][.//span[normalize-space(text())="${title}"]]]`,
+    );
   },
 
   /** The row's Collapsible trigger — the only `aria-expanded` button within the item. */

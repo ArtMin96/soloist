@@ -68,6 +68,7 @@ mod kv;
 mod link;
 mod loops;
 mod mailbox;
+mod mailbox_transcript;
 mod orchestration;
 mod output;
 mod project_settings;

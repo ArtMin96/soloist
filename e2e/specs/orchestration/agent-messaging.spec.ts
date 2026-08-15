@@ -6,6 +6,8 @@ import {
   requestLeadMailbox,
 } from "../../src/harness/leadAgent.js";
 import { launchAgent } from "../../src/flows/launch.js";
+import { messagesPanel } from "../../src/screens/MessagesPanel.js";
+import { orchestrationPane } from "../../src/screens/OrchestrationPane.js";
 import { openProject } from "../../src/flows/openProject.js";
 import { sidebar } from "../../src/screens/Sidebar.js";
 import { terminalPane } from "../../src/screens/TerminalPane.js";
@@ -22,17 +24,21 @@ function canonicalMessageBody(text: string): string {
 // its line reader cannot print `submitted wake received` for bytes merely pasted into the PTY: it
 // needs the semantic return that submits the turn.
 //
-// Every read below is an agent's *own* terminal output, so what is proven is that the core carried
-// the message into the recipient process — never that a Soloist surface displayed it. The app
-// renders no message bodies anywhere, and a real agent CLI prints nothing of the sort; the bodies
-// are legible here only because the fixture echoes what it received.
+// The terminal reads below are an agent's *own* output, so what they prove is that the core carried
+// the message into the recipient process — the bodies are legible there only because the fixture
+// echoes what it received, which a real agent CLI would not. The final case is the one that reads a
+// Soloist surface instead: the Messages view renders the retained transcript, so a body found there
+// was displayed by the app rather than printed by the fixture.
 //
 // Every agent in this walk is a fixture the harness puts first on PATH — no real agent CLI runs at
 // any point, here or anywhere in this suite. Green says the core's messaging works against agents
 // that behave as these stubs do; it is not a live multi-provider walk.
 describe("addressed work between spawned agents", () => {
+  let projectName = "";
+
   before(async () => {
-    await openProject("orchestration");
+    const project = await openProject("orchestration");
+    projectName = project.name;
     await requestLeadMailbox();
     await launchAgent(LEAD);
     await sidebar.waitForRowStatus(LEAD, RUNNING);
@@ -48,7 +54,9 @@ describe("addressed work between spawned agents", () => {
 
   it("proves default onboarding, opt-out, addressed exchange, and acknowledged completion", async () => {
     await sidebar.select(MAILBOX.primary);
-    const primaryTerminal = await terminalPane.waitForText(MAILBOX.completionReported);
+    const primaryTerminal = await terminalPane.waitForText(
+      MAILBOX.completionReported,
+    );
     expect(primaryTerminal).toContain(MAILBOX.submitted);
     expect(primaryTerminal).toContain(MAILBOX.instructions);
     expect(primaryTerminal).toContain(MAILBOX.instructionsReceived);
@@ -64,18 +72,45 @@ describe("addressed work between spawned agents", () => {
     expect(peerTerminal).toContain(MAILBOX.peerLeaseHeld);
     expect(peerTerminal).toContain(MAILBOX.peerLeaseAcquired);
     expect(peerTerminal).toContain(MAILBOX.peerLeaseReleased);
-    expect(canonicalMessageBody(peerTerminal)).toContain(canonicalMessageBody(MAILBOX.broadcast));
-    expect(canonicalMessageBody(peerTerminal)).toContain(canonicalMessageBody(MAILBOX.direct));
+    expect(canonicalMessageBody(peerTerminal)).toContain(
+      canonicalMessageBody(MAILBOX.broadcast),
+    );
+    expect(canonicalMessageBody(peerTerminal)).toContain(
+      canonicalMessageBody(MAILBOX.direct),
+    );
 
     await sidebar.select(LEAD);
     const leadTerminal = await terminalPane.waitForText(MAILBOX.proof);
-    expect(leadTerminal).toContain("lead retrieved and acknowledged Completion");
-    expect(canonicalMessageBody(leadTerminal)).toContain(canonicalMessageBody(MAILBOX.completion));
+    expect(leadTerminal).toContain(
+      "lead retrieved and acknowledged Completion",
+    );
+    expect(canonicalMessageBody(leadTerminal)).toContain(
+      canonicalMessageBody(MAILBOX.completion),
+    );
 
     await captureProof("agent-messaging-complete", {
       primaryTerminal,
       peerTerminal,
       leadTerminal,
     });
+  });
+
+  it("shows the exchanged bodies in the app's own Messages view", async () => {
+    await sidebar.openOrchestration(projectName);
+    await orchestrationPane.showView("messages");
+    const transcript = await messagesPanel.waitForTranscript();
+
+    // The same two bodies the terminals echoed, this time rendered by Soloist from its own retained
+    // record — the distinction between a fixture printing its mail and the app showing it.
+    expect(canonicalMessageBody(transcript)).toContain(
+      canonicalMessageBody(MAILBOX.direct),
+    );
+    expect(canonicalMessageBody(transcript)).toContain(
+      canonicalMessageBody(MAILBOX.broadcast),
+    );
+    // A closed worker's messages stay readable, so the routing labels survive alongside the bodies.
+    expect(transcript).toContain(MAILBOX.peer);
+
+    await captureProof("agent-messaging-transcript", { transcript });
   });
 });

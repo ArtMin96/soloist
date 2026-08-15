@@ -2,7 +2,7 @@
 //!
 //! [`OrchestrationSnapshot`] is the single read the orchestration UI renders: the project's agent
 //! lineage tree plus its coordination state (todos, timers, leases, scratchpads, diagrams,
-//! key-value). It is
+//! key-value, and the recorded agent-to-agent exchanges). It is
 //! **derived on read** from the live process registry (C2), the idle tracker (C4), and the durable
 //! coordination aggregates (C6) — never a separately stored copy of that state, so it cannot drift
 //! from the source of truth. The Facade assembles it ([`crate::facade::Facade::orchestration_snapshot`]);
@@ -13,7 +13,7 @@ use serde::Serialize;
 
 use crate::agents::AgentActivity;
 use crate::coordination::{
-    DiagramSummary, KvEntry, LeaseView, ScratchpadSummary, TimerView, TodoView,
+    AgentMessageRecord, DiagramSummary, KvEntry, LeaseView, ScratchpadSummary, TimerView, TodoView,
 };
 use crate::ids::{ProcessId, ProjectId};
 use crate::process::{ProcStatus, ProcessKind};
@@ -79,4 +79,7 @@ pub struct OrchestrationSnapshot {
     pub diagrams: Vec<DiagramSummary>,
     /// Key-value entries in the project, ordered by key.
     pub kv: Vec<KvEntry>,
+    /// Recorded agent-to-agent exchanges in the project, oldest first. Read live from the mailbox
+    /// that owns them — bounded, so the oldest exchanges of a long run are no longer here.
+    pub messages: Vec<AgentMessageRecord>,
 }
