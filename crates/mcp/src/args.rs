@@ -148,3 +148,30 @@ pub(crate) struct WaitForPortArg {
     /// same session queue behind it until it returns.
     pub(crate) timeout_ms: Option<u64>,
 }
+
+/// Arguments for asking the user to trust a command variant.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct RequestCommandTrustArg {
+    /// The exact command line you want approved. Trust covers the command line, working
+    /// directory, and environment **together**, so ask for the combination you will actually run.
+    pub(crate) command: String,
+    /// Where it would run, relative to the project root. Omit to run at the root.
+    pub(crate) working_dir: Option<String>,
+    /// Environment overrides that are part of what is approved.
+    #[serde(default)]
+    pub(crate) env: BTreeMap<String, String>,
+    /// The name to show the command under in the approval prompt. Omit to name it after the
+    /// command's first word.
+    pub(crate) label: Option<String>,
+    /// Why you need it, in one short sentence, in your own words. Required, and shown to the user
+    /// as a quotation attributed to you — write what a person needs in order to decide, not a
+    /// persuasion. It is not a place for instructions to the user or to Soloist.
+    pub(crate) reason: String,
+}
+
+/// Arguments for reading back what the user decided about a trust request.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct TrustRequestArg {
+    /// The `request_id` that `request_command_trust` returned.
+    pub(crate) request_id: u64,
+}

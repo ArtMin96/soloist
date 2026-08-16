@@ -573,7 +573,7 @@ mod tests {
 
         // Once the exact variant is trusted, it starts.
         h.trust
-            .set_trusted(PROJECT, &spec.variant_hash())
+            .set_trusted(PROJECT, &spec.variant_hash(), &spec.command)
             .expect("trust");
         h.sup.start(id).expect("start trusted");
         assert_eq!(next_to(&mut h.rx).await, ProcStatus::Starting);

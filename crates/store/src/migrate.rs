@@ -10,7 +10,7 @@ mod helpers;
 use helpers::{column_exists, seed_builtin_agent_tools, table_exists};
 
 /// The newest schema version this build knows how to migrate to.
-pub(crate) const SCHEMA_VERSION: i64 = 21;
+pub(crate) const SCHEMA_VERSION: i64 = 22;
 
 /// Applies migrations newer than the database's recorded `user_version`. Each step
 /// is idempotent; the version is bumped only after all pending steps succeed. A
@@ -353,6 +353,26 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), StoreError> {
     {
         conn.execute_batch("ALTER TABLE todos ADD COLUMN completion TEXT;")
             .map_err(sql_err)?;
+    }
+
+    if version < 22 && table_exists(conn, "trust")? {
+        // Provenance for a command grant: which process asked for it, the reason it gave, and when
+        // the user approved. Added as nullable columns rather than a table rebuild, so every grant
+        // that already existed keeps its row and reads back as what it is — one the user authored
+        // themselves. Guarded per column so a re-run is a no-op.
+        for (column, definition) in [
+            ("command", "TEXT"),
+            ("requested_by", "INTEGER"),
+            ("reason", "TEXT"),
+            ("granted_at_unix_millis", "INTEGER"),
+        ] {
+            if !column_exists(conn, "trust", column)? {
+                conn.execute_batch(&format!(
+                    "ALTER TABLE trust ADD COLUMN {column} {definition};"
+                ))
+                .map_err(sql_err)?;
+            }
+        }
     }
 
     if version < SCHEMA_VERSION {

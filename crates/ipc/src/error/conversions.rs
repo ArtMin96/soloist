@@ -1,7 +1,7 @@
 use soloist_core::{
     AgentMailboxError, CoordinationError, FeedbackError, IdentityError, IntegrationWriteError,
-    LaunchAgentError, PromptRenderError, RenderError, ScopedActionError, SetupIntegrationError,
-    SpawnAgentError, SpawnProcessError,
+    LaunchAgentError, PromptRenderError, RenderError, RequestTrustError, ScopedActionError,
+    SetupIntegrationError, SpawnAgentError, SpawnProcessError, TrustRequestCapacityError,
 };
 
 use super::IpcError;
@@ -64,6 +64,29 @@ impl From<SpawnProcessError> for IpcError {
             SpawnProcessError::Untrusted => IpcError::Untrusted,
             SpawnProcessError::Store(err) => IpcError::Internal(err.to_string()),
             SpawnProcessError::Supervisor(err) => IpcError::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<RequestTrustError> for IpcError {
+    fn from(err: RequestTrustError) -> Self {
+        match err {
+            RequestTrustError::NoProjectScope => IpcError::NoProjectScope,
+            RequestTrustError::NoBoundProcess => IpcError::NoBoundProcess,
+            RequestTrustError::InvalidCommand(err) => IpcError::InvalidCommand(err.to_string()),
+            RequestTrustError::Capacity(err) => err.into(),
+            RequestTrustError::UnknownRequest => IpcError::UnknownTrustRequest,
+            RequestTrustError::Store(err) => IpcError::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<TrustRequestCapacityError> for IpcError {
+    fn from(err: TrustRequestCapacityError) -> Self {
+        match err {
+            TrustRequestCapacityError::ReasonTooLarge => IpcError::TrustRequestReasonTooLarge,
+            TrustRequestCapacityError::ProjectQueueFull => IpcError::TrustRequestQueueFull,
+            TrustRequestCapacityError::GlobalQueueFull => IpcError::TrustRequestsFull,
         }
     }
 }

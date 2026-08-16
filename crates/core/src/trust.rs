@@ -10,8 +10,13 @@ use std::sync::Arc;
 
 use crate::config::ProcessSpec;
 use crate::hash::Hash;
-use crate::ids::ProjectId;
-use crate::ports::{StoreError, TrustRepo};
+use crate::ids::{ProcessId, ProjectId};
+use crate::ports::{StoreError, TrustGrant, TrustRepo};
+
+mod releaser;
+mod requests;
+
+pub use requests::{PendingTrustRequest, TrustRequestSubmission, TrustRequests};
 
 /// Whether a command variant is trusted to run. Trust is per command *variant*,
 /// identified by its [`Hash`] over command/working_dir/env (see
@@ -54,12 +59,50 @@ impl TrustStore {
 
     /// Trusts `spec`'s variant within `project`.
     pub fn trust(&self, project: ProjectId, spec: &ProcessSpec) -> Result<(), StoreError> {
-        self.repo.set_trusted(project, &spec.variant_hash())
+        self.repo
+            .set_trusted(project, &spec.variant_hash(), &spec.command)
+    }
+
+    /// Trusts `spec`'s variant within `project`, recording that a process asked for it and why.
+    ///
+    /// The grant itself is the same row an ordinary [`trust`](Self::trust) writes — it has to be,
+    /// since the start gate consults it on every start, auto-start, crash restart and file-watch
+    /// restart, and a second kind of trust in that path would be a second thing to get wrong. The
+    /// provenance is what separates a grant an agent asked for from one the user authored, so the
+    /// user can review and take back what they approved on someone else's behalf.
+    pub fn trust_requested(
+        &self,
+        project: ProjectId,
+        spec: &ProcessSpec,
+        requested_by: ProcessId,
+        reason: &str,
+        granted_at_unix_millis: u64,
+    ) -> Result<(), StoreError> {
+        self.repo.set_trusted_with_provenance(
+            project,
+            &spec.variant_hash(),
+            &spec.command,
+            requested_by,
+            reason,
+            granted_at_unix_millis,
+        )
+    }
+
+    /// Every trusted command variant in `project`, with the provenance of each — what the review
+    /// surface lists so a grant can be taken back.
+    pub fn grants(&self, project: ProjectId) -> Result<Vec<TrustGrant>, StoreError> {
+        self.repo.list_grants(project)
     }
 
     /// Revokes trust for `spec`'s variant within `project`.
     pub fn untrust(&self, project: ProjectId, spec: &ProcessSpec) -> Result<(), StoreError> {
         self.repo.revoke(project, &spec.variant_hash())
+    }
+
+    /// Revokes a variant named by its own key, as the review list names it — there is no spec to
+    /// resolve for a grant an agent asked for, so the key is the handle.
+    pub fn untrust_variant(&self, project: ProjectId, variant: &Hash) -> Result<(), StoreError> {
+        self.repo.revoke(project, variant)
     }
 
     /// Whether the user has authorised Soloist to make changes within `project` — the gate the

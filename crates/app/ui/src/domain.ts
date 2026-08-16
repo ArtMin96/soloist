@@ -133,6 +133,34 @@ export interface TrustReviewCommand {
   env: Record<string, string>;
 }
 
+// Where a trust request stands. Mirrors the core's `TrustRequestState`.
+export type TrustRequestState = "pending" | "granted" | "denied" | "expired" | "withdrawn";
+
+// One bound process's open request that the user trust a command variant.
+//
+// `reason` is written by the requesting process and is **untrusted text**: render it as a
+// quotation attributed to `requested_by_label`, as plain text, never as the app's own words and
+// never as markup.
+export interface TrustRequest {
+  id: number;
+  project: number;
+  requested_by: number;
+  requested_by_label: string;
+  review: TrustReviewCommand;
+  reason: string;
+  expires_unix_millis: number;
+}
+
+// One trusted command variant as the review list reads it back. A grant with no `requested_by` is
+// one the user authored themselves; one that names a process was made at that process's asking.
+export interface TrustGrant {
+  variant_hash: string;
+  command: string | null;
+  requested_by: number | null;
+  reason: string | null;
+  granted_at_unix_millis: number | null;
+}
+
 // The outcome of opening a project (the `project_load` command). `processes` is how many
 // the folder's solo.yml declared; `created` is true when Soloist auto-created the solo.yml
 // from detected commands (the folder had none). The UI turns these facts into a notice so
@@ -272,6 +300,17 @@ export type DomainEvent =
       diff: ConfigSync;
       requires_trust: boolean;
       commands: TrustReviewCommand[];
+    }
+  // A bound process asked the user to trust a command variant. Carries the whole request so the
+  // approval surface shows what would run and who is asking without a round trip.
+  | { type: "TrustRequested"; project: number; request: TrustRequest }
+  // A trust request reached a terminal state — decided, aged out, or dropped because the process
+  // that asked has closed. A prompt on screen for it closes.
+  | {
+      type: "TrustRequestResolved";
+      project: number;
+      id: number;
+      state: TrustRequestState;
     }
   | { type: "TerminalTitleChanged"; id: number; title: string }
   | { type: "TerminalBell"; id: number }

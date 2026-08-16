@@ -43,6 +43,10 @@ pub enum AgentMessageKind {
     Direct,
     Task,
     Completion,
+    /// The user answered a trust request this agent opened. Filed to the requester itself, because
+    /// there is no process behind the person's click — the notice is best-effort, and the
+    /// authoritative answer is always `trust_request_status`.
+    TrustDecision,
 }
 
 /// The observable delivery state of an addressed message.

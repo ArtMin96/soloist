@@ -24,6 +24,7 @@ mod project_settings;
 mod settings;
 mod templates;
 mod timers;
+mod trust;
 pub use attention::*;
 pub use coordination::*;
 pub use export::*;
@@ -37,6 +38,7 @@ pub use project_settings::*;
 pub use settings::*;
 pub use templates::*;
 pub use timers::*;
+pub use trust::*;
 
 use std::path::Path;
 use std::sync::Arc;

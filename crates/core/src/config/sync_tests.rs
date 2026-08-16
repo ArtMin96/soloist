@@ -193,7 +193,11 @@ fn renaming_a_trusted_command_preserves_trust() {
     // Trust Web's current variant.
     let web = crate::config::parse("processes:\n  Web:\n    command: npm run dev\n").unwrap();
     trust
-        .set_trusted(project, &web.processes["Web"].variant_hash())
+        .set_trusted(
+            project,
+            &web.processes["Web"].variant_hash(),
+            &web.processes["Web"].command,
+        )
         .unwrap();
 
     write(
@@ -219,7 +223,11 @@ fn a_rename_that_also_edits_the_variant_still_requires_trust() {
     // Trust Web's original variant (no env).
     let original = crate::config::parse("processes:\n  Web:\n    command: npm run dev\n").unwrap();
     trust
-        .set_trusted(project, &original.processes["Web"].variant_hash())
+        .set_trusted(
+            project,
+            &original.processes["Web"].variant_hash(),
+            &original.processes["Web"].command,
+        )
         .unwrap();
 
     // Rename Web -> Frontend (same command, so it is detected as a rename) but

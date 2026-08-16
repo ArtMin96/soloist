@@ -121,6 +121,13 @@ id_newtype!(
     /// reconstructed across an app restart.
     AgentMessageId
 );
+id_newtype!(
+    /// Identifies a pending request that the user trust a command variant, within one Soloist run.
+    /// A request is meaningful only while the process that made it is alive, so like a mailbox
+    /// message its id is monotonic per run and is never reconstructed across an app restart — the
+    /// *grant* an approval writes is durable, the asking is not.
+    TrustRequestId
+);
 
 #[cfg(test)]
 mod tests {

@@ -17,10 +17,11 @@ use tokio::sync::broadcast;
 use crate::attention::AttentionKind;
 use crate::configchange::{ConfigSync, TrustReviewCommand};
 use crate::idle::AgentActivity;
-use crate::ids::{AgentMessageId, ProcessId, ProjectId, TimerId, TodoId};
+use crate::ids::{AgentMessageId, ProcessId, ProjectId, TimerId, TodoId, TrustRequestId};
 use crate::orphans::OrphanInfo;
 use crate::process::{ProcStatus, ProcessKind};
 use crate::template::TemplateKind;
+use crate::trustrequest::{TrustRequest, TrustRequestState};
 use crate::watch::{WatchError, WatchPurpose};
 
 /// A change in domain state, serialized to adapters verbatim. `#[serde(tag = "type")]`
@@ -126,6 +127,23 @@ pub enum DomainEvent {
         diff: ConfigSync,
         requires_trust: bool,
         commands: Vec<TrustReviewCommand>,
+    },
+    /// A bound process asked the user to trust a command variant it wants to run. Carries the
+    /// whole request, so the approval surface shows what would run, who is asking, and the words
+    /// they gave — without a round trip, and without the user ever seeing only a name.
+    ///
+    /// The reason is **agent-supplied text**: attribute it to the named requester and render it as
+    /// plain text, never as the application's own words and never as markup.
+    TrustRequested {
+        project: ProjectId,
+        request: TrustRequest,
+    },
+    /// A pending trust request reached a terminal state — approved, declined, aged out, or dropped
+    /// because the process that asked has closed. An approval prompt on screen for it closes.
+    TrustRequestResolved {
+        project: ProjectId,
+        id: TrustRequestId,
+        state: TrustRequestState,
     },
     /// A process set its terminal title via an OSC sequence. Drives window/tab titles
     /// and feeds the agent idle heuristics that watch title stability.

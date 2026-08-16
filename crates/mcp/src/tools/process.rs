@@ -2,13 +2,15 @@
 //! within the session's effective project and honour the trust gate — both enforced in the
 //! core, not here.
 
+use std::path::PathBuf;
+
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
 use rmcp::{tool, tool_router};
-use soloist_core::ProcessId;
+use soloist_core::{ProcessId, TrustRequestId};
 use soloist_ipc::{IpcRequest, IpcResponse};
 
-use crate::args::{ProcessArg, RenameArg, SendInputArg};
+use crate::args::{ProcessArg, RenameArg, RequestCommandTrustArg, SendInputArg, TrustRequestArg};
 use crate::server::SoloistMcp;
 use crate::tools::reply::{acked, app_error, structured, unexpected};
 
@@ -148,6 +150,52 @@ impl SoloistMcp {
         };
         match self.client.request(request).await {
             Ok(IpcResponse::InputSent(tail)) => structured(&serde_json::json!({ "tail": tail })),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Ask the user to approve a command line that is not trusted in this project yet — what to call when `start_process` or `spawn_process` is refused as untrusted. Recording the ask succeeds immediately; it does not wait for an answer. Returns state 'granted' when the exact command, working directory and environment were already trusted (nothing was asked and you can run it now), or state 'pending' with a request_id to poll with `trust_request_status`. The user sees the command line, where it would run, its environment, and your reason attributed to you by name; approving is theirs alone, and there is no way for you to approve your own request. Ask once per command you genuinely need, and give a reason a person can decide on — repeated or vague asks train the user to click through prompts, which is the failure this exists to avoid."
+    )]
+    pub(crate) async fn request_command_trust(
+        &self,
+        Parameters(RequestCommandTrustArg {
+            command,
+            working_dir,
+            env,
+            label,
+            reason,
+        }): Parameters<RequestCommandTrustArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::RequestCommandTrust {
+            command,
+            working_dir: working_dir.map(PathBuf::from),
+            env,
+            label,
+            reason,
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::TrustRequestOpened(outcome)) => structured(&outcome),
+            Ok(_) => Err(unexpected()),
+            Err(err) => app_error(&err),
+        }
+    }
+
+    #[tool(
+        description = "Read back what the user decided about a trust request you opened: pending, granted, denied, expired (nobody answered in time), or withdrawn (the process that asked has closed). This is the authoritative answer — an agent is also sent a mailbox notice when a decision lands, but that is best-effort and a non-agent process has no mailbox at all. Poll rather than assume, and do not re-ask for a command that was denied."
+    )]
+    pub(crate) async fn trust_request_status(
+        &self,
+        Parameters(TrustRequestArg { request_id }): Parameters<TrustRequestArg>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = IpcRequest::TrustRequestStatus {
+            request: TrustRequestId::from_raw(request_id),
+        };
+        match self.client.request(request).await {
+            Ok(IpcResponse::TrustRequest(state)) => {
+                structured(&serde_json::json!({ "state": state }))
+            }
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
         }

@@ -64,6 +64,8 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "ProjectOpened":
     case "ProjectsReordered":
     case "ConfigChanged":
+    case "TrustRequested":
+    case "TrustRequestResolved":
     case "TerminalTitleChanged":
     case "TerminalBell":
     case "TerminalNotification":

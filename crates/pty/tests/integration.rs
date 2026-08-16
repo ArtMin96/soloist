@@ -13,8 +13,8 @@ use nix::sys::signal::killpg;
 use nix::unistd::Pid;
 use soloist_core::{
     CorePorts, DomainEvent, Facade, Hash, OrphanControl, OrphanRecord, PeerCredentials, ProcStatus,
-    ProcessIdentity, ProcessSpawner, ProjectId, ProjectRecord, ProjectRepo, PtySize, SpawnSpec,
-    StoreError, TokioClock, TrustRepo,
+    ProcessId, ProcessIdentity, ProcessSpawner, ProjectId, ProjectRecord, ProjectRepo, PtySize,
+    SpawnSpec, StoreError, TokioClock, TrustGrant, TrustRepo,
 };
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner};
 use tokio::sync::broadcast::error::RecvError;
@@ -708,8 +708,27 @@ impl TrustRepo for NoTrust {
     fn is_trusted(&self, _project: ProjectId, _variant: &Hash) -> Result<bool, StoreError> {
         Ok(false)
     }
-    fn set_trusted(&self, _project: ProjectId, _variant: &Hash) -> Result<(), StoreError> {
+    fn set_trusted(
+        &self,
+        _project: ProjectId,
+        _variant: &Hash,
+        _command: &str,
+    ) -> Result<(), StoreError> {
         Ok(())
+    }
+    fn set_trusted_with_provenance(
+        &self,
+        _project: ProjectId,
+        _variant: &Hash,
+        _command: &str,
+        _requested_by: ProcessId,
+        _reason: &str,
+        _granted_at_unix_millis: u64,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+    fn list_grants(&self, _project: ProjectId) -> Result<Vec<TrustGrant>, StoreError> {
+        Ok(Vec::new())
     }
     fn revoke(&self, _project: ProjectId, _variant: &Hash) -> Result<(), StoreError> {
         Ok(())

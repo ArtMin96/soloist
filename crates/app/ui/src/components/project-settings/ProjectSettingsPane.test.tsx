@@ -56,6 +56,7 @@ function mockPage(calls: string[]) {
   mockIPC((cmd) => {
     calls.push(cmd);
     if (cmd === "project_settings_page") return page;
+    if (cmd === "trust_grants") return [];
     return settings;
   });
 }

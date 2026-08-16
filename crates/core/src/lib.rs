@@ -47,6 +47,7 @@ pub mod support;
 pub mod template;
 pub mod terminal;
 pub mod trust;
+pub mod trustrequest;
 pub mod vcs;
 pub mod watch;
 
@@ -93,9 +94,10 @@ pub use coordination::{
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
 pub use facade::{
-    AgentMailboxError, AppearanceSettingsError, CompletionNotification, CompletionReport,
-    CoordinationError, CreateTerminalError, DraftError, Facade, GitReadError, Handoff,
-    HandoffError, LaunchAgentError, LocalCommandError, MoveCommandError, PromptRenderError,
+    AgentMailboxError, AppearanceSettingsError, CommandTrustRequest, CompletionNotification,
+    CompletionReport, CoordinationError, CreateTerminalError, DraftError, Facade, GitReadError,
+    Handoff, HandoffError, LaunchAgentError, LocalCommandError, MoveCommandError,
+    PromptRenderError, RequestTrustError, ResolveTrustRequestError, RevokeTrustError,
     ScopedActionError, ScopedFacade, ScopedGitError, SetupIntegrationError, SpawnAgentError,
     SpawnAgentOutcome, SpawnAgentRequest, SpawnProcessError, SpawnProcessRequest, StatusSummary,
     TrustCommandError,
@@ -115,7 +117,7 @@ pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};
 pub use ids::{
     AgentMessageId, DiagramId, ProcessId, ProjectId, ScratchpadId, SessionId, TemplateId, TimerId,
-    TodoId, PROCESS_ID_ENV,
+    TodoId, TrustRequestId, PROCESS_ID_ENV,
 };
 pub use metrics::{MetricsProbe, MetricsSampler, NoopMetricsProbe, ProcessMetrics};
 pub use notify::{
@@ -128,7 +130,8 @@ pub use ports::{
     Clock, CompositeLockReleaser, ExitFuture, ExitStatus, LockReleaser, NoopLockReleaser,
     NoopOrphanControl, NoopRuntimeState, OrphanControl, OrphanRecord, ProcessControl,
     ProcessIdentity, ProcessSpawner, ProjectRecord, ProjectRepo, PtyIo, PtySize, RuntimeState,
-    RuntimeStateError, SpawnError, SpawnSpec, Spawned, StoreError, TokioClock, TrustRepo,
+    RuntimeStateError, SpawnError, SpawnSpec, Spawned, StoreError, TokioClock, TrustGrant,
+    TrustRepo,
 };
 pub use portscan::{wait_for_port, NoopPortProbe, PortProbe, PortScanner, WaitForPortError};
 pub use process::{IllegalTransition, ProcStatus, ProcessKind, ProcessView, Readiness};
@@ -157,7 +160,12 @@ pub use support::{
 };
 pub use template::{TemplateKind, TemplateScope};
 pub use terminal::{LogLine, PtyChunk, RenderedScreen};
-pub use trust::{Trust, TrustStore};
+pub use trust::{PendingTrustRequest, Trust, TrustRequestSubmission, TrustRequests, TrustStore};
+pub use trustrequest::{
+    TrustRequest, TrustRequestCapacityError, TrustRequestOutcome, TrustRequestState,
+    MAX_PENDING_TRUST_REQUESTS, MAX_PENDING_TRUST_REQUESTS_PER_PROJECT,
+    MAX_TRUST_REQUEST_REASON_BYTES, TRUST_REQUEST_TTL,
+};
 pub use vcs::{
     Branch, BranchInfo, Branches, ChangeKind, CommitEntry, DiffTarget, FileChange, FileContent,
     FileDiff, GitFileStatus, HunkRange, ProjectFile, SyncState, COMMIT_BODY_LIMIT,

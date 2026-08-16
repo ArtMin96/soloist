@@ -7,7 +7,7 @@ use soloist_core::{
     AcquireOutcome, BranchOp, CorePorts, DomainEvent, IntegrationFile, McpFeatureGroup,
     MissingPolicy, NewPullRequest, Origin, PeerCredentials, ProcStatus, ProcessId, ProcessKind,
     ProcessSpec, ProjectRepo, Prompting, StartSummary, StashOp, SyncOp, TemplateScope, TokioClock,
-    TrustRepo,
+    TrustRepo, TrustRequestOutcome, TrustRequestState,
 };
 use soloist_ipc::GitRefusal;
 use std::collections::BTreeMap;
@@ -509,7 +509,7 @@ async fn spawn_process_routes_into_the_sessions_own_project() {
     let dir = tempfile::tempdir().expect("temp dir");
     let (facade, trust, project) = facade_with_a_project(&dir);
     trust
-        .set_trusted(project, &spawnable_spec().variant_hash())
+        .set_trusted(project, &spawnable_spec().variant_hash(), SPAWNABLE)
         .expect("trust the variant in the project");
     let session = grouped_session(&facade);
 
@@ -1625,4 +1625,88 @@ async fn a_proposal_that_asked_to_be_told_hears_the_branch_being_published_and_o
         silence.is_empty(),
         "a caller that never asked was told anyway: {silence:?}",
     );
+}
+
+fn request_the_spawnables_trust() -> IpcRequest {
+    IpcRequest::RequestCommandTrust {
+        command: SPAWNABLE.into(),
+        working_dir: None,
+        env: BTreeMap::new(),
+        label: None,
+        reason: "the release build needs it".into(),
+    }
+}
+
+#[tokio::test]
+async fn requesting_trust_records_it_in_the_sessions_own_project() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (facade, _trust, project) = facade_with_a_project(&dir);
+    let session = grouped_session(&facade);
+    let caller = scoped_terminal(&facade, session, project, "shell");
+
+    let opened = match handle_request(&facade, session, request_the_spawnables_trust()).await {
+        Ok(IpcResponse::TrustRequestOpened(outcome)) => outcome,
+        other => panic!("expected a recorded trust request, got {other:?}"),
+    };
+
+    assert_eq!(opened.state, TrustRequestState::Pending);
+    let id = opened
+        .request_id
+        .expect("a pending request has an id to poll");
+    let open = facade.pending_trust_requests(project);
+    assert_eq!(open.len(), 1);
+    assert_eq!(
+        (open[0].project, open[0].requested_by),
+        (project, caller),
+        "scope and attribution come from the session, not the request"
+    );
+    assert_eq!(
+        handle_request(
+            &facade,
+            session,
+            IpcRequest::TrustRequestStatus { request: id }
+        )
+        .await,
+        Ok(IpcResponse::TrustRequest(TrustRequestState::Pending))
+    );
+}
+
+#[tokio::test]
+async fn requesting_trust_for_an_already_trusted_variant_asks_nobody() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (facade, trust, project) = facade_with_a_project(&dir);
+    trust
+        .set_trusted(project, &spawnable_spec().variant_hash(), SPAWNABLE)
+        .expect("trust the variant in the project");
+    let session = grouped_session(&facade);
+    scoped_terminal(&facade, session, project, "shell");
+
+    assert_eq!(
+        handle_request(&facade, session, request_the_spawnables_trust()).await,
+        Ok(IpcResponse::TrustRequestOpened(TrustRequestOutcome {
+            request_id: None,
+            state: TrustRequestState::Granted,
+        }))
+    );
+    assert!(facade.pending_trust_requests(project).is_empty());
+}
+
+/// Deciding a trust request is absent from the wire protocol altogether, which is the boundary the
+/// whole design rests on: a session-scoped caller must not be able to approve its own request, and
+/// the way that is guaranteed is that there is no request it could send to try.
+#[test]
+fn deciding_a_trust_request_is_not_reachable_over_ipc() {
+    for op in [
+        "approve_trust_request",
+        "deny_trust_request",
+        "trust_request_approve",
+        "trust_request_deny",
+        "revoke_command_trust",
+    ] {
+        let attempt = serde_json::json!({ "op": op, "request": 1, "variant_hash": "abc" });
+        assert!(
+            serde_json::from_value::<IpcRequest>(attempt).is_err(),
+            "`{op}` must not exist on the IPC surface: approving is the local user's authority"
+        );
+    }
 }

@@ -388,7 +388,7 @@ fn trusted_command_in(
             .supervisor()
             .register(Registration::command(project, Path::new("/p"), name, &spec));
     trust
-        .set_trusted(project, &spec.variant_hash())
+        .set_trusted(project, &spec.variant_hash(), &spec.command)
         .expect("trust the command");
     id
 }
@@ -490,7 +490,7 @@ async fn an_untrusted_command_in_scope_is_refused() {
 
     // Once trusted, the same scoped call starts it — proving the guard is not the blocker.
     trust
-        .set_trusted(project, &spec.variant_hash())
+        .set_trusted(project, &spec.variant_hash(), &spec.command)
         .expect("trust the command");
     facade
         .scoped(session)

@@ -104,7 +104,7 @@ async fn the_trust_gate_is_enforced_through_the_facade() {
     ));
 
     trust
-        .set_trusted(project, &spec.variant_hash())
+        .set_trusted(project, &spec.variant_hash(), &spec.command)
         .expect("trust");
     facade.supervisor().start(id).expect("start once trusted");
 }

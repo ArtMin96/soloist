@@ -128,7 +128,7 @@ async fn open_starts_a_trusted_auto_start_command() {
         .expect("Web");
     parts
         .trust
-        .set_trusted(record.id, &spec.variant_hash())
+        .set_trusted(record.id, &spec.variant_hash(), &spec.command)
         .expect("trust");
 
     let load = parts.service().open(dir.path()).expect("open");
@@ -255,7 +255,7 @@ async fn restore_registers_known_projects_without_starting_them() {
         .expect("Web");
     parts
         .trust
-        .set_trusted(record.id, &spec.variant_hash())
+        .set_trusted(record.id, &spec.variant_hash(), &spec.command)
         .expect("trust");
 
     parts.service().restore();
@@ -286,7 +286,7 @@ async fn opened_running_web(
         .expect("Web");
     parts
         .trust
-        .set_trusted(record.id, &spec.variant_hash())
+        .set_trusted(record.id, &spec.variant_hash(), &spec.command)
         .expect("trust");
     let load = parts.service().open(dir).expect("open");
     wait_for(rx, ProcStatus::Running).await;
@@ -343,7 +343,7 @@ async fn reload_updates_a_changed_spec_in_place_and_recomputes_trust() {
         .expect("Web");
     parts
         .trust
-        .set_trusted(record.id, &spec.variant_hash())
+        .set_trusted(record.id, &spec.variant_hash(), &spec.command)
         .expect("trust");
     let load = parts.service().open(dir.path()).expect("open");
     let web = parts.supervisor.snapshot()[0].id;

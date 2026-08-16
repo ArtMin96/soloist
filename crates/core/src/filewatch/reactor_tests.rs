@@ -90,7 +90,7 @@ fn register_command(s: &Setup, name: &str, globs: &[&str], trusted: bool) -> Pro
         .register(Registration::command(PROJECT, Path::new(ROOT), name, &spec));
     if trusted {
         s.trust
-            .set_trusted(PROJECT, &spec.variant_hash())
+            .set_trusted(PROJECT, &spec.variant_hash(), &spec.command)
             .expect("trust");
     }
     id

@@ -62,6 +62,8 @@ import type {
   ThemeAppearance,
   ThemeConflictPolicy,
   ThemeFile,
+  TrustGrant,
+  TrustRequest,
   TrustReviewCommand,
 } from "@/domain";
 
@@ -551,6 +553,35 @@ export function configCommandReview(
 // model clears the command's blocked state; callers re-read the snapshot to reflect it.
 export function configTrust(project: number, name: string, variantHash: string): Promise<void> {
   return invoke<void>("config_trust", { project, name, variantHash });
+}
+
+// Every trust request in a project still awaiting the user's decision — what the approval dialog
+// opens from, and re-reads whenever a request is raised or resolved.
+export function trustRequests(project: number): Promise<TrustRequest[]> {
+  return invoke<TrustRequest[]>("trust_requests", { project });
+}
+
+// Approves a request, trusting exactly the variant the dialog displayed. `variantHash` is the key
+// that was on screen; the core refuses the grant unless it still matches the request's pinned
+// spec, so a stale dialog can never authorize a command the user did not read.
+export function trustRequestApprove(request: number, variantHash: string): Promise<void> {
+  return invoke<void>("trust_request_approve", { request, variantHash });
+}
+
+// Declines a request. Nothing is trusted.
+export function trustRequestDeny(request: number): Promise<void> {
+  return invoke<void>("trust_request_deny", { request });
+}
+
+// Every command variant trusted in a project, with the provenance of each.
+export function trustGrants(project: number): Promise<TrustGrant[]> {
+  return invoke<TrustGrant[]>("trust_grants", { project });
+}
+
+// Takes a grant back. The core re-checks trust on every start, so the variant is refused again the
+// next time anything tries to run it.
+export function trustRevoke(project: number, variantHash: string): Promise<void> {
+  return invoke<void>("trust_revoke", { project, variantHash });
 }
 
 // Every configured agent tool, for the launch picker to render instantly (no probing).

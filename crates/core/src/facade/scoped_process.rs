@@ -382,7 +382,7 @@ impl ScopedFacade<'_> {
 /// The label a spawned process takes when its caller names none: the command's first word, which
 /// the registry then numbers against the labels already in the project. The command line has
 /// already been checked non-blank, so there is always a word to take.
-fn default_label(command: &str) -> String {
+pub(in crate::facade) fn default_label(command: &str) -> String {
     command.split_whitespace().next().unwrap_or_default().into()
 }
 

@@ -14,8 +14,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use soloist_core::{
-    Facade, IdleMode, Progress, ProjectId, RenderRequest, SessionId, SpawnAgentRequest,
-    SpawnProcessRequest, WaitForPortError,
+    CommandTrustRequest, Facade, IdleMode, Progress, ProjectId, RenderRequest, SessionId,
+    SpawnAgentRequest, SpawnProcessRequest, WaitForPortError,
 };
 use soloist_ipc::{
     IpcError, IpcRequest, IpcResponse, IpcResult, PortWaitOutcome, ProjectStatus, ProjectSummary,
@@ -213,6 +213,28 @@ fn dispatch_blocking(
                 label,
             })
             .map(IpcResponse::Spawned)
+            .map_err(IpcError::from),
+        IpcRequest::RequestCommandTrust {
+            command,
+            working_dir,
+            env,
+            label,
+            reason,
+        } => facade
+            .scoped(session)
+            .request_command_trust(CommandTrustRequest {
+                command,
+                working_dir,
+                env,
+                label,
+                reason,
+            })
+            .map(IpcResponse::TrustRequestOpened)
+            .map_err(IpcError::from),
+        IpcRequest::TrustRequestStatus { request } => facade
+            .scoped(session)
+            .trust_request_status(request)
+            .map(IpcResponse::TrustRequest)
             .map_err(IpcError::from),
         IpcRequest::ListAgentTools => facade
             .agents()
