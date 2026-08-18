@@ -2,6 +2,7 @@
 //! to the running Soloist app over local IPC, scoped to one identity session.
 
 mod args;
+mod cache_hints;
 mod client;
 mod prompts;
 mod server;

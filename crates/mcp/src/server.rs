@@ -25,6 +25,7 @@ use rmcp::service::RequestContext;
 use rmcp::{tool_handler, ErrorData, RoleServer, ServerHandler};
 use soloist_core::{onboarding_hint, McpFeatureGroup, McpToolGroups};
 
+use crate::cache_hints::WithCacheHints;
 use crate::client::AppClient;
 use crate::prompts::changed_prompt_list;
 use crate::suggestions::Suggestions;
@@ -341,9 +342,12 @@ impl ServerHandler for SoloistMcp {
     async fn list_prompts(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
-        self.prompt_list().await
+        Ok(self
+            .prompt_list()
+            .await?
+            .with_cache_hints(context.protocol_version()))
     }
 
     /// Serves `prompts/get` (see [`SoloistMcp::prompt_get`]).
@@ -358,13 +362,15 @@ impl ServerHandler for SoloistMcp {
     /// Serves `tools/list` with the featured tools first (see [`SoloistMcp::featured_tool_list`])
     /// rather than rmcp's default alphabetical order, so a client that preserves server order shows
     /// `whoami` and `help` up top. Providing this suppresses the `#[tool_handler]` macro's default
-    /// `list_tools`. The full surface is unchanged — only its order — and there is no pagination.
+    /// `list_tools`, [caching hints](WithCacheHints) and all. The full surface is unchanged — only
+    /// its order — and there is no pagination.
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(self.featured_tool_list()))
+        Ok(ListToolsResult::with_all_items(self.featured_tool_list())
+            .with_cache_hints(context.protocol_version()))
     }
 
     /// Routes a tool call to the composed router (as the `#[tool_handler]` macro's default would),
