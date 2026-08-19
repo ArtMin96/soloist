@@ -139,3 +139,64 @@ async fn apply_routes_each_toggle_to_its_own_server() {
         "toggling HTTP off frees it live"
     );
 }
+
+// The exit path: shutting the set down frees every socket it holds, so nothing the app was
+// serving outlives it.
+#[tokio::test]
+async fn shutdown_frees_every_bound_socket() {
+    let mcp = Arc::new(Mutex::new(None));
+    let http = Arc::new(Mutex::new(None));
+    let servers = IntegrationServers::new(
+        Some(fake_server(Arc::clone(&mcp))),
+        Some(fake_server(Arc::clone(&http))),
+    );
+    servers.apply(Integrations::default()).await;
+    let mcp_addr = bound_addr(&mcp).expect("mcp bound");
+    let http_addr = bound_addr(&http).expect("http bound");
+
+    servers.shutdown().await;
+
+    assert!(bound_addr(&mcp).is_none(), "shutdown frees the MCP socket");
+    assert!(
+        bound_addr(&http).is_none(),
+        "shutdown frees the HTTP socket"
+    );
+    assert!(
+        TcpStream::connect(mcp_addr).await.is_err(),
+        "the freed MCP port must refuse new connections"
+    );
+    assert!(
+        TcpStream::connect(http_addr).await.is_err(),
+        "the freed HTTP port must refuse new connections"
+    );
+}
+
+// The terminal state: a settings toggle racing the exit path cannot bring a server back up after
+// the app has stopped it.
+#[tokio::test]
+async fn applying_settings_after_shutdown_never_rebinds() {
+    let slot = Arc::new(Mutex::new(None));
+    let servers = IntegrationServers::new(Some(fake_server(Arc::clone(&slot))), None);
+    servers.apply(Integrations::default()).await;
+
+    servers.shutdown().await;
+    servers.apply(Integrations::default()).await;
+
+    assert!(
+        bound_addr(&slot).is_none(),
+        "a shut-down set must stay down, whatever the settings say"
+    );
+}
+
+// Idempotency: a second shutdown is harmless, so a repeated exit request cannot wedge the app.
+#[tokio::test]
+async fn shutting_down_twice_leaves_everything_stopped() {
+    let slot = Arc::new(Mutex::new(None));
+    let servers = IntegrationServers::new(Some(fake_server(Arc::clone(&slot))), None);
+    servers.apply(Integrations::default()).await;
+
+    servers.shutdown().await;
+    servers.shutdown().await;
+
+    assert!(bound_addr(&slot).is_none(), "the socket stays freed");
+}

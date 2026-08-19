@@ -73,28 +73,72 @@ pub(crate) struct IntegrationServers {
     inner: Mutex<Inner>,
 }
 
+/// Whether the set still answers to the Integrations setting, or has been stopped for good on the
+/// way out of the app.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Lifecycle {
+    Serving,
+    Stopped,
+}
+
 struct Inner {
+    lifecycle: Lifecycle,
     mcp: Option<ToggleableServer>,
     http: Option<ToggleableServer>,
 }
 
+impl Inner {
+    /// Brings each present server to its toggle. The one place a setting reaches a socket.
+    async fn apply(&mut self, integrations: Integrations) {
+        if let Some(server) = self.mcp.as_mut() {
+            server.set(integrations.mcp_enabled).await;
+        }
+        if let Some(server) = self.http.as_mut() {
+            server.set(integrations.http_api_enabled).await;
+        }
+    }
+}
+
+/// Every server off — what a shutdown applies.
+const ALL_STOPPED: Integrations = Integrations {
+    mcp_enabled: false,
+    http_api_enabled: false,
+};
+
 impl IntegrationServers {
     pub(crate) fn new(mcp: Option<ToggleableServer>, http: Option<ToggleableServer>) -> Self {
         Self {
-            inner: Mutex::new(Inner { mcp, http }),
+            inner: Mutex::new(Inner {
+                lifecycle: Lifecycle::Serving,
+                mcp,
+                http,
+            }),
         }
     }
 
     /// Applies the settings to the live sockets: each present server is started or stopped to match
     /// its toggle. Called once at boot (a disabled server never binds) and again on every change to
-    /// the Integrations setting (a live start/stop, no restart).
+    /// the Integrations setting (a live start/stop, no restart). Once the set has been
+    /// [shut down](Self::shutdown) this does nothing: a toggle saved as the app is quitting must
+    /// not raise a socket the exit path has already taken down.
     pub(crate) async fn apply(&self, integrations: Integrations) {
         let mut inner = self.inner.lock().await;
-        if let Some(server) = inner.mcp.as_mut() {
-            server.set(integrations.mcp_enabled).await;
+        match inner.lifecycle {
+            Lifecycle::Serving => inner.apply(integrations).await,
+            Lifecycle::Stopped => {}
         }
-        if let Some(server) = inner.http.as_mut() {
-            server.set(integrations.http_api_enabled).await;
+    }
+
+    /// Stops every server for good, on the way out of the app: closes the set to further changes,
+    /// then cancels each live run and waits for it to drain. Idempotent.
+    pub(crate) async fn shutdown(&self) {
+        let mut inner = self.inner.lock().await;
+        match inner.lifecycle {
+            Lifecycle::Serving => {
+                inner.lifecycle = Lifecycle::Stopped;
+                inner.apply(ALL_STOPPED).await;
+            }
+            Lifecycle::Stopped => {}
         }
     }
 }

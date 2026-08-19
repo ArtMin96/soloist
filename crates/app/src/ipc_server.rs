@@ -15,7 +15,6 @@ use soloist_core::Facade;
 use soloist_ipc::{
     ensure_socket_path, read_frame, write_frame, IpcReply, IpcRequest, ProgressReport,
 };
-use tauri::{AppHandle, Manager};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -42,11 +41,12 @@ const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 64;
 const REPORT_BACKLOG: usize = 8;
 
 /// Binds the IPC socket and serves connections until `shutdown` fires (a live disable of the
-/// integration, or app shutdown), then unlinks the socket so a disabled server leaves nothing to
-/// connect to; already-accepted connections keep their own descriptors and drain on their own.
+/// integration, or app shutdown), then unlinks the socket so a stopped server leaves nothing to
+/// connect to. The same token reaches every accepted connection, so stopping covers the
+/// connections already in hand as well as the ones not yet made.
 /// Degrades to a logged no-op if the socket cannot be resolved or bound, so a packaging or
 /// permissions problem disables MCP rather than taking down the app (graceful degradation).
-pub async fn serve(app: AppHandle, shutdown: CancellationToken) {
+pub async fn serve(facade: Arc<Facade>, shutdown: CancellationToken) {
     // Resolves the socket path and creates its owner-only data directory in one step — the
     // single resolution the store shares, so the socket and database keep one private home.
     let path = match ensure_socket_path() {
@@ -77,7 +77,11 @@ pub async fn serve(app: AppHandle, shutdown: CancellationToken) {
         match accepted {
             Ok((stream, _addr)) => {
                 consecutive_errors = 0;
-                tauri::async_runtime::spawn(handle_connection(app.clone(), stream));
+                tauri::async_runtime::spawn(handle_connection(
+                    Arc::clone(&facade),
+                    stream,
+                    shutdown.clone(),
+                ));
             }
             Err(err) if accept_error_is_fatal(&err) => {
                 // The listener socket itself is unusable; retrying accept on it can never
@@ -123,14 +127,18 @@ fn accept_error_is_fatal(err: &std::io::Error) -> bool {
 }
 
 /// Serves one client connection: reads the connecting peer's credentials, opens an identity
-/// session with them, answers framed requests until the peer disconnects, then closes the
-/// session so its scope and binding are forgotten. The peer's group and working directory are
-/// what authenticate a session's project scope — the core matches the group to the managed
-/// process the caller runs in, and the directory to the project root it runs under — so a client
-/// cannot bind to or act on a sibling project it does not run in. A connection whose peer
+/// session with them, answers framed requests until the peer disconnects or `shutdown` fires, then
+/// closes the session so its scope and binding are forgotten. The peer's group and working
+/// directory are what authenticate a session's project scope — the core matches the group to the
+/// managed process the caller runs in, and the directory to the project root it runs under — so a
+/// client cannot bind to or act on a sibling project it does not run in. A connection whose peer
 /// credentials cannot be read, or whose peer is a different UID than Soloist runs as, is dropped
 /// (fail closed).
-async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
+async fn handle_connection(
+    facade: Arc<Facade>,
+    mut stream: UnixStream,
+    shutdown: CancellationToken,
+) {
     let resolved = peer_cred::peer_credentials(&stream);
     let credentials = match peer_cred::peer_scope(&resolved) {
         peer_cred::PeerScope::Open(credentials) => credentials,
@@ -142,23 +150,30 @@ async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
             return;
         }
     };
-    let session = app.state::<Arc<Facade>>().open_session(credentials);
+    let session = facade.open_session(credentials);
     loop {
-        let request: IpcRequest = match read_frame(&mut stream).await {
-            Ok(Some(request)) => request,
-            Ok(None) => break, // the peer closed the connection
-            Err(err) => {
-                eprintln!("soloist: MCP IPC read error: {err}");
-                break;
-            }
+        // Only the *next* request is raced against the stop: a request already being served runs
+        // to its answer, so stopping never abandons work the caller was told had started. Biased
+        // so a stop always wins over a request that arrived in the same instant — otherwise which
+        // of the two the connection honours would be a coin toss.
+        let request: IpcRequest = tokio::select! {
+            biased;
+            () = shutdown.cancelled() => break,
+            frame = read_frame(&mut stream) => match frame {
+                Ok(Some(request)) => request,
+                Ok(None) => break, // the peer closed the connection
+                Err(err) => {
+                    eprintln!("soloist: MCP IPC read error: {err}");
+                    break;
+                }
+            },
         };
-        let facade = app.state::<Arc<Facade>>();
         let (reports, mut reported) = mpsc::channel(REPORT_BACKLOG);
         // Remarks and the answer share one connection, so one loop writes both: whatever the request
         // says about itself goes out as its own frame while it runs, and the answer that ends it is
         // always the last frame written for it.
         let reply = {
-            let mut serving = pin!(handle_request(facade.inner(), session, request, reports));
+            let mut serving = pin!(handle_request(&facade, session, request, reports));
             let mut written = Ok(());
             let answer = loop {
                 let remark = tokio::select! {
@@ -185,5 +200,9 @@ async fn handle_connection(app: AppHandle, mut stream: UnixStream) {
             break;
         }
     }
-    app.state::<Arc<Facade>>().scoped(session).close_session();
+    facade.scoped(session).close_session();
 }
+
+#[cfg(test)]
+#[path = "ipc_server_tests.rs"]
+mod tests;

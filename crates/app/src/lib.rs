@@ -25,6 +25,7 @@ mod tray;
 compile_error!("enable either `devtools` or `tokio-console`, not both");
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::Serialize;
 use soloist_core::{
@@ -58,6 +59,13 @@ const DOMAIN_RESYNC: &str = "domain-resync";
 
 /// Store-metadata key holding the version of the build that last opened the durable store.
 const LAST_LAUNCH_VERSION_KEY: &str = "last_launch_version";
+
+/// How long the exit path waits for the local integration servers to stop before reaping anyway.
+/// Stopping them drains whatever they had in flight, and one of those can be an operation waiting
+/// on something that will never answer — a `git push` sitting at a credential prompt. Quitting
+/// must not be held hostage to it, and the OS reclaims the socket and the port either way, so the
+/// wait is bounded and the reap proceeds regardless.
+const SERVER_SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
 #[derive(Serialize)]
 struct AppInfo {
@@ -266,6 +274,8 @@ pub fn run() {
             let facade = Arc::new(build_facade(app.handle().clone()));
             // A clone for the integration servers' boot apply (reads the persisted toggles).
             let integration_boot = Arc::clone(&facade);
+            #[cfg(feature = "mcp")]
+            let mcp_facade = Arc::clone(&facade);
             #[cfg(feature = "http")]
             let http_facade = Arc::clone(&facade);
             app.manage(facade);
@@ -351,13 +361,10 @@ pub fn run() {
             // Each degrades to a logged no-op if its socket/port cannot be bound, never blocking
             // launch — that resilience lives in the serve functions.
             #[cfg(feature = "mcp")]
-            let mcp_server = {
-                let handle = app.handle().clone();
-                Some(integration_servers::ToggleableServer::new(
-                    "MCP IPC server",
-                    move |shutdown| ipc_server::serve(handle.clone(), shutdown),
-                ))
-            };
+            let mcp_server = Some(integration_servers::ToggleableServer::new(
+                "MCP IPC server",
+                move |shutdown| ipc_server::serve(Arc::clone(&mcp_facade), shutdown),
+            ));
             #[cfg(not(feature = "mcp"))]
             let mcp_server: Option<integration_servers::ToggleableServer> = None;
 
@@ -559,13 +566,26 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                // Reap every managed process group before the app exits, so no child
-                // outlives it (the deterministic-shutdown contract).
+                let servers = app.state::<Arc<integration_servers::IntegrationServers>>();
                 let facade = app.state::<Arc<Facade>>();
-                tauri::async_runtime::block_on(facade.supervisor().shutdown());
-                // Drop the HTTP runtime file so a stale port does not outlive the app.
-                #[cfg(feature = "http")]
-                soloist_httpapi::remove_runtime();
+                tauri::async_runtime::block_on(async {
+                    // The order is the contract, not a preference: the local servers must stop
+                    // accepting *before* the reap, or a start accepted while it runs spawns a
+                    // process group the reap has already walked past — and that child outlives
+                    // the app. Reaping first leaves that window open.
+                    if tokio::time::timeout(SERVER_SHUTDOWN_GRACE, servers.shutdown())
+                        .await
+                        .is_err()
+                    {
+                        eprintln!(
+                            "soloist: integration servers did not stop within the shutdown \
+                             grace; exiting anyway"
+                        );
+                    }
+                    // Reap every managed process group before the app exits, so no child
+                    // outlives it (the deterministic-shutdown contract).
+                    facade.supervisor().shutdown().await;
+                });
             }
         });
 }
