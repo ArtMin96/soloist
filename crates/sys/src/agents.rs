@@ -10,16 +10,16 @@
 //! quoted word — the same single program token the spawner launches it as — and a command
 //! carrying spaces or shell metacharacters can neither be word-split nor injected. Best-effort
 //! and bounded: a missing binary or a non-zero exit reports not-installed, a hang past the
-//! timeout or an unrunnable shell reports "no answer" rather than a false absence, and a hung
-//! probe is killed and reaped so it never leaks. The probe blocks (it spawns and waits on a
+//! timeout or an unrunnable shell reports "no answer" rather than a false absence, and a probe
+//! runs under the shared containment ([`soloist_exec::run`]), so its whole process group is
+//! stopped and reaped whatever it left running. The probe blocks (it spawns and waits on a
 //! child), so the core runs it off the async runtime.
 
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
 use soloist_core::{Detection, VersionProbe};
-
-use crate::shellenv::login_shell;
+use soloist_exec::{login_shell, run, Run, RunError};
 
 /// How long to wait for the login-shell `--version` probe before giving up on an answer.
 ///
@@ -32,8 +32,13 @@ use crate::shellenv::login_shell;
 /// pathological hang.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How often to poll the child while waiting, between spawn and the timeout.
-const POLL_INTERVAL: Duration = Duration::from_millis(20);
+/// The most a `--version` may print before the probe stops reading it.
+///
+/// Nothing here reads what was printed — the exit status is the whole answer — so this is not a
+/// budget for a version string but a ceiling on a command that mistakes `--version` for an
+/// invitation to print for ever. A version line is tens of bytes; this is orders of magnitude
+/// above every real one.
+const ANSWER_LIMIT: usize = 64 * 1024;
 
 /// Detects installed agent CLIs by running their `--version`. Stateless; the timeout bounds
 /// each probe.
@@ -70,45 +75,38 @@ impl VersionProbe for CommandVersionProbe {
 
 /// What `command --version`, run through the login shell, reveals within `timeout`.
 ///
-/// A clean exit is [`Detection::Installed`]; the command not being found (the shell exits
-/// non-zero) or any failing `--version` is [`Detection::Missing`] — both are answers about the
-/// machine. Not being able to run the shell at all, or a child still running at the deadline
-/// (killed and reaped so the probe never leaks a process), is [`Detection::Unknown`]: the probe
-/// reached no answer, which is not the same as the CLI being absent.
+/// A clean exit, or one that outran the output ceiling, is [`Detection::Installed`]; the command
+/// not being found (the shell exits non-zero) or any failing `--version` is [`Detection::Missing`]
+/// — all of them answers about the machine. Not being able to run the shell at all, or a run that
+/// reached no outcome within the timeout (its process group is stopped and reaped, so the probe
+/// leaves nothing behind), is [`Detection::Unknown`]: the probe reached no answer, which is not the
+/// same as the CLI being absent.
 fn probe_version(command: &str, timeout: Duration) -> Detection {
     let (program, args) = probe_command(&login_shell(), command);
-    let mut child = match Command::new(&program)
-        .args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        // The shell itself is not runnable, so nothing was learned about the CLI.
-        Err(_) => return Detection::Unknown,
-    };
+    let mut probe = Command::new(program);
+    probe.args(args);
 
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                return if status.success() {
-                    Detection::Installed
-                } else {
-                    Detection::Missing
-                };
-            }
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    // Past the ceiling: kill and reap so the probe never leaks a process.
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Detection::Unknown;
-                }
-                std::thread::sleep(POLL_INTERVAL);
-            }
-            Err(_) => return Detection::Unknown,
+    match run(
+        probe,
+        Run {
+            input: None,
+            stopped: None,
+            time_limit: timeout,
+            output_limit: ANSWER_LIMIT,
+            // A `--version` is answered by its exit status; whatever it printed, on either
+            // stream, says nothing about whether it is installed.
+            diagnostics: None,
+            // Nobody waits on a detection: it answers in milliseconds and reports one word.
+            watching: None,
+        },
+    ) {
+        Ok(finished) if finished.status.success() => Detection::Installed,
+        Ok(_) => Detection::Missing,
+        // A `--version` that outran the ceiling demonstrably ran, so calling it absent would be
+        // exactly the false absence this probe is built to avoid.
+        Err(RunError::OverLimit { .. }) => Detection::Installed,
+        Err(RunError::TimedOut | RunError::Stopped | RunError::Lost | RunError::Spawn(_)) => {
+            Detection::Unknown
         }
     }
 }

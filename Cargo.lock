@@ -5436,6 +5436,7 @@ dependencies = [
  "nix 0.31.3",
  "notify",
  "soloist-core",
+ "soloist-exec",
  "tempfile",
  "tokio",
 ]

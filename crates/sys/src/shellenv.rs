@@ -4,23 +4,19 @@
 //! Runs the user's shell as an interactive login shell and reads back the variables it
 //! exports (`$SHELL -ilc 'env -0'`), so a managed process sees the `PATH` a real terminal
 //! would — version managers (nvm, rbenv, pyenv) initialised from interactive rc files that
-//! a plain `-lc` command shell never sources. Best-effort and bounded: the shell is
-//! resolved the way the spawner resolves it (`$SHELL`, then the passwd entry, then
-//! `/bin/sh`), its output is drained on a thread so a large environment cannot fill the
-//! pipe and wedge it, the capture is killed and reaped if it outlives the timeout, and the
-//! NUL-delimited output is parsed leniently — discarding anything an rc file prints to
-//! stdout that is not a variable. The call blocks, so the core runs it off the runtime.
+//! a plain `-lc` command shell never sources. Best-effort and bounded: the shell is the one
+//! a managed process is launched through ([`soloist_exec::login_shell`]), the capture runs
+//! under the shared containment ([`soloist_exec::run`]) — bounded in time and in output,
+//! its whole process group stopped and reaped whatever it left running — and the
+//! NUL-delimited output is parsed leniently, discarding anything an rc file prints to stdout
+//! that is not a variable. The call blocks, so the core runs it off the runtime.
 
 use std::collections::BTreeMap;
-use std::io::Read;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
-use nix::unistd::{Uid, User};
 use soloist_core::{ShellEnvError, ShellEnvProbe};
-
-/// Fallback shell when neither `$SHELL` nor the passwd entry yields one.
-const FALLBACK_SHELL: &str = "/bin/sh";
+use soloist_exec::{login_shell, run, Run, RunError};
 
 /// How long to wait for the shell to dump its environment before giving up.
 ///
@@ -32,8 +28,13 @@ const FALLBACK_SHELL: &str = "/bin/sh";
 /// longer for an answer costs a background thread its patience, not the user their interface.
 pub(crate) const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How often to poll the shell while waiting, between spawn and the timeout.
-const POLL_INTERVAL: Duration = Duration::from_millis(20);
+/// The most one capture may read before it is abandoned.
+///
+/// An environment is kilobytes, and the kernel caps the whole of a process's arguments and
+/// environment at `ARG_MAX` — two megabytes on a stock Linux — so nothing a shell could dump
+/// reaches this. It is here for the other thing the pipe can carry: an rc file that writes to
+/// standard output and never stops.
+const CAPTURE_LIMIT: usize = 2 * 1024 * 1024;
 
 /// The command run inside the login shell: dump the environment NUL-delimited so a value
 /// that contains newlines or `=` is parsed unambiguously.
@@ -77,81 +78,56 @@ impl ShellEnvProbe for CommandShellEnvProbe {
     }
 }
 
-/// Resolves the user's login shell: `$SHELL`, then the passwd-entry shell, then `/bin/sh`.
-/// The same resolution the PTY spawner uses, so the captured environment is the one the
-/// command shell would have. Shared within the crate so `--version` auto-detection probes
-/// through the very same shell (and thus the same `PATH`) a launched process runs under.
-pub(crate) fn login_shell() -> String {
-    if let Ok(shell) = std::env::var("SHELL") {
-        if !shell.is_empty() {
-            return shell;
-        }
-    }
-    if let Ok(Some(user)) = User::from_uid(Uid::current()) {
-        if let Some(shell) = user.shell.to_str() {
-            if !shell.is_empty() {
-                return shell.to_owned();
-            }
-        }
-    }
-    FALLBACK_SHELL.to_string()
-}
-
-/// Runs `<shell> -ilc 'env -0'`, drains its output on a thread, and parses it. A spawn
-/// failure, a hang past `timeout` (the shell is killed and reaped), or output with no
+/// Runs `<shell> -ilc 'env -0'` under the shared containment and parses what it wrote. A
+/// shell that could not be started, one that did not answer within `timeout` (its process
+/// group is stopped and reaped, so nothing it started outlives the call), or output with no
 /// recognisable variables is an error, so the resolver falls back to the app environment.
+///
+/// The exit status is not consulted: an rc file that ends in a non-zero command still
+/// exported an environment worth having, and it is the variables that say whether the
+/// capture worked.
 fn capture_env(shell: &str, timeout: Duration) -> Result<BTreeMap<String, String>, ShellEnvError> {
-    let mut child = Command::new(shell)
-        .arg("-ilc")
-        .arg(DUMP_COMMAND)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|err| ShellEnvError::Capture(format!("spawn {shell}: {err}")))?;
+    let mut command = Command::new(shell);
+    command.arg("-ilc").arg(DUMP_COMMAND);
 
-    // Drain stdout on a thread so a large environment cannot fill the pipe and wedge the
-    // shell before it exits. On a timeout the kill below closes the pipe, ending this read.
-    let mut stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| ShellEnvError::Capture("no stdout pipe".to_string()))?;
-    let reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
-        buf
-    });
+    let finished = run(
+        command,
+        Run {
+            input: None,
+            stopped: None,
+            time_limit: timeout,
+            output_limit: CAPTURE_LIMIT,
+            // Whatever an rc file writes about itself is prose, and translated; the variables
+            // are the whole answer.
+            diagnostics: None,
+            // Nobody waits on a capture: it is a background read the user never asked for.
+            watching: None,
+        },
+    )
+    .map_err(unanswered)?;
 
-    let deadline = Instant::now() + timeout;
-    let timed_out = loop {
-        match child.try_wait() {
-            Ok(Some(_status)) => break false,
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break true;
-                }
-                std::thread::sleep(POLL_INTERVAL);
-            }
-            Err(err) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = reader.join();
-                return Err(ShellEnvError::Capture(format!("wait: {err}")));
-            }
-        }
-    };
-
-    let buf = reader.join().unwrap_or_default();
-    if timed_out {
-        return Err(ShellEnvError::Capture("timed out".to_string()));
-    }
-    let env = parse_env0(&buf);
+    let env = parse_env0(&finished.output);
     if env.is_empty() {
-        return Err(ShellEnvError::Capture("no variables captured".to_string()));
+        return Err(ShellEnvError::Capture(
+            "the shell exported no variables".to_string(),
+        ));
     }
     Ok(env)
+}
+
+/// What a capture that produced nothing has to say for itself. Only a reason to log — the run
+/// reports machine data rather than the shell's own wording, so nothing downstream can come to
+/// depend on the prose of a program Soloist does not own.
+fn unanswered(err: RunError) -> ShellEnvError {
+    let reason = match err {
+        RunError::Spawn(kind) => format!("the shell could not be started: {kind}"),
+        RunError::TimedOut => "the shell did not answer in time".to_string(),
+        RunError::OverLimit { .. } => {
+            "the shell wrote more than an environment's worth".to_string()
+        }
+        RunError::Stopped | RunError::Lost => "the capture reached no outcome".to_string(),
+    };
+    ShellEnvError::Capture(reason)
 }
 
 /// Parses NUL-delimited `env -0` output into a variable map, keeping only entries whose

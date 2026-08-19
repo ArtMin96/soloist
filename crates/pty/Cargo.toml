@@ -14,7 +14,7 @@ soloist-core = { path = "../core" }
 # its own, a time limit, an output ceiling, and a guaranteed reap.
 soloist-exec = { path = "../exec" }
 async-trait = "0.1"
-nix = { version = "0.31", features = ["signal", "process", "user"] }
+nix = { version = "0.31", features = ["signal", "process"] }
 portable-pty = "0.9"
 tokio = { version = "1", features = ["rt", "sync"] }
 

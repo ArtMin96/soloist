@@ -10,12 +10,13 @@ repository.workspace = true
 
 [dependencies]
 soloist-core = { path = "../core" }
+# The shared containment every external-tool adapter runs under: the child gets a process group of
+# its own, a time limit, an output ceiling, and a guaranteed reap. It also resolves the login shell
+# both of the shell-backed reads here go through.
+soloist-exec = { path = "../exec" }
 # CPU/memory and port discovery read `/proc` directly; `libc` is only for `sysconf`
 # (clock ticks per second, page size) when converting those readings to seconds and bytes.
 libc = "0.2"
-# Resolving the user's login shell for environment capture needs the passwd entry; only the
-# `user` feature (current uid + passwd lookup) is used.
-nix = { version = "0.31", features = ["user"] }
 # Recursive filesystem watching for file-watch restarts. Default features off: on Linux the
 # inotify backend is unconditional, so this drops the macOS backend and the unused
 # crossbeam-channel delivery path (we use the closure callback), keeping the bundle small.
@@ -26,6 +27,9 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [dev-dependencies]
 tempfile = "3"
+# Proving that a probe nobody got an answer from left nothing behind means asking whether a signal
+# still reaches its process group.
+nix = { version = "0.31", features = ["signal"] }
 # The integration tests construct the change channel the file-watch port forwards on, and
 # the config-watch test drives the real reactor over this crate's real watcher.
 tokio = { version = "1", default-features = false, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
