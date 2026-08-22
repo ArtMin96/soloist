@@ -26,7 +26,7 @@ pub(crate) const LOG_FORMAT: &str = "--format=%H%x00%an%x00%at%x00%P%x00%s%x00%b
 pub(crate) fn parse(output: &[u8]) -> Vec<CommitEntry> {
     let text = String::from_utf8_lossy(output);
     let fields: Vec<&str> = text.split('\0').collect();
-    fields.chunks_exact(FIELDS).filter_map(entry).collect()
+    fields.as_chunks::<FIELDS>().0.iter().filter_map(|record| entry(record)).collect()
 }
 
 /// One commit from its six fields, or `None` when the date it states is not one.
