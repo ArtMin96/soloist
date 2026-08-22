@@ -11,8 +11,9 @@ repository.workspace = true
 [dependencies]
 # Stopping a run means signalling its whole process group (`killpg`), so a command that started
 # helpers of its own leaves nothing behind. `signal` also carries the existence probe the
-# timeout test asserts a reaped group with.
-nix = { version = "0.31", features = ["signal"] }
+# timeout test asserts a reaped group with. `user` reads the passwd entry naming the login shell,
+# for the environments that do not export one.
+nix = { version = "0.31", features = ["signal", "user"] }
 
 [dev-dependencies]
 # A run stopped before it started has to be shown to have started nothing, which means giving it

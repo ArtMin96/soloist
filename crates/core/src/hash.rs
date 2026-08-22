@@ -34,7 +34,7 @@ impl Hash {
             return Err(HashParseError::BadLength(s.len()));
         }
         let mut buf = [0u8; 32];
-        for (slot, pair) in buf.iter_mut().zip(s.as_bytes().chunks_exact(2)) {
+        for (slot, pair) in buf.iter_mut().zip(s.as_bytes().as_chunks::<2>().0) {
             let hi = hex_val(pair[0]).ok_or(HashParseError::BadChar)?;
             let lo = hex_val(pair[1]).ok_or(HashParseError::BadChar)?;
             *slot = (hi << 4) | lo;

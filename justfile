@@ -106,7 +106,9 @@ lint:
     cargo test -q -p soloist-core --features schema config::schema
 
 # Audit the Rust dependency tree against RustSec advisories, the license allow-list, and
-# source provenance (policy in deny.toml). Needs `cargo install --locked cargo-deny`.
+# source provenance. The whole policy lives in deny.toml — including which target, features,
+# and crates make up the audited graph — so this recipe and the CI action check the same tree
+# and cannot report different results. Needs `cargo install --locked cargo-deny`.
 audit:
     cargo deny check
 

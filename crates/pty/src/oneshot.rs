@@ -28,9 +28,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use soloist_core::{AgentOneShot, OneShotError, OneShotInvocation, ONE_SHOT_REPLY_LIMIT};
-use soloist_exec::{Run, RunError};
-
-use crate::login_shell;
+use soloist_exec::{login_shell, Run, RunError};
 
 /// How long one run may take before it is stopped.
 ///

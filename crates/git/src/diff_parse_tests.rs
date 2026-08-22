@@ -145,10 +145,9 @@ fn a_second_paths_block_is_carried_with_the_hunk_it_precedes_rather_than_left_ad
     );
     assert_eq!(
         joined(&diff),
-        format!(
-            "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+A\n\
+        "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+A\n\
              diff --git a/b.txt b/b.txt\n--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-b\n+B\n"
-        ),
+            .to_string(),
         "however the boundaries fall, joining them back gives the output unchanged",
     );
 }

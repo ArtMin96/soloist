@@ -4,10 +4,10 @@
 //! child sees a real terminal (`isatty`) and behaves interactively — colours, cursor
 //! control, agent TUIs. Three invariants matter here:
 //!
-//! * **Login-shell execution** — the shell is resolved from `$SHELL`, then the user's
-//!   passwd entry, then `/bin/sh`, and run with `-lc <command>` in the working
-//!   directory, with per-process `env` layered onto the inherited environment (process
-//!   env wins). `TERM=xterm-256color` is advertised so colour and cursor control work.
+//! * **Login-shell execution** — the user's shell ([`soloist_exec::login_shell`]) is run
+//!   with `-lc <command>` in the working directory, with per-process `env` layered onto
+//!   the inherited environment (process env wins). `TERM=xterm-256color` is advertised so
+//!   colour and cursor control work.
 //! * **Process-group containment** — `portable-pty` makes the child a session leader,
 //!   so its process-group id equals its pid; stop signals target the whole group (via
 //!   `killpg`), tearing down a forking command without leaking orphans.
@@ -27,16 +27,15 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use nix::libc;
 use nix::sys::signal::{killpg, Signal};
-use nix::unistd::{Pid, Uid, User};
+use nix::unistd::Pid;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize as PtPtySize};
 use soloist_core::{
     ExitFuture, ExitStatus, OrphanControl, ProcessControl, ProcessIdentity, ProcessSpawner, PtyIo,
     PtySize, SpawnError, SpawnSpec, Spawned,
 };
+use soloist_exec::login_shell;
 use tokio::sync::mpsc;
 
-/// Fallback shell when neither `$SHELL` nor the passwd entry yields one.
-const FALLBACK_SHELL: &str = "/bin/sh";
 /// Terminal type advertised to children — a widely supported 256-colour terminfo
 /// entry. Soloist ships no custom terminfo.
 const TERM: &str = "xterm-256color";
@@ -46,27 +45,6 @@ const READ_CHUNK: usize = 8 * 1024;
 const OUTPUT_CAPACITY: usize = 1024;
 /// Reported for a signal death whose name the platform does not map to a known number.
 const UNKNOWN_SIGNAL: i32 = -1;
-
-/// Resolves the user's login shell: `$SHELL`, then the passwd-entry shell, then
-/// `/bin/sh`. A desktop launcher does not always export `$SHELL`, so the passwd
-/// fallback keeps commands running under the user's real shell. Shared within the
-/// crate so a headless one-shot ([`ShellAgentOneShot`]) asks through the same shell a
-/// launched process runs under.
-pub(crate) fn login_shell() -> String {
-    if let Ok(shell) = std::env::var("SHELL") {
-        if !shell.is_empty() {
-            return shell;
-        }
-    }
-    if let Ok(Some(user)) = User::from_uid(Uid::current()) {
-        if let Some(shell) = user.shell.to_str() {
-            if !shell.is_empty() {
-                return shell.to_owned();
-            }
-        }
-    }
-    FALLBACK_SHELL.to_string()
-}
 
 /// Spawns processes onto a pseudo-terminal, each as the leader of its own process group.
 #[derive(Clone, Copy, Default)]

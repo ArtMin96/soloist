@@ -5,6 +5,15 @@
 # Soloist ships x86_64 Linux only (D2), so only that target's dependency tree is checked —
 # this prunes platform-specific crates that never reach a build.
 targets = ["x86_64-unknown-linux-gnu"]
+# The audited feature set is pinned here rather than at the call site, so `just audit`, a bare
+# `cargo deny check`, and the CI action all resolve the same crates and cannot drift apart.
+all-features = true
+# That also enables the opt-in dev tooling, and the CrabNebula devtools plugin drags a second
+# HTTP stack (tonic 0.10 -> hyper 0.14 -> h2 0.3) behind it. `devtools` is absent from the app's
+# default features and is only ever enabled by `just devtools`, so that stack never reaches a
+# release build. The exclusion is recursive, dropping the subtree along with the plugin, while
+# the h2 0.4.x the shipped binary links stays audited — a regression there still fails the gate.
+exclude = ["tauri-plugin-devtools"]
 
 [advisories]
 # Vulnerabilities and unsound advisories fail the gate everywhere (the default). Unmaintained
@@ -13,16 +22,7 @@ targets = ["x86_64-unknown-linux-gnu"]
 unmaintained = "workspace"
 # Add an entry here, each with a written reason, only when a vulnerability has no fix and the
 # risk is knowingly accepted.
-ignore = [
-    # Two DoS advisories against quick-xml 0.39.4: a quadratic-time duplicate-attribute check on
-    # a crafted start tag (0194) and unbounded namespace-declaration allocation in NsReader (0195).
-    # Both are reached only transitively via plist -> tauri-utils (Tauri's bundler/plist parsing);
-    # Soloist parses no untrusted XML through that path. plist 1.9.0 pins quick-xml to 0.39.x with
-    # no in-range patched release, so the only fix is a full Tauri-stack upgrade — tracked
-    # separately, out of scope for a release cut. Revisit when tauri-utils ships a patched plist.
-    { id = "RUSTSEC-2026-0194", reason = "transitive quick-xml via plist/tauri-utils; no untrusted-XML path in Soloist; no in-range fix" },
-    { id = "RUSTSEC-2026-0195", reason = "transitive quick-xml via plist/tauri-utils; no untrusted-XML path in Soloist; no in-range fix" },
-]
+ignore = []
 
 [licenses]
 # The dependency tree must stay permissively licensed, matching Soloist's own MIT/Apache-2.0.

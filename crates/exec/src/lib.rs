@@ -10,6 +10,13 @@
 //! [`Command`] and reads the outcome back through its own typed error. That split is why the
 //! discipline is one implementation rather than one per adapter — nothing here knows what
 //! `git`, or an agent CLI, or anything else, is.
+//!
+//! The one thing it resolves rather than is handed is [`login_shell`], because everything Soloist
+//! runs through the user's shell has to agree on which shell that is.
+
+mod shell;
+
+pub use shell::login_shell;
 
 use std::io::{self, Read, Write};
 use std::os::unix::process::CommandExt;
