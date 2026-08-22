@@ -10,11 +10,10 @@ const FALLBACK_SHELL: &str = "/bin/sh";
 /// A desktop launcher does not always export `$SHELL`, so the passwd fallback keeps commands
 /// running under the user's real shell rather than a bare `/bin/sh`.
 ///
-/// It lives beside the containment, and not in whichever adapter reaches for it, because launching
-/// a managed process, capturing the environment that process will see, and detecting whether a CLI
-/// is installed are three questions that only agree with each other while they are asking the same
-/// shell — and so resolving against the same `PATH`. That is a promise two copies of this could
-/// make and only one can keep.
+/// It lives beside the containment, not in each adapter, because its three callers — launching a
+/// managed process, capturing the environment that process will see, and detecting whether a CLI
+/// is installed — only agree with each other if they resolve the same shell, and so the same
+/// `PATH`.
 pub fn login_shell() -> String {
     if let Ok(shell) = std::env::var("SHELL") {
         if !shell.is_empty() {

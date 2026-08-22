@@ -239,9 +239,13 @@ Every unbounded thing is a future crash. Hard rules:
 **Workspace (Rust):**
 ```
 crates/
-  core/    # C1–C8, ports (traits), domain types, event bus — NO tauri/mcp/axum/sqlite imports
+  core/    # C1–C9, ports (traits), domain types, event bus — NO tauri/mcp/axum/sqlite imports
   store/   # SQLite implementation of the Store port (repos, migrations)
   pty/     # ProcessSpawner impl over portable-pty + nix (could fold into an adapters crate)
+  sys/     # MetricsProbe/PortProbe impl over /proc + FileWatcher over notify
+  exec/    # bounded external-command execution primitive (process group, timeout, reap), used by pty/sys/git/forge
+  git/     # GitRepository impl over the system `git` CLI (C9)
+  forge/   # GitForge impl over the `gh` CLI (C9)
   app/     # Tauri binary + command/event adapter + bundled UI
   mcp/     # `soloist-mcp` binary: MCP (stdio) adapter over the core via IPC
   httpapi/ # local HTTP API (127.0.0.1) adapter

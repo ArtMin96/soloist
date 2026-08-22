@@ -8,7 +8,7 @@
 
 Soloist is a native-Linux **process-supervisor + agent-coordination workspace** (a clean-room rebuild of
 macOS Solo). Stack: **Tauri v2 + Rust core + React/TS + xterm.js**. Style: **Hexagonal (Ports & Adapters)**
-— a pure, framework-free domain core with 9 bounded contexts (C9 Git is designed, not yet built),
+— a pure, framework-free domain core with 9 bounded contexts,
 actor-model supervision, event-driven + CQRS-lite, SQLite for durable state.
 
 ---
@@ -43,8 +43,9 @@ headless-testable and is the mechanical guarantee behind *"remove MCP → app st
 |-------|------|------|---------------|--------|
 | `core` | domain | C1–C9, ports (traits), domain types, event bus, `Facade` | `tokio`/`serde`/`thiserror`/`vte` — **never** an adapter crate | live (C1–C3, C8) |
 | `store` | driven adapter | SQLite: `Store`/`ProjectRepo`/`TrustRepo`/`RuntimeState` + migrations | `core`, `ipc`, `rusqlite` | live |
-| `pty` | driven adapter | `ProcessSpawner`/`PtyIo`/`ProcessControl`/`OrphanControl` over `portable-pty`+`nix` | `core`, `portable-pty`, `nix` | live |
-| `sys` | driven adapter | `MetricsProbe` (CPU/mem) + `PortProbe` (discovery), both over `/proc`; `FileWatcher` over `notify` — monitoring C5 | `core`, `notify`, `libc` | live |
+| `pty` | driven adapter | `ProcessSpawner`/`PtyIo`/`ProcessControl`/`OrphanControl` over `portable-pty`+`nix` | `core`, `soloist-exec`, `portable-pty`, `nix` | live |
+| `sys` | driven adapter | `MetricsProbe` (CPU/mem) + `PortProbe` (discovery), both over `/proc`; `FileWatcher` over `notify` — monitoring C5 | `core`, `soloist-exec`, `notify`, `libc` | live |
+| `exec` | shared adapter primitive | bounded external-command execution — process group of its own, time limit, output ceiling, guaranteed reap — plus login-shell resolution (`login_shell`); implements no port itself, composed by `pty`/`sys`/`git`/`forge` | `nix` | live |
 | `git` | driven adapter | `GitRepository` over the **system `git` CLI** — machine formats, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, fresh process group, bounded timeout, kill+reap — git C9 | `core`, `soloist-exec` | live (`git-integration`) |
 | `forge` | driven adapter | `GitForge` over the **`gh` CLI** (`gh pr list/create --json`; `gh auth status` feature detection; the repository's own pull-request templates read off disk) — git C9 | `core`, `soloist-exec`, `serde_json` | live (`git-integration`) |
 | `app` | driving + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `sys`, `httpapi`, `tauri` | live |
