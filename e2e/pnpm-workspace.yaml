@@ -22,5 +22,18 @@ allowBuilds:
 # (webdriverio/desktop-mobile#506) and then re-released the sibling electron service against; the
 # tauri service has not had that follow-up release yet. This pin applies the same remedy. Drop it
 # once a tauri-service release corrects its own pin, and re-run `pnpm test` to confirm.
+#
+# The entries below are Dependabot-flagged security fixes that Dependabot itself cannot open PRs
+# for: every one is a purely transitive dependency (nested under mocha, webdriverio, and
+# puppeteer's browser-downloader chain, or cheerio), never a direct entry in package.json, so a
+# plain `pnpm update` silently no-ops on them. Pinning here is the only way to force the resolved
+# version up. undici resolves to two independent majors at once — 6.x via webdriver/webdriverio's
+# direct dependency, 7.x via cheerio's — so it needs pnpm's range-scoped override key
+# (`"pkg@range": "version"`) to patch each major without collapsing them onto one.
 overrides:
   "@wdio/native-utils": "2.5.0"
+  js-yaml: "^4.3.1"
+  ip-address: "^10.3.1"
+  serialize-javascript: "^7.0.5"
+  "undici@6": "6.28.0"
+  "undici@7": "7.29.0"
