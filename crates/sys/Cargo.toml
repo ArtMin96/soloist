@@ -28,9 +28,18 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 [dev-dependencies]
 tempfile = "3"
 # Proving that a probe nobody got an answer from left nothing behind means asking whether a signal
-# still reaches its process group.
-nix = { version = "0.31", features = ["signal"] }
+# still reaches its process group. `term` carries `openpty`, for the one test that reproduces the
+# controlling-terminal regression directly: giving a probe a real pseudo-terminal to inherit.
+nix = { version = "0.31", features = ["signal", "term"] }
 # The integration tests construct the change channel the file-watch port forwards on, and
 # the config-watch test drives the real reactor over this crate's real watcher.
 tokio = { version = "1", default-features = false, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 soloist-core = { path = "../core", features = ["testing"] }
+
+# Acquiring a controlling terminal for this process (`setsid`, then opening the pty by path) is a
+# per-thread kernel operation the libtest harness's worker threads do not sit on the right thread
+# for, so this one test runs without the harness and drives its own `main`.
+[[test]]
+name = "shellenv_controlling_terminal"
+path = "tests/shellenv_controlling_terminal.rs"
+harness = false

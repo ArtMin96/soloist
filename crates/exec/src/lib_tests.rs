@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use nix::errno::Errno;
 use nix::sys::signal::kill;
+use nix::unistd::getsid;
 
 use super::*;
 
@@ -265,5 +266,26 @@ fn a_program_that_is_not_installed_is_told_apart_from_one_that_failed() {
     assert_eq!(
         outcome.err(),
         Some(RunError::Spawn(io::ErrorKind::NotFound))
+    );
+}
+
+#[test]
+fn a_run_leads_a_session_of_its_own() {
+    // The session id is the sixth whitespace-separated field of `/proc/<pid>/stat`, right after
+    // the process-group id — read here rather than shelled out to `ps` so the assertion depends
+    // on nothing beyond a Linux `/proc`.
+    let finished = run(shell("cut -d' ' -f6 /proc/$$/stat"), bounded(None)).expect("finished");
+    let child_session: i32 = String::from_utf8_lossy(&finished.output)
+        .trim()
+        .parse()
+        .expect("the child reports its own session id");
+    let own_session = getsid(None).expect("this process has a session id");
+
+    assert_ne!(
+        Pid::from_raw(child_session),
+        own_session,
+        "a contained run has to be given a session of its own, not merely a new process group — \
+         a child left in the caller's session keeps its controlling terminal, and a descendant \
+         that touches it can still be stopped",
     );
 }

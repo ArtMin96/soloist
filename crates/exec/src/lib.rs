@@ -1,9 +1,11 @@
 //! Running an external command under the containment every one of Soloist's adapters owes.
 //!
-//! A run is disposable: it starts in a process group of its own so stopping it stops everything
-//! it started, it finishes within a time limit or is killed, it may produce only so much output,
-//! and it is **always reaped** — neither a zombie nor an orphan survives a call. Whichever way a
-//! run ends, nothing of it outlives the call that made it.
+//! A run is disposable: it leads a session and a process group of its own, detached from
+//! whatever controlling terminal the caller happens to have, so stopping it stops everything it
+//! started and nothing it started can be stopped in turn by a signal meant for a terminal it
+//! never had a claim on; it finishes within a time limit or is killed, it may produce only so
+//! much output, and it is **always reaped** — neither a zombie nor an orphan survives a call.
+//! Whichever way a run ends, nothing of it outlives the call that made it.
 //!
 //! This crate holds only the mechanism. What to run, which environment to run it in, and what a
 //! given exit status means are the calling adapter's business: it hands over a configured
@@ -27,7 +29,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use nix::sys::signal::{killpg, Signal};
-use nix::unistd::Pid;
+use nix::unistd::{setsid, Pid};
 
 /// How often a waiting run asks whether it has been asked to stop. Short enough that stopping feels
 /// immediate to whoever asked, long enough that waiting costs nothing measurable.
@@ -130,8 +132,9 @@ pub enum RunError {
 ///
 /// The caller configures the program, its arguments, its working directory and its environment;
 /// the containment is applied here and cannot be opted out of — the standard streams are wired to
-/// match `run`, and the child is placed in a process group of its own so a kill reaches whatever
-/// it started.
+/// match `run`, and the child leads a new session and process group of its own, detached from any
+/// controlling terminal, so a kill reaches whatever it started and nothing it started can be
+/// stopped by a signal meant for a terminal it never had.
 ///
 /// Blocking, and bounded by `run.time_limit`. Runs the child on threads of its own, so a full
 /// pipe can never deadlock against the wait.
@@ -141,7 +144,7 @@ pub fn run(mut command: Command, run: Run<'_>) -> Result<Finished, RunError> {
     if run.stopped.is_some_and(|stopped| stopped()) {
         return Err(RunError::Stopped);
     }
-    let mut child = command
+    command
         .stdin(if run.input.is_some() {
             Stdio::piped()
         } else {
@@ -152,10 +155,23 @@ pub fn run(mut command: Command, run: Run<'_>) -> Result<Finished, RunError> {
             Stdio::piped()
         } else {
             Stdio::null()
-        })
-        .process_group(0)
-        .spawn()
-        .map_err(|err| RunError::Spawn(err.kind()))?;
+        });
+    // `setsid()`, not `setpgid(0, 0)`: the latter makes the child leader of a new group but
+    // leaves it in whatever controlling terminal's session the caller inherited, and that new
+    // group is not the terminal's foreground group. An interactive shell's own job-control
+    // startup calls `tcsetpgrp()` on that terminal regardless of what its own stdio is wired to,
+    // and a background-group process doing that is stopped by `SIGTTOU` — indefinitely, since
+    // nothing ever makes it the foreground group again. `setsid()` gives the child a session with
+    // no controlling terminal at all, so no descendant it starts can be stopped by one it never
+    // had. It fails with `EPERM` only if the calling process already leads a process group, which
+    // a freshly forked, not-yet-exec'd child never does.
+    //
+    // SAFETY: the closure makes one async-signal-safe syscall and nothing else, the whole of what
+    // `pre_exec` allows between `fork` and `exec`.
+    unsafe {
+        command.pre_exec(|| setsid().map(|_| ()).map_err(io::Error::from));
+    }
+    let mut child = command.spawn().map_err(|err| RunError::Spawn(err.kind()))?;
 
     let writing = run.input.map(|input| write_input(&mut child, input));
     let latest = run.watching.as_ref().map(|_| Latest::default());
