@@ -58,10 +58,18 @@ jobs:
       - name: Acyclic-context guard
         run: ./scripts/check-core-cycles.sh
 
-      - name: Supply-chain audit (advisories, licenses, sources)
+      - name: Supply-chain audit (bans, licenses, sources)
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+          command-arguments: bans licenses sources
+
+      - name: Supply-chain audit (advisories, verbose — surfaces any accepted-risk ignore)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          command-arguments: advisories
+          log-level: info
 
       - name: File-size guard (warn-only)
         run: ./scripts/check-file-size.sh
