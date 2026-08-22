@@ -209,3 +209,64 @@ files pass.
 React build with the same `StrictMode`. It is a defect in the diff viewer package rather than in
 Soloist's own code, and it is out of this track's remit to change; it is recorded so the first person
 to open a diff in a dev session knows what they are looking at.
+
+## CI parallelized into a four-way shard matrix
+
+**Decided 2026-08-23.** The `e2e` job ran as one serial job at ~22–23 min wall-clock. Timing from a
+real successful run (`gh run view 32596821780 --json jobs`, re-derived here from each step's own
+`startedAt`/`completedAt`, not assumed): system deps install 51s, rust toolchain 11s, **`cargo
+install tauri-cli --locked` 321s** — paid in full on every run because the version was never
+pinned, so it could never be cached — pnpm/node/UI-deps/e2e-deps/typecheck ~24s, then the "Run e2e"
+step at 870s total, of which WebdriverIO's own reporter accounts for `17 passed, 17 total` in
+00:10:17 (617s), leaving ~253s for the app+CLI+lead-agent build `onPrepare` runs. Fixed cost (~660s,
+tauri-cli install included) and spec-execution cost (~617s) are close enough in magnitude that a
+"build once in job A, fan test-only shards out from job B" pipeline would not win wall-clock: it
+would serialize job A's ~11 min in front of job B's shard time, which is worse than running N fully
+independent shard jobs — each redoing its own setup+build+test-slice, which GitHub Actions runs
+concurrently across separate runners for free.
+
+**The fix: `strategy.matrix.shard: [1, 2, 3, 4]`, `fail-fast: false`, no build-artifact sharing.**
+Each shard is a complete, independent copy of the existing pipeline — same system deps, same
+`onPrepare` build, same everything — just running a fraction of the 17 specs via WebdriverIO's own
+`--shard current/total` flag (`wdio run --shard ${{ matrix.shard }}/${{ strategy.job-total }}`,
+`strategy.job-total` confirmed against GitHub's own docs as the matrix's total job count, not
+zero-based, pairing correctly with `matrix.shard`'s 1-based values). `--shard` is a real, shipped
+flag on the exact `@wdio/cli@9.30.0` this repo's `e2e/pnpm-lock.yaml` resolves — confirmed by
+reading the installed package source directly rather than trusting memory: the actual partition
+happens in `@wdio/config`'s `ConfigParser.shard()` (`@wdio/cli`'s own `index.js` only validates and
+reports the flag), which slices the resolved, deduplicated spec list into `Math.max(Math.round(N /
+total), 1)`-sized contiguous chunks per shard, with the **last** shard taking everything from its
+start index to the true end rather than a fixed size — a pure, deterministic, gapless,
+non-overlapping partition of whatever `getSpecs()` resolved, by construction (each shard's start is
+exactly the previous shard's end). Four was chosen for diminishing returns beyond it, given the
+fixed per-shard setup floor (system deps + toolchain + the build) that no shard count reduces; the
+repo is public, so runner-minute cost was not the constraint.
+
+**Two fixes rode along, both required for a matrix rather than optional:**
+- `actions/upload-artifact@v4+` hard-errors when two jobs in one run upload the same artifact name,
+  so the failure-log step's `name: e2e-logs` became `name: e2e-logs-${{ matrix.shard }}`.
+- `cargo install tauri-cli --locked` had no version pin, so it could never be cached and repaid its
+  full ~321s on every run — now four times over, once per shard. It is now pinned to `2.11.4` (the
+  current max stable 2.x release, matching `crates/app/Cargo.toml`'s `tauri = "2.11.2"` major.minor
+  line) behind an `actions/cache@v6` step keyed on the pin + `runner.os`, so the install only runs
+  again when the pin is bumped.
+
+**A silent breakage found in local verification, not assumed away:** the first version of the "Run
+e2e" step read `pnpm test -- --shard …`. `pnpm run <script> -- <args>` does **not** strip that `--`
+the way it looks like it should — it forwards the literal token, so `wdio run wdio.conf.ts` receives
+`-- --shard 1/4` verbatim (confirmed against the exact installed `pnpm@11.6.0`, not assumed: a throwaway
+script printing its own `process.argv` showed `["--","--shard","1/4"]`). A bare `--` in yargs argv
+means "stop parsing options," so `--shard` was silently read as a positional argument instead of the
+`shard` option — the run logged `Execution of 17 workers started` (no "(Shard 1 of 4)" note) and
+proceeded to run every spec. Nothing failed or warned; a shard job in this shape would have quietly
+4×'d the suite's total spec-execution cost while still reporting green. The fix is to drop the `--`:
+pnpm forwards `--shard` untouched on its own (matches the plain passthrough pnpm's own docs describe:
+`pnpm run watch --no-color` runs `webpack --watch --no-color`, no separator).
+
+**Verified locally, not just by inspection:** `pnpm -C e2e typecheck` stayed green (the config file
+this change touches nothing in — `wdio.conf.ts` is unmodified). `xvfb-run -a pnpm -C e2e test --shard
+1/4` (no `--`) built the app once, logged `Execution of 4 workers (Shard 1 of 4) started`, and its
+reporter printed `Spec Files: 4 passed, 4 total (100% completed) in 00:00:52` / `Shard: 1 / 4` — the
+correct first-of-four slice (`agents/launch-agent`, `coordination/coordination-panels`,
+`coordination/prompt-templates`, `cross-surface/cli-restart` — the first 4 of the 17-file sorted
+list, matching `Math.round(17 / 4) = 4`), all four passing.

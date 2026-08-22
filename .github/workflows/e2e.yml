@@ -18,6 +18,17 @@ jobs:
   e2e:
     # Matches the CI floor and the supported runtime target, Ubuntu 22.04+.
     runs-on: ubuntu-22.04
+    # Four independent, full-pipeline shards rather than one build job feeding test-only shards.
+    # Measured on a real run: the fixed setup/build cost (system deps + toolchain + the app/CLI/
+    # lead-agent build inside onPrepare) and the spec-execution cost are close enough in magnitude
+    # that a shared-build pipeline would serialize the build in front of the shard time — worse
+    # than N fully independent jobs, which GitHub Actions runs concurrently on separate runners for
+    # free. fail-fast: false so one shard's failure doesn't cancel the others mid-run and lose their
+    # failure-log artifacts.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
 
@@ -35,8 +46,19 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Pinned to match crates/app's `tauri = "2.11.2"` major.minor line (2.11.4 is the current max
+      # stable 2.x release). Unpinned, this can never be cached and recompiles from scratch on every
+      # run (~5 min, measured); pinned + cached, that cost is paid at most once per pin bump.
+      - name: Cache tauri-cli
+        id: cache-tauri-cli
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: tauri-cli-2.11.4-${{ runner.os }}
+
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --locked
+        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version 2.11.4 --locked
 
       - uses: pnpm/action-setup@v6
         with:
@@ -68,14 +90,18 @@ jobs:
 
       # wdio.conf.ts builds the app itself (`cargo tauri build --features wdio`) in onPrepare, so
       # there is no separate build step. xvfb-run supplies the display the real window needs.
+      # No `--` before `--shard`: pnpm forwards a literal `--` to the script rather than stripping
+      # it (confirmed empirically), and a literal `--` in wdio's argv makes yargs treat everything
+      # after it as positional, silently dropping `--shard` — every shard would then run all 17
+      # specs instead of its slice.
       - name: Run e2e
-        run: xvfb-run -a -s "-screen 0 1280x800x24" pnpm test
+        run: xvfb-run -a -s "-screen 0 1280x800x24" pnpm test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
         working-directory: e2e
 
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-logs
+          name: e2e-logs-${{ matrix.shard }}
           path: e2e/logs/
           if-no-files-found: ignore

@@ -9,6 +9,39 @@
 
 ## Current state
 
+> **LATEST (2026-08-23): E2E CI PARALLELIZED INTO A FOUR-WAY SHARD MATRIX — infra change, `Done —
+> pending verify` (not pushed).** `.github/workflows/e2e.yml`'s `e2e` job ran serially at ~22–23 min
+> wall-clock. Real timing from a completed run (`gh run view 32596821780 --json jobs`, re-derived
+> from each step's own `startedAt`/`completedAt`): the fixed setup/build cost (~660s — system deps,
+> toolchain, an **unpinned, never-cacheable** `cargo install tauri-cli --locked` alone worth 321s,
+> then the app/CLI/lead-agent build inside `onPrepare`) and the spec-execution cost (~617s, from
+> WebdriverIO's own `17 passed, 17 total ... in 00:10:17`) are close enough in magnitude that a
+> "build once, fan test-only shards out from a second job" pipeline would lose to N fully
+> independent shard jobs — it would serialize the ~11 min build in front of shard time instead of
+> letting GitHub Actions run everything concurrently across separate runners for free. Fixed:
+> `strategy.matrix.shard: [1, 2, 3, 4]` / `fail-fast: false`, each shard a complete, unmodified copy
+> of the existing pipeline slicing the 17 specs via WebdriverIO's own `--shard current/total`
+> (confirmed real and shipped on the exact installed `@wdio/cli@9.30.0` by reading the package
+> source directly, not assumed). Two required companion fixes: pinned the previously-floating
+> `tauri-cli` to `2.11.4` (matching `crates/app/Cargo.toml`'s `tauri = "2.11.2"`) behind
+> `actions/cache@v6`, so the 321s is paid once per pin bump instead of on every one of the four
+> shards; renamed the failure-log artifact `e2e-logs` → `e2e-logs-${{ matrix.shard }}`, since
+> `actions/upload-artifact@v4+` hard-errors on two jobs uploading the same name in one run.
+> **Found and fixed in local verification, not assumed away:** the first draft read `pnpm test --
+> --shard …` — pnpm forwards that literal `--` rather than stripping it, so wdio's yargs parser
+> treated everything after it as positional and silently dropped `--shard`, meaning every shard
+> would have quietly run all 17 specs and still reported green. Fixed by dropping the `--`; verified
+> with a real `xvfb-run pnpm -C e2e test --shard 1/4` run, which built the app once and reported
+> `Spec Files: 4 passed, 4 total` / `Shard: 1 / 4` — the correct first-of-four slice. `pnpm -C e2e
+> typecheck` stayed green (`e2e/wdio.conf.ts` itself is untouched). Full reasoning, the timing
+> evidence, and the slicing-algorithm read (`@wdio/config`'s `ConfigParser.shard()`, a deterministic
+> gapless partition) are recorded in `plan/e2e/e2e-00-harness-and-ci.md`.
+>
+> **Next session should start with:** review the `.github/workflows/e2e.yml` /
+> `plan/e2e/e2e-00-harness-and-ci.md` diff, commit, and watch a real PR's checks to confirm the
+> matrix behaves as measured locally (four shard jobs, each ~1/4 the spec time) — this has not yet
+> run on GitHub's own infrastructure.
+
 > **LATEST (2026-08-22): PR #173'S OWN DECLARED GAPS CLOSED, AND A REGRESSION SHIPPED BY THAT SAME PR FOUND AND FIXED — `Done — pending verify`.** Uncommitted on `main` `f0691b8`. PR #173 (merged `3e86273`, the 2026-08-19 entry below) left three things open in its own write-up: the servers-before-reap ordering had no test because there was no seam to drive it from, the pre-existing `ThemeSettings.test.tsx` frontend flake was diagnosed but not fixed, and `deny.toml`'s `[graph] exclude` was never revisited. This session closes all three, and in re-verifying PR #173's own premises against the real code — not against its write-up — found that one of its two fixes never got the runtime check its own gate called for, and had shipped broken.
 >
 > **1. The regression: `process_group(0)` does not detach a controlling terminal.** PR #173's `crates/sys`/`crates/exec` fix (entry below, item 1) put every `shellenv`/`agents` child in a process group of its own via `.process_group(0)`, but a child in a *new* group still inherits whichever controlling terminal the caller's *session* has, and that new group is never the terminal's foreground group. An interactive login shell's own job-control startup calls `tcsetpgrp()` on that terminal regardless of what its stdio is wired to, and a background-group process doing that is stopped by `SIGTTOU` — indefinitely, since nothing here ever makes it the foreground group again. Reproduced directly: `script -qec "cargo test -p soloist-sys --test shellenv" /dev/null` (a real pty) **FAILED at 10.63s** — the capture ran, hit its own time limit, and was killed; the identical test with no tty always passed, which is why CI's non-interactive runners never saw it. Effect in the running app: launched from a terminal, `$SHELL`-based environment capture and agent-CLI detection both silently fall back to their no-answer path, so every agent CLI on the roster reads `Unknown`.
