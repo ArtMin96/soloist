@@ -45,6 +45,8 @@ crates/
   core/    # C1–C9 + ports (traits) + domain types + event bus. NO tauri/mcp/axum/sqlite imports.
   store/   # SQLite impl of the Store port (repos + migrations)
   pty/     # ProcessSpawner impl (portable-pty + nix); headless AgentOneShot adapter
+  sys/     # MetricsProbe/PortProbe over /proc + FileWatcher over notify (C5)
+  exec/    # bounded external-command execution shared by pty/sys/git/forge; no port of its own
   git/     # GitRepository impl over the system `git` CLI (C9)
   forge/   # GitForge impl over the `gh` CLI (C9)
   app/     # Tauri binary + command/event adapter + HTTP API + bundled UI (ui/)

@@ -131,8 +131,8 @@ async fn cancelling_unlinks_the_socket_and_stops_accepting() {
     );
 }
 
-// The half the app's exit used to miss entirely: a connection already accepted stops being
-// served too, so no request can reach the core after the app has begun shutting down.
+// An already-accepted connection is not exempt from shutdown: it stops being served too, so no
+// request can reach the core after the app has begun shutting down.
 #[tokio::test]
 async fn cancelling_stops_serving_an_already_accepted_connection() {
     let _turn = SOCKET_DIR.lock().await;

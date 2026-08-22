@@ -66,5 +66,11 @@ export default defineConfig({
   },
   test: {
     setupFiles: ["./vitest.setup.ts"],
+    // Each suite is a jsdom component test: mounting a React tree, running its effects, and
+    // tearing it down all compete for CPU with whatever else the machine is doing, so a test's
+    // wall time is a function of contention, not of any defect in the test. Measured worst case
+    // across repeated full-suite runs under ordinary desktop load (load average 10-18 on an
+    // 8-core box) was ~6.2s; vitest's 5s default leaves no margin against that.
+    testTimeout: 20_000,
   },
 });

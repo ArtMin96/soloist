@@ -1,6 +1,6 @@
 [package]
 name = "soloist-exec"
-description = "Bounded external-command execution for Soloist: a child in a process group of its own, run under a time limit and an output ceiling, always reaped."
+description = "Bounded external-command execution for Soloist: a child in a session and process group of its own, run under a time limit and an output ceiling, always reaped."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,9 +11,12 @@ repository.workspace = true
 [dependencies]
 # Stopping a run means signalling its whole process group (`killpg`), so a command that started
 # helpers of its own leaves nothing behind. `signal` also carries the existence probe the
-# timeout test asserts a reaped group with. `user` reads the passwd entry naming the login shell,
-# for the environments that do not export one.
-nix = { version = "0.31", features = ["signal", "user"] }
+# timeout test asserts a reaped group with. `process` carries `setsid`, called from the child
+# between `fork` and `exec` to give it a session of its own, detached from any controlling
+# terminal the caller has — `signal` already pulls this in, named explicitly because the crate
+# now calls into it directly rather than only through `signal`'s own API. `user` reads the passwd
+# entry naming the login shell, for the environments that do not export one.
+nix = { version = "0.31", features = ["signal", "process", "user"] }
 
 [dev-dependencies]
 # A run stopped before it started has to be shown to have started nothing, which means giving it

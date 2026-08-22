@@ -24,6 +24,7 @@ mod tray;
 #[cfg(all(feature = "devtools", feature = "tokio-console"))]
 compile_error!("enable either `devtools` or `tokio-console`, not both");
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -64,7 +65,7 @@ const LAST_LAUNCH_VERSION_KEY: &str = "last_launch_version";
 /// Stopping them drains whatever they had in flight, and one of those can be an operation waiting
 /// on something that will never answer — a `git push` sitting at a credential prompt. Quitting
 /// must not be held hostage to it, and the OS reclaims the socket and the port either way, so the
-/// wait is bounded and the reap proceeds regardless.
+/// wait is bounded.
 const SERVER_SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
 #[derive(Serialize)]
@@ -177,6 +178,29 @@ fn forward_events(app: AppHandle) {
             }
         }
     });
+}
+
+/// Stops the local integration servers from accepting new work, then reaps every managed process
+/// group — the exit path's deterministic-shutdown sequence.
+///
+/// The order is the contract, not a preference: a process-group start accepted while the reap is
+/// still walking the supervisor would create one the reap has already passed, and that child would
+/// outlive the app. Stopping first closes that window. `reap` is taken as an un-awaited future,
+/// rather than run inline, so a test can drive and observe the real ordering instead of asserting
+/// a call shape.
+async fn stop_serving_then_reap(
+    servers: &integration_servers::IntegrationServers,
+    reap: impl Future<Output = ()>,
+) {
+    if tokio::time::timeout(SERVER_SHUTDOWN_GRACE, servers.shutdown())
+        .await
+        .is_err()
+    {
+        eprintln!(
+            "soloist: integration servers did not stop within the shutdown grace; exiting anyway"
+        );
+    }
+    reap.await;
 }
 
 pub fn run() {
@@ -568,27 +592,17 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let servers = app.state::<Arc<integration_servers::IntegrationServers>>();
                 let facade = app.state::<Arc<Facade>>();
-                tauri::async_runtime::block_on(async {
-                    // The order is the contract, not a preference: the local servers must stop
-                    // accepting *before* the reap, or a start accepted while it runs spawns a
-                    // process group the reap has already walked past — and that child outlives
-                    // the app. Reaping first leaves that window open.
-                    if tokio::time::timeout(SERVER_SHUTDOWN_GRACE, servers.shutdown())
-                        .await
-                        .is_err()
-                    {
-                        eprintln!(
-                            "soloist: integration servers did not stop within the shutdown \
-                             grace; exiting anyway"
-                        );
-                    }
-                    // Reap every managed process group before the app exits, so no child
-                    // outlives it (the deterministic-shutdown contract).
-                    facade.supervisor().shutdown().await;
-                });
+                tauri::async_runtime::block_on(stop_serving_then_reap(
+                    &servers,
+                    facade.supervisor().shutdown(),
+                ));
             }
         });
 }
+
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 mod theme_command_registration_tests {

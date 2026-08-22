@@ -52,7 +52,7 @@ export const TIMER = {
   /** The addressed Task attached atomically to the worker's spawn. */
   workerTask: "Stay active until the release timer is ready",
   /** The body the lead's fire-when-idle timer delivers on wake — asserted verbatim in the lead's
-   *  terminal. ASCII and single-line so it renders on one terminal row for a stable substring read. */
+   *  terminal. Single-line, so the fire delivers one turn rather than several. */
   body: "wake up: resume the release cut",
   /** Printed only after the stub's line reader receives the submitted timer turn. */
   submitted: "timer turn submitted",

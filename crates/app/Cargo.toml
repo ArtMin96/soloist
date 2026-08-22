@@ -80,7 +80,8 @@ tokio-util = "0.7"
 [dev-dependencies]
 soloist-core = { path = "../core", features = ["testing"] }
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "net", "rt"] }
+# `test-util` provides the paused clock the exit-path shutdown-grace test advances deterministically.
+tokio = { version = "1", features = ["macros", "net", "rt", "test-util"] }
 
 [build-dependencies]
 tauri-build = { version = "2.6.2", features = [] }

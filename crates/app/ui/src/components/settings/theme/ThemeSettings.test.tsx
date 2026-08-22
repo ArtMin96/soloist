@@ -59,11 +59,9 @@ describe("Settings — themes", () => {
     });
   });
 
-  it("previews all advanced color roles and restores the app when editing is cancelled", async () => {
+  it("previews all advanced color roles when advanced mode is enabled", () => {
     const state = fakeAppearanceState(DEFAULT_APPEARANCE, false);
     state.beginThemeDraft = vi.fn();
-    state.updateThemeDraft = vi.fn();
-    state.cancelThemeDraft = vi.fn();
     render(
       <AppearanceContext value={state}>
         <ThemeSettings />
@@ -74,23 +72,60 @@ describe("Settings — themes", () => {
     expect(state.beginThemeDraft).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("switch", { name: "Advanced colors" }));
     expect(screen.getAllByLabelText(/^Choose /)).toHaveLength(57);
+  });
+
+  it("surfaces accessibility warnings when advanced colors clash", () => {
+    const state = fakeAppearanceState(DEFAULT_APPEARANCE, false);
+    render(
+      <AppearanceContext value={state}>
+        <ThemeSettings />
+      </AppearanceContext>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create theme" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Advanced colors" }));
     const textColor = screen.getByRole("textbox", { name: "Text" });
     fireEvent.change(textColor, { target: { value: "#000000" } });
     fireEvent.blur(textColor);
     const canvasColor = screen.getByRole("textbox", { name: "Canvas" });
     fireEvent.change(canvasColor, { target: { value: "#000000" } });
     fireEvent.blur(canvasColor);
-    expect(screen.getByRole("region", { name: "Accessibility warnings" })).toBeTruthy();
 
+    expect(screen.getByRole("region", { name: "Accessibility warnings" })).toBeTruthy();
+  });
+
+  it("propagates name and author edits to the live draft", async () => {
+    const state = fakeAppearanceState(DEFAULT_APPEARANCE, false);
+    state.updateThemeDraft = vi.fn();
+    render(
+      <AppearanceContext value={state}>
+        <ThemeSettings />
+      </AppearanceContext>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create theme" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Theme name" }), {
       target: { value: "Aurora" },
     });
     fireEvent.change(screen.getByRole("textbox", { name: "Author" }), {
       target: { value: "Ada" },
     });
-    await waitFor(() => expect(state.updateThemeDraft).toHaveBeenCalled());
 
+    await waitFor(() => expect(state.updateThemeDraft).toHaveBeenCalled());
+  });
+
+  it("restores the app when editing is cancelled", () => {
+    const state = fakeAppearanceState(DEFAULT_APPEARANCE, false);
+    state.cancelThemeDraft = vi.fn();
+    render(
+      <AppearanceContext value={state}>
+        <ThemeSettings />
+      </AppearanceContext>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create theme" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel theme editing" }));
+
     expect(state.cancelThemeDraft).toHaveBeenCalledOnce();
     expect(screen.queryByRole("dialog", { name: "Create theme" })).toBeNull();
   });

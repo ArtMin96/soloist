@@ -1,5 +1,6 @@
 import type { ProcStatus } from "@domain";
 import { captureProof } from "../../src/harness/artifacts.js";
+import { ignoringWhitespace } from "../../src/harness/ignoringWhitespace.js";
 import {
   LEAD_AGENT,
   MAILBOX,
@@ -14,10 +15,6 @@ import { terminalPane } from "../../src/screens/TerminalPane.js";
 
 const LEAD = LEAD_AGENT.lead;
 const RUNNING: ProcStatus = "Running";
-
-function canonicalMessageBody(text: string): string {
-  return text.replace(/[·\s]+/gu, "");
-}
 
 // A real-window handoff through the real app, PTYs, and authenticated IPC sessions. The fixture
 // prints each proof marker only after the corresponding mailbox operation succeeds. In particular,
@@ -57,37 +54,46 @@ describe("addressed work between spawned agents", () => {
     const primaryTerminal = await terminalPane.waitForText(
       MAILBOX.completionReported,
     );
-    expect(primaryTerminal).toContain(MAILBOX.submitted);
-    expect(primaryTerminal).toContain(MAILBOX.instructions);
-    expect(primaryTerminal).toContain(MAILBOX.instructionsReceived);
-    expect(primaryTerminal).toContain(MAILBOX.taskAcknowledged);
-    expect(primaryTerminal).toContain(MAILBOX.primaryLeaseAcquired);
-    expect(primaryTerminal).toContain(MAILBOX.primaryLeaseReleased);
+    const primaryShown = ignoringWhitespace(primaryTerminal);
+    expect(primaryShown).toContain(ignoringWhitespace(MAILBOX.submitted));
+    expect(primaryShown).toContain(ignoringWhitespace(MAILBOX.instructions));
+    expect(primaryShown).toContain(
+      ignoringWhitespace(MAILBOX.instructionsReceived),
+    );
+    expect(primaryShown).toContain(
+      ignoringWhitespace(MAILBOX.taskAcknowledged),
+    );
+    expect(primaryShown).toContain(
+      ignoringWhitespace(MAILBOX.primaryLeaseAcquired),
+    );
+    expect(primaryShown).toContain(
+      ignoringWhitespace(MAILBOX.primaryLeaseReleased),
+    );
 
     await sidebar.select(MAILBOX.peer);
     const peerTerminal = await terminalPane.waitForText(MAILBOX.peerExchanged);
-    expect(peerTerminal).toContain(MAILBOX.submitted);
-    expect(peerTerminal).toContain(MAILBOX.instructionsSuppressed);
-    expect(peerTerminal).not.toContain(MAILBOX.instructions);
-    expect(peerTerminal).toContain(MAILBOX.peerLeaseHeld);
-    expect(peerTerminal).toContain(MAILBOX.peerLeaseAcquired);
-    expect(peerTerminal).toContain(MAILBOX.peerLeaseReleased);
-    expect(canonicalMessageBody(peerTerminal)).toContain(
-      canonicalMessageBody(MAILBOX.broadcast),
+    const peerShown = ignoringWhitespace(peerTerminal);
+    expect(peerShown).toContain(ignoringWhitespace(MAILBOX.submitted));
+    expect(peerShown).toContain(
+      ignoringWhitespace(MAILBOX.instructionsSuppressed),
     );
-    expect(canonicalMessageBody(peerTerminal)).toContain(
-      canonicalMessageBody(MAILBOX.direct),
-    );
+    expect(peerShown).not.toContain(ignoringWhitespace(MAILBOX.instructions));
+    expect(peerShown).toContain(ignoringWhitespace(MAILBOX.peerLeaseHeld));
+    expect(peerShown).toContain(ignoringWhitespace(MAILBOX.peerLeaseAcquired));
+    expect(peerShown).toContain(ignoringWhitespace(MAILBOX.peerLeaseReleased));
+    expect(peerShown).toContain(ignoringWhitespace(MAILBOX.broadcast));
+    expect(peerShown).toContain(ignoringWhitespace(MAILBOX.direct));
 
     await sidebar.select(LEAD);
     const leadTerminal = await terminalPane.waitForText(MAILBOX.proof);
-    expect(leadTerminal).toContain(
-      "lead retrieved and acknowledged Completion",
+    const leadShown = ignoringWhitespace(leadTerminal);
+    expect(leadShown).toContain(
+      ignoringWhitespace("lead retrieved and acknowledged Completion"),
     );
-    expect(canonicalMessageBody(leadTerminal)).toContain(
-      canonicalMessageBody(MAILBOX.completion),
-    );
+    expect(leadShown).toContain(ignoringWhitespace(MAILBOX.completion));
 
+    // The proof keeps the reads as the window rendered them, wraps included — the assertions above
+    // are the only place the row grid is ignored.
     await captureProof("agent-messaging-complete", {
       primaryTerminal,
       peerTerminal,
@@ -102,11 +108,11 @@ describe("addressed work between spawned agents", () => {
 
     // The same two bodies the terminals echoed, this time rendered by Soloist from its own retained
     // record — the distinction between a fixture printing its mail and the app showing it.
-    expect(canonicalMessageBody(transcript)).toContain(
-      canonicalMessageBody(MAILBOX.direct),
+    expect(ignoringWhitespace(transcript)).toContain(
+      ignoringWhitespace(MAILBOX.direct),
     );
-    expect(canonicalMessageBody(transcript)).toContain(
-      canonicalMessageBody(MAILBOX.broadcast),
+    expect(ignoringWhitespace(transcript)).toContain(
+      ignoringWhitespace(MAILBOX.broadcast),
     );
     // A closed worker's messages stay readable, so the routing labels survive alongside the bodies.
     expect(transcript).toContain(MAILBOX.peer);

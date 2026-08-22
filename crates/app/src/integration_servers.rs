@@ -75,7 +75,6 @@ pub(crate) struct IntegrationServers {
 
 /// Whether the set still answers to the Integrations setting, or has been stopped for good on the
 /// way out of the app.
-#[derive(Clone, Copy, PartialEq, Eq)]
 enum Lifecycle {
     Serving,
     Stopped,

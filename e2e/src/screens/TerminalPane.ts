@@ -1,4 +1,5 @@
 import { $, browser } from "@wdio/globals";
+import { ignoringWhitespace } from "../harness/ignoringWhitespace.js";
 import { WAIT } from "../harness/waits.js";
 import { waitUntilOr } from "../harness/waitUntilOr.js";
 
@@ -69,16 +70,20 @@ export const terminalPane = {
   },
 
   /**
-   * Waits until the visible terminal's rendered text contains `substring`, then returns the full
-   * text. Used to observe output the app delivers over a real PTY — the wake body a fired timer
-   * writes to the lead's stdin arrives this way — which no repaint can fake.
+   * Waits until the visible terminal shows `substring`, then returns the full rendered text as read.
+   * Used to observe output the app delivers over a real PTY — the wake body a fired timer writes to
+   * the lead's stdin arrives this way — which no repaint can fake.
+   *
+   * The match ignores whitespace, so it holds wherever the pane happened to wrap the line; a caller
+   * asserting further substrings of the returned text owes the same (`ignoringWhitespace`), or it
+   * waits on one rule and asserts by another.
    */
   async waitForText(substring: string): Promise<string> {
     let last = "";
     await waitUntilOr(
       async () => {
         last = await this.text();
-        return last.includes(substring);
+        return ignoringWhitespace(last).includes(ignoringWhitespace(substring));
       },
       () =>
         `the visible terminal never showed ${JSON.stringify(substring)}; last read:\n${last}`,

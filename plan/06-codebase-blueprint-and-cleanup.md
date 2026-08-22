@@ -49,10 +49,11 @@ builds and runs" (§8).
 |-------|------|------|---------------|--------|
 | `core` | domain | C1–C9, ports (traits), domain types, event bus | `tokio`/`serde`/`thiserror`/`vte`/etc. — **never** an adapter crate | live (C1–C3 + C8) |
 | `store` | driven adapter | SQLite impl of `Store`/`ProjectRepo`/`TrustRepo`/`RuntimeState` + migrations | `core`, `ipc`, `rusqlite` | live |
-| `pty` | driven adapter | `ProcessSpawner`/`PtyIo`/`ProcessControl`/`OrphanControl` over `portable-pty`+`nix` | `core`, `portable-pty`, `nix` | live |
-| `sys` | driven adapter | `MetricsProbe` (CPU/mem) + `PortProbe` (discovery) over `/proc`; `FileWatcher` over `notify` — monitoring C5 | `core`, `notify`, `libc` | live |
-| `git` | driven adapter | `GitRepository` over the **system `git` CLI** (machine formats, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, fresh process group, bounded timeout, kill+reap) — git C9 | `core`, `tokio` | **planned → `git-integration`** |
-| `forge` | driven adapter | `GitForge` over the **`gh` CLI** (`gh pr … --json`, `gh auth status` feature detection) — git C9 | `core`, `tokio`, `serde_json` | **planned → `git-integration`** |
+| `pty` | driven adapter | `ProcessSpawner`/`PtyIo`/`ProcessControl`/`OrphanControl` over `portable-pty`+`nix` | `core`, `soloist-exec`, `portable-pty`, `nix` | live |
+| `sys` | driven adapter | `MetricsProbe` (CPU/mem) + `PortProbe` (discovery) over `/proc`; `FileWatcher` over `notify` — monitoring C5 | `core`, `soloist-exec`, `notify`, `libc` | live |
+| `exec` | shared adapter primitive | bounded external-command execution — process group of its own, time limit, output ceiling, guaranteed reap — plus login-shell resolution (`login_shell`); implements no port itself, composed by `pty`/`sys`/`git`/`forge` | `nix` | live |
+| `git` | driven adapter | `GitRepository` over the **system `git` CLI** (machine formats, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, fresh process group, bounded timeout, kill+reap) — git C9 | `core`, `soloist-exec` | live (`git-integration`) |
+| `forge` | driven adapter | `GitForge` over the **`gh` CLI** (`gh pr … --json`, `gh auth status` feature detection) — git C9 | `core`, `soloist-exec`, `serde_json` | live (`git-integration`) |
 | `app` | driving adapter + host | Tauri shell, command/event wiring, **the composition root**, bundled UI | `core`, `store`, `pty`, `sys`, `httpapi`, `tauri` | live |
 | `mcp` | driving adapter | `soloist-mcp` stdio binary → core over `ipc` | `core`, `ipc`, `rmcp` | live (P8 skeleton) |
 | `httpapi` | driving adapter | loopback `127.0.0.1:24678` over `axum` | `core`, `ipc`, `axum` | live (P10: read + mutation API, CORS, local-auth) |

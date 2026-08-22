@@ -109,8 +109,15 @@ lint:
 # source provenance. The whole policy lives in deny.toml — including which target, features,
 # and crates make up the audited graph — so this recipe and the CI action check the same tree
 # and cannot report different results. Needs `cargo install --locked cargo-deny`.
+#
+# Split in two so an `[advisories] ignore` entry stays visible in the transcript: cargo-deny
+# only prints why an advisory was ignored at its `info` log level, and raising that for the
+# whole check buries the note under thousands of lines of `[bans] multiple-versions`
+# duplicate-crate graphs. Scoping `info` to the advisories check alone keeps everything else at
+# the default level and shows exactly what risk is being knowingly carried, and why.
 audit:
-    cargo deny check
+    cargo deny check bans licenses sources
+    cargo deny --log-level info check advisories
 
 # Auto-format Rust and UI sources.
 fmt:
