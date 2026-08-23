@@ -16,6 +16,7 @@
 //! [`crate::events::DomainEvent::TemplateChanged`] is published by the façade after a write for UI
 //! freshness; the cache invalidation lives here.
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -393,6 +394,12 @@ impl Templates {
     /// check the per-scope cap on a create, where the cache may well be cold — and populating it
     /// would mean loading every body to learn how many there are, where the store answers with a
     /// `COUNT`.
+    ///
+    /// A cold read holds the write guard across the scan, so the scan and the caching of what it
+    /// read are one step: an invalidation landing between the two would find no entry to drop and
+    /// then be undone by the insert, leaving the scope serving pre-write rows until its next write
+    /// — which may never come. The cost is that concurrent readers of a cold scope queue behind one
+    /// scan, which is also what keeps them from each running their own.
     fn with_cached_rows<T>(
         &self,
         kind: TemplateKind,
@@ -403,10 +410,12 @@ impl Templates {
         if let Some(rows) = read_lock(&self.cache).get(&key) {
             return Ok(read(rows));
         }
-        let rows = self.repo.list(kind, project)?;
-        let value = read(&rows);
-        write_lock(&self.cache).insert(key, rows);
-        Ok(value)
+        let mut cache = write_lock(&self.cache);
+        let rows = match cache.entry(key) {
+            Entry::Occupied(cached) => cached.into_mut(),
+            Entry::Vacant(slot) => slot.insert(self.repo.list(kind, project)?),
+        };
+        Ok(read(rows))
     }
 
     /// Drops the cached rows for a `(kind, scope)` after a write to it, so the next read repopulates

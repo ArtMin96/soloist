@@ -1,6 +1,9 @@
-use std::sync::Arc;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use super::*;
+use crate::sync::lock;
 use crate::template::TemplateKind;
 use crate::testing::FakeTemplateRepo;
 
@@ -789,4 +792,181 @@ fn forgetting_a_project_drops_its_entries_of_every_kind_and_no_others() {
         scans + 2,
         "forgetting one project leaves every other scope warm"
     );
+}
+
+/// A [`TemplateRepo`] that parks its first `list` after it has read the store, and releases it when
+/// the next store change lands. That window — a read holding a snapshot it has not yet cached — is
+/// where a concurrent invalidation is at risk of being lost, so pinning it is what lets a test drive
+/// the interleaving instead of racing for it. Every other call delegates to the fake.
+struct ParkingRepo {
+    inner: Arc<FakeTemplateRepo>,
+    /// Announces, once, that the parked read has taken its snapshot.
+    scanned: Mutex<Option<Sender<()>>>,
+    /// Releases the parked read; sent by every store change.
+    release: Mutex<Sender<()>>,
+    /// The parked read's end of that release, taken by the first `list`.
+    park: Mutex<Option<Receiver<()>>>,
+}
+
+impl ParkingRepo {
+    /// The repo, plus the signal its first `list` sends once it is parked mid-read.
+    fn new(inner: Arc<FakeTemplateRepo>) -> (Arc<Self>, Receiver<()>) {
+        let (scanned, reached) = channel();
+        let (release, park) = channel();
+        let repo = Arc::new(Self {
+            inner,
+            scanned: Mutex::new(Some(scanned)),
+            release: Mutex::new(release),
+            park: Mutex::new(Some(park)),
+        });
+        (repo, reached)
+    }
+
+    fn release_parked_read(&self) {
+        let _ = lock(&self.release).send(());
+    }
+}
+
+impl TemplateRepo for ParkingRepo {
+    fn write(
+        &self,
+        kind: TemplateKind,
+        project: Option<ProjectId>,
+        name: &str,
+        description: Option<&str>,
+        body: &str,
+        expected: Option<u64>,
+    ) -> Result<TemplateWriteResult, StoreError> {
+        let written = self
+            .inner
+            .write(kind, project, name, description, body, expected);
+        self.release_parked_read();
+        written
+    }
+
+    fn read(
+        &self,
+        kind: TemplateKind,
+        project: Option<ProjectId>,
+        name: &str,
+    ) -> Result<Option<StoredTemplate>, StoreError> {
+        self.inner.read(kind, project, name)
+    }
+
+    fn list(
+        &self,
+        kind: TemplateKind,
+        project: Option<ProjectId>,
+    ) -> Result<Vec<StoredTemplate>, StoreError> {
+        let rows = self.inner.list(kind, project)?;
+        // Taken out of the mutex before parking, so what waits here is this read alone.
+        let parked = lock(&self.park).take();
+        if let Some(park) = parked {
+            if let Some(scanned) = lock(&self.scanned).take() {
+                let _ = scanned.send(());
+            }
+            let _ = park.recv();
+        }
+        Ok(rows)
+    }
+
+    fn count(&self, kind: TemplateKind, project: Option<ProjectId>) -> Result<usize, StoreError> {
+        self.inner.count(kind, project)
+    }
+
+    fn delete(
+        &self,
+        kind: TemplateKind,
+        project: Option<ProjectId>,
+        name: &str,
+    ) -> Result<bool, StoreError> {
+        let deleted = self.inner.delete(kind, project, name);
+        self.release_parked_read();
+        deleted
+    }
+}
+
+/// How many times an interleaving test drives its race. With the reader holding the cache guard
+/// across its scan the outcome is deterministic; a reader that stopped holding it would lose the
+/// race only sometimes, so the repetition is what makes that regression redden reliably.
+const INTERLEAVINGS: usize = 20;
+
+/// Drives one write-against-a-cold-read interleaving, and answers with the names the next read
+/// sees. The reader parks holding a snapshot it has not cached; the write lands inside that window,
+/// dropping a cache entry the reader has yet to write.
+fn names_after_a_write_during_a_cold_read() -> Vec<String> {
+    let (repo, scanned) = ParkingRepo::new(Arc::new(FakeTemplateRepo::new()));
+    let templates = Templates::new(repo);
+
+    thread::scope(|threads| {
+        let reader = threads.spawn(|| {
+            templates.list(PROMPT, Some(P)).expect("the cold read");
+        });
+        scanned.recv().expect("the cold read reached the store");
+        templates
+            .create(PROMPT, Some(P), "late", None, "body")
+            .expect("create during the cold read");
+        reader.join().expect("the cold read finished");
+    });
+
+    templates
+        .list(PROMPT, Some(P))
+        .expect("list after both finished")
+        .into_iter()
+        .map(|row| row.name)
+        .collect()
+}
+
+#[test]
+fn a_write_that_lands_during_a_cold_read_survives_what_that_read_caches() {
+    for _ in 0..INTERLEAVINGS {
+        assert_eq!(
+            names_after_a_write_during_a_cold_read(),
+            vec!["late".to_owned()],
+            "a completed write is visible to the next read, never undone by a read that started \
+             before it"
+        );
+    }
+}
+
+/// Drives one eviction-against-a-cold-read interleaving, and answers with the names the next read
+/// sees. The project's rows cascade away in the store and the evictor drops what is cached of them
+/// while the reader is parked holding a snapshot that still has them.
+fn names_after_forgetting_a_project_during_a_cold_read() -> Vec<String> {
+    let store = Arc::new(FakeTemplateRepo::new());
+    store
+        .write(PROMPT, Some(P), "mine", None, "body", None)
+        .expect("seed the store");
+    let (repo, scanned) = ParkingRepo::new(store);
+    let templates = Templates::new(repo.clone());
+
+    thread::scope(|threads| {
+        let reader = threads.spawn(|| {
+            templates.list(PROMPT, Some(P)).expect("the cold read");
+        });
+        scanned.recv().expect("the cold read reached the store");
+        assert!(repo
+            .delete(PROMPT, Some(P), "mine")
+            .expect("the store cascade"));
+        templates.forget_project(P);
+        reader.join().expect("the cold read finished");
+    });
+
+    templates
+        .list(PROMPT, Some(P))
+        .expect("list after both finished")
+        .into_iter()
+        .map(|row| row.name)
+        .collect()
+}
+
+#[test]
+fn forgetting_a_project_during_a_cold_read_survives_what_that_read_caches() {
+    for _ in 0..INTERLEAVINGS {
+        assert!(
+            names_after_forgetting_a_project_during_a_cold_read().is_empty(),
+            "a removed project's rows stay unreachable, never resurrected by a read that started \
+             before the eviction"
+        );
+    }
 }
