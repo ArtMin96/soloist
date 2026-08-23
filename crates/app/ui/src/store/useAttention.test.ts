@@ -21,15 +21,15 @@ let publish: ((event: DomainEvent) => void) | undefined;
 function snapshot(...processes: AttentionSnapshot["processes"]): AttentionSnapshot {
   return {
     processes,
-    total: processes.reduce((sum, entry) => sum + entry.kinds.length, 0),
+    total: processes.reduce((sum, entry) => sum + entry.alerts, 0),
   };
 }
 
 const NOTHING = snapshot();
-const ONE_CRASH = snapshot({ process: 1, kinds: ["crashed"] });
+const ONE_CRASH = snapshot({ process: 1, kind: "crashed", alerts: 1 });
 const TWO_UNREAD = snapshot(
-  { process: 1, kinds: ["crashed"] },
-  { process: 2, kinds: ["agent_error"] },
+  { process: 1, kind: "crashed", alerts: 1 },
+  { process: 2, kind: "agent_error", alerts: 1 },
 );
 
 beforeEach(() => {

@@ -29,13 +29,14 @@ fn at_the_window() -> Presence {
 
 /// A snapshot of one process holding `alerts` unread — the shape the registry really produces,
 /// where the total counts alerts rather than processes.
-fn waiting(alerts: usize) -> AttentionSnapshot {
+fn waiting(alerts: u32) -> AttentionSnapshot {
     AttentionSnapshot {
         processes: vec![ProcessAttention {
             process: WEB,
-            kinds: vec![AttentionKind::Crashed; alerts],
+            kind: AttentionKind::Crashed,
+            alerts,
         }],
-        total: alerts,
+        total: alerts as usize,
     }
 }
 

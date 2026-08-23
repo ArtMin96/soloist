@@ -28,7 +28,7 @@ const STACK = [process(1, 10, "web"), process(2, 10, "api"), process(3, 20, "doc
 function snapshot(...entries: AttentionSnapshot["processes"]): AttentionSnapshot {
   return {
     processes: entries,
-    total: entries.reduce((sum, entry) => sum + entry.kinds.length, 0),
+    total: entries.reduce((sum, entry) => sum + entry.alerts, 0),
   };
 }
 
@@ -47,7 +47,7 @@ describe("attentionCountLabel", () => {
 
 describe("unreadProcessIds", () => {
   it("names every process with something waiting", () => {
-    const unread = unreadProcessIds(snapshot({ process: 2, kinds: ["crashed"] }));
+    const unread = unreadProcessIds(snapshot({ process: 2, kind: "crashed", alerts: 1 }));
     expect(unread.has(2)).toBe(true);
     expect(unread.has(1)).toBe(false);
   });
@@ -59,21 +59,24 @@ describe("unreadProcessIds", () => {
 
 describe("unreadProjectIds", () => {
   it("names the project owning an unread process", () => {
-    const projects = unreadProjectIds(snapshot({ process: 2, kinds: ["crashed"] }), STACK);
+    const projects = unreadProjectIds(snapshot({ process: 2, kind: "crashed", alerts: 1 }), STACK);
     expect(projects.has(10)).toBe(true);
     expect(projects.has(20)).toBe(false);
   });
 
   it("names a project once however many of its processes are unread", () => {
     const projects = unreadProjectIds(
-      snapshot({ process: 1, kinds: ["crashed"] }, { process: 2, kinds: ["agent_error"] }),
+      snapshot(
+        { process: 1, kind: "crashed", alerts: 1 },
+        { process: 2, kind: "agent_error", alerts: 1 },
+      ),
       STACK,
     );
     expect([...projects]).toEqual([10]);
   });
 
   it("ignores an unread process that is no longer in the stack", () => {
-    const projects = unreadProjectIds(snapshot({ process: 99, kinds: ["crashed"] }), STACK);
+    const projects = unreadProjectIds(snapshot({ process: 99, kind: "crashed", alerts: 1 }), STACK);
     expect(projects.size).toBe(0);
   });
 });
@@ -81,15 +84,41 @@ describe("unreadProjectIds", () => {
 describe("attentionEntries", () => {
   it("names each unread process and the oldest kind waiting on it", () => {
     const entries = attentionEntries(
-      snapshot({ process: 2, kinds: ["terminal_bell", "crashed"] }),
+      snapshot({ process: 2, kind: "terminal_bell", alerts: 2 }),
       STACK,
     );
     expect(entries).toEqual([{ process: 2, label: "api", kind: "terminal_bell", alerts: 2 }]);
   });
 
+  it("reads the same for one alert, a few, and far past the display cap", () => {
+    const one = snapshot({ process: 1, kind: "crashed", alerts: 1 });
+    const few = snapshot({ process: 1, kind: "crashed", alerts: 2 });
+    const many = snapshot({ process: 1, kind: "crashed", alerts: 150 });
+
+    // The kind never changes with how much has piled up, each entry carries the core's own count,
+    // and only the title bar's reading caps.
+    expect(attentionEntries(one, STACK)).toEqual([
+      { process: 1, label: "web", kind: "crashed", alerts: 1 },
+    ]);
+    expect(attentionEntries(few, STACK)).toEqual([
+      { process: 1, label: "web", kind: "crashed", alerts: 2 },
+    ]);
+    expect(attentionEntries(many, STACK)).toEqual([
+      { process: 1, label: "web", kind: "crashed", alerts: 150 },
+    ]);
+    expect([one, few, many].map((each) => attentionCountLabel(each.total))).toEqual([
+      "1",
+      "2",
+      "99+",
+    ]);
+  });
+
   it("keeps the core's order", () => {
     const entries = attentionEntries(
-      snapshot({ process: 3, kinds: ["crashed"] }, { process: 1, kinds: ["agent_error"] }),
+      snapshot(
+        { process: 3, kind: "crashed", alerts: 1 },
+        { process: 1, kind: "agent_error", alerts: 1 },
+      ),
       STACK,
     );
     expect(entries.map((entry) => entry.label)).toEqual(["docs", "web"]);
@@ -97,7 +126,10 @@ describe("attentionEntries", () => {
 
   it("drops a process the stack no longer holds, so a removed row leaves no entry", () => {
     const entries = attentionEntries(
-      snapshot({ process: 99, kinds: ["crashed"] }, { process: 1, kinds: ["crashed"] }),
+      snapshot(
+        { process: 99, kind: "crashed", alerts: 1 },
+        { process: 1, kind: "crashed", alerts: 1 },
+      ),
       STACK,
     );
     expect(entries.map((entry) => entry.process)).toEqual([1]);

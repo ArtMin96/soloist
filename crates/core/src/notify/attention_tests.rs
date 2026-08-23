@@ -7,14 +7,30 @@ use super::*;
 const WEB: ProcessId = ProcessId::from_raw(1);
 const API: ProcessId = ProcessId::from_raw(2);
 
-/// The kinds recorded against `process`, in the order the snapshot reports them.
-fn kinds_for(snapshot: &AttentionSnapshot, process: ProcessId) -> Vec<AttentionKind> {
+/// Far enough past the ceiling to show the count stops rather than merely slows.
+const OVERSHOOT: u32 = 500;
+
+/// A registry one process has alerted on more times than it will be counted for.
+fn storm() -> AttentionRegistry {
+    let registry = AttentionRegistry::new();
+    for _ in 0..MAX_UNREAD_PER_PROCESS + OVERSHOOT {
+        registry.raise(WEB, AttentionKind::Crashed);
+    }
+    registry
+}
+
+/// A snapshot as the surfaces receive it — what the registry costs to send, not what it holds.
+fn serialised(snapshot: &AttentionSnapshot) -> String {
+    serde_json::to_string(snapshot).expect("a snapshot serialises")
+}
+
+/// What the snapshot reports for `process`, or nothing when it has nothing waiting.
+fn entry_for(snapshot: &AttentionSnapshot, process: ProcessId) -> Option<ProcessAttention> {
     snapshot
         .processes
         .iter()
         .find(|entry| entry.process == process)
-        .map(|entry| entry.kinds.clone())
-        .unwrap_or_default()
+        .copied()
 }
 
 #[test]
@@ -33,7 +49,28 @@ fn raising_records_the_kind_against_its_process() {
 
     let snapshot = registry.snapshot();
     assert_eq!(snapshot.total, 1);
-    assert_eq!(kinds_for(&snapshot, WEB), vec![AttentionKind::Crashed]);
+    assert_eq!(
+        entry_for(&snapshot, WEB),
+        Some(ProcessAttention {
+            process: WEB,
+            kind: AttentionKind::Crashed,
+            alerts: 1,
+        })
+    );
+}
+
+#[test]
+fn the_kind_reported_is_the_one_that_started_the_run() {
+    let registry = AttentionRegistry::new();
+
+    registry.raise(WEB, AttentionKind::TerminalBell);
+    registry.raise(WEB, AttentionKind::Crashed);
+
+    // The marker is how a user finds the row again, so it names what first asked for them; a later
+    // alert adds to the count without renaming what is waiting.
+    let entry = entry_for(&registry.snapshot(), WEB).expect("web has something waiting");
+    assert_eq!(entry.kind, AttentionKind::TerminalBell);
+    assert_eq!(entry.alerts, 2);
 }
 
 #[test]
@@ -75,6 +112,35 @@ fn the_count_is_truthful_past_the_display_cap() {
 }
 
 #[test]
+fn the_count_stops_at_the_ceiling_however_much_a_process_raises() {
+    // The feed is a child process's own output — one alert per BEL byte it prints — so what it can
+    // drive this count to is whatever it can print. It stops where a larger number stops telling
+    // the user anything.
+    assert_eq!(storm().snapshot().total, MAX_UNREAD_PER_PROCESS as usize);
+}
+
+#[test]
+fn a_process_that_never_stops_alerting_snapshots_the_same_size_as_one_that_alerted_once() {
+    let quiet = AttentionRegistry::new();
+    quiet.raise(WEB, AttentionKind::Crashed);
+
+    let once = serialised(&quiet.snapshot());
+    let storm = serialised(&storm().snapshot());
+
+    // Every alert wakes every surface to re-read this snapshot, so one that carried the history
+    // would cost more to build and send the longer the storm ran. All a storm may add is the
+    // digits of the count itself, in each of the two places it is written: the process's own and
+    // the total.
+    let digits = MAX_UNREAD_PER_PROCESS.to_string().len();
+    assert!(
+        storm.len() <= once.len() + 2 * digits,
+        "a storm snapshotted to {} bytes against {} for a single alert",
+        storm.len(),
+        once.len()
+    );
+}
+
+#[test]
 fn clearing_one_process_leaves_the_others() {
     let registry = AttentionRegistry::new();
     registry.raise(WEB, AttentionKind::Crashed);
@@ -84,10 +150,14 @@ fn clearing_one_process_leaves_the_others() {
 
     let snapshot = registry.snapshot();
     assert_eq!(snapshot.total, 1);
-    assert!(kinds_for(&snapshot, WEB).is_empty());
+    assert_eq!(entry_for(&snapshot, WEB), None);
     assert_eq!(
-        kinds_for(&snapshot, API),
-        vec![AttentionKind::AgentPermission]
+        entry_for(&snapshot, API),
+        Some(ProcessAttention {
+            process: API,
+            kind: AttentionKind::AgentPermission,
+            alerts: 1,
+        })
     );
 }
 

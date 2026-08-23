@@ -18,12 +18,14 @@ use crate::ids::ProcessId;
 use crate::sync::lock;
 
 /// What one process has waiting for the user.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct ProcessAttention {
     pub process: ProcessId,
-    /// The kinds raised since this process was last cleared, oldest first — a surface renders the
-    /// marker from the most severe or the most recent as it chooses.
-    pub kinds: Vec<AttentionKind>,
+    /// The kind that started the run still waiting. A surface draws its marker from this one, so a
+    /// process reads as what first asked for the user rather than as whatever it last raised.
+    pub kind: AttentionKind,
+    /// How many alerts are waiting on this process, up to [`MAX_UNREAD_PER_PROCESS`].
+    pub alerts: u32,
 }
 
 /// Everything unread, derived on read. Never stored: a cached second copy would be one more thing
@@ -33,16 +35,32 @@ pub struct AttentionSnapshot {
     /// Every process with something waiting, ordered by process id so a surface renders a stable
     /// list without sorting it again.
     pub processes: Vec<ProcessAttention>,
-    /// How many alerts are waiting in total. Counts alerts rather than processes, and is never
-    /// truncated — a display cap such as "99+" belongs to whatever renders it.
+    /// How many alerts are waiting in total. Counts alerts rather than processes, and carries no
+    /// display cap — a reading such as "99+" belongs to whatever renders it, and the only ceiling
+    /// here is [`MAX_UNREAD_PER_PROCESS`], far past what any surface prints in full.
     pub total: usize,
+}
+
+/// The most alerts one process is counted for. A terminal rings the bell once per BEL byte, so
+/// this count is fed by whatever a child process chooses to print; past this many, a larger number
+/// tells a user nothing they cannot already act on. It sits two orders of magnitude above any
+/// display cap, so what a surface prints is never this bound showing through.
+const MAX_UNREAD_PER_PROCESS: u32 = 9_999;
+
+/// What one process has waiting, as the registry keeps it: the kind that started the run and how
+/// many have landed since. One fixed-size record per process, so what a process can raise decides
+/// the count it reports and never the memory it occupies.
+#[derive(Clone, Copy, Debug)]
+struct Unread {
+    first: AttentionKind,
+    count: u32,
 }
 
 /// The processes with unread attention. Shared behind an `Arc` between the reactor that raises and
 /// the façade methods that clear.
 #[derive(Debug, Default)]
 pub struct AttentionRegistry {
-    unread: Mutex<HashMap<ProcessId, Vec<AttentionKind>>>,
+    unread: Mutex<HashMap<ProcessId, Unread>>,
 }
 
 impl AttentionRegistry {
@@ -52,9 +70,19 @@ impl AttentionRegistry {
     }
 
     /// Records that `process` raised `kind`. Repeats accumulate: two crashes are two things that
-    /// happened, and collapsing them would under-report a process that keeps failing.
+    /// happened, and collapsing them would under-report a process that keeps failing. The count
+    /// stops at [`MAX_UNREAD_PER_PROCESS`], so a process that alerts without stopping raises the
+    /// number it reports and nothing else.
     pub fn raise(&self, process: ProcessId, kind: AttentionKind) {
-        lock(&self.unread).entry(process).or_default().push(kind);
+        lock(&self.unread)
+            .entry(process)
+            .and_modify(|unread| {
+                unread.count = unread.count.saturating_add(1).min(MAX_UNREAD_PER_PROCESS);
+            })
+            .or_insert(Unread {
+                first: kind,
+                count: 1,
+            });
     }
 
     /// Forgets what `process` had waiting, reporting whether anything was actually there. The
@@ -74,17 +102,17 @@ impl AttentionRegistry {
 
     /// Everything currently unread.
     pub fn snapshot(&self) -> AttentionSnapshot {
-        let unread = lock(&self.unread);
-        let mut processes: Vec<ProcessAttention> = unread
+        let mut processes: Vec<ProcessAttention> = lock(&self.unread)
             .iter()
-            .map(|(process, kinds)| ProcessAttention {
+            .map(|(process, unread)| ProcessAttention {
                 process: *process,
-                kinds: kinds.clone(),
+                kind: unread.first,
+                alerts: unread.count,
             })
             .collect();
         processes.sort_by_key(|entry| entry.process);
         AttentionSnapshot {
-            total: processes.iter().map(|entry| entry.kinds.len()).sum(),
+            total: processes.iter().map(|entry| entry.alerts as usize).sum(),
             processes,
         }
     }
