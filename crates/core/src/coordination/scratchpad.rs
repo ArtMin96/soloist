@@ -25,14 +25,22 @@ use crate::ports::{Clock, StoreError};
 /// table without limit. Generous for a real note, far below the transport frame ceiling.
 pub const MAX_SCRATCHPAD_CONTENT_BYTES: usize = 256 * 1024;
 
+fn validate_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        Err("name must not be blank".to_owned())
+    } else {
+        Ok(())
+    }
+}
+
 /// Checks a scratchpad write is well-formed: the `name` handle is not blank and the `body` stays
 /// within the size cap. The body may be blank — a blank document is valid; only the addressing
 /// handle and the size ceiling are enforced. Returns a single message naming every problem at once,
 /// or `Ok(())` when it is well-formed.
 fn validate(name: &str, body: &str) -> Result<(), String> {
     let mut problems: Vec<String> = Vec::new();
-    if name.trim().is_empty() {
-        problems.push("name must not be blank".to_owned());
+    if let Err(problem) = validate_name(name) {
+        problems.push(problem);
     }
     if body.len() > MAX_SCRATCHPAD_CONTENT_BYTES {
         problems.push(format!(
@@ -229,6 +237,7 @@ impl Scratchpads {
         from: &str,
         to: &str,
     ) -> Result<ScratchpadView, RenameError> {
+        validate_name(to).map_err(RenameError::Invalid)?;
         match self.repo.rename(project, from, to)? {
             RenameResult::Renamed(stored) => Ok(ScratchpadView::of(*stored)),
             RenameResult::NotFound => Err(RenameError::NotFound),
@@ -322,6 +331,9 @@ pub struct ScratchpadTransfer {
 /// Why a [`rename`](Scratchpads::rename) failed — both the caller's to fix.
 #[derive(Debug, thiserror::Error)]
 pub enum RenameError {
+    /// The target name failed the same validation applied when a scratchpad is written.
+    #[error("scratchpad is not well-formed: {0}")]
+    Invalid(String),
     /// No scratchpad exists under the source name in the project.
     #[error("no scratchpad under that name")]
     NotFound,

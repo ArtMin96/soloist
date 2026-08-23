@@ -217,30 +217,39 @@ impl TrustRequests {
     /// and announces the resolution. Returns the request that was resolved, or `None` when it was
     /// no longer pending.
     pub fn resolve(&self, id: TrustRequestId, outcome: TrustRequestState) -> Option<TrustRequest> {
-        let resolved = {
+        let now = self.clock.now_unix_millis();
+        let (resolved, expired) = {
             let mut state = lock(&self.state);
-            let index = state
+            let expired = prune_expired(&mut state, now);
+            let resolved = state
                 .pending
                 .iter()
-                .position(|held| held.request.id == id)?;
-            let held = state.pending.remove(index);
-            record_receipt(&mut state, id, held.request.project, outcome);
-            held.request
+                .position(|held| held.request.id == id)
+                .map(|index| state.pending.remove(index).request);
+            if let Some(resolved) = &resolved {
+                record_receipt(&mut state, id, resolved.project, outcome);
+            }
+            (resolved, expired)
         };
-        self.bus.publish(DomainEvent::TrustRequestResolved {
-            project: resolved.project,
-            id: resolved.id,
-            state: outcome,
-        });
-        Some(resolved)
+        self.announce_resolved(expired);
+        if let Some(resolved) = &resolved {
+            self.bus.publish(DomainEvent::TrustRequestResolved {
+                project: resolved.project,
+                id: resolved.id,
+                state: outcome,
+            });
+        }
+        resolved
     }
 
     /// Drops every request `process` opened, marking each [`TrustRequestState::Withdrawn`] and
     /// announcing it — so an approval prompt already on screen for a process that has closed goes
     /// away rather than inviting a grant on its behalf.
     pub(super) fn withdraw_requests_of(&self, process: ProcessId) {
-        let withdrawn: Vec<_> = {
+        let now = self.clock.now_unix_millis();
+        let (withdrawn, expired) = {
             let mut state = lock(&self.state);
+            let expired = prune_expired(&mut state, now);
             let (leaving, staying): (Vec<_>, Vec<_>) = std::mem::take(&mut state.pending)
                 .into_iter()
                 .partition(|held| held.request.requested_by == process);
@@ -253,11 +262,13 @@ impl TrustRequests {
                     TrustRequestState::Withdrawn,
                 );
             }
-            leaving
+            let withdrawn: Vec<_> = leaving
                 .into_iter()
                 .map(|held| (held.request.project, held.request.id))
-                .collect()
+                .collect();
+            (withdrawn, expired)
         };
+        self.announce_resolved(expired);
         for (project, id) in withdrawn {
             self.bus.publish(DomainEvent::TrustRequestResolved {
                 project,

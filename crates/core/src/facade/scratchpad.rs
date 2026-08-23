@@ -124,6 +124,7 @@ impl Facade {
             self.scratchpads
                 .rename(project, from, to)
                 .map_err(|err| match err {
+                    RenameError::Invalid(message) => CoordinationError::InvalidScratchpad(message),
                     RenameError::NotFound => CoordinationError::UnknownScratchpad,
                     RenameError::NameTaken => CoordinationError::ScratchpadNameTaken,
                     RenameError::Store(err) => CoordinationError::Store(err),
@@ -153,6 +154,7 @@ impl Facade {
             .scratchpads
             .transfer(from, name, to)
             .map_err(|err| match err {
+                RenameError::Invalid(message) => CoordinationError::InvalidScratchpad(message),
                 RenameError::NotFound => CoordinationError::UnknownScratchpad,
                 RenameError::NameTaken => CoordinationError::ScratchpadNameTaken,
                 RenameError::Store(err) => CoordinationError::Store(err),
