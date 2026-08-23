@@ -195,6 +195,50 @@ async fn open_does_not_recreate_an_existing_solo_yml() {
 }
 
 #[tokio::test]
+async fn a_solo_yml_that_does_not_parse_leaves_no_project_behind() {
+    let parts = parts(FakeSpawner::exits_on_terminate());
+    let mut rx = parts.bus.subscribe();
+    let dir = tempfile::tempdir().expect("temp dir");
+    let malformed = "processes:\n  Web:\n    command: [unclosed\n";
+    write_yml(dir.path(), malformed);
+
+    let err = parts
+        .service()
+        .open(dir.path())
+        .expect_err("a malformed config fails the open");
+    assert!(
+        matches!(err, LoadProjectError::Config(_)),
+        "the parser's complaint is what the caller is told, got {err:?}"
+    );
+
+    // An open the caller was told failed leaves nothing durable behind: no project to list,
+    // restore on the next launch, or show in the sidebar.
+    assert!(
+        parts.projects.list().expect("list").is_empty(),
+        "a failed open persists no project record"
+    );
+    assert!(
+        parts.supervisor.snapshot().is_empty(),
+        "a failed open registers no commands"
+    );
+    assert!(
+        matches!(rx.try_recv(), Err(broadcast::error::TryRecvError::Empty)),
+        "a failed open announces nothing — no consumer sees a project that did not open"
+    );
+    // The user's own file is never rewritten — least of all one we could not parse.
+    assert_eq!(
+        std::fs::read_to_string(crate::config::config_path(dir.path())).expect("read back"),
+        malformed
+    );
+
+    // Nothing half-open blocks recovery: fixing the file and re-opening works normally.
+    write_yml(dir.path(), "processes:\n  Web:\n    command: npm run dev\n");
+    let load = parts.service().open(dir.path()).expect("re-open");
+    assert_eq!(load.processes, 1);
+    assert_eq!(parts.projects.list().expect("list").len(), 1);
+}
+
+#[tokio::test]
 async fn open_persists_and_projects_the_display_name() {
     let parts = parts(FakeSpawner::exits_on_terminate());
     let dir = tempfile::tempdir().expect("temp dir");

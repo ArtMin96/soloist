@@ -46,16 +46,18 @@ impl<'a> ProjectService<'a> {
         }
     }
 
-    /// Opens a project: registers its root (assigning the durable [`ProjectId`]), loads
-    /// its `solo.yml`, registers each declared process as a trust-gated command, then
+    /// Opens a project: loads its `solo.yml`, registers its root (assigning the durable
+    /// [`ProjectId`]), registers each declared process as a trust-gated command, then
     /// reconciles leftover process groups and starts the trusted auto-start commands.
     ///
     /// When the folder has no `solo.yml`, one is auto-created from its detected commands
     /// before opening, so a project opened from an arbitrary folder is usable; an existing
-    /// `solo.yml` is never rewritten. Reconciliation runs **after** registration so a
-    /// leftover group matching a `solo.yml` command is adopted rather than mis-surfaced as
-    /// an orphan. Starting is the supervisor's trusted-auto-start subset, so a detected
-    /// (hence untrusted) command is registered (visible, `Stopped`) but never run until its
+    /// `solo.yml` is never rewritten. A `solo.yml` that does not parse fails the open with
+    /// the parser's complaint and registers nothing — the config is read before the project
+    /// is persisted, so a failed open leaves no project behind. Reconciliation runs **after**
+    /// registration so a leftover group matching a `solo.yml` command is adopted rather than
+    /// mis-surfaced as an orphan. Starting is the supervisor's trusted-auto-start subset, so a
+    /// detected (hence untrusted) command is registered (visible, `Stopped`) but never run until its
     /// variant is trusted. Returns the project's id, how many processes its `solo.yml`
     /// declared, and whether the file was just created, so the caller can tell the user
     /// what happened instead of doing so silently. Must run within a `tokio` runtime
@@ -184,25 +186,30 @@ impl<'a> ProjectService<'a> {
         Ok(())
     }
 
-    /// Adds the project (auto-creating its `solo.yml` when absent), loads the config,
-    /// persists the resolved display metadata, announces the open, and registers each
-    /// command as a trust-gated process — the shared path under [`Self::open`] (which then
-    /// reconciles and starts) and [`Self::restore`] (which does neither). Returns the
-    /// durable record, the parsed config, and whether the `solo.yml` was just created. Does
+    /// Resolves the root, auto-creates its `solo.yml` when absent, reads the config, persists
+    /// the project with the display metadata that config carries, announces the open, and
+    /// registers each command as a trust-gated process — the shared path under [`Self::open`]
+    /// (which then reconciles and starts) and [`Self::restore`] (which does neither). Returns
+    /// the durable record, the parsed config, and whether the `solo.yml` was just created. Does
     /// not reconcile orphans or start — the caller decides.
+    ///
+    /// The config is read **before** the record is persisted, so a `solo.yml` that does not
+    /// parse fails the open outright rather than leaving a durable project the caller was told
+    /// does not exist. Nothing on disk is touched on that path: an existing `solo.yml` is never
+    /// rewritten, least of all one we could not parse.
     fn open_and_register(
         &self,
         root: &Path,
     ) -> Result<(ProjectRecord, SoloYml, bool), LoadProjectError> {
-        let record = self.projects.add(root, None, None)?;
-        let created = crate::config::create_if_absent(&record.root)?;
-        let config = self.config.open(record.id, record.root.clone())?;
-        // Persist the project's display metadata now the config is known. The id had to
-        // be assigned first (`config.open` needs it), but the `name`/`icon` come from the
-        // file — so a second idempotent upsert (keyed on the canonical root) records them.
+        let root = Projects::canonical_root(root)?;
+        let created = crate::config::create_if_absent(&root)?;
+        let declared = crate::config::load_or_empty(&crate::config::config_path(&root))?.1;
         let record =
             self.projects
-                .add(&record.root, config.name.as_deref(), config.icon.as_deref())?;
+                .add(&root, declared.name.as_deref(), declared.icon.as_deref())?;
+        // Seed the sync engine now the durable id it keys on exists. Its own read is the
+        // snapshot every later reload diffs against, so registrations come from it.
+        let config = self.config.open(record.id, root)?;
         // Announce the project before its processes, so an adapter re-reading the project
         // read model has it in view before any `ProcessSpawned` references it.
         self.bus
