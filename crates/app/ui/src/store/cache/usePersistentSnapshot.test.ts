@@ -12,6 +12,7 @@ vi.mock("@/store/cache/persistentCache", () => ({
 
 import { CacheKey, readSnapshot, writeSnapshot } from "@/store/cache/persistentCache";
 import { usePersistentSnapshot } from "@/store/cache/usePersistentSnapshot";
+import type { SnapshotFetcher } from "@/store/cache/usePersistentSnapshot";
 
 const read = vi.mocked(readSnapshot);
 const write = vi.mocked(writeSnapshot);
@@ -107,5 +108,78 @@ describe("usePersistentSnapshot", () => {
 
     act(() => resolveDetect(["detected"]));
     await waitFor(() => expect(result.current.value).toEqual(["detected"]));
+  });
+
+  it("keeps the newer revalidate's result and never persists an older one landing after it (out-of-order resolution)", async () => {
+    // Two domain events in quick succession (e.g. ProjectOpened then ProjectRemoved), or
+    // onResync racing a domain event, start a second revalidate before the first has settled.
+    read.mockResolvedValue(null);
+    const resolvers: Array<(value: string[]) => void> = [];
+    const fetcher = vi.fn(() => new Promise<string[]>((resolve) => resolvers.push(resolve)));
+
+    const { result } = renderHook(() =>
+      usePersistentSnapshot(CacheKey.projects, fetcher, { revalidateOnMount: false }),
+    );
+
+    act(() => result.current.revalidate());
+    act(() => result.current.revalidate());
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    // Resolve the newer request first, then the older one lands after it.
+    act(() => resolvers[1](["newer"]));
+    await waitFor(() => expect(result.current.value).toEqual(["newer"]));
+
+    await act(async () => {
+      resolvers[0](["older"]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(result.current.value).toEqual(["newer"]);
+    expect(write).toHaveBeenCalledWith(CacheKey.projects, ["newer"]);
+    expect(write).not.toHaveBeenCalledWith(CacheKey.projects, ["older"]);
+  });
+
+  it("drops a stale generation's partial emitted after a newer revalidate has already started", async () => {
+    read.mockResolvedValue(null);
+    let staleEmit: ((partial: string[]) => void) | undefined;
+    let resolveNewer: (value: string[]) => void = () => {};
+    const fetcher = vi
+      .fn<SnapshotFetcher<string[]>>()
+      .mockImplementationOnce((emit) => {
+        staleEmit = emit;
+        return new Promise<string[]>(() => {});
+      })
+      .mockImplementationOnce(() => new Promise<string[]>((resolve) => (resolveNewer = resolve)));
+
+    const { result } = renderHook(() =>
+      usePersistentSnapshot(CacheKey.projects, fetcher, { revalidateOnMount: false }),
+    );
+
+    act(() => result.current.revalidate());
+    act(() => result.current.revalidate());
+
+    await act(async () => {
+      staleEmit?.(["stale-partial"]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(result.current.value).not.toEqual(["stale-partial"]);
+
+    act(() => resolveNewer(["fresh"]));
+    await waitFor(() => expect(result.current.value).toEqual(["fresh"]));
+  });
+
+  it("still accepts the first caller-triggered revalidate when revalidateOnMount is false", async () => {
+    read.mockResolvedValue(null);
+    const fetcher = vi.fn(() => Promise.resolve(["fresh"]));
+    const { result } = renderHook(() =>
+      usePersistentSnapshot(CacheKey.agents, fetcher, { revalidateOnMount: false }),
+    );
+
+    await waitFor(() => expect(result.current.value).toBeNull());
+    expect(fetcher).not.toHaveBeenCalled();
+
+    act(() => result.current.revalidate());
+    await waitFor(() => expect(result.current.value).toEqual(["fresh"]));
+    expect(write).toHaveBeenCalledWith(CacheKey.agents, ["fresh"]);
   });
 });

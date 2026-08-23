@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addLocalCommand,
   addSharedCommand,
@@ -22,13 +22,22 @@ import { CommandList } from "@/components/project-settings/CommandList";
 import { NotificationsSection } from "@/components/project-settings/NotificationsSection";
 import { OverviewSection } from "@/components/project-settings/OverviewSection";
 import { ProjectSettingsSection } from "@/components/project-settings/ProjectSettingsSection";
+import { specOf } from "@/components/project-settings/spec";
 import { PROJECT_TABS, type ProjectTabId } from "@/components/project-settings/tabs";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { monogram } from "@/store/projects";
 import type { CommandOps } from "@/components/project-settings/commands";
 import type { Option } from "@/lib/appearance";
-import type { ProjectSettingsPage, ProjectView } from "@/domain";
+import type { ProcessSpec, ProjectCommandView, ProjectSettingsPage, ProjectView } from "@/domain";
+
+// The name and spec a command's edit or rename most recently dispatched, keyed by the
+// ProjectCommandView identity its editor holds — not by the name captured when it was rendered.
+// A write still outstanding leaves its entry here for the next write on the same row to build on,
+// so a patch issued before an earlier one's reload lands still carries that earlier change, and a
+// patch issued after a rename still targets the row's current name. Cleared once its own write
+// settles, so it holds only what is genuinely still in flight.
+type PendingWrite = { name: string; spec: ProcessSpec };
 
 // The section switch reuses the project tab list as the app's one view-switch vocabulary — the
 // SegmentedControl (DESIGN.md §5), the same control the orchestration pane uses, rather than a
@@ -49,6 +58,7 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
   const [error, setError] = useState<string | null>(null);
 
   const id = project.id;
+  const pendingWrites = useRef<Map<ProjectCommandView, PendingWrite> | null>(null);
 
   const reload = useCallback(
     () =>
@@ -73,20 +83,45 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
     [reload],
   );
 
-  const ops = useMemo<CommandOps>(
-    () => ({
-      edit: (cmd, spec) =>
-        mutate(() =>
-          (cmd.visibility === "shared" ? editSharedCommand : editLocalCommand)(id, cmd.name, spec),
-        ),
-      rename: (cmd, to) =>
-        mutate(() =>
-          (cmd.visibility === "shared" ? renameSharedCommand : renameLocalCommand)(
+  const ops = useMemo<CommandOps>(() => {
+    const pending = (pendingWrites.current ??= new Map<ProjectCommandView, PendingWrite>());
+    // An entry clears when its own write settles — on success *or* failure alike, deliberately,
+    // not as `.finally`'s default side effect. `mutate` reloads only on success, so after a
+    // rejection `page` still holds the pre-write value and the user has already been shown the
+    // error; carrying the rejected field into a later write's merge base would silently resurrect
+    // a change the error said did not apply. A write still outstanding when it later fails is not
+    // penalised for having been outstanding: the identity check below means only *its own* entry
+    // is at risk, and a later write dispatched while it was still in flight has already installed
+    // its own (newer) entry over it, so that later write's base is untouched by the failure.
+    const settle = (cmd: ProjectCommandView, entry: PendingWrite) => () => {
+      if (pending.get(cmd) === entry) pending.delete(cmd);
+    };
+    return {
+      edit: (cmd, patch) =>
+        mutate(() => {
+          const prior = pending.get(cmd);
+          const name = prior?.name ?? cmd.name;
+          const spec: ProcessSpec = { ...(prior?.spec ?? specOf(cmd)), ...patch };
+          const entry = { name, spec };
+          pending.set(cmd, entry);
+          return (cmd.visibility === "shared" ? editSharedCommand : editLocalCommand)(
             id,
-            cmd.name,
+            name,
+            spec,
+          ).finally(settle(cmd, entry));
+        }),
+      rename: (cmd, to) =>
+        mutate(() => {
+          const prior = pending.get(cmd);
+          const from = prior?.name ?? cmd.name;
+          const entry = { name: to, spec: prior?.spec ?? specOf(cmd) };
+          pending.set(cmd, entry);
+          return (cmd.visibility === "shared" ? renameSharedCommand : renameLocalCommand)(
+            id,
+            from,
             to,
-          ),
-        ),
+          ).finally(settle(cmd, entry));
+        }),
       setNotificationLevel: (cmd, level) =>
         mutate(() => setCommandNotificationLevel(id, cmd.name, level)),
       toggleStorage: (cmd) =>
@@ -104,9 +139,8 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
         (visibility === "shared" ? addSharedCommand : addLocalCommand)(id, name, spec).then(() => {
           void reload();
         }),
-    }),
-    [id, mutate, reload],
-  );
+    };
+  }, [id, mutate, reload]);
 
   const setIcon = useCallback(
     (icon: string) =>

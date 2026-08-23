@@ -42,17 +42,28 @@ export function usePersistentSnapshot<T>(
   const errorRef = useRef(options?.onError);
   errorRef.current = options?.onError;
   const revalidateOnMount = options?.revalidateOnMount ?? true;
+  // Two revalidations can overlap (a burst of domain events, or onResync racing one), and their
+  // fetches can settle out of order. Only the most recently started request may still apply its
+  // result — including the write-through, so a stale answer never reaches the on-disk cache.
+  const latest = useRef(0);
 
   const revalidate = useCallback(() => {
+    const generation = ++latest.current;
     // A partial refines the on-screen value only while it is still empty (a cold open), so a
     // cached snapshot is never downgraded to a partial mid-revalidation.
-    const emit = (partial: T) => setValue((current) => current ?? partial);
+    const emit = (partial: T) => {
+      if (generation !== latest.current) return;
+      setValue((current) => current ?? partial);
+    };
     fetcherRef.current(emit).then(
       (authoritative) => {
+        if (generation !== latest.current) return;
         setValue(authoritative);
         void writeSnapshot(key, authoritative);
       },
-      (reason) => errorRef.current?.(reason),
+      (reason) => {
+        if (generation === latest.current) errorRef.current?.(reason);
+      },
     );
   }, [key]);
 

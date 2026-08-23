@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { scratchpadLink, scratchpadRead, scratchpadRename } from "@/api";
+import { scratchpadLink, scratchpadRead, scratchpadRename, scratchpadWrite } from "@/api";
 import { useScratchpadEditor } from "@/store/useScratchpadEditor";
 import { expectCopyLinkWritesCoreLink } from "@/test/copyLinkContract";
+import {
+  expectCloseDiscardsInFlightRead,
+  expectSupersededReadIsDiscarded,
+} from "@/test/loadRaceContract";
 import type { ScratchpadView } from "@/domain";
 
 // The real-window "Copy link" hop (writeText reaching the OS clipboard) is not verifiable under
@@ -16,11 +20,11 @@ vi.mock("@/api", () => ({
   scratchpadLink: vi.fn(),
 }));
 
-const view = (name: string, revision = 3): ScratchpadView => ({
+const view = (name: string, revision = 3, body = "the plan"): ScratchpadView => ({
   id: 2,
   name,
-  body: "the plan",
-  rendered: `# ${name}\n\nthe plan`,
+  body,
+  rendered: `# ${name}\n\n${body}`,
   tags: [],
   archived: false,
   revision,
@@ -34,6 +38,49 @@ async function openedEditor(name: string) {
   await waitFor(() => expect(result.current.initialBody).toBe("the plan"));
   return result;
 }
+
+describe("useScratchpadEditor open", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("discards a superseded read that resolves after the current scratchpad", async () => {
+    const { result } = await expectSupersededReadIsDiscarded({
+      useStore: () => useScratchpadEditor(7),
+      readFn: vi.mocked(scratchpadRead),
+      open: (store, target) => store.open(target.name),
+      snapshotOf: (store) => ({
+        identity: store.name,
+        content: store.initialBody,
+        revision: store.baseRevision,
+      }),
+      snapshotIn: (target) => ({
+        identity: target.name,
+        content: target.body,
+        revision: target.revision,
+      }),
+      first: view("release-plan", 3, "the plan"),
+      second: view("research", 8, "the research notes"),
+    });
+
+    vi.mocked(scratchpadWrite).mockResolvedValueOnce(view("research", 9));
+    await act(() => result.current.save("the research notes, edited"));
+    expect(scratchpadWrite).toHaveBeenCalledWith(7, "research", "the research notes, edited", 8);
+  });
+
+  it("leaves the editor closed when an in-flight read resolves after close", () =>
+    expectCloseDiscardsInFlightRead({
+      useStore: () => useScratchpadEditor(7),
+      readFn: vi.mocked(scratchpadRead),
+      open: (store, target) => store.open(target.name),
+      close: (store) => store.close(),
+      snapshotOf: (store) => ({
+        identity: store.name,
+        content: store.initialBody,
+        revision: store.baseRevision,
+      }),
+      target: view("release-plan", 3),
+      mountKeyOf: (store) => store.mountKey,
+    }));
+});
 
 describe("useScratchpadEditor copy link", () => {
   afterEach(() => vi.clearAllMocks());

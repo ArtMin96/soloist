@@ -1,0 +1,40 @@
+Implement Slice 7 — remaining facade/adapter P1 from the DSA codebase audit.
+
+Follow the start-of-session protocol in CLAUDE.md first (PROGRESS.md, the
+architecture set, the phase file).
+
+The audit lives in Soloist MCP scratchpads. Read, in this order:
+  scratchpad_read "dsa-audit-contract"   — section 6 has the priority ranking
+  scratchpad_read "dsa-audit-S03"
+  scratchpad_read "dsa-audit-S05"
+  scratchpad_read "dsa-audit-S06"
+  scratchpad_read "dsa-audit-S17"
+  scratchpad_read "dsa-audit-S29"
+  scratchpad_read "dsa-audit-verify-A"
+  scratchpad_read "dsa-audit-verify-D"
+  scratchpad_read "dsa-audit-verify-F"
+
+Work items, in this order:
+1. S03-F2
+2. S05-F1
+3. S06-F1 (minimal)
+4. S17-F1
+5. S29-F1
+
+S05-F1: gh runs on the runtime worker — that's the fix; the doc-unreachable half was narrowed off. S06-F1 minimal = trust digest built twice. S29-F1 is the failure half only (highlighter.ts memoizes rejection forever); theme-signature drift was narrowed off.
+
+Rules that always apply:
+- Implement at the VERIFIER-NARROWED scope, not the lane's original proposal.
+  Where the verifier rejected or narrowed a sub-claim, honour that.
+- Test-first. Every new or changed test must be SHOWN TO FAIL against the
+  unfixed behaviour before you fix it — break the fix, watch it redden, restore.
+  Assert observable outcomes, never call shape.
+- Invoke the matching tauri-* skills and the testing-guidelines skill before
+  touching those surfaces. Confirm any Tauri API against the official docs.
+- Do not touch the locked non-changes: panic = "unwind", freezePrototype = false,
+  Cargo.lock brotli pins, release opt-level, removeUnusedCommands.
+- Run the full gate set ONCE at the end: just lint && just test.
+- Update PROGRESS.md before finishing.
+
+If any finding turns out to be wrong when you read the actual code, say so and
+stop rather than forcing the change.

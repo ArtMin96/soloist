@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { diagramRead, diagramRename, diagramWrite } from "@/api";
 import { useDiagramEditor } from "@/store/useDiagramEditor";
+import { expectSupersededReadIsDiscarded } from "@/test/loadRaceContract";
 import type { DiagramView } from "@/domain";
 
 vi.mock("@/api", () => ({
@@ -33,25 +34,23 @@ afterEach(() => vi.clearAllMocks());
 
 describe("useDiagramEditor open", () => {
   it("discards a superseded read that resolves after the current diagram", async () => {
-    let resolveFirst!: (value: DiagramView) => void;
-    vi.mocked(diagramRead)
-      .mockReturnValueOnce(
-        new Promise<DiagramView>((resolve) => {
-          resolveFirst = resolve;
-        }),
-      )
-      .mockResolvedValueOnce(view("data-model", 8, "flowchart LR\n  D-->E"));
-    const { result } = renderHook(() => useDiagramEditor(7));
-
-    act(() => result.current.open("auth-flow"));
-    act(() => result.current.open("data-model"));
-    await waitFor(() => expect(result.current.initialSource).toBe("flowchart LR\n  D-->E"));
-
-    await act(async () => resolveFirst(view("auth-flow", 3, "flowchart TD\n  A-->B")));
-
-    expect(result.current.name).toBe("data-model");
-    expect(result.current.initialSource).toBe("flowchart LR\n  D-->E");
-    expect(result.current.baseRevision).toBe(8);
+    const { result } = await expectSupersededReadIsDiscarded({
+      useStore: () => useDiagramEditor(7),
+      readFn: vi.mocked(diagramRead),
+      open: (store, target) => store.open(target.name),
+      snapshotOf: (store) => ({
+        identity: store.name,
+        content: store.initialSource,
+        revision: store.baseRevision,
+      }),
+      snapshotIn: (target) => ({
+        identity: target.name,
+        content: target.source,
+        revision: target.revision,
+      }),
+      first: view("auth-flow", 3, "flowchart TD\n  A-->B"),
+      second: view("data-model", 8, "flowchart LR\n  D-->E"),
+    });
 
     vi.mocked(diagramWrite).mockResolvedValueOnce(view("data-model", 9));
     await act(() => result.current.save("flowchart LR\n  D-->F"));

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 import { Field, ToggleRow } from "@/components/project-settings/fields";
-import { specOf } from "@/components/project-settings/spec";
 import { SettingChoice } from "@/components/settings/controls/SettingChoice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,12 +11,12 @@ import {
   levelLabel,
 } from "@/lib/notifications";
 import type { CommandOps } from "@/components/project-settings/commands";
-import type { NotificationLevel, ProcessSpec, ProjectCommandView } from "@/domain";
+import type { NotificationLevel, ProjectCommandView } from "@/domain";
 
 // The expanded editing form for one command: its command line, name, start / restart toggles, its
 // notification level, file-watch globs, where it is stored, and delete. Text fields commit on blur or Enter;
-// toggles persist on change. Each edit rebuilds the spec from the command's current fields so only
-// the changed field moves; the pane reloads the page after every mutation.
+// toggles persist on change. Each edit sends only the field it changed as a patch — the pane owns
+// merging it onto the command's current spec — and the pane reloads the page after every mutation.
 export function CommandEditor({
   command,
   projectLevel,
@@ -36,12 +35,9 @@ export function CommandEditor({
     command.notification_level !== null &&
     command.notification_level !== command.effective_notification_level;
 
-  const editField = (patch: Partial<ProcessSpec>) =>
-    ops.edit(command, { ...specOf(command), ...patch });
-
   const commitCommand = (value: string) => {
     const next = value.trim();
-    if (next && next !== command.command) editField({ command: next });
+    if (next && next !== command.command) ops.edit(command, { command: next });
   };
   const commitRename = (value: string) => {
     const next = value.trim();
@@ -50,11 +46,13 @@ export function CommandEditor({
   const addGlob = () => {
     const glob = newGlob.trim();
     if (!glob || command.restart_when_changed.includes(glob)) return;
-    editField({ restart_when_changed: [...command.restart_when_changed, glob] });
+    ops.edit(command, { restart_when_changed: [...command.restart_when_changed, glob] });
     setNewGlob("");
   };
   const removeGlob = (glob: string) =>
-    editField({ restart_when_changed: command.restart_when_changed.filter((g) => g !== glob) });
+    ops.edit(command, {
+      restart_when_changed: command.restart_when_changed.filter((g) => g !== glob),
+    });
 
   return (
     <div className="flex flex-col gap-4 border-t border-border bg-muted/30 px-3 py-3.5">
@@ -87,12 +85,12 @@ export function CommandEditor({
         <ToggleRow
           label="Start when the project opens"
           checked={command.auto_start}
-          onChange={(v) => editField({ auto_start: v })}
+          onChange={(v) => ops.edit(command, { auto_start: v })}
         />
         <ToggleRow
           label="Restart automatically when it exits"
           checked={command.auto_restart}
-          onChange={(v) => editField({ auto_restart: v })}
+          onChange={(v) => ops.edit(command, { auto_restart: v })}
         />
       </div>
 
