@@ -25,7 +25,7 @@ export function buildSpec(fields: CommandFields): ProcessSpec {
   };
 }
 
-// The spec a command currently carries — the base an edit patches a single field of.
+// The spec a command currently carries — the base the pane merges an edit's patch onto.
 export function specOf(command: ProjectCommandView): ProcessSpec {
   return buildSpec(command);
 }

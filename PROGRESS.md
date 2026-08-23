@@ -3041,6 +3041,86 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### DSA audit — Slice 2: frontend latest-request guard (2026-08-23) — `Done — pending verify`
+Work items S22-F1, S23-F1, S25-F1 commit 1, from the DSA codebase audit held in the Soloist MCP
+scratchpads (`dsa-audit-contract`, `dsa-audit-S22`, `dsa-audit-S23`, `dsa-audit-S25`,
+`dsa-audit-verify-E`). Implemented at the **verifier-narrowed** scope, not the lanes' original
+proposals. Gates green: `just lint` exit 0; `just test` exit 0 (1978 Rust tests, 1242 UI tests /
+170 files). Slice 1 (S20-F1 bare-PID kill; S18-F1+F2 shutdown ordering) landed earlier via PR #179
+`fix/setsid-containment-and-exit-ordering` (merged at `b4c98ef`): containment moved into the
+`soloist-exec` crate (`setsid()` at `crates/exec/src/lib.rs:159-172`, consumed by `crates/sys`), and
+`47f2c06` pins the exit path's servers-before-reap ordering.
+
+- **S22-F1 — stale-load guard ported into two document editors.** `useDiagramEditor` already
+  generation-guarded its read; `useScratchpadEditor` and `useTemplateEditor` did not, so a
+  superseded read landed under the newly-opened document's handle. Ported the ~6-line
+  `loadRequestRef` shape verbatim into both (`load` captures `++loadRequestRef.current`, the
+  `.then`/`.catch`/`.finally` each re-check it, `close()` bumps it). Harm is recorded as the
+  verifier narrowed it: the lane's "wrong-document write lands" needs a revision coincidence
+  (`R_a === R_b`); the reliably reachable harm is the wrong body under the current name, a
+  `mountKey` bump re-seeding the uncontrolled editor with the wrong text, and a following autosave
+  refused with a misleading conflict.
+  - **REJECTED and not built** (verifier): the `DocumentEditor<H, D>` union, `store/documentEditor.ts`,
+    `store/useDocumentEditor.ts`, and any shared `useLatestRequest` runtime primitive. The three
+    in-repo guards disagree on what identity means (load generation, snapshot generation, request
+    key), so a fourth wrapper would be speculative abstraction. Confirmed absent by search.
+  - New `crates/app/ui/src/test/loadRaceContract.ts` — the **only** shared artifact, a test contract
+    (precedent: `test/copyLinkContract.ts`) consumed by all three editor test files and nothing else.
+    `useDiagramEditor.test.ts`'s assertions are preserved, not weakened, by the adoption.
+- **S23-F1 — generation guard in `usePersistentSnapshot`.** `revalidate` had no fetch identity, so
+  the last `.then` to land won for both React state and the on-disk cache — a stale snapshot was
+  written through to `ui-cache.json` and became the next cold-start paint. Added `latest` ref with
+  three checks: the `emit` partial path, the authoritative path (**covering `writeSnapshot`, not
+  only `setValue`**), and the rejection path. `Snapshot<T>` unchanged, so zero caller edits.
+  Reachability recorded as the verifier narrowed it — two domain events in succession, or `onResync`
+  plus any domain event; the lane's dialog-focus story was dropped as platform-dependent.
+- **S25-F1 commit 1 — command edit carries a patch, not a rebuilt record.** `CommandOps.edit` now
+  takes `Partial<ProcessSpec>`; `CommandEditor.tsx` no longer imports `specOf` or `ProcessSpec` and
+  assembles no DTO — each of the five call sites names only the field it changed. Commit 2's
+  machinery (serialized write queue, `pageRef`, busy flag) was **not** built; out-of-order
+  `reload()`s remain open, and commit 2 is still blocked on an explicit drain-vs-abort decision.
+
+#### S25-F1 in-flight edit merge and review correction
+Commit 1 as the verifier defined it merges `{...specOf(page row), ...patch}` against the pane's
+possibly-stale `page`, and the verifier said plainly it "narrows but does not eliminate" the window.
+The delivered change keeps a `pendingEdits` map keyed by row identity, so a patch merges onto the
+last still-outstanding edit for that row. It was built because the brief required regression tests
+(a) and (c), and neither can pass at the verifier's literal commit-1 scope. Commit 2 remains
+separately open.
+
+Review found that the first version also stored a speculative rename target in this map. Renaming
+`Web` to an existing `API`, then editing before the duplicate-name rejection returned, addressed the
+edit to `API` and replaced that unrelated command's spec. Fixed by limiting the map to edit specs:
+edits and renames remain addressed to the confirmed `ProjectCommandView.name` until a successful
+reload supplies a row with the new name. The regression test drives the overlapping operations
+against a stateful fake backend and verifies the existing command still renders its own config; it
+failed against the reviewed implementation because `API` was overwritten.
+
+Review follow-up verification: the focused `ProjectSettingsPane.test.tsx` suite is 7/7 green after
+showing the new regression red against the reviewed implementation. React Doctor changed-scope scan
+is 83/100 with no findings (the first scan's render-time ref initialization finding was fixed with
+eager `useRef(new Map())`). `just lint` exits 0. `just test` is green when run with Unix-socket access:
+the first sandboxed run's 11 `soloist-app` failures were all `Operation not permitted` at socket
+binds; the unrestricted rerun passed the Rust workspace and 170 UI files / 1242 tests.
+
+On-failure semantics, decided and pinned by a test rather than left to `.finally`'s default:
+> A write's in-flight merge-base entry is dropped the moment that write settles unsuccessfully:
+> because `mutate` only reloads the page on success, a rejected write leaves `page` at its pre-write
+> value with the error already shown to the user, so nothing it changed may be carried into a later
+> write's payload — doing so would silently resurrect a change the error said did not apply. A write
+> that is still *outstanding* — not yet settled — does contribute to a later write issued while it's
+> in flight, since that later write correctly assumed it would land; and if that outstanding write
+> later fails, the failure does not disturb the newer write's already-installed entry, because the
+> clear is guarded by identity to the specific entry that write itself owns.
+
+`.finally` is retained deliberately: `.then(settle, settle)` would swallow the rejection (a bare
+`onRejected` that does not re-throw fulfils the promise), firing `mutate`'s `.then(reload)` and
+never its `.catch` — reloading as if the write had succeeded, with no error shown.
+
+Every new test was shown to fail against the unfixed behaviour, then re-reddened by breaking the fix
+and restored. Test (b) (out-of-order page reads) was deliberately not added — it belongs to commit 2.
+
+
 ### Phase 12 — Packaging (`.deb` + `.AppImage`, x86_64) IMPLEMENTED & gate-green (2026-06-30)
 Branch `feat/phase-12-packaging` (off `main`). **All v1 rows J1/J2/J3 + the owner-requested optional J4/J5/tray
 delivered.** No frontend/`/impeccable` surface — the tray, updater, autostart, and MIME-open are **Rust app-shell +
@@ -5895,6 +5975,37 @@ has a `GripVertical` icon. Both reviewers flagged it as "fine if deliberate"; le
   Rust and no supervisor/PTY behaviour.
 
 ## Next session should start with
+
+**◆ NEWEST (2026-08-23) — DSA audit slice 2 is landed and gate-green, UNCOMMITTED. Two threads
+are owed before moving on.**
+
+The working tree holds slice 2 (S22-F1, S23-F1, S25-F1 commit 1) across 12 modified files plus one
+new `crates/app/ui/src/test/loadRaceContract.ts`. `just lint` and `just test` both exit 0. Nothing is
+committed. The audit itself lives in the Soloist MCP scratchpads — read `dsa-audit-contract`
+(§ "Final priorities and dependencies" is the ranking) and `dsa-audit-verify-E` (the verifier's
+rulings, which override the lanes) before touching any further slice.
+
+1. **The `pendingEdits` mechanism in `ProjectSettingsPane.tsx` has now had its second review.** The
+   review found and the follow-up fixed a P1 speculative-rename overwrite: pending state now carries
+   edit specs only and never changes a command's confirmed name. Its on-failure semantics and the
+   duplicate-rename regression are test-pinned.
+2. **Decide drain-vs-abort for S25-F1 commit 2** before anyone builds it. Commit 2 is the serialized
+   write chain (`queue = queue.then(() => op()).then(reload)` + `pageRef`) that closes the remaining
+   out-of-order-`reload()` window. The verifier is explicit that a silently draining queue would hide
+   a rejection, so this needs a decision, not a guess.
+
+**Slice 1 is already done** — S20-F1 + S18-F1/F2 landed via PR #179
+`fix/setsid-containment-and-exit-ordering` (merged at `b4c98ef`), confirmed against the tree.
+Containment is **not** a `process_group` call inside `crates/sys`: it moved into the `soloist-exec`
+crate (`setsid()` at `crates/exec/src/lib.rs:159-172`, with `crates/sys/Cargo.toml` taking the
+dependency edge and `shellenv.rs`/`agents.rs` running through `soloist_exec::run`), and `47f2c06`
+pins the exit path's servers-before-reap ordering. When re-checking that locked invariant, grep for
+`soloist_exec`, not for `process_group` — the latter returns nothing and reads as a false negative.
+
+Remaining frontend slices, in the contract's order: slice 3 (S27 autosave single-flight — Pattern B,
+which the verifier warns must NOT get slice 2's latest-request guard: latest-wins on an in-flight
+*write* is data loss), then slices 4–10 as filed in `.scratch/dsa-audit/slices/`.
+
 
 **◆ NEWEST (2026-08-09) — git integration: PR 10 (the MCP git tools, todo 46) is built on
 `feat/git-mcp-tools`. Only PR 9 — the commit history viewer, todo 45 — is left of the stack.**

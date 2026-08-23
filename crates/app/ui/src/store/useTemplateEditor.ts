@@ -72,6 +72,7 @@ export function useTemplateEditor(project: number | null): TemplateEditorStore {
   const [conflict, setConflict] = useState<TemplateConflict | null>(null);
   const [error, setError] = useState<string | null>(null);
   const baseRevisionRef = useRef<number | null>(null);
+  const loadRequestRef = useRef(0);
 
   // Keeps every read and write in this hook inside the library the template was opened from.
   const idOf = useCallback(
@@ -81,11 +82,13 @@ export function useTemplateEditor(project: number | null): TemplateEditorStore {
 
   const load = useCallback(
     (target: TemplateKind, targetScope: TemplateScope, targetName: string) => {
+      const request = ++loadRequestRef.current;
       setLoading(true);
       setConflict(null);
       setError(null);
       templateRead(target, idOf(targetScope), targetName)
         .then((view) => {
+          if (request !== loadRequestRef.current) return;
           setInitialBody(view.body);
           setInitialDescription(view.description ?? "");
           setPlaceholders(view.placeholders);
@@ -95,10 +98,13 @@ export function useTemplateEditor(project: number | null): TemplateEditorStore {
           setMountKey((key) => key + 1);
         })
         .catch((reason) => {
+          if (request !== loadRequestRef.current) return;
           setInitialBody(null);
           setError(String(reason));
         })
-        .finally(() => setLoading(false));
+        .finally(() => {
+          if (request === loadRequestRef.current) setLoading(false);
+        });
     },
     [idOf],
   );
@@ -121,6 +127,7 @@ export function useTemplateEditor(project: number | null): TemplateEditorStore {
   );
 
   const close = useCallback(() => {
+    loadRequestRef.current += 1;
     setKind(null);
     setScope(null);
     setName(null);

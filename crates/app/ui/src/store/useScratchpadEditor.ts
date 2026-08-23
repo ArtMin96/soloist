@@ -58,14 +58,17 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
   const [conflict, setConflict] = useState<ScratchpadConflict | null>(null);
   const [error, setError] = useState<string | null>(null);
   const baseRevisionRef = useRef<number | null>(null);
+  const loadRequestRef = useRef(0);
 
   const load = useCallback(
     (target: string) => {
+      const request = ++loadRequestRef.current;
       setLoading(true);
       setConflict(null);
       setError(null);
       scratchpadRead(project, target)
         .then((view) => {
+          if (request !== loadRequestRef.current) return;
           setInitialBody(view.body);
           setBaseRevision(view.revision);
           baseRevisionRef.current = view.revision;
@@ -73,10 +76,13 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
           setMountKey((key) => key + 1);
         })
         .catch((reason) => {
+          if (request !== loadRequestRef.current) return;
           setInitialBody(null);
           setError(String(reason));
         })
-        .finally(() => setLoading(false));
+        .finally(() => {
+          if (request === loadRequestRef.current) setLoading(false);
+        });
     },
     [project],
   );
@@ -93,6 +99,7 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
   );
 
   const close = useCallback(() => {
+    loadRequestRef.current += 1;
     setName(null);
     setInitialBody(null);
     setBaseRevision(null);

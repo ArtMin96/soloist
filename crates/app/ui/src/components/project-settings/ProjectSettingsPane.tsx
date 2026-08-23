@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addLocalCommand,
   addSharedCommand,
@@ -22,13 +22,14 @@ import { CommandList } from "@/components/project-settings/CommandList";
 import { NotificationsSection } from "@/components/project-settings/NotificationsSection";
 import { OverviewSection } from "@/components/project-settings/OverviewSection";
 import { ProjectSettingsSection } from "@/components/project-settings/ProjectSettingsSection";
+import { specOf } from "@/components/project-settings/spec";
 import { PROJECT_TABS, type ProjectTabId } from "@/components/project-settings/tabs";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { monogram } from "@/store/projects";
 import type { CommandOps } from "@/components/project-settings/commands";
 import type { Option } from "@/lib/appearance";
-import type { ProjectSettingsPage, ProjectView } from "@/domain";
+import type { ProcessSpec, ProjectCommandView, ProjectSettingsPage, ProjectView } from "@/domain";
 
 // The section switch reuses the project tab list as the app's one view-switch vocabulary — the
 // SegmentedControl (DESIGN.md §5), the same control the orchestration pane uses, rather than a
@@ -49,6 +50,7 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
   const [error, setError] = useState<string | null>(null);
 
   const id = project.id;
+  const pendingEdits = useRef(new Map<ProjectCommandView, ProcessSpec>());
 
   const reload = useCallback(
     () =>
@@ -73,12 +75,22 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
     [reload],
   );
 
-  const ops = useMemo<CommandOps>(
-    () => ({
-      edit: (cmd, spec) =>
-        mutate(() =>
-          (cmd.visibility === "shared" ? editSharedCommand : editLocalCommand)(id, cmd.name, spec),
-        ),
+  const ops = useMemo<CommandOps>(() => {
+    const pending = pendingEdits.current;
+    const settle = (cmd: ProjectCommandView, spec: ProcessSpec) => () => {
+      if (pending.get(cmd) === spec) pending.delete(cmd);
+    };
+    return {
+      edit: (cmd, patch) =>
+        mutate(() => {
+          const spec: ProcessSpec = { ...(pending.get(cmd) ?? specOf(cmd)), ...patch };
+          pending.set(cmd, spec);
+          return (cmd.visibility === "shared" ? editSharedCommand : editLocalCommand)(
+            id,
+            cmd.name,
+            spec,
+          ).finally(settle(cmd, spec));
+        }),
       rename: (cmd, to) =>
         mutate(() =>
           (cmd.visibility === "shared" ? renameSharedCommand : renameLocalCommand)(
@@ -104,9 +116,8 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
         (visibility === "shared" ? addSharedCommand : addLocalCommand)(id, name, spec).then(() => {
           void reload();
         }),
-    }),
-    [id, mutate, reload],
-  );
+    };
+  }, [id, mutate, reload]);
 
   const setIcon = useCallback(
     (icon: string) =>

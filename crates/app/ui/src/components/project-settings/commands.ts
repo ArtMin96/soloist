@@ -5,8 +5,10 @@ import type { NotificationLevel, ProcessSpec, ProjectCommandView, Visibility } f
 // move) pick the shared-vs-local core command from a command's `visibility` in the pane, so the
 // presentational components never branch on it.
 export interface CommandOps {
-  // Replace a command's spec — the editor patches one field and preserves the rest.
-  edit: (command: ProjectCommandView, spec: ProcessSpec) => void;
+  // Patch a command's spec with only the field(s) that changed. The pane merges the patch onto
+  // the command's current spec before it reaches the wire, so the caller carries intent, never a
+  // reconstructed record.
+  edit: (command: ProjectCommandView, patch: Partial<ProcessSpec>) => void;
   // Rename a command in place.
   rename: (command: ProjectCommandView, to: string) => void;
   // Override the command's notification level, or clear it with `null` so it inherits the

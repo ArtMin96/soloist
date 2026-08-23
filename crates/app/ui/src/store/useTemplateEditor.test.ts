@@ -4,6 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { templateRead, templateUpdate } from "@/api";
 import type { TemplateView } from "@/domain";
 import { useTemplateEditor } from "@/store/useTemplateEditor";
+import {
+  expectCloseDiscardsInFlightRead,
+  expectSupersededReadIsDiscarded,
+} from "@/test/loadRaceContract";
 
 vi.mock("@/api", () => ({
   templateRead: vi.fn(),
@@ -20,11 +24,12 @@ function view(
   revision: number,
   body = "the body",
   description: string | null = "a note",
+  name = "daily",
 ): TemplateView {
   return {
     id: 3,
     kind: "scratchpad",
-    name: "daily",
+    name,
     description,
     body,
     placeholders: [],
@@ -174,6 +179,54 @@ describe("useTemplateEditor", () => {
     // The editor is uncontrolled, so only a remount re-seeds it with the body just loaded.
     expect(result.current.mountKey).toBeGreaterThan(beforeReload);
   });
+
+  it("discards a superseded read that resolves after the current template", async () => {
+    const { result } = await expectSupersededReadIsDiscarded({
+      useStore: () => useTemplateEditor(OPEN_PROJECT),
+      readFn: read,
+      open: (store, target) => store.open(target.kind, target.scope, target.name),
+      snapshotOf: (store) => ({
+        identity: store.name,
+        content: store.initialBody,
+        revision: store.baseRevision,
+      }),
+      snapshotIn: (target) => ({
+        identity: target.name,
+        content: target.body,
+        revision: target.revision,
+      }),
+      first: view(3, "the daily body", "daily note", "daily"),
+      second: view(8, "the weekly body", "weekly note", "weekly"),
+    });
+
+    update.mockResolvedValueOnce(view(9, "weekly edited", "weekly note", "weekly"));
+    await act(async () => {
+      await result.current.save("weekly note", "weekly edited");
+    });
+    expect(update).toHaveBeenCalledWith(
+      "scratchpad",
+      null,
+      "weekly",
+      "weekly note",
+      "weekly edited",
+      8,
+    );
+  });
+
+  it("leaves the editor closed when an in-flight read resolves after close", () =>
+    expectCloseDiscardsInFlightRead({
+      useStore: () => useTemplateEditor(OPEN_PROJECT),
+      readFn: read,
+      open: (store, target) => store.open(target.kind, target.scope, target.name),
+      close: (store) => store.close(),
+      snapshotOf: (store) => ({
+        identity: store.name,
+        content: store.initialBody,
+        revision: store.baseRevision,
+      }),
+      target: view(3),
+      mountKeyOf: (store) => store.mountKey,
+    }));
 
   it("closing forgets the open template so the next open starts clean", async () => {
     read.mockResolvedValue(view(5));
