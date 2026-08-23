@@ -84,8 +84,8 @@
 > (which prunes) before `resolve`, and that dependency was documented nowhere; after this fix the
 > dependency is redundant rather than load-bearing. The facade was not changed.
 >
-> **C1 gate — the row-type decision required to land alongside S08-F2 is recorded**, in
-> `.scratch/dsa-audit/c1-row-type-decision.md`: do **not** unify `Scratchpads` and `Diagrams` into one
+> **C1 gate — the row-type decision required to land alongside S08-F2 is recorded here**: do **not**
+> unify `Scratchpads` and `Diagrams` into one
 > generic document aggregate. The duplication is real (`diagram_repo.rs` ~70% line-identical to
 > `scratchpad_repo.rs` after renaming, same for the store pair and the two in-memory fakes), but the
 > aggregates genuinely differ — `transfer` + the derived-todo cascade, template seeding, and the
@@ -3247,8 +3247,8 @@ gate; `pnpm -C crates/app/ui test` 171 files / 1255 tests passed. `just e2e` not
   **Narrowed (verifier):** the security framing — no path grants an expired request today (approval
   also needs three independently-agreeing hashes); the live defect is a mislabelled receipt/event,
   not a security hole, and the tests assert exactly that.
-- **C1 — declined to unify `Scratchpads`/`Diagrams` into one generic document aggregate**, recorded in
-  `.scratch/dsa-audit/c1-row-type-decision.md`. The ~70% line-identical duplication (repo, store,
+- **C1 — declined to unify `Scratchpads`/`Diagrams` into one generic document aggregate.** This ledger
+  is the record of that decision. The ~70% line-identical duplication (repo, store,
   in-memory fakes) is real but the aggregates differ in `transfer` + the derived-todo cascade,
   template seeding, and the heading-skipping `gist` rule; a generic rewrite does not clear the risk
   for one defect (S08-F2) that was fixable locally. Unblocks S16-F1 (`doc_table`) and the S15 fakes
@@ -6225,8 +6225,8 @@ The working tree now holds slices 2, 3 and 4 together: slice 2's frontend latest
 slice 3's autosave rebuild + settings write queue, and slice 4's S08-F2
 (`crates/core/src/coordination/scratchpad.rs` + `facade/scratchpad.rs`), S11-F1
 (`crates/core/src/git/commit.rs` + `repository.rs`), and S12-F2
-(`crates/core/src/trust/requests.rs`), plus the standalone C1 row-type decision written to
-`.scratch/dsa-audit/c1-row-type-decision.md`. Full gate set re-run once this session: `just lint`
+(`crates/core/src/trust/requests.rs`), plus the C1 row-type decision recorded in this
+ledger. Full gate set re-run once this session: `just lint`
 exit 0; `just test` exit 0 (`cargo test --workspace` 1983 passed / 0 failed / 3 ignored across 55
 test binaries, plus 2 more from `just lint`'s own schema-feature step, 1985 total across the full
 gate; `pnpm -C crates/app/ui test` 171 files / 1255 tests passed). `just e2e` not run. Nothing here
