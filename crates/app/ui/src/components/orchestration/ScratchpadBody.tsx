@@ -4,6 +4,7 @@ import { exportMarkdown } from "@/api";
 import { Button } from "@/components/ui/button";
 import { LazyRichTextEditor } from "@/components/editor/LazyRichTextEditor";
 import { useAutosave } from "@/components/editor/useAutosave";
+import type { SaveOutcome } from "@/store/saveOutcome";
 
 interface ScratchpadBodyProps {
   /** The Markdown to seed the editor with — this component is remounted per document, so it is read once. */
@@ -11,7 +12,7 @@ interface ScratchpadBodyProps {
   /** The document's name, used to shape the copied Markdown (`# name` + body). */
   name: string;
   /** Persists the Markdown body revision-guarded; the panel routes it to the core. */
-  onSave: (markdown: string) => Promise<void>;
+  onSave: (markdown: string) => Promise<SaveOutcome>;
   /** True while a revision conflict is unresolved: autosave pauses until the panel reloads. */
   paused: boolean;
 }

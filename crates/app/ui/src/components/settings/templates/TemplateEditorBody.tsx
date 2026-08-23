@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LazyRichTextEditor } from "@/components/editor/LazyRichTextEditor";
 import { useAutosave } from "@/components/editor/useAutosave";
+import type { SaveOutcome } from "@/store/saveOutcome";
 
 interface TemplateEditorBodyProps {
   /** The Markdown body to seed the editor with — read once (this component is remounted per template). */
@@ -11,7 +12,7 @@ interface TemplateEditorBodyProps {
   /** The one-line description the template loaded with — read once, then controlled locally. */
   initialDescription: string;
   /** Persists the description + body revision-guarded; the panel routes it to the core. */
-  onSave: (description: string, body: string) => Promise<void>;
+  onSave: (description: string, body: string) => Promise<SaveOutcome>;
   /** True while a revision conflict is unresolved: autosave pauses until the panel reloads. */
   paused: boolean;
 }

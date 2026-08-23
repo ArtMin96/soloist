@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { diagramRead, diagramRename, diagramWrite } from "@/api";
+import type { SaveOutcome } from "@/store/saveOutcome";
 
 // A revision conflict surfaced to the panel: a write was refused because the diagram moved on since it
 // was opened. `actual` is the revision it now sits at, so the banner can name it.
@@ -27,8 +28,12 @@ export interface DiagramEditorStore {
   error: string | null;
   open: (name: string) => void;
   close: () => void;
-  /** Saves the Mermaid source revision-guarded; resolves once the outcome (success/conflict/error) is set. */
-  save: (source: string) => Promise<void>;
+  /**
+   * Saves the Mermaid source revision-guarded, resolving to whether it went through. A refusal
+   * (conflict or error) never rejects — it is surfaced through `conflict`/`error` state, and the
+   * resolved `"refused"` is the caller's signal that nothing was persisted.
+   */
+  save: (source: string) => Promise<SaveOutcome>;
   /** Reload the open diagram fresh, discarding local edits — the conflict resolution. */
   reload: () => void;
   /**
@@ -111,13 +116,14 @@ export function useDiagramEditor(project: number): DiagramEditorStore {
   }, [name, load]);
 
   const save = useCallback(
-    async (source: string) => {
-      if (name == null) return;
+    async (source: string): Promise<SaveOutcome> => {
+      if (name == null) return "refused";
       setError(null);
       try {
         const view = await diagramWrite(project, name, source, baseRevisionRef.current);
         setBaseRevision(view.revision);
         baseRevisionRef.current = view.revision;
+        return "saved";
       } catch (reason) {
         // The write was refused. Re-read to tell a stale revision (a concurrent edit landed — surface a
         // conflict and leave the user's edits intact) from any other rejection (e.g. an invalid
@@ -132,6 +138,7 @@ export function useDiagramEditor(project: number): DiagramEditorStore {
         } catch (readReason) {
           setError(String(readReason));
         }
+        return "refused";
       }
     },
     [project, name],

@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { TodoDocFields } from "@/components/orchestration/TodoDocFields";
+import type { SaveOutcome } from "@/store/saveOutcome";
 import type { ScratchpadSummary, TodoDoc, TodoStatus } from "@/domain";
 
 interface TodoCreateFormProps {
   /** Posts the new document and its association — the board routes it to the core. */
-  onCreate: (doc: TodoDoc, scratchpad: number | null) => Promise<void>;
+  onCreate: (doc: TodoDoc, scratchpad: number | null) => Promise<SaveOutcome>;
   /** The project's scratchpads, offered as the documents this todo may derive from. */
   scratchpads: ScratchpadSummary[];
   /** Dismiss the form without creating. */

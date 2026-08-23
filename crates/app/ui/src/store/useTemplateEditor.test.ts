@@ -77,9 +77,7 @@ describe("useTemplateEditor", () => {
     await waitFor(() => expect(result.current.baseRevision).toBe(5));
 
     update.mockResolvedValue(view(6, "changed"));
-    await act(async () => {
-      await result.current.save("a note", "changed");
-    });
+    await expect(result.current.save("a note", "changed")).resolves.toBe("saved");
     await waitFor(() => expect(result.current.baseRevision).toBe(6));
     expect(result.current.error).toBeNull();
   });
@@ -110,9 +108,7 @@ describe("useTemplateEditor", () => {
     // The write is refused; the re-read shows a newer revision — a real conflict, not a validation error.
     update.mockRejectedValue("template revision conflict");
     read.mockResolvedValue(view(8));
-    await act(async () => {
-      await result.current.save("a note", "mine");
-    });
+    await expect(result.current.save("a note", "mine")).resolves.toBe("refused");
     await waitFor(() => expect(result.current.conflict).toEqual({ actual: 8 }));
     // Nothing was clobbered; the guard is untouched so a reload is the only way forward.
     expect(result.current.baseRevision).toBe(5);
@@ -144,9 +140,7 @@ describe("useTemplateEditor", () => {
     // The write is refused but the revision did not move — an invalid document, surfaced verbatim.
     update.mockRejectedValue("template is not well-formed: the body is empty");
     read.mockResolvedValue(view(5));
-    await act(async () => {
-      await result.current.save("a note", "");
-    });
+    await expect(result.current.save("a note", "")).resolves.toBe("refused");
     await waitFor(() =>
       expect(result.current.error).toBe("template is not well-formed: the body is empty"),
     );

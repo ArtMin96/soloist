@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ScratchpadBody } from "@/components/orchestration/ScratchpadBody";
 import { ScratchpadTitle } from "@/components/orchestration/ScratchpadTitle";
 import { humanizeName } from "@/lib/humanize";
+import type { SaveOutcome } from "@/store/saveOutcome";
 import type { ScratchpadConflict } from "@/store/useScratchpadEditor";
 
 interface ScratchpadEditorProps {
@@ -16,7 +17,7 @@ interface ScratchpadEditorProps {
   error: string | null;
   /** Whether the open scratchpad is archived — flips the header control between Archive and Restore. */
   archived: boolean;
-  onSave: (markdown: string) => Promise<void>;
+  onSave: (markdown: string) => Promise<SaveOutcome>;
   onReload: () => void;
   onCopyLink: () => void;
   /** Archives the open scratchpad, or restores it when already archived (also bound to Ctrl+Shift+W). */

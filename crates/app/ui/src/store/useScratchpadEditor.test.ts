@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { scratchpadLink, scratchpadRead, scratchpadRename, scratchpadWrite } from "@/api";
 import { useScratchpadEditor } from "@/store/useScratchpadEditor";
+import type { SaveOutcome } from "@/store/saveOutcome";
 import { expectCopyLinkWritesCoreLink } from "@/test/copyLinkContract";
 import {
   expectCloseDiscardsInFlightRead,
@@ -80,6 +81,47 @@ describe("useScratchpadEditor open", () => {
       target: view("release-plan", 3),
       mountKeyOf: (store) => store.mountKey,
     }));
+});
+
+describe("useScratchpadEditor save", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("resolves to saved on a successful write", async () => {
+    const result = await openedEditor("release-plan");
+    vi.mocked(scratchpadWrite).mockResolvedValueOnce(view("release-plan", 4));
+
+    await expect(result.current.save("edited")).resolves.toBe("saved");
+    expect(result.current.conflict).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  it("resolves to refused when a refused write reveals a moved-on revision", async () => {
+    const result = await openedEditor("release-plan");
+    vi.mocked(scratchpadWrite).mockRejectedValueOnce("stale revision");
+    vi.mocked(scratchpadRead).mockResolvedValueOnce(view("release-plan", 9));
+
+    let outcome: SaveOutcome | undefined;
+    await act(async () => {
+      outcome = await result.current.save("edited");
+    });
+
+    expect(outcome).toBe("refused");
+    expect(result.current.conflict).toEqual({ actual: 9 });
+  });
+
+  it("resolves to refused when a refused write is not a revision move", async () => {
+    const result = await openedEditor("release-plan");
+    vi.mocked(scratchpadWrite).mockRejectedValueOnce("invalid document");
+    vi.mocked(scratchpadRead).mockResolvedValueOnce(view("release-plan", 3));
+
+    let outcome: SaveOutcome | undefined;
+    await act(async () => {
+      outcome = await result.current.save("edited");
+    });
+
+    expect(outcome).toBe("refused");
+    expect(result.current.error).toBe("invalid document");
+  });
 });
 
 describe("useScratchpadEditor copy link", () => {

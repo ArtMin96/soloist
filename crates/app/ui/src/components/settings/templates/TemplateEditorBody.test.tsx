@@ -32,7 +32,7 @@ describe("TemplateEditorBody copy", () => {
       <TemplateEditorBody
         initialBody={BODY}
         initialDescription=""
-        onSave={() => Promise.resolve()}
+        onSave={() => Promise.resolve("saved")}
         paused={false}
       />,
     );
@@ -49,7 +49,7 @@ describe("TemplateEditorBody copy", () => {
       <TemplateEditorBody
         initialBody={BODY}
         initialDescription=""
-        onSave={() => Promise.resolve()}
+        onSave={() => Promise.resolve("saved")}
         paused={false}
       />,
     );
