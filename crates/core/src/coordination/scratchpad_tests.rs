@@ -199,6 +199,19 @@ fn rename_reports_missing_and_taken() {
 }
 
 #[test]
+fn rename_rejects_a_blank_target_name_without_moving_the_scratchpad() {
+    let pads = scratchpads();
+    pads.write(PROJECT, "old", body(), None).expect("create");
+
+    assert!(matches!(
+        pads.rename(PROJECT, "old", "   "),
+        Err(RenameError::Invalid(message)) if message.contains("name")
+    ));
+    assert!(pads.read(PROJECT, "old").unwrap().is_some());
+    assert!(pads.read(PROJECT, "   ").unwrap().is_none());
+}
+
+#[test]
 fn tags_add_dedupe_remove_and_list_distinct() {
     let pads = scratchpads();
     pads.write(PROJECT, "a", body(), None).expect("create a");

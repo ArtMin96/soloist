@@ -221,6 +221,27 @@ fn scratchpad_rename_in_refuses_a_taken_name_and_an_unknown_scratchpad() {
 }
 
 #[test]
+fn scratchpad_rename_in_refuses_a_blank_target_name_and_publishes_nothing() {
+    let (facade, a, _) = two_projects();
+    facade
+        .scratchpad_write_in(a, "plan", body(), None)
+        .expect("create");
+    let mut rx = facade.subscribe();
+
+    assert!(matches!(
+        facade.scratchpad_rename_in(a, "plan", "   "),
+        Err(CoordinationError::InvalidScratchpad(_))
+    ));
+
+    assert!(
+        drain(&mut rx).is_empty(),
+        "a refused rename must not publish a scratchpad change event"
+    );
+    // The document is still readable under its original name.
+    assert!(facade.scratchpad_read_in(a, "plan").is_ok());
+}
+
+#[test]
 fn tags_and_archive_round_trip_through_the_facade() {
     let (facade, session) = scoped_facade();
     facade
