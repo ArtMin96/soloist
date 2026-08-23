@@ -6218,8 +6218,47 @@ has a `GripVertical` icon. Both reviewers flagged it as "fine if deliberate"; le
 
 ## Next session should start with
 
-**◆ NEWEST (2026-08-23) — DSA audit slice 4 is landed and gate-green, UNCOMMITTED, on top of
-slices 2 and 3 (also still uncommitted). Commit and open the PR before touching slice 5.**
+**◆ NEWEST (2026-08-23) — DSA audit slice 5 is landed and gate-green on branch
+`fix/dsa-slice-05-processactionhandlers-contract`, committed but NOT yet pushed or PR'd.**
+
+Slice 5 is the audit's C4 cluster — `ProcessActionHandlers` contract erosion (S28-F1 as
+authoritative owner, S26-F2 as its dependent slice, plus `App.tsx`), then S28-F2. Four commits:
+
+- `e18fafe` — the sidebar chain (`Sidebar`/`ProjectGroup`/`ProcessGroup`/`ProcessNode`/`ProcessRow`)
+  and `TerminalPane` each took the canonical `ProcessActionHandlers` as one prop instead of six
+  zero-arg props they rebuilt the object from. `App.tsx` now builds one handler object for the
+  sidebar, every pooled terminal pane and the command palette, and `reviewById` with its
+  `store.processes.find` scan is deleted. A consumer in `harness.tsx` turned up on the sweep that
+  the audit had not listed. Net 256 deletions against 234 insertions, most insertions being tests.
+- `34277fd` — the project right-click menu's first test coverage, landed on its own ahead of the
+  refactor as the contract required. Nothing in the repo had ever opened that menu.
+- `8b589c9` — `projectActions` returns an ordered `ProjectActionSection[]` with empty sections
+  omitted, and both menu bodies render through one `ProjectActionSections` component parameterized
+  by a module-level parts record. `ProjectGroup.tsx` 326 → 286 lines.
+- `e79dcf9` — prettier formatting on four sidebar test files.
+
+Full gate set run once at the end: `just lint` exit 0; `just test` exit 0 (`cargo test --workspace`
+1983 passed / 0 failed / 3 ignored across 54 binaries — unchanged, this slice is frontend-only;
+`pnpm -C crates/app/ui test` 171 files / 1273 tests passed, up 18 from the 1255 baseline).
+`just e2e` not run.
+
+**Two audit claims were corrected on contact with the code, both recorded here rather than
+silently applied.** First, the "13 closures per row per render / 60fps" argument for S28-F1 was
+struck as unprofiled, per verifier F; the change is justified on single-source correctness alone.
+Second, S28-F2's claim that omitting the `arrange.length > 0` guard "produces an orphan separator"
+is true but **undetectable by any `menuitem`-role query** — an empty array maps to zero items
+either way, so only a structural read of the rendered sequence catches it. The separator-placement
+tests added in `8b589c9` read the menu content's children directly for that reason, and they cover
+both menus across all three arrange cases. Relatedly, the audit's separator rule ("one before every
+section after the first") undercounts by treating the `Label` as a section; the real rule, verified
+against the live JSX, is a separator before *every* section.
+
+Next: push the branch and open the PR, then continue with **slice 6** as filed in
+`.scratch/dsa-audit/slices/`.
+
+**◆ (2026-08-23) — DSA audit slice 4. Superseded by slice 5 above; since merged to `main` via
+PR #183, so the "UNCOMMITTED" note below is stale. Slices 1–4 are all on `main` now
+(PRs #179, #181, #182, #183).**
 
 The working tree now holds slices 2, 3 and 4 together: slice 2's frontend latest-request guard,
 slice 3's autosave rebuild + settings write queue, and slice 4's S08-F2
