@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { ProjectSettingsPane } from "@/components/project-settings/ProjectSettingsPane";
 import type {
+  ProcessSpec,
   ProjectCommandView,
   ProjectSettings,
   ProjectSettingsPage,
@@ -38,6 +39,14 @@ const webCommand: ProjectCommandView = {
   notification_level: null,
   effective_notification_level: "all",
   status: "Running",
+};
+
+const apiCommand: ProjectCommandView = {
+  ...webCommand,
+  name: "API",
+  command: "npm run api",
+  auto_start: false,
+  status: "Stopped",
 };
 
 const page: ProjectSettingsPage = {
@@ -81,6 +90,29 @@ function mockPageFailingFirstEdit(calls: Call[]) {
     if (cmd === "edit_shared_command" && ++editAttempts === 1) throw new Error("boom");
     return settings;
   });
+}
+
+function mockDuplicateRename() {
+  let commands = [webCommand, apiCommand];
+  let rejectRename: (error: Error) => void = () => undefined;
+  const rename = new Promise<never>((_, reject) => {
+    rejectRename = reject;
+  });
+
+  mockIPC((cmd, payload) => {
+    if (cmd === "project_settings_page") return { ...page, commands };
+    if (cmd === "trust_grants") return [];
+    if (cmd === "rename_shared_command") return rename;
+    if (cmd === "edit_shared_command") {
+      const edit = payload as { name: string; spec: ProcessSpec };
+      commands = commands.map((command) =>
+        command.name === edit.name ? { ...command, ...edit.spec } : command,
+      );
+    }
+    return settings;
+  });
+
+  return () => rejectRename(new Error("command API already exists"));
 }
 
 afterEach(() => {
@@ -184,28 +216,6 @@ describe("Per-project settings page", () => {
     });
   });
 
-  // A patch queued behind a rename must not be lost to the core rejecting an edit addressed to a
-  // name it no longer has.
-  it("targets the renamed command when an edit is queued behind a rename", async () => {
-    const calls: Call[] = [];
-    mockPage(calls);
-
-    render(<ProjectSettingsPane project={project} />);
-    await waitFor(() => expect(names(calls)).toContain("project_settings_page"));
-
-    const { nameInput, autoStartToggle } = await openCommandEditor();
-
-    // Rename, not yet resolved.
-    fireEvent.change(nameInput, { target: { value: "Web2" } });
-    fireEvent.blur(nameInput);
-
-    // Edit queued behind it, addressed through the same still-rendered editor.
-    fireEvent.click(autoStartToggle);
-
-    const edit = calls.find((c) => c.cmd === "edit_shared_command");
-    expect(edit?.payload?.name).toBe("Web2");
-  });
-
   // A write that settles unsuccessfully must not contribute its field to a later write's merge
   // base: `mutate` reloads only on success, so after this rejection `page` still holds the
   // pre-write value and the error is already on screen — carrying the rejected command line
@@ -233,5 +243,23 @@ describe("Per-project settings page", () => {
       command: webCommand.command,
       auto_start: false,
     });
+  });
+
+  it("keeps an overlapping edit away from the command that rejected a duplicate rename", async () => {
+    const rejectRename = mockDuplicateRename();
+
+    render(<ProjectSettingsPane project={project} />);
+    await screen.findByText("Valid");
+
+    const { nameInput, autoStartToggle } = await openCommandEditor();
+    expect(screen.getByText(apiCommand.command)).toBeTruthy();
+    fireEvent.change(nameInput, { target: { value: apiCommand.name } });
+    fireEvent.blur(nameInput);
+    fireEvent.click(autoStartToggle);
+    rejectRename();
+
+    await screen.findByText(/command API already exists/);
+    await waitFor(() => expect(screen.queryByText("AUTO")).toBeNull());
+    expect(screen.getByText(apiCommand.command)).toBeTruthy();
   });
 });

@@ -3080,15 +3080,28 @@ proposals. Gates green: `just lint` exit 0; `just test` exit 0 (1978 Rust tests,
   machinery (serialized write queue, `pageRef`, busy flag) was **not** built; out-of-order
   `reload()`s remain open, and commit 2 is still blocked on an explicit drain-vs-abort decision.
 
-#### Divergence from the audit, accepted by the owner (S25-F1)
+#### S25-F1 in-flight edit merge and review correction
 Commit 1 as the verifier defined it merges `{...specOf(page row), ...patch}` against the pane's
 possibly-stale `page`, and the verifier said plainly it "narrows but does not eliminate" the window.
-The delivered change goes further: `ProjectSettingsPane.tsx` holds a `pendingWrites`
-`Map<ProjectCommandView, PendingWrite>` keyed by row identity, so a patch merges onto the last
-still-outstanding write for that row. **This is a third design neither the lane nor verifier
-evaluated.** It was built because the brief required regression tests (a) and (c), and neither can
-pass at the verifier's literal commit-1 scope. Owner decided to keep it rather than narrow back.
-Follow-up review of this mechanism is owed; commit 2 remains separately open.
+The delivered change keeps a `pendingEdits` map keyed by row identity, so a patch merges onto the
+last still-outstanding edit for that row. It was built because the brief required regression tests
+(a) and (c), and neither can pass at the verifier's literal commit-1 scope. Commit 2 remains
+separately open.
+
+Review found that the first version also stored a speculative rename target in this map. Renaming
+`Web` to an existing `API`, then editing before the duplicate-name rejection returned, addressed the
+edit to `API` and replaced that unrelated command's spec. Fixed by limiting the map to edit specs:
+edits and renames remain addressed to the confirmed `ProjectCommandView.name` until a successful
+reload supplies a row with the new name. The regression test drives the overlapping operations
+against a stateful fake backend and verifies the existing command still renders its own config; it
+failed against the reviewed implementation because `API` was overwritten.
+
+Review follow-up verification: the focused `ProjectSettingsPane.test.tsx` suite is 7/7 green after
+showing the new regression red against the reviewed implementation. React Doctor changed-scope scan
+is 83/100 with no findings (the first scan's render-time ref initialization finding was fixed with
+eager `useRef(new Map())`). `just lint` exits 0. `just test` is green when run with Unix-socket access:
+the first sandboxed run's 11 `soloist-app` failures were all `Operation not permitted` at socket
+binds; the unrestricted rerun passed the Rust workspace and 170 UI files / 1242 tests.
 
 On-failure semantics, decided and pinned by a test rather than left to `.finally`'s default:
 > A write's in-flight merge-base entry is dropped the moment that write settles unsuccessfully:
@@ -5972,10 +5985,10 @@ committed. The audit itself lives in the Soloist MCP scratchpads — read `dsa-a
 (§ "Final priorities and dependencies" is the ranking) and `dsa-audit-verify-E` (the verifier's
 rulings, which override the lanes) before touching any further slice.
 
-1. **Review the `pendingWrites` mechanism in `ProjectSettingsPane.tsx`.** It closes S25's lost update
-   but is a third design neither the audit lane nor the verifier evaluated — see the divergence note
-   under "Decisions / changes this session". It was kept by owner decision. Its on-failure semantics
-   are decided and test-pinned; the mechanism itself has had no second reader.
+1. **The `pendingEdits` mechanism in `ProjectSettingsPane.tsx` has now had its second review.** The
+   review found and the follow-up fixed a P1 speculative-rename overwrite: pending state now carries
+   edit specs only and never changes a command's confirmed name. Its on-failure semantics and the
+   duplicate-rename regression are test-pinned.
 2. **Decide drain-vs-abort for S25-F1 commit 2** before anyone builds it. Commit 2 is the serialized
    write chain (`queue = queue.then(() => op()).then(reload)` + `pageRef`) that closes the remaining
    out-of-order-`reload()` window. The verifier is explicit that a silently draining queue would hide
