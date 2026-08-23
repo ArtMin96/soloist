@@ -162,3 +162,19 @@ bundle-size:
 # what fills the bundle). A normal `just bundle` build is unaffected.
 ui-analyze:
     ANALYZE=1 pnpm -C {{ui}} build
+
+# Report where the codebase repeats itself: cloned files first (whole-file similarity, measured
+# with the one noun that distinguishes a pair's file names masked, so a clone renamed as it was
+# pasted still shows), then blocks repeated verbatim. Covers both halves of the tree — the Rust
+# workspace and the TypeScript frontend and e2e sources.
+#
+# On demand only. It always exits 0, and it is deliberately absent from `just lint` and from every
+# CI workflow: a duplication gate fires on code that is legitimately similar but must stay separate,
+# and a gate that cries wolf gets switched off, which is worse than no signal at all. Every other
+# CLAUDE.md §15 rule has a signal; DRY had none, which is how it decayed unnoticed. This is it.
+#
+# Some pairs it lists are considered separations that must never be merged — the header of
+# scripts/report-duplication.mjs names them. Read that before "fixing" anything here.
+[doc("Report cloned files and repeated blocks across Rust and TypeScript (never fails).")]
+dupes:
+    @node scripts/report-duplication.mjs

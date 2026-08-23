@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { todoCreate, todoUpdate } from "@/api";
 import type { TodoView } from "@/domain";
+import type { SaveOutcome } from "@/store/saveOutcome";
 import { useTodoEditor } from "@/store/useTodoEditor";
 
 vi.mock("@/api", () => ({
@@ -40,9 +41,12 @@ describe("useTodoEditor", () => {
     expect(result.current.initial).toEqual({ title: "", body: "", status: "open" });
     expect(result.current.baseRevision).toBeNull();
 
+    let outcome: SaveOutcome | undefined;
     await act(async () => {
-      await result.current.save({ title: "New", body: "b", status: "open" }, null);
+      outcome = await result.current.save({ title: "New", body: "b", status: "open" }, null);
     });
+
+    expect(outcome).toBe("saved");
     expect(create).toHaveBeenCalledWith(7, { title: "New", body: "b", status: "open" }, null);
     expect(result.current.mode).toBeNull();
   });
@@ -56,9 +60,9 @@ describe("useTodoEditor", () => {
     expect(result.current.baseRevision).toBe(5);
 
     update.mockResolvedValue(view(3, 6));
-    await act(async () => {
-      await result.current.save({ title: "Ship it", body: "changed", status: "done" }, null);
-    });
+    await expect(
+      result.current.save({ title: "Ship it", body: "changed", status: "done" }, null),
+    ).resolves.toBe("saved");
     // The write carried the opened revision as its guard; success advances it for the next save.
     expect(update).toHaveBeenCalledWith(
       7,
@@ -76,9 +80,9 @@ describe("useTodoEditor", () => {
 
     act(() => result.current.editTodo(view(3, 5)));
     update.mockRejectedValue("todo is blocked by #2");
-    await act(async () => {
-      await result.current.save({ title: "Ship it", body: "b", status: "done" }, null);
-    });
+    await expect(
+      result.current.save({ title: "Ship it", body: "b", status: "done" }, null),
+    ).resolves.toBe("refused");
     await waitFor(() => expect(result.current.error).toBe("todo is blocked by #2"));
     // The base revision is untouched (nothing was written) and the surface stays open to keep edits.
     expect(result.current.baseRevision).toBe(5);

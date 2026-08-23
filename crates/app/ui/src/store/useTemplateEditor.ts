@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { templateRead, templateUpdate } from "@/api";
 import { templateScopeProject } from "@/lib/templates";
+import type { SaveOutcome } from "@/store/saveOutcome";
 import type { TemplateKind, TemplateScope } from "@/domain";
 
 // A revision conflict surfaced to the editor: an edit was refused because the template moved on since
@@ -43,11 +44,13 @@ export interface TemplateEditorStore {
   open: (kind: TemplateKind, scope: TemplateScope, name: string) => void;
   close: () => void;
   /**
-   * Saves the description + body revision-guarded; resolves once the outcome is set. The
-   * description goes to the core verbatim: it reads a blank one as "clear it" and only an omitted
-   * one as "keep the stored one", so a blank must not be mapped to null on the way out.
+   * Saves the description + body revision-guarded, resolving to whether it went through. A refusal
+   * (conflict or error) never rejects — it is surfaced through `conflict`/`error` state, and the
+   * resolved `"refused"` is the caller's signal that nothing was persisted. The description goes to
+   * the core verbatim: it reads a blank one as "clear it" and only an omitted one as "keep the
+   * stored one", so a blank must not be mapped to null on the way out.
    */
-  save: (description: string, body: string) => Promise<void>;
+  save: (description: string, body: string) => Promise<SaveOutcome>;
   /** Reload the open template fresh, discarding local edits — the conflict resolution. */
   reload: () => void;
 }
@@ -144,8 +147,10 @@ export function useTemplateEditor(project: number | null): TemplateEditorStore {
   }, [kind, scope, name, load]);
 
   const save = useCallback(
-    async (description: string, body: string) => {
-      if (kind == null || scope == null || name == null || baseRevisionRef.current == null) return;
+    async (description: string, body: string): Promise<SaveOutcome> => {
+      if (kind == null || scope == null || name == null || baseRevisionRef.current == null) {
+        return "refused";
+      }
       setError(null);
       try {
         const view = await templateUpdate(
@@ -159,6 +164,7 @@ export function useTemplateEditor(project: number | null): TemplateEditorStore {
         setPlaceholders(view.placeholders);
         setBaseRevision(view.revision);
         baseRevisionRef.current = view.revision;
+        return "saved";
       } catch (reason) {
         // The write was refused. Re-read to tell a stale revision (a concurrent edit landed — surface
         // a conflict and keep the user's edits) from any other rejection (e.g. an invalid document),
@@ -173,6 +179,7 @@ export function useTemplateEditor(project: number | null): TemplateEditorStore {
         } catch (readReason) {
           setError(String(readReason));
         }
+        return "refused";
       }
     },
     [kind, scope, name, idOf],

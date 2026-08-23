@@ -39,6 +39,16 @@ const SECTION_OPTIONS: Option<ProjectTabId>[] = PROJECT_TABS.map((tab) => ({
   label: tab.label,
 }));
 
+// A queued write's coalescing key. Writes that share one replace each other while still queued --
+// e.g. repeated edits to the same command -- so only the latest of them is ever sent; writes with
+// no shared key, which is most of the pane's mutations, always keep their own slot.
+type WriteKey = ProjectCommandView | symbol;
+
+interface QueuedWrite {
+  key: WriteKey;
+  run: () => Promise<unknown>;
+}
+
 // The per-project settings page, shown in the main content pane when a project (not a process) is
 // selected. It owns the page read-model — loading it for the project and reloading after every
 // mutation so the view always reflects the core — and routes between the four tabs. The sections
@@ -64,15 +74,45 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
     void reload();
   }, [reload]);
 
-  // Run a mutation, then refresh the page so the view reflects the core; surface any failure inline.
+  const writeQueue = useRef<{ inFlight: boolean; queue: QueuedWrite[] }>({
+    inFlight: false,
+    queue: [],
+  });
+
+  // Runs the next queued write, if any; otherwise the queue has drained and the page is refreshed
+  // once. Chained onto every write's settlement (success or failure) so at most one write is ever
+  // in flight -- a reload can then never land mid-batch and hand a later write a stale merge base.
+  const drain = useCallback(() => {
+    const state = writeQueue.current;
+    const next = state.queue.shift();
+    if (!next) {
+      state.inFlight = false;
+      void reload();
+      return;
+    }
+    state.inFlight = true;
+    void next
+      .run()
+      .catch((e) => setError(String(e)))
+      .then(drain);
+  }, [reload]);
+
+  // Run a write, coalescing it with any not-yet-started write sharing `key` -- most callers pass
+  // none, so each of their writes keeps its own slot -- and queuing it behind an in-flight write
+  // otherwise. An in-flight write is never aborted; it always runs to completion.
   const mutate = useCallback(
-    (op: () => Promise<unknown>) => {
+    (run: () => Promise<unknown>, key: WriteKey = Symbol()) => {
       setError(null);
-      void op()
-        .then(reload)
-        .catch((e) => setError(String(e)));
+      const state = writeQueue.current;
+      const existing = state.queue.find((w) => w.key === key);
+      if (existing) {
+        existing.run = run;
+      } else {
+        state.queue.push({ key, run });
+      }
+      if (!state.inFlight) drain();
     },
-    [reload],
+    [drain],
   );
 
   const ops = useMemo<CommandOps>(() => {
@@ -81,16 +121,21 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
       if (pending.get(cmd) === spec) pending.delete(cmd);
     };
     return {
-      edit: (cmd, patch) =>
-        mutate(() => {
-          const spec: ProcessSpec = { ...(pending.get(cmd) ?? specOf(cmd)), ...patch };
-          pending.set(cmd, spec);
-          return (cmd.visibility === "shared" ? editSharedCommand : editLocalCommand)(
-            id,
-            cmd.name,
-            spec,
-          ).finally(settle(cmd, spec));
-        }),
+      edit: (cmd, patch) => {
+        // Merged eagerly, before the write is queued: a further edit to the same command reads
+        // this value as its base even while this write is still queued behind another.
+        const spec: ProcessSpec = { ...(pending.get(cmd) ?? specOf(cmd)), ...patch };
+        pending.set(cmd, spec);
+        mutate(
+          () =>
+            (cmd.visibility === "shared" ? editSharedCommand : editLocalCommand)(
+              id,
+              cmd.name,
+              spec,
+            ).finally(settle(cmd, spec)),
+          cmd,
+        );
+      },
       rename: (cmd, to) =>
         mutate(() =>
           (cmd.visibility === "shared" ? renameSharedCommand : renameLocalCommand)(

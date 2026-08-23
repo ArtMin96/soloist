@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { todoCreate, todoUpdate } from "@/api";
+import type { SaveOutcome } from "@/store/saveOutcome";
 import type { TodoDoc, TodoView } from "@/domain";
 
 export type TodoEditorMode = "create" | "edit";
@@ -35,10 +36,11 @@ export interface TodoEditorStore {
   close: () => void;
   /**
    * Persists `doc`: create → {@link todoCreate} then close; edit → {@link todoUpdate} guarded by the
-   * base revision, bumping it on success. Resolves once the outcome is applied; a rejection sets
-   * `error` and keeps the surface open so the caller's edits survive.
+   * base revision, bumping it on success. Resolves to whether it went through — a refusal never
+   * rejects; it sets `error`, keeps the surface open so the caller's edits survive, and resolves
+   * `"refused"`.
    */
-  save: (doc: TodoDoc, scratchpad: number | null) => Promise<void>;
+  save: (doc: TodoDoc, scratchpad: number | null) => Promise<SaveOutcome>;
   /**
    * Re-seed the edit from `todo` (the live snapshot's copy) — the conflict resolution: it discards
    * local edits and adopts the concurrent writer's document and revision.
@@ -103,7 +105,7 @@ export function useTodoEditor(project: number): TodoEditorStore {
   }, []);
 
   const save = useCallback(
-    async (doc: TodoDoc, scratchpad: number | null) => {
+    async (doc: TodoDoc, scratchpad: number | null): Promise<SaveOutcome> => {
       setError(null);
       const id = editingIdRef.current;
       try {
@@ -115,11 +117,13 @@ export function useTodoEditor(project: number): TodoEditorStore {
           setBaseRevision(view.revision);
           baseRevisionRef.current = view.revision;
         }
+        return "saved";
       } catch (reason) {
         // The write was refused. Surface the core's message verbatim (an invalid document or the
         // blocked→done gate) and keep the surface open — the uncontrolled editor still holds the
         // edits. A revision conflict is the board's call from the live revision, not re-decided here.
         setError(String(reason));
+        return "refused";
       }
     },
     [project, close],

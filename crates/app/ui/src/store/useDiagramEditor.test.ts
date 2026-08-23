@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { diagramRead, diagramRename, diagramWrite } from "@/api";
 import { useDiagramEditor } from "@/store/useDiagramEditor";
+import type { SaveOutcome } from "@/store/saveOutcome";
 import { expectSupersededReadIsDiscarded } from "@/test/loadRaceContract";
 import type { DiagramView } from "@/domain";
 
@@ -63,8 +64,12 @@ describe("useDiagramEditor save", () => {
     const result = await openedEditor("auth-flow", 3);
     vi.mocked(diagramWrite).mockResolvedValueOnce(view("auth-flow", 4));
 
-    await act(() => result.current.save("flowchart TD\n  A-->C"));
+    let outcome: SaveOutcome | undefined;
+    await act(async () => {
+      outcome = await result.current.save("flowchart TD\n  A-->C");
+    });
 
+    expect(outcome).toBe("saved");
     // The guard the write carried was the revision it was opened at.
     expect(diagramWrite).toHaveBeenCalledWith(7, "auth-flow", "flowchart TD\n  A-->C", 3);
     expect(result.current.baseRevision).toBe(4);
@@ -78,8 +83,12 @@ describe("useDiagramEditor save", () => {
     // The re-read after the refusal shows the document now sits at a newer revision.
     vi.mocked(diagramRead).mockResolvedValueOnce(view("auth-flow", 5));
 
-    await act(() => result.current.save("flowchart TD\n  A-->C"));
+    let outcome: SaveOutcome | undefined;
+    await act(async () => {
+      outcome = await result.current.save("flowchart TD\n  A-->C");
+    });
 
+    expect(outcome).toBe("refused");
     expect(result.current.conflict).toEqual({ actual: 5 });
     expect(result.current.error).toBeNull();
   });
@@ -90,8 +99,12 @@ describe("useDiagramEditor save", () => {
     // The re-read shows the same revision, so the refusal was not a concurrent edit.
     vi.mocked(diagramRead).mockResolvedValueOnce(view("auth-flow", 3));
 
-    await act(() => result.current.save("flowchart TD\n  A-->C"));
+    let outcome: SaveOutcome | undefined;
+    await act(async () => {
+      outcome = await result.current.save("flowchart TD\n  A-->C");
+    });
 
+    expect(outcome).toBe("refused");
     expect(result.current.conflict).toBeNull();
     expect(result.current.error).toBe("invalid diagram");
   });

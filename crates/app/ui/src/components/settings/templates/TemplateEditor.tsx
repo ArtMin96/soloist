@@ -7,6 +7,7 @@ import { TemplateEditorBody } from "@/components/settings/templates/TemplateEdit
 import { templateScopeHeading } from "@/lib/templates";
 import { TemplatePreview } from "@/components/settings/templates/TemplatePreview";
 import type { TemplateConflict } from "@/store/useTemplateEditor";
+import type { SaveOutcome } from "@/store/saveOutcome";
 import type { RenderedPrompt, TemplateKind, TemplateScope } from "@/domain";
 
 // Everything the preview needs: the declared placeholders, the values typed against them, and the
@@ -33,7 +34,7 @@ interface TemplateEditorProps {
   error: string | null;
   /** The live preview for a renderable kind, or null when this kind is never rendered. */
   preview: TemplatePreviewState | null;
-  onSave: (description: string, body: string) => Promise<void>;
+  onSave: (description: string, body: string) => Promise<SaveOutcome>;
   onReload: () => void;
   onDelete: () => void;
   onBack: () => void;

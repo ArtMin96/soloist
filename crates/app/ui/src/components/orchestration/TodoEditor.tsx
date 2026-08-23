@@ -4,6 +4,7 @@ import { RevisionConflictNotice } from "@/components/RevisionConflictNotice";
 import { Button } from "@/components/ui/button";
 import { TodoDocFields } from "@/components/orchestration/TodoDocFields";
 import { useAutosave } from "@/components/editor/useAutosave";
+import type { SaveOutcome } from "@/store/saveOutcome";
 import type { ScratchpadSummary, TodoDoc, TodoStatus } from "@/domain";
 
 export interface TodoConflict {
@@ -22,7 +23,7 @@ interface TodoEditorProps {
   /** A non-conflict failure (invalid document, blocked→done gate), or null. */
   error: string | null;
   /** Persists the whole document and its association revision-guarded — routed to the core. */
-  onSave: (doc: TodoDoc, scratchpad: number | null) => Promise<void>;
+  onSave: (doc: TodoDoc, scratchpad: number | null) => Promise<SaveOutcome>;
   /** Reload the todo fresh, adopting the concurrent write and discarding local edits. */
   onReload: () => void;
   /** Leave edit mode (edits already autosaved). */

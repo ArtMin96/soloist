@@ -9,6 +9,53 @@
 
 ## Current state
 
+> **LATEST (2026-08-23): DSA AUDIT SLICE 3 — AUTOSAVE ACKNOWLEDGE-BEFORE-CLEAN + SINGLE-FLIGHT, AND
+> THE SETTLE-GATED SETTINGS WRITE QUEUE — gate-green, `Done — pending verify`, UNCOMMITTED.** Work
+> items **S27-F1** (`useAutosave`) and **S25-F1 commit 2** (`ProjectSettingsPane`'s write queue), from
+> the DSA codebase audit held in the Soloist MCP scratchpads. `useAutosave` previously destroyed the
+> pending value and set `dirty=false` **before** the write settled, so all four editors (scratchpad,
+> todo, diagram, template) rendered "Saved" and disabled Save for text that was never written, and a
+> Reload then discarded it. The verifier had established the fix had to span the store layer, because
+> every store `save` already swallows its own rejection and always resolves.
+>
+> **Fix.** New `crates/app/ui/src/store/saveOutcome.ts` — closed union `type SaveOutcome = "saved" |
+> "refused"`, the only signal a caller gets back since `save` never rejects. All four store hooks
+> (`useScratchpadEditor`, `useTodoEditor`, `useDiagramEditor`, `useTemplateEditor`) now return
+> `Promise<SaveOutcome>`. `useAutosave` (`crates/app/ui/src/components/editor/useAutosave.ts`) is
+> rebuilt around one discriminated union (`clean` / `dirty` / `saving` / `saving+queued`) so `commit()`
+> can only be entered from `dirty` — single-flight is structural, not flag-guarded. An edit that lands
+> mid-flight is queued (only the latest survives) and drained the moment the in-flight write settles,
+> never substituted for it. A refusal restores the value and returns to `dirty` **without** re-arming
+> the debounce (owner decision: no auto-retry — a write that keeps failing costs exactly one attempt
+> per user action; the next attempt is the user's next keystroke or an explicit Save). Relay prop types
+> widened in `TodoItem.tsx`, `TemplateEditor.tsx`, `TodoCreateForm.tsx` to match the new return type.
+>
+> **`ProjectSettingsPane.tsx`** gained a single-flight write queue (owner decision: drains, never
+> aborts an in-flight write) that coalesces a queued write with any not-yet-started write sharing a
+> key — `edit` keys on the command row so repeated edits to the same command replace each other while
+> still queued, every other caller keeps its own slot — and reloads exactly once when the queue drains,
+> closing the out-of-order-`reload()` window S25-F1 commit 1 left open.
+>
+> **Gates re-run in full this session** (the building agents reported only scoped runs). `just lint`
+> — first pass failed `prettier --check` on 3 slice files (`useAutosave.ts`, `useAutosave.test.ts`,
+> `ScratchpadEditor.test.tsx`); fixed with `prettier --write` on exactly those files (all inside the
+> slice's own write set); re-run **exit 0**. `just test` — **exit 0**: `cargo test --workspace`
+> **1978 passed / 0 failed / 3 ignored** (the 3 are the pre-existing `crates/pty/tests/soak.rs`
+> longevity tests, unchanged); `pnpm -C crates/app/ui test` **171 test files / 1255 tests passed, 0
+> failed**. **`just e2e` was NOT run** (rebuilds the app, long-running, out of scope for this
+> close-out pass) — nothing here is `Verified` by that measure.
+>
+> **Also recorded, not part of this slice's work:** a repo-wide duplication inventory now exists in
+> three Soloist MCP scratchpads — `dedupe-inventory-frontend`, `dedupe-inventory-rust`,
+> `reuse-discipline-proposal`. The owner has approved a `CLAUDE.md` §17 search-before-write rule plus
+> a reporting-only `just dupes` target (both being applied by other agents concurrently with this
+> session); the base-module extraction work the inventory recommends is **not yet scheduled**.
+>
+> **Next session should start with:** commit this working tree and open the PR (no self-merge) —
+> nothing from slice 2 or slice 3 is pushed yet. Then continue the DSA audit's remaining frontend
+> slices in contract order, starting with **slice 4** (`.scratch/dsa-audit/slices/slice-04-one-invariant-one-site-forgot-trio.md`)
+> through slice 10, as filed in `.scratch/dsa-audit/slices/`.
+
 > **LATEST (2026-08-23): E2E CI PARALLELIZED INTO A FOUR-WAY SHARD MATRIX — infra change, `Done —
 > pending verify` (not pushed).** `.github/workflows/e2e.yml`'s `e2e` job ran serially at ~22–23 min
 > wall-clock. Real timing from a completed run (`gh run view 32596821780 --json jobs`, re-derived
@@ -3041,6 +3088,34 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### DSA audit — Slice 3: autosave single-flight + settings write queue (2026-08-23) — `Done — pending verify`
+Work items S27-F1 and S25-F1 commit 2, from the DSA codebase audit held in the Soloist MCP
+scratchpads (`dsa-audit-contract`, `dsa-audit-S27`, `dsa-audit-S25`, `dsa-audit-verify-E`). Full gate
+set run once this session (the building agents reported only scoped runs): `just lint` — one round
+of `prettier --write` needed on 3 slice files, then **exit 0**; `just test` — **exit 0**, `cargo test
+--workspace` 1978 passed / 0 failed / 3 ignored (pre-existing soak longevity tests, unchanged),
+`pnpm -C crates/app/ui test` 171 files / 1255 tests passed. `just e2e` not run (out of scope for a
+lint/test close-out pass).
+
+- **S27-F1 — autosave acknowledge-before-clean + single-flight.** `useAutosave` previously destroyed
+  the pending value and set `dirty=false` before the write settled, so all four editors rendered
+  "Saved" and disabled Save for text that was never written; Reload then discarded it. New
+  `crates/app/ui/src/store/saveOutcome.ts` — closed union `type SaveOutcome = "saved" | "refused"`.
+  All four store hooks (`useScratchpadEditor`, `useTodoEditor`, `useDiagramEditor`,
+  `useTemplateEditor`) now return `Promise<SaveOutcome>`. `useAutosave` rebuilt around one
+  discriminated union (`clean` / `dirty` / `saving` / `saving+queued`); `commit()` can only enter
+  from `dirty`, so single-flight is structural. A mid-flight edit is queued and drained at settle,
+  never substituted for the in-flight write. **Owner decision:** a refusal restores the value and
+  goes back to `dirty` **without** re-arming the debounce — no auto-retry, per the ban on unbounded
+  retry; the next attempt is the user's next keystroke or an explicit Save. Relay prop types widened
+  in `TodoItem.tsx`, `TemplateEditor.tsx`, `TodoCreateForm.tsx`.
+- **S25-F1 commit 2 — serialized write queue in `ProjectSettingsPane`.** Writes were fire-and-forget,
+  each dragging its own `reload()`, so out-of-order settles let a stale reload clobber an earlier
+  command's applied change. A single-flight queue (`writeQueue` ref + `drain()`) now drains one write
+  at a time, coalescing a queued write with any not-yet-started write sharing a key (`edit` keys on
+  the command row; every other caller keeps its own slot), and reloads once when the queue empties.
+  **Owner decision:** the queue drains, never aborts, an in-flight write.
+
 ### DSA audit — Slice 2: frontend latest-request guard (2026-08-23) — `Done — pending verify`
 Work items S22-F1, S23-F1, S25-F1 commit 1, from the DSA codebase audit held in the Soloist MCP
 scratchpads (`dsa-audit-contract`, `dsa-audit-S22`, `dsa-audit-S23`, `dsa-audit-S25`,
@@ -5976,12 +6051,42 @@ has a `GripVertical` icon. Both reviewers flagged it as "fine if deliberate"; le
 
 ## Next session should start with
 
-**◆ NEWEST (2026-08-23) — DSA audit slice 2 is landed and gate-green, UNCOMMITTED. Two threads
-are owed before moving on.**
+**◆ NEWEST (2026-08-23) — DSA audit slice 3 is landed and gate-green, UNCOMMITTED, on top of
+slice 2 (also still uncommitted). Commit and open the PR before touching slice 4.**
 
-The working tree holds slice 2 (S22-F1, S23-F1, S25-F1 commit 1) across 12 modified files plus one
-new `crates/app/ui/src/test/loadRaceContract.ts`. `just lint` and `just test` both exit 0. Nothing is
-committed. The audit itself lives in the Soloist MCP scratchpads — read `dsa-audit-contract`
+The working tree now holds slices 2 and 3 together: slice 2's 12 modified files +
+`crates/app/ui/src/test/loadRaceContract.ts`, plus slice 3's `useAutosave` rebuild + the four store
+hooks' `Promise<SaveOutcome>` return type + the `ProjectSettingsPane` write queue + the new
+`crates/app/ui/src/store/saveOutcome.ts`. Full gate set re-run once this session (not just the
+scoped runs the building agents reported): `just lint` needed one `prettier --write` pass on 3
+files, then exit 0; `just test` exit 0 (`cargo test --workspace` 1978 passed / 0 failed / 3 ignored;
+`pnpm -C crates/app/ui test` 171 files / 1255 tests passed). `just e2e` not run. Nothing is
+committed — both slices are still in the working tree.
+
+Both threads slice 2 left open are now resolved: the `pendingEdits` P1 speculative-rename overwrite
+was already fixed (slice 2's own second review); the drain-vs-abort decision for S25-F1 commit 2 was
+made — **drain, never abort an in-flight write** — and built as part of this slice, closing the
+out-of-order-`reload()` window. Slice 3's autosave fix carries its own owner decision — no
+auto-retry on a refused save, restore-to-dirty only — recorded in the Decisions entry above.
+
+Then continue the DSA audit's remaining frontend slices in the contract's order: **slice 4**
+(`.scratch/dsa-audit/slices/slice-04-one-invariant-one-site-forgot-trio.md`) through slice 10, as
+filed in `.scratch/dsa-audit/slices/`. Read `dsa-audit-contract` (§ "Final priorities and
+dependencies") and `dsa-audit-verify-E` (the verifier's rulings, which override the lanes) before
+touching any further slice — same as before.
+
+Separately, and not part of the audit's own sequence: a repo-wide duplication inventory now exists
+in three Soloist MCP scratchpads (`dedupe-inventory-frontend`, `dedupe-inventory-rust`,
+`reuse-discipline-proposal`). The owner has approved a `CLAUDE.md` §17 search-before-write rule and
+a reporting-only `just dupes` target — both being applied by other agents concurrently with this
+entry — but the base-module extraction the inventory recommends is not yet scheduled; do not start
+it without a scheduling decision first.
+
+**◆ (2026-08-23) — DSA audit slice 2 was landed and gate-green here; superseded by slice 3 above.**
+
+The working tree held slice 2 (S22-F1, S23-F1, S25-F1 commit 1) across 12 modified files plus one
+new `crates/app/ui/src/test/loadRaceContract.ts`. `just lint` and `just test` both exit 0. The audit
+itself lives in the Soloist MCP scratchpads — read `dsa-audit-contract`
 (§ "Final priorities and dependencies" is the ranking) and `dsa-audit-verify-E` (the verifier's
 rulings, which override the lanes) before touching any further slice.
 
@@ -5989,10 +6094,8 @@ rulings, which override the lanes) before touching any further slice.
    review found and the follow-up fixed a P1 speculative-rename overwrite: pending state now carries
    edit specs only and never changes a command's confirmed name. Its on-failure semantics and the
    duplicate-rename regression are test-pinned.
-2. **Decide drain-vs-abort for S25-F1 commit 2** before anyone builds it. Commit 2 is the serialized
-   write chain (`queue = queue.then(() => op()).then(reload)` + `pageRef`) that closes the remaining
-   out-of-order-`reload()` window. The verifier is explicit that a silently draining queue would hide
-   a rejection, so this needs a decision, not a guess.
+2. ~~Decide drain-vs-abort for S25-F1 commit 2 before anyone builds it.~~ — **resolved in slice 3
+   above: drain, never abort.**
 
 **Slice 1 is already done** — S20-F1 + S18-F1/F2 landed via PR #179
 `fix/setsid-containment-and-exit-ordering` (merged at `b4c98ef`), confirmed against the tree.
@@ -6001,10 +6104,6 @@ crate (`setsid()` at `crates/exec/src/lib.rs:159-172`, with `crates/sys/Cargo.to
 dependency edge and `shellenv.rs`/`agents.rs` running through `soloist_exec::run`), and `47f2c06`
 pins the exit path's servers-before-reap ordering. When re-checking that locked invariant, grep for
 `soloist_exec`, not for `process_group` — the latter returns nothing and reads as a false negative.
-
-Remaining frontend slices, in the contract's order: slice 3 (S27 autosave single-flight — Pattern B,
-which the verifier warns must NOT get slice 2's latest-request guard: latest-wins on an in-flight
-*write* is data loss), then slices 4–10 as filed in `.scratch/dsa-audit/slices/`.
 
 
 **◆ NEWEST (2026-08-09) — git integration: PR 10 (the MCP git tools, todo 46) is built on

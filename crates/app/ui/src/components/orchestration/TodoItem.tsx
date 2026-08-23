@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { humanizeName } from "@/lib/humanize";
 import { TODO_STATUS } from "@/lib/todo";
 import { cn } from "@/lib/utils";
+import type { SaveOutcome } from "@/store/saveOutcome";
 import type { ScratchpadSummary, TodoDoc, TodoView } from "@/domain";
 
 // The edit surface's state for this row, present only while it is being edited. The board owns the
@@ -20,7 +21,7 @@ export interface TodoEditState {
   mountKey: number;
   conflict: TodoConflict | null;
   error: string | null;
-  onSave: (doc: TodoDoc, scratchpad: number | null) => Promise<void>;
+  onSave: (doc: TodoDoc, scratchpad: number | null) => Promise<SaveOutcome>;
   onReload: () => void;
   onDone: () => void;
 }

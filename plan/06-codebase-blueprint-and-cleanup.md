@@ -171,8 +171,30 @@ Anti-patterns to refuse are fixed in `04` §13. The one most relevant to this ap
 
 Each recipe is a closed checklist. Follow it and the change lands in the right layer with single-source,
 DRY, and the dependency rule intact. These *are* the "how future sessions architect changes" contract.
+**Every recipe starts at step 0 — search for what already exists (`CLAUDE.md` §17). §5.0 is the map.**
+
+### 5.0 Search first — where shared helpers already live
+
+Before adding a helper, component, hook, constant, or type, look here, then reuse it, extend it, or say you
+searched and found nothing (`CLAUDE.md` §17). Cloned *files* are invisible to symbol search, so when you are
+adding an X for a second noun, diff it against the existing X before writing a line.
+
+| Looking for | It already lives here |
+|-------------|-----------------------|
+| Domain enums, newtype ids, shared value types (Rust) | `core::{ids, process, idle, configchange, orphans, vcs}` — the crate-root shared kernel (§3.1) |
+| The TS mirror of those types + the `DomainEvent` union | `crates/app/ui/src/domain.ts` — the **one** TS definition (§5.6) |
+| Tauri command/event name strings, typed `invoke`/`listen`/Channel | `crates/app/ui/src/api.ts` (TS side) · `crates/app/src/lib.rs` (Rust side, e.g. `DOMAIN_EVENT`) |
+| Cross-binary request/reply types, JSON framing, socket paths | `crates/ipc/src/` — `protocol/`, `frame.rs`, `paths.rs`, `http.rs` |
+| `ProcStatus` → glyph/color/label, `canStart`/`canStop`/`canRestart`/`canRemove` | `crates/app/ui/src/lib/status.ts` |
+| Theme, fonts, terminal options and their option lists | `crates/app/ui/src/lib/appearance.ts` |
+| Pure UI helpers — formatting, humanizing, `cn`, hotkeys, clipboard, shell quoting, sorting, terminal palette/renderer | `crates/app/ui/src/lib/` (`format.ts`, `humanize.ts`, `utils.ts`, `hotkeys.ts`, `clipboard.ts`, `shellQuote.ts`, `sortable.ts`, `terminalPalette.ts`, …) |
+| Read-model reducers + subscription hooks | `crates/app/ui/src/store/` — `projection.ts`, `grouping.ts`, `use*.ts` |
+| The persisted read-model cache | `crates/app/ui/src/store/cache/` — `persistentCache.ts` + `usePersistentSnapshot.ts` (§3.3) |
+| Presentational primitives | `crates/app/ui/src/components/ui/` (shadcn) + shared components at the `components/` root (`ProcessControls.tsx`, `SortableList.tsx`, `IconButton.tsx`, `SegmentedControl.tsx`) |
+| Rust test fakes + `MockClock` | `crates/core/src/testing/`, behind the `testing` Cargo feature (§6) |
 
 ### 5.1 Add behavior to an existing context (e.g. a restart-policy rule)
+0. **Search first** (`CLAUDE.md` §17, §5.0) — the rule or helper may already exist in that context.
 1. Put the logic in the **owning context** module (`04` §3 table). Never in an adapter or the frontend.
 2. If it has states, express transitions as FSM functions returning `Result<_, IllegalTransition>`.
 3. If it needs OS/time/IO, take it through an **existing port**; add a new port only if none fits (§5.2).
@@ -182,6 +204,7 @@ DRY, and the dependency rule intact. These *are* the "how future sessions archit
 6. Expose it to adapters by adding (or reusing) **one** `Facade` method — never per-adapter logic.
 
 ### 5.2 Add a new port + driven adapter (e.g. metrics sampler, file watcher)
+0. **Search first** (`CLAUDE.md` §17, §5.0) — an existing port may already cover this; extend it rather than add a twin.
 1. Define the **trait** with a doc comment stating its contract, **in the bounded context that depends on
    it** (e.g. `core::metrics::probe`, `core::portscan::probe`) — a context owns its own port and data types,
    so a new metric/probe is confined to that domain rather than a shared god-file. (A genuinely cross-cutting
@@ -196,6 +219,7 @@ DRY, and the dependency rule intact. These *are* the "how future sessions archit
    stub sat empty and unreferenced until it was deleted).
 
 ### 5.3 Add an MCP tool (Phase 8+)
+0. **Search first** (`CLAUDE.md` §17, §5.0) — check the existing `tools/` sub-routers and `args.rs` structs for the same shape.
 1. The tool is a **thin handler** in the matching `crates/mcp/src/tools/<category>.rs` sub-router (a `#[tool]`
    method on `SoloistMcp`): parse params (clean-room JSON Schema from a struct in `args.rs`, `04`/`09`), call
    **one `Facade` method** over the IPC client, map the result via a `tools::reply` helper. No domain logic in
@@ -211,19 +235,24 @@ DRY, and the dependency rule intact. These *are* the "how future sessions archit
    sidecar. The core and every other adapter are untouched (§8).
 
 ### 5.4 Add an HTTP endpoint / CLI command (Phase 10)
+0. **Search first** (`CLAUDE.md` §17, §5.0) — the `Facade` method behind the equivalent UI button is very likely the one you need.
 1. Endpoint handler in `crates/httpapi` → one `Facade` method (mutations require `X-Soloist-Local-Auth`,
    loopback + localhost CORS, `05` §8). CLI subcommand in `crates/cli` → one HTTP call to that endpoint.
 2. Same behavior as the UI button and the MCP tool because all three route to the **same** `Facade` method.
    If you find yourself reimplementing the behavior, stop — route to the core.
 
 ### 5.5 Add a Tauri command (UI ↔ core)
-1. Add a thin `#[tauri::command]` in `crates/app/src/commands.rs` → one `Facade` method.
-2. Register it in the `invoke_handler!` list in `app/src/lib.rs` (the command name = the fn name; single
+0. **Search first** (`CLAUDE.md` §17, §5.0) — check `api.ts` for a command that already does this.
+1. Add a thin `#[tauri::command]` in the matching `crates/app/src/commands/<surface>.rs` submodule
+   (`commands/mod.rs` re-exports each one, so the whole surface stays under one `commands::` namespace)
+   → one `Facade` method.
+2. Register it in the `tauri::generate_handler!` list in `app/src/lib.rs` (the command name = the fn name; single
    source).
 3. Add the typed wrapper in `ui/src/api.ts` (the command-name string lives **only** here on the TS side).
 4. Never put logic in the command handler; it marshals types and calls the core.
 
 ### 5.6 Add a `DomainEvent` variant (cross-boundary change)
+0. **Search first** (`CLAUDE.md` §17, §5.0) — an existing variant may already carry the change; don't add a near-twin.
 1. Add the variant to `core::events::DomainEvent` (serde `#[serde(tag = "type")]` → the discriminator is the
    variant name; no hand-written string).
 2. Mirror it in `ui/src/domain.ts`'s `DomainEvent` union (the **one** TS definition) and handle it in the
@@ -233,9 +262,10 @@ DRY, and the dependency rule intact. These *are* the "how future sessions archit
    constant on each side"); do not add a third occurrence.
 
 ### 5.7 Add UI (always via `/impeccable`, `CLAUDE.md` §5)
+0. **Search first** (`CLAUDE.md` §17, §5.0) — `find-similar-functions` for the helper, and diff against the sibling surface's components before cloning a file.
 1. Types from `domain.ts`; data from a `store/` hook; status display from `lib/status.ts`.
 2. New presentational component under `components/<surface>/`; props-in/callbacks-out; no `invoke`.
-3. Reuse existing primitives (shadcn `Button`, `StatusIndicator`, `ProcessControls`) — never re-roll markup.
+3. Reuse existing primitives (shadcn `Button`, `ProcessIndicator`, `ProcessControls`) — never re-roll markup.
 
 ### 5.8 Use the coordination layer — create → delegate → use (C6, Phase 9)
 
@@ -299,7 +329,7 @@ neither surface re-rolls persistence and adding a setting is one field — never
 - **Façade**: one thin getter + setter per field over `get`/`update`, so the settings UI, CLI, and an MCP
   tool all drive the same record (one behavior, many fronts).
 
-**To add a setting:** (1) add a `#[serde(default)]` field — or a sub-struct for a whole new tab/group — to
+**To add a setting:** (0) search the document for a field that already holds it (`CLAUDE.md` §17, §5.0); (1) add a `#[serde(default)]` field — or a sub-struct for a whole new tab/group — to
 the matching document (`Settings` global, `ProjectSettings` per-project local); (2) add **one** `Facade`
 getter + setter calling `store.update(key, |d| d.x = v)` (§5.1; §5.5 for the Tauri command); (3) render it
 from the projected read-model in the tab/section panel (§5.7), auto-saving on change. No new port, no new

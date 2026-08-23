@@ -7,6 +7,7 @@ import { DiagramTitle } from "@/components/orchestration/DiagramTitle";
 import { DiagramToolbar } from "@/components/orchestration/DiagramToolbar";
 import { useAutosave } from "@/components/editor/useAutosave";
 import { humanizeName } from "@/lib/humanize";
+import type { SaveOutcome } from "@/store/saveOutcome";
 import type { DiagramConflict } from "@/store/useDiagramEditor";
 
 interface DiagramEditorProps {
@@ -17,7 +18,7 @@ interface DiagramEditorProps {
   error: string | null;
   /** Whether the open diagram is archived — flips the header control between Archive and Restore. */
   archived: boolean;
-  onSave: (source: string) => Promise<void>;
+  onSave: (source: string) => Promise<SaveOutcome>;
   onReload: () => void;
   /** Archives the open diagram, or restores it when already archived. */
   onArchive: () => void;

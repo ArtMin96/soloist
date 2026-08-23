@@ -38,6 +38,7 @@ In order, every session, before writing code or answering a task:
 - UI/UX → `/impeccable` (§5) before touching anything.
 - Claude Code / MCP / Agent SDK code → fetch official docs (§4) first.
 - Unfamiliar library API → `context7` (§4).
+- Adding a helper/component/hook/constant → search for an existing one first (§17).
 
 ---
 
@@ -154,6 +155,8 @@ enum Visibility  { Shared, Local }
 
 - **MCP server → invoke `mcp-builder`** + cross-check `modelcontextprotocol.io/docs/*` + `code.claude.com/llms.txt` + `rmcp` via `context7`.
 
+- **New TS/JS helper, hook or component → invoke `find-similar-functions` (MANDATORY).** Search for an existing one before writing a new one (§17).
+
 - **Always re-check what's available at session start.** If a skill clearly fits the task, use it — don't reinvent what it already encodes.
 
 ---
@@ -184,7 +187,7 @@ enum Visibility  { Shared, Local }
   3. Test plan implemented and green (unit on mock `Clock`, adapter/integration as specified).
   4. CI gates pass: `clippy -D warnings`, `rustfmt`, `tsc --noEmit`, ESLint, **dependency-direction check**, nightly soak (Phase 6+).
   5. `PROGRESS.md` updated (§10); intentional divergences in `KNOWN-DIVERGENCES.md`.
-  6. **Codebase-discipline gate (§15, §16) passes:** hexagonal layering + bounded contexts intact, adapters thin, DRY, small single-purpose files, no dead code or restating comments.
+  6. **Codebase-discipline gate (§15, §16, §17) passes:** hexagonal layering + bounded contexts intact, adapters thin, DRY, small single-purpose files, no dead code or restating comments.
 
 ---
 
@@ -268,6 +271,7 @@ A session that wrote code but didn't update `PROGRESS.md` has **failed its hando
 | "I'll build UI without the design skill" | Drive it through `/impeccable` first (§5). |
 | "I'll just `use tauri` in core to save a step" | Forbidden. Add a port. CI will fail you anyway. |
 | "I'll reimplement restart in the MCP adapter quickly" | One core command; route to it. |
+| "I'll just write this helper, it's quicker than looking" | Search first (§17). A copy you write today is a bug you fix twice. |
 | "An unbounded buffer is fine for now" | Every unbounded thing is a future crash. Cap it. |
 | "One more npm dep won't hurt the size" | Justify it against the size budget (§6). |
 | "Solo probably does X" | Check `plan/05`; if absent, it's a recorded gap. |
@@ -343,6 +347,20 @@ Detailed blueprint: **`plan/06-codebase-blueprint-and-cleanup.md`**. These are t
 - **Small files; tests in separate files, honest.** Split non-test source at the ~400-line smell. New tests live in their own file: unit tests of private items via `#[cfg(test)] #[path = "x_tests.rs"] mod tests;` (stays a child module, so it still reaches private items); adapter integration tests in `tests/`. Inline only when there is no other way. Every test must exercise real behavior.
 - **Reach for a pattern when its trigger fires, not before.** `plan/06` §4 table: FSM for legal state transitions; Registry for a growing handler set (MCP tools, agent providers — never a giant `match`); Strategy for per-provider behavior; Repository per durable aggregate; Builder when >4 constructor collaborators. No speculative abstraction (YAGNI).
 - **Use the recipes.** Adding a context behavior, port+adapter, MCP tool, HTTP/CLI/Tauri command, `DomainEvent`, or UI surface each has a checklist in `plan/06` §5. Follow it so the change lands in the right layer with dependency rule, single-source, and DRY intact.
+
+---
+
+## 17. Search before you write (MANDATORY)
+
+Before adding any helper, component, hook, constant, or function:
+
+- **TS/JS:** invoke the `find-similar-functions` skill with a short behavioural query ("format duration", "parse config", "roving focus list").
+- **Rust:** `rg "pub fn" crates/ | grep <keyword>`, then use LSP on the matches to read what they actually do.
+- **Both:** if you are adding X for a second noun, diff it against the existing X first — normalize the noun, then diff. Cloned *files* are invisible to symbol search; this is the check that catches them.
+
+Say which you did: "searched X, found nothing" or "reused Y at path Z".
+
+**Never copy-and-diverge.** If code is similar enough that you want to copy it, extract the shared version and route both callers to it — that is the refactor. `just dupes` reports current duplication; it does not gate, so the discipline is yours.
 
 ---
 

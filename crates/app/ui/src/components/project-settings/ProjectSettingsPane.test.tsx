@@ -79,17 +79,100 @@ function mockPage(calls: Call[]) {
 
 const names = (calls: Call[]) => calls.map((c) => c.cmd);
 
-// Serve the page as `mockPage` does, but reject the first `edit_shared_command` call — so a test
-// can drive a write through to an observed failure before dispatching the next one.
-function mockPageFailingFirstEdit(calls: Call[]) {
+// Serves the page and applies each `edit_shared_command` call to a local `commands` list, so a
+// test can assert what the pane ends up rendering rather than what it sent. The first edit always
+// rejects; later ones apply normally.
+function mockFailFirstEditThenApply() {
+  let commands = [webCommand];
   let editAttempts = 0;
   mockIPC((cmd, payload) => {
-    calls.push({ cmd, payload: payload as Record<string, unknown> | undefined });
-    if (cmd === "project_settings_page") return page;
+    if (cmd === "project_settings_page") return { ...page, commands };
     if (cmd === "trust_grants") return [];
-    if (cmd === "edit_shared_command" && ++editAttempts === 1) throw new Error("boom");
+    if (cmd === "edit_shared_command") {
+      editAttempts += 1;
+      if (editAttempts === 1) throw new Error("boom");
+      const edit = payload as { name: string; spec: ProcessSpec };
+      commands = commands.map((c) => (c.name === edit.name ? { ...c, ...edit.spec } : c));
+    }
     return settings;
   });
+}
+
+// Serves the page and applies each `edit_shared_command` call to a local `commands` list. Web's
+// edit is held open until the test releases it, so the test controls exactly when it settles.
+function mockGatedFirstEdit() {
+  let commands = [webCommand];
+  let editCalls = 0;
+  let release: (() => void) | null = null;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  mockIPC((cmd, payload) => {
+    if (cmd === "project_settings_page") return { ...page, commands };
+    if (cmd === "trust_grants") return [];
+    if (cmd === "edit_shared_command") {
+      editCalls += 1;
+      const edit = payload as { name: string; spec: ProcessSpec };
+      const apply = () => {
+        commands = commands.map((c) => (c.name === edit.name ? { ...c, ...edit.spec } : c));
+      };
+      if (editCalls === 1) return gate.then(apply);
+      apply();
+    }
+    return settings;
+  });
+
+  return { release: () => release?.(), editCalls: () => editCalls };
+}
+
+// Serves a page with two commands and applies each `edit_shared_command` call to a local
+// `commands` list. Each command's edit is held open until the test releases it, and any
+// `project_settings_page` read taken before Web's edit has landed is held open too, so the test
+// fully controls both the write order and exactly when that stale snapshot is delivered relative
+// to one that already reflects Web's change.
+function mockOutOfOrderCommandEdits() {
+  let commands = [webCommand, apiCommand];
+  const editGates = new Map<string, { release: () => void; promise: Promise<void> }>();
+  for (const name of ["Web", "API"]) {
+    let release: (() => void) | null = null;
+    const promise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    editGates.set(name, { release: () => release?.(), promise });
+  }
+  let releaseStaleRead: (() => void) | null = null;
+  const staleReadGate = new Promise<void>((resolve) => {
+    releaseStaleRead = resolve;
+  });
+  let firstRead = true;
+
+  mockIPC((cmd, payload) => {
+    if (cmd === "trust_grants") return [];
+    if (cmd === "project_settings_page") {
+      if (firstRead) {
+        firstRead = false;
+        return { ...page, commands };
+      }
+      const snapshot = { ...page, commands };
+      const webLanded = commands.find((c) => c.name === "Web")?.command !== webCommand.command;
+      return webLanded ? snapshot : staleReadGate.then(() => snapshot);
+    }
+    if (cmd === "edit_shared_command") {
+      const edit = payload as { name: string; spec: ProcessSpec };
+      const gate = editGates.get(edit.name);
+      return gate?.promise.then(() => {
+        commands = commands.map((c) => (c.name === edit.name ? { ...c, ...edit.spec } : c));
+      });
+    }
+    return settings;
+  });
+
+  return {
+    releaseWebEdit: () => editGates.get("Web")?.release(),
+    releaseApiEdit: () => editGates.get("API")?.release(),
+    releaseStaleRead: () => releaseStaleRead?.(),
+  };
 }
 
 function mockDuplicateRename() {
@@ -188,45 +271,103 @@ describe("Per-project settings page", () => {
     await waitFor(() => expect(names(calls)).toContain("make_command_local"));
   });
 
-  // Regression coverage for the lost-update bug: a whole-record replace assembled from the
-  // rendered (and by then stale) command dropped whatever an earlier, still in-flight edit had
-  // just changed. Two edits fire before the first's `project_settings_page` reload lands; the
-  // second write must still carry the first's change, not revert it.
-  it("carries an earlier in-flight edit's change forward instead of reverting it", async () => {
-    const calls: Call[] = [];
-    mockPage(calls);
+  // Regression coverage for the lost-update bug, now at the write level: writes to the same
+  // command must never be in flight at once. Write #2 must not even reach the wire until write #1
+  // settles, and once it does, it must carry both patches merged.
+  it("sends the merged edit only after the first settles, never concurrently, for the same command", async () => {
+    const { release, editCalls } = mockGatedFirstEdit();
 
     render(<ProjectSettingsPane project={project} />);
-    await waitFor(() => expect(names(calls)).toContain("project_settings_page"));
-
     const { commandInput, autoStartToggle } = await openCommandEditor();
 
-    // Write #1: edit the command line. Its reload is never awaited before write #2 fires.
+    // Write #1: edit the command line. Held open by the mock until released below.
     fireEvent.change(commandInput, { target: { value: "npm run build" } });
     fireEvent.blur(commandInput);
 
-    // Write #2: flip the auto-start toggle before write #1 resolves.
+    // Write #2: flip auto-start before write #1 settles. Must not go out yet.
     fireEvent.click(autoStartToggle);
+    expect(editCalls()).toBe(1);
 
-    const edits = calls.filter((c) => c.cmd === "edit_shared_command");
-    expect(edits).toHaveLength(2);
-    expect(edits[1].payload?.spec).toMatchObject({
-      command: "npm run build",
-      auto_start: false,
-    });
+    release();
+
+    await waitFor(() => expect(editCalls()).toBe(2));
+    await waitFor(() => expect(screen.getByText("npm run build")).toBeTruthy());
+    expect(screen.queryByText("AUTO")).toBeNull();
+  });
+
+  // Regression coverage for the lost-update bug across commands: firing writes for two different
+  // commands concurrently lets whichever `project_settings_page` read landed last win, even when
+  // it read the page before an earlier command's write had durably applied. Serializing every
+  // write removes the possibility entirely — there is only ever one in-flight write, and only one
+  // reload, so a stale snapshot can never be captured in the first place.
+  it("keeps a stale reload from clobbering an earlier command's already-applied change", async () => {
+    const { releaseWebEdit, releaseApiEdit, releaseStaleRead } = mockOutOfOrderCommandEdits();
+
+    render(<ProjectSettingsPane project={project} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Commands" }));
+
+    // Write #1: edit Web's command line. Held open until the test releases it.
+    fireEvent.click(await screen.findByText("Web"));
+    const commandInput = await screen.findByLabelText("Command");
+    fireEvent.change(commandInput, { target: { value: "npm run build" } });
+    fireEvent.blur(commandInput);
+
+    // Write #2: switch to a different command and flip its toggle. Also held open.
+    fireEvent.click(await screen.findByText("API"));
+    fireEvent.click(await screen.findByLabelText("Start when the project opens"));
+
+    // Let write #2 settle well before write #1. Its own reload, if it fires this early, reads the
+    // page while write #1's change is still outstanding.
+    releaseApiEdit();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Now let write #1 finally settle; its own reload lands promptly and reflects both changes.
+    releaseWebEdit();
+    await waitFor(() => expect(screen.getByText("npm run build")).toBeTruthy());
+
+    // A read taken before write #1 landed arrives now, after the correct one already did.
+    releaseStaleRead();
+
+    // Web already carries its own AUTO badge from the fixture; API's is what proves write #2 also
+    // survived.
+    await waitFor(() => expect(screen.getAllByText("AUTO")).toHaveLength(2));
+    expect(screen.getByText("npm run build")).toBeTruthy();
+  });
+
+  // The queue drains before the page reloads: two writes queued back to back must produce exactly
+  // one reload, not one per write, which is also what removes the out-of-order-reload window.
+  it("reloads once after the whole queue drains, not once per queued write", async () => {
+    const calls: Call[] = [];
+    mockPage(calls);
+    const reads = () => names(calls).filter((n) => n === "project_settings_page").length;
+
+    render(<ProjectSettingsPane project={project} />);
+    await waitFor(() => expect(reads()).toBe(1));
+    const readsAfterLoad = reads();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Settings" }));
+    const autoStartSwitch = await screen.findByLabelText("Suppress auto-start");
+    const autoTrustSwitch = await screen.findByLabelText("Automatically trust command changes");
+
+    // Both writes fire back to back, with no await between them, so the second is still queued
+    // (not yet sent) behind the first when it is issued.
+    fireEvent.click(autoStartSwitch);
+    fireEvent.click(autoTrustSwitch);
+
+    await waitFor(() => expect(names(calls)).toContain("set_project_auto_trust_command_changes"));
+    await waitFor(() => expect(reads()).toBeGreaterThan(readsAfterLoad));
+    // Give a wrongly per-write reload a chance to land before pinning the final count.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(reads()).toBe(readsAfterLoad + 1);
   });
 
   // A write that settles unsuccessfully must not contribute its field to a later write's merge
-  // base: `mutate` reloads only on success, so after this rejection `page` still holds the
-  // pre-write value and the error is already on screen — carrying the rejected command line
-  // forward would silently resurrect a change the error said did not apply.
+  // base, and the queue must still drain normally afterwards.
   it("drops a failed edit's field from a later edit's merge base", async () => {
-    const calls: Call[] = [];
-    mockPageFailingFirstEdit(calls);
+    mockFailFirstEditThenApply();
 
     render(<ProjectSettingsPane project={project} />);
-    await waitFor(() => expect(names(calls)).toContain("project_settings_page"));
-
     const { commandInput, autoStartToggle } = await openCommandEditor();
 
     // Write #1: rejects. Wait for the failure to surface before the next write fires.
@@ -237,12 +378,8 @@ describe("Per-project settings page", () => {
     // Write #2: a fresh edit on the same row, issued after write #1 has settled unsuccessfully.
     fireEvent.click(autoStartToggle);
 
-    const edits = calls.filter((c) => c.cmd === "edit_shared_command");
-    expect(edits).toHaveLength(2);
-    expect(edits[1].payload?.spec).toMatchObject({
-      command: webCommand.command,
-      auto_start: false,
-    });
+    await waitFor(() => expect(screen.queryByText("AUTO")).toBeNull());
+    expect(screen.getByText(webCommand.command)).toBeTruthy();
   });
 
   it("keeps an overlapping edit away from the command that rejected a duplicate rename", async () => {

@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { scratchpadLink, scratchpadRead, scratchpadRename, scratchpadWrite } from "@/api";
+import type { SaveOutcome } from "@/store/saveOutcome";
 
 // A revision conflict surfaced to the panel: a write was refused because the scratchpad moved on
 // since it was opened. `actual` is the revision it now sits at, so the banner can name it.
@@ -27,8 +28,12 @@ export interface ScratchpadEditorStore {
   error: string | null;
   open: (name: string) => void;
   close: () => void;
-  /** Saves the Markdown body revision-guarded; resolves once the outcome (success/conflict/error) is set. */
-  save: (markdown: string) => Promise<void>;
+  /**
+   * Saves the Markdown body revision-guarded, resolving to whether it went through. A refusal
+   * (conflict or error) never rejects — it is surfaced through `conflict`/`error` state, and the
+   * resolved `"refused"` is the caller's signal that nothing was persisted.
+   */
+  save: (markdown: string) => Promise<SaveOutcome>;
   /** Reload the open scratchpad fresh, discarding local edits — the conflict resolution. */
   reload: () => void;
   /**
@@ -113,13 +118,14 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
   }, [name, load]);
 
   const save = useCallback(
-    async (markdown: string) => {
-      if (name == null) return;
+    async (markdown: string): Promise<SaveOutcome> => {
+      if (name == null) return "refused";
       setError(null);
       try {
         const view = await scratchpadWrite(project, name, markdown, baseRevisionRef.current);
         setBaseRevision(view.revision);
         baseRevisionRef.current = view.revision;
+        return "saved";
       } catch (reason) {
         // The write was refused. Re-read to tell a stale revision (a concurrent edit landed — surface
         // a conflict and leave the user's edits intact) from any other rejection (e.g. an invalid
@@ -134,6 +140,7 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
         } catch (readReason) {
           setError(String(readReason));
         }
+        return "refused";
       }
     },
     [project, name],
