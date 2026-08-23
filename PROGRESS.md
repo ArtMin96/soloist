@@ -9,6 +9,130 @@
 
 ## Current state
 
+> **LATEST (2026-08-23): DSA AUDIT SLICE 4 — THE "ONE INVARIANT, ONE SITE FORGOT" TRIO — gate-green,
+> `Done — pending verify`, UNCOMMITTED.** On `main` `92b41b2`. Work items **S08-F2** (scratchpad
+> rename), **S11-F1** (`commit_template`'s missing `NotARepo` arm), and **S12-F2** (two trust-request
+> paths that never pruned expired requests), from the DSA codebase audit held in the Soloist MCP
+> scratchpads. All three share one shape: an invariant already re-asserted by hand at every other
+> entry point, where a single site forgot it — each fixed by mirroring an already-correct sibling in
+> the same codebase, not by inventing a new mechanism. All three were implemented at the
+> **verifier-narrowed** scope from `dsa-audit-verify-B`, which narrowed every one of the three
+> findings; in each case the verifier kept the behaviour fix and rejected the abstraction the lane had
+> attached to it.
+>
+> **S08-F2 — scratchpad rename accepted a blank name.** `Scratchpads::write` rejected a
+> blank/whitespace name via `validate`, but `Scratchpads::rename` passed `to` straight to the repo
+> with no check, and `RenameError` had no variant able to express the refusal — the store ran
+> `UPDATE scratchpads SET name = ?3` unconditionally, the facade mapped only
+> `NotFound`/`NameTaken`/`Store`, and the MCP tool passed through. The only guard was client-side in
+> `ScratchpadTitle.tsx`, unreachable from an agent. The sibling aggregate
+> `crates/core/src/coordination/diagram.rs` already did it correctly. Fixed by factoring a
+> `validate_name` helper out of `validate` (so the rule exists once), adding
+> `RenameError::Invalid(String)`, calling `validate_name(to).map_err(RenameError::Invalid)?` in
+> `rename`, and adding the matching arm to `crates/core/src/facade/scratchpad.rs`'s error map →
+> `CoordinationError::InvalidScratchpad`. The same arm had to be added to `scratchpad_transfer_in`'s
+> map too — `transfer` shares `RenameError`'s type and the match must stay exhaustive, not a
+> behaviour change to `transfer` itself, whose own `name` parameter is a lookup key for an existing
+> row (same role as `rename`'s `from`), checked and correctly left alone. **Verifier narrowings
+> honoured:** the lane's "wedged into a state it can never be written from again" was overstated — the
+> blank-named row stays listed with its exact name, readable, renamable-back and deletable; it is a
+> nuisance, not a trap, and no test name or comment claims otherwise. The `DocName` newtype spanning
+> both aggregates and both facades was rejected as YAGNI and not built. S08-F1
+> (`ScratchpadView.rendered`) was separately rejected on verification as a published tool contract and
+> left untouched.
+>
+> **S11-F1 — `commit_template` propagated `NotARepo` where every sibling absorbs it.**
+> `crates/core/src/git/commit.rs::configured_template` called the port with no
+> `Err(GitError::NotARepo)` arm, while every sibling read translates it into "no repository here" —
+> the adapter manufactures that error deliberately and the null-object port answers it too, so a core
+> built without a git adapter errored on this one read while every sibling answered `None`. Fixed with
+> the missing arm, mirroring `branch.rs` exactly, plus the `GitRepository` trait doc comment extended
+> to state the full membership. **The implementer counted call sites itself rather than trusting the
+> audit's number:** the slice instruction and the audit both said "six-method membership"; the actual
+> post-fix membership is **seven** — `status`, `list_files`, `read_file`, `log`, `diff`, `branches`,
+> and now `commit_template` (seven call sites, `diff` called from two) — six was the pre-fix count of
+> already-correct siblings, seven once `commit_template` joins them; the doc now states seven.
+> **Verifier narrowings honoured:** the lane's end-to-end UI claim was overstated —
+> `useCommitTemplate` returns only `value` from `useRepositoryRead` and discards the rejected
+> promise's error, so the user saw `null` either way; this is a core-contract inconsistency, not a
+> broken surface. The shared `reading` seam was rejected for this change. **C3 boundary held:**
+> S21-F1 (`Op → NotARepo` manufacture in the adapter, all six copies currently correct) is a different
+> finding in a different crate and direction; S11 is the authoritative owner, and the "commit_template
+> outside a repository" test both lanes named was written once, here, at the core layer. The test
+> could not use the shared `FakeGitRepository` — its `template` field is the only one of its seven
+> answer fields defaulting to `Ok(None)` rather than `Err(NotARepo)`, so it cannot inject the error;
+> the test builds `Git` against the real production `NoopGitRepository` instead, exactly the "core
+> built without a git adapter" scenario the finding describes. Aligning that fake's default is flagged
+> as a separate, out-of-scope fixture improvement.
+>
+> **S12-F2 — two trust-request paths never pruned expired requests.** In
+> `crates/core/src/trust/requests.rs`, four of six methods (`record`, `status`, `pending`, `peek`)
+> take the lock, call `prune_expired`, compute, release, then `announce_resolved(expired)`; `resolve`
+> and `withdraw_requests_of` never pruned, so denying or withdrawing a request already past its TTL
+> filed a `Denied`/`Withdrawn` receipt and event where a read one instruction earlier would have
+> produced `Expired`. **Additional latent defect found while fixing:** `resolve` used `?` inside its
+> locked block — `?` returns from the enclosing function, not the block — so an unrelated lookup miss
+> short-circuited the whole method and a naively-added prune call would never have been reached;
+> `resolve` was restructured to build a `(resolved, expired)` tuple inside the lock, announce after
+> unlocking, and fire its own `TrustRequestResolved` publish only `if let Some(resolved)`. **Verifier
+> narrowings honoured:** the security claim is defence-in-depth only — no current path grants an
+> expired request, and approval additionally requires the re-derived spec hash, the request's own
+> review hash, and the caller's reviewed hash to all agree; today's actual defect is a mislabelled
+> receipt/event on two paths, and that is what the tests assert — nothing is framed as a security fix.
+> The `with_state` helper was not built. **Also recorded:**
+> `crates/core/src/facade/trustrequest.rs::approve_trust_request` was safe only because it `peek`s
+> (which prunes) before `resolve`, and that dependency was documented nowhere; after this fix the
+> dependency is redundant rather than load-bearing. The facade was not changed.
+>
+> **C1 gate — the row-type decision required to land alongside S08-F2 is recorded**, in
+> `.scratch/dsa-audit/c1-row-type-decision.md`: do **not** unify `Scratchpads` and `Diagrams` into one
+> generic document aggregate. The duplication is real (`diagram_repo.rs` ~70% line-identical to
+> `scratchpad_repo.rs` after renaming, same for the store pair and the two in-memory fakes), but the
+> aggregates genuinely differ — `transfer` + the derived-todo cascade, template seeding, and the
+> heading-skipping `gist` rule are scratchpad-only — and a generic-over-kind rewrite spanning core +
+> store + testing fakes does not clear the risk for duplication that has produced exactly one defect,
+> fixable locally. **Consequence:** S16-F1 (`doc_table`) and the S15 fakes note are unblocked and may
+> proceed on their own merits; neither should reopen unification as a prerequisite. Prefer static
+> per-table SQL over interpolated identifiers in S16-F1.
+>
+> **Test-first evidence — all five new tests were shown to fail against the unfixed behaviour, then
+> pass:** `rename_rejects_a_blank_target_name_without_moving_the_scratchpad`,
+> `scratchpad_rename_in_refuses_a_blank_target_name_and_publishes_nothing`,
+> `a_template_read_for_a_non_repository_returns_none_not_an_error`,
+> `resolving_a_request_already_past_its_ttl_reads_back_expired_not_denied`,
+> `withdrawing_a_request_already_past_its_ttl_reads_back_expired_not_withdrawn`. Recorded honestly:
+> the two scratchpad tests' first failure was only a **compile** error (`RenameError::Invalid` did
+> not exist yet), proving the API was missing but not that the tests detect wrong behaviour — a real
+> mutation pass then commented out the `validate_name(to)` line alone with everything else compiling,
+> and both reddened with genuine assertion panics. The facade test's two halves were independently
+> checked by temporarily reordering its assertions (reverted immediately, no residue): both the
+> error-variant assertion and the no-event assertion redden on their own. The git and trust tests
+> reddened with real assertion failures from the start (e.g. `left: Some(Denied)` / `right:
+> Some(Expired)`).
+>
+> **Gate evidence — full set re-run once this session, green.** `just lint` — exit 0 (`cargo fmt
+> --check`, `clippy --workspace --all-targets -D warnings`, `tsc --noEmit`, `eslint .`, `prettier
+> --check .`, `check-core-deps.sh`, `check-core-cycles.sh` all clean). `just test` — exit 0: `cargo
+> test --workspace` **1983 passed / 0 failed / 3 ignored** (the 3 are the pre-existing
+> `crates/pty/tests/soak.rs` longevity tests, unchanged) across **55 test binaries** (44
+> unit/integration + 11 doctest, re-run twice this session with identical results); `just lint`'s own
+> `cargo test -q -p soloist-core --features schema config::schema` step adds **2** more passed, for
+> **1985** total across the full gate — reconciled by re-running both this session, not taken on
+> faith. `pnpm -C crates/app/ui test` **171 files / 1255 tests passed, 0 failed**. All five new tests
+> present and green in that run. `just e2e` not run — no real-window walk.
+>
+> **Why `Done — pending verify` and not `Verified`:** the gates are green and every fix is
+> unit-proven, but no real-window/desktop walk was run and none of the three touches a
+> parity-matrix v1 row that would gate on one.
+>
+> **Next session should start with:** commit this working tree and open the PR (no self-merge) —
+> nothing from slice 4 is pushed yet. Then continue the DSA audit's remaining slices in contract
+> order: **slice 5**
+> (`.scratch/dsa-audit/slices/slice-05-processactionhandlers-contract.md`, S28-F1 + S26-F2 +
+> `App.tsx` as one commit, then S28-F2) through slice 10. The audit's known gap still stands: **S31–S37
+> have never been independently verified** (slice 10 is filed as "config-rows-unverified" for exactly
+> this reason) — verify each against the actual code before scheduling any of them.
+
 > **LATEST (2026-08-23): DSA AUDIT SLICE 3 — AUTOSAVE ACKNOWLEDGE-BEFORE-CLEAN + SINGLE-FLIGHT, AND
 > THE SETTLE-GATED SETTINGS WRITE QUEUE — gate-green, `Done — pending verify`, UNCOMMITTED.** Work
 > items **S27-F1** (`useAutosave`) and **S25-F1 commit 2** (`ProjectSettingsPane`'s write queue), from
@@ -3088,6 +3212,49 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### DSA audit — Slice 4: the "one invariant, one site forgot" trio (2026-08-23) — `Done — pending verify`
+Work items S08-F2, S11-F1, S12-F2, from the DSA codebase audit held in the Soloist MCP scratchpads
+(`dsa-audit-contract`, `dsa-audit-S08`, `dsa-audit-S11`, `dsa-audit-S12`, `dsa-audit-verify-B`), all
+implemented at the verifier-narrowed scope. Full gate set run once this session: `just lint` exit 0;
+`just test` exit 0, `cargo test --workspace` 1983 passed / 0 failed / 3 ignored (pre-existing soak
+longevity tests, unchanged) across 55 test binaries, plus 2 more from `just lint`'s own
+`cargo test -q -p soloist-core --features schema config::schema` step, 1985 total across the full
+gate; `pnpm -C crates/app/ui test` 171 files / 1255 tests passed. `just e2e` not run.
+
+- **S08-F2 — blank-named scratchpad rename.** `Scratchpads::rename` had no validation where `write`
+  did, and `RenameError` had no variant to express a refusal. Fixed by factoring `validate_name` out
+  of `validate`, adding `RenameError::Invalid(String)`, and mapping it to
+  `CoordinationError::InvalidScratchpad` in both `scratchpad_rename_in` and `scratchpad_transfer_in`
+  (the latter only because both share `RenameError` and the match must stay exhaustive — no behaviour
+  change to `transfer`). **Rejected (verifier):** the `DocName` newtype spanning both aggregates and
+  both facades — YAGNI for one missing call. **Narrowed (verifier):** the lane's "wedged permanently"
+  claim — the row stays readable, renamable-back and deletable; it is a nuisance, not a trap.
+- **S11-F1 — `commit_template` propagated `NotARepo`.** Every other `GitRepository` read absorbs
+  `NotARepo` into `None`; `commit_template` did not. Fixed by mirroring `branch.rs`'s arm.
+  **Correction to the audit's own count:** the audit and the slice brief both said the sibling
+  membership was six methods; counting call sites directly in this session found the correct
+  post-fix membership is **seven** (`status`, `list_files`, `read_file`, `log`, `diff`, `branches`,
+  `commit_template`) — six was the pre-fix count, seven once this fix joins them. The trait doc
+  comment now states seven. **Rejected (verifier):** the shared `reading` seam. **Narrowed
+  (verifier):** the lane's end-to-end UI claim — `useCommitTemplate` already discarded the rejected
+  promise's error, so the user saw `null` either way; this is a core-contract inconsistency, not a
+  broken surface.
+- **S12-F2 — `resolve`/`withdraw_requests_of` never pruned expired trust requests.** The other four
+  `TrustRequests` methods do. Fixed by adding the prune to both, and restructuring `resolve` (which
+  used `?` inside its own locked block — returning from the whole function, not the block — so a
+  naive prune addition would never have been reached) to compute `(resolved, expired)` inside the
+  lock and announce/publish after releasing it. **Rejected (verifier):** the `with_state` helper.
+  **Narrowed (verifier):** the security framing — no path grants an expired request today (approval
+  also needs three independently-agreeing hashes); the live defect is a mislabelled receipt/event,
+  not a security hole, and the tests assert exactly that.
+- **C1 — declined to unify `Scratchpads`/`Diagrams` into one generic document aggregate**, recorded in
+  `.scratch/dsa-audit/c1-row-type-decision.md`. The ~70% line-identical duplication (repo, store,
+  in-memory fakes) is real but the aggregates differ in `transfer` + the derived-todo cascade,
+  template seeding, and the heading-skipping `gist` rule; a generic rewrite does not clear the risk
+  for one defect (S08-F2) that was fixable locally. Unblocks S16-F1 (`doc_table`) and the S15 fakes
+  note — prefer static per-table SQL over interpolated identifiers in S16-F1; neither should reopen
+  unification as a prerequisite.
+
 ### DSA audit — Slice 3: autosave single-flight + settings write queue (2026-08-23) — `Done — pending verify`
 Work items S27-F1 and S25-F1 commit 2, from the DSA codebase audit held in the Soloist MCP
 scratchpads (`dsa-audit-contract`, `dsa-audit-S27`, `dsa-audit-S25`, `dsa-audit-verify-E`). Full gate
@@ -6051,8 +6218,36 @@ has a `GripVertical` icon. Both reviewers flagged it as "fine if deliberate"; le
 
 ## Next session should start with
 
-**◆ NEWEST (2026-08-23) — DSA audit slice 3 is landed and gate-green, UNCOMMITTED, on top of
-slice 2 (also still uncommitted). Commit and open the PR before touching slice 4.**
+**◆ NEWEST (2026-08-23) — DSA audit slice 4 is landed and gate-green, UNCOMMITTED, on top of
+slices 2 and 3 (also still uncommitted). Commit and open the PR before touching slice 5.**
+
+The working tree now holds slices 2, 3 and 4 together: slice 2's frontend latest-request guard,
+slice 3's autosave rebuild + settings write queue, and slice 4's S08-F2
+(`crates/core/src/coordination/scratchpad.rs` + `facade/scratchpad.rs`), S11-F1
+(`crates/core/src/git/commit.rs` + `repository.rs`), and S12-F2
+(`crates/core/src/trust/requests.rs`), plus the standalone C1 row-type decision written to
+`.scratch/dsa-audit/c1-row-type-decision.md`. Full gate set re-run once this session: `just lint`
+exit 0; `just test` exit 0 (`cargo test --workspace` 1983 passed / 0 failed / 3 ignored across 55
+test binaries, plus 2 more from `just lint`'s own schema-feature step, 1985 total across the full
+gate; `pnpm -C crates/app/ui test` 171 files / 1255 tests passed). `just e2e` not run. Nothing here
+is committed.
+
+The audit's own "best first implementation slices" list now has slices 1 through 4 done — slice 1
+(2026-08-19, the two locked-invariant violations) via PR #179, slices 2 and 3 (2026-08-23, frontend
+async discipline + autosave) and now slice 4 (2026-08-23, the S08-F2/S11-F1/S12-F2 trio) all still
+sitting uncommitted in this same working tree. Continue with **slice 5**
+(`.scratch/dsa-audit/slices/slice-05-processactionhandlers-contract.md` — S28-F1 + S26-F2 + `App.tsx`
+as one commit, then S28-F2) through slice 10, as filed in `.scratch/dsa-audit/slices/`. Read
+`dsa-audit-contract` (§ "Final priorities and dependencies") and the slice's own named verifier
+scratchpad (rulings override the lanes) before touching it — same as before.
+
+**The audit's known gap still stands and should be closed before scheduling that ground: S31–S37
+have never been independently verified.** Slice 10 is filed as
+`.scratch/dsa-audit/slices/slice-10-config-rows-unverified.md` precisely because those six findings
+had no verifier pass at all — verify each against the actual code first, and drop any that doesn't
+hold, before implementing.
+
+**◆ (2026-08-23) — DSA audit slice 3 was landed and gate-green here; superseded by slice 4 above.**
 
 The working tree now holds slices 2 and 3 together: slice 2's 12 modified files +
 `crates/app/ui/src/test/loadRaceContract.ts`, plus slice 3's `useAutosave` rebuild + the four store
