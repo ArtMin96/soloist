@@ -56,7 +56,11 @@ impl Git {
     ) -> Result<Option<String>, GitError> {
         let gate = self.gate(project);
         let _running = lock(&gate);
-        self.repository.commit_template(root, COMMIT_TEMPLATE_LIMIT)
+        match self.repository.commit_template(root, COMMIT_TEMPLATE_LIMIT) {
+            Ok(template) => Ok(template),
+            Err(GitError::NotARepo) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     /// Records `project`'s index as a commit carrying `message`.

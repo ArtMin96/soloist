@@ -95,6 +95,16 @@ pub struct RawFileDiff {
 /// blocking pool ([`crate::facade::Facade::blocking`]) rather than a runtime worker. It must
 /// return within a bounded time — a repository read that cannot finish is a
 /// [`GitError::Timeout`], never a wait without end — and must leave no process behind.
+///
+/// [`GitError::NotARepo`] means the same thing everywhere a method below can answer it: `root`
+/// names no repository, which is an ordinary state rather than a fault. Seven of the methods
+/// below can — [`GitRepository::status`], [`GitRepository::list_files`],
+/// [`GitRepository::read_file`], [`GitRepository::log`], [`GitRepository::diff`],
+/// [`GitRepository::branches`], and [`GitRepository::commit_template`] — and the git context
+/// absorbs it from every one of them into its own ordinary `None`, so none of the seven ever
+/// hands a caller `NotARepo` as an error. Every other method changes a repository that has to
+/// already exist to be changed, so `NotARepo` from one of those is a genuine failure and reaches
+/// the caller as one.
 pub trait GitRepository: Send + Sync {
     /// The working-tree status of the repository containing `root`: what is checked out, how it
     /// stands against its upstream, and every path that differs from the last commit.

@@ -3,14 +3,15 @@
 //! repository was asked for, or the refusal that stopped it before anything ran.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::ids::ProjectId;
 use crate::testing::{
-    file_change, git_over, git_status, git_trusting, FakeGitRepository, GitChange,
+    file_change, git_over, git_status, git_trusting, FakeGitRepository, FakeTrustRepo, GitChange,
 };
 use crate::vcs::ChangeKind;
 
-use crate::git::{GitError, GitStatus};
+use crate::git::{Git, GitError, GitStatus, NoopFileOpener, NoopGitForge, NoopGitRepository};
 
 use super::{GitWriteError, COMMIT_TEMPLATE_LIMIT};
 
@@ -177,6 +178,26 @@ fn a_template_past_the_ceiling_the_core_sets_is_no_template_at_all() {
     let offered = git
         .commit_template(project, Path::new(ROOT))
         .expect("a template read");
+
+    assert_eq!(offered, None);
+}
+
+#[test]
+fn a_template_read_for_a_non_repository_returns_none_not_an_error() {
+    // The no-op port is what a core built without a git adapter answers with, and it reports
+    // every root as belonging to no repository — the same state a real adapter reports for a
+    // folder that is not one.
+    let project = ProjectId::next();
+    let git = Git::new(
+        Arc::new(NoopGitRepository),
+        Arc::new(NoopGitForge),
+        Arc::new(NoopFileOpener),
+        Arc::new(FakeTrustRepo::new().trusting_project(project)),
+    );
+
+    let offered = git
+        .commit_template(project, Path::new(ROOT))
+        .expect("a non-repository is not a fault");
 
     assert_eq!(offered, None);
 }
