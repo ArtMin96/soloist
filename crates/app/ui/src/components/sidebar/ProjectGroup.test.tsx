@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
 import { SortableList } from "@/components/SortableList";
@@ -42,12 +42,25 @@ const groupProps = {
   onRemoveProject: noop,
 };
 
+interface ProjectActionOverrides {
+  onStartAll?: () => void;
+  onRestartRunning?: () => void;
+  onStopAll?: () => void;
+  onOpenOrchestration?: () => void;
+  onOpenProjectSettings?: () => void;
+  onRemoveProject?: () => void;
+}
+
 // A project header inside the arrangeable project list, which is what supplies its move actions —
 // composed the way the sidebar does.
-function renderGroup(ids: string[] = ["1"]) {
+function renderGroup(
+  ids: string[] = ["1"],
+  overrides: ProjectActionOverrides = {},
+  onReorder: (ids: string[]) => void = noop,
+) {
   render(
     <TooltipProvider>
-      <SortableList ids={ids} onReorder={noop}>
+      <SortableList ids={ids} onReorder={onReorder}>
         <ProjectGroup
           tree={tree}
           open
@@ -58,16 +71,24 @@ function renderGroup(ids: string[] = ["1"]) {
           selectedId={null}
           onSelect={noop}
           handlers={NOOP_HANDLERS}
-          onStartAll={noop}
-          onRestartRunning={noop}
-          onStopAll={noop}
-          onOpenProjectSettings={noop}
-          onOpenOrchestration={noop}
-          onRemoveProject={noop}
+          onStartAll={overrides.onStartAll ?? noop}
+          onRestartRunning={overrides.onRestartRunning ?? noop}
+          onStopAll={overrides.onStopAll ?? noop}
+          onOpenProjectSettings={overrides.onOpenProjectSettings ?? noop}
+          onOpenOrchestration={overrides.onOpenOrchestration ?? noop}
+          onRemoveProject={overrides.onRemoveProject ?? noop}
         />
       </SortableList>
     </TooltipProvider>,
   );
+}
+
+// The row that carries both the ••• menu and the right-click menu — the same element the
+// drag handle and `ContextMenuTrigger` are bound to.
+function projectRow(name: string): Element {
+  const row = screen.getByText(name).closest("div[class*='group/project']");
+  if (!row) throw new Error(`project row for ${name} not found`);
+  return row;
 }
 
 afterEach(cleanup);
@@ -108,5 +129,98 @@ describe("ProjectGroup header", () => {
   it("shows the running count for the project", () => {
     renderGroup();
     expect(screen.getByLabelText("2 of 4 processes running").textContent).toBe("2/4");
+  });
+});
+
+describe("ProjectGroup right-click menu", () => {
+  it("offers the same sections, in the same order, as the ••• menu", () => {
+    // The middle of a three-item list, so both moves are on offer and the full order is visible.
+    renderGroup(["0", "1", "2"]);
+    fireEvent.contextMenu(projectRow("Storefront"));
+
+    const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(items).toEqual([
+      "Start all",
+      "Restart running",
+      "Stop all",
+      "Orchestration",
+      "Project settings",
+      "Move up",
+      "Move down",
+      "Remove project",
+    ]);
+  });
+
+  it("withholds Move up for a project already leading the list", () => {
+    renderGroup(["1", "2"]);
+    fireEvent.contextMenu(projectRow("Storefront"));
+
+    expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Move down" })).toBeTruthy();
+  });
+
+  it("withholds Move down for a project already trailing the list", () => {
+    renderGroup(["2", "1"]);
+    fireEvent.contextMenu(projectRow("Storefront"));
+
+    expect(screen.getByRole("menuitem", { name: "Move up" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Move down" })).toBeNull();
+  });
+
+  it("withholds both moves for a project alone in its list", () => {
+    renderGroup(["1"]);
+    fireEvent.contextMenu(projectRow("Storefront"));
+
+    expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Move down" })).toBeNull();
+  });
+
+  it("marks Remove project destructive, unlike the routine actions around it", () => {
+    renderGroup();
+    fireEvent.contextMenu(projectRow("Storefront"));
+
+    expect(
+      screen.getByRole("menuitem", { name: "Remove project" }).getAttribute("data-variant"),
+    ).toBe("destructive");
+    expect(
+      screen.getByRole("menuitem", { name: "Start all" }).getAttribute("data-variant"),
+    ).toBe("default");
+  });
+
+  it("runs the bulk handler a selected item names", () => {
+    const onStartAll = vi.fn();
+    renderGroup(["1"], { onStartAll });
+    fireEvent.contextMenu(projectRow("Storefront"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Start all" }));
+    expect(onStartAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs the view handler a selected item names", () => {
+    const onOpenProjectSettings = vi.fn();
+    renderGroup(["1"], { onOpenProjectSettings });
+    fireEvent.contextMenu(projectRow("Storefront"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Project settings" }));
+    expect(onOpenProjectSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("reorders the list when a selected move item names its direction", () => {
+    const onReorder = vi.fn();
+    renderGroup(["2", "1"], {}, onReorder);
+    fireEvent.contextMenu(projectRow("Storefront"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }));
+    expect(onReorder).toHaveBeenCalledWith(["1", "2"]);
+  });
+
+  it("opens the removal confirmation rather than removing straight from the menu", () => {
+    const onRemoveProject = vi.fn();
+    renderGroup(["1"], { onRemoveProject });
+    fireEvent.contextMenu(projectRow("Storefront"));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove project" }));
+    expect(onRemoveProject).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Remove “Storefront”?" })).toBeTruthy();
   });
 });
