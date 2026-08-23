@@ -430,7 +430,13 @@ describe("Sidebar Trust control", () => {
     render(
       <TooltipProvider>
         <HotkeysContext
-          value={{ bindings: DEFAULT_BINDINGS, remap: noop, disable: noop, reset: noop, resetAll: noop }}
+          value={{
+            bindings: DEFAULT_BINDINGS,
+            remap: noop,
+            disable: noop,
+            reset: noop,
+            resetAll: noop,
+          }}
         >
           <SidebarSettingsContext value={{ sidebar: DEFAULT_SIDEBAR, setSidebar: noop }}>
             <Sidebar

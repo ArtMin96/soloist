@@ -112,11 +112,15 @@ describe("ProcessNode action targeting", () => {
       </TooltipProvider>,
     );
 
-    within(screen.getByRole("treeitem", { name: /lead/ })).getByLabelText("Stop").click();
+    within(screen.getByRole("treeitem", { name: /lead/ }))
+      .getByLabelText("Stop")
+      .click();
     expect(onStop).toHaveBeenCalledTimes(1);
     expect(onStop).toHaveBeenCalledWith(1);
 
-    within(screen.getByRole("treeitem", { name: /worker/ })).getByLabelText("Stop").click();
+    within(screen.getByRole("treeitem", { name: /worker/ }))
+      .getByLabelText("Stop")
+      .click();
     expect(onStop).toHaveBeenCalledTimes(2);
     expect(onStop).toHaveBeenLastCalledWith(2);
   });
