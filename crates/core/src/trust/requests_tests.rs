@@ -214,3 +214,75 @@ fn a_resolved_request_reads_back_its_outcome() {
     );
     assert!(requests.pending(project).is_empty());
 }
+
+#[test]
+fn resolving_a_request_already_past_its_ttl_reads_back_expired_not_denied() {
+    let project = ProjectId::from_raw(1);
+    let requester = ProcessId::next();
+    let clock = Arc::new(MockClock::new());
+    let bus = EventBus::new(EVENT_BUFFER);
+    let requests = TrustRequests::new(clock.clone(), bus.clone());
+    let id = requests
+        .record(submission(project, requester, "npm run build"))
+        .expect("record");
+    clock.advance(TRUST_REQUEST_TTL + Duration::from_secs(1));
+    let mut events = bus.subscribe();
+
+    requests.resolve(id, TrustRequestState::Denied);
+
+    assert_eq!(
+        requests.status(project, id),
+        Some(TrustRequestState::Expired),
+        "a request already past its TTL must read back Expired, not the outcome resolve was asked to file"
+    );
+    let announced = events
+        .try_recv()
+        .expect("aging out must still be announced");
+    match announced {
+        DomainEvent::TrustRequestResolved {
+            id: reported,
+            state,
+            ..
+        } => {
+            assert_eq!(reported, id);
+            assert_eq!(state, TrustRequestState::Expired);
+        }
+        other => panic!("expected a resolution for the aged-out request, got {other:?}"),
+    }
+}
+
+#[test]
+fn withdrawing_a_request_already_past_its_ttl_reads_back_expired_not_withdrawn() {
+    let project = ProjectId::from_raw(1);
+    let requester = ProcessId::next();
+    let clock = Arc::new(MockClock::new());
+    let bus = EventBus::new(EVENT_BUFFER);
+    let requests = TrustRequests::new(clock.clone(), bus.clone());
+    let id = requests
+        .record(submission(project, requester, "npm run build"))
+        .expect("record");
+    clock.advance(TRUST_REQUEST_TTL + Duration::from_secs(1));
+    let mut events = bus.subscribe();
+
+    requests.withdraw_requests_of(requester);
+
+    assert_eq!(
+        requests.status(project, id),
+        Some(TrustRequestState::Expired),
+        "a request already past its TTL must read back Expired, not Withdrawn, when its process closes"
+    );
+    let announced = events
+        .try_recv()
+        .expect("aging out must still be announced");
+    match announced {
+        DomainEvent::TrustRequestResolved {
+            id: reported,
+            state,
+            ..
+        } => {
+            assert_eq!(reported, id);
+            assert_eq!(state, TrustRequestState::Expired);
+        }
+        other => panic!("expected a resolution for the aged-out request, got {other:?}"),
+    }
+}
