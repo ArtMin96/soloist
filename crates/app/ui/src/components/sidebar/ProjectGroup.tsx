@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { Fragment, useState, type ComponentType, type ReactNode } from "react";
 import { ChevronRight, MoreHorizontal } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ProcessGroup } from "@/components/sidebar/ProcessGroup";
-import { projectActions, type ProjectAction } from "@/components/sidebar/projectActions";
+import { projectActions, type ProjectActionSection } from "@/components/sidebar/projectActions";
 import { RemoveProjectDialog } from "@/components/sidebar/RemoveProjectDialog";
 import { WatchRefusedNotice } from "@/components/sidebar/WatchRefusedNotice";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -39,6 +39,29 @@ import type { ProcessKind } from "@/domain";
 /** One place toward the top of the list, and one place toward its bottom. */
 const MOVE_TOWARD_TOP = -1;
 const MOVE_TOWARD_BOTTOM = 1;
+
+/** The group/item/separator primitives one project menu needs, whichever family renders it. */
+interface MenuParts {
+  Group: ComponentType<{ children: ReactNode }>;
+  Item: ComponentType<{
+    variant?: "default" | "destructive";
+    onSelect: () => void;
+    children: ReactNode;
+  }>;
+  Separator: ComponentType;
+}
+
+const DROPDOWN_PARTS: MenuParts = {
+  Group: DropdownMenuGroup,
+  Item: DropdownMenuItem,
+  Separator: DropdownMenuSeparator,
+};
+
+const CONTEXT_PARTS: MenuParts = {
+  Group: ContextMenuGroup,
+  Item: ContextMenuItem,
+  Separator: ContextMenuSeparator,
+};
 
 interface ProjectGroupProps {
   tree: ProjectTree;
@@ -98,7 +121,7 @@ export function ProjectGroup({
   const id = String(project.id);
   const move = (delta: number) =>
     list?.canMoveItemBy(id, delta) ? () => list.moveItemBy(id, delta) : null;
-  const actions = projectActions({
+  const sections = projectActions({
     onStartAll,
     onRestartRunning,
     onStopAll,
@@ -182,46 +205,7 @@ export function ProjectGroup({
                 </Tooltip>
                 <DropdownMenuContent align="end" className="w-52">
                   <DropdownMenuLabel>{project.name}</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    {actions.bulk.map((action) => (
-                      <DropdownMenuItem key={action.id} onSelect={action.run}>
-                        <ActionIcon action={action} />
-                        {action.label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    {actions.views.map((action) => (
-                      <DropdownMenuItem key={action.id} onSelect={action.run}>
-                        <ActionIcon action={action} />
-                        {action.label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuGroup>
-                  {actions.arrange.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuGroup>
-                        {actions.arrange.map((action) => (
-                          <DropdownMenuItem key={action.id} onSelect={action.run}>
-                            <ActionIcon action={action} />
-                            {action.label}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuGroup>
-                    </>
-                  )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    {actions.danger.map((action) => (
-                      <DropdownMenuItem key={action.id} variant="destructive" onSelect={action.run}>
-                        <ActionIcon action={action} />
-                        {action.label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuGroup>
+                  <ProjectActionSections sections={sections} parts={DROPDOWN_PARTS} />
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -229,46 +213,7 @@ export function ProjectGroup({
         </ContextMenuTrigger>
         <ContextMenuContent className="w-52">
           <ContextMenuLabel>{project.name}</ContextMenuLabel>
-          <ContextMenuSeparator />
-          <ContextMenuGroup>
-            {actions.bulk.map((action) => (
-              <ContextMenuItem key={action.id} onSelect={action.run}>
-                <ActionIcon action={action} />
-                {action.label}
-              </ContextMenuItem>
-            ))}
-          </ContextMenuGroup>
-          <ContextMenuSeparator />
-          <ContextMenuGroup>
-            {actions.views.map((action) => (
-              <ContextMenuItem key={action.id} onSelect={action.run}>
-                <ActionIcon action={action} />
-                {action.label}
-              </ContextMenuItem>
-            ))}
-          </ContextMenuGroup>
-          {actions.arrange.length > 0 && (
-            <>
-              <ContextMenuSeparator />
-              <ContextMenuGroup>
-                {actions.arrange.map((action) => (
-                  <ContextMenuItem key={action.id} onSelect={action.run}>
-                    <ActionIcon action={action} />
-                    {action.label}
-                  </ContextMenuItem>
-                ))}
-              </ContextMenuGroup>
-            </>
-          )}
-          <ContextMenuSeparator />
-          <ContextMenuGroup>
-            {actions.danger.map((action) => (
-              <ContextMenuItem key={action.id} variant="destructive" onSelect={action.run}>
-                <ActionIcon action={action} />
-                {action.label}
-              </ContextMenuItem>
-            ))}
-          </ContextMenuGroup>
+          <ProjectActionSections sections={sections} parts={CONTEXT_PARTS} />
         </ContextMenuContent>
       </ContextMenu>
       {/* Outside the collapsible content on purpose: a project whose watches are gone must say so
@@ -305,8 +250,37 @@ export function ProjectGroup({
   );
 }
 
-// Renders a project action's icon; the menu components size and space the svg.
-function ActionIcon({ action }: { action: ProjectAction }) {
-  const { Icon } = action;
-  return <Icon aria-hidden />;
+// One project menu's sections, rendered behind the group/item/separator primitives of whichever
+// family (dropdown or context menu) is asking — the single body both menus share, so they can
+// never drift apart. A separator precedes every section, including the first, since the label
+// above it is the caller's, not this renderer's.
+function ProjectActionSections({
+  sections,
+  parts,
+}: {
+  sections: ProjectActionSection[];
+  parts: MenuParts;
+}) {
+  const { Group, Item, Separator } = parts;
+  return (
+    <>
+      {sections.map((section) => (
+        <Fragment key={section.id}>
+          <Separator />
+          <Group>
+            {section.actions.map((action) => (
+              <Item
+                key={action.id}
+                variant={section.destructive ? "destructive" : "default"}
+                onSelect={action.run}
+              >
+                <action.Icon aria-hidden />
+                {action.label}
+              </Item>
+            ))}
+          </Group>
+        </Fragment>
+      ))}
+    </>
+  );
 }

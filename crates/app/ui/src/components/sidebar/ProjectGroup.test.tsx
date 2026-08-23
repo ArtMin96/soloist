@@ -182,9 +182,9 @@ describe("ProjectGroup right-click menu", () => {
     expect(
       screen.getByRole("menuitem", { name: "Remove project" }).getAttribute("data-variant"),
     ).toBe("destructive");
-    expect(
-      screen.getByRole("menuitem", { name: "Start all" }).getAttribute("data-variant"),
-    ).toBe("default");
+    expect(screen.getByRole("menuitem", { name: "Start all" }).getAttribute("data-variant")).toBe(
+      "default",
+    );
   });
 
   it("runs the bulk handler a selected item names", () => {
@@ -223,4 +223,62 @@ describe("ProjectGroup right-click menu", () => {
     expect(onRemoveProject).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: "Remove “Storefront”?" })).toBeTruthy();
   });
+});
+
+// A menuitem's accessible name says nothing about the separator beside it, so a menu can pass
+// every item-order and item-content assertion above while still misplacing, dropping, or
+// doubling a separator. These read the menu content's own children, in order, to pin that
+// layout directly — the one thing an orphan separator (an empty section rendered anyway) or a
+// swapped section would actually change that a menuitem query cannot see.
+function openDropdown() {
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Actions for Storefront" }));
+}
+
+function menuContentSlots(menu: "dropdown" | "context"): (string | null)[] {
+  const content = document.querySelector(`[data-slot="${menu}-menu-content"]`);
+  if (!content) throw new Error(`${menu} menu content not found`);
+  return Array.from(content.children).map((child) => child.getAttribute("data-slot"));
+}
+
+function expectedMenuSlots(menu: "dropdown" | "context", sectionCount: number): string[] {
+  const slots = [`${menu}-menu-label`];
+  for (let i = 0; i < sectionCount; i += 1) {
+    slots.push(`${menu}-menu-separator`, `${menu}-menu-group`);
+  }
+  return slots;
+}
+
+const SEPARATOR_CASES = [
+  {
+    menu: "dropdown" as const,
+    scenario: "both moves available",
+    ids: ["0", "1", "2"],
+    sectionCount: 4,
+  },
+  { menu: "dropdown" as const, scenario: "one move available", ids: ["1", "2"], sectionCount: 4 },
+  { menu: "dropdown" as const, scenario: "no moves available", ids: ["1"], sectionCount: 3 },
+  {
+    menu: "context" as const,
+    scenario: "both moves available",
+    ids: ["0", "1", "2"],
+    sectionCount: 4,
+  },
+  { menu: "context" as const, scenario: "one move available", ids: ["1", "2"], sectionCount: 4 },
+  { menu: "context" as const, scenario: "no moves available", ids: ["1"], sectionCount: 3 },
+];
+
+describe("ProjectGroup menu section layout", () => {
+  it.each(SEPARATOR_CASES)(
+    "puts exactly one separator before every section in the $menu menu, $scenario",
+    ({ menu, ids, sectionCount }) => {
+      renderGroup(ids);
+      if (menu === "dropdown") {
+        openDropdown();
+      } else {
+        fireEvent.contextMenu(projectRow("Storefront"));
+      }
+
+      expect(menuContentSlots(menu)).toEqual(expectedMenuSlots(menu, sectionCount));
+    },
+  );
 });
