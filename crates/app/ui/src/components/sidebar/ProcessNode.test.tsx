@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { ProcessNode } from "@/components/sidebar/ProcessNode";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { ProcessActionHandlers } from "@/lib/processActions";
 import { EMPTY_STORE } from "@/store/signalStore";
 import { SignalsContext } from "@/store/signalsContext";
 import type { ProcessNode as Node } from "@/store/grouping";
@@ -10,6 +11,15 @@ import type { ToggleSet } from "@/store/useToggleSet";
 import type { ProcessView } from "@/domain";
 
 const noop = () => {};
+
+const NOOP_HANDLERS: ProcessActionHandlers = {
+  onTrust: noop,
+  onResume: noop,
+  onStart: noop,
+  onStop: noop,
+  onRestart: noop,
+  onRemove: noop,
+};
 
 function agent(id: number, label: string): ProcessView {
   return {
@@ -44,12 +54,7 @@ function renderNode(node: Node, collapsedLeads: ToggleSet = expandedLeads) {
           collapsedLeads={collapsedLeads}
           selectedId={null}
           onSelect={noop}
-          onStart={noop}
-          onStop={noop}
-          onRestart={noop}
-          onResume={noop}
-          onRemove={noop}
-          onTrust={noop}
+          handlers={NOOP_HANDLERS}
         />
       </SignalsContext>
     </TooltipProvider>,
@@ -81,5 +86,42 @@ describe("ProcessNode", () => {
     renderNode({ process: agent(3, "solo"), children: [] });
     expect(screen.getByRole("treeitem", { name: /solo/ }).getAttribute("aria-expanded")).toBeNull();
     expect(screen.queryByRole("button", { name: /workers/ })).toBeNull();
+  });
+});
+
+describe("ProcessNode action targeting", () => {
+  // Every row in the tree shares one `ProcessActionHandlers`, id-taking under the hood; a
+  // swapped verb or a mis-targeted id in the binding between a node and its row would
+  // type-check silently. This proves each row's control acts on that row's own process and
+  // never its neighbor's.
+  it("targets the activating row's own process, not the other row's", () => {
+    const onStop = vi.fn();
+    render(
+      <TooltipProvider>
+        <SignalsContext value={EMPTY_STORE}>
+          <ProcessNode
+            node={leadWithWorker}
+            depth={0}
+            treeColumn
+            collapsedLeads={expandedLeads}
+            selectedId={null}
+            onSelect={noop}
+            handlers={{ ...NOOP_HANDLERS, onStop }}
+          />
+        </SignalsContext>
+      </TooltipProvider>,
+    );
+
+    within(screen.getByRole("treeitem", { name: /lead/ }))
+      .getByLabelText("Stop")
+      .click();
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onStop).toHaveBeenCalledWith(1);
+
+    within(screen.getByRole("treeitem", { name: /worker/ }))
+      .getByLabelText("Stop")
+      .click();
+    expect(onStop).toHaveBeenCalledTimes(2);
+    expect(onStop).toHaveBeenLastCalledWith(2);
   });
 });

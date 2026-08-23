@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ProcessNode } from "@/components/sidebar/ProcessNode";
+import type { ProcessActionHandlers } from "@/lib/processActions";
 import type { ProcessGroup as Group } from "@/store/grouping";
 import type { ToggleSet } from "@/store/useToggleSet";
 
@@ -11,12 +12,7 @@ interface ProcessGroupProps {
   collapsedLeads: ToggleSet;
   selectedId: number | null;
   onSelect: (id: number) => void;
-  onStart: (id: number) => void;
-  onStop: (id: number) => void;
-  onRestart: (id: number) => void;
-  onResume: (id: number) => void;
-  onRemove: (id: number) => void;
-  onTrust: (id: number) => void;
+  handlers: ProcessActionHandlers;
 }
 
 // One collapsible subtype group (Agents / Terminals / Commands). The header is a small
@@ -31,12 +27,7 @@ export function ProcessGroup({
   collapsedLeads,
   selectedId,
   onSelect,
-  onStart,
-  onStop,
-  onRestart,
-  onResume,
-  onRemove,
-  onTrust,
+  handlers,
 }: ProcessGroupProps) {
   const treeColumn = group.roots.some((root) => root.children.length > 0);
   return (
@@ -64,12 +55,7 @@ export function ProcessGroup({
               collapsedLeads={collapsedLeads}
               selectedId={selectedId}
               onSelect={onSelect}
-              onStart={onStart}
-              onStop={onStop}
-              onRestart={onRestart}
-              onResume={onResume}
-              onRemove={onRemove}
-              onTrust={onTrust}
+              handlers={handlers}
             />
           ))}
         </div>

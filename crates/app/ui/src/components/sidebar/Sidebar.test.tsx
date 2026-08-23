@@ -4,12 +4,22 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { DEFAULT_SIDEBAR } from "@/lib/sidebar";
+import type { ProcessActionHandlers } from "@/lib/processActions";
 import { HotkeysContext } from "@/store/hotkeysContext";
 import { SidebarSettingsContext } from "@/store/sidebarSettingsContext";
 import type { HotkeyBindingView } from "@/domain";
 import type { Sidebar as SidebarSettings } from "@/domain";
 
 const noop = () => {};
+
+const NOOP_HANDLERS: ProcessActionHandlers = {
+  onTrust: noop,
+  onResume: noop,
+  onStart: noop,
+  onStop: noop,
+  onRestart: noop,
+  onRemove: noop,
+};
 
 const PROJECT_A = { id: 1, name: "alpha", root: "/a", icon: null };
 const PROJECT_B = { id: 2, name: "beta", root: "/b", icon: null };
@@ -118,12 +128,7 @@ function renderSidebar(
             lineage={lineage}
             selectedId={selectedId}
             onSelect={onSelect}
-            onStart={noop}
-            onStop={noop}
-            onRestart={onRestart}
-            onResume={noop}
-            onRemove={noop}
-            onTrust={noop}
+            handlers={{ ...NOOP_HANDLERS, onRestart }}
             onStartAll={noop}
             onRestartRunning={noop}
             onStopAll={noop}
@@ -228,12 +233,7 @@ describe("Sidebar lineage nesting", () => {
               lineage={new Map([[12, 10]])}
               selectedId={null}
               onSelect={noop}
-              onStart={noop}
-              onStop={noop}
-              onRestart={noop}
-              onResume={noop}
-              onRemove={noop}
-              onTrust={noop}
+              handlers={NOOP_HANDLERS}
               onStartAll={noop}
               onRestartRunning={noop}
               onStopAll={noop}
@@ -406,5 +406,63 @@ describe("Sidebar project arrangement", () => {
     expect(screen.queryByRole("menuitem", { name: "Move down" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull();
     expect(onReorderProjects).not.toHaveBeenCalled();
+  });
+});
+
+describe("Sidebar Trust control", () => {
+  const UNTRUSTED = {
+    id: 30,
+    project: 1,
+    kind: "Command" as const,
+    label: "build",
+    status: "Stopped" as const,
+    exit_code: null,
+    requires_trust: true,
+    resumable: false,
+    ports: [],
+    ready: "Ungated" as const,
+  };
+
+  // The row carries the process's project and name; Trust needs both to open the right
+  // review. This is the same contract `runFor` dispatches in lib/processActions.
+  it("passes the process's project and name to Trust, not just its id", () => {
+    const onTrust = vi.fn();
+    render(
+      <TooltipProvider>
+        <HotkeysContext
+          value={{
+            bindings: DEFAULT_BINDINGS,
+            remap: noop,
+            disable: noop,
+            reset: noop,
+            resetAll: noop,
+          }}
+        >
+          <SidebarSettingsContext value={{ sidebar: DEFAULT_SIDEBAR, setSidebar: noop }}>
+            <Sidebar
+              projects={[PROJECT_A]}
+              processes={[UNTRUSTED]}
+              lineage={new Map()}
+              selectedId={null}
+              onSelect={noop}
+              handlers={{ ...NOOP_HANDLERS, onTrust }}
+              onStartAll={noop}
+              onRestartRunning={noop}
+              onStopAll={noop}
+              onOpenStart={noop}
+              startActive
+              onOpenSettings={noop}
+              onOpenProjectSettings={noop}
+              onOpenOrchestration={noop}
+              onRemoveProject={noop}
+              onReorderProjects={noop}
+            />
+          </SidebarSettingsContext>
+        </HotkeysContext>
+      </TooltipProvider>,
+    );
+
+    screen.getByLabelText("Trust").click();
+    expect(onTrust).toHaveBeenCalledWith(UNTRUSTED.project, UNTRUSTED.label);
   });
 });

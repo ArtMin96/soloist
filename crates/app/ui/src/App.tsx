@@ -51,6 +51,7 @@ import { OpenSettingsContext, type OpenSettings } from "@/store/settingsContext"
 import { useAttention } from "@/store/useAttention";
 import { usePresence } from "@/store/usePresence";
 import { useWindowActive } from "@/store/useWindowActive";
+import type { ProcessActionHandlers } from "@/lib/processActions";
 import type { HotkeyAction, ProcessView } from "@/domain";
 
 // Binds the live keymap to the app's actions; rendered inside HotkeysProvider so it reads the
@@ -190,16 +191,6 @@ export default function App() {
     if (id !== null) processRemoved(id);
   }, [pendingRemoval, confirmRemoval, processRemoved]);
 
-  // Review a command by id: the row/header carries the project and name, and the review
-  // shows what trusting it would run — the row itself shows only a name the solo.yml chose.
-  const reviewById = useCallback(
-    (id: number) => {
-      const process = store.processes.find((candidate) => candidate.id === id);
-      if (process) trust.requestReview(process.project, process.label);
-    },
-    [store.processes, trust],
-  );
-
   // Open the launch picker, refreshing the tool list each time so detection is current.
   const { reload: reloadAgents, launch: launchAgent } = agents;
   const openPicker = useCallback(() => {
@@ -263,6 +254,18 @@ export default function App() {
     .map((id) => store.processes.find((process) => process.id === id))
     .filter((process): process is ProcessView => process !== undefined);
 
+  // The one set of process action callbacks every surface dispatches through — the sidebar
+  // tree, every pooled terminal pane, and the command palette all read this same object rather
+  // than each rebuilding its own description of "what running an action does".
+  const handlers: ProcessActionHandlers = {
+    onTrust: trust.requestReview,
+    onResume: resumeProcess,
+    onStart: startProcess,
+    onStop: stopProcess,
+    onRestart: restartProcess,
+    onRemove: requestProcessRemoval,
+  };
+
   return (
     <AppearanceProvider>
       <SidebarSettingsProvider>
@@ -300,12 +303,7 @@ export default function App() {
                             lineage={lineage}
                             selectedId={selectedId}
                             onSelect={selectProcess}
-                            onStart={startProcess}
-                            onStop={stopProcess}
-                            onRestart={restartProcess}
-                            onResume={resumeProcess}
-                            onTrust={reviewById}
-                            onRemove={requestProcessRemoval}
+                            handlers={handlers}
                             onStartAll={store.startAll}
                             onRestartRunning={store.restartRunning}
                             onStopAll={stopProject}
@@ -335,12 +333,7 @@ export default function App() {
                                   visible={process.id === selectedId}
                                   processes={store.processes}
                                   onSelectProcess={selectProcess}
-                                  onStart={() => startProcess(process.id)}
-                                  onStop={() => stopProcess(process.id)}
-                                  onRestart={() => restartProcess(process.id)}
-                                  onResume={() => resumeProcess(process.id)}
-                                  onTrust={() => reviewById(process.id)}
-                                  onRemove={() => requestProcessRemoval(process.id)}
+                                  handlers={handlers}
                                 />
                               ))}
                               {!selected &&
@@ -488,14 +481,7 @@ export default function App() {
                           startAll={store.startAll}
                           stopAll={stopProject}
                           restartRunning={store.restartRunning}
-                          process={{
-                            onTrust: trust.requestReview,
-                            onResume: resumeProcess,
-                            onStart: startProcess,
-                            onStop: stopProcess,
-                            onRestart: restartProcess,
-                            onRemove: requestProcessRemoval,
-                          }}
+                          process={handlers}
                         />
                       </DeferredOverlay>
                     </div>

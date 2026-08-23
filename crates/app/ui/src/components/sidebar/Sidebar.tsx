@@ -16,6 +16,7 @@ import {
 import { useCollapseState } from "@/store/useCollapseState";
 import { useSidebarSettings } from "@/store/sidebarSettingsContext";
 import { useToggleSet } from "@/store/useToggleSet";
+import type { ProcessActionHandlers } from "@/lib/processActions";
 import type { ProjectTree } from "@/store/projects";
 import type { ProcessView, ProjectView } from "@/domain";
 
@@ -31,12 +32,7 @@ interface SidebarProps {
   lineage: ReadonlyMap<number, number>;
   selectedId: number | null;
   onSelect: (id: number) => void;
-  onStart: (id: number) => void;
-  onStop: (id: number) => void;
-  onRestart: (id: number) => void;
-  onResume: (id: number) => void;
-  onRemove: (id: number) => void;
-  onTrust: (id: number) => void;
+  handlers: ProcessActionHandlers;
   onStartAll: (project: number) => void;
   onRestartRunning: (project: number) => void;
   onStopAll: (project: number) => void;
@@ -60,12 +56,7 @@ export function Sidebar({
   lineage,
   selectedId,
   onSelect,
-  onStart,
-  onStop,
-  onRestart,
-  onResume,
-  onRemove,
-  onTrust,
+  handlers,
   onStartAll,
   onRestartRunning,
   onStopAll,
@@ -97,7 +88,7 @@ export function Sidebar({
     selectedId,
     setCollapsed,
     onSelect,
-    onRestart,
+    onRestart: handlers.onRestart,
   });
 
   return (
@@ -148,12 +139,7 @@ export function Sidebar({
                   collapsedLeads={collapsedLeads}
                   selectedId={selectedId}
                   onSelect={onSelect}
-                  onStart={onStart}
-                  onStop={onStop}
-                  onRestart={onRestart}
-                  onResume={onResume}
-                  onRemove={onRemove}
-                  onTrust={onTrust}
+                  handlers={handlers}
                   onStartAll={() => onStartAll(tree.project.id)}
                   onRestartRunning={() => onRestartRunning(tree.project.id)}
                   onStopAll={() => onStopAll(tree.project.id)}

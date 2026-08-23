@@ -4,6 +4,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { ProcessActionHandlers } from "@/lib/processActions";
 import type { ProcessView } from "@/domain";
 
 // The emulator hook drives xterm.js against a measured surface jsdom can't provide; stub
@@ -29,18 +30,19 @@ const PROCESS: ProcessView = {
 
 const noop = () => {};
 
+const NOOP_HANDLERS: ProcessActionHandlers = {
+  onTrust: noop,
+  onResume: noop,
+  onStart: noop,
+  onStop: noop,
+  onRestart: noop,
+  onRemove: noop,
+};
+
 function renderPane() {
   render(
     <TooltipProvider>
-      <TerminalPane
-        process={PROCESS}
-        onStart={noop}
-        onStop={noop}
-        onRestart={noop}
-        onResume={noop}
-        onRemove={noop}
-        onTrust={noop}
-      />
+      <TerminalPane process={PROCESS} handlers={NOOP_HANDLERS} />
     </TooltipProvider>,
   );
 }
@@ -56,6 +58,37 @@ async function flush() {
 afterEach(() => {
   cleanup();
   clearMocks();
+});
+
+describe("TerminalPane Trust control", () => {
+  const UNTRUSTED: ProcessView = {
+    id: 8,
+    project: 3,
+    kind: "Command",
+    label: "build",
+    status: "Stopped",
+    exit_code: null,
+    requires_trust: true,
+    resumable: false,
+    ports: [],
+    ready: "Ungated",
+  };
+
+  // The header carries the process's project and name; Trust needs both to open the right
+  // review. This is the same contract `runFor` dispatches in lib/processActions.
+  it("passes the process's project and name to Trust, not just its id", async () => {
+    mockIPC(() => {}, { shouldMockEvents: true });
+    const onTrust = vi.fn();
+    render(
+      <TooltipProvider>
+        <TerminalPane process={UNTRUSTED} handlers={{ ...NOOP_HANDLERS, onTrust }} />
+      </TooltipProvider>,
+    );
+    await flush();
+
+    screen.getByLabelText("Trust").click();
+    expect(onTrust).toHaveBeenCalledWith(UNTRUSTED.project, UNTRUSTED.label);
+  });
 });
 
 describe("TerminalPane chrome", () => {
