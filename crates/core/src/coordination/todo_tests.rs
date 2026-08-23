@@ -1,7 +1,11 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::*;
-use crate::coordination::{CommentAuthor, CommentOutcome, MAX_TODO_DOC_BYTES};
+use crate::coordination::{
+    BlockerGate, CommentAuthor, CommentEdit, CommentOutcome, TodoCompletion,
+    TodoCompletionAtomicResult, TodoCompletionCompareResult, TodoCompletionContext,
+    TodoCompletionDecision, MAX_TODO_DOC_BYTES,
+};
 use crate::ids::{ProcessId, ProjectId};
 use crate::testing::FakeTodoRepo;
 
@@ -380,4 +384,291 @@ fn a_comment_persisted_before_authorship_reads_back_unattributed() {
         serde_json::from_str(r#"{"id":1,"body":"shipped"}"#).expect("legacy json");
     assert_eq!(legacy.author, None);
     assert_eq!(legacy.body, "shipped");
+}
+
+#[test]
+fn completing_does_not_clobber_a_document_edit_that_landed_first() {
+    let rows = Arc::new(FakeTodoRepo::new());
+    let observer = Todos::new(rows.clone());
+    let todo = observer
+        .create(PROJECT, doc("v1", TodoStatus::Open), None)
+        .expect("create");
+
+    // A second writer's revision-guarded edit lands between this aggregate's read and its write.
+    let edit = doc("v2", TodoStatus::Open);
+    let todos = Todos::new(Arc::new(InterleavedTodoRepo::new(
+        rows.clone(),
+        move |rows| {
+            rows.write_doc(
+                PROJECT,
+                todo.id,
+                &edit,
+                ScratchpadLink::Unchanged,
+                todo.revision,
+                BlockerGate::Unenforced,
+            )
+            .expect("the concurrent edit applies");
+        },
+    )));
+
+    let outcome = todos.complete(PROJECT, todo.id);
+
+    let stored = observer
+        .get(PROJECT, todo.id)
+        .expect("get")
+        .expect("the todo exists");
+    assert_eq!(
+        stored.doc.title, "v2",
+        "the edit that landed first must survive the completion"
+    );
+    assert!(
+        matches!(outcome, Err(TodoError::Conflict { .. })),
+        "a completion racing a newer document must be refused, got {outcome:?}"
+    );
+}
+
+#[test]
+fn a_blocker_that_arrives_before_the_write_still_gates_completion() {
+    let rows = Arc::new(FakeTodoRepo::new());
+    let observer = Todos::new(rows.clone());
+    let gated = observer
+        .create(PROJECT, doc("dependent", TodoStatus::Open), None)
+        .expect("create the dependent");
+    let blocker = observer
+        .create(PROJECT, doc("dependency", TodoStatus::Open), None)
+        .expect("create the blocker");
+
+    // A second agent blocks the todo between the aggregate reading it and the write landing.
+    let todos = Todos::new(Arc::new(InterleavedTodoRepo::new(
+        rows.clone(),
+        move |rows| {
+            rows.add_blocker(PROJECT, gated.id, blocker.id)
+                .expect("the concurrent blocker applies");
+        },
+    )));
+
+    let outcome = todos.complete(PROJECT, gated.id);
+
+    let stored = observer
+        .get(PROJECT, gated.id)
+        .expect("get")
+        .expect("the todo exists");
+    assert_eq!(
+        stored.blocked_by,
+        vec![blocker.id],
+        "the concurrent blocker is on the todo"
+    );
+    assert_ne!(
+        stored.doc.status,
+        TodoStatus::Done,
+        "a todo with an open blocker must never read as done"
+    );
+    let refused = outcome.expect_err("the gate must refuse the completion");
+    let TodoError::Blocked { by } = refused else {
+        panic!("expected the blocker gate to refuse, got {refused:?}");
+    };
+    assert_eq!(by, vec![blocker.id]);
+}
+
+/// The change a second agent lands, held until the next document write consumes it.
+type PendingChange = Mutex<Option<Box<dyn FnOnce(&FakeTodoRepo) + Send>>>;
+
+/// A todo store that lands one change immediately before the next document write — the
+/// interleaving a second agent produces between the aggregate's read and its write, made
+/// deterministic.
+struct InterleavedTodoRepo {
+    inner: Arc<FakeTodoRepo>,
+    before_write: PendingChange,
+}
+
+impl InterleavedTodoRepo {
+    fn new(
+        inner: Arc<FakeTodoRepo>,
+        before_write: impl FnOnce(&FakeTodoRepo) + Send + 'static,
+    ) -> Self {
+        Self {
+            inner,
+            before_write: Mutex::new(Some(Box::new(before_write))),
+        }
+    }
+}
+
+impl TodoRepo for InterleavedTodoRepo {
+    fn write_doc(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        doc: &TodoDoc,
+        scratchpad: ScratchpadLink<ScratchpadId>,
+        expected: u64,
+        gate: BlockerGate,
+    ) -> Result<TodoWriteResult, StoreError> {
+        if let Some(change) = crate::sync::lock(&self.before_write).take() {
+            change(&self.inner);
+        }
+        self.inner
+            .write_doc(project, id, doc, scratchpad, expected, gate)
+    }
+
+    fn apply_completion(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        policy: &mut dyn FnMut(&TodoCompletionContext) -> TodoCompletionDecision,
+    ) -> Result<TodoCompletionAtomicResult, StoreError> {
+        self.inner.apply_completion(project, id, policy)
+    }
+
+    fn compare_completion(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        expected: &TodoCompletion,
+        replacement: &TodoCompletion,
+    ) -> Result<TodoCompletionCompareResult, StoreError> {
+        self.inner
+            .compare_completion(project, id, expected, replacement)
+    }
+
+    fn create(
+        &self,
+        project: ProjectId,
+        doc: &TodoDoc,
+        scratchpad: Option<ScratchpadId>,
+    ) -> Result<StoredTodo, StoreError> {
+        self.inner.create(project, doc, scratchpad)
+    }
+
+    fn read(&self, project: ProjectId, id: TodoId) -> Result<Option<StoredTodo>, StoreError> {
+        self.inner.read(project, id)
+    }
+
+    fn list(&self, project: ProjectId) -> Result<Vec<StoredTodo>, StoreError> {
+        self.inner.list(project)
+    }
+
+    fn delete(&self, project: ProjectId, id: TodoId) -> Result<bool, StoreError> {
+        self.inner.delete(project, id)
+    }
+
+    fn tags(&self, project: ProjectId) -> Result<Vec<String>, StoreError> {
+        self.inner.tags(project)
+    }
+
+    fn add_tag(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        tag: &str,
+    ) -> Result<Option<StoredTodo>, StoreError> {
+        self.inner.add_tag(project, id, tag)
+    }
+
+    fn remove_tag(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        tag: &str,
+    ) -> Result<Option<StoredTodo>, StoreError> {
+        self.inner.remove_tag(project, id, tag)
+    }
+
+    fn set_blockers(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        blockers: &[TodoId],
+    ) -> Result<Option<StoredTodo>, StoreError> {
+        self.inner.set_blockers(project, id, blockers)
+    }
+
+    fn add_blocker(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        blocker: TodoId,
+    ) -> Result<Option<StoredTodo>, StoreError> {
+        self.inner.add_blocker(project, id, blocker)
+    }
+
+    fn remove_blocker(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        blocker: TodoId,
+    ) -> Result<Option<StoredTodo>, StoreError> {
+        self.inner.remove_blocker(project, id, blocker)
+    }
+
+    fn unmet_blockers(
+        &self,
+        project: ProjectId,
+        blockers: &[TodoId],
+    ) -> Result<Vec<TodoId>, StoreError> {
+        self.inner.unmet_blockers(project, blockers)
+    }
+
+    fn lock(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        owner: ProcessId,
+    ) -> Result<Option<StoredTodo>, StoreError> {
+        self.inner.lock(project, id, owner)
+    }
+
+    fn unlock(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        owner: ProcessId,
+    ) -> Result<Option<StoredTodo>, StoreError> {
+        self.inner.unlock(project, id, owner)
+    }
+
+    fn comment_create(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        body: &str,
+        author: Option<CommentAuthor>,
+    ) -> Result<Option<(StoredTodo, u64)>, StoreError> {
+        self.inner.comment_create(project, id, body, author)
+    }
+
+    fn comment_update(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        comment: u64,
+        body: &str,
+    ) -> Result<CommentEdit, StoreError> {
+        self.inner.comment_update(project, id, comment, body)
+    }
+
+    fn comment_delete(
+        &self,
+        project: ProjectId,
+        id: TodoId,
+        comment: u64,
+    ) -> Result<CommentEdit, StoreError> {
+        self.inner.comment_delete(project, id, comment)
+    }
+
+    fn release_owner(&self, process: ProcessId) -> Result<usize, StoreError> {
+        self.inner.release_owner(process)
+    }
+
+    fn clear_locks(&self) -> Result<usize, StoreError> {
+        self.inner.clear_locks()
+    }
+
+    fn transfer(
+        &self,
+        from: ProjectId,
+        to: ProjectId,
+        id: TodoId,
+    ) -> Result<Option<StoredTodo>, StoreError> {
+        self.inner.transfer(from, to, id)
+    }
 }

@@ -5,12 +5,13 @@
 //! read-modify-write of tags/blockers/comments, the conditional lock acquire/release — is one
 //! indivisible method the adapter performs under a single guard, never a read the aggregate then acts
 //! on, so two agents touching one project's todos cannot interleave to clobber an edit or double-grant
-//! a lock. The revision *guard* (a doc write applies only at the expected revision) is part of this
-//! contract; the document and blocker-gate policy lives in the [`Todos`](super::Todos)
-//! aggregate. The bounded context owns its own port (with a [`NoopTodoRepo`] default). A todo is
-//! durable and survives an app restart (no launch-reconcile clear), but its **lock** is process-owned
-//! and per-run, so [`clear_locks`](TodoRepo::clear_locks) drops every lock on launch while keeping the
-//! todos.
+//! a lock. The revision *guard* (a doc write applies only at the expected revision) and the blocker
+//! *gate* (a completing write applies only while every blocker is met) are both part of this
+//! contract, evaluated where the write commits; deciding when each applies stays with the
+//! [`Todos`](super::Todos) aggregate, along with document validation. The bounded context owns its
+//! own port (with a [`NoopTodoRepo`] default). A todo is durable and survives an app restart (no
+//! launch-reconcile clear), but its **lock** is process-owned and per-run, so
+//! [`clear_locks`](TodoRepo::clear_locks) drops every lock on launch while keeping the todos.
 
 use super::scratchpad::ScratchpadRef;
 use super::scratchpad_link::ScratchpadLink;
@@ -127,15 +128,25 @@ pub struct StoredTodo {
     pub revision: u64,
 }
 
+/// Whether a document write completes the todo, and so applies only while every blocker is met.
+/// The aggregate states it; the repository evaluates it inside the write's own atomic step, so a
+/// blocker that arrives after the caller decided cannot slip past the gate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockerGate {
+    Enforced,
+    Unenforced,
+}
+
 /// The outcome of a revision-guarded [`write_doc`](TodoRepo::write_doc): the write applied (the
-/// stored row at its new revision), no todo exists under that id, or the expected revision no longer
-/// matched. The stored row is boxed so the small `NotFound`/`Conflict` variants do not inflate the
-/// enum to its size.
+/// stored row at its new revision), no todo exists under that id, the expected revision no longer
+/// matched, or the write completes a todo whose blockers are not all met. The stored row is boxed so
+/// the small miss variants do not inflate the enum to its size.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TodoWriteResult {
     Written(Box<StoredTodo>),
     NotFound,
     Conflict { actual: u64 },
+    Blocked { by: Vec<TodoId> },
     CompletionProtected,
 }
 
@@ -190,18 +201,21 @@ pub trait TodoRepo: Send + Sync {
     fn list(&self, project: ProjectId) -> Result<Vec<StoredTodo>, StoreError>;
 
     /// Replaces the document of `(project, id)` with `doc` and applies `scratchpad` to its
-    /// association. When `expected` is `Some`, the write applies only if the current revision
-    /// matches (else [`TodoWriteResult::Conflict`]); when `None`, it applies unconditionally (the
-    /// `complete` shortcut). Either way the revision is bumped, and a refused write changes neither
-    /// the document nor the association. [`TodoWriteResult::NotFound`] if no todo exists under the
-    /// id. One atomic step.
+    /// association. The write applies only if the current revision matches `expected` (else
+    /// [`TodoWriteResult::Conflict`]) and, under [`BlockerGate::Enforced`], only while the todo's
+    /// blockers are all met (else [`TodoWriteResult::Blocked`]) — both evaluated in the same
+    /// indivisible step as the write, so neither a concurrent edit nor a concurrent blocker can slip
+    /// between the check and the write. An applied write bumps the revision; a refused one changes
+    /// neither the document nor the association. [`TodoWriteResult::NotFound`] if no todo exists
+    /// under the id.
     fn write_doc(
         &self,
         project: ProjectId,
         id: TodoId,
         doc: &TodoDoc,
         scratchpad: ScratchpadLink<ScratchpadId>,
-        expected: Option<u64>,
+        expected: u64,
+        gate: BlockerGate,
     ) -> Result<TodoWriteResult, StoreError>;
 
     /// Deletes `(project, id)`, returning whether one was removed.

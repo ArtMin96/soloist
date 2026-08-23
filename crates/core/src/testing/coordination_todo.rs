@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 use super::coordination_scratchpad::FakeScratchpadRepo;
 
 use crate::coordination::{
-    Comment, CommentAuthor, CommentEdit, ScratchpadLink, ScratchpadRef, StoredTodo, TodoCompletion,
-    TodoCompletionAtomicResult, TodoCompletionCompareResult, TodoCompletionContext,
+    BlockerGate, Comment, CommentAuthor, CommentEdit, ScratchpadLink, ScratchpadRef, StoredTodo,
+    TodoCompletion, TodoCompletionAtomicResult, TodoCompletionCompareResult, TodoCompletionContext,
     TodoCompletionDecision, TodoDoc, TodoRepo, TodoStatus, TodoWriteResult,
 };
 use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
@@ -75,6 +75,20 @@ impl FakeTodoRepo {
             name: String::new(),
         })
     }
+}
+
+/// The blockers of `project` that still exist and are not done, read from an already-held row set —
+/// a blocker that no longer exists counts as met, like the durable adapter.
+fn unmet(rows: &HashMap<u64, StoredTodo>, project: ProjectId, blockers: &[TodoId]) -> Vec<TodoId> {
+    blockers
+        .iter()
+        .copied()
+        .filter(|blocker| {
+            rows.get(&blocker.get())
+                .filter(|todo| todo.project == project)
+                .is_some_and(|todo| todo.doc.status != TodoStatus::Done)
+        })
+        .collect()
 }
 
 impl TodoRepo for FakeTodoRepo {
@@ -196,7 +210,8 @@ impl TodoRepo for FakeTodoRepo {
         id: TodoId,
         doc: &TodoDoc,
         scratchpad: ScratchpadLink<ScratchpadId>,
-        expected: Option<u64>,
+        expected: u64,
+        gate: BlockerGate,
     ) -> Result<TodoWriteResult, StoreError> {
         let stated = match scratchpad {
             ScratchpadLink::Unchanged => None,
@@ -204,28 +219,36 @@ impl TodoRepo for FakeTodoRepo {
             ScratchpadLink::Linked(id) => Some(Self::stored_link(Some(id))),
         };
         let mut rows = lock(&self.rows);
-        match rows
-            .get_mut(&id.get())
+        // The guard, the gate, and the write all read one row set under one lock, exactly as the
+        // durable adapter holds one connection guard across them.
+        let Some(mut updated) = rows
+            .get(&id.get())
             .filter(|todo| todo.project == project)
-        {
-            Some(todo) => match expected {
-                _ if todo.completion.is_some() => Ok(TodoWriteResult::CompletionProtected),
-                Some(rev) if rev != todo.revision => Ok(TodoWriteResult::Conflict {
-                    actual: todo.revision,
-                }),
-                _ => {
-                    todo.doc = doc.clone();
-                    if let Some(link) = stated {
-                        todo.scratchpad = link;
-                    }
-                    todo.revision += 1;
-                    Ok(TodoWriteResult::Written(Box::new(
-                        self.projected(todo.clone()),
-                    )))
-                }
-            },
-            None => Ok(TodoWriteResult::NotFound),
+            .cloned()
+        else {
+            return Ok(TodoWriteResult::NotFound);
+        };
+        if updated.completion.is_some() {
+            return Ok(TodoWriteResult::CompletionProtected);
         }
+        if gate == BlockerGate::Enforced {
+            let by = unmet(&rows, project, &updated.blockers);
+            if !by.is_empty() {
+                return Ok(TodoWriteResult::Blocked { by });
+            }
+        }
+        if expected != updated.revision {
+            return Ok(TodoWriteResult::Conflict {
+                actual: updated.revision,
+            });
+        }
+        updated.doc = doc.clone();
+        if let Some(link) = stated {
+            updated.scratchpad = link;
+        }
+        updated.revision += 1;
+        rows.insert(id.get(), updated.clone());
+        Ok(TodoWriteResult::Written(Box::new(self.projected(updated))))
     }
 
     fn delete(&self, project: ProjectId, id: TodoId) -> Result<bool, StoreError> {
@@ -311,16 +334,7 @@ impl TodoRepo for FakeTodoRepo {
         project: ProjectId,
         blockers: &[TodoId],
     ) -> Result<Vec<TodoId>, StoreError> {
-        let rows = lock(&self.rows);
-        Ok(blockers
-            .iter()
-            .copied()
-            .filter(|blocker| {
-                rows.get(&blocker.get())
-                    .filter(|todo| todo.project == project)
-                    .is_some_and(|todo| todo.doc.status != TodoStatus::Done)
-            })
-            .collect())
+        Ok(unmet(&lock(&self.rows), project, blockers))
     }
 
     fn lock(

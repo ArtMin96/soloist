@@ -1,7 +1,8 @@
 use super::{
-    CommentAuthor, CommentEdit, ProcessId, ProjectId, ScratchpadId, ScratchpadLink, StoreError,
-    StoredTodo, TodoCompletion, TodoCompletionAtomicResult, TodoCompletionCompareResult,
-    TodoCompletionContext, TodoCompletionDecision, TodoDoc, TodoId, TodoRepo, TodoWriteResult,
+    BlockerGate, CommentAuthor, CommentEdit, ProcessId, ProjectId, ScratchpadId, ScratchpadLink,
+    StoreError, StoredTodo, TodoCompletion, TodoCompletionAtomicResult,
+    TodoCompletionCompareResult, TodoCompletionContext, TodoCompletionDecision, TodoDoc, TodoId,
+    TodoRepo, TodoWriteResult,
 };
 
 /// A [`TodoRepo`] that stores nothing — the default until the durable adapter is wired, so the core
@@ -64,7 +65,8 @@ impl TodoRepo for NoopTodoRepo {
         _id: TodoId,
         _doc: &TodoDoc,
         _scratchpad: ScratchpadLink<ScratchpadId>,
-        _expected: Option<u64>,
+        _expected: u64,
+        _gate: BlockerGate,
     ) -> Result<TodoWriteResult, StoreError> {
         Ok(TodoWriteResult::NotFound)
     }
