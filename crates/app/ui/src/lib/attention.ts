@@ -1,4 +1,4 @@
-import type { AttentionKind, AttentionSnapshot, ProcessView } from "@/domain";
+import type { AttentionSnapshot, ProcessAttention, ProcessView } from "@/domain";
 
 // Nothing waiting. What every unread surface renders from before the first snapshot lands, so a
 // cold start shows no marker rather than a flash of one.
@@ -36,18 +36,15 @@ export function unreadProjectIds(
   );
 }
 
-/** One line of the title bar's unread list. */
-export interface AttentionEntry {
-  process: number;
+/** One line of the title bar's unread list: what the core reports, named for the user. */
+export interface AttentionEntry extends ProcessAttention {
   label: string;
-  /** The oldest kind waiting, which the entry's glyph reports. */
-  kind: AttentionKind;
-  /** How many alerts this process has waiting, so a list of few can still explain a large total. */
-  alerts: number;
 }
 
 // The unread list, in the order the core keeps. A process the stack no longer holds is dropped:
-// its row is gone, so an entry naming it could not be acted on.
+// its row is gone, so an entry naming it could not be acted on. Nothing else is derived here — the
+// kind and the count are the core's, so what the list reads and what the badge counts cannot
+// disagree.
 export function attentionEntries(
   snapshot: AttentionSnapshot,
   processes: ProcessView[],
@@ -55,8 +52,6 @@ export function attentionEntries(
   const byId = new Map(processes.map((process) => [process.id, process]));
   return snapshot.processes.flatMap((entry) => {
     const process = byId.get(entry.process);
-    const kind = entry.kinds[0];
-    if (!process || kind === undefined) return [];
-    return [{ process: entry.process, label: process.label, kind, alerts: entry.kinds.length }];
+    return process ? [{ ...entry, label: process.label }] : [];
   });
 }

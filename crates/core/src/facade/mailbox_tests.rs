@@ -5,9 +5,10 @@ use super::*;
 use crate::agents::{AgentKind, AgentTool, PromptMode};
 use crate::composition::CorePorts;
 use crate::coordination::{
-    CommentAuthor, CommentEdit, ScratchpadLink, StoredTodo, TodoCompletionAtomicResult,
-    TodoCompletionCompareResult, TodoCompletionContext, TodoCompletionDecision, TodoDoc, TodoRepo,
-    TodoStatus, TodoWriteResult, MAX_PENDING_MESSAGES_PER_RECIPIENT,
+    BlockerGate, CommentAuthor, CommentEdit, ScratchpadLink, StoredTodo,
+    TodoCompletionAtomicResult, TodoCompletionCompareResult, TodoCompletionContext,
+    TodoCompletionDecision, TodoDoc, TodoRepo, TodoStatus, TodoWriteResult,
+    MAX_PENDING_MESSAGES_PER_RECIPIENT,
 };
 use crate::events::DomainEvent;
 use crate::facade::Facade;
@@ -793,9 +794,11 @@ impl TodoRepo for RefusesNoticeFlag {
         id: TodoId,
         doc: &TodoDoc,
         scratchpad: ScratchpadLink<ScratchpadId>,
-        expected: Option<u64>,
+        expected: u64,
+        gate: BlockerGate,
     ) -> Result<TodoWriteResult, StoreError> {
-        self.inner.write_doc(project, id, doc, scratchpad, expected)
+        self.inner
+            .write_doc(project, id, doc, scratchpad, expected, gate)
     }
 
     fn delete(&self, project: ProjectId, id: TodoId) -> Result<bool, StoreError> {

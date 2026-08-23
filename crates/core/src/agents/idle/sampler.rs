@@ -74,10 +74,12 @@ impl IdleSampler {
                 return;
             };
             let tracked = self.tracker.tracked();
-            // Until an agent is launched there is nothing to classify or prune, so skip the
-            // supervisor snapshot entirely. Drop the strong reference first, so an empty tick
-            // never keeps the supervisor — and the app — alive across the sleep.
-            if tracked.is_empty() {
+            // With nothing to classify and nothing to reclaim, the registry snapshot has no
+            // reader, so skip it. Both maps have to be consulted: lineage records any process a
+            // bound lead spawned, so it outlives the last tracked agent and still needs pruning.
+            // Drop the strong reference first, so an empty tick never keeps the supervisor — and
+            // the app — alive across the sleep.
+            if tracked.is_empty() && self.lineage.is_empty() {
                 drop(supervisor);
                 continue;
             }
@@ -86,7 +88,8 @@ impl IdleSampler {
                 .into_iter()
                 .map(|view| (view.id, view.status))
                 .collect();
-            // Forget agents that have left the registry, so neither C4 per-agent map outgrows it.
+            // Forget processes that have left the registry, so neither C4 per-agent map outgrows
+            // it: the tracker holds agents, lineage holds anything a bound lead spawned.
             let live: HashSet<ProcessId> = status_by_id.keys().copied().collect();
             self.tracker.retain_live(&live);
             self.lineage.retain_live(&live);

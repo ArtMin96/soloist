@@ -8,8 +8,9 @@
 //!
 //! Lineage is **per-run, in-memory** process metadata, never persisted: a parent id is only
 //! meaningful while that process is live, so it is reconstructed from spawns, not restored. A
-//! manual launch records nothing and so reads back as a root. Edges are retained for the run so a
-//! departed lead does not merge its descendants into unrelated orchestration groups.
+//! manual launch records nothing and so reads back as a root. An edge outlives its parent so a
+//! departed lead does not merge its descendants into unrelated orchestration groups, and is
+//! reclaimed once no live process still descends from it.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -66,6 +67,12 @@ impl AgentLineage {
             .collect();
         edges.sort_by_key(|(child, _)| *child);
         edges
+    }
+
+    /// Whether no edge is recorded. The sampler's tick reads this to decide whether a sweep has
+    /// anything to reclaim, since lineage outlives the last tracked agent.
+    pub(super) fn is_empty(&self) -> bool {
+        lock(&self.parents).is_empty()
     }
 
     /// Keeps live agents and the dead ancestor edges needed to connect them, dropping every dead

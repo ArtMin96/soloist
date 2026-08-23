@@ -154,7 +154,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Mark a todo done. Refused while it still has unmet blockers — a todo stays gated until its blockers complete."
+        description = "Mark a todo done. Refused while it still has unmet blockers — a todo stays gated until its blockers complete. It writes under the revision it just read, so an edit that lands first is refused as a revision conflict rather than overwritten: re-read with todo_get and complete again."
     )]
     pub(crate) async fn todo_complete(
         &self,

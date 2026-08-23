@@ -72,8 +72,8 @@ pub use configchange::{ConfigSync, Rename, TrustReviewCommand};
 pub use coordination::{
     is_link, placeholders, AcquireOutcome, AgentBroadcastReceipt, AgentMailbox, AgentMessage,
     AgentMessageDelivery, AgentMessageKind, AgentMessageOutcome, AgentMessageReceipt,
-    AgentMessageRecord, AgentRelationship, AgentRosterEntry, Comment, CommentAuthor, CommentEdit,
-    CommentOutcome, DiagramRef, DiagramRenameError, DiagramRenameResult, DiagramRepo,
+    AgentMessageRecord, AgentRelationship, AgentRosterEntry, BlockerGate, Comment, CommentAuthor,
+    CommentEdit, CommentOutcome, DiagramRef, DiagramRenameError, DiagramRenameResult, DiagramRepo,
     DiagramSummary, DiagramView, DiagramWriteError, DiagramWriteResult, Diagrams, ExportedTemplate,
     FireCond, IdleMode, Kv, KvEntry, KvRepo, LeaseReleaser, LeaseView, Leases, Link, LinkContent,
     LinkError, LinkTarget, LockRepo, MissingPolicy, NewTimer, NoopDiagramRepo, NoopKvRepo,

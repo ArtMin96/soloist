@@ -61,7 +61,7 @@ const PROJECT = { id: 1, name: "storefront", root: "/p", icon: null };
 function snapshot(...processes: AttentionSnapshot["processes"]): AttentionSnapshot {
   return {
     processes,
-    total: processes.reduce((sum, entry) => sum + entry.kinds.length, 0),
+    total: processes.reduce((sum, entry) => sum + entry.alerts, 0),
   };
 }
 
@@ -155,7 +155,7 @@ describe("unread indicators", () => {
     const state = await mount(NOTHING);
     expect(within(row(2)).queryByRole("img", { name: ATTENTION_LABEL })).toBeNull();
 
-    state.snapshot = snapshot({ process: 2, kinds: ["crashed"] });
+    state.snapshot = snapshot({ process: 2, kind: "crashed", alerts: 1 });
     await announceAttentionChanged();
 
     await waitFor(() =>
@@ -166,7 +166,7 @@ describe("unread indicators", () => {
   });
 
   it("dots the project header when a child is unread, including when it is collapsed", async () => {
-    await mount(snapshot({ process: 2, kinds: ["crashed"] }));
+    await mount(snapshot({ process: 2, kind: "crashed", alerts: 1 }));
     await waitFor(() => expect(markers().length).toBeGreaterThan(0));
 
     // Collapsing unmounts every row, so what survives is the header's own dot — the reason it
@@ -183,7 +183,7 @@ describe("unread indicators", () => {
     // it is viewing*: selecting a project reports `viewing: null`, so the core is never asked to
     // clear anything. (The focus half of the rule is the core's and is tested there; a jsdom
     // window has no Tauri focus to report.)
-    const state = mockBackend(snapshot({ process: 2, kinds: ["crashed"] }), (cmd, args) => {
+    const state = mockBackend(snapshot({ process: 2, kind: "crashed", alerts: 1 }), (cmd, args) => {
       const presence = (args as { presence?: { viewing: number | null } })?.presence;
       if (cmd === "set_presence" && presence?.viewing === 2) state.snapshot = NOTHING;
     });
@@ -215,14 +215,17 @@ describe("unread indicators", () => {
   });
 
   it("caps the title-bar count at 99+ while the snapshot keeps counting", async () => {
-    await mount(snapshot({ process: 1, kinds: Array<"crashed">(150).fill("crashed") }));
+    await mount(snapshot({ process: 1, kind: "crashed", alerts: 150 }));
 
     await waitFor(() => expect(screen.getByText("99+")).toBeTruthy());
   });
 
   it("shows the exact title-bar count below the cap", async () => {
     await mount(
-      snapshot({ process: 1, kinds: ["crashed"] }, { process: 2, kinds: ["agent_error"] }),
+      snapshot(
+        { process: 1, kind: "crashed", alerts: 1 },
+        { process: 2, kind: "agent_error", alerts: 1 },
+      ),
     );
 
     await waitFor(() => expect(within(attentionControl()).getByText("2")).toBeTruthy());
@@ -230,7 +233,10 @@ describe("unread indicators", () => {
 
   it("clears every indicator at once from the title bar", async () => {
     await mount(
-      snapshot({ process: 1, kinds: ["crashed"] }, { process: 2, kinds: ["agent_error"] }),
+      snapshot(
+        { process: 1, kind: "crashed", alerts: 1 },
+        { process: 2, kind: "agent_error", alerts: 1 },
+      ),
     );
     await waitFor(() => expect(markers().length).toBeGreaterThan(0));
 
@@ -255,7 +261,7 @@ describe("unread indicators", () => {
 
   it("jumps to the process an entry names and clears only that one", async () => {
     const cleared: number[] = [];
-    mockBackend(snapshot({ process: 2, kinds: ["crashed"] }), (cmd) => {
+    mockBackend(snapshot({ process: 2, kind: "crashed", alerts: 1 }), (cmd) => {
       if (cmd === "set_presence") cleared.push(1);
     });
     render(<App />);

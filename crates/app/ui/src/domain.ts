@@ -1333,10 +1333,15 @@ export type AttentionKind =
   | "terminal_bell"
   | "terminal_notification";
 
-// What one process has waiting for the user (mirrors core::ProcessAttention), oldest kind first.
+// What one process has waiting for the user (mirrors core::ProcessAttention).
 export interface ProcessAttention {
   process: number;
-  kinds: AttentionKind[];
+  // The kind that started the run still waiting, which the entry's glyph reports. A surface never
+  // re-derives it: a later alert raises the count without renaming what is waiting.
+  kind: AttentionKind;
+  // How many alerts this process has waiting, so a list of few can still explain a large total.
+  // The core saturates it, so a process that alerts without stopping cannot run the number away.
+  alerts: number;
 }
 
 // Everything unread (mirrors core::AttentionSnapshot). The single source every unread surface

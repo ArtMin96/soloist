@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 
 use soloist_core::{
-    CommentAuthor, ProcessId, ProjectId, ProjectRepo, ScratchpadId, ScratchpadLink, StoredTodo,
-    TodoDoc, TodoRepo, TodoStatus, TodoWriteResult, WriteResult,
+    BlockerGate, CommentAuthor, ProcessId, ProjectId, ProjectRepo, ScratchpadId, ScratchpadLink,
+    StoredTodo, TodoDoc, TodoRepo, TodoStatus, TodoWriteResult, WriteResult,
 };
 use tempfile::tempdir;
 
@@ -93,7 +93,8 @@ fn write_doc_is_revision_guarded() {
                 todo.id,
                 &doc("v2", TodoStatus::InProgress),
                 ScratchpadLink::Unchanged,
-                Some(1),
+                1,
+                BlockerGate::Unenforced,
             )
             .expect("update"),
     );
@@ -106,7 +107,8 @@ fn write_doc_is_revision_guarded() {
             todo.id,
             &doc("v3", TodoStatus::Done),
             ScratchpadLink::Unchanged,
-            Some(1)
+            1,
+            BlockerGate::Enforced
         ),
         Ok(TodoWriteResult::Conflict { actual: 2 })
     ));
@@ -118,7 +120,8 @@ fn write_doc_is_revision_guarded() {
             TodoId::from_raw(9999),
             &doc("x", TodoStatus::Open),
             ScratchpadLink::Unchanged,
-            None
+            1,
+            BlockerGate::Unenforced
         ),
         Ok(TodoWriteResult::NotFound)
     ));
@@ -144,6 +147,81 @@ fn unmet_blockers_skips_done_and_deleted_blockers() {
         .expect("unmet");
     // Only the existing, not-done blocker is unmet; the done and the deleted are met.
     assert_eq!(unmet, vec![open.id]);
+}
+
+#[test]
+fn the_blocker_gate_refuses_a_completing_write_and_lifts_when_the_blocker_is_done() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let project = project(&store, "/p/app");
+    let gated = store
+        .create(project, &doc("dependent", TodoStatus::Open), None)
+        .unwrap();
+    let blocker = store
+        .create(project, &doc("dependency", TodoStatus::Open), None)
+        .unwrap();
+    store
+        .set_blockers(project, gated.id, &[blocker.id])
+        .expect("block the dependent");
+
+    // A gated write is refused and leaves both the document and the revision alone.
+    assert_eq!(
+        store
+            .write_doc(
+                project,
+                gated.id,
+                &doc("dependent", TodoStatus::Done),
+                ScratchpadLink::Unchanged,
+                gated.revision,
+                BlockerGate::Enforced,
+            )
+            .expect("the gated write is answered, not an error"),
+        TodoWriteResult::Blocked {
+            by: vec![blocker.id]
+        }
+    );
+    let refused = store.read(project, gated.id).unwrap().unwrap();
+    assert_eq!(refused.doc.status, TodoStatus::Open);
+    assert_eq!(refused.revision, gated.revision);
+
+    // A write that does not complete the todo carries no gate, so the open blocker does not stop it.
+    let progressed = written(
+        store
+            .write_doc(
+                project,
+                gated.id,
+                &doc("dependent", TodoStatus::InProgress),
+                ScratchpadLink::Unchanged,
+                gated.revision,
+                BlockerGate::Unenforced,
+            )
+            .expect("the ungated write applies"),
+    );
+    assert_eq!(progressed.doc.status, TodoStatus::InProgress);
+
+    // Completing the blocker lifts the gate.
+    store
+        .write_doc(
+            project,
+            blocker.id,
+            &doc("dependency", TodoStatus::Done),
+            ScratchpadLink::Unchanged,
+            blocker.revision,
+            BlockerGate::Enforced,
+        )
+        .expect("complete the blocker");
+    let done = written(
+        store
+            .write_doc(
+                project,
+                gated.id,
+                &doc("dependent", TodoStatus::Done),
+                ScratchpadLink::Unchanged,
+                progressed.revision,
+                BlockerGate::Enforced,
+            )
+            .expect("the dependent can now complete"),
+    );
+    assert_eq!(done.doc.status, TodoStatus::Done);
 }
 
 #[test]
@@ -230,7 +308,8 @@ fn concurrent_doc_writes_at_one_revision_apply_exactly_one() {
                     id,
                     &doc("v2", TodoStatus::InProgress),
                     ScratchpadLink::Unchanged,
-                    Some(1),
+                    1,
+                    BlockerGate::Unenforced,
                 ) {
                     Ok(TodoWriteResult::Written(_)) => wins.fetch_add(1, Ordering::Relaxed),
                     Ok(TodoWriteResult::Conflict { .. }) => {
@@ -415,7 +494,8 @@ fn a_doc_write_applies_the_stated_link_and_leaves_an_unchanged_one_alone() {
                 created.id,
                 &doc("ship it", TodoStatus::InProgress),
                 ScratchpadLink::Unchanged,
-                Some(created.revision),
+                created.revision,
+                BlockerGate::Unenforced,
             )
             .expect("write saying nothing about the link"),
     );
@@ -428,7 +508,8 @@ fn a_doc_write_applies_the_stated_link_and_leaves_an_unchanged_one_alone() {
                 created.id,
                 &doc("ship it", TodoStatus::InProgress),
                 ScratchpadLink::Linked(other),
-                Some(untouched.revision),
+                untouched.revision,
+                BlockerGate::Unenforced,
             )
             .expect("write relinking"),
     );
@@ -441,7 +522,8 @@ fn a_doc_write_applies_the_stated_link_and_leaves_an_unchanged_one_alone() {
                 created.id,
                 &doc("ship it", TodoStatus::InProgress),
                 ScratchpadLink::Cleared,
-                Some(relinked.revision),
+                relinked.revision,
+                BlockerGate::Unenforced,
             )
             .expect("write clearing"),
     );

@@ -17,15 +17,16 @@
 //! a named reference rather than a bare id.
 
 use soloist_core::{
-    Comment, CommentAuthor, CommentEdit, ProcessId, ProjectId, ScratchpadId, ScratchpadLink,
-    StoreError, StoredTodo, TodoCompletion, TodoCompletionAtomicResult,
+    BlockerGate, Comment, CommentAuthor, CommentEdit, ProcessId, ProjectId, ScratchpadId,
+    ScratchpadLink, StoreError, StoredTodo, TodoCompletion, TodoCompletionAtomicResult,
     TodoCompletionCompareResult, TodoCompletionContext, TodoCompletionDecision, TodoDoc, TodoId,
     TodoRepo, TodoWriteResult,
 };
 
 use crate::todo_json::{decode_strings, serialize_doc};
 use crate::todo_rows::{
-    raw_id, read_one, row_to_todo, stated_link, write_comments, TODO_COLUMNS, TODO_SOURCE,
+    raw_id, read_one, row_to_todo, stated_link, unmet_blockers, write_comments, TODO_COLUMNS,
+    TODO_SOURCE,
 };
 use crate::{sql_err, SqliteStore};
 
@@ -97,23 +98,29 @@ impl TodoRepo for SqliteStore {
         id: TodoId,
         doc: &TodoDoc,
         scratchpad: ScratchpadLink<ScratchpadId>,
-        expected: Option<u64>,
+        expected: u64,
+        gate: BlockerGate,
     ) -> Result<TodoWriteResult, StoreError> {
         let doc_json = serialize_doc(doc)?;
         let conn = self.lock();
-        // Read the current revision and update under one guard, so the guard check and the write
-        // cannot interleave with a concurrent writer.
+        // Read the current revision, resolve the gate, and update under one guard, so neither check
+        // can interleave with a concurrent writer — including one that only adds a blocker, which
+        // leaves the revision alone and would otherwise slip past the guard.
         let Some(stored) = read_one(&conn, project, id)? else {
             return Ok(TodoWriteResult::NotFound);
         };
         if stored.completion.is_some() {
             return Ok(TodoWriteResult::CompletionProtected);
         }
-        let revision = stored.revision;
-        if let Some(expected) = expected {
-            if expected != revision {
-                return Ok(TodoWriteResult::Conflict { actual: revision });
+        if gate == BlockerGate::Enforced {
+            let by = unmet_blockers(&conn, project, &stored.blockers)?;
+            if !by.is_empty() {
+                return Ok(TodoWriteResult::Blocked { by });
             }
+        }
+        let revision = stored.revision;
+        if expected != revision {
+            return Ok(TodoWriteResult::Conflict { actual: revision });
         }
         let key = (
             project.get() as i64,
@@ -228,18 +235,7 @@ impl TodoRepo for SqliteStore {
         project: ProjectId,
         blockers: &[TodoId],
     ) -> Result<Vec<TodoId>, StoreError> {
-        let conn = self.lock();
-        let mut unmet = Vec::new();
-        for &blocker in blockers {
-            // A blocker that exists in the project and is not yet done is unmet; one that no longer
-            // exists is skipped (counts as met, so a deleted blocker never deadlocks a todo).
-            if let Some(stored) = read_one(&conn, project, blocker)? {
-                if stored.doc.status != soloist_core::TodoStatus::Done {
-                    unmet.push(blocker);
-                }
-            }
-        }
-        Ok(unmet)
+        unmet_blockers(&self.lock(), project, blockers)
     }
 
     fn lock(

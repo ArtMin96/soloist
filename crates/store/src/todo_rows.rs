@@ -8,7 +8,7 @@
 use rusqlite::{Connection, OptionalExtension, Row};
 use soloist_core::{
     Comment, ProcessId, ProjectId, ScratchpadId, ScratchpadLink, ScratchpadRef, StoreError,
-    StoredTodo, TodoCompletion, TodoId,
+    StoredTodo, TodoCompletion, TodoId, TodoStatus,
 };
 
 use crate::sql_err;
@@ -67,6 +67,25 @@ pub(crate) fn write_comments(
     )
     .map_err(sql_err)?;
     Ok(())
+}
+
+/// The subset of `blockers` that exist in `project` and are not yet done, over an already-held
+/// guard. A blocker id that no longer exists is skipped — it counts as met, so a deleted blocker
+/// never deadlocks a todo.
+pub(crate) fn unmet_blockers(
+    conn: &Connection,
+    project: ProjectId,
+    blockers: &[TodoId],
+) -> Result<Vec<TodoId>, StoreError> {
+    let mut unmet = Vec::new();
+    for &blocker in blockers {
+        if let Some(stored) = read_one(conn, project, blocker)? {
+            if stored.doc.status != TodoStatus::Done {
+                unmet.push(blocker);
+            }
+        }
+    }
+    Ok(unmet)
 }
 
 /// One todo by `(project, id)` over an already-held guard, or `None` if absent.

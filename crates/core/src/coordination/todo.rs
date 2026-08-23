@@ -25,7 +25,7 @@ use super::scratchpad::ScratchpadRef;
 use super::scratchpad_link::ScratchpadLink;
 use super::todo_comment::Comment;
 use super::todo_doc::{TodoDoc, TodoStatus};
-use super::todo_repo::{StoredTodo, TodoRepo, TodoWriteResult};
+use super::todo_repo::{BlockerGate, StoredTodo, TodoRepo, TodoWriteResult};
 use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
 use crate::ports::StoreError;
 
@@ -102,8 +102,8 @@ pub enum TodoError {
 }
 
 /// The todo aggregate over the durable [`TodoRepo`]. The repo persists and makes each state-dependent
-/// step atomic; this aggregate owns the document validation, the revision-guard policy,
-/// and the blocker gate. Cheap to clone-share via the `Arc` it holds.
+/// step atomic; this aggregate owns the document validation and decides which revision a write is
+/// guarded by and whether it carries the blocker gate. Cheap to clone-share via the `Arc` it holds.
 pub struct Todos {
     pub(super) repo: Arc<dyn TodoRepo>,
 }
@@ -172,22 +172,26 @@ impl Todos {
         expected: u64,
     ) -> Result<TodoView, TodoError> {
         doc.validate().map_err(TodoError::Invalid)?;
-        if doc.status == TodoStatus::Done {
-            self.guard_blockers(project, id)?;
-        }
-        self.apply_doc(project, id, &doc, scratchpad, Some(expected))
+        self.apply_doc(project, id, &doc, scratchpad, expected)
     }
 
-    /// Marks todo `id` in `project` done — the convenience over [`update`](Self::update) that needs no
-    /// revision. Enforces the same blocker gate: refused with [`TodoError::Blocked`] while any blocker
-    /// is unmet, so a todo stays gated until its blockers complete.
+    /// Marks todo `id` in `project` done — the convenience over [`update`](Self::update) that reads
+    /// the revision for the caller instead of taking one. Enforces the same blocker gate: refused
+    /// with [`TodoError::Blocked`] while any blocker is unmet, so a todo stays gated until its
+    /// blockers complete. It carries the same revision guard as any other document write, so an edit
+    /// that lands first is reported as [`TodoError::Conflict`] rather than silently overwritten.
     pub fn complete(&self, project: ProjectId, id: TodoId) -> Result<TodoView, TodoError> {
         let Some(mut stored) = self.repo.read(project, id)? else {
             return Err(TodoError::NotFound);
         };
-        self.guard_blockers(project, id)?;
         stored.doc.status = TodoStatus::Done;
-        self.apply_doc(project, id, &stored.doc, ScratchpadLink::Unchanged, None)
+        self.apply_doc(
+            project,
+            id,
+            &stored.doc,
+            ScratchpadLink::Unchanged,
+            stored.revision,
+        )
     }
 
     /// Deletes todo `id` in `project`, returning whether one was removed.
@@ -270,25 +274,32 @@ impl Todos {
     }
 
     /// Writes `doc` and the stated `scratchpad` link to todo `id` and projects the result,
-    /// translating the store outcome to the aggregate's errors.
+    /// translating the store outcome to the aggregate's errors. A document that completes the todo
+    /// carries the blocker gate, so the store refuses it while a blocker is still open.
     fn apply_doc(
         &self,
         project: ProjectId,
         id: TodoId,
         doc: &TodoDoc,
         scratchpad: ScratchpadLink<ScratchpadId>,
-        expected: Option<u64>,
+        expected: u64,
     ) -> Result<TodoView, TodoError> {
+        let gate = if doc.status == TodoStatus::Done {
+            BlockerGate::Enforced
+        } else {
+            BlockerGate::Unenforced
+        };
         match self
             .repo
-            .write_doc(project, id, doc, scratchpad, expected)?
+            .write_doc(project, id, doc, scratchpad, expected, gate)?
         {
             TodoWriteResult::Written(stored) => Ok(self.view(*stored)?),
             TodoWriteResult::NotFound => Err(TodoError::NotFound),
             TodoWriteResult::Conflict { actual } => Err(TodoError::Conflict {
-                expected,
+                expected: Some(expected),
                 actual: Some(actual),
             }),
+            TodoWriteResult::Blocked { by } => Err(TodoError::Blocked { by }),
             TodoWriteResult::CompletionProtected => Err(TodoError::CompletionProtected),
         }
     }

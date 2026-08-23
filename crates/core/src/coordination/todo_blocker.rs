@@ -3,7 +3,10 @@
 //!
 //! A blocker is a live column beside the todo's document, so changing one carries no revision guard.
 //! What the gate mechanically enforces is completion: a todo cannot be marked done while any todo
-//! it names is still open.
+//! it names is still open. Because a blocker can arrive at any moment, that refusal is evaluated by
+//! the repository in the same step that commits the completing write
+//! ([`BlockerGate`](super::todo_repo::BlockerGate)), never as a check the aggregate makes and then
+//! acts on.
 
 use super::todo::{TodoError, TodoView, Todos};
 use super::todo_repo::StoredTodo;
@@ -61,19 +64,6 @@ impl Todos {
             return Err(TodoError::UnknownBlocker);
         }
         Ok(())
-    }
-
-    /// Refuses completion while todo `id` has unmet blockers, naming them.
-    pub(super) fn guard_blockers(&self, project: ProjectId, id: TodoId) -> Result<(), TodoError> {
-        let Some(stored) = self.repo.read(project, id)? else {
-            return Err(TodoError::NotFound);
-        };
-        let unmet = self.repo.unmet_blockers(project, &stored.blockers)?;
-        if unmet.is_empty() {
-            Ok(())
-        } else {
-            Err(TodoError::Blocked { by: unmet })
-        }
     }
 
     /// Projects a stored row that must exist (the aggregate already checked) to a view, mapping a

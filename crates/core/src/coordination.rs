@@ -101,6 +101,7 @@ pub use todo_completion::{
 pub use todo_doc::{TodoDoc, TodoStatus, MAX_TODO_DOC_BYTES};
 pub use todo_releaser::TodoLockReleaser;
 pub use todo_repo::{
-    CommentEdit, NoopTodoRepo, StoredTodo, TodoCompletionAtomicResult, TodoCompletionCompareResult,
-    TodoCompletionContext, TodoCompletionDecision, TodoCompletionIntent, TodoRepo, TodoWriteResult,
+    BlockerGate, CommentEdit, NoopTodoRepo, StoredTodo, TodoCompletionAtomicResult,
+    TodoCompletionCompareResult, TodoCompletionContext, TodoCompletionDecision,
+    TodoCompletionIntent, TodoRepo, TodoWriteResult,
 };

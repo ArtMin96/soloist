@@ -1,6 +1,6 @@
 //! The durable project registry: the set of workspace roots Soloist manages.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::ids::ProjectId;
@@ -30,9 +30,14 @@ impl Projects {
         name: Option<&str>,
         icon: Option<&Path>,
     ) -> Result<ProjectRecord, ProjectError> {
-        let canonical =
-            std::fs::canonicalize(root).map_err(|source| ProjectError::Root { source })?;
-        Ok(self.repo.upsert(&canonical, name, icon)?)
+        Ok(self.repo.upsert(&Self::canonical_root(root)?, name, icon)?)
+    }
+
+    /// Resolves `root` to the stable absolute form that is a project's durable identity, without
+    /// persisting anything. [`Self::add`] stores exactly this; a caller that must resolve a root
+    /// before deciding whether to persist it resolves it here, so the two never disagree.
+    pub(super) fn canonical_root(root: &Path) -> Result<PathBuf, ProjectError> {
+        std::fs::canonicalize(root).map_err(|source| ProjectError::Root { source })
     }
 
     /// All known projects in their display order — see [`Self::reorder`]; most-recently-added
