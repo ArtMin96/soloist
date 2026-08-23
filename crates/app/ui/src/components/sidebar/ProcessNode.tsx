@@ -1,5 +1,6 @@
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { ProcessRow } from "@/components/sidebar/ProcessRow";
+import type { ProcessActionHandlers } from "@/lib/processActions";
 import type { ProcessNode as Node } from "@/store/grouping";
 import type { ToggleSet } from "@/store/useToggleSet";
 
@@ -10,12 +11,7 @@ interface ProcessNodeProps {
   collapsedLeads: ToggleSet;
   selectedId: number | null;
   onSelect: (id: number) => void;
-  onStart: (id: number) => void;
-  onStop: (id: number) => void;
-  onRestart: (id: number) => void;
-  onResume: (id: number) => void;
-  onRemove: (id: number) => void;
-  onTrust: (id: number) => void;
+  handlers: ProcessActionHandlers;
 }
 
 // One process in a group's lineage tree: its row, with the workers it spawned nested
@@ -29,12 +25,7 @@ export function ProcessNode({
   collapsedLeads,
   selectedId,
   onSelect,
-  onStart,
-  onStop,
-  onRestart,
-  onResume,
-  onRemove,
-  onTrust,
+  handlers,
 }: ProcessNodeProps) {
   const { process, children } = node;
   const hasChildren = children.length > 0;
@@ -45,12 +36,7 @@ export function ProcessNode({
       process={process}
       selected={process.id === selectedId}
       onSelect={() => onSelect(process.id)}
-      onStart={() => onStart(process.id)}
-      onStop={() => onStop(process.id)}
-      onRestart={() => onRestart(process.id)}
-      onResume={() => onResume(process.id)}
-      onRemove={() => onRemove(process.id)}
-      onTrust={() => onTrust(process.id)}
+      handlers={handlers}
       depth={depth}
       treeColumn={treeColumn}
       hasChildren={hasChildren}
@@ -77,12 +63,7 @@ export function ProcessNode({
             collapsedLeads={collapsedLeads}
             selectedId={selectedId}
             onSelect={onSelect}
-            onStart={onStart}
-            onStop={onStop}
-            onRestart={onRestart}
-            onResume={onResume}
-            onRemove={onRemove}
-            onTrust={onTrust}
+            handlers={handlers}
           />
         ))}
       </CollapsibleContent>

@@ -28,6 +28,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSortableList } from "@/components/useSortableList";
 import { ATTENTION_LABEL } from "@/lib/attention";
+import type { ProcessActionHandlers } from "@/lib/processActions";
 import { cn } from "@/lib/utils";
 import { useUnreadProject } from "@/store/attentionContext";
 import { useWatchRefusal } from "@/store/watchContext";
@@ -52,12 +53,7 @@ interface ProjectGroupProps {
   collapsedLeads: ToggleSet;
   selectedId: number | null;
   onSelect: (id: number) => void;
-  onStart: (id: number) => void;
-  onStop: (id: number) => void;
-  onRestart: (id: number) => void;
-  onResume: (id: number) => void;
-  onRemove: (id: number) => void;
-  onTrust: (id: number) => void;
+  handlers: ProcessActionHandlers;
   onStartAll: () => void;
   onRestartRunning: () => void;
   onStopAll: () => void;
@@ -82,12 +78,7 @@ export function ProjectGroup({
   collapsedLeads,
   selectedId,
   onSelect,
-  onStart,
-  onStop,
-  onRestart,
-  onResume,
-  onRemove,
-  onTrust,
+  handlers,
   onStartAll,
   onRestartRunning,
   onStopAll,
@@ -304,12 +295,7 @@ export function ProjectGroup({
                 collapsedLeads={collapsedLeads}
                 selectedId={selectedId}
                 onSelect={onSelect}
-                onStart={onStart}
-                onStop={onStop}
-                onRestart={onRestart}
-                onResume={onResume}
-                onRemove={onRemove}
-                onTrust={onTrust}
+                handlers={handlers}
               />
             ))
           )}

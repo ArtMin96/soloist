@@ -29,12 +29,7 @@ interface TerminalPaneProps {
   processes?: ProcessView[];
   /** Called when a terminal-scope nav shortcut selects a different process. */
   onSelectProcess?: (id: number) => void;
-  onStart: () => void;
-  onStop: () => void;
-  onRestart: () => void;
-  onResume: () => void;
-  onRemove: () => void;
-  onTrust: () => void;
+  handlers: ProcessActionHandlers;
 }
 
 // The interactive PTY for the selected process: a header naming it with its status and
@@ -45,12 +40,7 @@ export function TerminalPane({
   visible = true,
   processes = NO_PROCESSES,
   onSelectProcess,
-  onStart,
-  onStop,
-  onRestart,
-  onResume,
-  onRemove,
-  onTrust,
+  handlers,
 }: TerminalPaneProps) {
   const sectionRef = useRef<HTMLElement>(null);
   const { hostRef, state, linkTarget, search, clipboard, insert } = useTerminal(process, visible);
@@ -61,14 +51,6 @@ export function TerminalPane({
   // The emulator's own surface color, so the host bleeds it to every edge — the sub-cell
   // remainder and scrollbar gutter read as terminal margin, not an app-colored frame.
   const surface = terminalColors(appliedTheme).background;
-  const processActionHandlers: ProcessActionHandlers = {
-    onTrust: () => onTrust(),
-    onResume: () => onResume(),
-    onRemove: () => onRemove(),
-    onStart: () => onStart(),
-    onStop: () => onStop(),
-    onRestart: () => onRestart(),
-  };
 
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
@@ -124,7 +106,7 @@ export function TerminalPane({
           />
         )}
         <div className="ml-auto">
-          <ProcessControls process={process} handlers={processActionHandlers} size="icon-sm" />
+          <ProcessControls process={process} handlers={handlers} size="icon-sm" />
         </div>
       </header>
       <div className="relative min-h-0 flex-1">

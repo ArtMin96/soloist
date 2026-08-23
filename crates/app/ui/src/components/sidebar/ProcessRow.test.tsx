@@ -3,12 +3,22 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ProcessRow } from "@/components/sidebar/ProcessRow";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { ProcessActionHandlers } from "@/lib/processActions";
 import { EMPTY_SIGNALS, type SignalState } from "@/store/signals";
 import { EMPTY_STORE, fixedSignalStore } from "@/store/signalStore";
 import { SignalsContext } from "@/store/signalsContext";
 import type { ProcessView } from "@/domain";
 
 const noop = () => {};
+
+const NOOP_HANDLERS: ProcessActionHandlers = {
+  onTrust: noop,
+  onResume: noop,
+  onStart: noop,
+  onStop: noop,
+  onRestart: noop,
+  onRemove: noop,
+};
 
 const running: ProcessView = {
   id: 1,
@@ -27,17 +37,7 @@ function renderRow(process: ProcessView, signals: SignalState = EMPTY_SIGNALS) {
   return render(
     <TooltipProvider>
       <SignalsContext value={fixedSignalStore(signals)}>
-        <ProcessRow
-          process={process}
-          selected={false}
-          onSelect={noop}
-          onStart={noop}
-          onStop={noop}
-          onRestart={noop}
-          onResume={noop}
-          onRemove={noop}
-          onTrust={noop}
-        />
+        <ProcessRow process={process} selected={false} onSelect={noop} handlers={NOOP_HANDLERS} />
       </SignalsContext>
     </TooltipProvider>,
   );
@@ -102,12 +102,7 @@ describe("ProcessRow as a tree row", () => {
             process={running}
             selected={false}
             onSelect={noop}
-            onStart={noop}
-            onStop={noop}
-            onRestart={noop}
-            onResume={noop}
-            onRemove={noop}
-            onTrust={noop}
+            handlers={NOOP_HANDLERS}
             treeColumn
             hasChildren
             expanded={false}
@@ -133,12 +128,7 @@ describe("ProcessRow as a tree row", () => {
             onSelect={() => {
               selected += 1;
             }}
-            onStart={noop}
-            onStop={noop}
-            onRestart={noop}
-            onResume={noop}
-            onRemove={noop}
-            onTrust={noop}
+            handlers={NOOP_HANDLERS}
             treeColumn
             hasChildren
             expanded
@@ -163,12 +153,7 @@ describe("ProcessRow as a tree row", () => {
             process={running}
             selected
             onSelect={noop}
-            onStart={noop}
-            onStop={noop}
-            onRestart={noop}
-            onResume={noop}
-            onRemove={noop}
-            onTrust={noop}
+            handlers={NOOP_HANDLERS}
             treeColumn
             hasChildren
             expanded={false}
@@ -189,12 +174,7 @@ describe("ProcessRow as a tree row", () => {
             process={running}
             selected
             onSelect={noop}
-            onStart={noop}
-            onStop={noop}
-            onRestart={noop}
-            onResume={noop}
-            onRemove={noop}
-            onTrust={noop}
+            handlers={NOOP_HANDLERS}
             treeColumn
             hasChildren
             expanded
@@ -217,12 +197,7 @@ describe("ProcessRow as a tree row", () => {
             process={running}
             selected={false}
             onSelect={noop}
-            onStart={noop}
-            onStop={noop}
-            onRestart={noop}
-            onResume={noop}
-            onRemove={noop}
-            onTrust={noop}
+            handlers={NOOP_HANDLERS}
             depth={1}
             treeColumn
           />

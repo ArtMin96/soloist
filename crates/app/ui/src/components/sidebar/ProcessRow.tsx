@@ -40,12 +40,7 @@ interface ProcessRowProps {
   process: ProcessView;
   selected: boolean;
   onSelect: () => void;
-  onStart: () => void;
-  onStop: () => void;
-  onRestart: () => void;
-  onResume: () => void;
-  onTrust: () => void;
-  onRemove: () => void;
+  handlers: ProcessActionHandlers;
   /** The row's lineage depth within its group; roots sit at 0. */
   depth?: number;
   /** Whether the row's group reserves a disclosure column (some row in it has workers). */
@@ -68,12 +63,7 @@ export function ProcessRow({
   process,
   selected,
   onSelect,
-  onStart,
-  onStop,
-  onRestart,
-  onResume,
-  onTrust,
-  onRemove,
+  handlers,
   depth = 0,
   treeColumn = false,
   hasChildren = false,
@@ -83,14 +73,6 @@ export function ProcessRow({
   const { metrics, restart, activity } = useSignal(process.id);
   const unread = useUnreadProcess(process.id);
   const { sidebar } = useSidebarSettings();
-  const handlers: ProcessActionHandlers = {
-    onTrust: () => onTrust(),
-    onResume: () => onResume(),
-    onStart: () => onStart(),
-    onStop: () => onStop(),
-    onRestart: () => onRestart(),
-    onRemove: () => onRemove(),
-  };
   // Selected rows and attention-worthy canonical actions stay visible. Ordinary controls reveal
   // on hover/focus, replacing the at-rest telemetry.
   const showControls =

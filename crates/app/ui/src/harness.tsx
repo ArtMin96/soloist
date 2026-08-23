@@ -53,6 +53,7 @@ import { SegmentedControl } from "@/components/SegmentedControl";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessRow } from "@/components/sidebar/ProcessRow";
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
+import type { ProcessActionHandlers } from "@/lib/processActions";
 import { CommandList as ProjectCommandList } from "@/components/project-settings/CommandList";
 import { ScratchpadList } from "@/components/orchestration/ScratchpadList";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
@@ -142,6 +143,16 @@ const NOOP_OPS = {
   toggleStorage: () => {},
   remove: () => {},
   add: () => Promise.resolve(),
+};
+
+// A no-op process-action bag so the source-list rows render without a real backend.
+const NOOP_HANDLERS: ProcessActionHandlers = {
+  onTrust: () => {},
+  onResume: () => {},
+  onStart: () => {},
+  onStop: () => {},
+  onRestart: () => {},
+  onRemove: () => {},
 };
 
 function Gallery() {
@@ -272,12 +283,7 @@ function Gallery() {
                 process={p}
                 selected={p.id === selectedRow}
                 onSelect={() => setSelectedRow(p.id)}
-                onStart={() => {}}
-                onStop={() => {}}
-                onRestart={() => {}}
-                onResume={() => {}}
-                onRemove={() => {}}
-                onTrust={() => {}}
+                handlers={NOOP_HANDLERS}
               />
             ))}
           </div>
@@ -437,12 +443,7 @@ function AuditView() {
                 process={p}
                 selected={p.id === 1}
                 onSelect={() => {}}
-                onStart={() => {}}
-                onStop={() => {}}
-                onRestart={() => {}}
-                onResume={() => {}}
-                onRemove={() => {}}
-                onTrust={() => {}}
+                handlers={NOOP_HANDLERS}
               />
             ))}
           </div>
@@ -553,12 +554,7 @@ function SidebarStateColumn({ title, width }: { title: string; width: string }) 
           collapsedLeads={{ has: () => false, toggle: () => {} }}
           selectedId={101}
           onSelect={() => {}}
-          onStart={() => {}}
-          onStop={() => {}}
-          onRestart={() => {}}
-          onResume={() => {}}
-          onRemove={() => {}}
-          onTrust={() => {}}
+          handlers={NOOP_HANDLERS}
           onStartAll={() => {}}
           onRestartRunning={() => {}}
           onStopAll={() => {}}
@@ -582,12 +578,7 @@ function SidebarStateColumn({ title, width }: { title: string; width: string }) 
                   process={process}
                   selected={process.id === 101}
                   onSelect={() => {}}
-                  onStart={() => {}}
-                  onStop={() => {}}
-                  onRestart={() => {}}
-                  onResume={() => {}}
-                  onRemove={() => {}}
-                  onTrust={() => {}}
+                  handlers={NOOP_HANDLERS}
                 />
               ))}
           </div>

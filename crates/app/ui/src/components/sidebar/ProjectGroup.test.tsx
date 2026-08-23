@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
 import { SortableList } from "@/components/SortableList";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { ProcessActionHandlers } from "@/lib/processActions";
 import type { ProjectTree } from "@/store/projects";
 
 const tree: ProjectTree = {
@@ -14,6 +15,15 @@ const tree: ProjectTree = {
 
 const noop = () => {};
 
+const NOOP_HANDLERS: ProcessActionHandlers = {
+  onTrust: noop,
+  onResume: noop,
+  onStart: noop,
+  onStop: noop,
+  onRestart: noop,
+  onRemove: noop,
+};
+
 const groupProps = {
   tree,
   open: true,
@@ -23,12 +33,7 @@ const groupProps = {
   collapsedLeads: { has: () => false, toggle: noop },
   selectedId: null,
   onSelect: noop,
-  onStart: noop,
-  onStop: noop,
-  onRestart: noop,
-  onResume: noop,
-  onRemove: noop,
-  onTrust: noop,
+  handlers: NOOP_HANDLERS,
   onStartAll: noop,
   onRestartRunning: noop,
   onStopAll: noop,
@@ -52,12 +57,7 @@ function renderGroup(ids: string[] = ["1"]) {
           collapsedLeads={{ has: () => false, toggle: noop }}
           selectedId={null}
           onSelect={noop}
-          onStart={noop}
-          onStop={noop}
-          onRestart={noop}
-          onResume={noop}
-          onRemove={noop}
-          onTrust={noop}
+          handlers={NOOP_HANDLERS}
           onStartAll={noop}
           onRestartRunning={noop}
           onStopAll={noop}
