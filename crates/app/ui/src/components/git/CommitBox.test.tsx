@@ -32,6 +32,7 @@ function renderBox({
   template = null,
   onCommit = vi.fn(() => Promise.resolve(true)),
   openSettings = vi.fn(),
+  reveal = true,
 }: {
   changes?: FileChange[];
   draft?: { drafting: boolean; request: () => Promise<string | null> } | null;
@@ -39,6 +40,7 @@ function renderBox({
   template?: string | null;
   onCommit?: (message: string, amend: boolean) => Promise<boolean>;
   openSettings?: OpenSettings;
+  reveal?: boolean;
 } = {}) {
   render(
     <OpenSettingsContext value={openSettings}>
@@ -53,12 +55,40 @@ function renderBox({
       </TooltipProvider>
     </OpenSettingsContext>,
   );
+  if (reveal) fireEvent.click(screen.getByRole("button", { name: /commit changes/i }));
   return { onCommit, openSettings };
 }
 
 function message(): HTMLTextAreaElement {
   return screen.getByLabelText("Commit message") as HTMLTextAreaElement;
 }
+
+describe("CommitBox — disclosure", () => {
+  it("starts as one compact action and reveals the composer only when asked", () => {
+    renderBox({ changes: [change("src/a.rs", true), change("src/b.rs", true)], reveal: false });
+
+    const trigger = screen.getByRole("button", { name: /commit changes/i });
+    expect(trigger.textContent).toContain("2 staged");
+    expect(screen.queryByLabelText("Commit message")).toBeNull();
+
+    fireEvent.click(trigger);
+
+    expect(screen.getByLabelText("Commit message")).toBeTruthy();
+  });
+
+  it("keeps an unfinished message and amend choice while the composer is hidden", () => {
+    renderBox();
+    fireEvent.change(message(), { target: { value: "A message that is not finished yet" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+
+    fireEvent.click(screen.getByRole("button", { name: /hide commit composer/i }));
+    expect(screen.queryByLabelText("Commit message")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /show commit composer/i }));
+
+    expect(message().value).toBe("A message that is not finished yet");
+    expect((screen.getByRole("checkbox") as HTMLButtonElement).dataset.state).toBe("checked");
+  });
+});
 
 describe("CommitBox — drafting a message", () => {
   it("offers drafting before a tool is picked, and takes the reader to the setting that picks one", async () => {

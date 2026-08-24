@@ -57,6 +57,15 @@ export function makeRepository(root: string, change: RepositoryChange): string {
   return root;
 }
 
+/** Adds files that remain outside the fixture repository's index. */
+export function addUntrackedFiles(root: string, files: Record<string, string>): void {
+  for (const [relativePath, contents] of Object.entries(files)) {
+    const file = path.join(root, relativePath);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, contents);
+  }
+}
+
 /** Runs one git command in the fixture, reporting what git said rather than only that it failed. */
 function git(root: string, ...args: string[]): void {
   try {

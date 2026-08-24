@@ -104,6 +104,7 @@ function statusWith(paths: string[]): GitStatus {
       discardablePaths: paths,
     },
     changeCounts: { added: 0, removed: 0 },
+    lineCounts: { additions: 0, deletions: 0, complete: true },
   };
 }
 
@@ -119,6 +120,11 @@ function rail(): HTMLElement {
   return screen.getByRole("complementary", { name: "Version control" });
 }
 
+async function openCommitComposer(): Promise<HTMLTextAreaElement> {
+  fireEvent.click(await within(rail()).findByRole("button", { name: /show commit composer/i }));
+  return within(rail()).getByLabelText("Commit message") as HTMLTextAreaElement;
+}
+
 describe("GitRail", () => {
   it("counts the changed files in the shared Git view switcher", async () => {
     readStatus.mockResolvedValue(statusWith(["a.rs", "b.rs", "c.rs"]));
@@ -127,6 +133,19 @@ describe("GitRail", () => {
 
     const changes = await screen.findByRole("radio", { name: /changes/i });
     expect(changes.textContent).toContain("3");
+  });
+
+  it("folds the changed-file count into the one control that reopens a collapsed rail", async () => {
+    readStatus.mockResolvedValue(statusWith(["a.rs", "b.rs", "c.rs"]));
+
+    renderRail();
+    fireEvent.click(await screen.findByRole("button", { name: "Hide version control" }));
+
+    const expand = screen.getByRole("button", {
+      name: "Show version control, 3 changed files",
+    });
+    expect(expand.textContent).toContain("3");
+    expect(within(rail()).getAllByRole("button")).toHaveLength(1);
   });
 
   it("states that a project is not a repository, rather than reporting a failure", async () => {
@@ -318,7 +337,7 @@ describe("GitRail", () => {
     readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
 
     renderRail();
-    const message = await within(rail()).findByLabelText("Commit message");
+    const message = await openCommitComposer();
     const button = within(rail()).getByRole("button", { name: /^commit$/i });
 
     fireEvent.change(message, { target: { value: "Record it" } });
@@ -335,7 +354,7 @@ describe("GitRail", () => {
     readStatus.mockResolvedValue(staged);
 
     renderRail();
-    const message = await within(rail()).findByLabelText("Commit message");
+    const message = await openCommitComposer();
     fireEvent.change(message, { target: { value: "Record it" } });
     fireEvent.click(within(rail()).getByRole("button", { name: /^commit$/i }));
 
@@ -348,7 +367,7 @@ describe("GitRail", () => {
     readTemplate.mockResolvedValue("Refs: \n");
 
     renderRail();
-    const message = (await within(rail()).findByLabelText("Commit message")) as HTMLTextAreaElement;
+    const message = await openCommitComposer();
     await waitFor(() => expect(message.value).toBe("Refs: \n"));
 
     fireEvent.change(message, { target: { value: "Record it\n\nRefs: #1\n" } });
@@ -366,7 +385,7 @@ describe("GitRail", () => {
     readTemplate.mockResolvedValue("Refs: \n");
 
     renderRail();
-    const message = (await within(rail()).findByLabelText("Commit message")) as HTMLTextAreaElement;
+    const message = await openCommitComposer();
     await waitFor(() => expect(message.value).toBe("Refs: \n"));
 
     fireEvent.change(message, { target: { value: "Record it" } });
@@ -394,7 +413,7 @@ describe("GitRail", () => {
 
     renderRail();
 
-    await within(rail()).findByLabelText("Commit message");
+    await openCommitComposer();
     fireEvent.click(within(rail()).getByRole("button", { name: "Draft…" }));
     expect(draftMessage).not.toHaveBeenCalled();
   });
@@ -405,7 +424,7 @@ describe("GitRail", () => {
     draftMessage.mockResolvedValue("Record the index");
 
     renderRail();
-    const message = (await within(rail()).findByLabelText("Commit message")) as HTMLTextAreaElement;
+    const message = await openCommitComposer();
     fireEvent.click(await within(rail()).findByRole("button", { name: "Draft" }));
 
     await waitFor(() => expect(message.value).toBe("Record the index"));
@@ -426,7 +445,7 @@ describe("GitRail", () => {
     draftMessage.mockRejectedValue("the agent tool did not answer within its time limit");
 
     renderRail();
-    const message = (await within(rail()).findByLabelText("Commit message")) as HTMLTextAreaElement;
+    const message = await openCommitComposer();
     fireEvent.change(message, { target: { value: "Half a message" } });
     fireEvent.click(await within(rail()).findByRole("button", { name: "Draft" }));
 
@@ -443,6 +462,8 @@ describe("GitRail", () => {
     readStatus.mockResolvedValue(statusWith(["src/a.rs"]));
 
     renderRail();
+
+    await openCommitComposer();
 
     const button = (await within(rail()).findByRole("button", {
       name: "Draft",

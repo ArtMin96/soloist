@@ -105,13 +105,13 @@ pub use facade::{
 pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
 pub use git::{
     BranchOp, CheckRun, CheckState, DiffExtent, Exchange, FileOpener, ForgeError, ForgeReadiness,
-    ForgeRepository, Git, GitDraftError, GitError, GitForge, GitRepository, GitStatus,
-    GitStatusWatchReactor, GitWriteError, HandoffSubject, LogRange, MergeMethod, NewPullRequest,
-    NoopFileOpener, NoopGitForge, NoopGitRepository, Observer, OpenError, Progress, Prompting,
-    PullRequest, PullRequestError, PullRequestReview, PullRequestState, PullRequestSuggestion,
-    PullRequestSurface, PullRequestTemplate, RawFileDiff, RawHunk, ReviewComment, ReviewLimits,
-    ReviewThread, StashOp, Stop, SyncOp, BRANCH_PAGE_SIZE, CHECK_LOG_LIMIT, HANDOFF_LIMIT,
-    LOG_PAGE_SIZE, REVIEW_LIMITS,
+    ForgeRepository, Git, GitDraftError, GitError, GitForge, GitLineCounts, GitRepository,
+    GitStatus, GitStatusWatchReactor, GitWriteError, HandoffSubject, LogRange, MergeMethod,
+    NewPullRequest, NoopFileOpener, NoopGitForge, NoopGitRepository, Observer, OpenError, Progress,
+    Prompting, PullRequest, PullRequestError, PullRequestReview, PullRequestState,
+    PullRequestSuggestion, PullRequestSurface, PullRequestTemplate, RawFileDiff, RawHunk,
+    ReviewComment, ReviewLimits, ReviewThread, StashOp, Stop, SyncOp, BRANCH_PAGE_SIZE,
+    CHECK_LOG_LIMIT, HANDOFF_LIMIT, LOG_PAGE_SIZE, REVIEW_LIMITS,
 };
 pub use hash::{content_hash, Hash, HashParseError, Hasher};
 pub use identity::{Identity, IdentityError, Origin, PeerCredentials, Whoami};

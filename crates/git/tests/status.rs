@@ -12,6 +12,8 @@ use tempfile::TempDir;
 mod fixture;
 use fixture::{git, repository_with, try_git, write, BRANCH};
 
+const OVERSIZED_UNTRACKED_TEXT_BYTES: usize = 2 * 1024 * 1024;
+
 /// A clone of a bare repository with one commit pushed to it, returned as (the whole fixture,
 /// the working copy) so the remote outlives the test.
 fn clone_of_a_remote() -> (TempDir, PathBuf) {
@@ -85,6 +87,115 @@ fn every_kind_of_change_is_classified_as_version_control_reports_it() {
     let untracked = change(&status, "untracked.txt");
     assert_eq!(untracked.status.unstaged, Some(ChangeKind::Untracked));
     assert_eq!(untracked.status.staged, None);
+}
+
+#[test]
+fn nested_untracked_files_are_reported_as_files_instead_of_one_directory_entry() {
+    let repo = repository_with(&["tracked.txt"]);
+    write(repo.path(), "notes/drafts/first.md", "one\n");
+    write(repo.path(), "notes/second.md", "two\n");
+
+    let status = read(repo.path());
+    let paths: Vec<&str> = status
+        .changes
+        .iter()
+        .map(|change| change.path.as_str())
+        .collect();
+
+    assert_eq!(
+        paths,
+        vec!["notes/drafts/first.md", "notes/second.md"],
+        "an untracked folder must be expandable from its actual file entries",
+    );
+}
+
+#[test]
+fn status_totals_tracked_and_visible_untracked_text_lines_but_not_binary_bytes() {
+    let repo = repository_with(&[
+        "staged.txt",
+        "unstaged.txt",
+        "deleted.txt",
+        "tracked-binary.dat",
+    ]);
+    let dir = repo.path();
+    write(dir, "staged.txt", "staged replacement\nand another\n");
+    git(dir, &["add", "staged.txt"]);
+    write(dir, "unstaged.txt", "unstaged replacement\n");
+    std::fs::remove_file(dir.join("deleted.txt")).expect("delete tracked file");
+    write(dir, "tracked-binary.dat", "\0changed binary bytes\n");
+    write(dir, "notes/draft.md", "first\nsecond");
+    write(dir, "assets/new.bin", "\0untracked binary bytes\n");
+
+    let status = read(dir);
+
+    assert_eq!(status.line_counts().additions, 5);
+    assert_eq!(status.line_counts().deletions, 3);
+    assert!(status.line_counts().complete);
+    assert_eq!(
+        change(&status, "tracked-binary.dat").status.unstaged,
+        Some(ChangeKind::Modified),
+        "a binary change remains in the changed-file projection",
+    );
+    assert_eq!(
+        change(&status, "assets/new.bin").status.unstaged,
+        Some(ChangeKind::Untracked),
+        "an untracked binary remains visible even though it adds no text lines",
+    );
+}
+
+#[test]
+fn a_repository_without_a_head_still_reports_untracked_lines() {
+    let repo = tempfile::tempdir().expect("temp dir");
+    git(repo.path(), &["init", "-b", BRANCH]);
+    write(repo.path(), "draft.txt", "first\nsecond\n");
+
+    let status = read(repo.path());
+
+    assert_eq!(status.line_counts().additions, 2);
+    assert_eq!(status.line_counts().deletions, 0);
+    assert!(status.line_counts().complete);
+    assert_eq!(
+        change(&status, "draft.txt").status.unstaged,
+        Some(ChangeKind::Untracked),
+    );
+}
+
+#[test]
+fn a_staged_first_commit_file_is_counted_against_an_empty_tree() {
+    let repo = tempfile::tempdir().expect("temp dir");
+    git(repo.path(), &["init", "-b", BRANCH]);
+    write(repo.path(), "first.txt", "first\nsecond\n");
+    git(repo.path(), &["add", "first.txt"]);
+
+    let status = read(repo.path());
+
+    assert_eq!(status.line_counts().additions, 2);
+    assert_eq!(status.line_counts().deletions, 0);
+    assert!(status.line_counts().complete);
+    assert_eq!(
+        change(&status, "first.txt").status.staged,
+        Some(ChangeKind::Added),
+    );
+}
+
+#[test]
+fn an_oversized_untracked_text_file_stays_visible_and_marks_line_totals_incomplete() {
+    let repo = repository_with(&["tracked.txt"]);
+    std::fs::write(
+        repo.path().join("large.txt"),
+        vec![b'x'; OVERSIZED_UNTRACKED_TEXT_BYTES],
+    )
+    .expect("write large file");
+
+    let status = read(repo.path());
+
+    assert_eq!(status.line_counts().additions, 0);
+    assert_eq!(status.line_counts().deletions, 0);
+    assert!(!status.line_counts().complete);
+    assert_eq!(
+        change(&status, "large.txt").status.unstaged,
+        Some(ChangeKind::Untracked),
+    );
 }
 
 #[test]

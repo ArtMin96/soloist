@@ -44,6 +44,8 @@ pub struct GitStatusFacts {
 pub struct GitStatus {
     #[serde(flatten)]
     facts: GitStatusFacts,
+    #[serde(default, rename = "lineCounts")]
+    line_counts: GitLineCounts,
 }
 
 /// The actions a surface can offer from one status without asking version control to perform a
@@ -70,6 +72,18 @@ pub struct GitChangeCounts {
     pub removed: usize,
 }
 
+/// How many lines differ from the last commit, using the same additions and deletions split a
+/// hosting service shows. A modified line contributes once to each side.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct GitLineCounts {
+    /// Lines present in the working tree that were not present in the last commit.
+    pub additions: usize,
+    /// Lines present in the last commit that are not present in the working tree.
+    pub deletions: usize,
+    /// Whether every eligible text change was measured within the adapter's bounds.
+    pub complete: bool,
+}
+
 impl GitStatus {
     /// Builds one status from the facts version control reported.
     pub fn new(branch: BranchInfo, changes: Vec<FileChange>, merging: bool) -> Self {
@@ -79,7 +93,19 @@ impl GitStatus {
                 changes,
                 merging,
             },
+            line_counts: GitLineCounts::default(),
         }
+    }
+
+    /// Attaches the line totals measured by the repository adapter.
+    pub fn with_line_counts(mut self, line_counts: GitLineCounts) -> Self {
+        self.line_counts = line_counts;
+        self
+    }
+
+    /// The added and deleted line totals measured against the last commit.
+    pub fn line_counts(&self) -> GitLineCounts {
+        self.line_counts
     }
 
     /// Takes the repository facts out of the cached status.
@@ -200,12 +226,15 @@ impl Serialize for GitStatus {
             capabilities: GitCapabilities,
             #[serde(rename = "changeCounts")]
             change_counts: GitChangeCounts,
+            #[serde(rename = "lineCounts")]
+            line_counts: GitLineCounts,
         }
 
         Wire {
             facts: &self.facts,
             capabilities: self.capabilities(),
             change_counts: self.change_counts(),
+            line_counts: self.line_counts,
         }
         .serialize(serializer)
     }

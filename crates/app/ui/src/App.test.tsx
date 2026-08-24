@@ -195,6 +195,7 @@ describe("App dashboard", () => {
               discardablePaths: ["src/main.rs"],
             },
             changeCounts: { added: 0, removed: 0 },
+            lineCounts: { additions: 0, deletions: 0, complete: true },
           };
         if (cmd === "git_files") return null;
         if (cmd === "git_diff")

@@ -467,6 +467,14 @@ export interface GitChangeCounts {
   removed: number;
 }
 
+// Text lines introduced and removed across the working tree's tracked diff. A modified line is
+// one deletion and one addition, matching the vocabulary GitHub uses for a diff summary.
+export interface GitLineCounts {
+  additions: number;
+  deletions: number;
+  complete: boolean;
+}
+
 // A repository's working tree at one moment. `null` from gitStatus() for a project that is not
 // a repository — an ordinary state, not an error.
 export interface GitStatus {
@@ -477,6 +485,7 @@ export interface GitStatus {
   merging: boolean;
   capabilities: GitCapabilities;
   changeCounts: GitChangeCounts;
+  lineCounts: GitLineCounts;
 }
 
 // One branch a switcher can offer (mirrors core::vcs::Branch).

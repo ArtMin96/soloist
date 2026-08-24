@@ -18,6 +18,7 @@ import { IconButton } from "@/components/IconButton";
 import { PaneDivider } from "@/components/PaneDivider";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Option } from "@/lib/appearance";
@@ -135,16 +136,16 @@ export function GitRail({
   // switcher, the exchange with the remote, nor the pull request is offered.
   const branch = status.status?.branch ?? null;
   const capabilities = status.status?.capabilities ?? null;
-  const changeCounts = status.status?.changeCounts ?? null;
+  const lineCounts = status.status?.lineCounts ?? null;
   const trusted = write.trusted === true;
   const cluster = useMemo<BranchClusterView | null>(
     () =>
-      branch === null || capabilities === null || changeCounts === null
+      branch === null || capabilities === null || lineCounts === null
         ? null
         : {
             branch,
             capabilities,
-            changeCounts,
+            lineCounts,
             branches: sync.branches,
             exchanging: sync.exchanging,
             busy: sync.busy(BRANCH_ACTION) || sync.busy(STASH_ACTION) || sync.busy(EXCHANGE_ACTION),
@@ -166,7 +167,7 @@ export function GitRail({
             openPullRequest: trusted && onOpenPullRequest !== undefined ? onOpenPullRequest : null,
             onBranchesOpen: setSwitcherOpen,
           },
-    [branch, capabilities, changeCounts, onOpenPullRequest, sync, trusted],
+    [branch, capabilities, lineCounts, onOpenPullRequest, sync, trusted],
   );
 
   useEffect(() => {
@@ -185,28 +186,38 @@ export function GitRail({
   }, [exchangeError, dismissExchangeError]);
 
   if (layout.collapsed) {
+    const expandLabel =
+      changes.length === 0
+        ? EXPAND_RAIL_LABEL
+        : `${EXPAND_RAIL_LABEL}, ${changes.length} changed ${changes.length === 1 ? "file" : "files"}`;
     return (
       <aside
         aria-label={RAIL_LABEL}
-        className="flex shrink-0 flex-col items-center gap-2 border-s border-sidebar-border bg-sidebar py-2"
+        className="flex shrink-0 flex-col items-center border-s border-sidebar-border bg-sidebar py-2"
       >
-        <IconButton
-          label={EXPAND_RAIL_LABEL}
-          icon={<PanelRightOpenIcon />}
-          onClick={() => setLayout({ collapsed: false })}
-        />
-        {/* What is checked out is in the window chrome whether the rail is open or not, so all a
-            closed rail still owes is how much has changed under it. */}
-        {changes.length > 0 && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Badge variant="muted" className="tabular-nums">
-                {changes.length}
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent>{`${changes.length} changed`}</TooltipContent>
-          </Tooltip>
-        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={expandLabel}
+              className="relative"
+              onClick={() => setLayout({ collapsed: false })}
+            >
+              <PanelRightOpenIcon />
+              {changes.length > 0 && (
+                <Badge
+                  aria-hidden
+                  variant="muted"
+                  className="absolute -end-1 -top-1 h-4 min-w-4 border border-sidebar bg-sidebar-accent px-1 text-[0.625rem] tabular-nums text-sidebar-foreground"
+                >
+                  {changes.length}
+                </Badge>
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{expandLabel}</TooltipContent>
+        </Tooltip>
       </aside>
     );
   }
@@ -279,7 +290,7 @@ export function GitRail({
                 {changes.length === 0 ? (
                   <RailEmpty>{NOTHING_CHANGED}</RailEmpty>
                 ) : (
-                  <ScrollArea className="h-full" constrainContent>
+                  <ScrollArea className="h-full" horizontal>
                     <ChangesTree
                       tree={changesTree}
                       changes={changes}
@@ -295,7 +306,7 @@ export function GitRail({
                 {filesTree === null ? (
                   <RailEmpty>{files.loading ? "" : NO_FILES}</RailEmpty>
                 ) : (
-                  <ScrollArea className="h-full" constrainContent>
+                  <ScrollArea className="h-full" horizontal>
                     <FilesTree
                       tree={filesTree}
                       expanded={filesFolders.expanded}
