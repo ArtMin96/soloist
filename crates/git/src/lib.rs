@@ -11,6 +11,7 @@
 mod branch;
 mod diff_parse;
 mod files_parse;
+mod line_counts;
 mod log_parse;
 mod patch;
 mod runner;
@@ -24,8 +25,8 @@ use std::io::{self, Read};
 use std::path::Path;
 
 use soloist_core::{
-    BranchOp, Branches, CommitEntry, DiffTarget, Exchange, FileContent, GitError, GitRepository,
-    GitStatus, HunkRange, LogRange, ProjectFile, RawFileDiff, StashOp,
+    BranchOp, Branches, CommitEntry, DiffTarget, Exchange, FileContent, GitError, GitLineCounts,
+    GitRepository, GitStatus, HunkRange, LogRange, ProjectFile, RawFileDiff, StashOp,
 };
 
 /// What separates the two ends of a revision range: everything the right names that the left does
@@ -34,7 +35,13 @@ const RANGE: &str = "..";
 
 /// The arguments asking for a working tree's state in the one machine-readable form this
 /// adapter reads.
-const STATUS_ARGS: &[&str] = &["status", "--porcelain=v2", "-z", "--branch"];
+const STATUS_ARGS: &[&str] = &[
+    "status",
+    "--porcelain=v2",
+    "-z",
+    "--branch",
+    "--untracked-files=all",
+];
 
 /// The arguments listing every path the repository tracks or has not been told to ignore.
 const LISTED_ARGS: &[&str] = &[
@@ -123,7 +130,8 @@ impl GitRepository for CliGitRepository {
         };
         let mut status = status_parse::parse(&output).ok_or(GitError::Op { status: None })?;
         status.merging = merging(root);
-        Ok(status)
+        let counts: GitLineCounts = line_counts::read(root, &status.changes);
+        Ok(status.with_line_counts(counts))
     }
 
     fn list_files(&self, root: &Path) -> Result<Vec<ProjectFile>, GitError> {

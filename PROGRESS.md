@@ -9,6 +9,79 @@
 
 ## Current state
 
+> **LATEST (2026-08-24): C9 GIT RAIL FOLLOW-UP — five usability defects corrected, scoped/e2e-green,
+> full lint green, full test stopped by the known PTY timing flake, `Done — pending verify`,
+> UNCOMMITTED.** On `main` `164d980`; parity rows **VC1/VC4/VC5/VC6/VC12**. This is one surgical
+> status-and-presentation slice: (1) `git status --porcelain=v2 -z --branch --untracked-files=all`
+> now reports each file beneath an untracked directory, so the Changes tree renders a real expandable
+> folder and reveals its children; (2) the commit composer is a compact, closed disclosure until the
+> user asks for it, preserves an unfinished message and Amend choice while hidden, wraps its status
+> copy, and offers a vertically resizable, bounded message field; (3) the title-bar branch cluster now
+> shows added/deleted **line** totals, not added/removed file counts, and marks bounded partial totals
+> as incomplete instead of presenting them as exact; (4) Changes and Files trees acquire horizontal
+> overflow only when their intrinsic path width needs it, while the Git status letter, checkbox and
+> row actions remain sticky, visible and reachable; (5) the collapsed rail folds its changed-file
+> count into one correctly positioned reopen control with one accessible name instead of a detached
+> badge competing for attention. The e2e fixture lock refresh is only its workspace path dependencies
+> moving from `0.16.1` to the current `0.16.3`; the unrelated untracked `.agents/skills/`, `.codex/`,
+> `.cursor/`, root `AGENTS.md`, and `gemini-code-1786538380867.md` material was preserved and is not
+> part of this slice.
+>
+> **Architecture and bounds.** The system-git adapter measures a bounded working-tree diff and
+> returns typed `core::git::GitStatus` with `GitLineCounts { additions, deletions, complete }`; the
+> existing Tauri status command remains an unchanged pass-through; React mirrors the type once in
+> `domain.ts` and only renders the projection. Untracked text inspection uses a 1 MiB per-file cap
+> and an 8 MiB aggregate byte budget; binary content stays in the file projection
+> but contributes no invented line total. No Tauri source, config, IPC action or capability changed,
+> so no Tauri implementation skill applied; the e2e verifier used `testing-tauri-apps` and consulted
+> official WebdriverIO/Tauri WebDriver guidance. UI work used `impeccable` (context once, craft-floor/
+> polish and detector once), `shadcn`, and `testing-guidelines`; Rust used `testing-guidelines`.
+>
+> **Test-first and mutation evidence.** Under the unfixed adapter, the nested-status regression
+> returned `["notes/"]` instead of the two nested files. Mutating the numeric parser and the binary/
+> rename parser reddened their tests; a projection mutation returned `0/0` instead of `7/3`; removing
+> untracked accounting reddened the mixed-total and no-HEAD tests; disabling the unborn-branch
+> fallback/completeness produced staged-first-commit additions `0` instead of `2`, incorrectly marked
+> a no-HEAD total incomplete, and incorrectly marked an oversized file complete. The first frontend
+> RED run was **3 component files: 15 failed / 40 passed** under the old behavior. After review-driven
+> corrections, the BranchCluster RED run was **2 failed / 17 passed** for the old exact-total and
+> missing incomplete-zero behavior. The initial independent review found **P1** unborn staged files
+> counting as zero and two **P2s** (no exact-vs-partial contract; no Files-tree e2e coverage); all were
+> corrected. Focused re-review result: **`Clean. No P0/P1/P2 findings`** — it confirmed the
+> object-format-safe empty-tree baseline, completeness propagation/presentation, Files coverage, and
+> no architecture, accessibility, bounded-performance, duplication or test-quality regression.
+>
+> **Scoped evidence.** `cargo test -p soloist-core -p soloist-git` — **1,353 passed / 0 failed**;
+> owned Rust files passed rustfmt and diff-check. Frontend's first green run covered **7 Vitest files,
+> 101/101 passed** plus UI `tsc`, targeted ESLint and e2e `tsc`; the correction green run covered
+> **5 Vitest files, 84/84 passed** plus those same type/lint checks and diff-check. The Impeccable
+> detector returned `[]`.
+>
+> **Full gates, recorded without hiding environment failures.** The first sandboxed `just lint` ran
+> `cargo fmt --check` and workspace Clippy clean, then failed because pnpm could not open its store
+> SQLite database under `/home/dell/.local/share/`; its approved unsandboxed continuation was **exit
+> 0**, including UI typecheck/lint/format, theme/dependency/cycle checks and the schema tests (**2
+> passed / 0 failed**). The first sandboxed `just test` stopped in `soloist-app` at **91 passed / 11
+> failed**, all eleven failures being `Operation not permitted` socket binds; its approved
+> unsandboxed continuation cleared those failures and every Git test, then stopped at the pre-existing
+> `create_terminal_runs_an_interactive_shell_in_the_project_dir` timing flake: that PTY binary was
+> **14 passed / 1 failed**, so `just test` is honestly **exit 101**, not green, and later suites did
+> not run. No test or check was weakened or skipped.
+>
+> **Real-window evidence and remaining verify.**
+> `cd e2e && xvfb-run -a pnpm test --spec ./specs/version-control/tree-actions.spec.ts` — **exit 0,
+> 3/3 tests passed in 1/1 spec file**. The real window confirmed Changes-tree horizontal overflow
+> while the status and actions remain visible and reachable, expanded a real untracked directory and
+> revealed both nested files, and reached the full long filename in the Files tree. The targeted e2e
+> contract is green; this remains `Done — pending verify`, not `Verified`, only because the full
+> `just test` gate still stops on the known PTY timing flake recorded above.
+>
+> **Next session should start with:** commit this working tree and open the PR without self-merging,
+> then preserve the prior audit pointer: continue DSA audit **slice 5**
+> (`.scratch/dsa-audit/slices/slice-05-processactionhandlers-contract.md`, S28-F1 + S26-F2 +
+> `App.tsx` as one commit, then S28-F2) through slice 10, independently verifying S31–S37 before
+> scheduling them.
+
 > **LATEST (2026-08-23): DSA AUDIT SLICE 4 — THE "ONE INVARIANT, ONE SITE FORGOT" TRIO — gate-green,
 > `Done — pending verify`, UNCOMMITTED.** On `main` `92b41b2`. Work items **S08-F2** (scratchpad
 > rename), **S11-F1** (`commit_template`'s missing `NotARepo` arm), and **S12-F2** (two trust-request

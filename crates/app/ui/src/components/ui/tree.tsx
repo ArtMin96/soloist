@@ -24,7 +24,7 @@ function Tree<T>({
       // in this tree and the neutral fill otherwise — the AppKit first-responder distinction the
       // app's other lists already read.
       data-selection-scope
-      className={cn("flex flex-col outline-none", className)}
+      className={cn("flex w-max min-w-full flex-col outline-none", className)}
       {...props}
     />
   );
@@ -53,7 +53,7 @@ function TreeItem<T>({
       data-selected={item.isSelected() ? "" : undefined}
       style={{ paddingInlineStart: `${item.getItemMeta().level * TREE_INDENT}px` }}
       className={cn(
-        "group/tree-item relative flex h-8 w-full min-w-0 cursor-default items-center gap-2 overflow-hidden rounded-sm pe-2 text-left text-[0.8125rem] tracking-[var(--tracking-body)] outline-none",
+        "group/tree-item relative flex h-8 w-max min-w-full cursor-default items-center gap-2 rounded-sm bg-sidebar text-left text-[0.8125rem] tracking-[var(--tracking-body)] outline-none",
         "transition-colors duration-[var(--dur-select)] ease-out-quint",
         "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
         "data-folder:font-medium data-selected:bg-[var(--sel-fill)] data-selected:hover:bg-[var(--sel-fill-hover)]",
@@ -85,10 +85,14 @@ function TreeItemChevron<T>({ item }: { item: ItemInstance<T> }) {
   );
 }
 
-/** The row's name, truncating rather than wrapping — a rail is narrow by design. */
+/** The row's name, kept on one line so the tree can reveal it by scrolling. */
 function TreeItemLabel({ className, ...props }: React.ComponentProps<"span">) {
   return (
-    <span data-slot="tree-item-label" className={cn("min-w-0 flex-1 truncate", className)} {...props} />
+    <span
+      data-slot="tree-item-label"
+      className={cn("w-max flex-none whitespace-nowrap", className)}
+      {...props}
+    />
   );
 }
 

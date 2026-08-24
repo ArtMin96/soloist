@@ -26,7 +26,7 @@ function cluster(overrides: Partial<BranchClusterView> = {}): BranchClusterView 
   return {
     branch: { name: "main", upstream: "origin/main", sync: { state: "up_to_date" } },
     capabilities: { pull: true, push: true },
-    changeCounts: { added: 0, removed: 0 },
+    lineCounts: { additions: 0, deletions: 0, complete: true },
     branches: null,
     exchanging: false,
     busy: false,

@@ -1,8 +1,9 @@
 import { useId, useState } from "react";
-import { SparklesIcon } from "lucide-react";
+import { ChevronDownIcon, SparklesIcon } from "lucide-react";
 import { ASSIST_SETTINGS_TAB } from "@/components/settings/tabs";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { GLASS_CONTROL_SURFACE } from "@/components/ui/glass";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -17,6 +18,7 @@ const AMEND_LABEL = "Amend";
 const AMEND_HINT = "Replace the last commit instead of adding one";
 const DRAFT_LABEL = "Draft";
 const DRAFT_HINT = "Describe the staged change with your assist tool, to edit before committing";
+const COMPOSER_LABEL = "Commit changes";
 /** The same control where no tool is picked yet, which is where every install starts. The ellipsis
  *  is the promise it keeps: it leads somewhere before it drafts anything. */
 const SETUP_LABEL = "Draft…";
@@ -29,6 +31,10 @@ const NOTHING_STAGED = "Nothing is staged to commit";
 /** …and how much there is to record, agreeing with the count. */
 function stagedFiles(staged: number): string {
   return staged === 1 ? "1 file staged" : `${staged} files staged`;
+}
+
+function stagedSummary(staged: number): string {
+  return staged === 0 ? NOTHING_STAGED : `${staged} staged`;
 }
 
 /**
@@ -66,6 +72,7 @@ export function CommitBox({
 }) {
   const amendId = useId();
   const openSettings = useOpenSettings();
+  const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState<string | null>(null);
   const [amend, setAmend] = useState(false);
   const message = typed ?? template ?? "";
@@ -107,53 +114,90 @@ export function CommitBox({
           act: requestDraft,
         };
 
+  const disclosureLabel = open ? "Hide commit composer" : `Show commit composer: ${COMPOSER_LABEL}`;
+
   return (
-    <div className="flex shrink-0 flex-col gap-2 border-t border-sidebar-border p-3">
-      <Textarea
-        value={message}
-        aria-label="Commit message"
-        placeholder={PLACEHOLDER}
-        rows={3}
-        className={cn("resize-none", GLASS_CONTROL_SURFACE)}
-        onChange={(event) => setTyped(event.target.value)}
-      />
-      {/* One line, always there, at a fixed leading: what a press would record changes as the state
-          does, and the row below it never moves because of it. */}
-      <p className="truncate type-label text-muted-foreground">
-        {recording({ drafting, amend, staged })}
-      </p>
-      <div className="flex items-center gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="flex items-center gap-2">
-              <Checkbox
-                id={amendId}
-                checked={amend}
-                onCheckedChange={(checked) => setAmend(checked === true)}
-              />
-              <label htmlFor={amendId} className="type-body">
-                {AMEND_LABEL}
-              </label>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{AMEND_HINT}</TooltipContent>
-        </Tooltip>
-        <div className="ms-auto flex items-center gap-1.5">
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="shrink-0 border-t border-sidebar-border"
+    >
+      <CollapsibleTrigger asChild>
+        <Button
+          variant="ghost"
+          aria-label={disclosureLabel}
+          className="h-auto w-full justify-start rounded-none px-3 py-2.5 text-start"
+        >
+          <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+            <span className="type-body font-medium text-foreground">{COMPOSER_LABEL}</span>
+            {!open && (
+              <span className="type-label whitespace-normal text-muted-foreground">
+                {stagedSummary(staged)}
+              </span>
+            )}
+          </span>
+          <ChevronDownIcon
+            aria-hidden
+            className={cn(
+              "ms-auto transition-transform duration-[var(--dur-control)] ease-spring-settle motion-reduce:transition-none",
+              open && "rotate-180",
+            )}
+          />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="flex flex-col gap-2 px-3 pb-3">
+        <Textarea
+          value={message}
+          aria-label="Commit message"
+          placeholder={PLACEHOLDER}
+          rows={4}
+          className={cn("min-h-24 max-h-[40vh] resize-y overflow-y-auto", GLASS_CONTROL_SURFACE)}
+          onChange={(event) => setTyped(event.target.value)}
+        />
+        <p
+          aria-live="polite"
+          className="type-label whitespace-normal leading-snug text-muted-foreground"
+        >
+          {recording({ drafting, amend, staged })}
+        </p>
+        <div className="flex items-center gap-2">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" disabled={assist.unavailable} onClick={assist.act}>
-                <SparklesIcon className={drafting ? "motion-safe:animate-pulse" : undefined} />
-                {assist.label}
-              </Button>
+              <span className="flex items-center gap-2">
+                <Checkbox
+                  id={amendId}
+                  checked={amend}
+                  onCheckedChange={(checked) => setAmend(checked === true)}
+                />
+                <label htmlFor={amendId} className="type-body">
+                  {AMEND_LABEL}
+                </label>
+              </span>
             </TooltipTrigger>
-            <TooltipContent>{assist.hint}</TooltipContent>
+            <TooltipContent>{AMEND_HINT}</TooltipContent>
           </Tooltip>
-          <Button size="sm" disabled={!ready || busy || drafting} onClick={commit}>
-            {COMMIT_LABEL}
-          </Button>
+          <div className="ms-auto flex items-center gap-1.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={assist.unavailable}
+                  onClick={assist.act}
+                >
+                  <SparklesIcon className={drafting ? "motion-safe:animate-pulse" : undefined} />
+                  {assist.label}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{assist.hint}</TooltipContent>
+            </Tooltip>
+            <Button size="sm" disabled={!ready || busy || drafting} onClick={commit}>
+              {COMMIT_LABEL}
+            </Button>
+          </div>
         </div>
-      </div>
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

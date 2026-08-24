@@ -36,6 +36,7 @@ function statusWith(paths: string[]): GitStatus {
       discardablePaths: paths,
     },
     changeCounts: { added: 0, removed: 0 },
+    lineCounts: { additions: 0, deletions: 0, complete: true },
   };
 }
 

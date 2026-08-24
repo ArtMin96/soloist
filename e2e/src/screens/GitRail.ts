@@ -3,15 +3,38 @@ import { WAIT } from "../harness/waits.js";
 
 const RAIL = 'aside[aria-label="Version control"]';
 const CHANGES = '[role="tree"][aria-label="Changed files"]';
+const FILES = '[role="tree"][aria-label="Project files"]';
+
+export interface PathPlacement {
+  /** The scroll viewport is narrower than the tree it carries. */
+  horizontallyScrollable: boolean;
+  /** The full filename is visible after the tree is scrolled to its trailing edge. */
+  nameVisibleAtEnd: boolean;
+}
 
 /** Where a changed row's trailing actions sit, against the rail edge they must stay inside. */
-export interface ActionPlacement {
+export interface ActionPlacement extends PathPlacement {
   /** The rail's own right edge. */
   railRight: number;
   /** The right edge of the row's actions, the last of them included. */
   actionsRight: number;
-  /** Whether a click at the centre of the last action lands on that action. */
-  reachable: boolean;
+  /** Every trailing action remains inside the visible rail. */
+  actionsVisible: boolean;
+  /** The change-status letter remains visible beside the controls. */
+  statusVisible: boolean;
+  /** A click at each interactive action's centre lands on that action. */
+  controlsReachable: boolean;
+}
+
+export interface FolderExpansion {
+  /** The row is represented as an expandable folder, not as an unknown file. */
+  folder: boolean;
+  /** The folder was closed before the user opened it. */
+  collapsedBefore: boolean;
+  /** The folder reports itself open after the user acts on it. */
+  expandedAfter: boolean;
+  /** Child rows visible after opening the folder. */
+  visibleChildren: string[];
 }
 
 /** The version-control rail beside the main area: what has changed under the open project. */
@@ -35,9 +58,50 @@ export const gitRail = {
     await expand.click();
   },
 
+  /** Closes the tree, opens one changed folder, and reads the children that become visible. */
+  async expandChangedFolder(
+    folderName: string,
+    childNames: string[],
+  ): Promise<FolderExpansion> {
+    const rail = await $(RAIL);
+    const tree = await rail.$(CHANGES);
+    const collapse = await rail.$("aria/Collapse all folders");
+    await collapse.waitForClickable({ timeout: WAIT.core });
+    await collapse.click();
+
+    const folder = await tree.$(`aria/${folderName}`);
+    await folder.waitForDisplayed({ timeout: WAIT.render });
+    const folderMarker = await folder.getAttribute("data-folder");
+    const collapsedBefore = (await folder.getAttribute("aria-expanded")) === "false";
+    await folder.click();
+
+    await browser.waitUntil(
+      async () =>
+        (await tree.$(`aria/${folderName}`).getAttribute("aria-expanded")) === "true",
+      {
+        timeout: WAIT.render,
+        timeoutMsg: `the changed folder ${folderName} never opened`,
+      },
+    );
+
+    const visibleChildren: string[] = [];
+    for (const childName of childNames) {
+      const child = await tree.$(`aria/${childName}`);
+      await child.waitForDisplayed({ timeout: WAIT.render });
+      visibleChildren.push(childName);
+    }
+
+    return {
+      folder: folderMarker !== null,
+      collapsedBefore,
+      expandedAfter:
+        (await tree.$(`aria/${folderName}`).getAttribute("aria-expanded")) === "true",
+      visibleChildren,
+    };
+  },
+
   /**
-   * Where a changed path's trailing actions sit, and whether the last of them still answers a
-   * click there.
+   * Where a changed path's trailing actions sit, and whether its controls still answer clicks.
    *
    * Reached through the discard control — the one action named for the path — and then measured as
    * the group it belongs to. The group is what the rail's edge constrains: the controls sit on one
@@ -56,32 +120,119 @@ export const gitRail = {
    */
   async actionPlacement(path: string): Promise<ActionPlacement> {
     const rail = await $(RAIL);
-    const discard = await rail.$(CHANGES).$(`aria/Discard the changes to ${path}`);
+    const discard = await rail
+      .$(CHANGES)
+      .$(`aria/Discard the changes to ${path}`);
+    const stage = await rail.$(CHANGES).$(`aria/Stage ${path}`);
     // The actions appear only once the core has answered which paths hold restorable work, and
     // only while the row's folders are open — so this existence is the whole arrange, waited on.
     await discard.waitForExist({ timeout: WAIT.core });
+    await stage.waitForExist({ timeout: WAIT.core });
 
     return browser.execute(
-      (railElement: HTMLElement, discardElement: HTMLElement) => {
+      (
+        railElement: HTMLElement,
+        discardElement: HTMLElement,
+        stageElement: HTMLElement,
+      ) => {
         const actions = discardElement.parentElement;
         if (actions === null) {
-          throw new Error("the discard control no longer sits among a changed row's actions");
+          throw new Error(
+            "the discard control no longer sits among a changed row's actions",
+          );
         }
-        const last = actions.lastElementChild ?? actions;
-        const lastBox = last.getBoundingClientRect();
-        const hit = document.elementFromPoint(
-          lastBox.x + lastBox.width / 2,
-          lastBox.y + lastBox.height / 2,
+        const row = actions.closest('[data-slot="tree-item"]');
+        const viewport = actions.closest('[data-slot="scroll-area-viewport"]');
+        const label = row?.querySelector<HTMLElement>(
+          '[data-slot="tree-item-label"]',
         );
+        if (!(viewport instanceof HTMLElement) || label == null) {
+          throw new Error(
+            "the changed row no longer sits in the repository tree scroll viewport",
+          );
+        }
+        const horizontallyScrollable =
+          viewport.scrollWidth > viewport.clientWidth;
+        viewport.scrollLeft = viewport.scrollWidth;
+        const labelBox = label.getBoundingClientRect();
+        const viewportBox = viewport.getBoundingClientRect();
+        const actionsBox = actions.getBoundingClientRect();
+        const railBox = railElement.getBoundingClientRect();
+        const actionElements = Array.from(actions.children).filter(
+          (element): element is HTMLElement => element instanceof HTMLElement,
+        );
+        const status = actions.querySelector<HTMLElement>('[role="img"]');
+        const reaches = (control: HTMLElement) => {
+          const box = control.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          );
+          return !control.hasAttribute("disabled") && hit !== null && control.contains(hit);
+        };
         return {
-          railRight: railElement.getBoundingClientRect().right,
-          actionsRight: actions.getBoundingClientRect().right,
-          reachable: hit !== null && last.contains(hit),
+          railRight: railBox.right,
+          actionsRight: actionsBox.right,
+          actionsVisible: actionElements.every((element) => {
+            const box = element.getBoundingClientRect();
+            return box.left >= viewportBox.left && box.right <= railBox.right;
+          }),
+          statusVisible:
+            status !== null &&
+            status.getBoundingClientRect().left >= viewportBox.left &&
+            status.getBoundingClientRect().right <= railBox.right,
+          controlsReachable: reaches(discardElement) && reaches(stageElement),
+          horizontallyScrollable,
+          nameVisibleAtEnd:
+            labelBox.left >= viewportBox.left &&
+            labelBox.right <= actionsBox.left,
         };
       },
       rail,
       discard,
+      stage,
     );
+  },
+
+  /** Reveals a nested project file and measures it at the tree's trailing scroll edge. */
+  async filePlacement(path: string): Promise<PathPlacement> {
+    const rail = await $(RAIL);
+    const filesTab = await rail.$("aria/Files");
+    await filesTab.waitForClickable({ timeout: WAIT.core });
+    await filesTab.click();
+
+    const tree = await rail.$(FILES);
+    await tree.waitForExist({ timeout: WAIT.core });
+    const expand = await rail.$("aria/Expand all folders");
+    await expand.waitForClickable({ timeout: WAIT.render });
+    await expand.click();
+
+    const name = path.split("/").at(-1) ?? path;
+    const row = await tree.$(`aria/${name}`);
+    await row.waitForExist({ timeout: WAIT.render });
+
+    return browser.execute((rowElement: HTMLElement) => {
+      const viewport = rowElement.closest('[data-slot="scroll-area-viewport"]');
+      const label = rowElement.querySelector<HTMLElement>(
+        '[data-slot="tree-item-label"]',
+      );
+      if (!(viewport instanceof HTMLElement) || label === null) {
+        throw new Error(
+          "the project file no longer sits in its tree scroll viewport",
+        );
+      }
+      const horizontallyScrollable =
+        viewport.scrollWidth > viewport.clientWidth;
+      viewport.scrollLeft = viewport.scrollWidth;
+      const labelBox = label.getBoundingClientRect();
+      const viewportBox = viewport.getBoundingClientRect();
+      return {
+        horizontallyScrollable,
+        nameVisibleAtEnd:
+          labelBox.left >= viewportBox.left &&
+          labelBox.right <= viewportBox.right,
+      };
+    }, row);
   },
 
   /**

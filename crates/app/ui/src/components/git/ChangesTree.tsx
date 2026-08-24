@@ -71,12 +71,11 @@ export function ChangesTree({
             <TreeItemLabel
               className={cn(
                 !node.folder && node.change !== null && CHANGE[node.change].gone && "line-through",
-                actions !== null && change !== undefined ? "pe-16" : "pe-6",
               )}
             >
               {node.name}
             </TreeItemLabel>
-            <div className="absolute inset-e-2 flex items-center gap-0.5">
+            <div className="sticky end-0 z-10 ms-auto flex shrink-0 items-center gap-0.5 bg-inherit pe-2 ps-2">
               {actions !== null && change !== undefined && actions.discardable.has(node.path) && (
                 <Tooltip>
                   <TooltipTrigger asChild>

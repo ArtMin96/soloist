@@ -13,7 +13,7 @@ use crate::ids::ProjectId;
 use crate::testing::{file_change, git_status, untrusting, FakeGitRepository};
 use crate::vcs::{ChangeKind, FileChange, GitFileStatus, SyncState};
 
-use super::{Git, GitStatus};
+use super::{Git, GitLineCounts, GitStatus};
 use crate::git::GitError;
 
 /// The fake ignores it — a status read is addressed by project here, not by path.
@@ -332,6 +332,46 @@ fn the_status_counts_paths_created_and_removed_across_both_sides_of_the_index() 
         serde_json::json!({ "added": 4, "removed": 2 }),
         "the wire carries the core's exhaustive classification",
     );
+}
+
+#[test]
+fn line_totals_are_projected_without_replacing_changed_path_counts() {
+    let mut status = git_status("main");
+    status
+        .changes
+        .push(file_change("modified.rs", None, Some(ChangeKind::Modified)));
+    let status = served(status.with_line_counts(GitLineCounts {
+        additions: 7,
+        deletions: 3,
+        complete: true,
+    }));
+
+    assert_eq!(
+        status.line_counts(),
+        GitLineCounts {
+            additions: 7,
+            deletions: 3,
+            complete: true,
+        },
+    );
+    let disclosed = serde_json::to_value(&status).expect("status serializes");
+    assert_eq!(
+        disclosed["lineCounts"],
+        serde_json::json!({ "additions": 7, "deletions": 3, "complete": true }),
+    );
+    assert_eq!(
+        disclosed["changeCounts"],
+        serde_json::json!({ "added": 0, "removed": 0 }),
+        "line totals extend the projection without changing its path totals",
+    );
+
+    let mut earlier_wire = disclosed;
+    earlier_wire
+        .as_object_mut()
+        .expect("a status is an object")
+        .remove("lineCounts");
+    let earlier: GitStatus = serde_json::from_value(earlier_wire).expect("older status decodes");
+    assert_eq!(earlier.line_counts(), GitLineCounts::default());
 }
 
 #[test]

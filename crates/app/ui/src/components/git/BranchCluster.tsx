@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { branchStanding } from "@/lib/git";
 import { cn } from "@/lib/utils";
 import { onBranchSwitcherRequest, useBranchCluster } from "@/store/git/branchCluster";
+import type { GitLineCounts } from "@/domain";
 
 /** What a detached head is called where a branch name would go. */
 const DETACHED = "Detached";
@@ -55,9 +56,11 @@ export function BranchCluster() {
 
   if (view === null) return null;
 
-  const { branch, branchActions, capabilities, changeCounts, exchange, openPullRequest } = view;
+  const { branch, branchActions, capabilities, lineCounts, exchange, openPullRequest } = view;
   const name = branch.name ?? DETACHED;
   const standing = branchStanding(branch);
+  const hasMeasuredLines = lineCounts.additions > 0 || lineCounts.deletions > 0;
+  const countsLabel = lineCountLabel(lineCounts);
   const badge = (
     <Badge variant="tinted" className={cn("min-w-0 shrink", standing.toneClass)}>
       <GitBranchIcon aria-hidden />
@@ -66,6 +69,37 @@ export function BranchCluster() {
       </span>
     </Badge>
   );
+  const counts =
+    countsLabel === null ? null : (
+      <span
+        role="img"
+        aria-label={countsLabel}
+        tabIndex={lineCounts.complete ? undefined : 0}
+        className={cn(
+          "type-body flex shrink-0 items-center gap-1 rounded-sm font-mono tabular-nums",
+          !hasMeasuredLines && "text-muted-foreground",
+          !lineCounts.complete &&
+            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        )}
+      >
+        {!hasMeasuredLines ? (
+          <span aria-hidden>Lines —</span>
+        ) : (
+          <>
+            {lineCounts.additions > 0 && (
+              <span aria-hidden className="text-git-added">
+                {!lineCounts.complete && "≥"}+{lineCounts.additions}
+              </span>
+            )}
+            {lineCounts.deletions > 0 && (
+              <span aria-hidden className="text-git-deleted">
+                {!lineCounts.complete && "≥"}&minus;{lineCounts.deletions}
+              </span>
+            )}
+          </>
+        )}
+      </span>
+    );
 
   return (
     <div className="flex min-w-0 items-center gap-2">
@@ -99,24 +133,15 @@ export function BranchCluster() {
           </PopoverContent>
         </Popover>
       )}
-      {(changeCounts.added > 0 || changeCounts.removed > 0) && (
-        <span
-          role="img"
-          aria-label={`${changeCounts.added} added ${changeCounts.added === 1 ? "file" : "files"}, ${changeCounts.removed} removed ${changeCounts.removed === 1 ? "file" : "files"}`}
-          className="type-body flex shrink-0 items-center gap-1 font-mono tabular-nums"
-        >
-          {changeCounts.added > 0 && (
-            <span aria-hidden className="text-git-added">
-              +{changeCounts.added}
-            </span>
-          )}
-          {changeCounts.removed > 0 && (
-            <span aria-hidden className="text-git-deleted">
-              &minus;{changeCounts.removed}
-            </span>
-          )}
-        </span>
-      )}
+      {counts !== null &&
+        (lineCounts.complete ? (
+          counts
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>{counts}</TooltipTrigger>
+            <TooltipContent>{countsLabel}</TooltipContent>
+          </Tooltip>
+        ))}
       {standing.label !== null &&
         (standing.ahead === 0 && standing.behind === 0 ? (
           <span className="type-label shrink-0 text-muted-foreground">{standing.label}</span>
@@ -184,4 +209,22 @@ export function BranchCluster() {
 /** What the branch tracks, said in full where the name itself may be truncated. */
 function upstreamLabel(name: string, upstream: string | null): string {
   return upstream !== null ? `${name} → ${upstream}` : `${name} (tracking nothing)`;
+}
+
+function lineCountLabel(counts: GitLineCounts): string | null {
+  if (counts.complete) {
+    if (counts.additions === 0 && counts.deletions === 0) return null;
+    return `${lineTotal(counts.additions, "addition")}, ${lineTotal(counts.deletions, "deletion")}`;
+  }
+
+  const measured = [
+    counts.additions > 0 ? lineTotal(counts.additions, "addition") : null,
+    counts.deletions > 0 ? lineTotal(counts.deletions, "deletion") : null,
+  ].filter((total): total is string => total !== null);
+  if (measured.length === 0) return "Line totals unavailable; measurement is incomplete";
+  return `At least ${measured.join(" and ")}; line totals are incomplete`;
+}
+
+function lineTotal(total: number, kind: "addition" | "deletion"): string {
+  return `${total} line ${total === 1 ? kind : `${kind}s`}`;
 }

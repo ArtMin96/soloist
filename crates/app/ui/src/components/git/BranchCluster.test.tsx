@@ -100,6 +100,7 @@ function statusWith(
     merging: false,
     capabilities,
     changeCounts: { added: 0, removed: 0 },
+    lineCounts: { additions: 0, deletions: 0, complete: true },
   };
 }
 
@@ -267,19 +268,52 @@ describe("the checked-out branch in the window chrome", () => {
     expect(readBranches).toHaveBeenCalledWith(PROJECT);
   });
 
-  it("shows created and removed file counts immediately after the branch badge", async () => {
+  it("shows line additions and deletions immediately after the branch badge", async () => {
     readStatus.mockResolvedValue({
       ...MAIN,
-      changeCounts: { added: 3, removed: 1 },
+      lineCounts: { additions: 3, deletions: 1, complete: true },
     });
 
     renderChrome();
 
     const counts = await within(chrome()).findByRole("img", {
-      name: "3 added files, 1 removed file",
+      name: "3 line additions, 1 line deletion",
     });
     expect(counts.textContent).toBe("+3−1");
     expect(counts.previousElementSibling?.getAttribute("data-variant")).toBe("tinted");
+  });
+
+  it("qualifies measured lines when the total is incomplete", async () => {
+    readStatus.mockResolvedValue({
+      ...MAIN,
+      lineCounts: { additions: 3, deletions: 1, complete: false },
+    });
+
+    renderChrome();
+
+    const counts = await within(chrome()).findByRole("img", {
+      name: "At least 3 line additions and 1 line deletion; line totals are incomplete",
+    });
+    expect(counts.textContent).toBe("≥+3≥−1");
+
+    fireEvent.focus(counts);
+    expect((await screen.findByRole("tooltip")).textContent).toBe(
+      "At least 3 line additions and 1 line deletion; line totals are incomplete",
+    );
+  });
+
+  it("reports unavailable totals calmly when an incomplete measurement found no lines", async () => {
+    readStatus.mockResolvedValue({
+      ...MAIN,
+      lineCounts: { additions: 0, deletions: 0, complete: false },
+    });
+
+    renderChrome();
+
+    const counts = await within(chrome()).findByRole("img", {
+      name: "Line totals unavailable; measurement is incomplete",
+    });
+    expect(counts.textContent).toBe("Lines —");
   });
 
   it("opens its switcher when a surface with no room for one asks for it", async () => {
