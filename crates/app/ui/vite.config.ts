@@ -40,8 +40,24 @@ const e2ePlugin: Plugin[] = process.env.VITE_E2E
     ]
   : [];
 
+const browserPreviewPlugin: Plugin[] =
+  process.env.VITE_BROWSER_PREVIEW === "1"
+    ? [
+        {
+          name: "browser-preview",
+          apply: "serve",
+          enforce: "pre",
+          transform(code, id) {
+            return id.split("?")[0] === entryModule
+              ? `import "@/browser-preview/install";\n${code}`
+              : null;
+          },
+        },
+      ]
+    : [];
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), ...e2ePlugin, ...bundleReport],
+  plugins: [react(), tailwindcss(), ...e2ePlugin, ...browserPreviewPlugin, ...bundleReport],
   resolve: {
     alias: {
       "@": path.resolve(dir, "./src"),

@@ -55,6 +55,7 @@ just setup   # install UI dependencies (pnpm)
 
 ```bash
 just dev      # run the desktop app with hot reload
+just browser  # run the same React UI in a browser with bounded development fixtures
 just test     # Rust workspace tests + UI unit tests (vitest)
 just lint     # rustfmt, clippy, eslint, prettier, tsc, and the dependency-direction guard
 just fmt      # auto-format Rust and UI sources
@@ -62,6 +63,21 @@ just deb      # build only the .deb bundle (fastest; mirrors the per-PR CI gate)
 just bundle   # build the .deb + .AppImage bundles
 just e2e      # real-window end-to-end tests (see below; slower — builds and launches the app)
 ```
+
+## Browser UI preview
+
+`just browser` opens `http://localhost:1420` with the same `main.tsx`, `App`, stores, components,
+styles, themes, and xterm renderer used by the desktop app. A serve-only Vite prelude installs
+Tauri's official frontend mocks before React starts, supplying a small fixed set of projects,
+process states, Git changes, and terminal output for UI work.
+
+The preview does not connect Chrome or Firefox to Soloist's Rust core. It cannot start real
+processes, persist changes, access native file paths, or verify operating-system integration.
+Unsupported product actions report that they are unavailable in the browser preview. Return to
+`just dev` for native behavior and `just e2e` for real-window verification.
+
+Port 1420 is shared with the ordinary Vite development server. Stop any running `just dev`,
+`just dev-alongside`, or other preview process before starting `just browser`.
 
 ## Running e2e tests
 

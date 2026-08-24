@@ -9,6 +9,49 @@
 
 ## Current state
 
+> **LATEST (2026-08-24): DEVELOPMENT BROWSER PREVIEW — scoped and real-page green, full lint green,
+> full test stopped by the known PTY timing flake, `Done — pending verify`, UNCOMMITTED.** `just
+> browser` now opens the production React renderer at `http://localhost:1420` with the official Tauri
+> JavaScript mocks installed before `main.tsx`. A serve-only `VITE_BROWSER_PREVIEW=1` prelude provides
+> window/webview metadata, event IPC, two projects, seven Command/Agent/Terminal rows, attention and
+> activity states, small Git projections, and one capped PTY resync. The normal Tauri entry, App,
+> stores, components, styles, IPC API/domain types, Rust core, and native runtime are unchanged. The
+> preview is a development fixture adapter, not a second product implementation; unsupported product
+> actions report that the browser preview does not support them. This convenience slice does not
+> claim a parity row and leaves the active phase status unchanged.
+>
+> **Bounds and test-first evidence.** The static preview has no timers or polling. PTY attach emits
+> exactly one resync frame through the real `Channel` path and caps the complete tagged frame at the
+> named 128-byte ceiling. Three reversible mutations proved the behavior tests: removing
+> `mockWindows` raised `TypeError: Cannot read properties of undefined (reading 'currentWindow')`;
+> returning empty project/process fixtures made the real App test fail because no process treeitems
+> rendered; removing the PTY slice made the frame 164 bytes against the 128-byte ceiling. Each
+> mutation was restored and the focused suite finished **3/3 passed**, including a direct assertion
+> that the root renders without an alert.
+>
+> **Scoped and browser evidence.** UI typecheck, ESLint, targeted Prettier, normal production build,
+> and `VITE_BROWSER_PREVIEW=1` production build all passed. The flagged production output contained
+> no `soloist-browser-preview-fixture` marker, proving the serve-only adapter is excluded. `just
+> browser` reported Vite ready on port 1420; an approved headless Chromium run loaded the real page,
+> found both preview projects and process rows, and emitted no uncaught, metadata, type, or
+> unsupported-command console errors. The full Vitest suite passed **172 files / 1,282 tests**.
+> Impeccable's detector returned `[]`. `just lint` was **exit 0**, including Rust fmt/Clippy, UI
+> type/lint/format, theme/dependency/cycle checks, and **2/2** schema tests.
+>
+> **Full test gate, recorded without hiding environment failures.** A sandboxed `just test` stopped
+> in `soloist-app` at **91 passed / 11 failed**, all from prohibited socket binds. Its approved
+> unsandboxed run encountered one transient Git credential-helper failure; rerunning that exact test
+> passed **1/1**. A fresh full unsandboxed rerun cleared those checks and then stopped at the already
+> recorded `create_terminal_runs_an_interactive_shell_in_the_project_dir` PTY timing flake: that
+> binary was **14 passed / 1 failed**, so `just test` remains honestly **exit 101** and no test was
+> weakened or skipped.
+>
+> **Next session should start with:** commit this browser-preview slice with the existing working tree
+> and open the PR without self-merging, then preserve the prior audit pointer: continue DSA audit
+> **slice 5** (`.scratch/dsa-audit/slices/slice-05-processactionhandlers-contract.md`, S28-F1 +
+> S26-F2 + `App.tsx` as one commit, then S28-F2) through slice 10, independently verifying S31–S37
+> before scheduling them.
+
 > **LATEST (2026-08-24): C9 GIT RAIL FOLLOW-UP — five usability defects corrected, scoped/e2e-green,
 > full lint green, full test stopped by the known PTY timing flake, `Done — pending verify`,
 > UNCOMMITTED.** On `main` `164d980`; parity rows **VC1/VC4/VC5/VC6/VC12**. This is one surgical
