@@ -9,6 +9,10 @@ default:
 dev:
     cd {{app}} && cargo tauri dev
 
+# Run the production renderer in a browser against bounded development fixtures.
+browser:
+    pnpm -C {{ui}} dev:browser
+
 # Run dev mode while an *installed* Soloist keeps running, untouched. Both overrides are
 # load-bearing. The data dir, because the IPC server unlinks and rebinds the socket on start:
 # sharing one dir silently steals the installed app's MCP clients. The identifier, because
