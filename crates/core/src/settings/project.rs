@@ -42,7 +42,9 @@ pub struct ProjectSettings {
     pub notification_level: NotificationLevel,
     /// Per-command level overrides, keyed by command name. An absent command inherits the project
     /// level; a present one combines with it, so an override can only tighten (see
-    /// [`Self::effective_level_for`]).
+    /// [`Self::effective_level_for`]). Keyed by a mutable name, so a rename or removal must route
+    /// through [`Self::rename_command`]/[`Self::forget_command`] rather than mutating this map
+    /// directly, or the entry is stranded under a name nothing uses any more.
     pub command_notification_levels: BTreeMap<String, NotificationLevel>,
     /// App-local commands — managed processes kept on this machine only, **never** written to
     /// `solo.yml` (`Visibility::Local`). Same shape as a shared command, keyed by name in display
@@ -88,6 +90,34 @@ impl ProjectSettings {
             .map_or(self.notification_level, |command_level| {
                 self.notification_level.most_restrictive(command_level)
             })
+    }
+
+    /// Moves this command's per-command settings state — its notification override and, if it is a
+    /// local command, its `local_commands` entry — from `from` to `to`, so a rename carries every
+    /// name-keyed fact along in one place rather than stranding some of it under the old name. A
+    /// no-op when `from` and `to` are the same. If `to` already carries an override (only reachable
+    /// when a different, since-removed command once held it), the moved override replaces it: it is
+    /// the active choice of the command that survives the rename.
+    pub fn rename_command(&mut self, from: &str, to: &str) {
+        if from == to {
+            return;
+        }
+        if let Some(level) = self.command_notification_levels.remove(from) {
+            self.command_notification_levels
+                .insert(to.to_owned(), level);
+        }
+        if let Some(idx) = self.local_commands.get_index_of(from) {
+            if let Some((_, spec)) = self.local_commands.shift_remove_index(idx) {
+                self.local_commands.shift_insert(idx, to.to_owned(), spec);
+            }
+        }
+    }
+
+    /// Drops this command's notification override, so a later, unrelated command created under the
+    /// same name starts at the project level instead of silently inheriting a retired command's
+    /// choice.
+    pub fn forget_command(&mut self, name: &str) {
+        self.command_notification_levels.remove(name);
     }
 }
 

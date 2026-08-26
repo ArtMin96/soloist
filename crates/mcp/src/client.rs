@@ -10,7 +10,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use soloist_core::{McpToolGroups, ProcessId};
+use soloist_core::{McpToolGroups, ProcessId, ProjectId};
 use soloist_ipc::{
     read_frame, write_frame, IpcError, IpcReply, IpcRequest, IpcResponse, IpcResult,
 };
@@ -64,6 +64,36 @@ impl fmt::Display for ClientError {
     }
 }
 
+/// What this session has established with the app beyond the bind: the facts `register_agent`,
+/// `select_project`, and `select_process` record, so a fresh connection can replay them and a
+/// reconnect cannot leave the app-side session half-initialised.
+#[derive(Default)]
+struct Established {
+    registered: Option<String>,
+    project: Option<ProjectId>,
+    process: Option<ProcessId>,
+}
+
+impl Established {
+    /// Records `request` if it is one of the facts this session tracks; anything else — every
+    /// other request this client sends — is not establishing state and is left untouched.
+    fn record(&mut self, request: &IpcRequest) {
+        match request {
+            IpcRequest::RegisterAgent { label } => self.registered = Some(label.clone()),
+            IpcRequest::SelectProject { project } => self.project = Some(*project),
+            IpcRequest::SelectProcess { process } => self.process = Some(*process),
+            _ => {}
+        }
+    }
+}
+
+/// The live connection and everything that had to be said on it. One lock, so recording an
+/// establishment and replaying it on a fresh connection can never race or drift apart.
+struct Connection {
+    stream: Option<UnixStream>,
+    established: Established,
+}
+
 /// A stateless front over one connection to the app.
 pub struct AppClient {
     /// The app's IPC socket path.
@@ -72,7 +102,7 @@ pub struct AppClient {
     /// attributes our calls to it.
     bound: Option<ProcessId>,
     /// The live connection, opened lazily and reopened after a transport failure.
-    stream: Mutex<Option<UnixStream>>,
+    connection: Mutex<Connection>,
     /// How long one request tolerates hearing nothing at all, and the most it may take however much
     /// it hears. Held rather than read from the constants at the point of use so a test about the
     /// waiting can set bounds it can reach, instead of taking minutes to reach the real ones.
@@ -87,7 +117,10 @@ impl AppClient {
         Self {
             socket,
             bound,
-            stream: Mutex::new(None),
+            connection: Mutex::new(Connection {
+                stream: None,
+                established: Established::default(),
+            }),
             silence: REQUEST_TIMEOUT,
             ceiling: MAX_REPORTED_WAIT,
         }
@@ -125,27 +158,46 @@ impl AppClient {
         request: IpcRequest,
         reports: Option<mpsc::Sender<String>>,
     ) -> Result<IpcResponse, ClientError> {
-        let mut slot = self.stream.lock().await;
-        if slot.is_none() {
-            *slot = Some(self.connect().await?);
+        let mut slot = self.connection.lock().await;
+        self.exchange_on(&mut slot, &request, reports.as_ref())
+            .await?
+            .map_err(ClientError::App)
+    }
+
+    /// The same exchange as [`request`](Self::request), for a request whose success this session
+    /// must remember — `register_agent`, `select_project`, `select_process` — so it survives a
+    /// reconnect. Records `request` into the connection's established facts on `Acked`; any other
+    /// outcome leaves the record as it was.
+    pub async fn establishing(&self, request: IpcRequest) -> Result<IpcResponse, ClientError> {
+        let mut slot = self.connection.lock().await;
+        let reply = self.exchange_on(&mut slot, &request, None).await?;
+        if let Ok(IpcResponse::Acked) = &reply {
+            slot.established.record(&request);
         }
-        let stream = match slot.as_mut() {
+        reply.map_err(ClientError::App)
+    }
+
+    /// Ensures a connection is open — opening and replaying onto one if needed — then performs the
+    /// exchange, returning the app's raw reply so a caller can react to it before it becomes an
+    /// error. A transport failure drops the connection so the next call reconnects.
+    async fn exchange_on(
+        &self,
+        slot: &mut Connection,
+        request: &IpcRequest,
+        reports: Option<&mpsc::Sender<String>>,
+    ) -> Result<IpcResult, ClientError> {
+        if slot.stream.is_none() {
+            slot.stream = Some(self.connect(&mut slot.established).await?);
+        }
+        let stream = match slot.stream.as_mut() {
             Some(stream) => stream,
             None => return Err(ClientError::NotRunning),
         };
-        match exchange(
-            stream,
-            &request,
-            reports.as_ref(),
-            self.silence,
-            self.ceiling,
-        )
-        .await
-        {
-            Ok(reply) => reply.map_err(ClientError::App),
+        match exchange(stream, request, reports, self.silence, self.ceiling).await {
+            Ok(reply) => Ok(reply),
             Err(err) => {
                 // Drop the broken connection so the next call reconnects.
-                *slot = None;
+                slot.stream = None;
                 Err(err)
             }
         }
@@ -162,8 +214,11 @@ impl AppClient {
         }
     }
 
-    /// Opens a fresh connection and binds it to our process, best-effort.
-    async fn connect(&self) -> Result<UnixStream, ClientError> {
+    /// Opens a fresh connection, binds it to our process, then replays every establishing fact the
+    /// session had recorded on the connection it replaces — so a reconnect is never distinguishable
+    /// from the first connection to whatever called `register_agent`, `select_project`, or
+    /// `select_process` on the one before it.
+    async fn connect(&self, established: &mut Established) -> Result<UnixStream, ClientError> {
         let mut stream = UnixStream::connect(&self.socket)
             .await
             .map_err(|_| ClientError::NotRunning)?;
@@ -178,7 +233,52 @@ impl AppClient {
             )
             .await;
         }
+        self.replay(&mut stream, established).await;
         Ok(stream)
+    }
+
+    /// Replays `established`'s facts on `stream`, in the order they were first established. A
+    /// replay the app refuses is dropped from `established` so it is not retried on every
+    /// subsequent reconnect; one that could not be sent at all (the fresh connection is itself
+    /// unreachable) is left as it was, since nothing has actually contradicted it.
+    async fn replay(&self, stream: &mut UnixStream, established: &mut Established) {
+        if let Some(label) = established.registered.clone() {
+            if self
+                .replay_one(stream, IpcRequest::RegisterAgent { label })
+                .await
+                == Some(false)
+            {
+                established.registered = None;
+            }
+        }
+        if let Some(project) = established.project {
+            if self
+                .replay_one(stream, IpcRequest::SelectProject { project })
+                .await
+                == Some(false)
+            {
+                established.project = None;
+            }
+        }
+        if let Some(process) = established.process {
+            if self
+                .replay_one(stream, IpcRequest::SelectProcess { process })
+                .await
+                == Some(false)
+            {
+                established.process = None;
+            }
+        }
+    }
+
+    /// Sends one establishing request on `stream`, best-effort: `Some(true)` acked, `Some(false)`
+    /// refused, `None` the app could not be reached for it at all.
+    async fn replay_one(&self, stream: &mut UnixStream, request: IpcRequest) -> Option<bool> {
+        match exchange(stream, &request, None, self.silence, self.ceiling).await {
+            Ok(Ok(IpcResponse::Acked)) => Some(true),
+            Ok(_) => Some(false),
+            Err(_) => None,
+        }
     }
 }
 

@@ -199,8 +199,12 @@ impl Facade {
     }
 
     /// Renames a shared command in `solo.yml`, keeping its position. A pure rename preserves trust
-    /// (trust is keyed on the command variant, not the name). Refused if the new name is already
-    /// taken by a local command, so the two stores never collide.
+    /// (trust is keyed on the command variant, not the name) and moves the command's notification
+    /// override (if any) to the new name via
+    /// [`ProjectSettings::rename_command`](crate::settings::ProjectSettings::rename_command), written
+    /// only after the `solo.yml` write succeeds, so a failed rename leaves the override in place
+    /// under the old name. Refused if the new name is already taken by a local command, so the two
+    /// stores never collide.
     pub fn rename_shared_command(
         &self,
         project: ProjectId,
@@ -218,24 +222,35 @@ impl Facade {
             return Err(ConfigWriteError::DuplicateCommand(to.to_owned()));
         }
         let (from, to) = (from.to_owned(), to.to_owned());
-        self.write_shared_command(project, move |config| {
-            if !config.processes.contains_key(&from) {
-                return Err(ConfigWriteError::UnknownCommand);
-            }
-            if from != to && config.processes.contains_key(&to) {
-                return Err(ConfigWriteError::DuplicateCommand(to));
-            }
-            if let Some(idx) = config.processes.get_index_of(&from) {
-                if let Some((_, spec)) = config.processes.shift_remove_index(idx) {
-                    config.processes.shift_insert(idx, to, spec);
+        let commands = self.write_shared_command(project, {
+            let from = from.clone();
+            let to = to.clone();
+            move |config| {
+                if !config.processes.contains_key(&from) {
+                    return Err(ConfigWriteError::UnknownCommand);
                 }
+                if from != to && config.processes.contains_key(&to) {
+                    return Err(ConfigWriteError::DuplicateCommand(to));
+                }
+                if let Some(idx) = config.processes.get_index_of(&from) {
+                    if let Some((_, spec)) = config.processes.shift_remove_index(idx) {
+                        config.processes.shift_insert(idx, to, spec);
+                    }
+                }
+                Ok(())
             }
-            Ok(())
-        })
+        })?;
+        self.project_settings
+            .update(&project, |s| s.rename_command(&from, &to))?;
+        Ok(commands)
     }
 
-    /// Removes a shared command from `solo.yml`.
-    pub fn remove_shared_command(
+    /// Removes a shared command from `solo.yml` only, leaving its per-command settings state (its
+    /// notification override) untouched. Used by [`remove_shared_command`](Self::remove_shared_command)
+    /// — which also forgets that state, since it retires the command for good — and internally by the
+    /// shared⇄local move paths, which must keep it: the command's name does not change there, so its
+    /// settings state still belongs to the copy that survives the move.
+    fn remove_shared_command_only(
         &self,
         project: ProjectId,
         name: &str,
@@ -248,6 +263,22 @@ impl Facade {
                 .ok_or(ConfigWriteError::UnknownCommand)?;
             Ok(())
         })
+    }
+
+    /// Removes a shared command from `solo.yml` and forgets its notification override (via
+    /// [`ProjectSettings::forget_command`](crate::settings::ProjectSettings::forget_command)), written
+    /// only after the `solo.yml` write succeeds, so a failed removal leaves the override in place.
+    /// A later, unrelated command created under the same name then starts at the project level
+    /// rather than inheriting this one's suppression.
+    pub fn remove_shared_command(
+        &self,
+        project: ProjectId,
+        name: &str,
+    ) -> Result<Vec<TrustReviewCommand>, ConfigWriteError> {
+        let commands = self.remove_shared_command_only(project, name)?;
+        self.project_settings
+            .update(&project, |s| s.forget_command(name))?;
+        Ok(commands)
     }
 
     /// Adds an app-local command (never written to `solo.yml`). Refused if the name is already taken
@@ -298,8 +329,11 @@ impl Facade {
         })?)
     }
 
-    /// Renames an app-local command, keeping its position. Refused if the new name is already taken
-    /// by a shared command, so the two stores never collide.
+    /// Renames an app-local command, keeping its position, and moves its notification override (if
+    /// any) to the new name along with it (via
+    /// [`ProjectSettings::rename_command`](crate::settings::ProjectSettings::rename_command)).
+    /// Refused if the new name is already taken by a shared command, so the two stores never
+    /// collide.
     pub fn rename_local_command(
         &self,
         project: ProjectId,
@@ -315,16 +349,15 @@ impl Facade {
             return Err(LocalCommandError::Duplicate(to.to_owned()));
         }
         let (from, to) = (from.to_owned(), to.to_owned());
-        Ok(self.project_settings.update(&project, |s| {
-            if let Some(idx) = s.local_commands.get_index_of(&from) {
-                if let Some((_, spec)) = s.local_commands.shift_remove_index(idx) {
-                    s.local_commands.shift_insert(idx, to, spec);
-                }
-            }
-        })?)
+        Ok(self
+            .project_settings
+            .update(&project, |s| s.rename_command(&from, &to))?)
     }
 
-    /// Removes an app-local command.
+    /// Removes an app-local command and forgets its notification override (via
+    /// [`ProjectSettings::forget_command`](crate::settings::ProjectSettings::forget_command)), so a
+    /// later, unrelated command created under the same name starts at the project level rather than
+    /// inheriting this one's suppression.
     pub fn remove_local_command(
         &self,
         project: ProjectId,
@@ -341,6 +374,7 @@ impl Facade {
         let name = name.to_owned();
         Ok(self.project_settings.update(&project, |s| {
             s.local_commands.shift_remove(&name);
+            s.forget_command(&name);
         })?)
     }
 
@@ -362,7 +396,7 @@ impl Facade {
                 s.local_commands.insert(name, spec);
             }
         })?;
-        match self.remove_shared_command(project, name) {
+        match self.remove_shared_command_only(project, name) {
             Ok(_) => Ok(added),
             Err(err) => {
                 let _ = self.project_settings.update(&project, |s| {
@@ -394,8 +428,9 @@ impl Facade {
             s.local_commands.shift_remove(name);
         }) {
             // The shared write succeeded but clearing the local copy failed; remove the shared
-            // command again so it never lives in both stores (mirrors make_command_local).
-            let _ = self.remove_shared_command(project, name);
+            // command again so it never lives in both stores (mirrors make_command_local). The
+            // command's name is unchanged throughout, so its settings state must not be forgotten.
+            let _ = self.remove_shared_command_only(project, name);
             return Err(MoveCommandError::Store(err));
         }
         Ok(commands)
