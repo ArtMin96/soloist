@@ -5,20 +5,20 @@ import path from "node:path";
 /** What the branch a fixture repository is created on is called. */
 const BRANCH = "main";
 
-// A fixed identity, with the developer's own git configuration out of the way: a global
-// `commit.gpgsign`, `core.hooksPath` or commit template would otherwise decide whether the
-// fixture commits at all, and the run's result would depend on whose machine it ran on.
-const CONFIG = {
-  ...process.env,
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
+// A fixed identity, carried per invocation because there is no configuration left to carry one:
+// the run replaces the developer's global and system git configuration with its own, so nothing
+// they configured decides whether the fixture commits at all or under whose name.
 const IDENTITY = [
   "-c",
   "user.name=Soloist e2e",
   "-c",
   "user.email=e2e@example.invalid",
 ];
+
+// Where a fixture repository's stand-in credential helper lives, and where it records having been
+// asked. Both inside `.git`, so neither is a change to the working tree that a status read reports.
+const HELPER = ".git/credential-helper-stub";
+const HELPER_CONSULTED = ".git/credential-helper-consulted";
 
 /** A path the repository holds twice: as the last commit left it, and as it stands now. */
 export interface RepositoryChange {
@@ -50,6 +50,7 @@ export function makeRepository(root: string, change: RepositoryChange): string {
   writeFileSync(file, change.committed);
 
   git(root, "init", "--quiet", "--initial-branch", BRANCH);
+  isolateCredentials(root);
   git(root, "add", "--all");
   git(root, ...IDENTITY, "commit", "--quiet", "--message", "Baseline");
 
@@ -66,10 +67,35 @@ export function addUntrackedFiles(root: string, files: Record<string, string>): 
   }
 }
 
+/**
+ * Points the fixture at a credential helper of its own and discards every helper a wider
+ * configuration named.
+ *
+ * This binds the **app** as well as the harness: the adapter runs `git` inside this repository, so
+ * its repo-local configuration is part of what those invocations read. The empty value first is
+ * what does the discarding — version control appends helpers across configuration files and an
+ * empty one resets the list — so the stub is the only helper left, and it records having been asked
+ * and then fails rather than answering. A real helper is a program with access to the developer's
+ * own credential store, and one of them opens a window and waits.
+ */
+function isolateCredentials(root: string): void {
+  const stub = path.join(root, HELPER);
+  const consulted = path.basename(HELPER_CONSULTED);
+  writeFileSync(
+    stub,
+    `#!/bin/sh\nprintf 'asked\\n' >> "$(dirname "$0")/${consulted}"\nexit 1\n`,
+    { mode: 0o755 },
+  );
+  git(root, "config", "credential.helper", "");
+  git(root, "config", "--add", "credential.helper", stub);
+}
+
 /** Runs one git command in the fixture, reporting what git said rather than only that it failed. */
 function git(root: string, ...args: string[]): void {
   try {
-    execFileSync("git", ["-C", root, ...args], { env: CONFIG, stdio: "pipe" });
+    // The run's own environment, so these invocations read the same sandboxed git configuration
+    // the app under test does rather than a curated one of the harness's.
+    execFileSync("git", ["-C", root, ...args], { env: process.env, stdio: "pipe" });
   } catch (reason) {
     const said =
       (reason as { stderr?: Buffer }).stderr?.toString().trim() ??

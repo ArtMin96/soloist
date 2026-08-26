@@ -178,6 +178,53 @@ same scratch tree), so it isolates the lock and nothing else. This is the third 
 alongside the per-session data dir and webview storage. Verified: the suite now runs green with the
 developer's installed Soloist open at the same time.
 
+## The developer's git configuration escaped isolation too — found and fixed
+
+**Found 2026-08-26 auditing the harness; fixed the same session.** The app reads a repository by
+running the user's own `git`, and those invocations inherit the environment the service spawned the
+app with. The three isolation legs above cover app state, webview storage and the single-instance
+lock; **none of them touched git**. So every walk that put the app on a real repository read the
+developer's real `~/.gitconfig` and `/etc/gitconfig`: a global `core.excludesFile`, `commit.gpgsign`,
+`core.hooksPath` or commit template silently decided what the walk saw, machine by machine.
+
+**The rung with teeth is the credential helper, and this exact hole has been found once before — on
+the Rust side.** `crates/git/tests/fixture/mod.rs` neutralised the machine's configuration for the
+*fixture's* invocations and never for the *adapter's*; running under the owner's real
+`credential.helper = git-credential-manager`, a test opened a GUI dialog on their desktop and wrote a
+`[credential …]` section into their real `~/.gitconfig` (`PROGRESS.md`, git-sync slice). The e2e
+harness had the identical shape: `makeRepository` passed `GIT_CONFIG_GLOBAL=/dev/null` to its own
+`execFileSync` and to nothing the app ran.
+
+**How reachable it is today, checked rather than assumed.** No spec reaches a remote: nothing under
+`e2e/specs/` or `e2e/src/` drives push, pull, fetch or publish, and the exchange controls live in the
+window chrome, which no screen touches. And the product will not close this for us — `crates/git/src/
+sync.rs` applies its `UNATTENDED` environment only for `Prompting::Denied`; `Prompting::Allowed`, the
+path the local user's own click takes, passes `&[]` **on purpose**, because a person sitting in front
+of the window that asked should be asked. Unattended is what the harness is, so the harness is where
+it is closed — before a walk reaches a remote rather than after one has.
+
+**The fix has three legs, because the ways in are three different mechanisms.**
+
+1. `GIT_CONFIG_GLOBAL` points at a configuration the run owns (`e2e/.tmp/git/config`) and
+   `GIT_CONFIG_SYSTEM` at `/dev/null`, both set at module load beside `PATH` and `SHELL` and for the
+   same reason: the app inherits the *launcher's* environment, so a lifecycle hook is too late.
+   `onPrepare` writes the file, since the wipe there would otherwise remove it.
+2. `GIT_ASKPASS` and `SSH_ASKPASS` are emptied and `SSH_ASKPASS_REQUIRE=never`. These are read from
+   the environment rather than from configuration, so leg 1 does not close them: a desktop session
+   that exports one still hands `git` a window to open.
+3. Every fixture repository resets `credential.helper` to empty and then names a recording stub of
+   its own inside `.git/`, mirroring the Rust fixture. Repo-local configuration binds the **adapter**
+   too, because the adapter runs inside that repository — which is the whole reason this works.
+
+**The run's configuration is deliberately not empty, and that is what makes the containment
+testable.** An app that never received it and an app that received an empty one behave identically,
+so there would be nothing to assert. It names one `core.excludesFile`, holding one path
+(`gitConfig.ts`), and `specs/version-control/global-git-config.spec.ts` drives the app's own Files
+tab over a fixture holding two untracked files alike in every way the app can see. The app reports
+the named one **ignored** and its twin ordinary — an answer it can only give by having really read
+the run's configuration through a real `git` subprocess. Mutation-verified: with the two variables
+removed the app reports `{"ignored": false, "name": "draft-note.md"}` and only that spec fails.
+
 ## A benign warning you will see
 
 `WARN tauri-service:service: Failed to clear mock store: A sessionId is required` on teardown. It is
