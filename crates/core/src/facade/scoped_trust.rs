@@ -15,8 +15,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::scoped::ScopedFacade;
-use super::scoped_process::default_label;
-use crate::config::{check_command_line, check_command_name, InvalidCommand, ProcessSpec};
+use super::scoped_process::checked_variant;
+use crate::config::InvalidCommand;
 use crate::ids::TrustRequestId;
 use crate::ports::StoreError;
 use crate::trust::TrustRequestSubmission;
@@ -95,19 +95,12 @@ impl ScopedFacade<'_> {
             .origin(self.session)
             .process()
             .ok_or(RequestTrustError::NoBoundProcess)?;
-        let spec = ProcessSpec {
-            command: request.command,
-            working_dir: request.working_dir,
-            auto_start: false,
-            auto_restart: false,
-            restart_when_changed: Vec::new(),
-            env: request.env,
-        };
-        check_command_line(&spec)?;
-        let name = request
-            .label
-            .unwrap_or_else(|| default_label(&spec.command));
-        check_command_name(&name)?;
+        let (spec, name) = checked_variant(
+            request.command,
+            request.working_dir,
+            request.env,
+            request.label,
+        )?;
         // A store failure fails closed, matching the start gate: a variant that cannot be verified
         // is not trusted, so the user is asked rather than told it is already fine.
         if self.inner.trust.is_trusted(project, &spec)? {
@@ -153,3 +146,7 @@ impl ScopedFacade<'_> {
             .ok_or(RequestTrustError::UnknownRequest)
     }
 }
+
+#[cfg(test)]
+#[path = "scoped_trust_tests.rs"]
+mod tests;

@@ -57,7 +57,7 @@ impl SoloistMcp {
     ) -> Result<CallToolResult, ErrorData> {
         match self
             .client
-            .request(IpcRequest::RegisterAgent { label })
+            .establishing(IpcRequest::RegisterAgent { label })
             .await
         {
             Ok(IpcResponse::Acked) => acked(),
@@ -76,7 +76,7 @@ impl SoloistMcp {
         let request = IpcRequest::SelectProject {
             project: ProjectId::from_raw(project),
         };
-        match self.client.request(request).await {
+        match self.client.establishing(request).await {
             Ok(IpcResponse::Acked) => acked(),
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),
@@ -93,7 +93,7 @@ impl SoloistMcp {
         let request = IpcRequest::SelectProcess {
             process: ProcessId::from_raw(process),
         };
-        match self.client.request(request).await {
+        match self.client.establishing(request).await {
             Ok(IpcResponse::Acked) => acked(),
             Ok(_) => Err(unexpected()),
             Err(err) => app_error(&err),

@@ -27,10 +27,18 @@ const CSS_VARIABLE_PREFIX = "--diff-view-";
 // generated file long enough to matter is one nobody reads line by line anyway.
 const MAX_LINE_TO_HIGHLIGHT = 2000;
 
-let engine: HighlighterCore | null = null;
-let starting: Promise<HighlighterCore> | null = null;
-let activeThemeSignature = "";
-const loaded = new Map<string, Promise<void>>();
+/** The engine once it is usable, paired with the palette actually sitting in its one theme slot. */
+type Ready = { core: HighlighterCore; theme: string };
+
+let ready: Ready | null = null;
+// Resolves; never rejects. A failed start is a `null` value rather than a thrown one, so every
+// reader below agrees on "not ready" instead of two of them swallowing it and one throwing.
+let starting: Promise<Ready | null> | null = null;
+// Holds only successful grammar loads. A failed one deletes its own entry (in `ensureLanguage`)
+// instead of caching the rejection, so a transient chunk failure costs one call, not the rest of
+// the page's life. A failed engine start is retried the same way — `start` clears `starting`
+// back to `null` on failure rather than leaving that attempt in place.
+const grammars = new Map<string, Promise<boolean>>();
 
 let maxLineToIgnoreSyntax = MAX_LINE_TO_HIGHLIGHT;
 const ignoreSyntaxHighlightList: (string | RegExp)[] = [];
@@ -59,9 +67,10 @@ export const HIGHLIGHTER: DiffFileHighlighter = {
     ignoreSyntaxHighlightList.splice(0, ignoreSyntaxHighlightList.length, ...paths);
   },
   processAST,
-  hasRegisteredCurrentLang: (language) => engine?.getLoadedLanguages().includes(language) ?? false,
+  hasRegisteredCurrentLang: (language) =>
+    ready?.core.getLoadedLanguages().includes(language) ?? false,
   getAST: (raw, _fileName, language) =>
-    engine?.codeToHast(raw, {
+    ready?.core.codeToHast(raw, {
       lang: language ?? "",
       themes: { light: ACTIVE_THEME, dark: ACTIVE_THEME },
       cssVariablePrefix: CSS_VARIABLE_PREFIX,
@@ -74,26 +83,36 @@ export const HIGHLIGHTER: DiffFileHighlighter = {
 
 /**
  * Makes the highlighter ready to colour `language`, fetching the engine, the themes, and the
- * grammar as needed. Resolves to whether it can — a language with no grammar here resolves
- * `false`, and the caller shows plain text rather than pretending.
+ * grammar as needed. Resolves to whether it can. `false` now covers two cases a caller does not
+ * need to tell apart: there is no grammar for `language` at all, or the engine or the grammar
+ * failed to load. Either way the caller shows plain text rather than pretending — it never
+ * rejects, so a failure never becomes an unhandled rejection at a fire-and-forget call site.
  *
- * Every fetch is remembered, so a burst of files in one language costs one of them.
+ * Every fetch is remembered while it is in flight, so a burst of files in one language costs one
+ * of them — but only a *successful* fetch stays remembered; a failed one is retried on the next
+ * call instead of staying broken for the life of the page.
  */
 export async function ensureLanguage(language: string | null): Promise<boolean> {
-  const core = await (starting ??= start());
-  if (language === null) return false;
-  if (core.getLoadedLanguages().includes(language)) return true;
+  const state = await (starting ??= start());
+  if (state === null || language === null) return false;
+  if (state.core.getLoadedLanguages().includes(language)) return true;
 
   const grammar = grammarOf(language);
   if (grammar === null) return false;
-  await (loaded.get(language) ??
-    loaded
+  await (grammars.get(language) ??
+    grammars
       .set(
         language,
-        grammar.then((module) => core.loadLanguage(module.default)),
+        grammar
+          .then((module) => state.core.loadLanguage(module.default))
+          .then(() => true)
+          .catch(() => {
+            grammars.delete(language);
+            return false;
+          }),
       )
       .get(language));
-  return core.getLoadedLanguages().includes(language);
+  return state.core.getLoadedLanguages().includes(language);
 }
 
 /** Load both the grammar and the live app palette before a highlighted surface is revealed. */
@@ -101,10 +120,16 @@ export async function ensureHighlighting(
   language: string | null,
   theme: AppliedTheme,
 ): Promise<boolean> {
-  const core = await (starting ??= start());
-  if (activeThemeSignature !== theme.signature) {
-    await core.loadTheme(syntaxTheme(theme));
-    activeThemeSignature = theme.signature;
+  const state = await (starting ??= start());
+  if (state === null) return false;
+  if (state.theme !== theme.signature) {
+    try {
+      await state.core.loadTheme(syntaxTheme(theme));
+      // One write, on the object the palette actually lives in — not a second variable beside it.
+      state.theme = theme.signature;
+    } catch {
+      return false;
+    }
   }
   return ensureLanguage(language);
 }
@@ -121,24 +146,32 @@ export function highlightedHtml(
   language: string,
   theme: AppliedTheme | boolean,
 ): string | null {
-  if (engine?.getLoadedLanguages().includes(language) !== true) return null;
+  if (ready === null || !ready.core.getLoadedLanguages().includes(language)) return null;
   const applied = typeof theme === "boolean" ? defaultAppliedTheme(theme) : theme;
-  if (activeThemeSignature !== applied.signature) engine.loadThemeSync(syntaxTheme(applied));
-  activeThemeSignature = applied.signature;
-  return engine.codeToHtml(code, { lang: language, theme: ACTIVE_THEME });
+  if (ready.theme !== applied.signature) ready.core.loadThemeSync(syntaxTheme(applied));
+  ready.theme = applied.signature;
+  return ready.core.codeToHtml(code, { lang: language, theme: ACTIVE_THEME });
 }
 
-/** Builds the engine with the default app palette and the languages worth having up front. */
-async function start(): Promise<HighlighterCore> {
+/**
+ * Builds the engine with the default app palette and the languages worth having up front.
+ * Resolves to `null` on failure rather than rejecting, and clears `starting` back to `null`
+ * first, so the next call attempts a fresh start instead of replaying the same failure forever.
+ */
+async function start(): Promise<Ready | null> {
   const initialTheme = defaultAppliedTheme(false);
-  const core = await createHighlighterCore({
-    themes: [syntaxTheme(initialTheme)],
-    langs: STARTING_LANGUAGES.map(grammarOf).filter((grammar) => grammar !== null),
-    engine: createJavaScriptRegexEngine({ forgiving: true }),
-  });
-  engine = core;
-  activeThemeSignature = initialTheme.signature;
-  return core;
+  try {
+    const core = await createHighlighterCore({
+      themes: [syntaxTheme(initialTheme)],
+      langs: STARTING_LANGUAGES.map(grammarOf).filter((grammar) => grammar !== null),
+      engine: createJavaScriptRegexEngine({ forgiving: true }),
+    });
+    ready = { core, theme: initialTheme.signature };
+    return ready;
+  } catch {
+    starting = null;
+    return null;
+  }
 }
 
 /** TextMate scopes projected onto semantic colors from the active Soloist palette. */

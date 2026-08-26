@@ -9,6 +9,7 @@
 //! A handoff is a semantic turn: it arrives in the chosen agent's session and is submitted once.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -87,17 +88,24 @@ impl Facade {
     /// agent running — or with several and none named — the text comes back to be copied instead,
     /// which is an answer rather than a failure.
     ///
-    /// Composing reaches the service, so callers come through [`Facade::blocking`]; delivery is a
-    /// submitted semantic turn to a terminal that is already open and costs nothing.
+    /// Composing reaches the service and resolves which agent it goes to, so both run through
+    /// [`Facade::blocking`]; delivery is a submitted semantic turn to a terminal that is already
+    /// open and is the only part of this that stays on the runtime.
     pub async fn git_hand_off(
-        &self,
+        self: &Arc<Self>,
         project: ProjectId,
         subject: HandoffSubject,
         target: Option<ProcessId>,
     ) -> Result<Handoff, HandoffError> {
-        let root = self.review_root(project)?;
-        let text = self.git.handoff_context(project, &root, &subject)?;
-        let Some(agent) = self.handoff_target(project, target)? else {
+        let (text, agent) = self
+            .blocking(move |f| {
+                let root = f.review_root(project)?;
+                let text = f.git.handoff_context(project, &root, &subject)?;
+                let agent = f.handoff_target(project, target)?;
+                Ok::<_, HandoffError>((text, agent))
+            })
+            .await?;
+        let Some(agent) = agent else {
             return Ok(Handoff::Copy { text });
         };
         self.supervisor()

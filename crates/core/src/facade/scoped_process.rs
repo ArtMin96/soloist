@@ -6,13 +6,15 @@
 //! refuses an untrusted command. The scope rule itself lives once in
 //! [`scoped`](super::scoped); this module only spends it.
 
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use super::mailbox::{SpawnAgentOutcome, SpawnAgentRequest};
 use super::scoped::{
     ScopedActionError, ScopedFacade, SpawnAgentError, SpawnProcessError, SpawnProcessRequest,
 };
-use crate::config::ProcessSpec;
+use crate::config::{InvalidCommand, ProcessSpec};
 use crate::ids::{ProcessId, ProjectId};
 use crate::process::ProcessView;
 use crate::supervisor::{Registration, StartSummary};
@@ -251,19 +253,12 @@ impl ScopedFacade<'_> {
         if self.caller_is_spawned_worker() {
             return Err(SpawnProcessError::WorkerMayNotSpawn);
         }
-        let spec = ProcessSpec {
-            command: request.command,
-            working_dir: request.working_dir,
-            auto_start: false,
-            auto_restart: false,
-            restart_when_changed: Vec::new(),
-            env: request.env,
-        };
-        crate::config::check_command_line(&spec)?;
-        let label = request
-            .label
-            .unwrap_or_else(|| default_label(&spec.command));
-        crate::config::check_command_name(&label)?;
+        let (spec, label) = checked_variant(
+            request.command,
+            request.working_dir,
+            request.env,
+            request.label,
+        )?;
         let root = self
             .inner
             .project_root(project)?
@@ -382,8 +377,41 @@ impl ScopedFacade<'_> {
 /// The label a spawned process takes when its caller names none: the command's first word, which
 /// the registry then numbers against the labels already in the project. The command line has
 /// already been checked non-blank, so there is always a word to take.
-pub(in crate::facade) fn default_label(command: &str) -> String {
+fn default_label(command: &str) -> String {
     command.split_whitespace().next().unwrap_or_default().into()
+}
+
+/// Turns a scoped caller's raw command fields into the checked `(ProcessSpec, label)` pair the
+/// trust gate keys on — the one place those fields become a trust variant, spent by both the ask
+/// half of the workflow ([`request_command_trust`](super::scoped_trust::ScopedFacade::request_command_trust))
+/// and the do half ([`spawn_process`](ScopedFacade::spawn_process)), so the variant the user
+/// approves and the variant a spawn checks can never drift apart.
+///
+/// `working_dir` is carried through **as written**, not resolved against the project root: it is
+/// one of the three trust-variant digest inputs, so resolving it first would key the gate on a
+/// digest no trusted variant could equal.
+///
+/// The command line is validated before the label defaults, because the default reads the
+/// (validated) command — checking it after would default a label off a command already known to
+/// be blank.
+pub(in crate::facade) fn checked_variant(
+    command: String,
+    working_dir: Option<PathBuf>,
+    env: BTreeMap<String, String>,
+    label: Option<String>,
+) -> Result<(ProcessSpec, String), InvalidCommand> {
+    let spec = ProcessSpec {
+        command,
+        working_dir,
+        auto_start: false,
+        auto_restart: false,
+        restart_when_changed: Vec::new(),
+        env,
+    };
+    crate::config::check_command_line(&spec)?;
+    let label = label.unwrap_or_else(|| default_label(&spec.command));
+    crate::config::check_command_name(&label)?;
+    Ok((spec, label))
 }
 
 #[cfg(test)]

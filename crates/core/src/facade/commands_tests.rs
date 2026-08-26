@@ -11,6 +11,7 @@ use crate::config::{config_path, ConfigWriteError, ProcessSpec};
 use crate::ids::ProjectId;
 use crate::ports::TokioClock;
 use crate::projects::ProjectCommandView;
+use crate::settings::NotificationLevel;
 use crate::testing::{FakeProjectRepo, FakeSettingsRepo, FakeSpawner, FakeTrustRepo};
 
 /// A façade over fakes, plus a temp project directory seeded with `solo.yml`, opened in the config
@@ -660,6 +661,167 @@ fn renaming_a_command_preserves_its_env_block() {
         parsed.processes["WebApp"].env.get("A").map(String::as_str),
         Some("1"),
         "a rename keeps the command's env"
+    );
+}
+
+#[test]
+fn renaming_a_shared_command_carries_its_notification_override() {
+    let (facade, project, _dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    facade
+        .set_command_notification_level(project, "Web", Some(NotificationLevel::None))
+        .expect("set override");
+
+    facade
+        .rename_shared_command(project, "Web", "WebApp")
+        .expect("rename");
+
+    let settings = facade.project_settings(project).unwrap();
+    assert_eq!(
+        settings.effective_level_for("WebApp"),
+        NotificationLevel::None,
+        "the override followed the command to its new name"
+    );
+    assert_eq!(
+        settings.effective_level_for("Web"),
+        NotificationLevel::All,
+        "the old name no longer carries any override"
+    );
+}
+
+#[test]
+fn renaming_a_local_command_carries_its_notification_override() {
+    let (facade, project, _dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    facade
+        .add_local_command(project, "Logs", spec("tail -f log"))
+        .expect("add local");
+    facade
+        .set_command_notification_level(project, "Logs", Some(NotificationLevel::Important))
+        .expect("set override");
+
+    facade
+        .rename_local_command(project, "Logs", "AppLogs")
+        .expect("rename");
+
+    let settings = facade.project_settings(project).unwrap();
+    assert!(
+        settings.local_commands.contains_key("AppLogs"),
+        "the command itself moved to the new name"
+    );
+    assert_eq!(
+        settings.effective_level_for("AppLogs"),
+        NotificationLevel::Important,
+        "the override followed the local command to its new name"
+    );
+    assert_eq!(
+        settings.effective_level_for("Logs"),
+        NotificationLevel::All,
+        "the old name no longer carries any override"
+    );
+}
+
+#[test]
+fn removing_a_shared_command_drops_its_override_so_a_reused_name_starts_clean() {
+    let (facade, project, _dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    facade
+        .set_command_notification_level(project, "Web", Some(NotificationLevel::None))
+        .expect("set override");
+
+    facade
+        .remove_shared_command(project, "Web")
+        .expect("remove");
+
+    assert!(
+        !facade
+            .project_settings(project)
+            .unwrap()
+            .command_notification_levels
+            .contains_key("Web"),
+        "the override does not outlive the command it belonged to"
+    );
+
+    // A later, unrelated command created under the same name must not inherit it.
+    facade
+        .add_shared_command(project, "Web", spec("npm run dev"))
+        .expect("recreate under the same name");
+    assert_eq!(
+        facade
+            .project_settings(project)
+            .unwrap()
+            .effective_level_for("Web"),
+        NotificationLevel::All,
+        "the recreated command starts at the project level, not the retired one's override"
+    );
+}
+
+#[test]
+fn removing_a_local_command_drops_its_override_so_a_reused_name_starts_clean() {
+    let (facade, project, _dir) =
+        project_with_yaml("processes:\n  Web:\n    command: npm run dev\n");
+    facade
+        .add_local_command(project, "Logs", spec("tail -f log"))
+        .expect("add local");
+    facade
+        .set_command_notification_level(project, "Logs", Some(NotificationLevel::None))
+        .expect("set override");
+
+    facade
+        .remove_local_command(project, "Logs")
+        .expect("remove");
+
+    assert!(
+        !facade
+            .project_settings(project)
+            .unwrap()
+            .command_notification_levels
+            .contains_key("Logs"),
+        "the override does not outlive the local command it belonged to"
+    );
+
+    facade
+        .add_local_command(project, "Logs", spec("tail -f log"))
+        .expect("recreate under the same name");
+    assert_eq!(
+        facade
+            .project_settings(project)
+            .unwrap()
+            .effective_level_for("Logs"),
+        NotificationLevel::All,
+        "the recreated command starts at the project level, not the retired one's override"
+    );
+}
+
+#[test]
+fn making_a_command_local_and_back_preserves_its_notification_override() {
+    let (facade, project, _dir) = project_with_yaml("processes:\n  Api:\n    command: cargo run\n");
+    facade
+        .set_command_notification_level(project, "Api", Some(NotificationLevel::None))
+        .expect("set override");
+
+    facade
+        .make_command_local(project, "Api")
+        .expect("make local");
+    assert_eq!(
+        facade
+            .project_settings(project)
+            .unwrap()
+            .effective_level_for("Api"),
+        NotificationLevel::None,
+        "the override survives the move into the local overlay"
+    );
+
+    facade
+        .save_command_to_yaml(project, "Api")
+        .expect("save back");
+    assert_eq!(
+        facade
+            .project_settings(project)
+            .unwrap()
+            .effective_level_for("Api"),
+        NotificationLevel::None,
+        "the override survives the round trip back to solo.yml"
     );
 }
 

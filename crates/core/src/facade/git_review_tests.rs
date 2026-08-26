@@ -324,3 +324,40 @@ async fn merging_reaches_the_service_and_re_reads_what_the_working_tree_now_says
          against it, so what every version-control surface shows has to be read again",
     );
 }
+
+/// How long the forge is made to dwell answering, and how far short of that a sibling timer is set
+/// — wide enough apart that the timer firing first is only possible if the runtime kept scheduling
+/// other work while the forge call was still in flight.
+const FORGE_DWELL: Duration = Duration::from_millis(200);
+
+#[tokio::test(flavor = "current_thread")]
+async fn composing_a_handoff_leaves_the_forge_off_the_runtime_worker() {
+    // One worker, deliberately: nothing here can progress by luck of a second OS thread stealing
+    // the sibling timer. If composing the handoff ran inline, it would hold that one worker for
+    // the whole dwell and the timer below could not fire until it let go — refused or not, the
+    // forge is still asked before a target is even looked at.
+    let h = harness(reviewed().slow(FORGE_DWELL));
+    let stranger = ProcessId::from_raw(9_999);
+
+    let handoff = h.facade.git_hand_off(
+        h.project,
+        HandoffSubject::Thread {
+            id: THREAD.to_string(),
+        },
+        Some(stranger),
+    );
+    tokio::pin!(handoff);
+
+    tokio::select! {
+        result = &mut handoff => {
+            panic!(
+                "the hand-off resolved ({result:?}) before a concurrent timer could fire, so \
+                 composing it held the runtime worker for the whole forge round trip",
+            );
+        }
+        () = tokio::time::sleep(STEP) => {}
+    }
+
+    let refused = handoff.await.expect_err("that is nobody's agent");
+    assert!(matches!(refused, HandoffError::NotAnAgent));
+}

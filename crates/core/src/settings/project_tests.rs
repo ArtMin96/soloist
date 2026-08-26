@@ -159,6 +159,99 @@ fn a_record_missing_a_field_deserializes_to_that_field_default() {
     assert_eq!(empty, ProjectSettings::default());
 }
 
+fn spec(command: &str) -> crate::config::ProcessSpec {
+    crate::config::ProcessSpec {
+        command: command.into(),
+        working_dir: None,
+        auto_start: true,
+        auto_restart: false,
+        restart_when_changed: Vec::new(),
+        env: Default::default(),
+    }
+}
+
+#[test]
+fn renaming_a_command_moves_its_notification_override() {
+    let mut settings = ProjectSettings::default();
+    settings
+        .command_notification_levels
+        .insert("Web".into(), NotificationLevel::None);
+
+    settings.rename_command("Web", "WebApp");
+
+    assert_eq!(
+        settings.effective_level_for("WebApp"),
+        NotificationLevel::None,
+        "the override followed the command to its new name"
+    );
+    assert_eq!(
+        settings.effective_level_for("Web"),
+        NotificationLevel::All,
+        "the old name no longer carries any override"
+    );
+}
+
+#[test]
+fn renaming_a_local_command_moves_its_local_commands_entry_too() {
+    let mut settings = ProjectSettings::default();
+    settings
+        .local_commands
+        .insert("Logs".into(), spec("tail -f log"));
+
+    settings.rename_command("Logs", "AppLogs");
+
+    assert!(settings.local_commands.contains_key("AppLogs"));
+    assert!(!settings.local_commands.contains_key("Logs"));
+}
+
+#[test]
+fn renaming_onto_a_name_with_a_stale_override_lets_the_moved_override_win() {
+    let mut settings = ProjectSettings::default();
+    // "Old" is a stale entry left behind by a different, since-removed command.
+    settings
+        .command_notification_levels
+        .insert("Old".into(), NotificationLevel::Important);
+    settings
+        .command_notification_levels
+        .insert("Api".into(), NotificationLevel::None);
+
+    settings.rename_command("Api", "Old");
+
+    assert_eq!(
+        settings.effective_level_for("Old"),
+        NotificationLevel::None,
+        "the surviving command's own override wins over a stale one at the destination name"
+    );
+}
+
+#[test]
+fn renaming_a_command_to_its_own_name_is_a_no_op() {
+    let mut settings = ProjectSettings::default();
+    settings
+        .command_notification_levels
+        .insert("Web".into(), NotificationLevel::None);
+
+    settings.rename_command("Web", "Web");
+
+    assert_eq!(settings.effective_level_for("Web"), NotificationLevel::None);
+}
+
+#[test]
+fn forgetting_a_command_drops_its_notification_override() {
+    let mut settings = ProjectSettings::default();
+    settings
+        .command_notification_levels
+        .insert("Web".into(), NotificationLevel::None);
+
+    settings.forget_command("Web");
+
+    assert_eq!(
+        settings.effective_level_for("Web"),
+        NotificationLevel::All,
+        "a forgotten command has no override left to inherit"
+    );
+}
+
 #[test]
 fn a_written_record_reads_back_unchanged() {
     // The document serializes under its own field names but deserializes through the upgrade

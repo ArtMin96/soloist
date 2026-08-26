@@ -9,6 +9,97 @@
 
 ## Current state
 
+> **LATEST (2026-08-26): DSA AUDIT SLICE 7 — REMAINING FACADE/ADAPTER P1 — five findings fixed at
+> verifier-narrowed scope, `just lint` exit 0, `Done — pending verify`.** On `main` `0431873`
+> (v0.16.4). Work items **S03-F2**, **S05-F1**, **S06-F1 (minimal)**, **S17-F1**, **S29-F1**, from
+> `.scratch/dsa-audit/slices/slice-07-remaining-facade-adapter-p1.md`. Every finding was re-checked
+> against the real code before any edit and all five still matched the tree; none was forced.
+> Implemented at the **verifier-narrowed** scope in every case where the verifier narrowed.
+>
+> **S03-F2 — per-command notification overrides keyed by a mutable name.**
+> `command_notification_levels: BTreeMap<String, NotificationLevel>` was never migrated on rename
+> (silent loudening) nor dropped on removal (a later same-named command silently inherited the
+> suppression); none of the four rename/remove facade methods touched it, and it had zero test
+> coverage. Added `ProjectSettings::rename_command` / `forget_command` so the rule lives once, and
+> routed all four call sites through them. **One deviation, surfaced not silent:**
+> `remove_shared_command` is reused internally by `make_command_local` and the yaml rollback, which
+> must *keep* the override — an inline forget would have deleted it on the move path. Split into a
+> private `remove_shared_command_only` (config write only) plus a public wrapper that also forgets,
+> with the two internal reuse sites repointed at the raw variant. No one-shot prune of pre-existing
+> stranded entries was built.
+>
+> **S05-F1 — `git_hand_off` ran a `gh` round trip on a tokio runtime worker.** `review_root` and
+> `git.handoff_context` executed inline before the method's only `.await`, bounded at 120 s per forge
+> call and up to two calls for `HandoffSubject::Check`. Its own doc comment asserted callers came
+> through `Facade::blocking`, which was unreachable: `blocking` takes a synchronous closure and the
+> method was `async fn`. Receiver changed to `self: &Arc<Self>` and the composition moved inside one
+> `self.blocking(...)` closure; only `submit_turn` and the `Copy`/`Delivered` match stay on the
+> runtime. The false doc claim was corrected rather than left standing. **No Tauri surface changed** —
+> `crates/app/src/commands/git_review.rs` needed zero edits, confirmed three ways (read in full,
+> `cargo check -p soloist-app` clean, and against the already-shipped `self: &Arc<Self>` +
+> `State<'_, Arc<Facade>>` pattern at `crates/app/src/commands/git.rs`). Every caller was enumerated
+> before the signature moved: one Tauri command, its `generate_handler!` registration, eight existing
+> tests, and a string-keyed `invoke` in `api.ts`; no MCP, HTTP, CLI or `ScopedFacade` caller exists.
+>
+> **S06-F1 (minimal) — a security gate computed in two places.** `spawn_process` and
+> `request_command_trust` each hand-built an identical `ProcessSpec` and independently ran the same
+> validation sequence (`check_command_line` → `default_label` → `check_command_name` →
+> `trust.is_trusted`), so the digest the user approves and the digest checked at spawn had nothing
+> enforcing their agreement. Consolidated into one private `checked_variant` helper called by both.
+> **The verifier's rejection was honoured:** the public `ScopedCommand` reshape was NOT built — no
+> public type, serde, or wire shape changed.
+>
+> **S17-F1 — only `bound` survived an MCP client reconnect.** `AppClient` recorded none of the other
+> establishment facts, and `connect()` replayed only `BindSessionProcess`, so `register_agent`,
+> `select_project` and `select_process` were silently lost when the connection dropped and lazily
+> reopened. Added the establishment record and its replay. **The verifier's narrowing was honoured in
+> the framing:** the loss is staleness (lost label/hint), not scope widening — the lane's "every
+> scoped tool refuses `NoProjectScope` forever" needs an edge configuration, and the verifier confirms
+> the loss cannot widen scope. Nothing in the code, comments or test names claims otherwise.
+> S17 Finding 2 (`ServedGroups` provenance) was left alone.
+>
+> **S29-F1 — a failed syntax-highlighter load was cached forever.** `highlighter.ts` held four loose
+> module variables and `starting ??= start()` memoized a *rejection*, so one transient chunk-fetch
+> failure disabled a language for the life of the page, as an unhandled rejection at two call sites
+> that attach only `.then`. Collapsed to `ready: Ready | null`, a `starting` promise that never
+> rejects (resolves `null` on failure and clears the slot so the next call retries), and a grammar map
+> holding only successes. **The verifier's narrowing was honoured:** the theme-signature-drift half is
+> not claimed as a fix anywhere and no test asserts it. Public interface unchanged; no npm dependency.
+> As a genuine side effect it resolved the long-standing React Doctor `async-defer-await` finding on
+> this file (warnings 17→16 on full scope) — the new guard depends on the awaited value, so the await
+> is no longer ahead of a guard that did not need it. Not chased.
+>
+> **Test-first evidence, and one honest weakness.** S03-F2: four facade tests plus four unit tests red
+> before the fix (`left: All / right: None` for the lost override; "the override does not outlive the
+> command it belonged to" for the orphan), five mutations each reddening the intended test. S05-F1:
+> the new test panicked "the hand-off resolved before a concurrent timer could fire, so composing it
+> held the runtime worker"; two mutations, including a partial fix leaving only `handoff_context`
+> inline, both reddened. S06-F1 used the order the audit demanded — the ask→approve→spawn round-trip
+> test was written and shown **green against the un-refactored code first**, then proven able to fail
+> by desynchronising `env` on the spawn side alone (`Untrusted`), and only then was the refactor made;
+> four further mutations reddened. S29-F1: three tests rejected instead of resolving; three mutations.
+> **S17-F1 is the weak one and is recorded as such:** its red was a *compile* failure
+> (`no method named 'establishing'`), not a behavioural red, and **its mutation pass was not run** —
+> it was stopped to stay inside the session budget. That test is therefore less proven than the other
+> four and should get a mutation pass before this slice is called `Verified`.
+>
+> **Gates.** `just lint` — **exit 0** (rustfmt, workspace clippy `-D warnings`, UI typecheck/lint/
+> format, dependency-direction and cycle guards). Scoped suites green: `cargo test -p soloist-core
+> --lib` **1236 passed / 0 failed** (baseline 1234, +1 for S05-F1, +1 for S06-F1),
+> `cargo test -p soloist-mcp` **151 passed / 0 failed**, and the UI diff suite **8 passed / 0 failed**
+> across two files. **`just test` (full workspace) had not completed at commit time** — it is running
+> and its result is not yet recorded here. This entry is `Done — pending verify` for that reason plus
+> S17-F1's missing mutation pass; nothing was weakened or skipped to get here.
+>
+> **Ordering note.** Slices 5 and 6 were not run before this one — slice 7 was requested directly.
+> The audit's remaining backlog is otherwise unchanged.
+>
+> **Next session should start with:** confirm `just test` is green on this branch and get CI green,
+> then give S17-F1's reconnect-replay test the mutation pass this session skipped. After that,
+> continue the DSA audit at **slice 5** (`.scratch/dsa-audit/slices/slice-05-processactionhandlers-contract.md`,
+> S28-F1 + S26-F2 + `App.tsx` as one commit, then S28-F2), then slice 6, then slices 8–10 —
+> independently verifying S31–S37 before scheduling slice 10.
+
 > **LATEST (2026-08-24): C9 GIT RAIL FOLLOW-UP — five usability defects corrected, scoped/e2e-green,
 > full lint green, full test stopped by the known PTY timing flake, `Done — pending verify`,
 > UNCOMMITTED.** On `main` `164d980`; parity rows **VC1/VC4/VC5/VC6/VC12**. This is one surgical
