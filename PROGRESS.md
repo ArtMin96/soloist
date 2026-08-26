@@ -9,6 +9,76 @@
 
 ## Current state
 
+> **LATEST (2026-08-27): DSA AUDIT SLICE 8 — E2E TEST ISOLATION — the developer's git configuration
+> no longer reaches the app under test; mutation-proven, `just lint` exit 0, `just test` green.** On
+> `main`, commits `a745889` (the fix) and `dabdc42` (an incidental lead-agent lockfile refresh the
+> e2e build produced). Work item **S30-F1** at the verifier-narrowed scope, corroborated by S37-F1.
+> **No product code changed** — `git diff --stat crates/` empty — because the product must honour a
+> real user's configuration; the fix belongs in the harness.
+>
+> **The escape.** The app reads a repository by running the user's own `git`, and those invocations
+> inherit the environment the service spawned the app with. The three existing isolation legs
+> (`SOLOIST_APP_DATA_DIR`, `XDG_DATA_HOME`, the `dev.soloist.app.e2e` identifier) cover app state,
+> webview storage and the single-instance lock, and **none of them touched git**. Every walk that put
+> the app on a real repository therefore read the developer's real `~/.gitconfig` and
+> `/etc/gitconfig`. `e2e/src/harness/repository.ts` had the same shape the Rust-side hole had: it
+> neutralised the machine's configuration for the *harness's* own `execFileSync` and for nothing the
+> app ran.
+>
+> **The unadjudicated question, answered empirically against the code (STEP 0).** S30-F1 is right and
+> S37-F1 is wrong: credential prompting is **not** closed in product code on the path the window
+> takes. `crates/git/src/runner.rs:117-121` sets `GIT_TERMINAL_PROMPT=0` on every invocation, which
+> closes terminal prompting only; `crates/git/src/sync.rs:106-109` applies the `UNATTENDED` set
+> (`GIT_ASKPASS=""`, `SSH_ASKPASS=""`, `SSH_ASKPASS_REQUIRE=never`, `GCM_INTERACTIVE=0`) **only** for
+> `Prompting::Denied`, and `Prompting::Allowed` passes `&[]` — deliberately, because a person sitting
+> in front of the window that asked should be asked. Verifier G's read is confirmed on both counts,
+> including the second half: no e2e spec reaches a remote today (nothing under `e2e/specs/` or
+> `e2e/src/` drives push/pull/fetch/publish; the exchange controls live in the window chrome and no
+> screen drives them). So the rung is guard-less but unreached, and the harness is the only place it
+> can be closed. It is closed now, before a walk reaches a remote rather than after one has.
+>
+> **The fix, three legs.** (1) `GIT_CONFIG_GLOBAL` points at a configuration the run owns
+> (`e2e/.tmp/git/config`, written by `onPrepare` after its wipe) and `GIT_CONFIG_SYSTEM` at
+> `/dev/null`, both set at **module load** beside `PATH`/`SHELL` — the app inherits the launcher's
+> environment, so a lifecycle hook is too late. (2) `GIT_ASKPASS`/`SSH_ASKPASS` emptied and
+> `SSH_ASKPASS_REQUIRE=never`: these are read from the environment rather than from configuration, so
+> leg 1 does not close them and a desktop session exporting one still hands `git` a window to open.
+> (3) Every fixture repository resets `credential.helper` to empty and then names a recording stub of
+> its own inside `.git/`, mirroring `crates/git/tests/fixture/mod.rs` — repo-local configuration binds
+> the **adapter** too, because the adapter runs inside that repository. `repository.ts`'s now-redundant
+> `CONFIG` constant is gone; `IDENTITY` stays and is load-bearing rather than defensive.
+>
+> **Test-first, and shown to fail.** The run's configuration is deliberately **not empty** — an app
+> that never received it and one that received an empty one behave identically, so there would be
+> nothing to assert. It names one `core.excludesFile` holding one path, and
+> `e2e/specs/version-control/global-git-config.spec.ts` ("reports the path that configuration excludes
+> as ignored, and its twin as an ordinary file") drives the app's own Files tab over a fixture holding
+> two untracked files alike in every way the app can see. New screen reader `gitRail.projectFiles()`
+> snapshots the rows in one evaluation. **Mutation pass:** with the two `process.env` lines removed
+> the spec failed with `Expected value: {"ignored": true, "name": "draft-note.md"}` against
+> `Received array: [… {"ignored": false, "name": "draft-note.md"} …]` — the app reporting a listing it
+> could only produce by never having read the run's configuration. Restored byte-clean, re-run green.
+>
+> **Gates.** `pnpm -C e2e typecheck` clean. Targeted e2e run (no xvfb on this host — run on the live
+> display; none of these specs assert focus): **4 spec files, 9 tests, all passing in 49 s** —
+> `smoke`, the new `global-git-config`, `open-diff`, `tree-actions` (the two walks that put the app's
+> git adapter on a real repository). `just lint` **exit 0**. `just test` **exit 0**: `cargo test
+> --workspace` **2017 passed / 0 failed** across 54 result lines, `vitest` **172 files / 1283 tests
+> passed**. The full e2e suite was **not** run — `xvfb-run` is not installed on this host, so
+> `just e2e` refuses; the four spec files above were run directly instead.
+>
+> **Deliberately out of scope, per the verifier:** the proposed `harness/sandbox.ts` `Sandbox` record
+> / `sandboxEnv()`, overriding `HOME`, the `XDG_CONFIG_HOME`/`CACHE`/`STATE` set, collapsing the three
+> `.tmp` re-derivations, and S30 Finding 2 (the lead-stub tagged union). The new spec is a
+> harness-containment walk and is recorded in `plan/e2e/e2e-00-harness-and-ci.md`; **no row was added
+> to the `plan/e2e/README.md` §4 catalog**, which tracks user journeys — say so if it should have one.
+>
+> **Next session should start with:** installing `xvfb` (`sudo apt install xvfb`) and running the full
+> `just e2e` once to confirm all 18 spec files are green together, since single-spec runs hide
+> cross-session bleed. After that, continue the DSA audit — slice 7's open threads still stand
+> (confirm CI green, and give S17-F1's reconnect-replay test the mutation pass that session skipped),
+> then slices 5, 6, 9 and 10.
+
 > **LATEST (2026-08-26): DSA AUDIT SLICE 7 — REMAINING FACADE/ADAPTER P1 — five findings fixed at
 > verifier-narrowed scope, `just lint` exit 0, `Done — pending verify`.** On `main` `0431873`
 > (v0.16.4). Work items **S03-F2**, **S05-F1**, **S06-F1 (minimal)**, **S17-F1**, **S29-F1**, from
