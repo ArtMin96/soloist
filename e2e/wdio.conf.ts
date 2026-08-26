@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { browser } from "@wdio/globals";
 import { soloistCli } from "./src/harness/cli.js";
+import { sandboxGitConfig, writeSandboxGitConfig } from "./src/harness/gitConfig.js";
 import { LEAD_AGENT } from "./src/harness/leadAgent.js";
 import { WAIT } from "./src/harness/waits.js";
 
@@ -50,6 +51,26 @@ process.env.PATH = `${path.join(dir, "fixtures", "bin")}${path.delimiter}${proce
 // back ahead of the stubs. The stand-in shell skips profiles, so the capture returns this exact
 // environment.
 process.env.SHELL = path.join(dir, "fixtures", "bin", "shell");
+// The app reads a repository by running the user's own `git`, which inherits this environment — so
+// without these the developer's real `~/.gitconfig` decides what a spec sees. A global
+// `core.excludesFile`, `commit.gpgsign` or `core.hooksPath` changes the answer; worse, a credential
+// helper named there is a program with access to their real credential store, and one of them opens
+// a window on the desktop and waits for an answer that then gets written back into their own
+// configuration. The run reads its own instead — named here because the app inherits the launcher's
+// environment, written by `onPrepare` because the wipe there would otherwise remove it.
+const sandboxGitDir = path.join(scratchDir, "git");
+process.env.GIT_CONFIG_GLOBAL = sandboxGitConfig(sandboxGitDir);
+process.env.GIT_CONFIG_SYSTEM = "/dev/null";
+// Replacing the configuration does not close every way of asking a person for a credential: both
+// askpass variables are read from the environment, so a desktop session that exports one still
+// hands `git` a window to open. Emptying them closes that path whichever was set — git-config(1)
+// says `core.askPass` "can be overridden by the GIT_ASKPASS environment variable. If not set, fall
+// back to the value of the SSH_ASKPASS environment variable" — and ssh's own prompting is closed by
+// its documented never (ssh(1) on `SSH_ASKPASS_REQUIRE`). The product leaves this open on purpose
+// for a person sitting in front of the window that asked; nobody is sitting in front of this one.
+process.env.GIT_ASKPASS = "";
+process.env.SSH_ASKPASS = "";
+process.env.SSH_ASKPASS_REQUIRE = "never";
 // The lead stub reads these from the app-inherited (and shell-captured) environment: where its
 // compiled binary is, and which worker tool to spawn. The `codex` PATH stub execs the binary; the
 // stub itself spawns the worker over MCP. One TS source (`leadAgent.ts`), shared with the spec
@@ -159,6 +180,10 @@ export const config: WebdriverIO.Config = {
     // app exists, so it can never delete a running app's files.
     rmSync(scratchDir, { recursive: true, force: true });
     mkdirSync(scratchDir, { recursive: true });
+
+    // The run's own global git configuration, put back after the wipe that just removed it and
+    // before the builds below, which inherit the environment naming it.
+    writeSandboxGitConfig(sandboxGitDir);
 
     // Three switches, none of which any other build path sets, so no ordinary build can produce
     // this binary by accident: `--features wdio` links the in-app WebDriver server, `--config`

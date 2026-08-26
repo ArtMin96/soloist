@@ -26,6 +26,15 @@ export interface ActionPlacement extends PathPlacement {
   controlsReachable: boolean;
 }
 
+/** One row of the project's files: what it is called, and whether the app says it is ignored. */
+export interface ProjectFileRow {
+  name: string;
+  ignored: boolean;
+}
+
+/** What the Files tree appends to a row's name in place of the dimming an ignored path shows. */
+const IGNORED_SUFFIX = " (ignored)";
+
 export interface FolderExpansion {
   /** The row is represented as an expandable folder, not as an unknown file. */
   folder: boolean;
@@ -35,6 +44,23 @@ export interface FolderExpansion {
   expandedAfter: boolean;
   /** Child rows visible after opening the folder. */
   visibleChildren: string[];
+}
+
+/**
+ * Switches the rail to the whole project and hands back the tree it lists it in.
+ *
+ * The listing is fetched only while that tab is the one being shown, so the tree existing is the
+ * core having answered — which is why waiting on it is the whole arrange.
+ */
+async function openFilesTab() {
+  const rail = await $(RAIL);
+  const filesTab = await rail.$("aria/Files");
+  await filesTab.waitForClickable({ timeout: WAIT.core });
+  await filesTab.click();
+
+  const tree = await rail.$(FILES);
+  await tree.waitForExist({ timeout: WAIT.core });
+  return tree;
 }
 
 /** The version-control rail beside the main area: what has changed under the open project. */
@@ -194,15 +220,39 @@ export const gitRail = {
     );
   },
 
+  /**
+   * Every row the Files tab shows, and whether the app reports each path as ignored.
+   *
+   * One evaluation, because the listing is one answer from the core: the rows are all there or
+   * none of them are, and reading them one at a time would only race the tree rebuilding itself
+   * when version control reports a change.
+   */
+  async projectFiles(): Promise<ProjectFileRow[]> {
+    const tree = await openFilesTab();
+    const anyRow = await tree.$('[data-slot="tree-item-label"]');
+    await anyRow.waitForExist({ timeout: WAIT.core });
+
+    return browser.execute(
+      (treeElement: HTMLElement, suffix: string) =>
+        Array.from(
+          treeElement.querySelectorAll<HTMLElement>('[data-slot="tree-item-label"]'),
+        ).map((label) => {
+          const shown = label.textContent ?? "";
+          const ignored = shown.endsWith(suffix);
+          return {
+            name: ignored ? shown.slice(0, -suffix.length) : shown,
+            ignored,
+          };
+        }),
+      tree,
+      IGNORED_SUFFIX,
+    );
+  },
+
   /** Reveals a nested project file and measures it at the tree's trailing scroll edge. */
   async filePlacement(path: string): Promise<PathPlacement> {
+    const tree = await openFilesTab();
     const rail = await $(RAIL);
-    const filesTab = await rail.$("aria/Files");
-    await filesTab.waitForClickable({ timeout: WAIT.core });
-    await filesTab.click();
-
-    const tree = await rail.$(FILES);
-    await tree.waitForExist({ timeout: WAIT.core });
     const expand = await rail.$("aria/Expand all folders");
     await expand.waitForClickable({ timeout: WAIT.render });
     await expand.click();
