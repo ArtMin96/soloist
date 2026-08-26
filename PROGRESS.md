@@ -64,8 +64,15 @@
 > `smoke`, the new `global-git-config`, `open-diff`, `tree-actions` (the two walks that put the app's
 > git adapter on a real repository). `just lint` **exit 0**. `just test` **exit 0**: `cargo test
 > --workspace` **2017 passed / 0 failed** across 54 result lines, `vitest` **172 files / 1283 tests
-> passed**. The full e2e suite was **not** run — `xvfb-run` is not installed on this host, so
-> `just e2e` refuses; the four spec files above were run directly instead.
+> passed**.
+>
+> **Full suite, run afterwards and green: `just e2e` — 18 spec files, 18 passed, 100% completed in
+> 05:07, exit 0**, every walk under the run's own git configuration. `xvfb-run` was the smaller of two
+> blockers: the recipe also refuses Node >= 26 (this host defaults to 26.3.0) because WebdriverIO
+> 9.29.1 sets headers Node 26's undici rejects, so no WebDriver session can start. Run it through the
+> pinned LTS the recipe already points at — `fnm exec --using=24 -- just e2e`. The 14 spec files the
+> targeted run had not covered all pass unchanged, so nothing on this machine was passing because of a
+> personal git setting.
 >
 > **Deliberately out of scope, per the verifier:** the proposed `harness/sandbox.ts` `Sandbox` record
 > / `sandboxEnv()`, overriding `HOME`, the `XDG_CONFIG_HOME`/`CACHE`/`STATE` set, collapsing the three
@@ -73,9 +80,9 @@
 > harness-containment walk and is recorded in `plan/e2e/e2e-00-harness-and-ci.md`; **no row was added
 > to the `plan/e2e/README.md` §4 catalog**, which tracks user journeys — say so if it should have one.
 >
-> **Next session should start with:** installing `xvfb` (`sudo apt install xvfb`) and running the full
-> `just e2e` once to confirm all 18 spec files are green together, since single-spec runs hide
-> cross-session bleed. After that, continue the DSA audit — slice 7's open threads still stand
+> **Next session should start with:** confirming CI green on PR #195
+> (`fix/dsa-audit-slice-08-test-isolation`) and merging it. After that, continue the DSA audit —
+> slice 7's open threads still stand
 > (confirm CI green, and give S17-F1's reconnect-replay test the mutation pass that session skipped),
 > then slices 5, 6, 9 and 10.
 
