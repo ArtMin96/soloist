@@ -385,9 +385,7 @@ fn every_response_variant_round_trips_through_json() {
             already_idle: false,
             paused_remaining_millis: None,
         }),
-        // The facade enriches the nested `TimerView` before building the outcome — there is no
-        // outer `already_idle`/`waiting_on` for this fixture to duplicate, and drift is
-        // unrepresentable.
+        // `SetWhenIdleOutcome` carries `waiting_on`/`already_idle` only on the nested `TimerView`.
         IpcResponse::TimerWhenIdle(SetWhenIdleOutcome {
             timer: TimerView {
                 id: TimerId::from_raw(4),
@@ -589,10 +587,10 @@ fn spawn_agent_pins_legacy_and_initial_message_response_shapes() {
     );
 }
 
-/// `SetWhenIdleOutcome` carries its idle answer once, on the nested `timer` — there is no outer
-/// `already_idle`/`waiting_on` for it to disagree with. Pinning the exact wire object (not merely
-/// a round trip) catches a reintroduced outer copy, which `assert_eq!` on `serde_json::Value`
-/// treats as an extra key rather than a value it can ignore.
+/// `SetWhenIdleOutcome` carries its idle answer only on the nested `timer`, not a top-level
+/// `already_idle`/`waiting_on`. Pinning the exact wire object (not merely a round trip) catches a
+/// reintroduced top-level copy, which `assert_eq!` on `serde_json::Value` treats as an extra key
+/// rather than a value it can ignore.
 #[test]
 fn timer_when_idle_carries_its_idle_answer_only_on_the_nested_timer() {
     pins(

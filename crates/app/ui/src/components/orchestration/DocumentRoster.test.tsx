@@ -47,7 +47,7 @@ function renderRoster(items: Doc[]) {
       sortOrder={["updated", "name"]}
       sortLabels={{ updated: "Recent", name: "Name" }}
       sortItems={(rows) => rows}
-      handleAttribute={(name) => ({ "data-doc-name": name })}
+      kind="scratchpad"
     />,
   );
 }

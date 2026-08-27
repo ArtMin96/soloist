@@ -9,9 +9,98 @@
 
 ## Current state
 
+> **LATEST (2026-08-28): DSA AUDIT SLICE 9 — CODE REVIEW FIX PASS — six Standards findings and one
+> Spec-axis bug fixed, `just lint` exit 0, `just test` exit 0, `Done — pending verify`, UNCOMMITTED.**
+> Branch `refactor/dsa-audit-slice-09-structural-p2`, on top of the slice's own commit `eceb78e`
+> (entry below, whose closing status this supersedes — that work is now committed, not uncommitted;
+> this fix pass is what's uncommitted). A two-axis code review (Standards + Spec, parallel sub-agents)
+> ran against `main...HEAD` and all its findings are applied here as uncommitted follow-up work on the
+> same branch.
+>
+> **Magic strings (§15) fixed.** `data-scratchpad-name`/`data-diagram-name` had each gone from one
+> literal on `main` to two. Now single-sourced in `DOCUMENT_NAME_ATTRIBUTE`
+> (`crates/app/ui/src/components/orchestration/DocumentList.tsx:17-20`), declared
+> `as const satisfies Record<DocumentKind, string>` so the mapping is exhaustive against the kind
+> union at compile time. `DocumentList` and `DocumentRoster` now take `kind: DocumentKind` instead of
+> a `handleAttribute: (name: string) => Record<string, string>` closure.
+>
+> **Dead code (§15) fixed.** `DiagramList.tsx` had no production caller at all; `ScratchpadList.tsx`
+> had only `harness.tsx`. Both wrappers and both their test files were deleted, `harness.tsx` now
+> renders `DocumentList` directly, and coverage was consolidated into a new `DocumentList.test.tsx`
+> (8 tests) that asserts each subject's handle attribute both positively and negatively (a scratchpad
+> list carries no `data-diagram-name`, and vice versa). The duplicated first-run hint resolved as a
+> consequence of that deletion (a §15 DRY fix) — each subject's hint now has one definition.
+>
+> **Speculative generality fixed.** `label` and `emptyHint` were optional props no caller passed; both
+> are now required. `DocumentRoster`'s archived list passes `emptyHint={null}` since that branch only
+> mounts when `archived.length > 0`.
+>
+> **Single source (§15, Rust) fixed.** `IdleMode::quorum_met` and `IdleMode::idle_report` each
+> independently encoded the Any/All-plus-empty-set rule. Extracted a private
+> `IdleMode::met(watched_is_empty, any_idle: impl FnOnce() -> bool, all_idle: impl FnOnce() -> bool)`;
+> the thunks let `quorum_met` keep the scheduler's per-tick short-circuit (only the matched mode's
+> traversal runs) while `idle_report` passes the two booleans it already has. `quorum_met`'s doc
+> comment had become false on two counts — it claimed to be "the single definition of the quorum" and
+> "shared with the façade", but the façade had moved to `idle_report`, leaving `scheduler.rs:154` its
+> only caller. Corrected. New test
+> `quorum_met_and_idle_report_agree_on_the_any_all_and_empty_set_rule`, proven to fail by stripping the
+> empty-set early return.
+>
+> **Comment discipline (§8) fixed.** Four instances of de-duplication narration ("there is no outer
+> copy for it to disagree with") rewritten across `crates/core/src/coordination/timer.rs` and
+> `crates/ipc/src/protocol_tests.rs` to state what the type is rather than what it no longer
+> duplicates. The load-bearing reason the wire-shape test pins exact JSON instead of round-tripping
+> was kept.
+>
+> **File size (§15) fixed.** `facade/coordination.rs` was 398 lines on `main` and the slice pushed it
+> to 412, crossing the ~400 split smell. The timer façade surface moved to a new flat sibling
+> `crates/core/src/facade/timer.rs` (199 lines) with `crates/core/src/facade/timer_tests.rs`
+> (225 lines), matching the existing `git.rs`/`git_draft.rs`/`git_pr.rs`/`git_review.rs` family
+> convention, with `mod timer;` added to `facade.rs`. `coordination.rs` is now 246 lines.
+> `CoordinationError` and the shared `coordination_scope`/`coordination_owner`/`check_payload_size`
+> helpers deliberately stayed in `coordination.rs` — they are used by the scratchpad, diagram, todo,
+> template and kv façade files too. The lint file-size advisory went from 25 files to 24.
+>
+> **Spec-axis bug fixed — the tag chip's selected fill.** The extraction had made
+> `hover:bg-sidebar-accent` unconditional; both originals scoped it to the inactive branch only.
+> Restored. Deeper than that: the base primitive at `crates/app/ui/src/components/ui/toggle.tsx:10`
+> carries unconditional `hover:bg-muted` and `aria-pressed:bg-muted` in its root class, each at the
+> same specificity as a lone `data-[state=on]:` rule — so which one painted the active chip depended on
+> Tailwind's stylesheet emit order, on hover AND at rest. Fixed with a compound
+> `data-[state=on]:aria-pressed:` variant, whose selector carries both attributes and so outranks the
+> base's selectors deterministically. Verified against the real compiled CSS, not inferred. The test
+> asserts the winning declaration and was proven to fail against the single-variant version.
+>
+> **Deliberately not done, each with its reason.** `store/scratchpadSort.ts`/`store/diagramSort.ts`
+> duplication — the audit fences it as another lane's ("name it, do not fix it").
+> `ScratchpadTitle.tsx`/`DiagramTitle.tsx` remain two-line delegating wrappers — inlining them means
+> editing `ScratchpadEditor.tsx`/`DiagramEditor.tsx`, which verifier F fenced off ("do not let a
+> reviewer widen it to the editor header"). The base `ui/toggle.tsx` primitive carries the same
+> `aria-pressed:`/`data-[state=on]:` duplication in its own `cva` variants — shared with
+> `SegmentedControl` and `AppearanceModeCards`, so out of scope here; worth a follow-up. The
+> owner-directed shadcn `Toggle` adoption was **not** reverted — only its regression was fixed.
+>
+> **Gates — one clean run after all fixes.** `just lint` exit 0 (cargo fmt, clippy
+> `--workspace --all-targets -D warnings`, tsc, eslint, prettier, `check-core-deps.sh`
+> "framework-free", `check-core-cycles.sh` no cycles). `just test` exit 0: `cargo test --workspace`
+> **2023 passed / 0 failed / 3 ignored** (the 3 pre-existing `#[ignore]`s); `pnpm -C crates/app/ui
+> test` **176 files / 1304 tests, all passed**. The vitest count moved from slice 9's own 177
+> files/1308 tests to 176/1304 because two duplicated kind-agnostic List suites were consolidated into
+> one `DocumentList.test.tsx` — consolidation, not lost coverage.
+>
+> **Next session should start with:** committing this review-fix pass and opening the PR (still no
+> self-merge) for `refactor/dsa-audit-slice-09-structural-p2` — it now carries both slice 9's own
+> commit (`eceb78e`) and this fix pass. After that, resume the pointer slice 9 itself left below:
+> slice 7's open threads still stand (confirm CI is green there, give S17-F1's reconnect-replay test
+> the mutation pass that session skipped), then the DSA audit's remaining slices **5, 6 and 10**
+> (`.scratch/dsa-audit/slices/`).
+
 > **LATEST (2026-08-27): DSA AUDIT SLICE 9 — STRUCTURAL P2, NO LIVE DEFECT — all four work items landed
 > at the verifier-narrowed scope, `just lint` exit 0, `just test` exit 0, `Done — pending verify`,
-> UNCOMMITTED.** On `main` `1de3d93`. Work items **S27-F2**, **S16-F1**, **S26-F1**, **S10-F1(a)(b)**,
+> committed as `eceb78e`.** On `main` `1de3d93`, branch `refactor/dsa-audit-slice-09-structural-p2`.
+> A two-axis code review then ran against this diff and its fixes are recorded in the entry above —
+> that follow-up work is what is uncommitted now, not this slice. Work items **S27-F2**, **S16-F1**,
+> **S26-F1**, **S10-F1(a)(b)**,
 > from `.scratch/dsa-audit/slices/slice-09-structural-p2-no-live-defect.md`, sourced from the Soloist
 > MCP scratchpads (`dsa-audit-contract`, `dsa-audit-S10`/`S16`/`S26`/`S27`,
 > `dsa-audit-verify-B`/`C`/`F`). The slice's own name is accurate for three of the four — duplication,
@@ -147,10 +236,12 @@
 > Status for this slice: **`Done — pending verify`** — both gates are green and every change is
 > mutation-proven, but there is no e2e run and no PR yet, per CLAUDE.md §10's exact vocabulary.
 >
-> **Next session should start with:** committing this working tree and opening the PR (no self-merge).
-> Slice 7's open threads still stand — confirm CI is green there and give S17-F1's reconnect-replay
-> test the mutation pass that session skipped. After that, the DSA audit's remaining slices are
-> **5, 6 and 10** (`.scratch/dsa-audit/slices/`). Also worth someone's judgement, recorded rather than
+> **Next session should start with (superseded by the entry above — see its own pointer first):**
+> this slice is now committed as `eceb78e`; committing the review-fix pass above and opening the PR
+> (no self-merge) is the immediate next step. After that, slice 7's open threads still stand —
+> confirm CI is green there and give S17-F1's reconnect-replay test the mutation pass that session
+> skipped. After that, the DSA audit's remaining slices are **5, 6 and 10**
+> (`.scratch/dsa-audit/slices/`). Also worth someone's judgement, recorded rather than
 > acted on: **(a)** `react-doctor` scores the project 74/100 with 26 issues, none in the files this
 > slice touched, concentrated in `App.tsx`, `ThemeEditor.tsx`, `ThemeColorInput.tsx` and some
 > sidebar/store hooks; **(b)** a hand-rolled flat-row pattern is duplicated independently across

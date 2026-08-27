@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DocumentList, type DocumentRow } from "@/components/orchestration/DocumentList";
+import type { DocumentKind } from "@/components/orchestration/DocumentTitle";
 import { TagFilterChips } from "@/components/orchestration/TagFilterChips";
 import { humanizeName } from "@/lib/humanize";
 
@@ -42,7 +43,8 @@ interface DocumentRosterProps<Row extends DocumentSummaryRow, Sort extends strin
   sortLabels: Record<Sort, string>;
   /** The subject's own sort — injected so the roster stays agnostic of which document kind it lists. */
   sortItems: (items: Row[], sort: Sort) => Row[];
-  handleAttribute: (name: string) => Record<string, string>;
+  /** Which document kind these rows are — forwarded to `DocumentList` for its name-handle attribute. */
+  kind: DocumentKind;
 }
 
 // The document roster shared by scratchpads and diagrams: a live search, an optional tag filter, and
@@ -60,7 +62,7 @@ export function DocumentRoster<Row extends DocumentSummaryRow, Sort extends stri
   sortOrder,
   sortLabels,
   sortItems,
-  handleAttribute,
+  kind,
 }: DocumentRosterProps<Row, Sort>) {
   const [query, setQuery] = useState("");
   const [tag, setTag] = useState<string | null>(null);
@@ -140,7 +142,7 @@ export function DocumentRoster<Row extends DocumentSummaryRow, Sort extends stri
           onSelect={onSelect}
           label={copy.label}
           emptyHint={filtering ? copy.noResultsHint : copy.firstRunHint}
-          handleAttribute={handleAttribute}
+          kind={kind}
         />
         {archived.length > 0 && (
           <>
@@ -150,8 +152,10 @@ export function DocumentRoster<Row extends DocumentSummaryRow, Sort extends stri
               selected={selected}
               onSelect={onSelect}
               label={copy.archivedLabel}
-              emptyHint={copy.firstRunHint}
-              handleAttribute={handleAttribute}
+              // Never rendered: this list only mounts once `archived.length > 0`, so its own empty
+              // state can't occur.
+              emptyHint={null}
+              kind={kind}
             />
           </>
         )}

@@ -86,6 +86,7 @@ mod settings;
 mod support;
 mod template;
 mod terminal;
+mod timer;
 mod todo;
 mod trustrequest;
 

@@ -131,6 +131,33 @@ fn the_idle_backstop_defaults_and_clamps() {
 }
 
 #[test]
+fn quorum_met_and_idle_report_agree_on_the_any_all_and_empty_set_rule() {
+    let watched = vec![ProcessId::from_raw(2), ProcessId::from_raw(3)];
+    let idle = |p: ProcessId| p == ProcessId::from_raw(2);
+
+    // `Any` is met once one watched process is idle; `All` needs both.
+    assert!(IdleMode::Any.quorum_met(&watched, idle));
+    assert!(!IdleMode::All.quorum_met(&watched, idle));
+
+    // `idle_report` agrees with `quorum_met` and names the process still not idle.
+    let (waiting_on, already_idle) = IdleMode::All.idle_report(&watched, idle);
+    assert_eq!(waiting_on, vec![ProcessId::from_raw(3)]);
+    assert_eq!(
+        already_idle,
+        IdleMode::All.quorum_met(&watched, idle),
+        "the scheduler's fire decision and the façade's already_idle report must never disagree"
+    );
+
+    // An empty watched set is never met by either mode or function — not even `All`, whose
+    // `.all()` over an empty iterator would otherwise be vacuously true.
+    let empty: Vec<ProcessId> = Vec::new();
+    assert!(!IdleMode::Any.quorum_met(&empty, idle));
+    assert!(!IdleMode::All.quorum_met(&empty, idle));
+    assert!(!IdleMode::Any.idle_report(&empty, idle).1);
+    assert!(!IdleMode::All.idle_report(&empty, idle).1);
+}
+
+#[test]
 fn list_returns_only_the_owners_timers() {
     let (timers, _clock, _repo) = timers();
     let other = ProcessId::from_raw(9);

@@ -40,7 +40,7 @@ export function ScratchpadRoster({ scratchpads, selected, onSelect }: Scratchpad
       sortOrder={SCRATCHPAD_SORT_ORDER}
       sortLabels={SCRATCHPAD_SORT_LABELS}
       sortItems={sortScratchpads}
-      handleAttribute={(name) => ({ "data-scratchpad-name": name })}
+      kind="scratchpad"
     />
   );
 }

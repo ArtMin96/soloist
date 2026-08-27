@@ -55,7 +55,7 @@ import { ProcessRow } from "@/components/sidebar/ProcessRow";
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
 import type { ProcessActionHandlers } from "@/lib/processActions";
 import { CommandList as ProjectCommandList } from "@/components/project-settings/CommandList";
-import { ScratchpadList } from "@/components/orchestration/ScratchpadList";
+import { DocumentList } from "@/components/orchestration/DocumentList";
 import { SettingsSection } from "@/components/settings/controls/SettingsSection";
 import { SettingsTabRail } from "@/components/settings/SettingsTabRail";
 import { StartSurface } from "@/components/StartSurface";
@@ -455,7 +455,15 @@ function AuditView() {
         </AuditColumn>
         <AuditColumn label="Scratchpad list">
           <div className="w-56 rounded-lg border border-sidebar-border bg-sidebar">
-            <ScratchpadList scratchpads={AUDIT_PADS} selected="research" onSelect={() => {}} />
+            <DocumentList
+              items={AUDIT_PADS}
+              selected="research"
+              onSelect={() => {}}
+              label="Scratchpads"
+              // The fixture rows are never empty, so this never renders.
+              emptyHint={null}
+              kind="scratchpad"
+            />
           </div>
         </AuditColumn>
       </div>

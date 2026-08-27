@@ -36,7 +36,7 @@ export function DiagramRoster({ diagrams, selected, onSelect }: DiagramRosterPro
       sortOrder={DIAGRAM_SORT_ORDER}
       sortLabels={DIAGRAM_SORT_LABELS}
       sortItems={sortDiagrams}
-      handleAttribute={(name) => ({ "data-diagram-name": name })}
+      kind="diagram"
     />
   );
 }

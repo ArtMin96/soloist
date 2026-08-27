@@ -1,4 +1,5 @@
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import type { DocumentKind } from "@/components/orchestration/DocumentTitle";
 import { humanizeName } from "@/lib/humanize";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +11,14 @@ export interface DocumentRow {
   gist: string;
 }
 
+/** The DOM handle attribute each document kind's rows are stamped with — the single source an e2e
+ *  reader (e.g. `ScratchpadPanel.ts`'s `NAME_ATTR`) and this list share, so the two can never drift
+ *  apart and a reader addressing one document kind can never end up reading the other's. */
+const DOCUMENT_NAME_ATTRIBUTE = {
+  scratchpad: "data-scratchpad-name",
+  diagram: "data-diagram-name",
+} as const satisfies Record<DocumentKind, string>;
+
 interface DocumentListProps<Row extends DocumentRow> {
   items: Row[];
   selected: string | null;
@@ -18,9 +27,9 @@ interface DocumentListProps<Row extends DocumentRow> {
   label: string;
   /** Shown in place of the list when it is empty. */
   emptyHint: ReactNode;
-  /** The DOM attribute(s) a row's raw name handle is exposed under, e.g. `{ "data-scratchpad-name":
-   *  name }` — kept per-subject so an e2e reader addressing one document kind never sees the other's. */
-  handleAttribute: (name: string) => Record<string, string>;
+  /** Which document kind these rows are — selects the row's name-handle attribute via
+   *  `DOCUMENT_NAME_ATTRIBUTE`. */
+  kind: DocumentKind;
 }
 
 // A single-select ARIA listbox shared by every document roster: one row per document (its humanized
@@ -38,7 +47,7 @@ export function DocumentList<Row extends DocumentRow>({
   onSelect,
   label,
   emptyHint,
-  handleAttribute,
+  kind,
 }: DocumentListProps<Row>) {
   const baseId = useId();
   // Track the roving cursor by the document's name, not its index, so a document added or removed
@@ -107,7 +116,7 @@ export function DocumentList<Row extends DocumentRow>({
             role="option"
             aria-selected={isSelected}
             // The raw handle the row addresses, kept reachable now that the row reads as prose.
-            {...handleAttribute(item.name)}
+            {...{ [DOCUMENT_NAME_ATTRIBUTE[kind]]: item.name }}
             // Roving tabindex: only the cursor's option is in the tab order; the arrows move it.
             tabIndex={index === activeIndex ? 0 : -1}
             onClick={() => {
