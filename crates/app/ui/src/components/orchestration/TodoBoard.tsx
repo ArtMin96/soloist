@@ -6,6 +6,7 @@ import { TodoGroup } from "@/components/orchestration/TodoGroup";
 import { TodoItem, type TodoEditState } from "@/components/orchestration/TodoItem";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { Button } from "@/components/ui/button";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { useCollapseState } from "@/store/useCollapseState";
 import { useTodoActions } from "@/store/useTodoActions";
 import { useTodoEditor } from "@/store/useTodoEditor";
@@ -164,11 +165,21 @@ export function TodoBoard({
 
       <div className="min-h-0 flex-1 overflow-auto">
         {visible.length === 0 ? (
-          <p className="px-3 py-6 text-[0.8125rem] leading-relaxed text-muted-foreground">
-            {isFiltering(filter)
-              ? "No todos match your search."
-              : "No todos yet. Create one, or let agents create them to hand off and order work — they appear here live, with their blockers, locks, and comments."}
-          </p>
+          <Empty>
+            <EmptyHeader>
+              {isFiltering(filter) ? (
+                <EmptyDescription>No todos match your search.</EmptyDescription>
+              ) : (
+                <>
+                  <EmptyTitle>No todos yet</EmptyTitle>
+                  <EmptyDescription>
+                    Create one, or let agents create them to hand off and order work — they appear
+                    here live, with their blockers, locks, and comments.
+                  </EmptyDescription>
+                </>
+              )}
+            </EmptyHeader>
+          </Empty>
         ) : grouped ? (
           // Sections are plain containers, not list items: the rows stay the only list entries, so a
           // row is addressed the same way whichever view is showing.

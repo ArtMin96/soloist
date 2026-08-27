@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Plus, Trash2, X } from "lucide-react";
-import { Field, ToggleRow } from "@/components/project-settings/fields";
+import { CommandField, ToggleRow } from "@/components/project-settings/fields";
 import { SettingChoice } from "@/components/settings/controls/SettingChoice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,7 +56,7 @@ export function CommandEditor({
 
   return (
     <div className="flex flex-col gap-4 border-t border-border bg-muted/30 px-3 py-3.5">
-      <Field label="Command">
+      <CommandField label="Command">
         <Input
           key={command.command}
           defaultValue={command.command}
@@ -67,9 +67,9 @@ export function CommandEditor({
           aria-label="Command"
           className="font-mono text-xs"
         />
-      </Field>
+      </CommandField>
 
-      <Field label="Name">
+      <CommandField label="Name">
         <Input
           key={command.name}
           defaultValue={command.name}
@@ -79,7 +79,7 @@ export function CommandEditor({
           }}
           aria-label="Name"
         />
-      </Field>
+      </CommandField>
 
       <div className="flex flex-col gap-2.5">
         <ToggleRow
@@ -112,7 +112,7 @@ export function CommandEditor({
         )}
       </fieldset>
 
-      <Field label="Restart when files change">
+      <CommandField label="Restart when files change">
         <div className="flex flex-col gap-1.5">
           {command.restart_when_changed.length > 0 && (
             <ul className="flex flex-col gap-1">
@@ -153,7 +153,7 @@ export function CommandEditor({
             </Button>
           </div>
         </div>
-      </Field>
+      </CommandField>
 
       <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
         <Button variant="outline" size="sm" onClick={() => ops.toggleStorage(command)}>

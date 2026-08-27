@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { FoldVerticalIcon, UnfoldVerticalIcon } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 
 const EXPAND_FOLDERS_LABEL = "Expand all folders";
 const COLLAPSE_FOLDERS_LABEL = "Collapse all folders";
@@ -42,8 +43,10 @@ export function RailMessage({ children }: { children: ReactNode }) {
 /** The quiet line a tab shows when it has nothing in it. */
 export function RailEmpty({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-full items-center justify-center px-6 text-center">
-      <RailMessage>{children}</RailMessage>
-    </div>
+    <Empty className="h-full">
+      <EmptyHeader>
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   );
 }

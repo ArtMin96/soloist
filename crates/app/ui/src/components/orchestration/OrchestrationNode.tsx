@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import { Collapsible } from "radix-ui";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { cn } from "@/lib/utils";
 import type { OrchestrationTreeNode } from "@/store/orchestrationTree";
@@ -32,7 +32,7 @@ export function OrchestrationNode({ node, depth, isCollapsed, onToggle }: Orches
       style={indent}
     >
       {hasChildren ? (
-        <Collapsible.Trigger
+        <CollapsibleTrigger
           aria-label={open ? `Collapse ${node.label}'s workers` : `Expand ${node.label}'s workers`}
           className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
         >
@@ -40,7 +40,7 @@ export function OrchestrationNode({ node, depth, isCollapsed, onToggle }: Orches
             aria-hidden
             className={cn("size-3 transition-transform", open && "rotate-90")}
           />
-        </Collapsible.Trigger>
+        </CollapsibleTrigger>
       ) : (
         <span aria-hidden className="size-4 shrink-0" />
       )}
@@ -57,9 +57,9 @@ export function OrchestrationNode({ node, depth, isCollapsed, onToggle }: Orches
   if (!hasChildren) return row;
 
   return (
-    <Collapsible.Root open={open} onOpenChange={() => onToggle(node.id)}>
+    <Collapsible open={open} onOpenChange={() => onToggle(node.id)}>
       {row}
-      <Collapsible.Content role="group">
+      <CollapsibleContent role="group">
         {node.children.map((child) => (
           <OrchestrationNode
             key={child.id}
@@ -69,7 +69,7 @@ export function OrchestrationNode({ node, depth, isCollapsed, onToggle }: Orches
             onToggle={onToggle}
           />
         ))}
-      </Collapsible.Content>
-    </Collapsible.Root>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

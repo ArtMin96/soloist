@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
-import { Collapsible } from "radix-ui";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 interface TodoGroupProps {
   label: string;
@@ -20,8 +20,8 @@ interface TodoGroupProps {
 // element the board, the keyboard, and the end-to-end walks already address.
 export function TodoGroup({ label, count, open, onOpenChange, children }: TodoGroupProps) {
   return (
-    <Collapsible.Root open={open} onOpenChange={onOpenChange} className="select-none">
-      <Collapsible.Trigger
+    <Collapsible open={open} onOpenChange={onOpenChange} className="select-none">
+      <CollapsibleTrigger
         data-todo-group={label}
         className="group/todogroup flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring"
       >
@@ -35,10 +35,10 @@ export function TodoGroup({ label, count, open, onOpenChange, children }: TodoGr
         <span className="type-label ml-auto pr-1 font-mono tabular-nums text-muted-foreground">
           {count}
         </span>
-      </Collapsible.Trigger>
-      <Collapsible.Content className="overflow-hidden data-[state=open]:animate-disclose-down data-[state=closed]:animate-disclose-up">
+      </CollapsibleTrigger>
+      <CollapsibleContent className="overflow-hidden data-[state=open]:animate-disclose-down data-[state=closed]:animate-disclose-up">
         {children}
-      </Collapsible.Content>
-    </Collapsible.Root>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
 import { PaneDivider } from "@/components/PaneDivider";
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { isEditableTarget } from "@/lib/hotkeys";
 import { cn } from "@/lib/utils";
@@ -117,8 +118,10 @@ export function SplitNotice({ children, action }: { children: ReactNode; action?
 /** The quiet line a view shows when it has nothing to render. */
 export function SplitMessage({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-full items-center justify-center px-6 py-10 text-center">
-      <p className="type-body text-muted-foreground">{children}</p>
-    </div>
+    <Empty className="h-full py-10">
+      <EmptyHeader>
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   );
 }

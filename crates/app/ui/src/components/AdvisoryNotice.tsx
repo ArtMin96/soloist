@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 
 // An inline advisory strip: something about the surface needs the user's attention, but nothing is
@@ -29,18 +30,17 @@ export function AdvisoryNotice({
   urgency?: AdvisoryUrgency;
 }) {
   return (
-    <div
+    <Alert
+      // Alert sets `role="alert"` itself; spreading ours after it is what lets a strip ask for the
+      // quieter `status` instead.
       role={urgency}
       // A strip stays identifiable as one whatever politeness it asks for. Addressing it by role
       // instead would make every urgency decision a change to whoever reads the strip back.
       data-advisory-notice
-      className={cn(
-        "flex items-center gap-3 rounded-md border border-status-transition/40 bg-status-transition/10 px-3 py-2 text-[0.8125rem]",
-        className,
-      )}
+      className={cn("border-status-transition/40 bg-status-transition/10", className)}
     >
-      <span className="min-w-0 flex-1">{children}</span>
-      {action}
-    </div>
+      <AlertDescription className="text-foreground">{children}</AlertDescription>
+      {action && <AlertAction className="top-1/2 -translate-y-1/2">{action}</AlertAction>}
+    </Alert>
   );
 }

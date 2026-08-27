@@ -3,6 +3,7 @@ import { ChevronDownIcon, SparklesIcon } from "lucide-react";
 import { ASSIST_SETTINGS_TAB } from "@/components/settings/tabs";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { GLASS_CONTROL_SURFACE } from "@/components/ui/glass";
 import { Textarea } from "@/components/ui/textarea";
@@ -169,9 +170,9 @@ export function CommitBox({
                   checked={amend}
                   onCheckedChange={(checked) => setAmend(checked === true)}
                 />
-                <label htmlFor={amendId} className="type-body">
+                <Label htmlFor={amendId} className="type-body font-normal">
                   {AMEND_LABEL}
-                </label>
+                </Label>
               </span>
             </TooltipTrigger>
             <TooltipContent>{AMEND_HINT}</TooltipContent>

@@ -1,6 +1,7 @@
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { DocumentKind } from "@/components/orchestration/DocumentTitle";
 import { humanizeName } from "@/lib/humanize";
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { cn } from "@/lib/utils";
 
 /** The row shape a document summary (scratchpad or diagram) must satisfy to appear in the list. */
@@ -56,9 +57,11 @@ export function DocumentList<Row extends DocumentRow>({
 
   if (items.length === 0) {
     return (
-      <p className="px-3 py-6 text-[0.8125rem] leading-relaxed text-muted-foreground">
-        {emptyHint}
-      </p>
+      <Empty>
+        <EmptyHeader>
+          <EmptyDescription>{emptyHint}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
 

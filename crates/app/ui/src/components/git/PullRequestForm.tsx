@@ -2,6 +2,7 @@ import { useId } from "react";
 import { SparklesIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -178,9 +179,9 @@ export function PullRequestForm({
                 checked={draft}
                 onCheckedChange={(checked) => onDraftChange(checked === true)}
               />
-              <label htmlFor={draftId} className="type-body">
+              <Label htmlFor={draftId} className="type-body font-normal">
                 {DRAFT_LABEL}
-              </label>
+              </Label>
             </span>
           </TooltipTrigger>
           <TooltipContent>{DRAFT_HINT}</TooltipContent>
@@ -214,8 +215,8 @@ export function PullRequestForm({
 /** A field's quiet sentence-case label, sitting above its control. */
 function FieldLabel({ htmlFor, children }: { htmlFor: string; children: string }) {
   return (
-    <label htmlFor={htmlFor} className="type-label text-muted-foreground">
+    <Label htmlFor={htmlFor} className="type-label font-normal text-muted-foreground">
       {children}
-    </label>
+    </Label>
   );
 }

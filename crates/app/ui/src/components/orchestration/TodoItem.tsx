@@ -1,5 +1,5 @@
 import { ChevronRight, Link2, Lock, Pencil } from "lucide-react";
-import { Collapsible } from "radix-ui";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { MarkdownView } from "@/components/editor/MarkdownView";
 import { CommentComposer } from "@/components/orchestration/CommentComposer";
 import { CommentList } from "@/components/orchestration/CommentList";
@@ -78,12 +78,12 @@ export function TodoItem({
   return (
     // No separator between rows: a native list draws its structure with the rows themselves, and
     // the open row is marked by a quiet tonal fill instead of a rule.
-    <Collapsible.Root
+    <Collapsible
       open={open}
       onOpenChange={onToggle}
       className="rounded-md data-[state=open]:bg-muted/40"
     >
-      <Collapsible.Trigger className="flex min-h-7 w-full items-center gap-2 rounded-md px-2 py-1 text-left outline-none hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+      <CollapsibleTrigger className="flex min-h-7 w-full items-center gap-2 rounded-md px-2 py-1 text-left outline-none hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
         <ChevronRight
           aria-hidden
           className={cn(
@@ -118,10 +118,10 @@ export function TodoItem({
         <span className="type-label shrink-0 text-muted-foreground">
           {TODO_STATUS[todo.doc.status]}
         </span>
-      </Collapsible.Trigger>
+      </CollapsibleTrigger>
 
       {/* Indented to the row's title, so the document reads as belonging to the row above it. */}
-      <Collapsible.Content className="flex flex-col gap-3 pt-1 pr-2 pb-3 pl-8 text-[0.8125rem]">
+      <CollapsibleContent className="flex flex-col gap-3 pt-1 pr-2 pb-3 pl-8 text-[0.8125rem]">
         {edit ? (
           <TodoEditor
             key={edit.mountKey}
@@ -189,7 +189,7 @@ export function TodoItem({
             </div>
           </>
         )}
-      </Collapsible.Content>
-    </Collapsible.Root>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

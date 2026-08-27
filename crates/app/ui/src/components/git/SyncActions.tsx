@@ -1,5 +1,6 @@
 import { ArrowDownToLineIcon, ArrowUpFromLineIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
+import { Spinner } from "@/components/ui/spinner";
 import type { BranchInfo, GitCapabilities } from "@/domain";
 
 const FETCH_LABEL = "Fetch";
@@ -12,6 +13,7 @@ const PUBLISH_LABEL = "Publish";
 const PUBLISH_HINT = "Hand this branch to the remote and track it from now on";
 const STOP_LABEL = "Stop";
 const STOP_HINT = "Stop waiting on the remote";
+const EXCHANGING_LABEL = "Exchanging with the remote";
 
 /**
  * Fetch, pull, and hand commits over — and, while one of those is under way, the one control that
@@ -49,9 +51,9 @@ export function SyncActions({
   if (exchanging) {
     return (
       <div className="flex shrink-0 items-center gap-1">
-        <RefreshCwIcon
-          aria-hidden
-          className="size-3.5 text-muted-foreground motion-safe:animate-spin"
+        <Spinner
+          aria-label={EXCHANGING_LABEL}
+          className="size-3.5 text-muted-foreground motion-reduce:animate-none"
         />
         <IconButton label={STOP_LABEL} hint={STOP_HINT} icon={<XIcon />} onClick={onStop} />
       </div>

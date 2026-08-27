@@ -209,3 +209,40 @@ describe("ProcessRow as a tree row", () => {
     expect(row.getAttribute("aria-level")).toBe("2");
   });
 });
+
+describe("ProcessRow working shimmer", () => {
+  const agent: ProcessView = { ...running, kind: "Agent", label: "reviewer" };
+
+  function shimmer(container: HTMLElement) {
+    return container.querySelector('[data-slot="text-shimmer"]');
+  }
+
+  function withActivity(state: SignalState["activity"]): SignalState {
+    return { metrics: new Map(), attempts: new Map(), activity: state };
+  }
+
+  it("sweeps the name of an agent that is working", () => {
+    const { container } = renderRow(agent, withActivity(new Map([[1, "Working"]])));
+    expect(shimmer(container)).not.toBeNull();
+  });
+
+  // The sweep reports work in flight; a paused or deliberating agent is not that, and a row that
+  // shimmered for every activity would stop meaning anything.
+  it("leaves the name still for an agent that is not working", () => {
+    const { container } = renderRow(agent, withActivity(new Map([[1, "Thinking"]])));
+    expect(shimmer(container)).toBeNull();
+  });
+
+  it("leaves the name still for a running process with no agent activity", () => {
+    const { container } = renderRow(running);
+    expect(shimmer(container)).toBeNull();
+  });
+
+  // The highlight is a second copy of the label stacked on the first. Hiding it from the
+  // accessibility tree is what keeps the row from announcing the agent's name twice.
+  it("keeps the swept name out of the accessibility tree", () => {
+    const { container } = renderRow(agent, withActivity(new Map([[1, "Working"]])));
+    expect(shimmer(container)?.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByRole("treeitem").textContent).toContain("reviewer");
+  });
+});

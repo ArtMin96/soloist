@@ -6701,6 +6701,54 @@ has a `GripVertical` icon. Both reviewers flagged it as "fine if deliberate"; le
 
 ## Next session should start with
 
+**◆ NEWEST (2026-08-28) — shadcn adoption pass + working-agent shimmer, branch
+`feat/shadcn-adoption-and-working-shimmer`, stacked on PR #196's branch.**
+
+The shadcn install was already correct — `crates/app/ui/components.json` (Vite / TS / Tailwind v4 /
+`radix` base / `nova` style) with 30 registry components. The report that it was missing came from
+running `shadcn info` at the repo root, where there is no `components.json`; it lives one level down
+in `crates/app/ui`. Nothing was re-initialised.
+
+Added two registry components that the codebase was hand-rolling — `alert` and `spinner` — and one
+project primitive, `ui/text-shimmer.tsx`. What changed:
+
+- **Empty states** now route through shadcn `Empty`. `RailEmpty` (`git/RailChrome`) and
+  `SplitMessage` (`git/SplitSurface`) were near-identical hand-rolled copies of the same centred
+  muted block; both are now thin wrappers over `Empty`, which covers their ~10 call sites unchanged.
+  `DocumentList` (every document roster), `TodoBoard` and `git/CheckList` migrated too.
+- **`AdvisoryNotice`** is built on `Alert` + `AlertDescription` + `AlertAction`, keeping its
+  `urgency` role override and its `data-advisory-notice` marker.
+- **`git/SyncActions`** uses `Spinner` instead of a hand-spun `RefreshCwIcon`.
+- **Duplicate `Field`** resolved: `project-settings/fields.tsx` defined a second component named
+  `Field` alongside the shadcn one. It is now `CommandField`, built on shadcn `Field`, and
+  `ToggleRow` gained a real `htmlFor` binding via `FieldLabel`.
+- **Collapsible** in `TodoItem`/`TodoGroup`/`OrchestrationNode` routes through
+  `@/components/ui/collapsible` instead of importing `radix-ui` directly.
+- **`Label`** had zero app-code consumers; the checkbox and field labels in `git/CommitBox` and
+  `git/PullRequestForm` now use it.
+
+**Working-agent shimmer.** A working agent's name sweeps a highlight in the same
+`text-status-running` tone its glyph already uses (`ProcessRow` → `TextShimmer`). DESIGN.md:626 bans
+`background-clip: text` gradient text, so the owner chose a masked sweep: the label is painted twice
+and a travelling `mask-image` reveals a slice of a brighter copy over a base layer that stays fully
+opaque, so contrast has a floor. Reduced motion drops the overlay entirely rather than freezing a
+band mid-sweep. **DESIGN.md still needs a short amendment recording that masked sweeps are permitted
+on in-flight labels** — that is the one open thread from this session.
+
+Deliberately **not** migrated, with reasons: `ErrorBanner` is a full-bleed banner, and wrapping it in
+`Alert` would mean overriding radius, all four borders, padding, type scale and colour, which
+shadcn's own "className for layout, not styling" rule forbids. `ProjectGroup`'s "No processes yet" is
+a dense one-line sidebar hint at label size, where a centred `p-6` `Empty` block would fight the
+density rules. `SegmentedControl` keeps its raw Radix `ToggleGroup` because it builds a different
+control (measured sliding thumb) that shadcn's `ToggleGroupItem` styling would fight.
+
+Gates run at the end, all green: `tsc --noEmit` clean, `eslint .` clean, `prettier --check src`
+clean, `vitest run` 176 files / 1308 tests passed (up 4 from the 1304 baseline — the new shimmer
+tests), `vite build` succeeds. The shimmer's mask utility, keyframes and animation were confirmed
+present in the built CSS with `-webkit-` prefixes for WebKitGTK. The four new tests were mutation-
+checked: disabling the shimmer reddens two of them. Rust was untouched, so `cargo test` was not run.
+
+
 **◆ NEWEST (2026-08-23) — DSA audit slice 5 is landed and gate-green on branch
 `fix/dsa-slice-05-processactionhandlers-contract`, committed but NOT yet pushed or PR'd.**
 
