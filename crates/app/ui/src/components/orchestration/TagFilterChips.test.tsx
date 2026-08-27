@@ -47,4 +47,31 @@ describe("TagFilterChips", () => {
     );
     expect(screen.getByRole("button", { name: "beta" }).getAttribute("aria-pressed")).toBe("true");
   });
+
+  it("only applies the hover background to the inactive chip, never the pressed one", () => {
+    render(<TagFilterChips tags={["alpha", "beta"]} active="beta" onToggle={vi.fn()} />);
+    const inactive = screen.getByRole("button", { name: "alpha" });
+    const active = screen.getByRole("button", { name: "beta" });
+
+    expect(inactive.className).toMatch(/hover:bg-sidebar-accent/);
+    expect(active.className).not.toMatch(/hover:bg-sidebar-accent/);
+  });
+
+  it("guards the selected fill with a rule that outranks the base Toggle's own hover/pressed background, not one tied with it", () => {
+    render(<TagFilterChips tags={["alpha", "beta"]} active="beta" onToggle={vi.fn()} />);
+    const active = screen.getByRole("button", { name: "beta" });
+    const classes = active.className.split(/\s+/);
+
+    // The shared `Toggle` primitive carries its own unconditional `aria-pressed:bg-muted` and
+    // `hover:bg-muted`, each a single-attribute selector — the same CSS specificity as a lone
+    // `data-[state=on]:bg-…` override, so whichever wins would depend on Tailwind's emit order rather
+    // than intent. Requiring both attributes Radix sets together compiles to a two-attribute
+    // selector, which outranks either base rule regardless of emit order.
+    const selectedFillDeclaration = classes.find((c) =>
+      c.endsWith(":bg-[var(--sidebar-sel-fill)]"),
+    );
+    expect(selectedFillDeclaration).toBe(
+      "data-[state=on]:aria-pressed:bg-[var(--sidebar-sel-fill)]",
+    );
+  });
 });
