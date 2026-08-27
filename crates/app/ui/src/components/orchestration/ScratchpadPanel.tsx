@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState } from "react";
 import { scratchpadArchive } from "@/api";
+import { DocumentPanel, DocumentPlaceholder } from "@/components/orchestration/DocumentPanel";
 import { ScratchpadEditor } from "@/components/orchestration/ScratchpadEditor";
 import { ScratchpadRoster } from "@/components/orchestration/ScratchpadRoster";
 import { useScratchpadEditor } from "@/store/useScratchpadEditor";
@@ -38,15 +39,18 @@ export function ScratchpadPanel({
   useScratchpadHotkeys(panelRef, editor.name != null ? archiveOpen : undefined);
 
   return (
-    <div ref={panelRef} className="flex h-full min-h-0 tracking-[var(--tracking-body)]">
-      <div className="w-60 shrink-0 border-r">
+    <DocumentPanel
+      panelRef={panelRef}
+      roster={
         <ScratchpadRoster scratchpads={scratchpads} selected={editor.name} onSelect={editor.open} />
-      </div>
-      <div className="min-w-0 flex-1">
-        {editor.name == null ? (
-          <Placeholder>Select a scratchpad to read or edit it.</Placeholder>
+      }
+      content={
+        editor.name == null ? (
+          <DocumentPlaceholder>Select a scratchpad to read or edit it.</DocumentPlaceholder>
         ) : editor.initialBody == null ? (
-          <Placeholder>{editor.loading ? "Loading…" : (editor.error ?? "Not found.")}</Placeholder>
+          <DocumentPlaceholder>
+            {editor.loading ? "Loading…" : (editor.error ?? "Not found.")}
+          </DocumentPlaceholder>
         ) : (
           <ScratchpadEditor
             name={editor.name}
@@ -64,16 +68,8 @@ export function ScratchpadPanel({
             onArchive={archiveOpen}
             onRename={editor.rename}
           />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Placeholder({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex h-full items-center justify-center p-6 text-center text-[0.8125rem] text-muted-foreground">
-      {children}
-    </div>
+        )
+      }
+    />
   );
 }

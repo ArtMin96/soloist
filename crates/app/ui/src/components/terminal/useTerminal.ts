@@ -13,7 +13,8 @@ import {
 } from "@/components/terminal/terminalClipboard";
 import { oscLinkHandler, webLinksAddon } from "@/components/terminal/terminalLinks";
 import { useTerminalSearch } from "@/components/terminal/terminalSearch";
-import { ptyAttach, ptyDetach, ptyResize, ptyWrite } from "@/api";
+import { openPtyStream, type PtyStream } from "@/components/terminal/terminalStream";
+import { ptyResize, ptyWrite } from "@/api";
 import {
   TERMINAL_FIXED_OPTIONS,
   TERMINAL_SCROLLBACK_LINES,
@@ -26,15 +27,6 @@ import { defaultAppliedTheme } from "@/theme/runtime";
 import type { ProcessView } from "@/domain";
 
 export type TerminalState = "attaching" | "live" | "not-started";
-
-// Upper bound on bytes coalesced between animation frames. Flushing stops while the pane can't be
-// drawn — a background pool pane, or the whole window occluded (WebKitGTK suspends rAF) — so without
-// a cap a chatty process would grow the queue without limit; oldest chunks are dropped first. A drop
-// leaves the remaining backlog starting mid-stream, so instead of writing that gap the pane marks
-// itself to re-attach and replay the core's coherent raw-scrollback ring — an overflow never leaves
-// a gap. Sized to hold a full scrollback replay (the core caps raw scrollback at 256 KiB) plus a
-// burst of live output.
-const PENDING_CAP_BYTES = 512 * 1024;
 
 // How long to wait before retrying an attach that was rejected while the process is active. The
 // backend opens the terminal channel synchronously as a process launches, so an attach to a live
@@ -57,24 +49,15 @@ export function useTerminal(process: ProcessView, visible = true) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const attachedRef = useRef(false);
-  // Cancels the current attachment: drops its queued chunks and pending frame, discards its
-  // late-arriving bytes, and detaches its backend forwarder by token. Unmount calls it before
-  // disposing the emulator, so a superseded attachment can never write to the new terminal
-  // or claim its animation frame.
-  const cancelAttachRef = useRef<(() => void) | null>(null);
-  // Drains the current attachment's flush when its pane becomes visible again, writing the bytes
-  // that accumulated (bounded) while it was hidden. Null between attachments.
-  const resumeRef = useRef<(() => void) | null>(null);
+  // The current PTY attachment — its coalescing backlog, animation frame, and cancel/resume/desync
+  // handle, all owned by one `PtyStream` (`terminalStream.ts`). Null when nothing is attached;
+  // replacing it (cancel, reattach, or unmount) drops every reference to the superseded stream's
+  // state in one assignment, rather than by convention across several refs.
+  const streamRef = useRef<PtyStream | null>(null);
   // Re-establishes the stream on the live emulator (cancel, reset, re-attach) so the core replays
   // a coherent scrollback. Held in a ref so the attachment's flush can trigger it without a forward
   // reference. Assigned once `reattach` is defined.
   const reattachRef = useRef<(() => void) | null>(null);
-  // Set when the bounded backlog overflowed and dropped bytes — while hidden, or while visible but
-  // with rAF suspended (an occluded window) — so the remaining backlog is non-contiguous and
-  // draining it would splice a gap. The pane then re-attaches and replays the core's coherent
-  // scrollback instead. Reset on each (re)attach and on a backend resync.
-  const desyncedRef = useRef(false);
   const [state, setState] = useState<TerminalState>("attaching");
   // The destination of the link under the pointer, or null when there is none. Fed from the link
   // machinery rather than from the cells on screen, so an OSC 8 hyperlink that displays one thing
@@ -111,94 +94,31 @@ export function useTerminal(process: ProcessView, visible = true) {
     if (appearanceRef.current.appearance.terminal.focus_on_click) termRef.current?.focus();
   }, []);
 
+  // Opens a new stream unless one is already attached. `streamRef.current === stream` guards both
+  // branches below: if `cancel`/`reattach` has since replaced or cleared the ref, this stream was
+  // superseded and its settle must not touch state that belongs to another one.
   const attach = useCallback(() => {
     const term = termRef.current;
-    if (!term || attachedRef.current) return;
-    attachedRef.current = true;
+    if (!term || streamRef.current) return;
     setState("attaching");
-    desyncedRef.current = false;
 
-    // All coalescing state lives in this closure and dies with this attachment. Bytes from a
-    // cancelled attachment are discarded on arrival — never queued, never given a frame — so
-    // they cannot swallow the live attachment's flush or write to its emulator. This matters
-    // most for a silent process: its scrollback replay is the only content it will ever get.
-    let cancelled = false;
-    let frame = 0;
-    let pending: Uint8Array[] = [];
-    let pendingBytes = 0;
-
-    const flush = () => {
-      frame = 0;
-      if (desyncedRef.current) {
-        // The backlog shed a chunk from its middle (a burst outran the cap, e.g. while the
-        // window was occluded and rAF suspended); writing it would splice a gap into the
-        // emulator. Discard it and re-attach to replay the core's coherent scrollback.
-        pending = [];
-        pendingBytes = 0;
-        reattachRef.current?.();
-        return;
-      }
-      const batch = pending;
-      pending = [];
-      pendingBytes = 0;
-      for (const chunk of batch) term.write(chunk);
-    };
-
-    // Called when this attachment's pane is shown: parse the backlog it accrued while hidden.
-    resumeRef.current = () => {
-      if (cancelled || frame || pending.length === 0) return;
-      frame = requestAnimationFrame(flush);
-    };
-
-    const attachment = ptyAttach(id, (bytes, resync) => {
-      if (cancelled) return;
-      if (resync) {
-        // The forwarder re-synced from the core's scrollback (the first attach, or after it
-        // fell behind): reset the emulator and drop the now-stale backlog, then start from
-        // this coherent snapshot. Written on the next frame — or on show, if hidden.
-        if (frame) cancelAnimationFrame(frame);
-        frame = 0;
-        pending = [bytes];
-        pendingBytes = bytes.length;
-        desyncedRef.current = false;
-        term.reset();
-        if (visibleRef.current) frame = requestAnimationFrame(flush);
-        return;
-      }
-      pending.push(bytes);
-      pendingBytes += bytes.length;
-      while (pendingBytes > PENDING_CAP_BYTES && pending.length > 1) {
-        pendingBytes -= pending[0].length;
-        pending.shift();
-        // A drop leaves the backlog non-contiguous; draining it would splice a gap. Mark the
-        // pane to re-attach and replay the core's coherent scrollback instead of showing junk.
-        desyncedRef.current = true;
-      }
-      // A hidden pool pane keeps accruing bytes (bounded above) but does not schedule a flush, so it
-      // runs no VT parsing on the main thread until it is shown again.
-      if (visibleRef.current && !frame) frame = requestAnimationFrame(flush);
+    const stream = openPtyStream({
+      id,
+      term,
+      visible: () => visibleRef.current,
+      onDesync: () => reattachRef.current?.(),
     });
+    streamRef.current = stream;
 
-    cancelAttachRef.current = () => {
-      cancelled = true;
-      if (frame) cancelAnimationFrame(frame);
-      frame = 0;
-      pending = [];
-      pendingBytes = 0;
-      // Detach by this attachment's own token once it resolves: if a newer attachment has
-      // already installed its forwarder, the backend treats the stale token as a no-op — a
-      // late detach can never kill the stream the user is looking at.
-      void attachment.then((token) => ptyDetach(token)).catch(() => {});
-    };
-
-    attachment
+    stream.ready
       .then(() => {
-        if (!cancelled) setState("live");
+        if (streamRef.current === stream) setState("live");
       })
       .catch(() => {
-        if (cancelled) return;
-        attachedRef.current = false;
-        setState("not-started");
+        if (streamRef.current === stream) {
+          streamRef.current = null;
+          setState("not-started");
+        }
       });
   }, [id]);
 
@@ -210,8 +130,8 @@ export function useTerminal(process: ProcessView, visible = true) {
   const reattach = useCallback(() => {
     const term = termRef.current;
     if (!term) return;
-    cancelAttachRef.current?.();
-    attachedRef.current = false;
+    streamRef.current?.cancel();
+    streamRef.current = null;
     term.reset();
     attach();
   }, [attach]);
@@ -267,7 +187,7 @@ export function useTerminal(process: ProcessView, visible = true) {
     term.open(host);
     termRef.current = term;
     fitRef.current = fit;
-    attachedRef.current = false;
+    streamRef.current = null;
 
     // Swap in the GPU (WebGL) renderer now that the terminal is in the DOM. The load is
     // async; until it resolves — and if WebGL is unavailable — the built-in DOM renderer
@@ -325,8 +245,8 @@ export function useTerminal(process: ProcessView, visible = true) {
       observer.disconnect();
       onData.dispose();
       onSelection.dispose();
-      cancelAttachRef.current?.();
-      cancelAttachRef.current = null;
+      streamRef.current?.cancel();
+      streamRef.current = null;
       detachSearch();
       // Released before the emulator they decorate: both reach back into it as they let go.
       addons?.dispose();
@@ -337,7 +257,6 @@ export function useTerminal(process: ProcessView, visible = true) {
       setLinkTarget(null);
       termRef.current = null;
       fitRef.current = null;
-      attachedRef.current = false;
     };
   }, [id, attach, syncSize, focusIfEnabled, attachSearch]);
 
@@ -367,7 +286,7 @@ export function useTerminal(process: ProcessView, visible = true) {
   // A process selected before it started has no terminal to attach to; attach once it
   // goes live so its output appears without re-selecting.
   useEffect(() => {
-    if (!attachedRef.current && isActive(process.status)) attach();
+    if (!streamRef.current && isActive(process.status)) attach();
   }, [process.status, attach]);
 
   // Drive recovery off the attach *result*, not just status: if an attach was rejected while the
@@ -405,8 +324,8 @@ export function useTerminal(process: ProcessView, visible = true) {
     // Drain what accrued while hidden — unless the bounded backlog overflowed, in which case the
     // drained bytes would start mid-stream (a gap): re-attach and replay the core's scrollback for a
     // coherent, current view instead.
-    if (desyncedRef.current) reattach();
-    else resumeRef.current?.();
+    if (streamRef.current?.desynced()) reattach();
+    else streamRef.current?.resume();
     syncSize();
     focusIfEnabled();
   }, [visible, reattach, syncSize, focusIfEnabled]);

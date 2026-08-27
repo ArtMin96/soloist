@@ -385,6 +385,9 @@ fn every_response_variant_round_trips_through_json() {
             already_idle: false,
             paused_remaining_millis: None,
         }),
+        // The facade enriches the nested `TimerView` before building the outcome — there is no
+        // outer `already_idle`/`waiting_on` for this fixture to duplicate, and drift is
+        // unrepresentable.
         IpcResponse::TimerWhenIdle(SetWhenIdleOutcome {
             timer: TimerView {
                 id: TimerId::from_raw(4),
@@ -399,8 +402,6 @@ fn every_response_variant_round_trips_through_json() {
                 already_idle: false,
                 paused_remaining_millis: None,
             },
-            already_idle: false,
-            waiting_on: vec![ProcessId::from_raw(2), ProcessId::from_raw(3)],
         }),
         IpcResponse::TimerChanged(true),
         IpcResponse::Timers(vec![TimerView {
@@ -583,6 +584,47 @@ fn spawn_agent_pins_legacy_and_initial_message_response_shapes() {
                 "process": 12,
                 "initial_message_id": 3,
                 "delivery": "queued",
+            },
+        }),
+    );
+}
+
+/// `SetWhenIdleOutcome` carries its idle answer once, on the nested `timer` — there is no outer
+/// `already_idle`/`waiting_on` for it to disagree with. Pinning the exact wire object (not merely
+/// a round trip) catches a reintroduced outer copy, which `assert_eq!` on `serde_json::Value`
+/// treats as an extra key rather than a value it can ignore.
+#[test]
+fn timer_when_idle_carries_its_idle_answer_only_on_the_nested_timer() {
+    pins(
+        IpcResponse::TimerWhenIdle(SetWhenIdleOutcome {
+            timer: TimerView {
+                id: TimerId::from_raw(4),
+                owner: ProcessId::from_raw(1),
+                body: "all done".into(),
+                fire: FireCond::WhenIdleAll {
+                    watched: vec![ProcessId::from_raw(2), ProcessId::from_raw(3)],
+                },
+                status: TimerStatus::Armed,
+                deadline_unix_millis: 1_700_000_060_000,
+                waiting_on: vec![ProcessId::from_raw(2)],
+                already_idle: false,
+                paused_remaining_millis: None,
+            },
+        }),
+        serde_json::json!({
+            "ok": "timer_when_idle",
+            "data": {
+                "timer": {
+                    "id": 4,
+                    "owner": 1,
+                    "body": "all done",
+                    "fire": { "kind": "when_idle_all", "watched": [2, 3] },
+                    "status": "armed",
+                    "deadline_unix_millis": 1_700_000_060_000u64,
+                    "waiting_on": [2],
+                    "already_idle": false,
+                    "paused_remaining_millis": null,
+                },
             },
         }),
     );

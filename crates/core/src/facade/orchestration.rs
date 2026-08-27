@@ -11,7 +11,6 @@
 use std::collections::HashSet;
 
 use super::Facade;
-use crate::coordination::watched_is_idle;
 use crate::ids::{ProcessId, ProjectId};
 use crate::orchestration::{AgentNode, AgentSignal, LineageEdge, OrchestrationSnapshot};
 use crate::ports::StoreError;
@@ -86,22 +85,18 @@ impl Facade {
             })
             .collect();
         // Enrich each timer view with `waiting_on` (watched but not yet idle) and `already_idle`
-        // (quorum met at read time) computed from the live idle tracker and process registry. These
-        // are dynamic at-read-time values, not stored — the aggregate defaults them to empty/false.
+        // (quorum met at read time), via the one idle-report derivation `timer_list` and
+        // `timer_fire_when_idle` also call. These are dynamic at-read-time values, not stored —
+        // the aggregate defaults them to empty/false.
         let timers = self
             .timers
             .list_project(project)?
             .into_iter()
             .map(|mut tv| {
-                let enrichment = tv.fire.idle_quorum().map(|(mode, watched)| {
-                    let is_idle = |p: ProcessId| {
-                        watched_is_idle(self.idle.activity(p), self.supervisor.view(p).is_some())
-                    };
-                    let waiting_on: Vec<ProcessId> =
-                        watched.iter().copied().filter(|&p| !is_idle(p)).collect();
-                    let already_idle = mode.quorum_met(watched, is_idle);
-                    (waiting_on, already_idle)
-                });
+                let enrichment = tv
+                    .fire
+                    .idle_quorum()
+                    .map(|(mode, watched)| mode.idle_report(watched, |p| self.is_idle_now(p)));
                 if let Some((waiting_on, already_idle)) = enrichment {
                     tv.waiting_on = waiting_on;
                     tv.already_idle = already_idle;

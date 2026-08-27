@@ -99,6 +99,36 @@ impl IdleMode {
             IdleMode::All => !watched.is_empty() && watched.iter().all(|&p| is_idle(p)),
         }
     }
+
+    /// The live idle report for a fire-when-idle timer's `watched` set, from **one** idle
+    /// observation per process: which of `watched` are not yet idle (`waiting_on`), and whether
+    /// this quorum is already met (`already_idle`) — the same policy as
+    /// [`quorum_met`](Self::quorum_met), derived alongside `waiting_on` in a single pass instead
+    /// of a second poll. The one derivation shared by every read site that reports a
+    /// fire-when-idle timer's live idle state — `timer_fire_when_idle`, `timer_list`, and the
+    /// orchestration snapshot — so they can never disagree about what a timer is waiting on.
+    pub(crate) fn idle_report(
+        self,
+        watched: &[ProcessId],
+        mut is_idle: impl FnMut(ProcessId) -> bool,
+    ) -> (Vec<ProcessId>, bool) {
+        let mut waiting_on = Vec::new();
+        let mut any_idle = false;
+        let mut all_idle = true;
+        for &process in watched {
+            if is_idle(process) {
+                any_idle = true;
+            } else {
+                all_idle = false;
+                waiting_on.push(process);
+            }
+        }
+        let already_idle = match self {
+            IdleMode::Any => any_idle,
+            IdleMode::All => !watched.is_empty() && all_idle,
+        };
+        (waiting_on, already_idle)
+    }
 }
 
 /// Whether a watched process counts as idle for a fire-when-idle timer, from its last-known
@@ -132,8 +162,10 @@ pub enum TimerStatus {
 /// A timer as a caller sees it (the answer to setting one and the rows `timer_list` returns):
 /// its id, the body it will deliver, what it is waiting for, when its deadline is, and whether
 /// it is armed or paused. `waiting_on` and `already_idle` are computed at read time by the
-/// façade from the live idle state — they default to empty/false here and are enriched by the
-/// caller that has access to idle state (the orchestration snapshot and `timer_list`).
+/// façade from the live idle state via [`IdleMode::idle_report`] — they default to empty/false
+/// here and are enriched by the caller that has access to idle state (`timer_fire_when_idle`,
+/// `timer_list`, and the orchestration snapshot). This is the **one** place the idle answer for a
+/// timer lives — a fire-when-idle outcome carries it only here, never a second copy alongside.
 /// Built from a [`StoredTimer`](super::StoredTimer) so the wire shape cannot drift from the
 /// persisted one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,14 +192,14 @@ pub struct TimerView {
     pub paused_remaining_millis: Option<u64>,
 }
 
-/// The outcome of arming a fire-when-idle timer: the timer itself, whether its idle condition is
-/// **already** satisfied at set time (so it will fire promptly), and which watched processes it
-/// is still `waiting_on` (those not yet idle). A non-blocking signal the caller can act on.
+/// The outcome of arming a fire-when-idle timer: the timer, enriched with whether its idle
+/// condition is **already** satisfied at set time (so it will fire promptly) and which watched
+/// processes it is still [`waiting_on`](TimerView::waiting_on). A non-blocking signal the caller
+/// can act on. The idle answer lives once, on `timer` — there is deliberately no outer copy for
+/// it to disagree with.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetWhenIdleOutcome {
     pub timer: TimerView,
-    pub already_idle: bool,
-    pub waiting_on: Vec<ProcessId>,
 }
 
 /// The timer aggregate over the durable [`TimerRepo`] and the [`Clock`]. The repo persists and

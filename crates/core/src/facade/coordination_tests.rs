@@ -226,8 +226,8 @@ fn fire_when_idle_reports_the_processes_it_is_waiting_on() {
         .expect("set");
 
     // Neither is idle, so the condition is not yet met and the report names both as still pending.
-    assert!(!outcome.already_idle);
-    assert_eq!(outcome.waiting_on, watched);
+    assert!(!outcome.timer.already_idle);
+    assert_eq!(outcome.timer.waiting_on, watched);
 }
 
 #[test]
@@ -251,11 +251,47 @@ fn fire_when_idle_counts_a_process_absent_from_the_registry_as_idle() {
         .expect("set");
 
     assert!(
-        outcome.already_idle,
+        outcome.timer.already_idle,
         "an absent watched process counts as idle, so an all-timer's condition is already met"
     );
     assert!(
-        outcome.waiting_on.is_empty(),
+        outcome.timer.waiting_on.is_empty(),
         "the report must not wait on a process that has left the registry"
+    );
+}
+
+#[test]
+fn timer_list_reports_the_live_waiting_on_and_already_idle_for_a_fire_when_idle_timer() {
+    // A mixed watched set: one process still running (not idle) and one absent from the registry
+    // (counts idle), so the report is neither the all-idle nor the none-idle degenerate case.
+    let facade = facade_with(Arc::new(FakeProjectRepo::new()));
+    let project = ProjectId::from_raw(1);
+    let (session, _owner) = bound_session(&facade, project);
+    let running = facade
+        .supervisor()
+        .register(terminal_registration(project, "worker", "sleep 60"));
+    let gone = ProcessId::from_raw(9999);
+
+    facade
+        .scoped(session)
+        .timer_fire_when_idle(
+            "go".into(),
+            vec![running, gone],
+            IdleMode::Any,
+            Some(Duration::from_secs(60)),
+        )
+        .expect("arm the timer");
+
+    let listed = facade.scoped(session).timer_list().expect("list");
+
+    assert_eq!(listed.len(), 1);
+    assert!(
+        listed[0].already_idle,
+        "the absent process alone satisfies an Any quorum"
+    );
+    assert_eq!(
+        listed[0].waiting_on,
+        vec![running],
+        "timer_list must report live idle state, not the aggregate's empty/false defaults"
     );
 }

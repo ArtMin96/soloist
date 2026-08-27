@@ -9,8 +9,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { TagFilterChips } from "@/components/orchestration/TagFilterChips";
 import { TODO_STATUS, TODO_STATUS_ORDER } from "@/lib/todo";
-import { cn } from "@/lib/utils";
 import type { StatusFilter, TodoFilter } from "@/store/todoFilter";
 
 interface TodoFiltersProps {
@@ -62,30 +62,11 @@ export function TodoFilters({ filter, tags, onChange, trailing }: TodoFiltersPro
         </Select>
         {trailing}
       </div>
-      {tags.length > 0 && (
-        <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by tag">
-          {tags.map((tag) => {
-            const active = filter.tag === tag;
-            return (
-              <button
-                key={tag}
-                type="button"
-                aria-pressed={active}
-                onClick={() => onChange({ ...filter, tag: active ? null : tag })}
-                className={cn(
-                  "rounded-md px-1.5 py-0.5 text-[0.6875rem] transition-colors duration-[var(--dur-fast)] ease-out-quint",
-                  "focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none",
-                  active
-                    ? "bg-[var(--sidebar-sel-fill)] text-foreground"
-                    : "text-muted-foreground hover:bg-sidebar-accent",
-                )}
-              >
-                {tag}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      <TagFilterChips
+        tags={tags}
+        active={filter.tag}
+        onToggle={(tag) => onChange({ ...filter, tag })}
+      />
     </div>
   );
 }

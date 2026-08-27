@@ -67,4 +67,24 @@ describe("ScratchpadList", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(screen.getByText(/No scratchpads yet/)).toBeTruthy();
   });
+
+  it("stamps each row with its data-scratchpad-name handle, never a diagram's", () => {
+    render(<ScratchpadList scratchpads={pads} selected={null} onSelect={vi.fn()} />);
+    const options = screen.getAllByRole("option");
+    expect(options.map((o) => o.getAttribute("data-scratchpad-name"))).toEqual([
+      "plan",
+      "research",
+      "risks",
+    ]);
+    expect(document.querySelector("[data-diagram-name]")).toBeNull();
+  });
+
+  it("renders the humanized title, the revision and the gist for a row", () => {
+    const slugged = [pad(9, "release-plan", "ships next week")];
+    render(<ScratchpadList scratchpads={slugged} selected={null} onSelect={vi.fn()} />);
+    const row = screen.getByRole("option");
+    expect(row.textContent).toContain("Release plan");
+    expect(row.textContent).toContain("r1");
+    expect(row.textContent).toContain("ships next week");
+  });
 });

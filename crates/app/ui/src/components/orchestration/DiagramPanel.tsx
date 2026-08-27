@@ -1,5 +1,6 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useState } from "react";
 import { diagramArchive } from "@/api";
+import { DocumentPanel, DocumentPlaceholder } from "@/components/orchestration/DocumentPanel";
 import { DiagramEditor } from "@/components/orchestration/DiagramEditor";
 import { DiagramRoster } from "@/components/orchestration/DiagramRoster";
 import { useDiagramEditor } from "@/store/useDiagramEditor";
@@ -9,8 +10,8 @@ import type { DiagramSummary } from "@/domain";
 // The roster is the live snapshot's summaries (refreshed by the parent on DiagramChanged); opening one
 // reads its full Mermaid source through the editor hook, the only place here that reaches IPC. Archiving
 // toggles the open document's listing flag through the core (the header control); the emitted event
-// re-lists it, so the editor stays open and flips Archive ⇄ Restore. Mirrors the scratchpad panel; a
-// diagram has no `solo://` link and no archive hotkey (there is no diagram hotkey scope in the core).
+// re-lists it, so the editor stays open and flips Archive ⇄ Restore. A diagram has no `solo://` link and
+// no archive hotkey (there is no diagram hotkey scope in the core).
 export function DiagramPanel({
   project,
   diagrams,
@@ -32,15 +33,15 @@ export function DiagramPanel({
   }, [project, editor.name, archived]);
 
   return (
-    <div className="flex h-full min-h-0 tracking-[var(--tracking-body)]">
-      <div className="w-60 shrink-0 border-r">
-        <DiagramRoster diagrams={diagrams} selected={editor.name} onSelect={editor.open} />
-      </div>
-      <div className="min-w-0 flex-1">
-        {editor.name == null ? (
-          <Placeholder>Select a diagram to read or edit it.</Placeholder>
+    <DocumentPanel
+      roster={<DiagramRoster diagrams={diagrams} selected={editor.name} onSelect={editor.open} />}
+      content={
+        editor.name == null ? (
+          <DocumentPlaceholder>Select a diagram to read or edit it.</DocumentPlaceholder>
         ) : editor.initialSource == null ? (
-          <Placeholder>{editor.loading ? "Loading…" : (editor.error ?? "Not found.")}</Placeholder>
+          <DocumentPlaceholder>
+            {editor.loading ? "Loading…" : (editor.error ?? "Not found.")}
+          </DocumentPlaceholder>
         ) : (
           <DiagramEditor
             key={editor.mountKey}
@@ -55,16 +56,8 @@ export function DiagramPanel({
             onArchive={archiveOpen}
             onRename={editor.rename}
           />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Placeholder({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex h-full items-center justify-center p-6 text-center text-[0.8125rem] text-muted-foreground">
-      {children}
-    </div>
+        )
+      }
+    />
   );
 }

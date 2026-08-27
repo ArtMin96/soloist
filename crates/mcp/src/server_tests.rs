@@ -1726,12 +1726,10 @@ async fn timer_fire_when_idle_all_threads_the_processes_and_projects_the_outcome
                     },
                     status: TimerStatus::Armed,
                     deadline_unix_millis: 0,
-                    waiting_on: processes.clone(),
+                    waiting_on: processes,
                     already_idle: false,
                     paused_remaining_millis: None,
                 },
-                already_idle: false,
-                waiting_on: processes,
             }))
         }
         _ => Err(IpcError::Internal("unexpected request".into())),
@@ -1747,9 +1745,9 @@ async fn timer_fire_when_idle_all_threads_the_processes_and_projects_the_outcome
         .expect("timer_fire_when_idle_all succeeds");
     let back: SetWhenIdleOutcome =
         serde_json::from_value(structured_of(result)).expect("decode outcome");
-    assert!(!back.already_idle);
+    assert!(!back.timer.already_idle);
     assert_eq!(
-        back.waiting_on,
+        back.timer.waiting_on,
         vec![ProcessId::from_raw(2), ProcessId::from_raw(3)]
     );
 }
@@ -1763,9 +1761,10 @@ async fn timer_fire_when_idle_any_uses_the_any_request_variant() {
             if processes == vec![ProcessId::from_raw(4)] =>
         {
             Ok(IpcResponse::TimerWhenIdle(SetWhenIdleOutcome {
-                timer: sample_timer(1),
-                already_idle: true,
-                waiting_on: Vec::new(),
+                timer: TimerView {
+                    already_idle: true,
+                    ..sample_timer(1)
+                },
             }))
         }
         _ => Err(IpcError::Internal("expected the any variant".into())),
@@ -1781,7 +1780,7 @@ async fn timer_fire_when_idle_any_uses_the_any_request_variant() {
         .expect("timer_fire_when_idle_any succeeds");
     let back: SetWhenIdleOutcome =
         serde_json::from_value(structured_of(result)).expect("decode outcome");
-    assert!(back.already_idle, "the any-outcome is projected");
+    assert!(back.timer.already_idle, "the any-outcome is projected");
 }
 
 #[tokio::test]

@@ -71,4 +71,23 @@ describe("DiagramList", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(screen.getByText(/No diagrams yet/)).toBeTruthy();
   });
+
+  it("stamps each row with its data-diagram-name handle, never a scratchpad's", () => {
+    render(<DiagramList diagrams={diagrams} selected={null} onSelect={vi.fn()} />);
+    const options = screen.getAllByRole("option");
+    expect(options.map((o) => o.getAttribute("data-diagram-name"))).toEqual([
+      "auth-flow",
+      "data-model",
+      "deploy",
+    ]);
+    expect(document.querySelector("[data-scratchpad-name]")).toBeNull();
+  });
+
+  it("renders the humanized title, the revision and the gist for a row", () => {
+    render(<DiagramList diagrams={diagrams} selected={null} onSelect={vi.fn()} />);
+    const first = screen.getAllByRole("option")[0];
+    expect(first.textContent).toContain("Auth flow");
+    expect(first.textContent).toContain("r1");
+    expect(first.textContent).toContain("the login handshake");
+  });
 });

@@ -210,8 +210,10 @@ impl Facade {
     /// Whether a process counts as idle right now for a fire-when-idle timer — the snapshot the
     /// `already_idle`/`waiting_on` report is built from. Applies the same rule the scheduler fires
     /// on ([`watched_is_idle`]): the agent idle FSM (C4) reports `Idle`, or the process has left the
-    /// registry (it can no longer work), so the report can never disagree with what fires.
-    fn is_idle_now(&self, process: ProcessId) -> bool {
+    /// registry (it can no longer work), so the report can never disagree with what fires. Shared
+    /// with the sibling orchestration surface ([`super::orchestration`]), so every timer read
+    /// tests idle the same way.
+    pub(in crate::facade) fn is_idle_now(&self, process: ProcessId) -> bool {
         watched_is_idle(
             self.idle.activity(process),
             self.supervisor.view(process).is_some(),
@@ -327,25 +329,19 @@ impl ScopedFacade<'_> {
         let project = self.coordination_scope()?;
         let owner = self.coordination_owner()?;
         check_payload_size(body.len(), MAX_TIMER_BODY_BYTES, "timer body")?;
-        let waiting_on: Vec<ProcessId> = processes
-            .iter()
-            .copied()
-            .filter(|&process| !self.inner.is_idle_now(process))
-            .collect();
-        let already_idle = mode.quorum_met(&processes, |process| self.inner.is_idle_now(process));
-        let timer = self
+        let (waiting_on, already_idle) =
+            mode.idle_report(&processes, |process| self.inner.is_idle_now(process));
+        let mut timer = self
             .inner
             .timers
             .set_when_idle(project, owner, body, processes, mode, max_wait)?;
+        timer.waiting_on = waiting_on;
+        timer.already_idle = already_idle;
         self.inner.bus.publish(DomainEvent::TimerArmed {
             owner,
             id: timer.id,
         });
-        Ok(SetWhenIdleOutcome {
-            timer,
-            already_idle,
-            waiting_on,
-        })
+        Ok(SetWhenIdleOutcome { timer })
     }
 
     /// Cancels a timer the session's bound process owns, returning whether one was removed.
@@ -386,10 +382,28 @@ impl ScopedFacade<'_> {
         Ok(resumed)
     }
 
-    /// Every timer the session's bound process owns (armed or paused).
+    /// Every timer the session's bound process owns (armed or paused), each fire-when-idle timer
+    /// enriched with its live `waiting_on`/`already_idle` from the current idle state — the same
+    /// enrichment [`timer_fire_when_idle`](Self::timer_fire_when_idle) reports at set time, so a
+    /// caller polling this instead of waiting on the timer sees the same answer.
     pub fn timer_list(&self) -> Result<Vec<TimerView>, CoordinationError> {
         let owner = self.coordination_owner()?;
-        Ok(self.inner.timers.list(owner)?)
+        Ok(self
+            .inner
+            .timers
+            .list(owner)?
+            .into_iter()
+            .map(|mut view| {
+                let enrichment = view.fire.idle_quorum().map(|(mode, watched)| {
+                    mode.idle_report(watched, |process| self.inner.is_idle_now(process))
+                });
+                if let Some((waiting_on, already_idle)) = enrichment {
+                    view.waiting_on = waiting_on;
+                    view.already_idle = already_idle;
+                }
+                view
+            })
+            .collect())
     }
 }
 
