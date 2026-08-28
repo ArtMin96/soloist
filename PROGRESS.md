@@ -9,9 +9,10 @@
 
 ## Current state
 
-> **LATEST (2026-08-28): BOUNDED PROJECT FILE WATCHING — seven commits on
-> `fix/bounded-project-file-watching`, `Done — pending verify`; wiring (T6) and the on-machine
-> measurement (T7) still owed.** Stacked on `feat/shadcn-adoption-and-working-shimmer` (PR #197),
+> **LATEST (2026-08-28): BOUNDED PROJECT FILE WATCHING — thirteen commits on
+> `fix/bounded-project-file-watching`, PR #198, `Done — pending verify`. Measured on real hardware:
+> **57,596 watches / 8 inotify instances → 255 / 1** (~226x), dev build of this branch running
+> alongside the installed one, same repo open in both.** Stacked on `feat/shadcn-adoption-and-working-shimmer` (PR #197),
 > which is green in CI on all four e2e shards plus `check`/`bundle`/`smoke`.
 >
 > **Why.** Soloist exhausted the system inotify budget. Measured live: the installed build held
@@ -37,12 +38,35 @@
 > with a budget and incremental maintenance (`12d3783`); a `Degraded` limit state in the UI
 > (`2c37c33`); fake levers for the unopenable-session path (`827f412`).
 >
-> **Open.** T6 wires the set into `build_facade`, rewires the three registration sites
-> (`git/watched.rs`, `filewatch/reactor.rs`, `projects/config_watch.rs`) into the one supervised
-> owner, and deletes the legacy port methods. T7 measures on the real machine. Also open: a live
-> defect found in `12d3783` — the dropped-change rescan arms a debounce that then re-syncs without
-> forcing a re-plan, so a settled project skips its scan and a dropped `Appeared` hides a subtree for
-> the life of the process; fix dispatched.
+> **Measured (T7).** Watches via `grep -h '^inotify wd:' /proc/$pid/fdinfo/*`, instances via
+> `find /proc/$pid/fd -lname 'anon_inode:inotify'`; pids cross-checked against the HTTP runtime file
+> (installed :24678, dev :24679). Installed build **57,596 watches / 8 instances**; this branch
+> **255 / 1**, re-confirmed 3x. Directory ground truth: 59,080 total, **315 gitignore-eligible** (via a
+> standalone program replicating `watchscan.rs`'s exact `WalkBuilder` config, reproduced twice),
+> `.claude/worktrees` 40,483 excluded via `.git/info/exclude`. Release binary at `304583f`
+> **24,115,792 bytes**; `ignore` contributes **48.5 KiB** wired (`cargo bloat --crates`) — the earlier
+> "+896 bytes" was measured unwired, when the linker dropped it.
+>
+> **One figure is unexplained and is not claimed otherwise.** The plan predicts ~343 watches
+> (root + `.git` + 314 tree + ~27 refs); 255 were measured, 88 short. Ruled out: raw OS refusal by
+> arithmetic (420 free before, 164 after), and "created after the scan" (several absent dirs are weeks
+> old). Not identified — the repo was under concurrent edit, so inode cross-referencing is not
+> trustworthy evidence. **Unknown.**
+>
+> **Not measured:** the degraded-notice text (Wayland blocks `wmctrl`/`xdotool` window addressing; a
+> full-desktop screenshot was declined for privacy; the HTTP API exposes no watch-limit state — it is
+> UI-only over the Tauri event bus); `just bundle-size`; a clean `main` binary diff. The "after" watch
+> figure is a **debug** build. Stock `just dev-alongside` could not start — Vite's `beforeDevCommand`
+> dies with `ENOSPC` because the installed build holds the budget; run with `CHOKIDAR_USEPOLLING=true`
+> and `--no-watch`, which move unrelated tooling watchers off inotify without touching the subsystem
+> under test.
+>
+> **New finding — a partial watch failure is invisible.** `watchset/reconcile.rs:104-129` escalates
+> only the project **root's** refusal to a reported `WatchLimit::Refused`; every other per-path failure
+> emits `tracing::warn!` and continues. **No `tracing_subscriber` is initialized anywhere in
+> `crates/app/src`** (grepped, confirmed absent), so those warnings produce zero output. Not reported,
+> not logged, not countable — in a subsystem whose signature failure mode is silence. **Open follow-up.**
+> Also open: `Registered.paths` is a `HashSet<PathBuf>`, erasing the priority order `plan()` builds.
 
 > **LATEST (2026-08-28): DSA AUDIT SLICE 9 — CODE REVIEW FIX PASS — six Standards findings and one
 > Spec-axis bug fixed, `just lint` exit 0, `just test` exit 0, `Done — pending verify`, UNCOMMITTED.**
