@@ -44,6 +44,15 @@ fn a_watch_limit_carries_one_reason_per_limited_purpose() {
     );
 
     assert_eq!(
+        limit_wire(BTreeMap::from([(
+            WatchPurpose::GitStatus,
+            WatchLimit::Refused(WatchError::ShareExhausted)
+        )])),
+        r#"{"type":"WatchLimitChanged","project":1,"limits":{"git_status":{"refused":"share_exhausted"}}}"#,
+        "a spent share spells apart from the system's exhausted limit",
+    );
+
+    assert_eq!(
         limit_wire(BTreeMap::from([
             (
                 WatchPurpose::Restarts,

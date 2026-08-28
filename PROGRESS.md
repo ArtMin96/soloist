@@ -9,7 +9,7 @@
 
 ## Current state
 
-> **LATEST (2026-08-28): BOUNDED PROJECT FILE WATCHING — thirteen commits on
+> **LATEST (2026-08-28): BOUNDED PROJECT FILE WATCHING — twenty-two commits through `17f7fc5` on
 > `fix/bounded-project-file-watching`, PR #198, `Done — pending verify`. Measured on real hardware:
 > **57,596 watches / 8 inotify instances → 255 / 1** (~226x), dev build of this branch running
 > alongside the installed one, same repo open in both.** Stacked on `feat/shadcn-adoption-and-working-shimmer` (PR #197),
@@ -38,6 +38,24 @@
 > with a budget and incremental maintenance (`12d3783`); a `Degraded` limit state in the UI
 > (`2c37c33`); fake levers for the unopenable-session path (`827f412`).
 >
+> **Review pass — eight further commits.** A two-axis code review (Standards + Spec) ran against the
+> branch and every finding was implemented. **The watch budget had neither enforcement nor reclaim**
+> (`dd82208`): `register` spent without ever checking the share, nothing released what a shrunk plan
+> no longer wanted, and `absorb_appeared`'s `.max(1)` granted past the share — plus a degradation
+> that never cleared on a *widening* share (the replan trigger was monotone toward degradation), and
+> a scan ceiling counting **files** where the share counts **directories**. **A prefix-less restart
+> glob** (`**/*.json`) had stopped watching the gitignored directories the old recursive root watch
+> covered (`b15e466`); prefix scans are now fitted one at a time, named prefixes before the
+> whole-root fallback. **Two error-semantics fixes:** `BudgetExhausted` claimed the *system's* limit
+> was exhausted when Soloist's own share had refused (`e94f19a`), and a new `WatchError::ShareExhausted`
+> (`17f7fc5`) lets the notice give the advice that actually applies — raising
+> `fs.inotify.max_user_watches` lifts one and not the other; the degraded notice mis-attributed its
+> cause the same way. **Structure:** the `WatchScanner` port moved from `filewatch`, which drives
+> none of it, to `watchset`, and `git/watched.rs` → `routing.rs` (`5f6375d`); `Watches` → `Routes`,
+> the type having held no watches since the watch-set collapse (`8b0cfcb`). The sampler flake
+> recorded below is **fixed** (`0874ef0`). The new refusal reason's wire form is pinned beside every
+> other one in `events_tests.rs`.
+>
 > **Measured (T7).** Watches via `grep -h '^inotify wd:' /proc/$pid/fdinfo/*`, instances via
 > `find /proc/$pid/fd -lname 'anon_inode:inotify'`; pids cross-checked against the HTTP runtime file
 > (installed :24678, dev :24679). Installed build **57,596 watches / 8 instances**; this branch
@@ -53,9 +71,15 @@
 > old). Not identified — the repo was under concurrent edit, so inode cross-referencing is not
 > trustworthy evidence. **Unknown.**
 >
-> **Not measured:** the degraded-notice text (Wayland blocks `wmctrl`/`xdotool` window addressing; a
-> full-desktop screenshot was declined for privacy; the HTTP API exposes no watch-limit state — it is
-> UI-only over the Tauri event bus); `just bundle-size`; a clean `main` binary diff. The "after" watch
+> **Not measured — five T7 steps are UNPERFORMED, not deferred with a plan.** Namely:
+> **three-project simultaneity**; the **close/reopen leak cycle on a real machine** (covered only at
+> the fake level, in `crates/core`); the **by-hand `mkdir` race**; **`just soak`**; and the
+> **degraded/refused notice text**. The first four need a host whose inotify budget is not already
+> consumed by the installed build — **this machine's is**, which is the condition the branch exists
+> to remove. The notice text is blocked separately: Wayland blocks `wmctrl`/`xdotool` window
+> addressing so the window cannot be driven, a full-desktop screenshot was declined for privacy, and
+> the HTTP API exposes no watch-limit state (it is UI-only over the Tauri event bus). Also
+> unmeasured: `just bundle-size`; a clean `main` binary diff. The "after" watch
 > figure is a **debug** build. Stock `just dev-alongside` could not start — Vite's `beforeDevCommand`
 > dies with `ENOSPC` because the installed build holds the budget; run with `CHOKIDAR_USEPOLLING=true`
 > and `--no-watch`, which move unrelated tooling watchers off inotify without touching the subsystem
@@ -108,6 +132,18 @@
 > `crates/app/src`** (grepped, confirmed absent), so those warnings produce zero output. Not reported,
 > not logged, not countable — in a subsystem whose signature failure mode is silence. **Open follow-up.**
 > Also open: `Registered.paths` is a `HashSet<PathBuf>`, erasing the priority order `plan()` builds.
+>
+> **Next session should start with:** committing this working tree — the `share_exhausted` wire pin
+> in `crates/core/src/events_tests.rs` and this ledger update are both unstaged, and the review pass
+> above is committed without them. Then, on a host whose inotify budget is free, perform the five T7
+> steps listed above under "Not measured": `just soak` and the real-machine close/reopen leak cycle
+> first (they need only a free budget), then three-project simultaneity and the by-hand `mkdir` race,
+> and last the degraded/refused notice text, which additionally needs a session where the window can
+> be driven (not Wayland). They are the only thing between this branch and `Verified` and none has
+> been attempted, so **whether PR #198 leaves draft before they are done is the owner's call, not a
+> next session's default.** The review pass's implementation follow-ups are in the Decisions entry
+> below; `absorb_appeared` scanning with repository ignores honoured is the one that is a live
+> behaviour gap rather than a cost or a placement question.
 
 > **LATEST (2026-08-28): DSA AUDIT SLICE 9 — CODE REVIEW FIX PASS — six Standards findings and one
 > Spec-axis bug fixed, `just lint` exit 0, `just test` exit 0, `Done — pending verify`, UNCOMMITTED.**
@@ -3795,6 +3831,98 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Bounded file watching — the review-fix pass (2026-08-28) — `Done — pending verify`
+
+A two-axis code review (Standards + Spec, parallel sub-agents) ran against
+`fix/bounded-project-file-watching` and every finding it raised was implemented — eight commits on
+top of `e50f0dc`, plus the wire pin below. The branch stays `Done — pending verify`: nothing in this
+pass touches the T7 verification steps, which remain unperformed.
+
+- **The watch budget had neither enforcement nor reclaim** (`dd82208`). `register` spent against the
+  share without ever checking it; nothing released what a shrunk plan no longer wanted, so a project
+  that narrowed its watches kept paying for the old ones; and `absorb_appeared`'s `.max(1)` granted a
+  watch past the share on every appearing directory. Two smaller faults in the same area: a
+  degradation never cleared on a *widening* share, because the replan trigger was monotone toward
+  degradation and could only ever tighten; and the scan ceiling counted **files** where the share
+  counts **directories**, so the two bounds were denominated differently.
+- **A prefix-less restart glob stopped watching what the recursive root watch used to cover**
+  (`b15e466`). `**/*.json` has no literal prefix, so the plan derived no directory from it and the
+  gitignored directories the old `RecursiveMode::Recursive` root watch reached went unwatched — a
+  regression introduced by the bounded plan itself. Prefix scans are now fitted one at a time, named
+  prefixes before the whole-root fallback, so a named prefix is not starved by the fallback.
+- **A refused watch said the wrong thing** (`e94f19a`, then `17f7fc5`). `WatchError::BudgetExhausted`
+  announced that *the system's* file-watch limit was exhausted in cases where Soloist's own share had
+  refused the registration before the OS was ever asked. The distinction is the whole of the user's
+  next action — raising `fs.inotify.max_user_watches` lifts one and does nothing for the other — so a
+  `ShareExhausted` variant now carries that case, and the degraded notice, which mis-attributed its
+  cause the same way, was corrected with it.
+- **The sampler test waited on the wrong clock** (`0874ef0`). `the_sampler_restarts_itself_after_a_panic`
+  budgeted 3,200 cooperative `yield_now()` calls for an effect that crosses `run_blocking` onto the
+  blocking thread pool — a budget that can exhaust in a fraction of a second of wall clock, so the
+  test failed on time rather than on outcome. It now drives a wall-clock-bounded loop. This closes the
+  flake the previous entry below recorded as an open follow-up.
+- **Two names and one placement corrected** (`8b0cfcb`, `5f6375d`). `Watches` → `Routes`: the type has
+  held no watches since the watch-set collapse, and the name was describing its history rather than
+  its contents. The `WatchScanner` port moved from `filewatch`, which drives none of it, to
+  `watchset`, which does; `git/watched.rs` became `routing.rs` to match its type.
+- **The new refusal reason's wire form is pinned.** Every other `WatchError` variant is asserted
+  byte-for-byte in `crates/core/src/events_tests.rs`, since the TypeScript union in `domain.ts` is a
+  hand-kept mirror across an IPC boundary and nothing else compares the two spellings.
+  `share_exhausted` is now pinned beside them. Proved able to fail first, by asserting the wrong tag
+  (`shareExhausted`) and watching it redden before correcting it.
+
+**Decision — the newly-visible `Restarts: Degraded` is announced, not suppressed (owner-decided,
+2026-08-28).** With the budget actually enforced, a project carrying a prefix-less
+`restart_when_changed` glob on a large repository now displays `Restarts: Degraded` where the same
+shortfall was previously silent. Coverage is unchanged by this; what changed is that the user is told
+about it. The owner decided to announce it rather than suppress the notice.
+
+**Gates, all run this session against this working tree.**
+
+- `cargo test --workspace --locked --no-fail-fast` → **2,073 passed / 1 failed / 3 ignored across 55
+  binaries**. The one failure is the known `SHELL`-sensitive `crates/pty` flake recorded in the entry
+  below; it passes on an isolated re-run under `SHELL=/bin/bash`, and `crates/pty` is untouched on
+  this branch. This is the CI gate (`.github/workflows/ci.yml:50`) — the narrow runs that follow are
+  detail, not evidence of a green branch.
+- `cargo test -p soloist-core --lib` → 1,282 passed. `cargo test -p soloist-sys` → 42 passed (11
+  suites). `pnpm vitest run` under Node 22 → **1,317 tests / 176 files passed**.
+- `cargo clippy --workspace --all-targets -- -D warnings` → no issues. `cargo fmt --all -- --check` →
+  clean.
+- `scripts/check-core-deps.sh` → core framework-free. `scripts/check-core-cycles.sh` → **183 module
+  edges, no cycles**. Reported as 182 before this pass; not re-measured against the parent, so only
+  the 183 is evidence. The added edge is `composition → watchset`, from the scanner-port move.
+
+**Open follow-ups — found during implementation and deliberately not fixed here.**
+
+- **`absorb_appeared` still scans with repository ignores honoured**, so a gitignored directory
+  *created at runtime* goes unwatched until the next full replan (`ProjectOpened`, `ConfigChanged`, or
+  a dropped-change rescan). `b15e466` closed the startup and replan paths; it did not close this one.
+  A behaviour gap, not a missing test.
+- **No test proves a restart actually fires for a gitignored prefix.** Both guards use `dist`, which
+  `DEFAULT_IGNORES` rejects regardless — pre-existing, and it stands directly against what `b15e466`
+  is recorded above as fixing.
+- **Two full root walks per replan** for a project with a prefix-less glob — one honouring ignores,
+  one with them disabled. Bounded by the scan ceiling and edge-triggered: a cost, not a correctness
+  problem.
+- **`supervision::INITIAL_BACKOFF` is private**, so `crates/core/src/watchset/set_tests.rs` hardcodes
+  `200ms` to stand in for it — a magic number standing where a constant exists three modules away.
+  Clean fix is `pub(crate)`; not taken here. The sampler tests deliberately avoided copying the wart.
+- **A `Debouncers<K>` extraction was skipped on placement grounds.** Six copies of the same entry
+  dance, three `next_due` folds and three `retain` blocks across `filewatch/reactor.rs`,
+  `git/watch.rs` and `projects/config_watch.rs`; the correct home is `crate::debounce`. A full design
+  exists; what is unresolved is placement, not risk.
+- **`crates/core/src/filewatch/watcher.rs` sits in the same misplacement `scan.rs` was in** before
+  `5f6375d`. The move is clean but the diff is larger; awaiting triage.
+- **`Registered.paths` is a `HashSet<PathBuf>`**, erasing the priority order `plan()` builds
+  (pre-existing); **the startup window widened to ~300ms and is edge-triggered**; and **a partial
+  watch failure is still invisible** — re-checked this session, `watchset/reconcile.rs` still
+  escalates only the project root's refusal, every other per-path failure emits a `tracing::warn!`,
+  and no `tracing_subscriber` is initialized anywhere in `crates/app/src`. All three are carried
+  forward from the Current state entry, untouched by this pass.
+
+**Still UNPERFORMED — the five T7 verification steps**, unchanged by this pass and listed with their
+blockers in the Current state entry under "Not measured".
+
 ### Bounded project file watching + the working-agent name sweep (2026-08-28) — `Done — pending verify`
 
 Two threads. **PR #197** (`feat/shadcn-adoption-and-working-shimmer`) closed out and green in CI;
@@ -3822,13 +3950,16 @@ Two threads. **PR #197** (`feat/shadcn-adoption-and-working-shimmer`) closed out
   enclosing box the highlight fills — and against the row cell, so a clipped name is held to the width
   it is clipped to. Mutation-verified at overrun 74px against a 1px tolerance. `prefers-reduced-motion`
   probed under CI's exact Xvfb flags: no preference, so the test is meaningful there rather than inert.
-- **Watch rework** — see the Current state entry above for the measurements and the seven commits.
+- **Watch rework** — see the Current state entry above for the measurements and the commit list.
 
 **Two defects found by refusing to write a test.** `releasing_a_project_forgets_its_refusal`
 originally asserted `refusal.is_none()`, which passes whether `release` clears the whole record or
 only the handles; strengthened to ask-counts and proved red against a no-op `release`.
-`a_dropped_change_arms_a_full_rescan` could not be written at all, because the self-heal does not
-heal — proved empirically (`root_scans_before=1 root_scans_after=1`) rather than argued.
+`a_dropped_change_arms_a_full_rescan` could not be written at all against the code as it then
+stood, because the self-heal did not heal — proved empirically (`root_scans_before=1
+root_scans_after=1`) rather than argued. **Since fixed:** `8af356d` re-derives a project's watches
+when a change is dropped, and that test is now written and green in
+`crates/core/src/watchset/set_tests.rs`.
 
 **Tooling defect worth carrying forward.** `scripts/check-core-cycles.sh` and `check-file-size.sh`
 build their file lists from `git ls-files`, so **untracked files are silently skipped** and a task
@@ -3836,12 +3967,15 @@ landing new files gets a confident green that examined a subset — a run report
 omitting an entire new module; staged, the real number is 184. Run these gates *after* `git add`.
 
 **Known-flaky, pre-existing, not introduced here.** `crates/pty`'s
-`create_terminal_runs_an_interactive_shell_in_the_project_dir`; and
-`metrics::sampler::tests::the_sampler_restarts_itself_after_a_panic`, whose cause is now diagnosed:
-`sampler_tests.rs:99` waits with a **yield-count budget** (3,200 `yield_now()` calls) for an effect
-that crosses `run_blocking` onto the **blocking thread pool**, which cooperative yields have no
-relationship to. It fails on time, never on outcome. **Open follow-up** — and the reason every new
-test in this work waits via `testing::wait::bounded` on the real signal instead.
+`create_terminal_runs_an_interactive_shell_in_the_project_dir` — **still flaky**, `crates/pty`
+untouched on this branch, and reproduced again this session (fails under `/usr/bin/zsh`, passes
+isolated under `SHELL=/bin/bash`). The other half of the pair,
+`metrics::sampler::tests::the_sampler_restarts_itself_after_a_panic`, was diagnosed here and **has
+since been fixed** (`0874ef0`): it waited with a **yield-count budget** (3,200 `yield_now()` calls)
+for an effect that crosses `run_blocking` onto the **blocking thread pool**, which cooperative
+yields have no relationship to, so it failed on time and never on outcome — and the budget could
+exhaust in a fraction of a second of wall clock. It now drives a wall-clock-bounded loop, the same
+discipline every new test in this work follows via `testing::wait::bounded`.
 
 ### DSA audit — Slice 4: the "one invariant, one site forgot" trio (2026-08-23) — `Done — pending verify`
 Work items S08-F2, S11-F1, S12-F2, from the DSA codebase audit held in the Soloist MCP scratchpads
