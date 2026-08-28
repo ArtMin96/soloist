@@ -101,20 +101,29 @@ export const sidebar = {
       ) => {
         const tree = document.querySelector(nav);
         if (!tree) return [];
-        return [...tree.querySelectorAll(row)].map((node) => ({
-          label:
-            (
-              node.querySelector(label) as HTMLElement | null
-            )?.innerText.trim() ?? "",
-          status:
-            node.querySelector(status)?.getAttribute("data-status") ?? null,
-          hasActivity: node.querySelector(activity) !== null,
-          selected: node.getAttribute("aria-selected") === "true",
-          // textContent rather than innerText: the read-out hides under the controls while the
-          // row is selected or hovered, and a hidden element's innerText reads empty.
-          meta: node.querySelector(meta)?.textContent ?? null,
-          unread: node.querySelector(marker) !== null,
-        }));
+        return [...tree.querySelectorAll(row)].map((node) => {
+          // A working agent's name is painted twice — a solid base and a copy the travelling
+          // highlight sweeps over, hidden from the accessibility tree — so the name is read from
+          // a clone with the hidden copies taken out. Reading the label whole reports the name
+          // twice, and the row is then lost to every lookup by the name the user reads.
+          const name = node.querySelector(label)?.cloneNode(true) as
+            | HTMLElement
+            | undefined;
+          name?.querySelectorAll("[aria-hidden]").forEach((copy) => {
+            copy.remove();
+          });
+          return {
+            label: name?.textContent?.trim() ?? "",
+            status:
+              node.querySelector(status)?.getAttribute("data-status") ?? null,
+            hasActivity: node.querySelector(activity) !== null,
+            selected: node.getAttribute("aria-selected") === "true",
+            // textContent rather than innerText: the read-out hides under the controls while the
+            // row is selected or hovered, and a hidden element's innerText reads empty.
+            meta: node.querySelector(meta)?.textContent ?? null,
+            unread: node.querySelector(marker) !== null,
+          };
+        });
       },
       NAV,
       ROW,
@@ -443,10 +452,15 @@ export const sidebar = {
    * The row element itself, found by the text of its label span. The controls a spec clicks are
    * revealed for the selected row, so callers `select` before reaching for one; a control is
    * waited on until clickable, which is when the reveal has landed.
+   *
+   * The name is matched wherever it sits under the row rather than as a direct child: the label
+   * carries its own box for the working-agent sweep, so the text is nested below the label span
+   * rather than directly inside it. The sweep's hidden copy of the name is excluded, so the row
+   * stays addressed by the name the user actually reads.
    */
   rowElement(label: string) {
     return $(NAV).$(
-      `.//*[@role="treeitem"][./span[normalize-space(text())="${label}"]]`,
+      `.//*[@role="treeitem"][.//span[not(@aria-hidden)][normalize-space(text())="${label}"]]`,
     );
   },
 
