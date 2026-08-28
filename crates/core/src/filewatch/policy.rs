@@ -18,27 +18,40 @@ use crate::ids::ProcessId;
 /// `node_modules/`) and would otherwise cause restart storms.
 pub(crate) const DEFAULT_IGNORES: [&str; 5] = [".git", "node_modules", "target", "dist", ".venv"];
 
-/// The directory a glob is anchored at: its leading components up to the first that carries a
-/// glob metacharacter (`*`, `?`, `[`, `{`), excluding the pattern's final component (the file
-/// position, never a directory to watch). `None` for a pattern with nothing before that —
-/// anchored at the root itself, or its very first component is already a metacharacter.
+/// The characters that make a glob component match more than the name it spells, and so name no
+/// directory a scan could be anchored at.
+const METACHARACTERS: [char; 4] = ['*', '?', '[', '{'];
+
+/// The directory a glob's matches have to be watched at, relative to the project root, or `None`
+/// when the root on its own already covers the pattern.
 ///
-/// Shared with [`crate::watchset`], which scans this directory with the repository's own ignore
-/// rules disabled: a glob names it explicitly, so a gitignored prefix (`dist/config.json`) must
-/// still be watched even though the whole-tree scan would skip `dist`.
+/// The pattern's leading components up to the first that carries a [metacharacter](METACHARACTERS),
+/// excluding its final component (the file position, never a directory to watch). **The empty
+/// path when there is no such leading component**: the pattern's very first component is already
+/// a metacharacter, and `*` matches across separators, so a match can lie at any depth and the
+/// whole root is what has to be covered. `None` only for a single component spelling one literal
+/// name (`solo.yml`) — nothing but a file directly in the root can match that, and the root is
+/// always watched.
+///
+/// Shared with [`crate::watchset`], which scans the returned directory with the repository's own
+/// ignore rules disabled: a glob names it, so a gitignored directory the glob can match — the
+/// prefix of `dist/config.json`, or anything `**/*.json` reaches — must still be watched even
+/// though the whole-tree scan would skip it.
 pub(crate) fn literal_prefix(pattern: &str) -> Option<PathBuf> {
     let components: Vec<&str> = pattern.split('/').collect();
     let mut literal = Vec::new();
     for component in components.iter().take(components.len().saturating_sub(1)) {
-        if component.contains(['*', '?', '[', '{']) {
+        if component.contains(METACHARACTERS) {
             break;
         }
         literal.push(*component);
     }
-    if literal.is_empty() {
-        None
-    } else {
-        Some(literal.into_iter().collect())
+    if !literal.is_empty() {
+        return Some(literal.into_iter().collect());
+    }
+    match components.as_slice() {
+        [only] if !only.contains(METACHARACTERS) => None,
+        _ => Some(PathBuf::new()),
     }
 }
 

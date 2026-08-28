@@ -4,7 +4,7 @@
 //! No clock, no I/O: this is handed [`Scan`]s a caller already ran off the runtime, so it is
 //! exhaustively unit-testable on its own, the same shape as [`crate::filewatch::policy`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::filewatch::Scan;
@@ -33,16 +33,16 @@ pub(crate) struct ProjectPlan {
 /// `globs` decides whether the project has anything to ask [`WatchPurpose::Restarts`] for at
 /// all: with none, `prefixes` is never read and no `Restarts` entry is ever produced, matching
 /// what a caller with no watch-eligible commands would pass. `prefixes` holds one [`Scan`] per
-/// distinct glob literal prefix (`crate::filewatch::literal_prefix`), scanned with the
-/// repository's own ignore rules disabled — a gitignored prefix a glob names explicitly is
-/// still watched. `tree` is the repository-ignore-honouring scan of the whole root.
+/// distinct directory the globs ask to have watched (`crate::filewatch::literal_prefix`), each
+/// scanned with the repository's own ignore rules disabled — a gitignored directory stays
+/// watched whether a glob names it or merely reaches it. `tree` is the repository-ignore-
+/// honouring scan of the whole root.
 ///
-/// Fitting is sequential and independent per purpose: the prefixes are tried against `share`
-/// first, and only what they leave is offered to the tree scan — so a project whose tree does
-/// not fit degrades only [`WatchPurpose::GitStatus`], while one whose *prefixes* do not fit
-/// degrades [`WatchPurpose::Restarts`] too, and leaves less room for the tree besides. A
-/// truncated scan is dropped outright regardless of how many paths it did report: half a tree
-/// is a watch set that lies about coverage.
+/// Each purpose is degraded only by what it asked for and did not get: a project whose tree does
+/// not fit degrades [`WatchPurpose::GitStatus`] alone, while one that could not have every
+/// prefix degrades [`WatchPurpose::Restarts`] too, and leaves less room for the tree besides.
+/// `prefixes` is fitted in the order given — [`Fitting`] states the rule — so the caller passes
+/// them in the order the project can least afford to lose them.
 pub(crate) fn plan(
     root: &Path,
     globs: &[String],
@@ -51,49 +51,86 @@ pub(crate) fn plan(
     share: usize,
 ) -> ProjectPlan {
     let state_dir = root.join(STATE_DIR);
-    let refs_dir = state_dir.join(REFS_DIR);
-    // The always-watched paths a scan may report on its own (the root, or a prefix that
-    // happens to coincide with it), so they are never counted, or registered, twice.
-    let held: [PathBuf; 2] = [root.to_path_buf(), state_dir.clone()];
-    let mut directories = held.to_vec();
-    let trees = vec![refs_dir];
+    let trees = vec![state_dir.join(REFS_DIR)];
+    let mut fitting = Fitting::new(share, vec![root.to_path_buf(), state_dir], trees.len());
     let mut limit = HashMap::new();
-    let mut spent = directories.len() + trees.len();
 
     if !globs.is_empty() {
-        let found = directories_of(prefixes, &held);
-        let truncated = prefixes.iter().any(|scan| scan.truncated);
-        if !truncated && spent + found.len() <= share {
-            spent += found.len();
-            directories.extend(found);
-        } else {
+        let mut every_prefix = true;
+        for prefix in prefixes {
+            every_prefix &= fitting.fit(prefix);
+        }
+        if !every_prefix {
             limit.insert(WatchPurpose::Restarts, WatchLimit::Degraded);
         }
     }
-
-    let found = directories_of(std::slice::from_ref(tree), &held);
-    if !tree.truncated && spent + found.len() <= share {
-        directories.extend(found);
-    } else {
+    if !fitting.fit(tree) {
         limit.insert(WatchPurpose::GitStatus, WatchLimit::Degraded);
     }
 
     ProjectPlan {
         trees,
-        directories,
+        directories: fitting.directories,
         limit,
     }
 }
 
-/// Every directory a set of scans found, minus the always-watched paths a scan may report on
-/// its own (the root, or a prefix that happens to coincide with it).
-fn directories_of(scans: &[Scan], exclude: &[PathBuf; 2]) -> Vec<PathBuf> {
-    scans
-        .iter()
-        .flat_map(|scan| scan.paths.iter())
-        .filter(|found| found.directory && !exclude.contains(&found.path))
-        .map(|found| found.path.clone())
-        .collect()
+/// The registration set being assembled: what it holds, and how much of the share that has
+/// spent.
+///
+/// The fitting rule, stated once. Scans are offered one at a time, in the order the project can
+/// least afford to lose them: the directories each glob names, then the whole-root scan a
+/// prefix-less glob asks for, then the speculative tree. A scan is taken whole or not at all, so
+/// one too large for what is left costs only itself and the scans after it. A directory an
+/// earlier scan already took is neither registered nor charged again. A truncated scan is dropped
+/// individually, however many paths it did report, because half a walk is a watch set that lies
+/// about its coverage.
+struct Fitting {
+    share: usize,
+    spent: usize,
+    taken: HashSet<PathBuf>,
+    directories: Vec<PathBuf>,
+}
+
+impl Fitting {
+    /// A fitting holding the paths a project is watched at regardless — its root and its
+    /// repository state directory — with `trees` subtree registrations already charged against
+    /// the share alongside them.
+    fn new(share: usize, always: Vec<PathBuf>, trees: usize) -> Self {
+        Self {
+            share,
+            spent: always.len() + trees,
+            taken: always.iter().cloned().collect(),
+            directories: always,
+        }
+    }
+
+    /// Takes every directory `scan` found that is not held already, if all of it fits in what is
+    /// left of the share, and reports whether it was taken.
+    fn fit(&mut self, scan: &Scan) -> bool {
+        if scan.truncated {
+            return false;
+        }
+        let mut found: Vec<PathBuf> = Vec::new();
+        let mut adding: HashSet<&Path> = HashSet::new();
+        for path in scan
+            .paths
+            .iter()
+            .filter(|scanned| scanned.directory)
+            .map(|scanned| scanned.path.as_path())
+        {
+            if !self.taken.contains(path) && adding.insert(path) {
+                found.push(path.to_path_buf());
+            }
+        }
+        if self.spent + found.len() > self.share {
+            return false;
+        }
+        self.spent += found.len();
+        self.taken.extend(found.iter().cloned());
+        self.directories.extend(found);
+        true
+    }
 }
 
 #[cfg(test)]

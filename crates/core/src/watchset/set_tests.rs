@@ -21,13 +21,14 @@ use crate::composition::CorePorts;
 use crate::config::ProcessSpec;
 use crate::configchange::ConfigSync;
 use crate::events::{DomainEvent, EventBus};
-use crate::filewatch::FileChangeKind;
+use crate::filewatch::{FileChangeKind, Scan, WatchReactor};
 use crate::ids::{ProcessId, ProjectId};
-use crate::ports::ProjectRepo;
+use crate::ports::{ProjectRepo, TrustRepo};
+use crate::process::ProcStatus;
 use crate::supervisor::{Registration, Supervisor};
 use crate::testing::{
-    next_matching, FakeFileWatcher, FakeProjectRepo, FakeSpawner, FakeTrustRepo, FakeWatchScanner,
-    MockClock,
+    next_matching, wait_all, FakeFileWatcher, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
+    FakeWatchScanner, MockClock,
 };
 use crate::watch::{WatchError, WatchLimit, WatchPurpose};
 
@@ -42,6 +43,20 @@ const SMALL_CAPACITY: usize = 64;
 /// How far past a deadline a test advances the clock, so the deadline fires rather than the
 /// advance landing exactly on it.
 const PAST_THE_DEADLINE: Duration = Duration::from_millis(100);
+
+/// How far [`expect_file_restart`] advances the clock per attempt. The restart reactor's quiet
+/// window belongs to its own module and is not visible here, so this is a step generous enough to
+/// clear any plausible one rather than a value pinned to it.
+const RESTART_ADVANCE: Duration = Duration::from_secs(1);
+
+/// How many advances [`expect_file_restart`] makes before failing. The reactor is woken from
+/// another task, so an advance can land before it has armed the window the change opened, and the
+/// next one then clears it.
+const RESTART_ATTEMPTS: usize = 20;
+
+/// How long [`expect_file_restart`] lets real time pass after each advance, so the reactor — woken
+/// on another task — gets a real opportunity to act on it.
+const SETTLE: Duration = Duration::from_millis(20);
 
 fn root() -> PathBuf {
     PathBuf::from(ROOT)
@@ -69,6 +84,7 @@ struct Setup {
     projects: Arc<Projects>,
     sup: Arc<Supervisor>,
     status: Arc<WatchStatus>,
+    trust: Arc<FakeTrustRepo>,
 }
 
 fn setup() -> Setup {
@@ -76,11 +92,12 @@ fn setup() -> Setup {
     let rx = bus.subscribe();
     let clock = MockClock::new();
     let repo = Arc::new(FakeProjectRepo::new());
+    let trust = Arc::new(FakeTrustRepo::new());
     let projects = Arc::new(Projects::new(repo.clone()));
     let ports = CorePorts::builder(
         Arc::new(FakeSpawner::exits_on_kill()),
         Arc::new(clock.clone()),
-        Arc::new(FakeTrustRepo::new()),
+        trust.clone(),
         repo.clone(),
     )
     .build();
@@ -95,14 +112,15 @@ fn setup() -> Setup {
         repo,
         projects,
         sup,
+        trust,
     }
 }
 
-fn watch_set(s: &Setup) -> ProjectWatchSet {
+fn watch_set(s: &Setup, scanner: Arc<dyn WatchScanner>) -> ProjectWatchSet {
     ProjectWatchSet::new(
         Arc::new(s.clock.clone()),
         s.watcher.clone(),
-        s.scanner.clone(),
+        scanner,
         &s.bus,
         s.projects.clone(),
         Arc::downgrade(&s.sup),
@@ -110,13 +128,50 @@ fn watch_set(s: &Setup) -> ProjectWatchSet {
     )
 }
 
-/// Builds the set and spawns it, returning the handle a test subscribes from — a fresh
-/// `watch_set(s)` call would open an unrelated fan-out, so the spawned and subscribed instances
-/// must be the same value (clones of it, sharing the same broadcast channel).
+/// Builds the set over the setup's own scanner and spawns it.
 fn spawn_set(s: &Setup) -> ProjectWatchSet {
-    let ws = watch_set(s);
+    spawn_set_with(s, s.scanner.clone())
+}
+
+/// Builds the set over `scanner` and spawns it, returning the handle a test subscribes from — a
+/// fresh `watch_set` call would open an unrelated fan-out, so the spawned and subscribed instances
+/// must be the same value (clones of it, sharing the same broadcast channel).
+fn spawn_set_with(s: &Setup, scanner: Arc<dyn WatchScanner>) -> ProjectWatchSet {
+    let ws = watch_set(s, scanner);
     tokio::spawn(ws.clone().run());
     ws
+}
+
+/// Spawns the restart reactor over the set's fan-out, so a test can assert on the restart a
+/// registered directory's change actually produces rather than on the registration alone.
+fn spawn_reactor(s: &Setup, changes: broadcast::Receiver<PathBuf>) {
+    tokio::spawn(
+        WatchReactor::new(
+            Arc::new(s.clock.clone()),
+            changes,
+            &s.bus,
+            Arc::downgrade(&s.sup),
+        )
+        .run(),
+    );
+}
+
+/// Answers a repository-ignore-honouring scan and an ignore-disabled scan of the *same* root
+/// differently — what a real repository does for a gitignored directory, and what the shared
+/// [`FakeWatchScanner`] cannot express on its own because it answers per root.
+struct IgnoreAwareScanner {
+    honouring: Arc<FakeWatchScanner>,
+    disabled: Arc<FakeWatchScanner>,
+}
+
+impl WatchScanner for IgnoreAwareScanner {
+    fn scan(&self, request: ScanRequest) -> Scan {
+        if request.honour_repository_ignores {
+            self.honouring.scan(request)
+        } else {
+            self.disabled.scan(request)
+        }
+    }
 }
 
 fn watched_spec(globs: &[&str]) -> ProcessSpec {
@@ -137,6 +192,42 @@ fn register_command(s: &Setup, project: ProjectId, name: &str, globs: &[&str]) -
         name,
         &watched_spec(globs),
     ))
+}
+
+/// Registers a watch-eligible command, trusts it, starts it and awaits its `Running` transition
+/// — a file-watch restart fires only for a live, trusted command.
+async fn running_command(
+    s: &mut Setup,
+    project: ProjectId,
+    name: &str,
+    globs: &[&str],
+) -> ProcessId {
+    let id = register_command(s, project, name, globs);
+    let spec = watched_spec(globs);
+    s.trust
+        .set_trusted(project, &spec.variant_hash(), &spec.command)
+        .expect("trust");
+    s.sup.start(id).expect("start");
+    wait_all(&mut s.rx, &[id], ProcStatus::Running).await;
+    id
+}
+
+/// Fires the restart reactor's debounce and asserts the restart it produces is `expected`.
+/// Bounded in both directions: a generous advance per attempt and a fixed number of them, so a
+/// change that never restarts anything fails loudly instead of hanging.
+async fn expect_file_restart(s: &mut Setup, expected: ProcessId) {
+    for _ in 0..RESTART_ATTEMPTS {
+        s.clock.advance(RESTART_ADVANCE);
+        tokio::time::sleep(SETTLE).await;
+        while let Ok(event) = s.rx.try_recv() {
+            let DomainEvent::FileRestart { id } = event else {
+                continue;
+            };
+            assert_eq!(id, expected, "a different command restarted");
+            return;
+        }
+    }
+    panic!("the watched change never restarted the command");
 }
 
 fn seed_scan(scanner: &FakeWatchScanner, scan_root: PathBuf, entries: &[(PathBuf, bool)]) {
@@ -538,6 +629,97 @@ async fn a_gitignored_glob_prefix_is_scanned_with_repository_ignores_disabled() 
         .find(|request| request.root == under("dist"))
         .expect("a scan of dist was requested");
     assert!(!request.honour_repository_ignores);
+}
+
+#[tokio::test]
+async fn a_gitignored_directory_a_glob_names_still_restarts_its_command() {
+    let mut s = setup();
+    let project = s.repo.upsert(&root(), None, None).expect("seed").id;
+    let build = running_command(&mut s, project, "Build", &["generated/config.json"]).await;
+    // The repository ignores `generated`, so the whole-tree scan does not report it...
+    seed_scan(&s.scanner, root(), &[(under("src"), true)]);
+    // ...but the glob names it, and the scan serving that glob runs with those ignores disabled.
+    let disabled = Arc::new(FakeWatchScanner::new());
+    seed_scan(&disabled, under("generated"), &[(under("generated"), true)]);
+    let ws = spawn_set_with(
+        &s,
+        Arc::new(IgnoreAwareScanner {
+            honouring: s.scanner.clone(),
+            disabled,
+        }),
+    );
+    spawn_reactor(&s, ws.subscribe());
+    wait_until(
+        "the gitignored directory the glob names is registered",
+        || s.watcher.registered().contains(&under("generated")),
+    )
+    .await;
+
+    s.watcher
+        .change_of(under("generated/config.json"), FileChangeKind::Modified);
+
+    expect_file_restart(&mut s, build).await;
+}
+
+#[tokio::test]
+async fn a_gitignored_directory_a_prefixless_glob_matches_still_restarts_its_command() {
+    let mut s = setup();
+    let project = s.repo.upsert(&root(), None, None).expect("seed").id;
+    let build = running_command(&mut s, project, "Build", &["**/*.json"]).await;
+    // As above, `generated` is gitignored and absent from the whole-tree scan. This glob names no
+    // directory at all, so what it asks to have scanned with the ignores disabled is the root.
+    seed_scan(&s.scanner, root(), &[(under("src"), true)]);
+    let disabled = Arc::new(FakeWatchScanner::new());
+    seed_scan(&disabled, root(), &[(under("generated"), true)]);
+    let ws = spawn_set_with(
+        &s,
+        Arc::new(IgnoreAwareScanner {
+            honouring: s.scanner.clone(),
+            disabled,
+        }),
+    );
+    spawn_reactor(&s, ws.subscribe());
+    wait_until(
+        "a gitignored directory the prefix-less glob can match is registered",
+        || s.watcher.registered().contains(&under("generated")),
+    )
+    .await;
+
+    s.watcher
+        .change_of(under("generated/config.json"), FileChangeKind::Modified);
+
+    expect_file_restart(&mut s, build).await;
+}
+
+#[tokio::test]
+async fn a_named_glob_prefix_is_watched_before_a_prefixless_globs_whole_root() {
+    let mut s = setup();
+    s.watcher = Arc::new(FakeFileWatcher::new().with_capacity(SMALL_CAPACITY));
+    let project = s.repo.upsert(&root(), None, None).expect("seed").id;
+    register_command(&s, project, "Build", &["assets/config.json", "**/*.json"]);
+    let disabled = Arc::new(FakeWatchScanner::new());
+    // One cheap directory for the glob that names one...
+    seed_scan(&disabled, under("assets"), &[(under("assets"), true)]);
+    // ...and, for the glob that names none, a whole root that fits the share of 32 on its own
+    // (with the root, the state directory and the refs tree) but leaves nothing over. Only the
+    // order decides which of the two is watched.
+    seed_scan(&disabled, root(), &many_directories(29));
+    spawn_set_with(
+        &s,
+        Arc::new(IgnoreAwareScanner {
+            honouring: s.scanner.clone(),
+            disabled,
+        }),
+    );
+
+    wait_until("the directory the glob names is registered", || {
+        s.watcher.registered().contains(&under("assets"))
+    })
+    .await;
+    assert!(
+        !s.watcher.registered().contains(&under("d0")),
+        "the whole-root scan did not fit and must not have been registered",
+    );
 }
 
 #[tokio::test]

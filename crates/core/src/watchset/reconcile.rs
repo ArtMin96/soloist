@@ -206,18 +206,12 @@ impl ProjectWatchSet {
         by_project
     }
 
-    /// Scans `root`'s whole tree and each distinct glob literal prefix off the runtime, then
-    /// hands the results to the pure [`plan`]. One [`run_blocking`] closure covers every scan
-    /// this project needs, so the registrations [`Self::resync`] then applies for it happen as
-    /// one uninterrupted batch against a single, consistent read of the filesystem.
+    /// Scans `root`'s whole tree and everything its globs ask for off the runtime, then hands the
+    /// results to the pure [`plan`]. One [`run_blocking`] closure covers every scan this project
+    /// needs, so the registrations [`Self::resync`] then applies for it happen as one
+    /// uninterrupted batch against a single, consistent read of the filesystem.
     async fn replan(&self, root: &Path, globs: &[String], share: usize) -> ProjectPlan {
-        let prefixes: Vec<PathBuf> = globs
-            .iter()
-            .filter_map(|glob| literal_prefix(glob))
-            .map(|prefix| root.join(prefix))
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
+        let prefixes = prefix_requests(root, globs, share);
         let scanner = self.scanner.clone();
         let scan_root = root.to_path_buf();
         let (tree, prefix_scans) = run_blocking(move || {
@@ -229,14 +223,7 @@ impl ProjectWatchSet {
             });
             let prefix_scans: Vec<Scan> = prefixes
                 .into_iter()
-                .map(|prefix| {
-                    scanner.scan(ScanRequest {
-                        root: prefix,
-                        ignored_names: Vec::new(),
-                        honour_repository_ignores: false,
-                        ceiling: share,
-                    })
-                })
+                .map(|request| scanner.scan(request))
                 .collect();
             (tree, prefix_scans)
         })
@@ -269,4 +256,55 @@ impl ProjectWatchSet {
         self.status
             .resynced(WatchPurpose::Restarts, &restart_outcomes);
     }
+}
+
+/// One scan request per distinct directory `globs` asks to have watched, each with the
+/// repository's own ignore rules disabled — a glob names the directory, so a gitignored one it
+/// can match is still watched even though the whole-tree scan skips it.
+///
+/// A glob whose first component is already a metacharacter names no directory but can still
+/// match at any depth ([`literal_prefix`] reports the empty path for it), so what it asks for is
+/// the whole root. That scan — and only that one — is told to skip the always-ignored directory
+/// names: a change inside one never restarts anything ([`crate::filewatch::is_ignored`]), so
+/// descending into `node_modules` or `target` would spend the project's whole share on
+/// registrations that cannot fire. A glob naming such a directory explicitly is scanned without
+/// that list, since the directory it names is the walk's own root.
+///
+/// Bounded twice over: every walk stops at `ceiling`, and [`plan`] drops a scan that does not fit
+/// the share rather than registering past it.
+///
+/// The whole-root request comes **last**, because [`plan`] fits them in order and this is the one
+/// a project can most afford to lose: a glob naming a directory states a small, specific intent
+/// and is cheap to satisfy, where the whole-root scan is the broad fallback and is large enough to
+/// exhaust the share on its own.
+fn prefix_requests(root: &Path, globs: &[String], ceiling: usize) -> Vec<ScanRequest> {
+    let mut named: HashSet<PathBuf> = HashSet::new();
+    let mut requests = Vec::new();
+    let mut whole_root = None;
+    for glob in globs {
+        let Some(prefix) = literal_prefix(glob) else {
+            continue;
+        };
+        if prefix.as_os_str().is_empty() {
+            whole_root = Some(ScanRequest {
+                root: root.to_path_buf(),
+                ignored_names: ignored_names(),
+                honour_repository_ignores: false,
+                ceiling,
+            });
+            continue;
+        }
+        let scan_root = root.join(prefix);
+        if !named.insert(scan_root.clone()) {
+            continue;
+        }
+        requests.push(ScanRequest {
+            root: scan_root,
+            ignored_names: Vec::new(),
+            honour_repository_ignores: false,
+            ceiling,
+        });
+    }
+    requests.extend(whole_root);
+    requests
 }

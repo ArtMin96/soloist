@@ -85,6 +85,64 @@ fn oversized_prefixes_degrade_both_purposes() {
 }
 
 #[test]
+fn a_directory_both_scans_found_is_counted_once() {
+    // A prefix-less glob's scan covers the whole root, so almost everything the tree scan finds
+    // is already taken. Charging those directories twice would degrade the git rail for a set
+    // that fits.
+    let prefixes = [scan(&["shared"], false)];
+    let tree = scan(&["shared", "src"], false);
+    // root + .git + the refs tree + shared + src = 5, exactly the share.
+    let result = plan(&root(), &globs(), &tree, &prefixes, 5);
+
+    assert!(result.limit.is_empty(), "{:?}", result.limit);
+    assert!(result.directories.contains(&under("shared")));
+    assert!(result.directories.contains(&under("src")));
+    assert_eq!(
+        result
+            .directories
+            .iter()
+            .filter(|path| *path == &under("shared"))
+            .count(),
+        1,
+    );
+}
+
+#[test]
+fn prefix_scans_are_fitted_one_at_a_time_in_the_order_given() {
+    // What `["assets/config.json", "**/*.json"]` produces: the directory one glob names, then the
+    // whole-root scan the prefix-less one asks for. Either fits the share alone; together they do
+    // not. Fitting them as one set would lose both, and fitting them in the other order would keep
+    // the wrong one.
+    let prefixes = [scan(&["assets"], false), scan(&["a"], false)];
+    let tree = scan(&[], false);
+    // root + .git + the refs tree + one more = 4, the whole share.
+    let result = plan(&root(), &globs(), &tree, &prefixes, 4);
+
+    assert_eq!(
+        result.limit.get(&WatchPurpose::Restarts),
+        Some(&WatchLimit::Degraded)
+    );
+    assert!(result.directories.contains(&under("assets")));
+    assert!(!result.directories.contains(&under("a")));
+}
+
+#[test]
+fn a_truncated_scan_does_not_cost_its_siblings_their_directories() {
+    // One glob too broad to walk to the end degrades restarts, but the directory another glob
+    // named explicitly is still watched.
+    let prefixes = [scan(&["assets"], false), scan(&["huge"], true)];
+    let tree = scan(&[], false);
+    let result = plan(&root(), &globs(), &tree, &prefixes, 10);
+
+    assert_eq!(
+        result.limit.get(&WatchPurpose::Restarts),
+        Some(&WatchLimit::Degraded)
+    );
+    assert!(result.directories.contains(&under("assets")));
+    assert!(!result.directories.contains(&under("huge")));
+}
+
+#[test]
 fn a_truncated_scan_degrades_even_when_the_count_would_fit() {
     let tree = scan(&["src"], true);
     let result = plan(&root(), &[], &tree, &[], 100);
