@@ -389,11 +389,19 @@ export interface AppInfo {
 
 // ── Filesystem watches (mirrors core::filewatch and core::watch) ─────────────
 
-// Why the OS would not watch a directory (mirrors core::watch::WatchError). Only
-// `budget_exhausted` has a fix the user can apply, which is why the reason travels rather than a
-// single "not watched" flag. Declared as values with the type derived from them, so a new reason
-// reaches everything that has to answer for one without being restated anywhere.
-export const WATCH_ERRORS = ["budget_exhausted", "unwatchable", "unavailable"] as const;
+// Why a directory is not watched (mirrors core::watch::WatchError). The reason travels rather than
+// a single "not watched" flag because the remedies differ, and two of them are opposite advice:
+// `budget_exhausted` is the machine's own limit, which a setting raises, while `share_exhausted` is
+// the share Soloist keeps to and divides between open projects, which raising that setting frees
+// nothing of.
+// Declared as values with the type derived from them, so a new reason reaches everything that has
+// to answer for one without being restated anywhere.
+export const WATCH_ERRORS = [
+  "budget_exhausted",
+  "share_exhausted",
+  "unwatchable",
+  "unavailable",
+] as const;
 
 export type WatchError = (typeof WATCH_ERRORS)[number];
 

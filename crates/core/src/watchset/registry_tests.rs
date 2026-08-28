@@ -48,12 +48,31 @@ fn a_registration_past_the_whole_budget_is_refused_without_asking_the_os() {
 
     assert_eq!(
         registrations.register(&path(total), project, false, session.as_ref()),
-        Err(WatchError::BudgetExhausted),
+        Err(WatchError::ShareExhausted),
     );
     assert_eq!(
         watcher.registered().len(),
         total,
         "the OS must never be asked for a watch the budget cannot pay for",
+    );
+}
+
+// The two ways a watch is refused for want of budget are different conditions with different
+// remedies, so the one the OS reports and the one Soloist imposes on itself must not arrive as the
+// same error: a share Soloist spent says nothing about how much of the system's limit is left, and
+// only the system's own limit is raised by raising the system's setting.
+#[test]
+fn an_os_refusal_is_reported_apart_from_a_spent_share() {
+    let watcher = FakeFileWatcher::new().with_capacity(CAPACITY);
+    let (session, _changes) = session(&watcher);
+    let mut registrations = Registrations::new(Some(CAPACITY));
+    let project = ProjectId::next();
+    watcher.refuse(path(0));
+
+    assert_eq!(
+        registrations.register(&path(0), project, false, session.as_ref()),
+        Err(WatchError::BudgetExhausted),
+        "a refusal the OS gave is the system's limit, with budget to spare",
     );
 }
 

@@ -80,6 +80,26 @@ describe("WatchLimitNotice", () => {
     expect(text).toContain("could not be read");
   });
 
+  // The two ways a watch budget runs out have opposite remedies: the machine's own limit is raised
+  // with a setting, while the share Soloist keeps to is freed by closing a project. Offering the
+  // setting for the second sends the user to change something that cannot lift it.
+  it("tells the system's exhausted limit apart from Soloist's spent share", () => {
+    const { container: system } = render(
+      <WatchLimitNotice limits={{ restarts: { refused: "budget_exhausted" } }} />,
+    );
+    const systemText = system.textContent ?? "";
+    cleanup();
+    const { container: own } = render(
+      <WatchLimitNotice limits={{ restarts: { refused: "share_exhausted" } }} />,
+    );
+    const ownText = own.textContent ?? "";
+
+    expect(systemText).toContain("fs.inotify.max_user_watches");
+    expect(ownText).not.toContain("fs.inotify.max_user_watches");
+    expect(ownText).toContain("Closing a project");
+    expect(ownText).not.toEqual(systemText);
+  });
+
   // The one refusal the user can do something about is worth nothing unless it names the setting.
   it("names the setting that restores an exhausted watch budget", () => {
     const { container } = render(

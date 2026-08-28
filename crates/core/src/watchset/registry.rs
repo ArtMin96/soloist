@@ -74,10 +74,10 @@ impl Registrations {
     /// A path another project already holds costs nothing new: `project` simply joins as an
     /// additional owner, with no second call to `session` and no second unit spent — the same
     /// physical OS watch already covers it. A path nobody holds yet costs a unit, so it is
-    /// registered only if the budget still has one: an exhausted budget is refused here rather
-    /// than asked of the OS, which shares its own limit with every other program on the machine.
-    /// On refusal, from either, nothing changes and the error is returned for the caller to
-    /// report.
+    /// registered only if the budget still has one: a spent budget is refused here as
+    /// [`WatchError::ShareExhausted`] rather than asked of the OS, whose own limit is shared with
+    /// every other program on the machine and is a separate thing to run out of. On refusal, from
+    /// either, nothing changes and the error is returned for the caller to report.
     pub(super) fn register(
         &mut self,
         path: &Path,
@@ -90,7 +90,7 @@ impl Registrations {
             return Ok(());
         }
         if self.budget.remaining() == 0 {
-            return Err(WatchError::BudgetExhausted);
+            return Err(WatchError::ShareExhausted);
         }
         if tree {
             session.watch_tree(path)?;

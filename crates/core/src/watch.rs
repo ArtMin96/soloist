@@ -22,16 +22,23 @@ use crate::ids::ProjectId;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Error, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WatchError {
-    /// No further watch could be taken for want of budget, from either of two places: Soloist's own
-    /// share was spent before the OS was asked, or the OS refused because the per-user file-watch
-    /// limit is exhausted — on Linux `fs.inotify.max_user_watches`, shared with every other program
-    /// on the machine, of which a recursive watch spends one per directory beneath its root.
-    ///
-    /// Soloist holds only a fraction of that limit by design, divided between the open projects, so
-    /// a spent share says nothing about how much of the system's limit is left. Both arrive here
-    /// and this variant does not tell them apart.
-    #[error("no file-watch budget remains for this directory")]
+    /// The OS refused: the machine's per-user file-watch limit is exhausted — on Linux
+    /// `fs.inotify.max_user_watches`, shared with every other program running, of which a
+    /// recursive watch spends one per directory beneath its root. Raising that limit is what
+    /// lifts this, and only this.
+    #[error("the system's file-watch limit is exhausted")]
     BudgetExhausted,
+    /// Soloist's own share of that system limit was spent, so the watch was refused before the OS
+    /// was ever asked for it.
+    ///
+    /// Soloist holds a fraction of the machine's limit by design and divides it between the open
+    /// projects, so a spent share says nothing about how much of the system's limit is left.
+    /// Closing a project returns its watches at once; raising the system limit frees nothing
+    /// already held, and enlarges the fraction only once Soloist next reads that limit. Distinct
+    /// from the even share a single project is planned against, which bounds one project's set of
+    /// watches rather than refusing a registration outright.
+    #[error("Soloist's own file-watch share is spent")]
+    ShareExhausted,
     /// The path itself could not be watched: it does not exist, is not readable, or vanished while
     /// the watch was being established.
     #[error("the directory could not be watched")]

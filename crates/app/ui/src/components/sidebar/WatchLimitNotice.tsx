@@ -11,20 +11,26 @@ const CONSEQUENCE: Record<WatchPurpose, string> = {
   git_status: "live git status",
 };
 
-// What each refusal leaves the user able to do about it. Only the exhausted budget has a fix, and
-// naming the setting is the whole value of saying anything at all — the other two are conditions to
-// know about, not to act on.
+// What each refusal leaves the user able to do about it. Two of them have a remedy and the remedies
+// are not interchangeable: the machine's own limit is raised with a setting, while the share Soloist
+// keeps to is freed by closing a project — raising the setting releases none of what Soloist already
+// holds. Naming one for the other sends the user to change something that will not help now. The
+// remaining two are conditions to know about, not to act on.
 const CAUSE: Record<WatchError, string> = {
   budget_exhausted:
     "The system's file-watch limit is exhausted; raising fs.inotify.max_user_watches restores it.",
+  share_exhausted:
+    "Soloist is holding every watch it allows itself — a share of the system's limit, split between open projects. Closing a project frees its watches.",
   unwatchable: "This project's directory could not be read.",
   unavailable: "The filesystem watcher could not start.",
 };
 
 // Why a purpose is degraded — one project-wide condition, said once no matter how many purposes it
-// touches, because both purposes lose it to the same budget.
+// touches, because both purposes lose it to the same share. The system's own limit is not what was
+// met here: the tree outgrew what Soloist gives one open project, so the system may have watches to
+// spare and the setting that raises it is beside the point.
 const DEGRADED_CAUSE =
-  "Watching only this project's repository state — its file tree needs more watches than the system allows.";
+  "Watching only this project's repository state — its file tree needs more watches than Soloist gives one open project.";
 
 // What a degraded purpose still does and what it no longer does, named once per purpose. Neither
 // loses everything: the repository's own state stays watched event-driven, so a degraded purpose is
