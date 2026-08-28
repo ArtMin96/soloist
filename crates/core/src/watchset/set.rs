@@ -19,9 +19,7 @@ use tokio::sync::mpsc;
 
 use crate::debounce::{sleep_until, Debouncer};
 use crate::events::{DomainEvent, EventBus};
-use crate::filewatch::{
-    FileChange, FileChangeKind, FileWatcher, ScanRequest, WatchScanner, WatchSession, WatchStatus,
-};
+use crate::filewatch::{FileChange, FileChangeKind, FileWatcher, WatchSession, WatchStatus};
 use crate::ids::ProjectId;
 use crate::ports::Clock;
 use crate::projects::Projects;
@@ -31,6 +29,7 @@ use crate::watch::{WatchLimit, WatchPurpose};
 
 use super::ignored_names;
 use super::registry::Registrations;
+use super::scan::{ScanRequest, WatchScanner};
 
 /// How many raw filesystem changes the adapter may have in flight before its sends start
 /// dropping. Bounded, and a drop is self-healing (see [`Self::run_loop`]'s `dropped` handling),

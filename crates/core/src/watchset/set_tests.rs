@@ -21,7 +21,7 @@ use crate::composition::CorePorts;
 use crate::config::ProcessSpec;
 use crate::configchange::ConfigSync;
 use crate::events::{DomainEvent, EventBus};
-use crate::filewatch::{FileChangeKind, Scan, WatchReactor};
+use crate::filewatch::{FileChangeKind, WatchReactor};
 use crate::ids::{ProcessId, ProjectId};
 use crate::ports::{ProjectRepo, TrustRepo};
 use crate::process::ProcStatus;
@@ -31,6 +31,7 @@ use crate::testing::{
     FakeWatchScanner, MockClock,
 };
 use crate::watch::{WatchError, WatchLimit, WatchPurpose};
+use crate::watchset::Scan;
 
 use super::*;
 

@@ -1,10 +1,10 @@
-//! The file-watch domain's second driven port: which paths under a root are worth watching.
+//! The watch set's own driven port: which paths under a root are worth watching.
 //!
-//! [`FileWatcher`](super::FileWatcher) says how to watch a path once chosen; [`WatchScanner`]
-//! says which paths that is. An implementation walks the filesystem honouring a repository's own
-//! ignore rules where asked, and stops at a caller-imposed ceiling rather than materialising an
-//! unbounded tree — the adapter (`crates/sys`, over the `ignore` crate) does the walking; the
-//! core decides nothing about what a directory contains.
+//! [`FileWatcher`](crate::filewatch::FileWatcher) says how to watch a path once chosen;
+//! [`WatchScanner`] says which paths that is. An implementation walks the filesystem honouring a
+//! repository's own ignore rules where asked, and stops at a caller-imposed ceiling rather than
+//! materialising an unbounded tree — the adapter (`crates/sys`, over the `ignore` crate) does the
+//! walking; the core decides nothing about what a directory contains.
 
 use std::path::PathBuf;
 
@@ -50,7 +50,8 @@ pub struct Scan {
 /// Enumerates the paths under a root that are worth watching.
 ///
 /// Blocking: a real implementation walks the filesystem, so a caller reaches it off the runtime,
-/// the same way it already does for [`FileWatcher::watch`](super::FileWatcher::watch).
+/// the same way it already does for
+/// [`WatchSession::watch_dir`](crate::filewatch::WatchSession::watch_dir).
 pub trait WatchScanner: Send + Sync {
     fn scan(&self, request: ScanRequest) -> Scan;
 }

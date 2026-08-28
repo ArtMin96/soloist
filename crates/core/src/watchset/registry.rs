@@ -16,7 +16,7 @@ use super::budget::Budget;
 /// One watched path, and which open projects currently want it.
 ///
 /// Refcounted because projects nest — a repository opened inside another project's tree shares
-/// its files (`crate::git::watched` documents the same shape) — so releasing an inner project
+/// its files (`crate::git::routing` documents the same shape) — so releasing an inner project
 /// must not unwatch a path an outer one still holds.
 struct Registration {
     owners: HashSet<ProjectId>,

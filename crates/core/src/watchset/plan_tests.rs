@@ -3,8 +3,8 @@
 
 use std::path::PathBuf;
 
-use crate::filewatch::{Scan, ScannedPath};
 use crate::watch::{WatchLimit, WatchPurpose};
+use crate::watchset::{Scan, ScannedPath};
 
 use super::*;
 

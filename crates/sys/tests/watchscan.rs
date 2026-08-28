@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use soloist_core::filewatch::{Scan, ScanRequest, WatchScanner};
+use soloist_core::watchset::{Scan, ScanRequest, WatchScanner};
 use soloist_sys::IgnoreWatchScanner;
 use tempfile::TempDir;
 

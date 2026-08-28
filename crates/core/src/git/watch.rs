@@ -3,7 +3,7 @@
 //!
 //! Changed paths arrive from [`crate::watchset::ProjectWatchSet`]'s fan-out — the single owner
 //! of every OS watch registration (monitoring C5), which also reports what it could not watch to
-//! [`WatchStatus`](crate::filewatch::WatchStatus). [`super::watched`] decides which projects a
+//! [`WatchStatus`](crate::filewatch::WatchStatus). [`super::routing`] decides which projects a
 //! changed path belongs to; this module decides when one is worth reading. Both sources feed
 //! **one** quiet window per project through the shared [`crate::debounce::Debouncer`], so an
 //! operation that touches both — `git add` writing the index beside the file it staged — coalesces
@@ -40,8 +40,8 @@ use crate::ports::Clock;
 use crate::projects::Projects;
 use crate::supervision::run_blocking;
 
+use super::routing::{is_lock, Routes};
 use super::status::Git;
-use super::watched::{is_lock, Routes};
 
 /// The quiet window a burst of changes is coalesced into before one status read. Long enough to
 /// absorb the several files a single `git` invocation writes, short enough that a commit made in

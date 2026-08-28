@@ -15,6 +15,10 @@
 //! [`crate::filewatch::WatchReactor`] already name in the other direction, so putting it inside
 //! `filewatch` would close a ring `scripts/check-core-cycles.sh` has no allow-list for.
 //!
+//! [`WatchScanner`] is the port it drives to learn what is under a root, defined here because
+//! nothing else drives it; walking the filesystem is an adapter's job (`crates/sys`, over the
+//! `ignore` crate), and a build without it degrades to [`NoopWatchScanner`].
+//!
 //! [`plan`] is the pure policy (given scan results, produce a registration plan and the
 //! resulting [`WatchLimit`](crate::watch::WatchLimit)s); [`budget`] is the pure bookkeeping of
 //! what the app may spend, wrapped with the refcounted held-path map in `registry`; [`set`]
@@ -25,14 +29,16 @@ mod budget;
 mod plan;
 mod reconcile;
 mod registry;
+mod scan;
 mod set;
 
+pub use scan::{NoopWatchScanner, Scan, ScanRequest, ScannedPath, WatchScanner};
 pub use set::ProjectWatchSet;
 
 use crate::filewatch::DEFAULT_IGNORES;
 
 /// The directory names every scan this module asks for is told to skip, in the shape
-/// [`ScanRequest::ignored_names`](crate::filewatch::ScanRequest::ignored_names) takes them.
+/// [`ScanRequest::ignored_names`] takes them.
 fn ignored_names() -> Vec<String> {
     DEFAULT_IGNORES
         .iter()

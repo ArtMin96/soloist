@@ -15,7 +15,9 @@
 //! watches is [`crate::watchset::ProjectWatchSet`]'s job entirely, over the single shared
 //! [`crate::filewatch::WatchSession`]. What survives here is where each open project's status is
 //! scoped to, so a changed path reported on the watch set's fan-out can be matched back to the
-//! projects it belongs to. When a change here is worth re-reading a status is [`super::watch`]'s.
+//! projects it belongs to — and, in [`is_lock`], which paths on that same stream are the lock
+//! files git writes around its own writes rather than a change worth routing at all. When a
+//! change here is worth re-reading a status is [`super::watch`]'s.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};

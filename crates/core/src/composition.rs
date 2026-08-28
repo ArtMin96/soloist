@@ -19,7 +19,7 @@ use crate::coordination::{
     NoopTemplateRepo, NoopTimerRepo, NoopTodoRepo, ScratchpadRepo, TemplateRepo, TimerRepo,
     TodoRepo,
 };
-use crate::filewatch::{FileWatcher, NoopFileWatcher, NoopWatchScanner, WatchScanner};
+use crate::filewatch::{FileWatcher, NoopFileWatcher};
 use crate::git::{
     FileOpener, GitForge, GitRepository, NoopFileOpener, NoopGitForge, NoopGitRepository,
 };
@@ -31,6 +31,7 @@ use crate::settings::{NoopSettingsRepo, ProjectSettings, Settings, SettingsRepo}
 use crate::shellenv::{NoopShellEnvProbe, ShellEnv, ShellEnvProbe};
 use crate::supervisor::SupervisorPorts;
 use crate::support::{FeedbackRepo, NoopFeedbackRepo};
+use crate::watchset::{NoopWatchScanner, WatchScanner};
 
 use crate::ports::{
     Clock, LockReleaser, NoopLockReleaser, NoopOrphanControl, NoopRuntimeState, OrphanControl,

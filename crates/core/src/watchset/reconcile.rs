@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use crate::filewatch::{compile, literal_prefix, FileChange, Scan, ScanRequest};
+use crate::filewatch::{compile, literal_prefix, FileChange};
 use crate::ids::ProjectId;
 use crate::ports::ProjectRecord;
 use crate::supervision::run_blocking;
@@ -19,6 +19,7 @@ use crate::watch::{WatchError, WatchLimit, WatchOutcome, WatchPurpose};
 
 use super::ignored_names;
 use super::plan::{plan, ProjectPlan};
+use super::scan::{Scan, ScanRequest};
 use super::set::{ProjectWatchSet, Registered, RunState};
 
 impl ProjectWatchSet {
@@ -30,7 +31,7 @@ impl ProjectWatchSet {
     /// the plan wants in both directions: releasing what the plan no longer covers, and retrying
     /// whatever it wants that is not currently held. That last step, run unconditionally on every
     /// re-sync, is what re-establishes a refusal that has since cleared without needing a fresh
-    /// scan to trigger it (the [`crate::git::watched`] guarantee, at this layer).
+    /// scan to trigger it (the [`crate::git::routing`] guarantee, at this layer).
     ///
     /// `force_rescan` is [`super::set::ProjectWatchSet::run_loop`]'s answer to a dropped
     /// change: a directory whose `Appeared` never arrived looks, from a settled project's own

@@ -7,7 +7,7 @@
 //! Which of a project's directories are actually watched, and what a refusal or a degradation
 //! means, is the watch set's own concern and its own test coverage; this file pins only what the
 //! reactor decides once a change has already been reported: which changed paths belong to which
-//! projects' status ([`super::watched::Routes`]), and when a burst of them is worth a debounced
+//! projects' status ([`super::routing::Routes`]), and when a burst of them is worth a debounced
 //! re-read.
 //!
 //! The quiet window is advanced on the mock clock, so no real debounce elapses. The reads
@@ -385,7 +385,7 @@ async fn one_operation_touching_both_the_working_tree_and_the_repository_reads_t
     assert_eq!(
         s.repository.reads(),
         1,
-        "the two watches share one quiet window, so one operation is one read",
+        "the two sources share one quiet window, so one operation is one read",
     );
 }
 

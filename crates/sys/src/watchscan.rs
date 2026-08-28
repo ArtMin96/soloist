@@ -6,11 +6,11 @@
 //! set `git status` itself reads: `.gitignore`, `.git/info/exclude`, global excludes, and nested
 //! ignore files, all applied the way `git` applies them. Walking is blocking filesystem I/O; the
 //! core reaches this port off the runtime, the same way it already does for
-//! [`FileWatcher::watch`](soloist_core::FileWatcher::watch).
+//! [`WatchSession::watch_dir`](soloist_core::filewatch::WatchSession::watch_dir).
 
 use ignore::WalkBuilder;
-use soloist_core::filewatch::{Scan, ScanRequest, ScannedPath, WatchScanner};
 use soloist_core::vcs::STATE_DIR;
+use soloist_core::watchset::{Scan, ScanRequest, ScannedPath, WatchScanner};
 
 /// Scans a root for the paths worth watching, over the `ignore` crate's own gitignore-precedence
 /// walker.

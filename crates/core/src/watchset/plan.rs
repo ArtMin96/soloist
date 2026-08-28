@@ -7,9 +7,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::filewatch::Scan;
 use crate::vcs::{REFS_DIR, STATE_DIR};
 use crate::watch::{WatchLimit, WatchPurpose};
+
+use super::scan::Scan;
 
 /// What one project's watches should be, and what had to be dropped to make them fit.
 pub(crate) struct ProjectPlan {

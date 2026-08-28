@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use crate::filewatch::{Scan, ScanRequest, ScannedPath, WatchScanner};
 use crate::sync::lock;
+use crate::watchset::{Scan, ScanRequest, ScannedPath, WatchScanner};
 
 /// An in-memory [`WatchScanner`] answering from paths seeded per root via [`Self::reporting`].
 /// A root nothing was seeded for scans empty — an unseeded scan is a fact worth seeing in a

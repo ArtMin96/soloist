@@ -113,7 +113,7 @@ impl Facade {
     /// degradation to [`crate::filewatch::WatchStatus`]. Self-supervised internally (see
     /// [`crate::watchset::ProjectWatchSet::run`]): a panicking scan or a dead backend restarts
     /// the loop rather than silently losing file watching for the rest of the process. With the
-    /// default [`crate::filewatch::NoopFileWatcher`]/[`crate::filewatch::NoopWatchScanner`] it
+    /// default [`crate::filewatch::NoopFileWatcher`]/[`crate::watchset::NoopWatchScanner`] it
     /// watches nothing, so the real adapters are chosen in the composition root.
     pub fn watch_set_loop(&self) -> impl Future<Output = ()> + Send + 'static {
         self.watch_set.clone().run()
