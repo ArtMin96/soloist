@@ -10,6 +10,10 @@ import { cn } from "@/lib/utils";
  *
  * Under `prefers-reduced-motion` the highlight is dropped rather than parked mid-sweep, leaving the
  * plain solid label.
+ *
+ * Both copies sit in an inner box that hugs the glyph run. The mask is sized and travelled in
+ * percentages of the box it paints, so letting that box stretch to the layout cell would scale the
+ * highlight past the width of the word and strand it over empty space for most of the sweep.
  */
 export function TextShimmer({
   text,
@@ -27,21 +31,23 @@ export function TextShimmer({
   title?: string;
 }) {
   return (
-    <span className={cn("relative block min-w-0", className)} title={title}>
-      <span className="block truncate">{text}</span>
-      {active && (
-        <span
-          data-slot="text-shimmer"
-          aria-hidden
-          className={cn(
-            "text-shimmer-band pointer-events-none absolute inset-0 block truncate",
-            "animate-text-shimmer motion-reduce:hidden",
-            highlightClassName,
-          )}
-        >
-          {text}
-        </span>
-      )}
+    <span className={cn("flex min-w-0", className)} title={title}>
+      <span className="relative min-w-0 truncate">
+        {text}
+        {active && (
+          <span
+            data-slot="text-shimmer"
+            aria-hidden
+            className={cn(
+              "text-shimmer-band pointer-events-none absolute inset-0 block truncate",
+              "animate-text-shimmer motion-reduce:hidden",
+              highlightClassName,
+            )}
+          >
+            {text}
+          </span>
+        )}
+      </span>
     </span>
   );
 }
