@@ -600,3 +600,65 @@ async fn a_panicked_loop_rebuilds_its_watches_without_doubling_them() {
         "a fresh session, not the wedged one reused"
     );
 }
+
+#[tokio::test]
+async fn a_dropped_change_arms_a_full_rescan() {
+    let s = setup();
+    s.repo.upsert(&root(), None, None).expect("seed");
+    let ws = spawn_set(&s);
+    let mut rx = ws.subscribe();
+    wait_until("the project settles", || {
+        s.watcher.registered().contains(&root())
+    })
+    .await;
+    let root_scans_before = s
+        .scanner
+        .requests()
+        .iter()
+        .filter(|request| request.root == root())
+        .count();
+
+    // A directory the next full scan will find but nothing has registered yet — standing in
+    // for one whose own `Appeared` notification never arrived.
+    let missed = under("missed");
+    seed_scan(&s.scanner, root(), &[(missed.clone(), true)]);
+
+    // Overflows the bounded change channel with no `.await` in the loop, so the loop task
+    // cannot drain any of it concurrently: on a single-threaded runtime this deterministically
+    // forces `try_send` failures past `CHANGE_BUFFER`, which the fake mirrors onto the
+    // `dropped` counter exactly as the real adapter's contract does.
+    let noise = under("noise");
+    for _ in 0..CHANGE_BUFFER + 100 {
+        s.watcher.change_of(noise.clone(), FileChangeKind::Modified);
+    }
+
+    // The loop notices the counter moved and arms `RESCAN_QUIET` (500ms, private to this
+    // module — restated here as it was for `INITIAL_BACKOFF` above).
+    s.clock
+        .deadline_armed_at(s.clock.now() + Duration::from_millis(500))
+        .await;
+    s.clock.advance(Duration::from_millis(600));
+
+    // The observable outcome, not the mechanism: the missed directory is registered, and a
+    // change under it reaches a consumer end to end — not merely that a scan was requested
+    // again (which would pass even if the scan's result were discarded).
+    wait_until("the missed directory is registered", || {
+        s.watcher.registered().contains(&missed)
+    })
+    .await;
+    let root_scans_after = s
+        .scanner
+        .requests()
+        .iter()
+        .filter(|request| request.root == root())
+        .count();
+    assert!(
+        root_scans_after > root_scans_before,
+        "a dropped change must re-scan every open project, not just retry what is already known",
+    );
+
+    let inside_missed = under("missed/file.txt");
+    s.watcher
+        .change_of(inside_missed.clone(), FileChangeKind::Modified);
+    expect_change(&mut rx, &inside_missed).await;
+}

@@ -17,7 +17,9 @@
 //!
 //! [`plan`] is the pure policy (given scan results, produce a registration plan and the
 //! resulting [`WatchLimit`](crate::watch::WatchLimit)s); [`budget`] is the pure bookkeeping of
-//! what the app may spend; [`set`] is the stateful loop that drives both over the real ports.
+//! what the app may spend, wrapped with the refcounted held-path map in `registry`; [`set`]
+//! holds the type vocabulary and the event loop, over `reconcile`'s planning half
+//! (`resync`/`replan`) — split out for size, both `impl ProjectWatchSet`.
 
 mod budget;
 mod plan;

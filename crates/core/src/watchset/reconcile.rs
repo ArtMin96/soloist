@@ -22,16 +22,24 @@ use super::set::{ProjectWatchSet, Registered, RunState};
 
 impl ProjectWatchSet {
     /// Reconciles every open project's watches: ensures the session is open, re-plans a project
-    /// only when it is new, its root or watch-eligible globs changed, or it now holds more than
-    /// its share; and — regardless of whether it re-planned — retries whatever its cached plan
-    /// wants that it does not currently hold. That last step, run unconditionally on every
-    /// re-sync, is what re-establishes a refusal that has since cleared without needing a fresh
-    /// scan to trigger it (the [`crate::git::watched`] guarantee, at this layer).
+    /// when it is new, its root or watch-eligible globs changed, it now holds more than its
+    /// share, or `force_rescan` says the filesystem may have moved since the last plan without
+    /// any of those signals catching it; and — regardless of whether it re-planned — retries
+    /// whatever its cached plan wants that it does not currently hold. That last step, run
+    /// unconditionally on every re-sync, is what re-establishes a refusal that has since cleared
+    /// without needing a fresh scan to trigger it (the [`crate::git::watched`] guarantee, at
+    /// this layer).
+    ///
+    /// `force_rescan` is [`super::set::ProjectWatchSet::run_loop`]'s answer to a dropped
+    /// change: a directory whose `Appeared` never arrived looks, from a settled project's own
+    /// plan, identical to a tree nobody touched — nothing about its root, globs, or share moved
+    /// — so only an explicit "the ground may have shifted, look again" makes the re-scan happen.
     pub(super) async fn resync(
         &self,
         state: &mut RunState,
         changes_tx: &mpsc::Sender<FileChange>,
         dropped: &Arc<AtomicU64>,
+        force_rescan: bool,
     ) {
         let Ok(records) = self.projects.list() else {
             return;
@@ -63,14 +71,15 @@ impl ProjectWatchSet {
             let globs = globs_by_project.get(&project).cloned().unwrap_or_default();
             let restart_eligible = !globs.is_empty();
 
-            let needs_replan = match state.projects.get(&project) {
-                None => true,
-                Some(existing) => {
-                    existing.root != root
-                        || existing.globs != globs
-                        || state.registrations.held_by(project) > share
-                }
-            };
+            let needs_replan = force_rescan
+                || match state.projects.get(&project) {
+                    None => true,
+                    Some(existing) => {
+                        existing.root != root
+                            || existing.globs != globs
+                            || state.registrations.held_by(project) > share
+                    }
+                };
             if needs_replan {
                 let computed = self.replan(&root, &globs, share).await;
                 let paths: HashSet<PathBuf> = computed

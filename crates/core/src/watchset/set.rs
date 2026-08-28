@@ -155,7 +155,7 @@ impl ProjectWatchSet {
             projects: HashMap::new(),
         };
 
-        self.resync(&mut state, &changes_tx, &dropped).await;
+        self.resync(&mut state, &changes_tx, &dropped, false).await;
 
         loop {
             let next_due = rescan.due_at();
@@ -172,7 +172,7 @@ impl ProjectWatchSet {
                             | DomainEvent::ProjectRemoved { .. }
                             | DomainEvent::ConfigChanged { .. })
                         | Err(RecvError::Lagged(_)) => {
-                            self.resync(&mut state, &changes_tx, &dropped).await;
+                            self.resync(&mut state, &changes_tx, &dropped, false).await;
                         }
                         Ok(_) => {}
                     }
@@ -185,11 +185,12 @@ impl ProjectWatchSet {
                 }
                 // The dropped-change debounce elapsed: re-plan every open project from
                 // scratch, since a dropped `Appeared` may have hidden a subtree that would
-                // otherwise stay unwatched forever.
+                // otherwise stay unwatched forever. Forced: a settled project's root, globs,
+                // and share are all unchanged, so nothing else would trigger the re-scan.
                 () = sleep_until(&self.clock, next_due) => {
                     let now = self.clock.now();
                     if rescan.take_if_due(now) {
-                        self.resync(&mut state, &changes_tx, &dropped).await;
+                        self.resync(&mut state, &changes_tx, &dropped, true).await;
                     }
                 }
             }
