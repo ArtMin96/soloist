@@ -61,7 +61,28 @@
 > and `--no-watch`, which move unrelated tooling watchers off inotify without touching the subsystem
 > under test.
 >
-> **RED — `check` is failing on this branch.**
+> **RESOLVED — the `check` failure was the test's own setup, not production.**
+> `config_watch.rs` wrote its edit before either spawned loop had been polled: `#[tokio::test]` is a
+> current-thread runtime, `tokio::spawn` only schedules, and there was no `.await` between the spawns
+> and the write — so both loops were provably unpolled, which is why it elapsed cleanly every time
+> rather than flaking. `80e8d0e` had dropped the old test's explicit `yield_now()` synchronisation
+> without replacing it for a path that now crosses a `supervise` spawn and an off-runtime scan.
+> Isolated by inserting one 300ms sleep (3/3 green), then fixed by re-issuing the edit until the
+> reload arrives or the existing budget elapses — free, since `ConfigEngine` hash-diffs. Retry period
+> must exceed the reactor's 300ms quiet window or each retry re-arms the debounce (10/10 failures
+> before that was understood). **`cargo test --workspace --locked --no-fail-fast` → 2058 passed
+> across 55 binaries, 0 failures.**
+>
+> **Open follow-up — the startup window widened.** `ProjectWatchSet` registers through a multi-hop
+> async chain (supervise-spawn → off-runtime scan → blocking `watch_dir`), up to ~300ms, where each
+> reactor previously established its watch synchronously after one yield. Edge-triggered with no
+> content rescan, so a `solo.yml` edit inside that window is lost permanently. Not believed
+> user-visible (a human is slower than 300ms) but reachable by a script or a `git checkout` swapping
+> `solo.yml` as a project opens; the retry-based test can no longer detect it widening. Candidate
+> fixes: a readiness signal `load_project` callers await, or a re-read on first successful
+> registration.
+>
+> **(superseded) RED — `check` was failing on this branch.**
 > `crates/sys/tests/config_watch.rs::an_external_edit_reaches_a_reload_through_the_real_watch_set`
 > fails in CI and reproduces locally in 10s
 > (`cargo test --workspace --locked --no-fail-fast`). A **regression from `80e8d0e`**, which rewrote
