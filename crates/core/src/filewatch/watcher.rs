@@ -10,43 +10,17 @@ use tokio::sync::mpsc;
 
 use crate::watch::WatchError;
 
-/// Watches project directories for the filesystem changes that drive file-watch restarts
-/// and `solo.yml` reloads.
+/// Watches project directories for the filesystem changes that drive file-watch restarts,
+/// `solo.yml` reloads, and the git status rail.
 ///
-/// An implementation watches a directory for the events that leave it different than before —
-/// a path created, modified (a rename included), or removed — and forwards each changed
-/// **absolute** path to the `changes` channel. A path merely opened or read is not a change and
-/// is not reported. All matching, debouncing, restarting, and reloading is the consuming
-/// reactor's ([`super::WatchReactor`], [`crate::projects::ConfigWatchReactor`],
-/// [`crate::git::GitStatusWatchReactor`]) — the adapter only reports raw changes, so every
-/// testable decision stays in the core.
-///
-/// Both methods block until the watch is registered. [`Self::watch`] walks the whole tree under its
-/// root to do it, which is unbounded work, so a caller reaches it on the blocking pool rather than on
-/// a runtime worker; [`Self::watch_dir`] registers one directory and is called directly.
+/// A single [`open`](Self::open) call yields one [`WatchSession`] that every directory the app
+/// wants watched registers through — one backend instance for the whole app, however many
+/// directories or projects it watches. All matching, debouncing, restarting, and reloading is
+/// the consuming code's ([`crate::watchset::ProjectWatchSet`] plans and maintains the
+/// registrations; [`super::WatchReactor`], [`crate::projects::ConfigWatchReactor`], and
+/// [`crate::git::GitStatusWatchReactor`] consume its fan-out) — the adapter only reports raw
+/// changes, so every testable decision stays in the core.
 pub trait FileWatcher: Send + Sync {
-    /// Begins watching `root` recursively, forwarding each changed absolute path to `changes`
-    /// until the returned [`WatchHandle`] is dropped (which stops the watch and releases its
-    /// OS resources — the bounded-resource contract).
-    ///
-    /// A root that cannot be watched is a [`WatchError`], never a handle that reports nothing: the
-    /// caller decides how to degrade, and says so.
-    fn watch(
-        &self,
-        root: PathBuf,
-        changes: mpsc::Sender<PathBuf>,
-    ) -> Result<Box<dyn WatchHandle>, WatchError>;
-
-    /// Begins watching the single directory `dir` — **non-recursive**, so only its direct
-    /// children report — with the same channel, handle, and failure contract as [`Self::watch`].
-    /// For a file at a fixed, known location (a project root's `solo.yml`), where a recursive tree
-    /// watch would spend an OS watch per subdirectory to observe one file.
-    fn watch_dir(
-        &self,
-        dir: PathBuf,
-        changes: mpsc::Sender<PathBuf>,
-    ) -> Result<Box<dyn WatchHandle>, WatchError>;
-
     /// Opens one [`WatchSession`] that every directory registered through it shares — the
     /// backend allocates a single watcher instance rather than one per registration, which is
     /// what lets many projects' watches live behind one OS handle. Changes stream to `changes`
@@ -64,10 +38,6 @@ pub trait FileWatcher: Send + Sync {
     /// conservative default rather than an unbounded one.
     fn capacity(&self) -> Option<usize>;
 }
-
-/// A live filesystem watch. Dropping it stops the watch and frees its OS resources, so the
-/// reactor holds one per watched root for exactly as long as it watches that root.
-pub trait WatchHandle: Send + Sync {}
 
 /// What changed about one path a [`WatchSession`] is watching.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -91,11 +61,9 @@ pub struct FileChange {
     pub kind: FileChangeKind,
 }
 
-/// A live set of filesystem watches sharing one backend instance, from [`FileWatcher::open`].
-/// Registering every directory through the same session — rather than one backend instance per
-/// directory, as [`FileWatcher::watch`]/[`FileWatcher::watch_dir`] do — is what keeps the app to
-/// one OS watcher regardless of how many directories, or how many projects, it watches. Dropping
-/// the session stops every watch it holds.
+/// A live set of filesystem watches sharing one backend instance, from [`FileWatcher::open`] —
+/// what keeps the app to one OS watcher regardless of how many directories, or how many
+/// projects, it watches. Dropping the session stops every watch it holds.
 ///
 /// `&self` rather than `&mut self`: registration is unbounded work for a large directory tree and
 /// so runs on the blocking pool (`crate::supervision::run_blocking`), which needs `'static +
@@ -124,22 +92,6 @@ pub trait WatchSession: Send + Sync {
 pub struct NoopFileWatcher;
 
 impl FileWatcher for NoopFileWatcher {
-    fn watch(
-        &self,
-        _root: PathBuf,
-        _changes: mpsc::Sender<PathBuf>,
-    ) -> Result<Box<dyn WatchHandle>, WatchError> {
-        Ok(Box::new(NoopWatchHandle))
-    }
-
-    fn watch_dir(
-        &self,
-        _dir: PathBuf,
-        _changes: mpsc::Sender<PathBuf>,
-    ) -> Result<Box<dyn WatchHandle>, WatchError> {
-        Ok(Box::new(NoopWatchHandle))
-    }
-
     fn open(
         &self,
         _changes: mpsc::Sender<FileChange>,
@@ -152,12 +104,6 @@ impl FileWatcher for NoopFileWatcher {
         None
     }
 }
-
-/// The [`WatchHandle`] for a no-op watch — its drop stops nothing.
-#[derive(Clone, Copy, Default)]
-pub struct NoopWatchHandle;
-
-impl WatchHandle for NoopWatchHandle {}
 
 /// The [`WatchSession`] for a no-op watch — every registration succeeds and reports nothing.
 #[derive(Clone, Copy, Default)]

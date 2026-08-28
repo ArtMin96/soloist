@@ -103,7 +103,7 @@ pub use facade::{
     SpawnAgentOutcome, SpawnAgentRequest, SpawnProcessError, SpawnProcessRequest, StatusSummary,
     TrustCommandError,
 };
-pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
+pub use filewatch::{FileWatcher, NoopFileWatcher, WatchReactor};
 pub use git::{
     BranchOp, CheckRun, CheckState, DiffExtent, Exchange, FileOpener, ForgeError, ForgeReadiness,
     ForgeRepository, Git, GitDraftError, GitError, GitForge, GitLineCounts, GitRepository,

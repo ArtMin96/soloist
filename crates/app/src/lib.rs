@@ -38,7 +38,8 @@ use soloist_git::CliGitRepository;
 use soloist_pty::{PgidOrphanControl, PtyProcessSpawner, ShellAgentOneShot};
 use soloist_store::{FileRuntimeState, SqliteStore};
 use soloist_sys::{
-    CommandShellEnvProbe, CommandVersionProbe, NotifyFileWatcher, ProcMetricsProbe, ProcPortProbe,
+    CommandShellEnvProbe, CommandVersionProbe, IgnoreWatchScanner, NotifyFileWatcher,
+    ProcMetricsProbe, ProcPortProbe,
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_window_state::StateFlags;
@@ -113,8 +114,9 @@ fn build_facade(app: AppHandle) -> Facade {
     // process's close out to both its leases and its todo locks (over the same store), and the lease,
     // timer, scratchpad, diagram, and todo stores persist them; the runtime-state and orphan-control adapters are
     // wired for adoption, the metrics probe reads CPU/memory from /proc, the port probe reads /proc,
-    // the file watcher reports filesystem changes via notify, the git repository reads working
-    // trees through the user's own `git`, the notifier shows desktop toasts via
+    // the file watcher reports filesystem changes via notify, the watch scanner enumerates a
+    // project's gitignore-filtered tree for the watch set to plan against, the git repository
+    // reads working trees through the user's own `git`, the notifier shows desktop toasts via
     // the Tauri notification plugin, the version probe auto-detects installed agent CLIs, and the
     // shell-env probe captures the login shell's environment (over this process's own env as the
     // base) so launched processes see version-manager PATHs.
@@ -134,6 +136,7 @@ fn build_facade(app: AppHandle) -> Facade {
         .metrics(Arc::new(ProcMetricsProbe::new()))
         .port_probe(Arc::new(ProcPortProbe::new()))
         .file_watcher(Arc::new(NotifyFileWatcher::new()))
+        .watch_scanner(Arc::new(IgnoreWatchScanner::new()))
         .git_repository(Arc::new(CliGitRepository::new()))
         .git_forge(Arc::new(GhForge::new()))
         .file_opener(Arc::new(DesktopFileOpener::new(app.clone())))
@@ -361,18 +364,22 @@ pub fn run() {
             // launch (resting — restore never starts a process); the UI seeds from the
             // resulting snapshots.
             app.state::<Arc<Facade>>().restore_projects();
-            // Start the file-watch reactor last: it reads the restored commands at startup, so
-            // it must run after restore has registered them, then re-syncs on each project
-            // open. It reloads a running watched command when a matching file changes via the
-            // notify watcher wired in `build_facade` (weakly held, ends when the bus closes).
+            // Start the watch set next: it reads the restored projects at startup, so it must run
+            // after restore has registered them, then plans and maintains every filesystem watch
+            // registration within the app's budget over the notify/`ignore` adapters wired in
+            // `build_facade`. It must be running before the three reactors below, which consume
+            // its fan-out rather than watching anything of their own (weakly held, ends when the
+            // bus closes).
+            tauri::async_runtime::spawn(app.state::<Arc<Facade>>().watch_set_loop());
+            // The file-watch reactor reloads a running watched command when the watch set reports
+            // a matching change.
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().file_watch_loop());
-            // The config-watch reactor watches each restored project's root for external
-            // `solo.yml` edits, so it starts after restore for the same reason; a debounced
-            // edit reloads the project and raises the trust review when needed.
+            // The config-watch reactor reloads a project and raises the trust review when the
+            // watch set reports an external edit to its `solo.yml`.
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().config_watch_loop());
-            // The git status watch reactor watches each restored project's repository state for
-            // the same reason, so a commit or a branch switch made in a terminal updates the
-            // rail without a manual refresh.
+            // The git status watch reactor re-reads a project's status when the watch set reports
+            // a change to its repository state or working tree, so a commit or a branch switch
+            // made in a terminal updates the rail without a manual refresh.
             tauri::async_runtime::spawn(app.state::<Arc<Facade>>().git_status_watch_loop());
             // Assemble the toggleable integration servers, each present only when its adapter is
             // compiled in. The composition root owns each server's task + cancellation handle so a

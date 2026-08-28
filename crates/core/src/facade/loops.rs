@@ -105,35 +105,45 @@ impl Facade {
         .run()
     }
 
+    /// The watch set loop (monitoring C5), returned for the composition root to spawn once on
+    /// its runtime, **before** the three reactors below — they consume its fan-out, so it must
+    /// already be serving one when they subscribe. It is the single owner of every project's
+    /// filesystem watch registrations: it plans what to watch within the app's budget, maintains
+    /// it incrementally as directories appear and vanish, and reports every refusal and
+    /// degradation to [`crate::filewatch::WatchStatus`]. Self-supervised internally (see
+    /// [`crate::watchset::ProjectWatchSet::run`]): a panicking scan or a dead backend restarts
+    /// the loop rather than silently losing file watching for the rest of the process. With the
+    /// default [`crate::filewatch::NoopFileWatcher`]/[`crate::filewatch::NoopWatchScanner`] it
+    /// watches nothing, so the real adapters are chosen in the composition root.
+    pub fn watch_set_loop(&self) -> impl Future<Output = ()> + Send + 'static {
+        self.watch_set.clone().run()
+    }
+
     /// The file-watch reactor loop (monitoring C5), returned for the composition root to spawn
-    /// once on its runtime. It watches each trusted, file-watched command's project root and,
-    /// on a matching change, restarts that command (debounced) via the supervisor — reusing
-    /// one restart behaviour. Watches the supervisor weakly and ends when the bus closes (app
-    /// shutdown). With the default [`crate::filewatch::NoopFileWatcher`] it watches nothing,
-    /// so the real `notify` adapter is chosen in the composition root.
+    /// once on its runtime. It matches each changed path the watch set reports against every
+    /// trusted, file-watched command's globs and, on a match, restarts that command (debounced)
+    /// via the supervisor — reusing one restart behaviour. Watches the supervisor weakly and ends
+    /// when the bus closes (app shutdown).
     pub fn file_watch_loop(&self) -> impl Future<Output = ()> + Send + 'static {
         WatchReactor::new(
             self.clock.clone(),
-            self.file_watcher.clone(),
+            self.watch_set.subscribe(),
             &self.bus,
             Arc::downgrade(&self.supervisor),
-            self.watch_status.clone(),
         )
         .run()
     }
 
     /// The config-watch reactor loop (projects C1), returned for the composition root to spawn
-    /// once on its runtime. It holds a non-recursive watch on each open project's root and,
-    /// on an external `solo.yml` edit, reloads that project (debounced) via the projects
-    /// domain — the same reconcile an explicit reload drives, announcing
+    /// once on its runtime. It matches each changed path the watch set reports against every open
+    /// project's `solo.yml` location and, on an external edit, reloads that project (debounced)
+    /// via the projects domain — the same reconcile an explicit reload drives, announcing
     /// [`crate::events::DomainEvent::ConfigChanged`] with its trust review. Watches the
-    /// supervisor weakly and ends when the bus closes (app shutdown). With the default
-    /// [`crate::filewatch::NoopFileWatcher`] it watches nothing, so the real `notify`
-    /// adapter is chosen in the composition root.
+    /// supervisor weakly and ends when the bus closes (app shutdown).
     pub fn config_watch_loop(&self) -> impl Future<Output = ()> + Send + 'static {
         ConfigWatchReactor::new(
             self.clock.clone(),
-            self.file_watcher.clone(),
+            self.watch_set.subscribe(),
             &self.bus,
             Arc::downgrade(&self.supervisor),
             self.projects.clone(),
@@ -143,23 +153,20 @@ impl Facade {
     }
 
     /// The git status watch reactor loop (git C9), returned for the composition root to spawn
-    /// once on its runtime. It watches each open project's repository state and, when a change
-    /// there leaves the working tree looking different, re-reads that project's status
-    /// (debounced) and announces
+    /// once on its runtime. It matches each changed path the watch set reports against every open
+    /// project's repository state and working tree and, when one leaves the tree looking
+    /// different, re-reads that project's status (debounced) and announces
     /// [`crate::events::DomainEvent::GitStatusChanged`] — so a commit made in a terminal
     /// beside the rail shows up without a manual refresh. Holds the git context weakly and ends
-    /// when the bus closes (app shutdown). With the default
-    /// [`crate::filewatch::NoopFileWatcher`] it watches nothing, and with the default
-    /// [`crate::git::NoopGitRepository`] a re-read finds no repository, so the real adapters are
-    /// chosen in the composition root.
+    /// when the bus closes (app shutdown). With the default [`crate::git::NoopGitRepository`] a
+    /// re-read finds no repository, so the real adapter is chosen in the composition root.
     pub fn git_status_watch_loop(&self) -> impl Future<Output = ()> + Send + 'static {
         GitStatusWatchReactor::new(
             self.clock.clone(),
-            self.file_watcher.clone(),
+            self.watch_set.subscribe(),
             &self.bus,
             Arc::downgrade(&self.git),
             self.projects.clone(),
-            self.watch_status.clone(),
         )
         .run()
     }

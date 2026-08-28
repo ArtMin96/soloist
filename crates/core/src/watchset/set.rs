@@ -40,10 +40,6 @@ const CHANGE_BUFFER: usize = 1_024;
 /// How many changed paths a lagging consumer (a reactor's `subscribe()` receiver) may fall
 /// behind before it starts missing them. A `Lagged` receiver re-syncs its own state wholesale
 /// (each reactor's own `resync`), so a drop here costs a wasted re-sync, not correctness.
-///
-/// Read only by [`ProjectWatchSet::new`], not yet called outside this module's own tests until
-/// the composition root builds a set over it.
-#[allow(dead_code)]
 const FANOUT_CAPACITY: usize = 1_024;
 
 /// The most paths one `Appeared` scan republishes onto the fan-out. A directory created and
@@ -99,11 +95,8 @@ pub struct ProjectWatchSet {
 
 impl ProjectWatchSet {
     /// Builds a watch set over the given ports, watching the supervisor weakly (so it never
-    /// keeps the app alive) and reporting through the shared [`WatchStatus`].
-    ///
-    /// Constructed by this module's own tests only until the composition root builds one over
-    /// the real ports and spawns [`Self::run`].
-    #[allow(dead_code)]
+    /// keeps the app alive) and reporting through the shared [`WatchStatus`]. Built once by
+    /// [`crate::facade::Facade::new`]; the composition root spawns [`Self::run`].
     pub(crate) fn new(
         clock: Arc<dyn Clock>,
         watcher: Arc<dyn FileWatcher>,

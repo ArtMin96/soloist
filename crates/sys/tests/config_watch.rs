@@ -1,26 +1,26 @@
-//! Integration check for the config-watch chain over the real `notify` adapter: an external
-//! edit to an open project's `solo.yml` on a real filesystem reaches a reload — announced as
-//! `ConfigChanged` with its trust review — through the real watcher, the real debounce
-//! window, and the real sync engine. The mock-clock policy behaviour is covered in the
-//! core's reactor tests; this proves the live wiring end to end, headless. Uses real time
-//! (a bounded await), like the other OS-adapter integration tests.
+//! Integration check for the config-watch chain over the real composition: an external edit to
+//! an open project's `solo.yml` on a real filesystem reaches a reload — announced as
+//! `ConfigChanged` with its trust review — through the real `notify` watcher, the real
+//! `ignore`-backed scanner, the watch set that plans and maintains the registration over both,
+//! the real debounce window, and the real sync engine. The mock-clock policy behaviour is
+//! covered in the core's reactor tests; this proves the live wiring end to end, headless,
+//! exactly as the composition root assembles it — driving the config-watch reactor with no
+//! watcher of its own, only the watch set's fan-out. Uses real time (a bounded await), like the
+//! other OS-adapter integration tests.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use soloist_core::testing::{FakeProjectRepo, FakeSpawner, FakeTrustRepo};
-use soloist_core::{
-    ConfigEngine, ConfigWatchReactor, CorePorts, DomainEvent, EventBus, ProjectService, Projects,
-    Supervisor, TokioClock,
-};
-use soloist_sys::NotifyFileWatcher;
+use soloist_core::{CorePorts, DomainEvent, Facade, TokioClock};
+use soloist_sys::{IgnoreWatchScanner, NotifyFileWatcher};
 
 /// How long to wait for the debounced reload before giving up — the quiet window plus
 /// generous inotify slack, so a loaded CI box does not flake.
 const BUDGET: Duration = Duration::from_secs(10);
 
 #[tokio::test]
-async fn an_external_edit_reaches_a_reload_through_the_real_watcher() {
+async fn an_external_edit_reaches_a_reload_through_the_real_watch_set() {
     let dir = tempfile::tempdir().expect("temp dir");
     std::fs::write(
         dir.path().join("solo.yml"),
@@ -28,38 +28,24 @@ async fn an_external_edit_reaches_a_reload_through_the_real_watcher() {
     )
     .expect("write solo.yml");
 
-    let bus = EventBus::new(1024);
-    let mut rx = bus.subscribe();
-    let trust = Arc::new(FakeTrustRepo::new());
-    let repo = Arc::new(FakeProjectRepo::new());
-    let ports = CorePorts::builder(
-        Arc::new(FakeSpawner::exits_on_terminate()),
-        Arc::new(TokioClock),
-        trust.clone(),
-        repo.clone(),
-    )
-    .build();
-    let sup = Arc::new(Supervisor::new(ports.supervisor_ports(), bus.clone()));
-    let projects = Arc::new(Projects::new(repo));
-    let config = Arc::new(ConfigEngine::new(trust, bus.clone()));
-
-    ProjectService::new(&projects, &config, &sup, &bus)
-        .open(dir.path())
-        .expect("open project");
-    tokio::spawn(
-        ConfigWatchReactor::new(
+    let facade = Facade::new(
+        CorePorts::builder(
+            Arc::new(FakeSpawner::exits_on_terminate()),
             Arc::new(TokioClock),
-            Arc::new(NotifyFileWatcher::new()),
-            &bus,
-            Arc::downgrade(&sup),
-            projects,
-            config,
+            Arc::new(FakeTrustRepo::new()),
+            Arc::new(FakeProjectRepo::new()),
         )
-        .run(),
+        .file_watcher(Arc::new(NotifyFileWatcher::new()))
+        .watch_scanner(Arc::new(IgnoreWatchScanner::new()))
+        .build(),
     );
-    // The reactor establishes its watch synchronously in its startup re-sync; yielding lets
-    // the spawned task reach it before the edit lands.
-    tokio::task::yield_now().await;
+    let mut rx = facade.subscribe();
+
+    facade.load_project(dir.path()).expect("open project");
+    // The composition root's own order: the watch set must already be serving the fan-out
+    // before the reactor that consumes it starts.
+    tokio::spawn(facade.watch_set_loop());
+    tokio::spawn(facade.config_watch_loop());
 
     std::fs::write(
         dir.path().join("solo.yml"),

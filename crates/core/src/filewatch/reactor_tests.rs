@@ -1,10 +1,16 @@
 //! Behavioural tests for [`WatchReactor`], kept out of the implementation file. They drive a
-//! real [`Supervisor`] over fakes plus a [`FakeFileWatcher`] feeding synthetic change events.
-//! Waits are event-driven — they await a status transition on the bus ([`wait_all`]), the
-//! watcher's `established` signal, a `FileRestart`, or the reactor arming its debounce deadline
-//! ([`MockClock::deadline_armed_at`]) — and the debounce window is then advanced on the mock
-//! clock, so there is no real filesystem, no real time, and no reliance on scheduler timing (which
-//! is what makes a `yield_now` budget flake under load).
+//! real [`Supervisor`] over fakes, feeding synthetic changed paths straight onto a broadcast
+//! channel the reactor consumes in place of [`crate::watchset::ProjectWatchSet`]'s fan-out —
+//! which of a project's directories are actually watched, and what a refusal or a degradation
+//! means, is that module's own concern and its own test coverage; this file pins only what the
+//! reactor decides once a change has already been reported: which changed paths, for which
+//! commands, are worth a debounced restart.
+//!
+//! Waits are event-driven — they await a status transition on the bus ([`wait_all`]), a
+//! `FileRestart`, or the reactor arming its debounce deadline ([`MockClock::deadline_armed_at`])
+//! — and the debounce window is then advanced on the mock clock, so there is no real filesystem,
+//! no real time, and no reliance on scheduler timing (which is what makes a `yield_now` budget
+//! flake under load).
 //!
 //! The one remaining `yield_now` budget is [`yield_many`], and only where the assertion is that
 //! nothing happens: there is no event to await for an effect that must never occur, and a budget
@@ -26,17 +32,24 @@ use crate::ports::{Clock, PtySize, SpawnSpec, TrustRepo};
 use crate::process::{ProcStatus, ProcessKind};
 use crate::supervisor::{Registration, Supervisor};
 use crate::testing::{
-    next_matching, wait_all, FakeFileWatcher, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
-    MockClock,
+    next_matching, wait_all, FakeProjectRepo, FakeSpawner, FakeTrustRepo, MockClock,
 };
-use crate::watch::{WatchError, WatchLimit, WatchPurpose};
 
-use super::{WatchReactor, WatchStatus, QUIET};
+use super::{WatchReactor, QUIET};
 
 const PROJECT: ProjectId = ProjectId::from_raw(1);
 const ROOT: &str = "/project";
 /// One advance step, comfortably past the reactor's quiet window so a single step fires it.
 const STEP: Duration = Duration::from_millis(400);
+/// How many changed paths the test's fan-out buffers before a send starts dropping — generous
+/// for a single test's traffic.
+const CHANGE_BUFFER: usize = 256;
+/// How long one [`changed_until_armed`] attempt waits before resending — short, since a
+/// resync that is going to catch up does so within a scheduler tick.
+const RETRY_STEP: Duration = Duration::from_millis(50);
+/// How many times [`changed_until_armed`] resends before giving up — generous relative to
+/// [`RETRY_STEP`], so a resync that never catches up fails the test loudly instead of hanging.
+const RETRY_LIMIT: usize = 20;
 
 struct Setup {
     sup: Arc<Supervisor>,
@@ -44,7 +57,7 @@ struct Setup {
     bus: EventBus,
     rx: broadcast::Receiver<DomainEvent>,
     trust: Arc<FakeTrustRepo>,
-    watcher: Arc<FakeFileWatcher>,
+    changes: broadcast::Sender<PathBuf>,
 }
 
 fn setup() -> Setup {
@@ -61,13 +74,14 @@ fn setup() -> Setup {
     )
     .build();
     let sup = Arc::new(Supervisor::new(ports.supervisor_ports(), bus.clone()));
+    let (changes, _rx) = broadcast::channel(CHANGE_BUFFER);
     Setup {
         sup,
         clock,
         bus,
         rx,
         trust,
-        watcher: Arc::new(FakeFileWatcher::new()),
+        changes,
     }
 }
 
@@ -113,25 +127,17 @@ async fn yield_many() {
     }
 }
 
-/// Spawns the reactor without waiting — for asserting an ineligible target is never watched.
+/// Spawns the reactor over the test's own change fan-out.
 fn spawn_reactor(s: &Setup) {
     tokio::spawn(
         WatchReactor::new(
             Arc::new(s.clock.clone()),
-            s.watcher.clone(),
+            s.changes.subscribe(),
             &s.bus,
             Arc::downgrade(&s.sup),
-            Arc::new(WatchStatus::new(s.bus.clone())),
         )
         .run(),
     );
-}
-
-/// Spawns the reactor and awaits its first established watch (so the fake holds the change
-/// sink). Use [`spawn_reactor`] directly when no watch is expected.
-async fn start_reactor(s: &Setup) {
-    spawn_reactor(s);
-    s.watcher.established().await;
 }
 
 /// Fires the debounce window and awaits the resulting `FileRestart`. Changes must already be
@@ -168,16 +174,44 @@ async fn assert_no_file_restart(s: &mut Setup) {
     }
 }
 
+/// Sends `path` on the change fan-out, retrying until the reactor arms a debounce deadline for
+/// it — bounded, so a resync that never catches up fails the test loudly rather than hanging.
+///
+/// A live resync (on `ProjectOpened`/`ConfigChanged`) rebuilds the reactor's match rules
+/// concurrently with whatever the test does next: a real filesystem watch cannot report a change
+/// before the directory it lives under is registered, but a test feeding a synthetic change
+/// straight onto the fan-out can race ahead of the resync that would have matched it, in which
+/// case the change simply matches nothing and has to be sent again once the rules have caught
+/// up. Resending costs nothing here — every burst test already sends the same path several times
+/// and asserts it coalesces into one restart.
+async fn changed_until_armed(s: &Setup, path: &Path) {
+    let deadline = s.clock.now() + QUIET;
+    for attempt in 0..RETRY_LIMIT {
+        let _ = s.changes.send(path.to_path_buf());
+        if tokio::time::timeout(RETRY_STEP, s.clock.deadline_armed_at(deadline))
+            .await
+            .is_ok()
+        {
+            return;
+        }
+        assert!(
+            attempt + 1 < RETRY_LIMIT,
+            "the reactor never armed a debounce for {}",
+            path.display(),
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_matching_save_burst_to_a_running_command_triggers_exactly_one_restart() {
     let mut s = setup();
     let web = register_command(&s, "Web", &["src/**/*.rs"], true);
     start_running(&mut s, web).await;
-    start_reactor(&s).await;
+    spawn_reactor(&s);
 
     // A burst of saves for one logical edit.
     for _ in 0..5 {
-        s.watcher.change(changed("src/app/main.rs"));
+        let _ = s.changes.send(changed("src/app/main.rs"));
     }
 
     // Coalesced into a single restart of exactly that command.
@@ -191,11 +225,11 @@ async fn an_ignored_or_non_matching_change_to_a_running_command_does_not_restart
     let mut s = setup();
     let web = register_command(&s, "Web", &["**/*.rs"], true);
     start_running(&mut s, web).await;
-    start_reactor(&s).await;
+    spawn_reactor(&s);
 
     // Inside an ignored directory (matches the glob, but ignored), and a non-matching file.
-    s.watcher.change(changed("node_modules/dep.rs"));
-    s.watcher.change(changed("docs/readme.md"));
+    let _ = s.changes.send(changed("node_modules/dep.rs"));
+    let _ = s.changes.send(changed("docs/readme.md"));
     yield_many().await;
 
     assert_no_file_restart(&mut s).await;
@@ -208,9 +242,9 @@ async fn a_change_to_a_stopped_command_does_not_start_it() {
     // must not resurrect a resting one (otherwise an edit would start a command the user
     // stopped, or a restored-but-resting one on launch).
     let web = register_command(&s, "Web", &["src/**/*.rs"], true);
-    start_reactor(&s).await;
+    spawn_reactor(&s);
 
-    s.watcher.change(changed("src/app/main.rs"));
+    let _ = s.changes.send(changed("src/app/main.rs"));
     yield_many().await;
 
     assert_no_file_restart(&mut s).await;
@@ -229,24 +263,22 @@ async fn an_untrusted_command_is_never_restarted() {
     // Watched (command + globs) but never trusted: it cannot be started, so it is never
     // running, and a watched change never reloads it (the restart gate also fails closed).
     register_command(&s, "Web", &["src/**/*.rs"], false);
-    start_reactor(&s).await;
+    spawn_reactor(&s);
 
-    s.watcher.change(changed("src/app/main.rs"));
+    let _ = s.changes.send(changed("src/app/main.rs"));
     yield_many().await;
 
     assert_no_file_restart(&mut s).await;
 }
 
 #[tokio::test]
-async fn a_project_opened_after_startup_is_watched() {
+async fn a_project_opened_after_startup_is_matched() {
     let mut s = setup();
-    // The reactor starts with no watch-eligible commands, so it watches nothing.
+    // The reactor starts with no watch-eligible commands, so a change matches nothing.
     spawn_reactor(&s);
+    let _ = s.changes.send(changed("src/app/main.rs"));
     yield_many().await;
-    assert!(
-        s.watcher.watched().is_empty(),
-        "there is nothing to watch at startup",
-    );
+    assert_no_file_restart(&mut s).await;
 
     // A command registered after startup — as opening a project does — becomes watch
     // eligible; the reactor only learns of it when the open is announced.
@@ -254,28 +286,21 @@ async fn a_project_opened_after_startup_is_watched() {
     start_running(&mut s, web).await;
     s.bus.publish(DomainEvent::ProjectOpened { id: PROJECT });
 
-    // The reactor re-syncs on the open and now establishes the watch for the new command.
-    s.watcher.established().await;
-    assert!(
-        !s.watcher.watched().is_empty(),
-        "the project opened after startup is now watched",
-    );
-
-    // A matching change to it now restarts it, proving the re-watch is live.
-    s.watcher.change(changed("src/app/main.rs"));
+    // A matching change now restarts it, once the live resync has rebuilt the match rules.
+    changed_until_armed(&s, &changed("src/app/main.rs")).await;
     assert_eq!(next_file_restart(&mut s).await, web);
 }
 
 #[tokio::test]
-async fn a_config_reload_that_adds_a_watched_command_is_watched() {
+async fn a_config_reload_that_adds_a_watched_command_is_matched() {
     let mut s = setup();
-    // Nothing watch-eligible at startup.
+    // Nothing watch-eligible at startup — proven, not assumed: the initial resync must have
+    // actually run against the empty registry before a command is registered, or the assertion
+    // below would prove nothing about the *live* resync this test exists to check.
     spawn_reactor(&s);
+    let _ = s.changes.send(changed("src/app/main.rs"));
     yield_many().await;
-    assert!(
-        s.watcher.watched().is_empty(),
-        "nothing to watch at startup"
-    );
+    assert_no_file_restart(&mut s).await;
 
     // A solo.yml reload adds a watch-eligible command: the command is registered (as the
     // config engine's reload does) and the reload is announced with ConfigChanged. The reactor
@@ -290,75 +315,16 @@ async fn a_config_reload_that_adds_a_watched_command_is_watched() {
         commands: Vec::new(),
     });
 
-    s.watcher.established().await;
-    assert!(
-        !s.watcher.watched().is_empty(),
-        "the reloaded command is now watched",
-    );
-
-    // A matching change now restarts it, proving the re-watch is live.
-    s.watcher.change(changed("src/app/main.rs"));
+    // A matching change now restarts it, once the live resync has rebuilt the match rules.
+    changed_until_armed(&s, &changed("src/app/main.rs")).await;
     assert_eq!(next_file_restart(&mut s).await, web);
 }
 
 #[tokio::test]
-async fn a_removed_projects_root_watch_is_released() {
+async fn a_terminal_or_a_glob_less_command_is_not_matched() {
     let mut s = setup();
-    let web = register_command(&s, "Web", &["src/**/*.rs"], true);
-    start_running(&mut s, web).await;
-    start_reactor(&s).await;
-    assert_eq!(s.watcher.live(), vec![PathBuf::from(ROOT)]);
-
-    // Project removal's teardown: its processes close, then the removal is announced. The
-    // reactor re-syncs on the announcement; with no watch-eligible command left at ROOT,
-    // the root's OS watch is dropped (releasing its resources), not merely unmatched.
-    s.sup.close_all(PROJECT).await;
-    s.bus.publish(DomainEvent::ProjectRemoved { id: PROJECT });
-
-    s.watcher.released().await;
-    assert!(
-        s.watcher.live().is_empty(),
-        "the removed project's watch is dropped",
-    );
-}
-
-#[tokio::test]
-async fn a_root_the_os_refuses_is_reported_instead_of_quietly_not_restarting() {
-    let mut s = setup();
-    // The OS is out of watch descriptors. The command stays registered and watch-eligible, but
-    // nothing under its root will ever report, so its globs cannot fire — which looks exactly
-    // like a project nobody edits unless somebody says otherwise.
-    s.watcher.refuse(ROOT);
-    let web = register_command(&s, "Web", &["src/**/*.rs"], true);
-    start_running(&mut s, web).await;
-    spawn_reactor(&s);
-
-    let announced = next_matching(&mut s.rx, |e| {
-        matches!(e, DomainEvent::WatchLimitChanged { .. })
-    })
-    .await;
-    let expected = BTreeMap::from([(
-        WatchPurpose::Restarts,
-        WatchLimit::Refused(WatchError::BudgetExhausted),
-    )]);
-    assert!(
-        matches!(
-            &announced,
-            DomainEvent::WatchLimitChanged { project, limits }
-                if *project == PROJECT && *limits == expected
-        ),
-        "the user is told which of the project's watches stopped, and why: {announced:?}",
-    );
-
-    // ...and the save it cannot see restarts nothing, which is the thing being reported.
-    s.watcher.change(changed("src/app/main.rs"));
-    assert_no_file_restart(&mut s).await;
-}
-
-#[tokio::test]
-async fn a_terminal_or_a_glob_less_command_is_not_watched() {
-    let s = setup();
-    // A terminal (never file-watched) and a command with no globs — neither is eligible.
+    // A terminal (never file-watched) and a command with no globs — neither is eligible, so no
+    // rule is ever built for either and a change against their paths matches nothing.
     s.sup.register(Registration::launched(
         PROJECT,
         ProcessKind::Terminal,
@@ -371,12 +337,10 @@ async fn a_terminal_or_a_glob_less_command_is_not_watched() {
         },
     ));
     register_command(&s, "NoGlob", &[], true);
-
     spawn_reactor(&s);
+
+    let _ = s.changes.send(changed("anything.rs"));
     yield_many().await;
 
-    assert!(
-        s.watcher.watched().is_empty(),
-        "an ineligible target is never watched",
-    );
+    assert_no_file_restart(&mut s).await;
 }

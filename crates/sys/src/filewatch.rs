@@ -1,40 +1,33 @@
 //! Filesystem watching over `notify`: the OS read behind the core's `FileWatcher`.
 //!
-//! For each watched directory, this registers a `notify` watcher (inotify on Linux) —
-//! recursive for project roots, non-recursive for a single directory — and forwards every
-//! created, modified, or removed absolute path to the core's reactors. The watcher delivers
-//! events on its own OS thread, so it never blocks the async runtime; the callback only pushes
-//! onto the bounded channel. All matching, the default ignores, and debouncing stay in the pure
-//! core ([`soloist_core::WatchReactor`]) — the adapter reports raw changes, so every
-//! testable decision lives in the core, not here.
+//! [`NotifyFileWatcher::open`] backs the session-based port: one `notify` watcher instance
+//! registers every directory asked of it, non-recursively per directory, so the app holds one
+//! inotify instance regardless of how many directories or projects it watches. The watcher
+//! delivers events on its own OS thread, so it never blocks the async runtime; the callback only
+//! pushes onto the bounded channel. All matching, the default ignores, planning, and debouncing
+//! stay in the pure core (`soloist_core::watchset::ProjectWatchSet`, `soloist_core::WatchReactor`)
+//! — the adapter reports raw changes, so every testable decision lives in the core, not here.
+//! Because registration is per directory rather than per tree, a newly created subdirectory is
+//! not auto-added by `notify` the way a recursive registration would add it; the core registers
+//! it itself once its own scan finds it.
 //!
-//! Establishing a watch blocks the calling thread until the backend has registered it. For a
-//! recursive one that means walking the whole tree under the root and spending one inotify watch per
-//! directory in it — unbounded work, so the core reaches those off a runtime worker; a non-recursive
-//! one is a single registration and is not worth the hop.
+//! Registering a directory blocks the calling thread until the backend has registered it — a
+//! single, bounded registration, so the core reaches it directly rather than off the runtime;
+//! only the whole-tree scans that plan *what* to register walk unbounded work, and those are the
+//! core's own concern.
 //!
-//! A watch the OS refuses comes back as a [`WatchError`] rather than as a handle that reports
-//! nothing: silence is what a tree nobody touches looks like too, so a swallowed refusal would be a
-//! subsystem that died without saying anything. `notify` stops a recursive registration at the first
-//! directory it cannot watch, so an exhausted watch budget refuses the whole root rather than part of
-//! it — which is why losing one root must not cost the others.
-//!
-//! [`NotifyFileWatcher::open`] backs the session-based half of the port: one `notify` watcher
-//! instance registers every directory asked of it, non-recursively per directory, so the app holds
-//! one inotify instance regardless of how many directories or projects it watches — where the
-//! legacy [`FileWatcher::watch`]/[`FileWatcher::watch_dir`] above build a fresh instance per call.
-//! Because registration is per directory rather than per tree, a newly created subdirectory is not
-//! auto-added by `notify` the way a recursive registration would add it; the core registers it
-//! itself once its own scan finds it.
+//! A directory the OS refuses comes back as a [`WatchError`] rather than succeeding silently:
+//! silence is what a tree nobody touches looks like too, so a swallowed refusal would be a
+//! subsystem that died without saying anything.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Config, ErrorKind, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use soloist_core::filewatch::{FileChange, FileChangeKind, WatchSession};
-use soloist_core::{FileWatcher, WatchError, WatchHandle};
+use soloist_core::{FileWatcher, WatchError};
 use tokio::sync::mpsc;
 
 /// Watches directories via `notify`, forwarding create/modify/remove paths to the core's watch
@@ -49,22 +42,6 @@ impl NotifyFileWatcher {
 }
 
 impl FileWatcher for NotifyFileWatcher {
-    fn watch(
-        &self,
-        root: PathBuf,
-        changes: mpsc::Sender<PathBuf>,
-    ) -> Result<Box<dyn WatchHandle>, WatchError> {
-        start_watch(&root, RecursiveMode::Recursive, changes)
-    }
-
-    fn watch_dir(
-        &self,
-        dir: PathBuf,
-        changes: mpsc::Sender<PathBuf>,
-    ) -> Result<Box<dyn WatchHandle>, WatchError> {
-        start_watch(&dir, RecursiveMode::NonRecursive, changes)
-    }
-
     fn open(
         &self,
         changes: mpsc::Sender<FileChange>,
@@ -130,36 +107,6 @@ fn classify(kind: &EventKind) -> Option<FileChangeKind> {
     }
 }
 
-/// Builds a watcher on `dir` at the given depth, or says why it could not be built — the backend
-/// itself would not start, the OS is out of watches, or the directory is unreadable or gone.
-fn start_watch(
-    dir: &Path,
-    mode: RecursiveMode,
-    changes: mpsc::Sender<PathBuf>,
-) -> Result<Box<dyn WatchHandle>, WatchError> {
-    // Runs on notify's own delivery thread. Creations, modifications, and removals each leave the
-    // tree different from before, so all three are reported; access events (a file merely opened,
-    // read, or closed) change nothing and are not. A rename needs no case of its own — the
-    // backend reports one as a modification of the name, so it arrives with the modifications.
-    // `try_send` never blocks that thread, and a full channel drops the path harmlessly — the
-    // burst already armed the consuming reactor's debounce, and the next change re-arms it.
-    let forward = move |result: notify::Result<notify::Event>| {
-        let Ok(event) = result else {
-            return;
-        };
-        if event.kind.is_create() || event.kind.is_modify() || event.kind.is_remove() {
-            for path in event.paths {
-                let _ = changes.try_send(path);
-            }
-        }
-    };
-
-    let mut watcher =
-        RecommendedWatcher::new(forward, Config::default()).map_err(|_| WatchError::Unavailable)?;
-    watcher.watch(dir, mode).map_err(refusal)?;
-    Ok(Box::new(NotifyWatchHandle { _watcher: watcher }))
-}
-
 /// What the backend's refusal means to the core. A recursive watch registers one per directory it
 /// walks and stops at the first the OS will not give it, so an exhausted budget is the failure a
 /// large tree actually meets — and the one the user can do something about.
@@ -169,14 +116,6 @@ fn refusal(err: notify::Error) -> WatchError {
         _ => WatchError::Unwatchable,
     }
 }
-
-/// A live `notify` watch. Dropping it stops the OS watch and releases its inotify
-/// descriptors, so the reactor holds one per watched root for exactly as long as it watches.
-struct NotifyWatchHandle {
-    _watcher: RecommendedWatcher,
-}
-
-impl WatchHandle for NotifyWatchHandle {}
 
 /// The [`WatchSession`] [`NotifyFileWatcher::open`] returns: one `notify` watcher instance shared
 /// by every directory registered through it. Dropping it drops the watcher, releasing every

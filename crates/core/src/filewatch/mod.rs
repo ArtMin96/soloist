@@ -18,6 +18,5 @@ pub use reactor::WatchReactor;
 pub use scan::{NoopWatchScanner, Scan, ScanRequest, ScannedPath, WatchScanner};
 pub(crate) use status::WatchStatus;
 pub use watcher::{
-    FileChange, FileChangeKind, FileWatcher, NoopFileWatcher, NoopWatchHandle, NoopWatchSession,
-    WatchHandle, WatchSession,
+    FileChange, FileChangeKind, FileWatcher, NoopFileWatcher, NoopWatchSession, WatchSession,
 };
