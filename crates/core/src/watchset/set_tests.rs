@@ -662,3 +662,93 @@ async fn a_dropped_change_arms_a_full_rescan() {
         .change_of(inside_missed.clone(), FileChangeKind::Modified);
     expect_change(&mut rx, &inside_missed).await;
 }
+
+#[tokio::test]
+async fn a_reopened_project_has_its_registrations_re_established() {
+    // A project reopened at the same root, with the same restart-eligible globs and the same
+    // budget share, looks identical to `resync`'s replan check — nothing about it moved. But the
+    // path underneath an unchanged root can have: a fresh clone over a deleted checkout, a
+    // directory swapped wholesale. `ProjectOpened` must therefore drop what this project holds
+    // and re-establish it, not merely reconcile against the unchanged-looking cached plan.
+    let s = setup();
+    let project = s.repo.upsert(&root(), None, None).expect("seed").id;
+    seed_scan(&s.scanner, root(), &[(under("src"), true)]);
+    let ws = spawn_set(&s);
+    let mut rx = ws.subscribe();
+    wait_until("src registered", || {
+        s.watcher.registered().contains(&under("src"))
+    })
+    .await;
+    let unwatched_before = s.watcher.unwatched().len();
+
+    s.bus.publish(DomainEvent::ProjectOpened { id: project });
+
+    wait_until(
+        "the root's stale handle is dropped and a fresh one taken",
+        || s.watcher.unwatched().contains(&root()) && s.watcher.registered().contains(&root()),
+    )
+    .await;
+    assert!(
+        s.watcher.unwatched().len() > unwatched_before,
+        "reopening an unchanged project must still drop and re-take its registrations",
+    );
+
+    // End to end: the re-established registration is actually delivering.
+    let touched = under("src/touched");
+    s.watcher
+        .change_of(touched.clone(), FileChangeKind::Modified);
+    expect_change(&mut rx, &touched).await;
+}
+
+#[tokio::test]
+async fn only_the_working_trees_refusal_is_reported() {
+    let mut s = setup();
+    s.watcher.refuse(state_dir());
+    let project = s.repo.upsert(&root(), None, None).expect("seed").id;
+    let ws = spawn_set(&s);
+    let mut rx = ws.subscribe();
+    wait_until("the root settles", || {
+        s.watcher.registered().contains(&root())
+    })
+    .await;
+
+    while let Ok(event) = s.rx.try_recv() {
+        if let DomainEvent::WatchLimitChanged { project: p, limits } = event {
+            if p == project {
+                assert!(
+                    limits.is_empty(),
+                    "a state-dir refusal must not be reported: {limits:?}",
+                );
+            }
+        }
+    }
+
+    let touched = under("touched");
+    s.watcher
+        .change_of(touched.clone(), FileChangeKind::Modified);
+    expect_change(&mut rx, &touched).await;
+}
+
+#[tokio::test]
+async fn a_restart_eligible_projects_root_refusal_marks_both_purposes() {
+    let mut s = setup();
+    s.watcher.refuse(root());
+    let project = s.repo.upsert(&root(), None, None).expect("seed").id;
+    register_command(&s, project, "Build", &["src/**/*.rs"]);
+    spawn_set(&s);
+
+    // Each purpose settles (and may announce) independently, so the first `WatchLimitChanged`
+    // seen for this project can carry only `GitStatus` a moment before `Restarts` catches up —
+    // the predicate waits for the settled state where both hold, the same shape
+    // `a_refused_session_is_retried_on_the_next_resync` above uses.
+    let announced = next_matching(&mut s.rx, |event| {
+        matches!(event, DomainEvent::WatchLimitChanged { project: p, limits }
+            if *p == project
+                && limits.get(&WatchPurpose::GitStatus)
+                    == Some(&WatchLimit::Refused(WatchError::BudgetExhausted))
+                && limits.get(&WatchPurpose::Restarts)
+                    == Some(&WatchLimit::Refused(WatchError::BudgetExhausted)))
+    })
+    .await;
+    let _ = announced;
+}

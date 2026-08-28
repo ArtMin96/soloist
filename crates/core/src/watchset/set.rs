@@ -161,8 +161,21 @@ impl ProjectWatchSet {
                 result = events.recv() => {
                     match result {
                         Err(RecvError::Closed) => break,
-                        Ok(DomainEvent::ProjectOpened { .. }
-                            | DomainEvent::ProjectRemoved { .. }
+                        // A project reopened at an unchanged root, with unchanged globs and
+                        // unchanged share, looks identical to a settled one to `resync`'s replan
+                        // check — nothing about it moved. But the path underneath an unchanged
+                        // root can be a different inode (a fresh clone over a deleted checkout, a
+                        // directory swapped wholesale), whose old registration is now silently
+                        // dead. Dropping what this project holds first forces every one of its
+                        // watches to be re-established, the intent the release-on-open this owner
+                        // replaced had — a full [`Self::resync`] alone cannot do this: an
+                        // already-held path is left untouched by design (see its own doc), so
+                        // only explicitly releasing first makes the retry loop re-register it.
+                        Ok(DomainEvent::ProjectOpened { id }) => {
+                            self.release_project(&mut state, id);
+                            self.resync(&mut state, &changes_tx, &dropped, false).await;
+                        }
+                        Ok(DomainEvent::ProjectRemoved { .. }
                             | DomainEvent::ConfigChanged { .. })
                         | Err(RecvError::Lagged(_)) => {
                             self.resync(&mut state, &changes_tx, &dropped, false).await;
