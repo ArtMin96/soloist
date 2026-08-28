@@ -74,3 +74,36 @@ fn an_empty_glob_list_compiles_to_no_matcher() {
 fn a_list_with_a_valid_glob_compiles() {
     assert!(compile(&["*.rs".to_string()]).is_some());
 }
+
+#[test]
+fn literal_prefix_stops_at_the_first_metacharacter_component() {
+    assert_eq!(literal_prefix("src/**/*.rs"), Some(PathBuf::from("src")));
+}
+
+#[test]
+fn literal_prefix_excludes_the_final_component_even_when_it_is_literal() {
+    assert_eq!(
+        literal_prefix("dist/config.json"),
+        Some(PathBuf::from("dist"))
+    );
+}
+
+#[test]
+fn literal_prefix_is_none_for_a_pattern_anchored_at_the_root() {
+    assert_eq!(literal_prefix("*.toml"), None);
+}
+
+#[test]
+fn literal_prefix_spans_several_literal_directories() {
+    assert_eq!(literal_prefix("a/b/c.txt"), Some(PathBuf::from("a/b")));
+}
+
+#[test]
+fn literal_prefix_stops_at_a_bracket_class() {
+    assert_eq!(literal_prefix("a/[bc]/d"), Some(PathBuf::from("a")));
+}
+
+#[test]
+fn literal_prefix_is_none_when_the_first_component_is_a_brace_alternation() {
+    assert_eq!(literal_prefix("{a,b}/c"), None);
+}

@@ -18,6 +18,30 @@ use crate::ids::ProcessId;
 /// `node_modules/`) and would otherwise cause restart storms.
 pub(crate) const DEFAULT_IGNORES: [&str; 5] = [".git", "node_modules", "target", "dist", ".venv"];
 
+/// The directory a glob is anchored at: its leading components up to the first that carries a
+/// glob metacharacter (`*`, `?`, `[`, `{`), excluding the pattern's final component (the file
+/// position, never a directory to watch). `None` for a pattern with nothing before that —
+/// anchored at the root itself, or its very first component is already a metacharacter.
+///
+/// Shared with [`crate::watchset`], which scans this directory with the repository's own ignore
+/// rules disabled: a glob names it explicitly, so a gitignored prefix (`dist/config.json`) must
+/// still be watched even though the whole-tree scan would skip `dist`.
+pub(crate) fn literal_prefix(pattern: &str) -> Option<PathBuf> {
+    let components: Vec<&str> = pattern.split('/').collect();
+    let mut literal = Vec::new();
+    for component in components.iter().take(components.len().saturating_sub(1)) {
+        if component.contains(['*', '?', '[', '{']) {
+            break;
+        }
+        literal.push(*component);
+    }
+    if literal.is_empty() {
+        None
+    } else {
+        Some(literal.into_iter().collect())
+    }
+}
+
 /// Compiles a command's `restart_when_changed` globs into a matcher, or `None` when the list
 /// is empty or every pattern is invalid — in which case the command is not watched. Invalid
 /// patterns are skipped so one typo does not silently disable the rest. `*` is left to match

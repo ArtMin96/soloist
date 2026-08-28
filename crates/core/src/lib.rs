@@ -50,6 +50,7 @@ pub mod trust;
 pub mod trustrequest;
 pub mod vcs;
 pub mod watch;
+pub mod watchset;
 
 mod cache;
 mod supervision;
@@ -171,3 +172,4 @@ pub use vcs::{
     FileDiff, GitFileStatus, HunkRange, ProjectFile, SyncState, COMMIT_BODY_LIMIT,
 };
 pub use watch::{WatchError, WatchPurpose};
+pub use watchset::ProjectWatchSet;

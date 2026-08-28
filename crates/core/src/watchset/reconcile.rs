@@ -1,0 +1,252 @@
+//! The planning half of [`ProjectWatchSet`](super::ProjectWatchSet): what each open project's
+//! watches should be, and reconciling what is actually held to that — split out of
+//! [`super::set`], which owns the event loop that calls [`ProjectWatchSet::resync`] and the
+//! incremental (`Appeared`/`Vanished`) maintenance that runs between one re-sync and the next.
+
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+
+use tokio::sync::mpsc;
+
+use crate::filewatch::{compile, literal_prefix, FileChange, Scan, ScanRequest, DEFAULT_IGNORES};
+use crate::ids::ProjectId;
+use crate::ports::ProjectRecord;
+use crate::supervision::run_blocking;
+use crate::vcs::{REFS_DIR, STATE_DIR};
+use crate::watch::{WatchError, WatchLimit, WatchOutcome, WatchPurpose};
+
+use super::plan::{plan, ProjectPlan};
+use super::set::{ProjectWatchSet, Registered, RunState};
+
+impl ProjectWatchSet {
+    /// Reconciles every open project's watches: ensures the session is open, re-plans a project
+    /// only when it is new, its root or watch-eligible globs changed, or it now holds more than
+    /// its share; and — regardless of whether it re-planned — retries whatever its cached plan
+    /// wants that it does not currently hold. That last step, run unconditionally on every
+    /// re-sync, is what re-establishes a refusal that has since cleared without needing a fresh
+    /// scan to trigger it (the [`crate::git::watched`] guarantee, at this layer).
+    pub(super) async fn resync(
+        &self,
+        state: &mut RunState,
+        changes_tx: &mpsc::Sender<FileChange>,
+        dropped: &Arc<AtomicU64>,
+    ) {
+        let Ok(records) = self.projects.list() else {
+            return;
+        };
+        let open: HashSet<ProjectId> = records.iter().map(|record| record.id).collect();
+        let globs_by_project = self.eligible_globs();
+
+        let session = match &state.session {
+            Some(session) => session.clone(),
+            None => match self.watcher.open(changes_tx.clone(), dropped.clone()) {
+                Ok(session) => {
+                    state.session = Some(session.clone());
+                    session
+                }
+                Err(_) => {
+                    self.report_unavailable(&records, &globs_by_project);
+                    return;
+                }
+            },
+        };
+
+        let share = state.registrations.share(open.len());
+        let mut git_outcomes = Vec::new();
+        let mut restart_outcomes = Vec::new();
+
+        for record in &records {
+            let project = record.id;
+            let root = record.root.clone();
+            let globs = globs_by_project.get(&project).cloned().unwrap_or_default();
+            let restart_eligible = !globs.is_empty();
+
+            let needs_replan = match state.projects.get(&project) {
+                None => true,
+                Some(existing) => {
+                    existing.root != root
+                        || existing.globs != globs
+                        || state.registrations.held_by(project) > share
+                }
+            };
+            if needs_replan {
+                let computed = self.replan(&root, &globs, share).await;
+                let paths: HashSet<PathBuf> = computed
+                    .directories
+                    .into_iter()
+                    .chain(computed.trees)
+                    .collect();
+                state.projects.insert(
+                    project,
+                    Registered {
+                        root: root.clone(),
+                        globs: globs.clone(),
+                        paths,
+                        limit: computed.limit,
+                    },
+                );
+            }
+
+            let refs_path = root.join(STATE_DIR).join(REFS_DIR);
+            let wanted: Vec<PathBuf> = state
+                .projects
+                .get(&project)
+                .map(|entry| entry.paths.iter().cloned().collect())
+                .unwrap_or_default();
+            let mut root_refused = None;
+            for path in &wanted {
+                if state.registrations.is_held(path, project) {
+                    continue;
+                }
+                let tree = *path == refs_path;
+                if let Err(err) =
+                    state
+                        .registrations
+                        .register(path, project, tree, session.as_ref())
+                {
+                    if *path == root {
+                        root_refused = Some(err);
+                    } else {
+                        // Only the working-tree root's refusal is reported (see below): a
+                        // project that is not a repository has no `.git` to watch, so a
+                        // state-dir refusal is the ordinary case rather than a loss.
+                        tracing::warn!(
+                            path = %path.display(),
+                            refusal = %err,
+                            "a project's watched files will not report: the directory could not be watched",
+                        );
+                    }
+                }
+            }
+
+            let mut limit = state
+                .projects
+                .get(&project)
+                .map(|entry| entry.limit.clone())
+                .unwrap_or_default();
+            if let Some(err) = root_refused {
+                limit.insert(WatchPurpose::GitStatus, WatchLimit::Refused(err));
+                if restart_eligible {
+                    limit.insert(WatchPurpose::Restarts, WatchLimit::Refused(err));
+                }
+            }
+            git_outcomes.push(WatchOutcome {
+                project,
+                limit: limit.get(&WatchPurpose::GitStatus).copied(),
+            });
+            if restart_eligible {
+                restart_outcomes.push(WatchOutcome {
+                    project,
+                    limit: limit.get(&WatchPurpose::Restarts).copied(),
+                });
+            }
+        }
+
+        let closed: Vec<ProjectId> = state
+            .projects
+            .keys()
+            .filter(|project| !open.contains(project))
+            .copied()
+            .collect();
+        for project in closed {
+            self.release_project(state, project);
+        }
+
+        self.status.resynced(WatchPurpose::GitStatus, &git_outcomes);
+        self.status
+            .resynced(WatchPurpose::Restarts, &restart_outcomes);
+    }
+
+    /// Every currently watch-eligible command's globs, grouped by project — commands whose
+    /// globs all fail to compile contribute nothing, the same predicate
+    /// [`crate::filewatch::WatchReactor`] matches against. Sorted per project so a re-sync
+    /// comparing against the cached [`Registered::globs`] is not fooled by registry iteration
+    /// order alone.
+    fn eligible_globs(&self) -> HashMap<ProjectId, Vec<String>> {
+        let mut by_project: HashMap<ProjectId, Vec<String>> = HashMap::new();
+        if let Some(supervisor) = self.supervisor.upgrade() {
+            for target in supervisor.watch_targets() {
+                if compile(&target.globs).is_some() {
+                    by_project
+                        .entry(target.project)
+                        .or_default()
+                        .extend(target.globs);
+                }
+            }
+        }
+        for globs in by_project.values_mut() {
+            globs.sort_unstable();
+        }
+        by_project
+    }
+
+    /// Scans `root`'s whole tree and each distinct glob literal prefix off the runtime, then
+    /// hands the results to the pure [`plan`]. One [`run_blocking`] closure covers every scan
+    /// this project needs, so the registrations [`Self::resync`] then applies for it happen as
+    /// one uninterrupted batch against a single, consistent read of the filesystem.
+    async fn replan(&self, root: &Path, globs: &[String], share: usize) -> ProjectPlan {
+        let prefixes: Vec<PathBuf> = globs
+            .iter()
+            .filter_map(|glob| literal_prefix(glob))
+            .map(|prefix| root.join(prefix))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let ignored_names: Vec<String> = DEFAULT_IGNORES
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect();
+        let scanner = self.scanner.clone();
+        let scan_root = root.to_path_buf();
+        let (tree, prefix_scans) = run_blocking(move || {
+            let tree = scanner.scan(ScanRequest {
+                root: scan_root,
+                ignored_names,
+                honour_repository_ignores: true,
+                ceiling: share,
+            });
+            let prefix_scans: Vec<Scan> = prefixes
+                .into_iter()
+                .map(|prefix| {
+                    scanner.scan(ScanRequest {
+                        root: prefix,
+                        ignored_names: Vec::new(),
+                        honour_repository_ignores: false,
+                        ceiling: share,
+                    })
+                })
+                .collect();
+            (tree, prefix_scans)
+        })
+        .await;
+        plan(root, globs, &tree, &prefix_scans, share)
+    }
+
+    /// Reports every open project as refused for want of a working backend — the session itself
+    /// could not be opened. Retried, from scratch, on the next re-sync.
+    fn report_unavailable(
+        &self,
+        records: &[ProjectRecord],
+        globs_by_project: &HashMap<ProjectId, Vec<String>>,
+    ) {
+        let mut git_outcomes = Vec::new();
+        let mut restart_outcomes = Vec::new();
+        for record in records {
+            git_outcomes.push(WatchOutcome {
+                project: record.id,
+                limit: Some(WatchLimit::Refused(WatchError::Unavailable)),
+            });
+            if globs_by_project.contains_key(&record.id) {
+                restart_outcomes.push(WatchOutcome {
+                    project: record.id,
+                    limit: Some(WatchLimit::Refused(WatchError::Unavailable)),
+                });
+            }
+        }
+        self.status.resynced(WatchPurpose::GitStatus, &git_outcomes);
+        self.status
+            .resynced(WatchPurpose::Restarts, &restart_outcomes);
+    }
+}
