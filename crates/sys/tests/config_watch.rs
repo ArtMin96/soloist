@@ -19,6 +19,18 @@ use soloist_sys::{IgnoreWatchScanner, NotifyFileWatcher};
 /// generous inotify slack, so a loaded CI box does not flake.
 const BUDGET: Duration = Duration::from_secs(10);
 
+/// How often the edit below is re-issued until it is seen. The watch set's startup
+/// registration crosses a `supervise` spawn and an off-runtime (`spawn_blocking`) scan before
+/// the session's own blocking `watch_dir` call returns, so a write landing before that
+/// registration completes raises no inotify event at all — and because the chain is
+/// edge-triggered with no content rescan, that write is then lost for good, not merely
+/// delayed. Re-issuing the same bytes is safe: `ConfigEngine` hash-diffs against the
+/// `echo one` baseline written above, so whichever attempt the watcher first observes produces
+/// exactly one `ConfigChanged`, and every later identical write no-ops. Longer than
+/// `ConfigWatchReactor`'s own 300ms debounce window, so a write that does land gets a clear
+/// quiet period to fire its reload in before the next retry re-arms the debounce.
+const RETRY: Duration = Duration::from_millis(500);
+
 #[tokio::test]
 async fn an_external_edit_reaches_a_reload_through_the_real_watch_set() {
     let dir = tempfile::tempdir().expect("temp dir");
@@ -47,21 +59,27 @@ async fn an_external_edit_reaches_a_reload_through_the_real_watch_set() {
     tokio::spawn(facade.watch_set_loop());
     tokio::spawn(facade.config_watch_loop());
 
-    std::fs::write(
-        dir.path().join("solo.yml"),
-        "processes:\n  Echo:\n    command: echo two\n",
-    )
-    .expect("edit solo.yml");
-
+    let mut retry = tokio::time::interval(RETRY);
     let changed = tokio::time::timeout(BUDGET, async {
         loop {
-            match rx.recv().await.expect("event bus open") {
-                DomainEvent::ConfigChanged {
-                    diff,
-                    requires_trust,
-                    ..
-                } => break (diff, requires_trust),
-                _ => continue,
+            tokio::select! {
+                _ = retry.tick() => {
+                    std::fs::write(
+                        dir.path().join("solo.yml"),
+                        "processes:\n  Echo:\n    command: echo two\n",
+                    )
+                    .expect("edit solo.yml");
+                }
+                event = rx.recv() => {
+                    match event.expect("event bus open") {
+                        DomainEvent::ConfigChanged {
+                            diff,
+                            requires_trust,
+                            ..
+                        } => break (diff, requires_trust),
+                        _ => continue,
+                    }
+                }
             }
         }
     })
