@@ -61,6 +61,26 @@
 > and `--no-watch`, which move unrelated tooling watchers off inotify without touching the subsystem
 > under test.
 >
+> **RED — `check` is failing on this branch.**
+> `crates/sys/tests/config_watch.rs::an_external_edit_reaches_a_reload_through_the_real_watch_set`
+> fails in CI and reproduces locally in 10s
+> (`cargo test --workspace --locked --no-fail-fast`). A **regression from `80e8d0e`**, which rewrote
+> that test to build a real `Facade` over the watch set's fan-out receiver; it passed on the parent
+> branch as `..._through_the_real_watcher`. Likely means `solo.yml` external-edit reload is broken by
+> the rework. Under investigation; PR #198 stays draft.
+>
+> **Retraction.** An earlier revision of this entry attributed the `crates/sys` failures to this
+> machine's exhausted inotify budget. That was wrong. CI has no inotify pressure and fails
+> identically, and `crates/sys/tests/filewatch.rs` passes locally. The cause was never established
+> before being written down as fact.
+>
+> **Verification lesson, recorded because it caused the above.** The gate is
+> `cargo test --workspace --locked` (`.github/workflows/ci.yml:50`). Narrow runs like
+> `cargo test -p soloist-core --lib` structurally exclude every `tests/` integration target and cannot
+> evidence a green branch. Locally, `--no-fail-fast` is also required: `cargo test --workspace` stops
+> at the first failing binary, and `crates/pty`'s interactive-shell test flakes here, masking
+> everything after it. Run correctly, the whole workspace has exactly one failure — the one above.
+>
 > **New finding — a partial watch failure is invisible.** `watchset/reconcile.rs:104-129` escalates
 > only the project **root's** refusal to a reported `WatchLimit::Refused`; every other per-path failure
 > emits `tracing::warn!` and continues. **No `tracing_subscriber` is initialized anywhere in
