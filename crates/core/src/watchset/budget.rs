@@ -48,15 +48,10 @@ impl Budget {
         self.spent = self.spent.saturating_sub(watches);
     }
 
-    /// What is left to spend. Saturates at zero rather than underflowing if more was ever spent
-    /// than the total holds, which a shrinking share (a new project opening) can momentarily
-    /// cause until the next re-sync catches up.
-    ///
-    /// Not read by anything in this task's own write set — [`Registrations`](super::registry::Registrations)
-    /// tracks fit per project through [`Self::share`] and [`Self::held_by`] instead. Kept as
-    /// part of the budget's accounting surface for the whole-app reading a future status
-    /// consumer needs.
-    #[allow(dead_code)]
+    /// What is left to spend — what [`Registrations::register`](super::registry::Registrations)
+    /// asks before it takes another watch out on the OS. Saturates at zero rather than
+    /// underflowing if more was ever spent than the total holds, which a shrinking share (a new
+    /// project opening) can momentarily cause until the next re-sync catches up.
     pub(crate) fn remaining(&self) -> usize {
         self.total.saturating_sub(self.spent)
     }

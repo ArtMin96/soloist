@@ -35,6 +35,14 @@ use super::*;
 
 const ROOT: &str = "/project";
 
+/// A watch capacity small enough for a test to fill by hand. Soloist holds half of it, so one
+/// open project's share is 32 watches and a second open project halves that again.
+const SMALL_CAPACITY: usize = 64;
+
+/// How far past a deadline a test advances the clock, so the deadline fires rather than the
+/// advance landing exactly on it.
+const PAST_THE_DEADLINE: Duration = Duration::from_millis(100);
+
 fn root() -> PathBuf {
     PathBuf::from(ROOT)
 }
@@ -145,12 +153,17 @@ fn seed_scan(scanner: &FakeWatchScanner, scan_root: PathBuf, entries: &[(PathBuf
     );
 }
 
+/// `count` distinct directories under `scan_root`, for a scan sized against a small budget.
+fn directories_under(scan_root: &Path, count: usize) -> Vec<(PathBuf, bool)> {
+    (0..count)
+        .map(|i| (scan_root.join(format!("d{i}")), true))
+        .collect()
+}
+
 /// `count` distinct directories under the project root, for a scan too large to fit a small
 /// budget.
 fn many_directories(count: usize) -> Vec<(PathBuf, bool)> {
-    (0..count)
-        .map(|i| (under(&format!("d{i}")), true))
-        .collect()
+    directories_under(&root(), count)
 }
 
 /// Polls a synchronous condition on a short real interval until it holds or a generous ceiling
@@ -325,7 +338,7 @@ async fn a_directory_two_projects_share_survives_one_closing() {
 #[tokio::test]
 async fn an_oversized_project_is_degraded_not_refused() {
     let mut s = setup();
-    s.watcher = Arc::new(FakeFileWatcher::new().with_capacity(64));
+    s.watcher = Arc::new(FakeFileWatcher::new().with_capacity(SMALL_CAPACITY));
     let project = s.repo.upsert(&root(), None, None).expect("seed").id;
     seed_scan(&s.scanner, root(), &many_directories(40));
     let ws = spawn_set(&s);
@@ -356,7 +369,7 @@ async fn an_oversized_project_is_degraded_not_refused() {
 #[tokio::test]
 async fn a_glob_prefix_directory_survives_degradation() {
     let mut s = setup();
-    s.watcher = Arc::new(FakeFileWatcher::new().with_capacity(64));
+    s.watcher = Arc::new(FakeFileWatcher::new().with_capacity(SMALL_CAPACITY));
     let project = s.repo.upsert(&root(), None, None).expect("seed").id;
     register_command(&s, project, "Build", &["dist/**/*.json"]);
     seed_scan(&s.scanner, under("dist"), &[(under("dist"), true)]);
@@ -381,6 +394,126 @@ async fn a_glob_prefix_directory_survives_degradation() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn a_halved_share_releases_the_tree_it_no_longer_covers() {
+    let mut s = setup();
+    s.watcher = Arc::new(FakeFileWatcher::new().with_capacity(SMALL_CAPACITY));
+    s.repo.upsert(&root(), None, None).expect("seed");
+    // The root, the state directory, the refs tree and these fit a lone project's share of 32.
+    const TREE_DIRECTORIES: usize = 28;
+    seed_scan(&s.scanner, root(), &many_directories(TREE_DIRECTORIES));
+    spawn_set(&s);
+    let last = under(&format!("d{}", TREE_DIRECTORIES - 1));
+    wait_until("the whole tree is registered", || {
+        s.watcher.registered().contains(&last)
+    })
+    .await;
+
+    let other = PathBuf::from("/other");
+    let opened = s.repo.upsert(&other, None, None).expect("seed second").id;
+    s.bus.publish(DomainEvent::ProjectOpened { id: opened });
+
+    wait_until(
+        "the tree the halved share no longer covers is released",
+        || !s.watcher.registered().contains(&last),
+    )
+    .await;
+    assert!(
+        s.watcher.registered().contains(&root()),
+        "what the shrunken plan still wants stays watched",
+    );
+}
+
+#[tokio::test]
+async fn a_project_holding_its_whole_share_does_not_watch_a_newly_appeared_directory() {
+    let mut s = setup();
+    s.watcher = Arc::new(FakeFileWatcher::new().with_capacity(SMALL_CAPACITY));
+    s.repo.upsert(&root(), None, None).expect("seed");
+    // The root, the state directory, the refs tree and these are exactly a lone project's share
+    // of 32 — a directory appearing afterwards has nothing left to be watched with.
+    const TREE_DIRECTORIES: usize = 29;
+    seed_scan(&s.scanner, root(), &many_directories(TREE_DIRECTORIES));
+    let ws = spawn_set(&s);
+    let mut rx = ws.subscribe();
+    let last = under(&format!("d{}", TREE_DIRECTORIES - 1));
+    wait_until("the whole tree is registered", || {
+        s.watcher.registered().contains(&last)
+    })
+    .await;
+    let held_at_the_share = s.watcher.registered().len();
+
+    let appeared = under("appeared");
+    seed_scan(&s.scanner, appeared.clone(), &[(appeared.clone(), true)]);
+    s.watcher
+        .change_of(appeared.clone(), FileChangeKind::Appeared);
+
+    // Changes are handled one at a time and each is republished only once handled, so a later
+    // change reaching the fan-out proves the appearance before it was absorbed in full.
+    let afterwards = under("afterwards");
+    s.watcher
+        .change_of(afterwards.clone(), FileChangeKind::Modified);
+    expect_change(&mut rx, &afterwards).await;
+
+    assert!(
+        !s.watcher.registered().contains(&appeared),
+        "a project already holding its whole share must not spend past it",
+    );
+    assert_eq!(s.watcher.registered().len(), held_at_the_share);
+}
+
+#[tokio::test]
+async fn closing_a_sibling_re_establishes_the_tree_the_shared_budget_had_dropped() {
+    let mut s = setup();
+    s.watcher = Arc::new(FakeFileWatcher::new().with_capacity(SMALL_CAPACITY));
+    let project = s.repo.upsert(&root(), None, None).expect("seed").id;
+    let sibling_root = PathBuf::from("/other");
+    let sibling = s
+        .repo
+        .upsert(&sibling_root, None, None)
+        .expect("seed sibling")
+        .id;
+    // Two open projects share 16 watches each: this tree plus the three essentials does not fit,
+    // while the sibling's smaller one does.
+    const TREE_DIRECTORIES: usize = 27;
+    const SIBLING_DIRECTORIES: usize = 10;
+    seed_scan(&s.scanner, root(), &many_directories(TREE_DIRECTORIES));
+    seed_scan(
+        &s.scanner,
+        sibling_root.clone(),
+        &directories_under(&sibling_root, SIBLING_DIRECTORIES),
+    );
+    spawn_set(&s);
+    let sibling_last = sibling_root.join(format!("d{}", SIBLING_DIRECTORIES - 1));
+    wait_until("the sibling's tree is registered", || {
+        s.watcher.registered().contains(&sibling_last)
+    })
+    .await;
+    let degraded = next_matching(&mut s.rx, |event| {
+        matches!(event, DomainEvent::WatchLimitChanged { project: p, limits }
+            if *p == project && limits.get(&WatchPurpose::GitStatus) == Some(&WatchLimit::Degraded))
+    })
+    .await;
+    let _ = degraded;
+
+    s.repo.remove(sibling).expect("remove the sibling");
+    s.bus.publish(DomainEvent::ProjectRemoved { id: sibling });
+
+    let withdrawn = next_matching(&mut s.rx, |event| {
+        matches!(event, DomainEvent::WatchLimitChanged { project: p, limits }
+            if *p == project && limits.is_empty())
+    })
+    .await;
+    let _ = withdrawn;
+    wait_until(
+        "the whole tree the widened share now covers is registered",
+        || {
+            let live = s.watcher.registered();
+            (0..TREE_DIRECTORIES).all(|i| live.contains(&under(&format!("d{i}"))))
+        },
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -632,12 +765,11 @@ async fn a_dropped_change_arms_a_full_rescan() {
         s.watcher.change_of(noise.clone(), FileChangeKind::Modified);
     }
 
-    // The loop notices the counter moved and arms `RESCAN_QUIET` (500ms, private to this
-    // module — restated here as it was for `INITIAL_BACKOFF` above).
+    // The loop notices the counter moved and arms the rescan debounce.
     s.clock
-        .deadline_armed_at(s.clock.now() + Duration::from_millis(500))
+        .deadline_armed_at(s.clock.now() + RESCAN_QUIET)
         .await;
-    s.clock.advance(Duration::from_millis(600));
+    s.clock.advance(RESCAN_QUIET + PAST_THE_DEADLINE);
 
     // The observable outcome, not the mechanism: the missed directory is registered, and a
     // change under it reaches a consumer end to end — not merely that a scan was requested

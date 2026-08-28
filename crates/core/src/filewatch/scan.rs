@@ -20,7 +20,11 @@ pub struct ScanRequest {
     /// excludes) apply. `false` for a directory a user's `restart_when_changed` glob names
     /// explicitly — a gitignored path a glob still names must still be watched.
     pub honour_repository_ignores: bool,
-    /// The most paths the walk may report before it stops and says it was cut short.
+    /// The most directories the walk may report before it stops and says it was cut short. A
+    /// watch is spent per directory, so this is the caller's watch budget stated directly. The
+    /// files found alongside them cost no watch and so do not cut the walk short, but no more
+    /// than this many of them are reported either, so one scan's result stays bounded by the
+    /// same budget that asked for it.
     pub ceiling: usize,
 }
 
@@ -37,8 +41,9 @@ pub struct ScannedPath {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Scan {
     pub paths: Vec<ScannedPath>,
-    /// Whether the walk stopped at [`ScanRequest::ceiling`] rather than exhausting the tree. A
-    /// truncated scan under-reports what is there, so a caller must not treat it as complete.
+    /// Whether the walk stopped at [`ScanRequest::ceiling`] rather than reaching every directory
+    /// under the root. A truncated scan under-reports the directories that are there, so a caller
+    /// must not treat its coverage as complete.
     pub truncated: bool,
 }
 

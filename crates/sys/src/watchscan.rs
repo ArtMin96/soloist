@@ -52,6 +52,8 @@ impl WatchScanner for IgnoreWatchScanner {
             });
 
         let mut paths = Vec::new();
+        let mut directories = 0;
+        let mut files = 0;
         let mut truncated = false;
         for entry in builder.build() {
             // An unreadable directory (permissions, a race with a deletion) is not a failure of
@@ -60,11 +62,21 @@ impl WatchScanner for IgnoreWatchScanner {
             let Ok(entry) = entry else {
                 continue;
             };
-            if paths.len() == request.ceiling {
-                truncated = true;
-                break;
-            }
             let directory = entry.file_type().is_some_and(|kind| kind.is_dir());
+            if directory {
+                if directories == request.ceiling {
+                    truncated = true;
+                    break;
+                }
+                directories += 1;
+            } else {
+                // A file costs no watch, so it does not cut the walk short — but the result it
+                // is reported in stays bounded by what asked for it all the same.
+                if files == request.ceiling {
+                    continue;
+                }
+                files += 1;
+            }
             paths.push(ScannedPath {
                 path: entry.into_path(),
                 directory,

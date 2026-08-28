@@ -1,7 +1,7 @@
 //! The planning half of [`ProjectWatchSet`](super::ProjectWatchSet): what each open project's
-//! watches should be, and reconciling what is actually held to that — split out of
-//! [`super::set`], which owns the event loop that calls [`ProjectWatchSet::resync`] and the
-//! incremental (`Appeared`/`Vanished`) maintenance that runs between one re-sync and the next.
+//! watches should be, and reconciling what is actually held to that. [`super::set`] owns the
+//! event loop that calls [`ProjectWatchSet::resync`] and the incremental
+//! (`Appeared`/`Vanished`) maintenance that runs between one re-sync and the next.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -10,25 +10,27 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use crate::filewatch::{compile, literal_prefix, FileChange, Scan, ScanRequest, DEFAULT_IGNORES};
+use crate::filewatch::{compile, literal_prefix, FileChange, Scan, ScanRequest};
 use crate::ids::ProjectId;
 use crate::ports::ProjectRecord;
 use crate::supervision::run_blocking;
 use crate::vcs::{REFS_DIR, STATE_DIR};
 use crate::watch::{WatchError, WatchLimit, WatchOutcome, WatchPurpose};
 
+use super::ignored_names;
 use super::plan::{plan, ProjectPlan};
 use super::set::{ProjectWatchSet, Registered, RunState};
 
 impl ProjectWatchSet {
-    /// Reconciles every open project's watches: ensures the session is open, re-plans a project
-    /// when it is new, its root or watch-eligible globs changed, it now holds more than its
-    /// share, or `force_rescan` says the filesystem may have moved since the last plan without
-    /// any of those signals catching it; and — regardless of whether it re-planned — retries
-    /// whatever its cached plan wants that it does not currently hold. That last step, run
-    /// unconditionally on every re-sync, is what re-establishes a refusal that has since cleared
-    /// without needing a fresh scan to trigger it (the [`crate::git::watched`] guarantee, at
-    /// this layer).
+    /// Reconciles every open project's watches: ensures the session is open, hands back what a
+    /// since-closed project held, and re-plans a project whose plan inputs moved — it is new, or
+    /// its root, its watch-eligible globs or its share of the budget changed, or `force_rescan`
+    /// says the filesystem may have moved without any of those signals catching it. Then, for
+    /// every project and regardless of whether it re-planned, it reconciles what is held to what
+    /// the plan wants in both directions: releasing what the plan no longer covers, and retrying
+    /// whatever it wants that is not currently held. That last step, run unconditionally on every
+    /// re-sync, is what re-establishes a refusal that has since cleared without needing a fresh
+    /// scan to trigger it (the [`crate::git::watched`] guarantee, at this layer).
     ///
     /// `force_rescan` is [`super::set::ProjectWatchSet::run_loop`]'s answer to a dropped
     /// change: a directory whose `Appeared` never arrived looks, from a settled project's own
@@ -61,6 +63,19 @@ impl ProjectWatchSet {
             },
         };
 
+        // Before anything is planned: a project closed since the last re-sync still holds its
+        // watches, and what returning them frees is exactly what the projects still open are
+        // about to be offered.
+        let closed: Vec<ProjectId> = state
+            .projects
+            .keys()
+            .filter(|project| !open.contains(project))
+            .copied()
+            .collect();
+        for project in closed {
+            self.release_project(state, project);
+        }
+
         let share = state.registrations.share(open.len());
         let mut git_outcomes = Vec::new();
         let mut restart_outcomes = Vec::new();
@@ -75,9 +90,7 @@ impl ProjectWatchSet {
                 || match state.projects.get(&project) {
                     None => true,
                     Some(existing) => {
-                        existing.root != root
-                            || existing.globs != globs
-                            || state.registrations.held_by(project) > share
+                        existing.root != root || existing.globs != globs || existing.share != share
                     }
                 };
             if needs_replan {
@@ -92,6 +105,7 @@ impl ProjectWatchSet {
                     Registered {
                         root: root.clone(),
                         globs: globs.clone(),
+                        share,
                         paths,
                         limit: computed.limit,
                     },
@@ -99,11 +113,22 @@ impl ProjectWatchSet {
             }
 
             let refs_path = root.join(STATE_DIR).join(REFS_DIR);
-            let wanted: Vec<PathBuf> = state
+            let wanted: HashSet<PathBuf> = state
                 .projects
                 .get(&project)
-                .map(|entry| entry.paths.iter().cloned().collect())
+                .map(|entry| entry.paths.clone())
                 .unwrap_or_default();
+            let stale: Vec<PathBuf> = state
+                .registrations
+                .held_by(project)
+                .filter(|held| !wanted.contains(*held))
+                .cloned()
+                .collect();
+            for path in stale {
+                state
+                    .registrations
+                    .release(&path, project, session.as_ref());
+            }
             let mut root_refused = None;
             for path in &wanted {
                 if state.registrations.is_held(path, project) {
@@ -153,16 +178,6 @@ impl ProjectWatchSet {
             }
         }
 
-        let closed: Vec<ProjectId> = state
-            .projects
-            .keys()
-            .filter(|project| !open.contains(project))
-            .copied()
-            .collect();
-        for project in closed {
-            self.release_project(state, project);
-        }
-
         self.status.resynced(WatchPurpose::GitStatus, &git_outcomes);
         self.status
             .resynced(WatchPurpose::Restarts, &restart_outcomes);
@@ -203,16 +218,12 @@ impl ProjectWatchSet {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
-        let ignored_names: Vec<String> = DEFAULT_IGNORES
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect();
         let scanner = self.scanner.clone();
         let scan_root = root.to_path_buf();
         let (tree, prefix_scans) = run_blocking(move || {
             let tree = scanner.scan(ScanRequest {
                 root: scan_root,
-                ignored_names,
+                ignored_names: ignored_names(),
                 honour_repository_ignores: true,
                 ceiling: share,
             });

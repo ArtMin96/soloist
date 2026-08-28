@@ -119,6 +119,20 @@ fn a_project_with_no_globs_asks_for_no_prefixes_and_reports_no_restarts_entry() 
 }
 
 #[test]
+fn the_refs_tree_is_counted_against_the_share() {
+    // The root, the state directory and the refs tree are three registrations of the share on
+    // their own, leaving nothing for a fourth in a share of three.
+    let tree = scan(&["src"], false);
+    let result = plan(&root(), &[], &tree, &[], 3);
+
+    assert_eq!(
+        result.limit.get(&WatchPurpose::GitStatus),
+        Some(&WatchLimit::Degraded)
+    );
+    assert!(!result.directories.contains(&under("src")));
+}
+
+#[test]
 fn a_scan_reporting_the_root_itself_is_not_double_counted() {
     // The scanner's own contract is to include the root it was asked to scan; the always-held
     // root must not also consume budget as if it were a distinct find.
@@ -135,9 +149,9 @@ fn a_scan_reporting_the_root_itself_is_not_double_counted() {
         ],
         truncated: false,
     };
-    // Budget for exactly root + .git + one more directory (src). If the root were
-    // double-counted this would overflow and degrade GitStatus.
-    let result = plan(&root(), &[], &tree, &[], 3);
+    // Budget for exactly root + .git + the refs tree + one more directory (src). If the root
+    // were double-counted this would overflow and degrade GitStatus.
+    let result = plan(&root(), &[], &tree, &[], 4);
 
     assert!(result.limit.is_empty());
     assert!(result.directories.contains(&under("src")));

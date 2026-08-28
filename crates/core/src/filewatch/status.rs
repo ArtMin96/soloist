@@ -16,12 +16,13 @@ type Limits = BTreeMap<WatchPurpose, WatchLimit>;
 /// Which of each project's watches the OS is limiting, and the single voice that tells the
 /// surfaces.
 ///
-/// Both watch reactors record their answers here rather than announcing their own, for two
+/// The watch set records both purposes' answers here rather than announcing them itself, for two
 /// reasons. A project can be limited on one watch and granted the other, and only the aggregate
 /// says which consequences actually follow — so it is the aggregate a surface renders, without
-/// knowing which reactor asked. And both ask again for a limited root on every re-sync —
-/// deliberately, so a limit that has since cleared is not permanent — which means announcing per
-/// attempt would repeat one sentence for as long as the condition lasted. Announced on the
+/// knowing which purpose met the limit. And a limit is asked about again: a refused root is
+/// retried on every re-sync, and a degraded project is re-planned whenever its share of the
+/// budget moves, both deliberately, so neither kind of limit is permanent. Announcing per attempt
+/// would repeat one sentence for as long as the condition lasted, so the announcement is on the
 /// transition instead: limited, limited differently, or watched again in full.
 pub(crate) struct WatchStatus {
     bus: EventBus,

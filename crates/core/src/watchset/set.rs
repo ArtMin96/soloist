@@ -21,7 +21,6 @@ use crate::debounce::{sleep_until, Debouncer};
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::{
     FileChange, FileChangeKind, FileWatcher, ScanRequest, WatchScanner, WatchSession, WatchStatus,
-    DEFAULT_IGNORES,
 };
 use crate::ids::ProjectId;
 use crate::ports::Clock;
@@ -30,6 +29,7 @@ use crate::supervision::{run_blocking, supervise};
 use crate::supervisor::Supervisor;
 use crate::watch::{WatchLimit, WatchPurpose};
 
+use super::ignored_names;
 use super::registry::Registrations;
 
 /// How many raw filesystem changes the adapter may have in flight before its sends start
@@ -60,6 +60,10 @@ pub(super) struct Registered {
     /// The `restart_when_changed` globs of its currently watch-eligible commands — cached so a
     /// re-sync can tell "unchanged" from "needs a fresh scan" without re-reading the supervisor.
     pub(super) globs: Vec<String>,
+    /// The share this plan was fitted to. A share that moves in either direction re-plans: a
+    /// sibling project opening shrinks what this one may hold, and a sibling closing widens it
+    /// again, which is what withdraws a degradation the narrower budget had forced.
+    pub(super) share: usize,
     /// Every path the last plan wants watched, held or not — diffed against what is actually
     /// held on every re-sync, so a still-refused path is retried without re-scanning.
     pub(super) paths: HashSet<PathBuf>,
@@ -71,9 +75,9 @@ pub(super) struct Registered {
 }
 
 /// Per-run mutable state: the live session, what is physically held, and each open project's
-/// cached plan. Rebuilt from scratch on every restart — see the module doc for why holding any
-/// of this across one would leave the app watching nothing while believing it watches
-/// everything.
+/// cached plan. Rebuilt from scratch on every restart, because dropping the session releases
+/// every watch it held: carrying the held-path map across a restart would leave the app
+/// believing it watches everything while watching nothing.
 pub(super) struct RunState {
     pub(super) session: Option<Arc<dyn WatchSession>>,
     pub(super) registrations: Registrations,
@@ -134,8 +138,8 @@ impl ProjectWatchSet {
         supervise(clock, move || self.clone().run_loop()).await;
     }
 
-    /// The loop itself. All per-run state is created here, never read from `self` — see the
-    /// module doc's table of what lives where and why.
+    /// The loop itself. All per-run state is created here, never read from `self`, so a restart
+    /// starts from an empty [`RunState`] and a fresh session.
     async fn run_loop(self) {
         let mut events = self.bus.subscribe();
         let (changes_tx, mut changes_rx) = mpsc::channel::<FileChange>(CHANGE_BUFFER);
@@ -167,10 +171,10 @@ impl ProjectWatchSet {
                         // root can be a different inode (a fresh clone over a deleted checkout, a
                         // directory swapped wholesale), whose old registration is now silently
                         // dead. Dropping what this project holds first forces every one of its
-                        // watches to be re-established, the intent the release-on-open this owner
-                        // replaced had — a full [`Self::resync`] alone cannot do this: an
-                        // already-held path is left untouched by design (see its own doc), so
-                        // only explicitly releasing first makes the retry loop re-register it.
+                        // watches to be re-established — a full [`Self::resync`] alone cannot do
+                        // this: an already-held path is left untouched by design (see its own
+                        // doc), so only explicitly releasing first makes the retry loop
+                        // re-register it.
                         Ok(DomainEvent::ProjectOpened { id }) => {
                             self.release_project(&mut state, id);
                             self.resync(&mut state, &changes_tx, &dropped, false).await;
@@ -247,17 +251,13 @@ impl ProjectWatchSet {
         };
         let open_projects = state.projects.len().max(1);
         let share = state.registrations.share(open_projects);
-        let ceiling = share
-            .saturating_sub(state.registrations.held_by(project))
-            .max(1);
+        // What is left of this project's share, and no more: a directory appearing while it
+        // already holds everything it may is not a reason to spend past the budget.
+        let ceiling = share.saturating_sub(state.registrations.held_by(project).count());
         let scanner = self.scanner.clone();
-        let ignored_names: Vec<String> = DEFAULT_IGNORES
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect();
         let request = ScanRequest {
             root: path.to_path_buf(),
-            ignored_names,
+            ignored_names: ignored_names(),
             honour_repository_ignores: true,
             ceiling,
         };

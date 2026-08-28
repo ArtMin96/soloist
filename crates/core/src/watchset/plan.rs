@@ -58,7 +58,7 @@ pub(crate) fn plan(
     let mut directories = held.to_vec();
     let trees = vec![refs_dir];
     let mut limit = HashMap::new();
-    let mut spent = directories.len();
+    let mut spent = directories.len() + trees.len();
 
     if !globs.is_empty() {
         let found = directories_of(prefixes, &held);

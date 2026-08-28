@@ -1,10 +1,8 @@
 //! What is physically held: one refcounted map from a watched path to the projects that want
 //! it, and the app-wide [`Budget`] that map spends against.
 //!
-//! Split out of [`super::set`] because the two are a cohesive unit on their own — every
-//! registration or release touches both the map and the budget in lockstep — and keeping them
-//! together there would have pushed the loop's own file well past the size a reader can hold in
-//! their head at once.
+//! The two are one unit: every registration or release touches the map and the budget in
+//! lockstep, and no watch is taken out on the OS that the budget has not first paid for.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -22,20 +20,14 @@ use super::budget::Budget;
 /// must not unwatch a path an outer one still holds.
 struct Registration {
     owners: HashSet<ProjectId>,
-    /// Whether it was registered as a bounded subtree ([`WatchSession::watch_tree`]) or a single
-    /// directory ([`WatchSession::watch_dir`]). [`Registrations::register`] is the only thing
-    /// that ever needs to know, to release and re-register a path the same way it was asked
-    /// for; nothing reads it back out, the same shape as `Held::Watching` in
-    /// `crate::git::watched`.
-    #[expect(dead_code)]
-    tree: bool,
 }
 
 /// The paths this run currently holds, and the budget spending them against.
 ///
-/// Per-run state: rebuilt from scratch on every [`super::ProjectWatchSet`] restart, alongside
-/// the [`WatchSession`] it registers through — see that module's doc for why holding either
-/// across a restart would leave the app watching nothing while believing it watches everything.
+/// Per-run state: rebuilt from scratch on every [`super::ProjectWatchSet`] restart, alongside the
+/// [`WatchSession`] it registers through. A restart is how the set recovers from a wedged
+/// backend, so carrying either across one would leave it believing it holds watches that the
+/// dropped session already released.
 pub(super) struct Registrations {
     budget: Budget,
     held: HashMap<PathBuf, Registration>,
@@ -54,13 +46,14 @@ impl Registrations {
         self.budget.share(open_projects)
     }
 
-    /// How many paths `project` currently holds — the "holds more than its new share" trigger
-    /// for a full re-plan.
-    pub(super) fn held_by(&self, project: ProjectId) -> usize {
+    /// Every path `project` currently holds — counted for what is left of its share, and diffed
+    /// against its plan on every re-sync so a path the plan no longer wants is released rather
+    /// than left spending budget nothing asks for.
+    pub(super) fn held_by(&self, project: ProjectId) -> impl Iterator<Item = &PathBuf> {
         self.held
-            .values()
-            .filter(|registration| registration.owners.contains(&project))
-            .count()
+            .iter()
+            .filter(move |(_, registration)| registration.owners.contains(&project))
+            .map(|(path, _)| path)
     }
 
     /// Whether `project` already holds `path`.
@@ -80,9 +73,11 @@ impl Registrations {
     ///
     /// A path another project already holds costs nothing new: `project` simply joins as an
     /// additional owner, with no second call to `session` and no second unit spent — the same
-    /// physical OS watch already covers it. A path nobody holds yet is registered through
-    /// `session` and, on success, spent against the budget; on refusal, nothing changes and the
-    /// error is returned so the caller can report it.
+    /// physical OS watch already covers it. A path nobody holds yet costs a unit, so it is
+    /// registered only if the budget still has one: an exhausted budget is refused here rather
+    /// than asked of the OS, which shares its own limit with every other program on the machine.
+    /// On refusal, from either, nothing changes and the error is returned for the caller to
+    /// report.
     pub(super) fn register(
         &mut self,
         path: &Path,
@@ -94,6 +89,9 @@ impl Registrations {
             existing.owners.insert(project);
             return Ok(());
         }
+        if self.budget.remaining() == 0 {
+            return Err(WatchError::BudgetExhausted);
+        }
         if tree {
             session.watch_tree(path)?;
         } else {
@@ -102,7 +100,7 @@ impl Registrations {
         let mut owners = HashSet::new();
         owners.insert(project);
         self.held
-            .insert(path.to_path_buf(), Registration { owners, tree });
+            .insert(path.to_path_buf(), Registration { owners });
         self.budget.spend(1);
         Ok(())
     }
@@ -127,3 +125,7 @@ impl Registrations {
         self.held.keys()
     }
 }
+
+#[cfg(test)]
+#[path = "registry_tests.rs"]
+mod tests;

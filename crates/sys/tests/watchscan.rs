@@ -21,6 +21,26 @@ const GENEROUS_CEILING: usize = 10_000;
 /// scans.
 const SMALL_CEILING: usize = 3;
 
+/// The ceiling `files_are_reported_without_counting_against_the_ceiling` sets: exactly the two
+/// directories of the tree it scans, and fewer than the files under them.
+const TWO_DIRECTORIES: usize = 2;
+
+/// How many directories a scan reported.
+fn directories(scan: &Scan) -> usize {
+    scan.paths
+        .iter()
+        .filter(|scanned| scanned.directory)
+        .count()
+}
+
+/// How many non-directory paths a scan reported.
+fn files(scan: &Scan) -> usize {
+    scan.paths
+        .iter()
+        .filter(|scanned| !scanned.directory)
+        .count()
+}
+
 /// A request scanning `root` with no name exclusions and the repository's own ignore rules
 /// honoured — the ordinary case, overridden field by field where a test needs otherwise.
 fn request(root: &Path) -> ScanRequest {
@@ -185,7 +205,7 @@ fn a_walk_past_the_ceiling_says_it_was_cut_short() {
     let scan = IgnoreWatchScanner::new().scan(req);
 
     assert_eq!(
-        scan.paths.len(),
+        directories(&scan),
         SMALL_CEILING,
         "a walk stops at its ceiling: {:?}",
         scan.paths,
@@ -193,6 +213,38 @@ fn a_walk_past_the_ceiling_says_it_was_cut_short() {
     assert!(
         scan.truncated,
         "a walk stopped short of the whole tree must say so",
+    );
+}
+
+#[test]
+fn files_are_reported_without_counting_against_the_ceiling() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).expect("create src dir");
+    for name in ["a.rs", "b.rs", "c.rs", "d.rs"] {
+        fs::write(root.join("src").join(name), "").expect("write source file");
+    }
+
+    let mut req = request(root);
+    req.ceiling = TWO_DIRECTORIES;
+
+    let scan = IgnoreWatchScanner::new().scan(req);
+
+    assert!(
+        !scan.truncated,
+        "a tree whose directories all fit its ceiling was not cut short, however many files \
+         they hold: {:?}",
+        scan.paths,
+    );
+    assert!(
+        any_path_named(&scan, "src"),
+        "every directory within the ceiling is reported: {:?}",
+        scan.paths,
+    );
+    assert!(
+        files(&scan) <= TWO_DIRECTORIES,
+        "the files reported alongside them stay bounded by the same ceiling: {:?}",
+        scan.paths,
     );
 }
 
