@@ -41,7 +41,7 @@ use crate::projects::Projects;
 use crate::supervision::run_blocking;
 
 use super::status::Git;
-use super::watched::{is_lock, Watches};
+use super::watched::{is_lock, Routes};
 
 /// The quiet window a burst of changes is coalesced into before one status read. Long enough to
 /// absorb the several files a single `git` invocation writes, short enough that a commit made in
@@ -99,11 +99,11 @@ impl GitStatusWatchReactor {
 
     /// Runs the reactor until the bus closes (app shutdown) or the git context is dropped.
     pub async fn run(mut self) {
-        // The routing table, held for the reactor's lifetime: it decides which open projects a
-        // changed path belongs to, and `resync` reconciles it to the registry — once now, then
-        // again on each project open or removal.
-        let mut watches = Watches::new();
-        self.resync(&mut watches);
+        // Held for the reactor's lifetime: it decides which open projects a changed path belongs
+        // to, and `resync` reconciles it to the registry — once now, then again on each project
+        // open or removal.
+        let mut routes = Routes::new();
+        self.resync(&mut routes);
 
         let mut debouncers: HashMap<ProjectId, Debouncer> = HashMap::new();
         // The projects whose pending read is already a retry, so a repository that keeps failing
@@ -120,7 +120,7 @@ impl GitStatusWatchReactor {
                     match result {
                         Err(RecvError::Closed) => break,
                         Ok(DomainEvent::ProjectOpened { .. }) => {
-                            self.resync(&mut watches);
+                            self.resync(&mut routes);
                         }
                         Ok(DomainEvent::ProjectRemoved { id }) => {
                             if let Some(git) = self.git.upgrade() {
@@ -128,12 +128,12 @@ impl GitStatusWatchReactor {
                             }
                             debouncers.remove(&id);
                             retried.remove(&id);
-                            self.resync(&mut watches);
+                            self.resync(&mut routes);
                         }
                         // A lag may have hidden an open whose directory was replaced, so rebuild
                         // the routing table rather than trust the one we hold.
                         Err(RecvError::Lagged(_)) => {
-                            self.resync(&mut watches);
+                            self.resync(&mut routes);
                         }
                         Ok(_) => {}
                     }
@@ -148,7 +148,7 @@ impl GitStatusWatchReactor {
                         Ok(path) => {
                             if !is_lock(&path) {
                                 let now = self.clock.now();
-                                for project in watches.projects_of(&path) {
+                                for project in routes.projects_of(&path) {
                                     debouncers
                                         .entry(project)
                                         .or_insert_with(|| Debouncer::bounded(QUIET, MAX_POSTPONE))
@@ -158,7 +158,7 @@ impl GitStatusWatchReactor {
                         }
                         Err(RecvError::Lagged(_)) => {
                             let now = self.clock.now();
-                            for project in watches.routed() {
+                            for project in routes.routed() {
                                 debouncers
                                     .entry(project)
                                     .or_insert_with(|| Debouncer::bounded(QUIET, MAX_POSTPONE))
@@ -182,7 +182,7 @@ impl GitStatusWatchReactor {
                         debouncer.due_at().is_some()
                     });
                     for project in due {
-                        let Some(root) = watches.root_of(project) else {
+                        let Some(root) = routes.root_of(project) else {
                             continue;
                         };
                         // Reading a repository runs an external tool, so it goes to the blocking
@@ -228,16 +228,16 @@ impl GitStatusWatchReactor {
     /// and what a refusal or a degradation means, is
     /// [`crate::watchset::ProjectWatchSet`]'s concern entirely. A failed registry read changes
     /// nothing — the next lifecycle event re-syncs.
-    fn resync(&self, watches: &mut Watches) {
+    fn resync(&self, routes: &mut Routes) {
         let Ok(records) = self.projects.list() else {
             return;
         };
         let mut open: HashSet<ProjectId> = HashSet::new();
         for record in records {
             open.insert(record.id);
-            watches.set(record.id, record.root);
+            routes.set(record.id, record.root);
         }
-        watches.retain(&open);
+        routes.retain(&open);
     }
 }
 

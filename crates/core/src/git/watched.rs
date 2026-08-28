@@ -27,13 +27,13 @@ use crate::vcs::STATE_DIR;
 /// The extension git gives the lock files it creates and removes around every write.
 const LOCK_EXTENSION: &str = "lock";
 
-/// A watched project: where to read its status from, and the repository state that says when to.
-struct Watched {
+/// Where one project's status is read from, and the repository state that says when to read it.
+struct Route {
     root: PathBuf,
     state_dir: PathBuf,
 }
 
-impl Watched {
+impl Route {
     fn new(root: PathBuf) -> Self {
         let state_dir = root.join(STATE_DIR);
         Self { root, state_dir }
@@ -56,12 +56,12 @@ impl Watched {
 
 /// Every open project's routing: which paths change its status, and where its status is read
 /// from.
-pub(super) struct Watches {
-    projects: HashMap<ProjectId, Watched>,
+pub(super) struct Routes {
+    projects: HashMap<ProjectId, Route>,
 }
 
-impl Watches {
-    /// An empty set.
+impl Routes {
+    /// Nothing routed yet.
     pub(super) fn new() -> Self {
         Self {
             projects: HashMap::new(),
@@ -72,7 +72,7 @@ impl Watches {
     /// project whose root may have been replaced (a fresh clone over a deleted checkout is a new
     /// inode), where a stale route would be as wrong as a stale watch.
     pub(super) fn set(&mut self, project: ProjectId, root: PathBuf) {
-        self.projects.insert(project, Watched::new(root));
+        self.projects.insert(project, Route::new(root));
     }
 
     /// Drops everything routed for a project outside `open` — a project that has been removed.
@@ -86,7 +86,7 @@ impl Watches {
         self.projects.keys().copied()
     }
 
-    /// Every watched project whose status `path` is part of.
+    /// Every routed project whose status `path` is part of.
     ///
     /// More than one can match, because projects nest: a repository opened inside another project's
     /// tree shares its files, so a file changed there changes what both statuses say. Each is armed,
@@ -98,15 +98,13 @@ impl Watches {
     ) -> impl Iterator<Item = ProjectId> + 'a {
         self.projects
             .iter()
-            .filter(move |(_, watched)| watched.covers(path))
+            .filter(move |(_, route)| route.covers(path))
             .map(|(&project, _)| project)
     }
 
-    /// Where `project`'s status is read from, or `None` for one no longer watched.
+    /// Where `project`'s status is read from, or `None` for one no longer routed.
     pub(super) fn root_of(&self, project: ProjectId) -> Option<PathBuf> {
-        self.projects
-            .get(&project)
-            .map(|watched| watched.root.clone())
+        self.projects.get(&project).map(|route| route.root.clone())
     }
 }
 

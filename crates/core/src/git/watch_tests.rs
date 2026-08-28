@@ -7,7 +7,7 @@
 //! Which of a project's directories are actually watched, and what a refusal or a degradation
 //! means, is the watch set's own concern and its own test coverage; this file pins only what the
 //! reactor decides once a change has already been reported: which changed paths belong to which
-//! projects' status ([`super::watched::Watches`]), and when a burst of them is worth a debounced
+//! projects' status ([`super::watched::Routes`]), and when a burst of them is worth a debounced
 //! re-read.
 //!
 //! The quiet window is advanced on the mock clock, so no real debounce elapses. The reads
