@@ -1,6 +1,16 @@
-//! Behavioural tests for [`MetricsSampler`], kept out of the implementation file. They
-//! drive a real [`Supervisor`] over fakes and the mock clock, so timing is deterministic
-//! with no real time elapsed and no real OS read.
+//! Behavioural tests for [`MetricsSampler`], kept out of the implementation file. They drive a
+//! real [`Supervisor`] over fakes and the mock clock, so every timer the sampler waits on fires
+//! when the test says so and no OS is read.
+//!
+//! Every effect the sampler produces crosses the blocking thread pool — its OS read runs under
+//! `run_blocking` — so the wake that arms its next timer arrives from another thread. Waits here
+//! therefore advance the clock on a short *real* interval under a wall-clock ceiling
+//! ([`drive_until`]): a budget of cooperative `yield_now`s cannot order a cross-thread wake, and
+//! spans so little real time that it expires on a merely slow sample rather than a broken one.
+//!
+//! [`a_process_with_no_live_group_is_not_sampled`] keeps a yield budget, because its assertion is
+//! that nothing happens: there is no effect to await, and a budget that runs short there only
+//! weakens the assertion instead of failing the test.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -26,6 +36,16 @@ const PROJECT: ProjectId = ProjectId::from_raw(1);
 /// sample interval or a restart backoff — so the sampler is driven without knowing the
 /// supervision backoff bound.
 const ADVANCE_STEP: Duration = Duration::from_secs(10);
+
+/// How much real time [`drive_until`] leaves between advances, for the sample it just woke to
+/// cross the blocking pool and arm the sampler's next timer. Short, so a test that is going to
+/// progress does so in milliseconds.
+const DRIVE_STEP: Duration = Duration::from_millis(5);
+
+/// The wall-clock ceiling on a drive loop, so an effect that is never going to arrive fails the
+/// test loudly instead of parking it. Far above the milliseconds these waits take, and far below
+/// a CI job's timeout.
+const DRIVE_LIMIT: Duration = Duration::from_secs(5);
 
 /// A running supervisor plus the bus the sampler publishes on and the clock it ticks on
 /// — a minimal composition for sampler tests (the supervisor's own harness is private to
@@ -87,34 +107,86 @@ async fn wait_for_running(rx: &mut broadcast::Receiver<DomainEvent>, id: Process
     }
 }
 
-/// Advances the mock clock and yields repeatedly until a `MetricsTick` for `id` arrives,
-/// or fails after a bounded number of rounds. Each round fires whatever single timer is
-/// currently pending (the tick interval or a restart backoff) and lets the spawned tasks
-/// progress, so the sampler is driven deterministically with no real time.
+/// Advances the mock clock until `settled` holds, failing after [`DRIVE_LIMIT`]. Each round fires
+/// whichever single timer is pending — the sample interval, or the backoff a supervised restart
+/// waits out — then leaves [`DRIVE_STEP`] of real time for the woken sample to run on the blocking
+/// pool and arm the next timer. An advance that lands before the sampler has armed costs one
+/// round, since the sampler then arms from the new reading and the following advance reaches it;
+/// the ceiling being wall-clock is what makes that safe, as a stalled round spends the budget in
+/// proportion to how long it stalls rather than all at once.
+async fn drive_until(what: &str, clock: &MockClock, mut settled: impl FnMut() -> bool) {
+    let deadline = tokio::time::Instant::now() + DRIVE_LIMIT;
+    while !settled() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for {what}",
+        );
+        clock.advance(ADVANCE_STEP);
+        tokio::time::sleep(DRIVE_STEP).await;
+    }
+}
+
+/// Drains everything queued on `rx`, returning the reading of the last `MetricsTick` for `id`
+/// among it.
+fn drain_tick(rx: &mut broadcast::Receiver<DomainEvent>, id: ProcessId) -> Option<(f32, u64)> {
+    let mut reading = None;
+    while let Ok(event) = rx.try_recv() {
+        if let DomainEvent::MetricsTick {
+            id: got,
+            cpu_pct,
+            rss,
+        } = event
+        {
+            if got == id {
+                reading = Some((cpu_pct, rss));
+            }
+        }
+    }
+    reading
+}
+
+/// Drives the sampler until the probe has taken `target` samples or a `MetricsTick` for `id` is
+/// published, whichever comes first, and reports whether one was — how both emit-on-change tests
+/// observe a window's worth of sampling.
+///
+/// The sample count is read before each drain, so the drain that decides the answer is the one
+/// taken after the count reached its target: the sampler publishes a sample's reading before it
+/// starts the next, so a target that has been reached implies every tick it covers is already
+/// queued.
+async fn ticked_within_samples(
+    clock: &MockClock,
+    rx: &mut broadcast::Receiver<DomainEvent>,
+    probe: &FakeMetricsProbe,
+    id: ProcessId,
+    target: usize,
+) -> bool {
+    let mut ticked = false;
+    drive_until(
+        &format!("the probe to reach {target} samples or tick for {id:?}"),
+        clock,
+        || {
+            let sampled_enough = probe.calls() >= target;
+            ticked |= drain_tick(rx, id).is_some();
+            ticked || sampled_enough
+        },
+    )
+    .await;
+    ticked
+}
+
+/// Drives the sampler until a `MetricsTick` for `id` arrives, returning its reading.
 async fn next_metrics_tick(
     rx: &mut broadcast::Receiver<DomainEvent>,
     clock: &MockClock,
     id: ProcessId,
 ) -> (f32, u64) {
-    for _ in 0..200 {
-        clock.advance(ADVANCE_STEP);
-        for _ in 0..16 {
-            tokio::task::yield_now().await;
-        }
-        while let Ok(event) = rx.try_recv() {
-            if let DomainEvent::MetricsTick {
-                id: got,
-                cpu_pct,
-                rss,
-            } = event
-            {
-                if got == id {
-                    return (cpu_pct, rss);
-                }
-            }
-        }
-    }
-    panic!("no MetricsTick for {id:?} within the budget");
+    let mut reading = None;
+    drive_until(&format!("a MetricsTick for {id:?}"), clock, || {
+        reading = drain_tick(rx, id);
+        reading.is_some()
+    })
+    .await;
+    reading.expect("drive_until returns only once a tick has been drained")
 }
 
 #[tokio::test]
@@ -193,29 +265,13 @@ async fn an_unchanged_reading_is_suppressed_between_heartbeats() {
     assert_eq!(next_metrics_tick(&mut s.rx, &s.clock, id).await, (3.0, 512));
 
     // Drive several more samples (fewer than a heartbeat window) with the same reading and confirm
-    // none is re-emitted. Progress is measured by the probe's sample count, not wall-clock rounds,
-    // so scheduler contention under a parallel test run only slows the test — it can never make it
-    // observe a false "suppressed" from a sample that never ran.
+    // none is re-emitted. Progress is measured by the probe's sample count, so scheduler contention
+    // under a parallel test run only slows the test — it can never make it observe a false
+    // "suppressed" from a sample that never ran.
     let target = probe.calls() + (HEARTBEAT_SAMPLES as usize) / 2;
     let mut rx = s.bus.subscribe();
-    let mut re_emitted = false;
-    for _ in 0..500 {
-        if probe.calls() >= target {
-            break;
-        }
-        s.clock.advance(ADVANCE_STEP);
-        for _ in 0..16 {
-            tokio::task::yield_now().await;
-        }
-        while let Ok(event) = rx.try_recv() {
-            if matches!(event, DomainEvent::MetricsTick { id: got, .. } if got == id) {
-                re_emitted = true;
-            }
-        }
-    }
-    assert!(probe.calls() >= target, "the probe kept sampling");
     assert!(
-        !re_emitted,
+        !ticked_within_samples(&s.clock, &mut rx, &probe, id, target).await,
         "an unchanged reading is suppressed within a heartbeat window"
     );
 }
@@ -246,27 +302,12 @@ async fn a_steady_reading_is_re_emitted_as_a_heartbeat() {
 
     // Drive past a full heartbeat window with the same reading and confirm it is re-published. A
     // fresh subscriber (which missed the first publish) must still receive the reading — the
-    // property the heartbeat guarantees. Progress is measured by the probe's sample count (so a
-    // parallel run's scheduler contention only slows the test), with a generous round budget.
+    // property the heartbeat guarantees. Progress is measured by the probe's sample count, so a
+    // parallel run's scheduler contention only slows the test.
     let target = probe.calls() + HEARTBEAT_SAMPLES as usize + 2;
     let mut rx = s.bus.subscribe();
-    let mut re_emitted = false;
-    for _ in 0..1000 {
-        if re_emitted || probe.calls() >= target {
-            break;
-        }
-        s.clock.advance(ADVANCE_STEP);
-        for _ in 0..16 {
-            tokio::task::yield_now().await;
-        }
-        while let Ok(event) = rx.try_recv() {
-            if matches!(event, DomainEvent::MetricsTick { id: got, .. } if got == id) {
-                re_emitted = true;
-            }
-        }
-    }
     assert!(
-        re_emitted,
+        ticked_within_samples(&s.clock, &mut rx, &probe, id, target).await,
         "a steady reading is re-published as a heartbeat"
     );
 }

@@ -31,6 +31,7 @@ use crate::settings::{NoopSettingsRepo, ProjectSettings, Settings, SettingsRepo}
 use crate::shellenv::{NoopShellEnvProbe, ShellEnv, ShellEnvProbe};
 use crate::supervisor::SupervisorPorts;
 use crate::support::{FeedbackRepo, NoopFeedbackRepo};
+use crate::watchset::{NoopWatchScanner, WatchScanner};
 
 use crate::ports::{
     Clock, LockReleaser, NoopLockReleaser, NoopOrphanControl, NoopRuntimeState, OrphanControl,
@@ -43,7 +44,7 @@ use crate::ports::{
 /// (`spawner`, `clock`, `trust`, `projects`) have no meaningful absence; the optional
 /// driven subsystems (`locks`, `lock_repo`, `timer_repo`, `scratchpad_repo`, `diagram_repo`,
 /// `todo_repo`, `kv_repo`, `template_repo`, `runtime`, `orphan_control`, `metrics`,
-/// `port_probe`, `file_watcher`, `git_repository`, `git_forge`, `file_opener`, `notifier`, `agent_tools`, `version_probe`,
+/// `port_probe`, `file_watcher`, `watch_scanner`, `git_repository`, `git_forge`, `file_opener`, `notifier`, `agent_tools`, `version_probe`,
 /// `agent_one_shot`,
 /// `shell_env_probe`, `settings_repo`, `project_settings_repo`, `feedback_repo`)
 /// default to their `Noop` port via [`CorePorts::builder`], so a new optional port never
@@ -69,6 +70,7 @@ pub struct CorePorts {
     pub(crate) metrics: Arc<dyn MetricsProbe>,
     pub(crate) port_probe: Arc<dyn PortProbe>,
     pub(crate) file_watcher: Arc<dyn FileWatcher>,
+    pub(crate) watch_scanner: Arc<dyn WatchScanner>,
     pub(crate) git_repository: Arc<dyn GitRepository>,
     pub(crate) git_forge: Arc<dyn GitForge>,
     pub(crate) file_opener: Arc<dyn FileOpener>,
@@ -135,6 +137,7 @@ impl CorePorts {
                 metrics: Arc::new(NoopMetricsProbe),
                 port_probe: Arc::new(NoopPortProbe),
                 file_watcher: Arc::new(NoopFileWatcher),
+                watch_scanner: Arc::new(NoopWatchScanner),
                 git_repository: Arc::new(NoopGitRepository),
                 git_forge: Arc::new(NoopGitForge),
                 file_opener: Arc::new(NoopFileOpener),
@@ -257,6 +260,15 @@ impl CorePortsBuilder {
     /// [`NoopFileWatcher`], which watches nothing — so the reactor never restarts).
     pub fn file_watcher(mut self, file_watcher: Arc<dyn FileWatcher>) -> Self {
         self.ports.file_watcher = file_watcher;
+        self
+    }
+
+    /// Overrides the scanner that enumerates which paths under a project are worth watching
+    /// (monitoring C5; defaults to [`NoopWatchScanner`], which reports only the root — so a build
+    /// without the real adapter watches each project's root and repository state and nothing
+    /// deeper).
+    pub fn watch_scanner(mut self, watch_scanner: Arc<dyn WatchScanner>) -> Self {
+        self.ports.watch_scanner = watch_scanner;
         self
     }
 

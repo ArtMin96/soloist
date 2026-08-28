@@ -1,9 +1,11 @@
 //! The live-status trigger: a [`Clock`]-driven reactor that turns changes to a repository — to
 //! its own state files and to the working tree beside them — into debounced status re-reads.
 //!
-//! Where those changes come from is [`super::watched`]'s: it holds the watches and decides which
-//! projects a changed path belongs to. This module decides when one is worth reading. Both sources
-//! feed **one** quiet window per project through the shared [`crate::debounce::Debouncer`], so an
+//! Changed paths arrive from [`crate::watchset::ProjectWatchSet`]'s fan-out — the single owner
+//! of every OS watch registration (monitoring C5), which also reports what it could not watch to
+//! [`WatchStatus`](crate::filewatch::WatchStatus). [`super::routing`] decides which projects a
+//! changed path belongs to; this module decides when one is worth reading. Both sources feed
+//! **one** quiet window per project through the shared [`crate::debounce::Debouncer`], so an
 //! operation that touches both — `git add` writing the index beside the file it staged — coalesces
 //! into a single re-read of that project's status through [`Git`]. It announces
 //! [`DomainEvent::GitStatusChanged`] only when the re-read differs from what was already known, so
@@ -19,29 +21,27 @@
 //! otherwise never be read: an agent writing file after file re-arms the window before it elapses,
 //! and coalescing would turn into never refreshing at all.
 //!
-//! Like the other filesystem reactors it re-syncs on [`DomainEvent::ProjectOpened`] and
-//! [`DomainEvent::ProjectRemoved`], holds the context weakly so it never keeps the app alive,
+//! Like the other filesystem reactors it re-syncs its routing on [`DomainEvent::ProjectOpened`]
+//! and [`DomainEvent::ProjectRemoved`], holds the context weakly so it never keeps the app alive,
 //! and ends when the bus closes.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::mpsc;
 
 use crate::debounce::{sleep_until, Debouncer};
 use crate::events::{DomainEvent, EventBus};
-use crate::filewatch::{FileWatcher, WatchStatus};
 use crate::ids::ProjectId;
 use crate::ports::Clock;
 use crate::projects::Projects;
 use crate::supervision::run_blocking;
-use crate::watch::{WatchOutcome, WatchPurpose};
 
+use super::routing::{is_lock, Routes};
 use super::status::Git;
-use super::watched::{is_lock, Watches};
 
 /// The quiet window a burst of changes is coalesced into before one status read. Long enough to
 /// absorb the several files a single `git` invocation writes, short enough that a commit made in
@@ -65,58 +65,45 @@ const QUIET: Duration = Duration::from_millis(100);
 /// is going to stop changing still refreshes while it is being changed.
 const MAX_POSTPONE: Duration = Duration::from_secs(1);
 
-/// How many pending changed paths the watch channel buffers before the adapter's sends start
-/// dropping. Bounded (no unbounded channel), and small on purpose: the paths are only ever used
-/// to decide *that* a project changed, never which file did, so buffering a whole tree's burst
-/// would cost memory for no extra information. Dropping is safe for the same reason — the burst
-/// has already armed the debounce, the next change re-arms it, and the read it leads to reads the
-/// working tree whole, so a status arrived at from a partial view of the burst is still the
-/// status the tree actually has.
-const CHANGE_BUFFER: usize = 256;
-
 /// Turns repository-state changes into debounced status re-reads. Built once by the composition
 /// root (via [`crate::facade::Facade::git_status_watch_loop`]) and spawned on the runtime.
 pub struct GitStatusWatchReactor {
     clock: Arc<dyn Clock>,
-    watcher: Arc<dyn FileWatcher>,
     events: broadcast::Receiver<DomainEvent>,
+    changes: broadcast::Receiver<PathBuf>,
     bus: EventBus,
     git: Weak<Git>,
     projects: Arc<Projects>,
-    status: Arc<WatchStatus>,
 }
 
 impl GitStatusWatchReactor {
-    /// Builds a reactor over the file watcher and clock, watching the git context weakly (so it
-    /// never keeps the app alive), subscribing to the bus for project lifecycle and the shutdown
-    /// signal, and reporting what the OS refuses through the shared [`WatchStatus`].
+    /// Builds a reactor over the clock, watching the git context weakly (so it never keeps the
+    /// app alive), subscribing to the bus for project lifecycle and the shutdown signal, and
+    /// consuming changed paths from the watch set's fan-out.
     pub(crate) fn new(
         clock: Arc<dyn Clock>,
-        watcher: Arc<dyn FileWatcher>,
+        changes: broadcast::Receiver<PathBuf>,
         bus: &EventBus,
         git: Weak<Git>,
         projects: Arc<Projects>,
-        status: Arc<WatchStatus>,
     ) -> Self {
         Self {
             clock,
-            watcher,
             events: bus.subscribe(),
+            changes,
             bus: bus.clone(),
             git,
             projects,
-            status,
         }
     }
 
     /// Runs the reactor until the bus closes (app shutdown) or the git context is dropped.
     pub async fn run(mut self) {
-        let (changes_tx, mut changes_rx) = mpsc::channel(CHANGE_BUFFER);
-        // The watch set, held for the reactor's lifetime: it keeps each project's OS watches alive,
-        // and `resync` reconciles it to the registry — once now, then again on each project open or
-        // removal.
-        let mut watches = Watches::new(self.watcher.clone(), changes_tx);
-        self.resync(&mut watches).await;
+        // Held for the reactor's lifetime: it decides which open projects a changed path belongs
+        // to, and `resync` reconciles it to the registry — once now, then again on each project
+        // open or removal.
+        let mut routes = Routes::new();
+        self.resync(&mut routes);
 
         let mut debouncers: HashMap<ProjectId, Debouncer> = HashMap::new();
         // The projects whose pending read is already a retry, so a repository that keeps failing
@@ -127,17 +114,13 @@ impl GitStatusWatchReactor {
             tokio::select! {
                 // The event bus drives two things: a closed bus means the facade dropped, so
                 // stop; a project opening or being removed (or a lag that may have hidden
-                // either) means the watched set changed, so re-sync. Repository changes
-                // themselves arrive on `changes_rx`, not here.
+                // either) means the routing table changed, so re-sync it. Repository changes
+                // themselves arrive on `self.changes`, not here.
                 result = self.events.recv() => {
                     match result {
                         Err(RecvError::Closed) => break,
-                        // Opening a project drops its existing watch first: the same path can
-                        // have been replaced since (a fresh clone over a deleted checkout is a
-                        // new inode), which silently invalidates the OS watch.
-                        Ok(DomainEvent::ProjectOpened { id }) => {
-                            watches.release(id);
-                            self.resync(&mut watches).await;
+                        Ok(DomainEvent::ProjectOpened { .. }) => {
+                            self.resync(&mut routes);
                         }
                         Ok(DomainEvent::ProjectRemoved { id }) => {
                             if let Some(git) = self.git.upgrade() {
@@ -145,31 +128,44 @@ impl GitStatusWatchReactor {
                             }
                             debouncers.remove(&id);
                             retried.remove(&id);
-                            self.resync(&mut watches).await;
+                            self.resync(&mut routes);
                         }
                         // A lag may have hidden an open whose directory was replaced, so rebuild
-                        // every watch rather than trust the ones we hold.
+                        // the routing table rather than trust the one we hold.
                         Err(RecvError::Lagged(_)) => {
-                            watches.release_all();
-                            self.resync(&mut watches).await;
+                            self.resync(&mut routes);
                         }
                         Ok(_) => {}
                     }
                 }
                 // A changed path: arm the debounce for every watched project whose status it is
-                // part of, and never for the lock files git writes around its own writes.
-                changed = changes_rx.recv() => {
-                    let Some(path) = changed else {
-                        break;
-                    };
-                    if !is_lock(&path) {
-                        let now = self.clock.now();
-                        for project in watches.projects_of(&path) {
-                            debouncers
-                                .entry(project)
-                                .or_insert_with(|| Debouncer::bounded(QUIET, MAX_POSTPONE))
-                                .trigger(now);
+                // part of, and never for the lock files git writes around its own writes. A
+                // lagged receiver arms every routed project instead of doing nothing — unlike a
+                // spurious restart, a spurious status re-read is idempotent, and the alternative
+                // is a rail that silently stops following a repository until its next change.
+                changed = self.changes.recv() => {
+                    match changed {
+                        Ok(path) => {
+                            if !is_lock(&path) {
+                                let now = self.clock.now();
+                                for project in routes.projects_of(&path) {
+                                    debouncers
+                                        .entry(project)
+                                        .or_insert_with(|| Debouncer::bounded(QUIET, MAX_POSTPONE))
+                                        .trigger(now);
+                                }
+                            }
                         }
+                        Err(RecvError::Lagged(_)) => {
+                            let now = self.clock.now();
+                            for project in routes.routed() {
+                                debouncers
+                                    .entry(project)
+                                    .or_insert_with(|| Debouncer::bounded(QUIET, MAX_POSTPONE))
+                                    .trigger(now);
+                            }
+                        }
+                        Err(RecvError::Closed) => break,
                     }
                 }
                 // The quiet window elapsed for at least one project: re-read the due ones.
@@ -186,7 +182,7 @@ impl GitStatusWatchReactor {
                         debouncer.due_at().is_some()
                     });
                     for project in due {
-                        let Some(root) = watches.root_of(project) else {
+                        let Some(root) = routes.root_of(project) else {
                             continue;
                         };
                         // Reading a repository runs an external tool, so it goes to the blocking
@@ -223,30 +219,25 @@ impl GitStatusWatchReactor {
                 }
             }
         }
-        // Dropping `watches` here stops every watch — the reactor leaves no OS watch behind.
-        drop(watches);
     }
 
-    /// Reconciles the watches to the registry: a newly-opened project gains them, an already
-    /// watched one keeps the ones it holds, and a removed one has its handles dropped, releasing
-    /// the OS resources. A failed registry read changes nothing — the next lifecycle event
-    /// re-syncs.
-    ///
-    /// Every open project's standing answer — watched, or the refusal met establishing it — is
-    /// reported to [`WatchStatus`], so a repository whose changes have stopped reporting says so
-    /// rather than looking like one nobody is touching.
-    async fn resync(&self, watches: &mut Watches) {
+    /// Reconciles the routing table to the registry: a newly-opened (or re-opened) project is
+    /// routed to its current root, replacing whatever it was routed to before — the same
+    /// directory can have been replaced since (a fresh clone over a deleted checkout is a new
+    /// inode) — and a removed project drops out. Which OS watches actually back that routing,
+    /// and what a refusal or a degradation means, is
+    /// [`crate::watchset::ProjectWatchSet`]'s concern entirely. A failed registry read changes
+    /// nothing — the next lifecycle event re-syncs.
+    fn resync(&self, routes: &mut Routes) {
         let Ok(records) = self.projects.list() else {
             return;
         };
         let mut open: HashSet<ProjectId> = HashSet::new();
-        let mut outcomes: Vec<WatchOutcome> = Vec::new();
         for record in records {
             open.insert(record.id);
-            outcomes.push(watches.establish(record.id, record.root).await);
+            routes.set(record.id, record.root);
         }
-        watches.retain(&open);
-        self.status.resynced(WatchPurpose::GitStatus, &outcomes);
+        routes.retain(&open);
     }
 }
 

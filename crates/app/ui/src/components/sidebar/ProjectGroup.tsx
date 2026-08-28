@@ -4,7 +4,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { ProcessGroup } from "@/components/sidebar/ProcessGroup";
 import { projectActions, type ProjectActionSection } from "@/components/sidebar/projectActions";
 import { RemoveProjectDialog } from "@/components/sidebar/RemoveProjectDialog";
-import { WatchRefusedNotice } from "@/components/sidebar/WatchRefusedNotice";
+import { WatchLimitNotice } from "@/components/sidebar/WatchLimitNotice";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,7 +31,7 @@ import { ATTENTION_LABEL } from "@/lib/attention";
 import type { ProcessActionHandlers } from "@/lib/processActions";
 import { cn } from "@/lib/utils";
 import { useUnreadProject } from "@/store/attentionContext";
-import { useWatchRefusal } from "@/store/watchContext";
+import { useWatchLimit } from "@/store/watchContext";
 import { monogram, type ProjectTree } from "@/store/projects";
 import type { ToggleSet } from "@/store/useToggleSet";
 import type { ProcessKind } from "@/domain";
@@ -111,7 +111,7 @@ export function ProjectGroup({
 }: ProjectGroupProps) {
   const { project, kinds, count } = tree;
   const unread = useUnreadProject(project.id);
-  const watchRefusals = useWatchRefusal(project.id);
+  const watchLimits = useWatchLimit(project.id);
   // The menus only *open* the confirm; the removal itself runs solely from the dialog's
   // destructive action, so a destructive menu click can never remove anything by itself.
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -216,9 +216,9 @@ export function ProjectGroup({
           <ProjectActionSections sections={sections} parts={CONTEXT_PARTS} />
         </ContextMenuContent>
       </ContextMenu>
-      {/* Outside the collapsible content on purpose: a project whose watches are gone must say so
+      {/* Outside the collapsible content on purpose: a project whose watches are limited must say so
           whether or not its processes are unfolded, since the loss is one nothing else reveals. */}
-      {watchRefusals && <WatchRefusedNotice refusals={watchRefusals} className="mt-1 ml-3" />}
+      {watchLimits && <WatchLimitNotice limits={watchLimits} className="mt-1 ml-3" />}
       <RemoveProjectDialog
         open={confirmRemove}
         onOpenChange={setConfirmRemove}

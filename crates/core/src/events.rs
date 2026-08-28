@@ -22,7 +22,7 @@ use crate::orphans::OrphanInfo;
 use crate::process::{ProcStatus, ProcessKind};
 use crate::template::TemplateKind;
 use crate::trustrequest::{TrustRequest, TrustRequestState};
-use crate::watch::{WatchError, WatchPurpose};
+use crate::watch::{WatchLimit, WatchPurpose};
 
 /// A change in domain state, serialized to adapters verbatim. `#[serde(tag = "type")]`
 /// gives each variant a discriminator field so a JS/TS consumer can switch on it.
@@ -257,9 +257,9 @@ pub enum DomainEvent {
     /// payload, so a repository under active change coalesces to one re-query per frame
     /// instead of one per file.
     GitStatusChanged { project: ProjectId },
-    /// Which of a project's watches the OS is refusing changed: `refusals` names a reason for each
-    /// [`WatchPurpose`] turned down, and is empty once every watch it had refused is established
-    /// again.
+    /// Which of a project's watches is limited changed: `limits` names what each affected
+    /// [`WatchPurpose`] met — refused outright, or degraded to its essential watches — and is
+    /// empty once every watch it had limited is established again in full.
     ///
     /// Keyed by purpose because the two watches fail into different sentences — a refused restart
     /// watch stops a `restart_when_changed` command reloading on a save, a refused git watch stops
@@ -269,17 +269,17 @@ pub enum DomainEvent {
     /// watch at all.
     ///
     /// Edge-triggered in both directions, like [`Self::ReadyStateChanged`]: the reactors ask for a
-    /// refused root again on every re-sync, so a signal per attempt would repeat one sentence for
+    /// limited root again on every re-sync, so a signal per attempt would repeat one sentence for
     /// as long as the condition lasted.
     ///
-    /// It carries the refusals rather than pointing at a read model, deliberately. An exhausted
+    /// It carries the limits rather than pointing at a read model, deliberately. An exhausted
     /// watch budget is the user's to raise and an unreadable directory is not, and there is no
     /// record to re-query for which it was. This is the one degradation nothing else reveals — a
     /// watch that yields no events looks exactly like a tree nobody edits — so if it is not said
     /// here it is not said at all.
-    WatchRefusalChanged {
+    WatchLimitChanged {
         project: ProjectId,
-        refusals: BTreeMap<WatchPurpose, WatchError>,
+        limits: BTreeMap<WatchPurpose, WatchLimit>,
     },
 }
 

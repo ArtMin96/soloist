@@ -4,6 +4,7 @@ import { ACTION_ICONS, ACTION_VARIANTS, ProcessControls } from "@/components/Pro
 import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessMeta } from "@/components/sidebar/ProcessMeta";
 import { Button } from "@/components/ui/button";
+import { TextShimmer } from "@/components/ui/text-shimmer";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -18,6 +19,7 @@ import {
   type ProcessActionHandlers,
   type RunnableProcessAction,
 } from "@/lib/processActions";
+import { ACTIVITY } from "@/lib/activity";
 import { ATTENTION_LABEL } from "@/lib/attention";
 import { cn } from "@/lib/utils";
 import { useUnreadProcess } from "@/store/attentionContext";
@@ -72,6 +74,9 @@ export function ProcessRow({
 }: ProcessRowProps) {
   const { metrics, restart, activity } = useSignal(process.id);
   const unread = useUnreadProcess(process.id);
+  // A working agent says so in its name as well as its glyph, so the row reports progress
+  // even at the density where the label is all that is left.
+  const working = process.status === "Running" && activity === "Working";
   const { sidebar } = useSidebarSettings();
   // Selected rows and attention-worthy canonical actions stay visible. Ordinary controls reveal
   // on hover/focus, replacing the at-rest telemetry.
@@ -155,9 +160,13 @@ export function ProcessRow({
           <span aria-hidden className="size-4 shrink-0" />
         ))}
       <ProcessIndicator status={process.status} activity={activity} showLabel={false} />
-      <span className="min-w-0 flex-1 truncate" title={process.label}>
-        {process.label}
-      </span>
+      <TextShimmer
+        text={process.label}
+        active={working}
+        highlightClassName={ACTIVITY.Working.toneClass}
+        className="flex-1"
+        title={process.label}
+      />
       {/* The right zone stacks at-rest telemetry under the controls in one grid cell, so the
           cell keeps the width of whichever is wider and the name never reflows on hover. */}
       <div

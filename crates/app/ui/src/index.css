@@ -90,6 +90,10 @@
    * content-height var, paired with the chevron rotation, so a group unfolds rather than snaps. */
   --animate-disclose-down: disclose-down var(--dur-control) var(--ease-spring-settle);
   --animate-disclose-up: disclose-up var(--dur-control) var(--ease-spring-settle);
+
+  /* The highlight that travels across a working agent's name. Linear and looping: this reports
+   * an ongoing activity rather than answering an interaction, so it does not spring or settle. */
+  --animate-text-shimmer: text-shimmer var(--dur-shimmer) linear infinite;
   --color-status-running: var(--status-running);
   --color-status-transition: var(--status-transition);
   --color-status-stopped: var(--status-stopped);
@@ -209,6 +213,7 @@
   --dur-sheet: 300ms; /* dialog / sheet present */
   --dur-sheet-out: 180ms; /* dialog / sheet dismiss */
   --dur-ring: 150ms; /* focus ring grow-in */
+  --dur-shimmer: 2200ms; /* working-label highlight sweep */
 
   /*
    * Body tracking. The native desktop type scale tightens 13px text very slightly (−0.08pt at
@@ -284,6 +289,22 @@
 @utility type-title {
   font-size: 0.9375rem;
   line-height: 1.25rem;
+}
+
+/*
+ * The travelling highlight of a working agent's name. Painted as a second, brighter copy of the
+ * label stacked over the solid one, revealed only through a narrow moving mask — so the legible
+ * base text is never itself a gradient (the No-Gradient-Decoration Rule) and never drops contrast:
+ * the band only ever adds the running hue on top of fully-painted text. Reduced motion is handled
+ * at the call site, which drops the layer outright rather than freezing a band mid-sweep.
+ */
+@utility text-shimmer-band {
+  mask-image: linear-gradient(90deg, transparent 40%, black 50%, transparent 60%);
+  mask-size: 250% 100%;
+  mask-repeat: no-repeat;
+  -webkit-mask-image: linear-gradient(90deg, transparent 40%, black 50%, transparent 60%);
+  -webkit-mask-size: 250% 100%;
+  -webkit-mask-repeat: no-repeat;
 }
 
 @layer base {
@@ -406,5 +427,18 @@
   }
   to {
     height: 0;
+  }
+}
+
+/* Left-to-right: the mask is twice the label's width, so walking it from right-aligned to
+ * left-aligned carries the band across the text exactly once per cycle. */
+@keyframes text-shimmer {
+  from {
+    mask-position: 100% 0;
+    -webkit-mask-position: 100% 0;
+  }
+  to {
+    mask-position: 0% 0;
+    -webkit-mask-position: 0% 0;
   }
 }

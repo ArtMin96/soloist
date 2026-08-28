@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CHECK } from "@/lib/git";
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { cn } from "@/lib/utils";
 import type { CheckRun, CheckState } from "@/domain";
 
@@ -46,7 +47,13 @@ export function CheckList({
   onOpen: (url: string) => void;
 }) {
   if (checks.length === 0) {
-    return <p className="px-1 text-[0.8125rem] text-muted-foreground">{NOTHING}</p>;
+    return (
+      <Empty className="p-4">
+        <EmptyHeader>
+          <EmptyDescription>{NOTHING}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
   return (
     <ul className="flex flex-col">

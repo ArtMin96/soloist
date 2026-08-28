@@ -169,6 +169,7 @@ describe("applyEvent", () => {
       { type: "ScratchpadChanged", project: 1, name: "plan" },
       { type: "KvChanged", project: 1, key: "config" },
       { type: "GitStatusChanged", project: 1 },
+      { type: "WatchLimitChanged", project: 1, limits: {} },
     ];
     const input = [starting];
     for (const event of elsewhere) {

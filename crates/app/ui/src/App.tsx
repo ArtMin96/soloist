@@ -45,7 +45,7 @@ import { SignalsProvider } from "@/store/SignalsProvider";
 import { useTrust } from "@/store/useTrust";
 import { useTrustRequests } from "@/store/useTrustRequests";
 import { AttentionContext, useAttentionMarks } from "@/store/attentionContext";
-import { useWatchRefusals } from "@/store/useWatchRefusals";
+import { useWatchLimits } from "@/store/useWatchLimits";
 import { WatchContext } from "@/store/watchContext";
 import { OpenSettingsContext, type OpenSettings } from "@/store/settingsContext";
 import { useAttention } from "@/store/useAttention";
@@ -75,7 +75,7 @@ export default function App() {
   const trust = useTrust(store.refresh, store.reportError);
   const trustRequests = useTrustRequests(store.refresh, store.reportError);
   const orphans = useOrphans(store.reportError);
-  const watchRefusals = useWatchRefusals();
+  const watchLimits = useWatchLimits();
   const agents = useAgents(store.reportError);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [orchestrationProjectId, setOrchestrationProjectId] = useState<number | null>(null);
@@ -294,9 +294,9 @@ export default function App() {
                         <ErrorBanner message={store.error} onDismiss={store.clearError} />
                       )}
                       <div className="flex min-h-0 flex-1">
-                        {/* Scoped to the rail: a refused watch is announced on the project header
+                        {/* Scoped to the rail: a limited watch is announced on the project header
                             it belongs to, and nothing outside the sidebar reads it. */}
-                        <WatchContext value={watchRefusals}>
+                        <WatchContext value={watchLimits}>
                           <Sidebar
                             projects={projects.projects}
                             processes={store.processes}

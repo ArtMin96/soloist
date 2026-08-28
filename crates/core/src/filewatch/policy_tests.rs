@@ -74,3 +74,52 @@ fn an_empty_glob_list_compiles_to_no_matcher() {
 fn a_list_with_a_valid_glob_compiles() {
     assert!(compile(&["*.rs".to_string()]).is_some());
 }
+
+#[test]
+fn literal_prefix_stops_at_the_first_metacharacter_component() {
+    assert_eq!(literal_prefix("src/**/*.rs"), Some(PathBuf::from("src")));
+}
+
+#[test]
+fn literal_prefix_excludes_the_final_component_even_when_it_is_literal() {
+    assert_eq!(
+        literal_prefix("dist/config.json"),
+        Some(PathBuf::from("dist"))
+    );
+}
+
+#[test]
+fn literal_prefix_is_the_whole_root_for_a_pattern_that_can_match_at_any_depth() {
+    // `*` crosses separators, so `*.toml` reaches a file at any depth: the directory to watch is
+    // the root itself, not nothing.
+    assert_eq!(literal_prefix("*.toml"), Some(PathBuf::new()));
+    assert_eq!(literal_prefix("**/*.json"), Some(PathBuf::new()));
+}
+
+#[test]
+fn literal_prefix_is_none_for_a_single_literal_name() {
+    assert_eq!(literal_prefix("solo.yml"), None);
+}
+
+#[test]
+fn a_single_literal_name_matches_only_directly_in_the_root() {
+    // What lets a single literal name ask for no directory of its own: it cannot match deeper.
+    let r = rule(&[".env"]);
+    assert!(r.matches(&under_root(".env")));
+    assert!(!r.matches(&under_root("sub/.env")));
+}
+
+#[test]
+fn literal_prefix_spans_several_literal_directories() {
+    assert_eq!(literal_prefix("a/b/c.txt"), Some(PathBuf::from("a/b")));
+}
+
+#[test]
+fn literal_prefix_stops_at_a_bracket_class() {
+    assert_eq!(literal_prefix("a/[bc]/d"), Some(PathBuf::from("a")));
+}
+
+#[test]
+fn literal_prefix_is_the_whole_root_when_the_first_component_is_a_brace_alternation() {
+    assert_eq!(literal_prefix("{a,b}/c"), Some(PathBuf::new()));
+}

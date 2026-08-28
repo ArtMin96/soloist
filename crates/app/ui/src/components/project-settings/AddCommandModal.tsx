@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Field, ToggleRow } from "@/components/project-settings/fields";
+import { CommandField, ToggleRow } from "@/components/project-settings/fields";
 import { buildSpec } from "@/components/project-settings/spec";
 import { Button } from "@/components/ui/button";
 import {
@@ -101,15 +101,15 @@ export function AddCommandModal({
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
-          <Field label="Name">
+          <CommandField label="Name">
             <Input
               value={name}
               onChange={(e) => setName(e.currentTarget.value)}
               placeholder="Web"
               aria-label="Command name"
             />
-          </Field>
-          <Field label="Command">
+          </CommandField>
+          <CommandField label="Command">
             <Input
               value={command}
               onChange={(e) => setCommand(e.currentTarget.value)}
@@ -117,8 +117,8 @@ export function AddCommandModal({
               aria-label="Command"
               className="font-mono text-xs"
             />
-          </Field>
-          <Field label="Working directory" hint="Leave empty to use the project root.">
+          </CommandField>
+          <CommandField label="Working directory" hint="Leave empty to use the project root.">
             <Input
               value={workingDir}
               onChange={(e) => setWorkingDir(e.currentTarget.value)}
@@ -126,7 +126,7 @@ export function AddCommandModal({
               aria-label="Working directory"
               className="font-mono text-xs"
             />
-          </Field>
+          </CommandField>
 
           <div className="flex flex-col gap-2.5">
             <ToggleRow
@@ -141,7 +141,7 @@ export function AddCommandModal({
             />
           </div>
 
-          <Field
+          <CommandField
             label="Restart when files change"
             hint="Comma-separated globs, e.g. src/**/*.rs, .env"
           >
@@ -152,7 +152,7 @@ export function AddCommandModal({
               aria-label="File-watch globs"
               className="font-mono text-xs"
             />
-          </Field>
+          </CommandField>
 
           <fieldset className="flex flex-col">
             <legend className="mb-1.5 text-[0.6875rem] font-medium tracking-[0.01em] text-muted-foreground">

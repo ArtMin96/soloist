@@ -12,6 +12,13 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The directory in a project root holding its repository state.
+pub const STATE_DIR: &str = ".git";
+
+/// The subdirectory of [`STATE_DIR`] holding refs. Watched as a tree, because a branch or a
+/// remote-tracking ref sits one or more levels inside it.
+pub const REFS_DIR: &str = "refs";
+
 /// What happened to one path, as version control classifies it. A closed set: every match over
 /// it is exhaustive, so a new classification cannot be added without every reader answering
 /// for it.

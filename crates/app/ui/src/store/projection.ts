@@ -4,7 +4,7 @@ import type { DomainEvent, ProcessView } from "@/domain";
 // business logic — the core stays authoritative; this only mirrors its deltas, which
 // keeps it trivially unit-testable. Events that don't change the process list (config
 // sync, terminal title/bell, orphans, restart notices, metrics ticks, agent activity, git
-// status, a project's watches being refused, and
+// status, a project's watches being limited, and
 // the coordination deltas — todo/timer/lease/scratchpad/diagram/kv/template changed) leave it untouched;
 // their consumers subscribe elsewhere (the coordination deltas drive an orchestration_snapshot
 // re-query once the orchestration view exists; a template change drives the settings manager to
@@ -84,7 +84,7 @@ export function applyEvent(processes: ProcessView[], event: DomainEvent): Proces
     case "KvChanged":
     case "TemplateChanged":
     case "GitStatusChanged":
-    case "WatchRefusalChanged":
+    case "WatchLimitChanged":
     case "NotificationRaised":
     case "AttentionChanged":
     case "PresenceChanged":

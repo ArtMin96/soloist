@@ -12,7 +12,9 @@ mod reactor;
 mod status;
 mod watcher;
 
-pub(crate) use policy::is_ignored;
+pub(crate) use policy::{compile, is_ignored, literal_prefix, DEFAULT_IGNORES};
 pub use reactor::WatchReactor;
 pub(crate) use status::WatchStatus;
-pub use watcher::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle};
+pub use watcher::{
+    FileChange, FileChangeKind, FileWatcher, NoopFileWatcher, NoopWatchSession, WatchSession,
+};
