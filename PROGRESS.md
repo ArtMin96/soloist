@@ -9,6 +9,41 @@
 
 ## Current state
 
+> **LATEST (2026-08-28): BOUNDED PROJECT FILE WATCHING — seven commits on
+> `fix/bounded-project-file-watching`, `Done — pending verify`; wiring (T6) and the on-machine
+> measurement (T7) still owed.** Stacked on `feat/shadcn-adoption-and-working-shimmer` (PR #197),
+> which is green in CI on all four e2e shards plus `check`/`bundle`/`smoke`.
+>
+> **Why.** Soloist exhausted the system inotify budget. Measured live: the installed build held
+> **57,861 of 65,536** watches (88.3%) for a single project, and with tsserver the machine sat at
+> 99.2% — currently failing every `crates/sys` test that registers a real watch. Not a leak (counts
+> flat over 90s; every handle map has matching removes) but one unfiltered `RecursiveMode::Recursive`
+> watch per project root, and inotify charges one watch per DIRECTORY. This repo is 58,179
+> directories; excluding what git ignores, 337. A second open project (Laravel) holds 706,030
+> gitignored dirs under `storage/`.
+>
+> **A cheaper primitive does not exist.** Git's `fsmonitor--daemon` runs on inotify on Linux and
+> exposes no subscribable change stream; `fanotify`'s `FAN_MARK_FILESYSTEM` needs `CAP_SYS_ADMIN`,
+> and unprivileged fanotify (5.13+) is per-inode. Raising `max_user_watches` is actively worse: it
+> converts a bounded visible error into a permanent invisible drain, forcing `git status` over a
+> 734k-directory repo against a 1s debounce ceiling. Design and sources recorded in
+> `.scratch/bounded-file-watching/`.
+>
+> **Landed.** Per-path watch accounting so a refusal can clear (`68b7138`) — three parallel maps
+> collapsed into one record, which is what let the bug exist; a session-based `FileWatcher` port so
+> one inotify instance backs many paths (`8c8a423`), lifting the ~32-project `max_user_instances`
+> ceiling; a gitignore-aware scanner over the `ignore` crate (`2daf8b1`, +896 bytes release,
+> unwired — re-measure after T6); `ProjectWatchSet` planning a project's watches as a bounded set
+> with a budget and incremental maintenance (`12d3783`); a `Degraded` limit state in the UI
+> (`2c37c33`); fake levers for the unopenable-session path (`827f412`).
+>
+> **Open.** T6 wires the set into `build_facade`, rewires the three registration sites
+> (`git/watched.rs`, `filewatch/reactor.rs`, `projects/config_watch.rs`) into the one supervised
+> owner, and deletes the legacy port methods. T7 measures on the real machine. Also open: a live
+> defect found in `12d3783` — the dropped-change rescan arms a debounce that then re-syncs without
+> forcing a re-plan, so a settled project skips its scan and a dropped `Appeared` hides a subtree for
+> the life of the process; fix dispatched.
+
 > **LATEST (2026-08-28): DSA AUDIT SLICE 9 — CODE REVIEW FIX PASS — six Standards findings and one
 > Spec-axis bug fixed, `just lint` exit 0, `just test` exit 0, `Done — pending verify`, UNCOMMITTED.**
 > Branch `refactor/dsa-audit-slice-09-structural-p2`, on top of the slice's own commit `eceb78e`
@@ -3694,6 +3729,54 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Bounded project file watching + the working-agent name sweep (2026-08-28) — `Done — pending verify`
+
+Two threads. **PR #197** (`feat/shadcn-adoption-and-working-shimmer`) closed out and green in CI;
+**`fix/bounded-file-watching`** stacked on it with seven commits, T6/T7 outstanding.
+
+- **The sweep on a working agent's name was not sweeping** (`bdb46b9`). Not a CSS fault — the
+  animation ran throughout (`animation-play-state: running`, `mask-position` interpolating). A mask
+  is sized in percentages of the box it paints, and the overlay is `inset-0` against a wrapper the
+  call site stretched with `flex-1`: **181.03px of box around 40.73px of ink**, making the band 107px,
+  wider than the word. Measured in WebKitGTK 4.1: before, all six columns lit together at t=550ms and
+  the word sat plain for 42% of each cycle; after, a single band walks left to right with no dead
+  frames. Dead fraction was `0.7 - T/W`, so short labels — the sidebar's common case — degraded worst.
+  Both copies now sit in a box hugging the glyph run, pinning `T/W = 1` at every length; the mask was
+  retuned to `250%` / `40%,50%,60%` so the band clears both edges (0% ink at t=0 and t=2199).
+- **The e2e suite was right to go red** (`cbdf509`). A real DOM-contract change, not a stale selector:
+  the stacked-copy technique renders the name twice (solid base + `aria-hidden` swept copy) and moved
+  it into a nested box. Two independent breakages — `./span[text()=X]` needs a direct text node of a
+  direct-child span, and `textContent` concatenated both copies (`OpenCodeOpenCode`), losing the row
+  to every lookup by name while an agent worked. `e2e/fixtures/lead-agent/Cargo.lock` also refreshed
+  0.16.4 → 0.16.5; it tracks the workspace crates by path, so cargo rewrote it on every build. The
+  release script only refreshes the root lockfile — **open follow-up**.
+- **Regression cover** (`847aca2`, catalog row `ce5cc0f`). `ProcessRow.test.tsx` was green throughout
+  the defect and can never catch it: jsdom lays nothing out, so every box measures zero. The walk
+  measures the highlight against the name's own glyph run — a `Range` over the text node, never an
+  enclosing box the highlight fills — and against the row cell, so a clipped name is held to the width
+  it is clipped to. Mutation-verified at overrun 74px against a 1px tolerance. `prefers-reduced-motion`
+  probed under CI's exact Xvfb flags: no preference, so the test is meaningful there rather than inert.
+- **Watch rework** — see the Current state entry above for the measurements and the seven commits.
+
+**Two defects found by refusing to write a test.** `releasing_a_project_forgets_its_refusal`
+originally asserted `refusal.is_none()`, which passes whether `release` clears the whole record or
+only the handles; strengthened to ask-counts and proved red against a no-op `release`.
+`a_dropped_change_arms_a_full_rescan` could not be written at all, because the self-heal does not
+heal — proved empirically (`root_scans_before=1 root_scans_after=1`) rather than argued.
+
+**Tooling defect worth carrying forward.** `scripts/check-core-cycles.sh` and `check-file-size.sh`
+build their file lists from `git ls-files`, so **untracked files are silently skipped** and a task
+landing new files gets a confident green that examined a subset — a run reported 174 edges while
+omitting an entire new module; staged, the real number is 184. Run these gates *after* `git add`.
+
+**Known-flaky, pre-existing, not introduced here.** `crates/pty`'s
+`create_terminal_runs_an_interactive_shell_in_the_project_dir`; and
+`metrics::sampler::tests::the_sampler_restarts_itself_after_a_panic`, whose cause is now diagnosed:
+`sampler_tests.rs:99` waits with a **yield-count budget** (3,200 `yield_now()` calls) for an effect
+that crosses `run_blocking` onto the **blocking thread pool**, which cooperative yields have no
+relationship to. It fails on time, never on outcome. **Open follow-up** — and the reason every new
+test in this work waits via `testing::wait::bounded` on the real signal instead.
 
 ### DSA audit — Slice 4: the "one invariant, one site forgot" trio (2026-08-23) — `Done — pending verify`
 Work items S08-F2, S11-F1, S12-F2, from the DSA codebase audit held in the Soloist MCP scratchpads
