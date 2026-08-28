@@ -23,14 +23,8 @@ use tokio::sync::mpsc;
 use crate::filewatch::{is_ignored, FileWatcher, WatchHandle};
 use crate::ids::ProjectId;
 use crate::supervision::run_blocking;
-use crate::watch::{WatchError, WatchOutcome};
-
-/// The directory in a project root holding its repository state.
-const STATE_DIR: &str = ".git";
-
-/// The subdirectory of [`STATE_DIR`] holding refs. Watched as a tree, because a branch or a
-/// remote-tracking ref sits one or more levels inside it.
-const REFS_DIR: &str = "refs";
+use crate::vcs::{REFS_DIR, STATE_DIR};
+use crate::watch::{WatchError, WatchLimit, WatchOutcome};
 
 /// The extension git gives the lock files it creates and removes around every write.
 const LOCK_EXTENSION: &str = "lock";
@@ -174,7 +168,10 @@ impl Watches {
             });
         self.projects
             .insert(project, WatchedProject { watched, held });
-        WatchOutcome { project, refusal }
+        WatchOutcome {
+            project,
+            limit: refusal.map(WatchLimit::Refused),
+        }
     }
 
     /// Drops everything held for a project outside `open` — a project that has been removed —

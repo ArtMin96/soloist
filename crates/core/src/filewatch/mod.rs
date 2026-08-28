@@ -9,10 +9,15 @@
 
 mod policy;
 mod reactor;
+mod scan;
 mod status;
 mod watcher;
 
 pub(crate) use policy::is_ignored;
 pub use reactor::WatchReactor;
+pub use scan::{NoopWatchScanner, Scan, ScanRequest, ScannedPath, WatchScanner};
 pub(crate) use status::WatchStatus;
-pub use watcher::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle};
+pub use watcher::{
+    FileChange, FileChangeKind, FileWatcher, NoopFileWatcher, NoopWatchHandle, NoopWatchSession,
+    WatchHandle, WatchSession,
+};

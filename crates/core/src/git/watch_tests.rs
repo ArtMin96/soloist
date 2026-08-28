@@ -30,7 +30,7 @@ use crate::testing::{
     FakeProjectRepo,
 };
 use crate::vcs::ChangeKind;
-use crate::watch::{WatchError, WatchPurpose};
+use crate::watch::{WatchError, WatchLimit, WatchPurpose};
 
 use super::GitStatusWatchReactor;
 
@@ -565,7 +565,7 @@ async fn a_working_tree_the_os_refuses_is_reported_instead_of_a_rail_that_stops_
     let announced = tokio::time::timeout(
         SETTLE,
         next_matching(&mut rx, |e| {
-            matches!(e, DomainEvent::WatchRefusalChanged { .. })
+            matches!(e, DomainEvent::WatchLimitChanged { .. })
         }),
     )
     .await
@@ -573,12 +573,15 @@ async fn a_working_tree_the_os_refuses_is_reported_instead_of_a_rail_that_stops_
     // Only the git rail is named. This project declares no `restart_when_changed` command, so the
     // restart policy never asks for a watch over it and nothing there has stopped — saying so would
     // report a consequence that did not follow.
-    let expected = BTreeMap::from([(WatchPurpose::GitStatus, WatchError::BudgetExhausted)]);
+    let expected = BTreeMap::from([(
+        WatchPurpose::GitStatus,
+        WatchLimit::Refused(WatchError::BudgetExhausted),
+    )]);
     assert!(
         matches!(
             &announced,
-            DomainEvent::WatchRefusalChanged { project, refusals }
-                if *project == s.project && *refusals == expected
+            DomainEvent::WatchLimitChanged { project, limits }
+                if *project == s.project && *limits == expected
         ),
         "the user is told which of the project's watches stopped reporting, and why: {announced:?}",
     );
@@ -588,7 +591,7 @@ async fn a_working_tree_the_os_refuses_is_reported_instead_of_a_rail_that_stops_
 async fn a_project_that_is_not_a_repository_reports_no_refusal() {
     let s = setup(FakeGitRepository::reporting(clean()));
     // A project with no `.git` at all. Its two repository-state watches cannot be established and
-    // never will be, and that is ordinary rather than a degradation: the working tree is watched,
+    // never will be, and that is ordinary rather than a failure: the working tree is watched,
     // so restart-on-change still fires and the rail is not missing anything a repository would
     // report. Reporting it would put a notice on every project that is not under version control,
     // claiming two things that are both false.
@@ -600,7 +603,7 @@ async fn a_project_that_is_not_a_repository_reports_no_refusal() {
 
     while let Ok(event) = rx.try_recv() {
         assert!(
-            !matches!(event, DomainEvent::WatchRefusalChanged { .. }),
+            !matches!(event, DomainEvent::WatchLimitChanged { .. }),
             "a project with no repository state is not one whose watching failed: {event:?}",
         );
     }

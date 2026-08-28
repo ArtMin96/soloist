@@ -13,9 +13,10 @@ use tokio::sync::mpsc;
 
 use crate::ids::ProjectId;
 use crate::testing::FakeFileWatcher;
-use crate::watch::WatchError;
+use crate::vcs::{REFS_DIR, STATE_DIR};
+use crate::watch::{WatchError, WatchLimit};
 
-use super::{Watches, REFS_DIR, STATE_DIR};
+use super::Watches;
 
 /// How many pending changed paths the test's channel buffers. Never drained — these tests assert
 /// on what was asked for, not on a change reaching a receiver — so any small bound does.
@@ -61,8 +62,8 @@ async fn a_cleared_total_refusal_is_established_on_the_next_resync() {
 
     let refused = watches.establish(project, root.clone()).await;
     assert_eq!(
-        refused.refusal,
-        Some(WatchError::BudgetExhausted),
+        refused.limit,
+        Some(WatchLimit::Refused(WatchError::BudgetExhausted)),
         "the OS turned every watch down",
     );
 
@@ -71,9 +72,9 @@ async fn a_cleared_total_refusal_is_established_on_the_next_resync() {
     watcher.allow(refs_dir.clone());
     let cleared = watches.establish(project, root.clone()).await;
     assert!(
-        cleared.refusal.is_none(),
+        cleared.limit.is_none(),
         "a total refusal that has since cleared must not be replayed for ever: {:?}",
-        cleared.refusal,
+        cleared.limit,
     );
     assert!(
         watcher.live().contains(&root),
@@ -110,9 +111,9 @@ async fn a_partial_refusal_re_attempts_only_the_refused_path() {
         "the refused working-tree watch was retried on every resync: {requested:?}",
     );
     assert!(
-        cleared.refusal.is_none(),
+        cleared.limit.is_none(),
         "the refusal clears once the OS grants it: {:?}",
-        cleared.refusal,
+        cleared.limit,
     );
 }
 
@@ -147,10 +148,10 @@ async fn a_refused_refs_tree_is_re_attempted_without_disturbing_the_state_dir() 
         "the granted tree was left alone: {requested:?}"
     );
     assert!(
-        first.refusal.is_none() && second.refusal.is_none(),
+        first.limit.is_none() && second.limit.is_none(),
         "a refs refusal is not reported: {:?}, {:?}",
-        first.refusal,
-        second.refusal,
+        first.limit,
+        second.limit,
     );
 }
 
@@ -189,9 +190,9 @@ async fn only_the_working_trees_refusal_is_reported() {
     let outcome = watches.establish(project, root.clone()).await;
 
     assert!(
-        outcome.refusal.is_none(),
+        outcome.limit.is_none(),
         "a project with no repository state is not one whose watching failed: {:?}",
-        outcome.refusal,
+        outcome.limit,
     );
     assert!(
         watcher.live().contains(&root),
@@ -218,9 +219,9 @@ async fn releasing_a_project_forgets_its_refusal() {
     let outcome = watches.establish(project, root.clone()).await;
 
     assert!(
-        outcome.refusal.is_none(),
+        outcome.limit.is_none(),
         "release forgets the standing refusal along with the handle: {:?}",
-        outcome.refusal,
+        outcome.limit,
     );
     let requested = watcher.watched();
     assert_eq!(

@@ -29,7 +29,7 @@ use crate::testing::{
     next_matching, wait_all, FakeFileWatcher, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
     MockClock,
 };
-use crate::watch::{WatchError, WatchPurpose};
+use crate::watch::{WatchError, WatchLimit, WatchPurpose};
 
 use super::{WatchReactor, WatchStatus, QUIET};
 
@@ -334,15 +334,18 @@ async fn a_root_the_os_refuses_is_reported_instead_of_quietly_not_restarting() {
     spawn_reactor(&s);
 
     let announced = next_matching(&mut s.rx, |e| {
-        matches!(e, DomainEvent::WatchRefusalChanged { .. })
+        matches!(e, DomainEvent::WatchLimitChanged { .. })
     })
     .await;
-    let expected = BTreeMap::from([(WatchPurpose::Restarts, WatchError::BudgetExhausted)]);
+    let expected = BTreeMap::from([(
+        WatchPurpose::Restarts,
+        WatchLimit::Refused(WatchError::BudgetExhausted),
+    )]);
     assert!(
         matches!(
             &announced,
-            DomainEvent::WatchRefusalChanged { project, refusals }
-                if *project == PROJECT && *refusals == expected
+            DomainEvent::WatchLimitChanged { project, limits }
+                if *project == PROJECT && *limits == expected
         ),
         "the user is told which of the project's watches stopped, and why: {announced:?}",
     );

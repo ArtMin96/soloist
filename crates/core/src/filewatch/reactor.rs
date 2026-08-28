@@ -30,7 +30,7 @@ use crate::ids::ProcessId;
 use crate::ports::Clock;
 use crate::supervision::run_blocking;
 use crate::supervisor::Supervisor;
-use crate::watch::{WatchError, WatchOutcome, WatchPurpose};
+use crate::watch::{WatchError, WatchLimit, WatchOutcome, WatchPurpose};
 
 use super::policy::{compile, WatchRule};
 use super::status::WatchStatus;
@@ -205,7 +205,7 @@ impl WatchReactor {
                 };
                 outcomes.push(WatchOutcome {
                     project: target.project,
-                    refusal,
+                    limit: refusal.map(WatchLimit::Refused),
                 });
             }
             rules.push(WatchRule::new(target.id, target.project_root, set));

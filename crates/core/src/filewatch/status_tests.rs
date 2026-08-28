@@ -9,21 +9,21 @@ use tokio::sync::broadcast;
 use crate::events::{DomainEvent, EventBus};
 use crate::ids::ProjectId;
 use crate::testing::drain;
-use crate::watch::{WatchError, WatchOutcome, WatchPurpose};
+use crate::watch::{WatchError, WatchLimit, WatchOutcome, WatchPurpose};
 
 use super::WatchStatus;
 
 const ONE: ProjectId = ProjectId::from_raw(1);
 const TWO: ProjectId = ProjectId::from_raw(2);
 
-/// The refusal sets announced since the last call, as `(project, refusals)`.
+/// The limit sets announced since the last call, as `(project, limits)`.
 fn announced(
     rx: &mut broadcast::Receiver<DomainEvent>,
-) -> Vec<(ProjectId, BTreeMap<WatchPurpose, WatchError>)> {
+) -> Vec<(ProjectId, BTreeMap<WatchPurpose, WatchLimit>)> {
     drain(rx)
         .into_iter()
         .filter_map(|event| match event {
-            DomainEvent::WatchRefusalChanged { project, refusals } => Some((project, refusals)),
+            DomainEvent::WatchLimitChanged { project, limits } => Some((project, limits)),
             _ => None,
         })
         .collect()
@@ -33,15 +33,23 @@ fn announced(
 fn refused(project: ProjectId, reason: WatchError) -> WatchOutcome {
     WatchOutcome {
         project,
-        refusal: Some(reason),
+        limit: Some(WatchLimit::Refused(reason)),
     }
 }
 
-/// What a purpose reports for a project whose watch it holds.
+/// What a purpose reports for a project degraded to its essential watches.
+fn degraded(project: ProjectId) -> WatchOutcome {
+    WatchOutcome {
+        project,
+        limit: Some(WatchLimit::Degraded),
+    }
+}
+
+/// What a purpose reports for a project whose watch it holds without restriction.
 fn watched(project: ProjectId) -> WatchOutcome {
     WatchOutcome {
         project,
-        refusal: None,
+        limit: None,
     }
 }
 
@@ -59,7 +67,10 @@ fn a_refusal_is_announced_once_however_often_the_watch_is_retried() {
         announced(&mut rx),
         vec![(
             ONE,
-            BTreeMap::from([(WatchPurpose::Restarts, WatchError::BudgetExhausted)])
+            BTreeMap::from([(
+                WatchPurpose::Restarts,
+                WatchLimit::Refused(WatchError::BudgetExhausted)
+            )])
         )],
         "the first refusal reaches the surfaces",
     );
@@ -111,7 +122,7 @@ fn a_refusal_that_changes_reason_is_announced_again() {
     let _ = announced(&mut rx);
 
     // A directory that was missing and is now there, on a machine that has since run out of
-    // watches: the same project is still degraded, but for a reason the user acts on differently.
+    // watches: the same project is still refused, but for a reason the user acts on differently.
     status.resynced(
         WatchPurpose::Restarts,
         &[refused(ONE, WatchError::BudgetExhausted)],
@@ -120,7 +131,10 @@ fn a_refusal_that_changes_reason_is_announced_again() {
         announced(&mut rx),
         vec![(
             ONE,
-            BTreeMap::from([(WatchPurpose::Restarts, WatchError::BudgetExhausted)])
+            BTreeMap::from([(
+                WatchPurpose::Restarts,
+                WatchLimit::Refused(WatchError::BudgetExhausted)
+            )])
         )],
         "a refusal for a different reason is worth saying",
     );
@@ -178,8 +192,14 @@ fn a_project_refused_both_watches_is_announced_with_both_reasons() {
         vec![(
             ONE,
             BTreeMap::from([
-                (WatchPurpose::Restarts, WatchError::Unwatchable),
-                (WatchPurpose::GitStatus, WatchError::BudgetExhausted),
+                (
+                    WatchPurpose::Restarts,
+                    WatchLimit::Refused(WatchError::Unwatchable)
+                ),
+                (
+                    WatchPurpose::GitStatus,
+                    WatchLimit::Refused(WatchError::BudgetExhausted)
+                ),
             ])
         )],
         "each refused watch is named with the reason it met",
@@ -228,13 +248,22 @@ fn a_project_only_one_purpose_watches_is_announced_with_only_that_purposes_refus
         vec![
             (
                 ONE,
-                BTreeMap::from([(WatchPurpose::GitStatus, WatchError::BudgetExhausted)])
+                BTreeMap::from([(
+                    WatchPurpose::GitStatus,
+                    WatchLimit::Refused(WatchError::BudgetExhausted)
+                )])
             ),
             (
                 TWO,
                 BTreeMap::from([
-                    (WatchPurpose::Restarts, WatchError::Unwatchable),
-                    (WatchPurpose::GitStatus, WatchError::BudgetExhausted),
+                    (
+                        WatchPurpose::Restarts,
+                        WatchLimit::Refused(WatchError::Unwatchable)
+                    ),
+                    (
+                        WatchPurpose::GitStatus,
+                        WatchLimit::Refused(WatchError::BudgetExhausted)
+                    ),
                 ])
             ),
         ],
@@ -267,5 +296,38 @@ fn a_project_a_purpose_stops_watching_has_its_refusal_withdrawn() {
         announced(&mut rx),
         vec![(ONE, BTreeMap::new())],
         "the project nobody watches any more is no longer reported refused",
+    );
+}
+
+#[test]
+fn a_refusal_and_a_degradation_on_the_same_project_are_announced_together() {
+    let bus = EventBus::new(64);
+    let mut rx = bus.subscribe();
+    let status = WatchStatus::new(bus);
+
+    // The two purposes can meet different limits on the same tree: the restart policy's root is
+    // gone outright, while the git rail's tree is merely too large for its share of the budget.
+    // A surface handed only the whole-set comparison, without both purposes present, could not
+    // tell the two consequences apart.
+    status.resynced(
+        WatchPurpose::Restarts,
+        &[refused(ONE, WatchError::Unwatchable)],
+    );
+    let _ = announced(&mut rx);
+    status.resynced(WatchPurpose::GitStatus, &[degraded(ONE)]);
+
+    assert_eq!(
+        announced(&mut rx),
+        vec![(
+            ONE,
+            BTreeMap::from([
+                (
+                    WatchPurpose::Restarts,
+                    WatchLimit::Refused(WatchError::Unwatchable)
+                ),
+                (WatchPurpose::GitStatus, WatchLimit::Degraded),
+            ])
+        )],
+        "one announcement carries both purposes' limits, refused and degraded alike",
     );
 }
