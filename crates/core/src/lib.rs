@@ -50,6 +50,7 @@ pub mod trust;
 pub mod trustrequest;
 pub mod vcs;
 pub mod watch;
+pub mod watchset;
 
 mod cache;
 mod supervision;
@@ -102,7 +103,7 @@ pub use facade::{
     SpawnAgentOutcome, SpawnAgentRequest, SpawnProcessError, SpawnProcessRequest, StatusSummary,
     TrustCommandError,
 };
-pub use filewatch::{FileWatcher, NoopFileWatcher, NoopWatchHandle, WatchHandle, WatchReactor};
+pub use filewatch::{FileWatcher, NoopFileWatcher, WatchReactor};
 pub use git::{
     BranchOp, CheckRun, CheckState, DiffExtent, Exchange, FileOpener, ForgeError, ForgeReadiness,
     ForgeRepository, Git, GitDraftError, GitError, GitForge, GitLineCounts, GitRepository,
@@ -171,3 +172,4 @@ pub use vcs::{
     FileDiff, GitFileStatus, HunkRange, ProjectFile, SyncState, COMMIT_BODY_LIMIT,
 };
 pub use watch::{WatchError, WatchPurpose};
+pub use watchset::ProjectWatchSet;

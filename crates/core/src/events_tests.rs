@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use crate::ids::{ProcessId, ProjectId};
-use crate::watch::{WatchError, WatchPurpose};
+use crate::watch::{WatchError, WatchLimit, WatchPurpose};
 
 use super::{DomainEvent, EventBus};
 
@@ -23,38 +23,62 @@ async fn published_events_reach_a_subscriber() {
     }
 }
 
-/// A watch refusal announcement for project 1, as it reaches a surface.
-fn refusal_wire(refusals: BTreeMap<WatchPurpose, WatchError>) -> String {
-    let event = DomainEvent::WatchRefusalChanged {
+/// A watch limit announcement for project 1, as it reaches a surface.
+fn limit_wire(limits: BTreeMap<WatchPurpose, WatchLimit>) -> String {
+    let event = DomainEvent::WatchLimitChanged {
         project: ProjectId::from_raw(1),
-        refusals,
+        limits,
     };
     serde_json::to_string(&event).expect("a domain event serializes")
 }
 
 #[test]
-fn a_watch_refusal_carries_one_reason_per_refused_purpose() {
+fn a_watch_limit_carries_one_reason_per_limited_purpose() {
     assert_eq!(
-        refusal_wire(BTreeMap::from([(
+        limit_wire(BTreeMap::from([(
             WatchPurpose::GitStatus,
-            WatchError::BudgetExhausted
+            WatchLimit::Refused(WatchError::BudgetExhausted)
         )])),
-        r#"{"type":"WatchRefusalChanged","project":1,"refusals":{"git_status":"budget_exhausted"}}"#,
-        "one refused watch is one keyed reason",
+        r#"{"type":"WatchLimitChanged","project":1,"limits":{"git_status":{"refused":"budget_exhausted"}}}"#,
+        "one refused watch is one keyed reason, as a newtype variant",
     );
 
     assert_eq!(
-        refusal_wire(BTreeMap::from([
-            (WatchPurpose::Restarts, WatchError::Unwatchable),
-            (WatchPurpose::GitStatus, WatchError::Unavailable),
+        limit_wire(BTreeMap::from([(
+            WatchPurpose::GitStatus,
+            WatchLimit::Refused(WatchError::ShareExhausted)
+        )])),
+        r#"{"type":"WatchLimitChanged","project":1,"limits":{"git_status":{"refused":"share_exhausted"}}}"#,
+        "a spent share spells apart from the system's exhausted limit",
+    );
+
+    assert_eq!(
+        limit_wire(BTreeMap::from([
+            (
+                WatchPurpose::Restarts,
+                WatchLimit::Refused(WatchError::Unwatchable)
+            ),
+            (
+                WatchPurpose::GitStatus,
+                WatchLimit::Refused(WatchError::Unavailable)
+            ),
         ])),
-        r#"{"type":"WatchRefusalChanged","project":1,"refusals":{"restarts":"unwatchable","git_status":"unavailable"}}"#,
+        r#"{"type":"WatchLimitChanged","project":1,"limits":{"restarts":{"refused":"unwatchable"},"git_status":{"refused":"unavailable"}}}"#,
         "both purposes and every reason spell the same on the wire as in the mirror",
     );
 
     assert_eq!(
-        refusal_wire(BTreeMap::new()),
-        r#"{"type":"WatchRefusalChanged","project":1,"refusals":{}}"#,
+        limit_wire(BTreeMap::new()),
+        r#"{"type":"WatchLimitChanged","project":1,"limits":{}}"#,
         "a project watched again arrives as an empty set, not as an absent field",
+    );
+
+    assert_eq!(
+        limit_wire(BTreeMap::from([(
+            WatchPurpose::GitStatus,
+            WatchLimit::Degraded
+        )])),
+        r#"{"type":"WatchLimitChanged","project":1,"limits":{"git_status":"degraded"}}"#,
+        "a degradation is a unit variant, so it spells as a bare string rather than an object",
     );
 }

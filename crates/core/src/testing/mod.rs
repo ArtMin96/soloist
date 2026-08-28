@@ -5,7 +5,8 @@
 //! [`FakeTrustRepo`]/[`FakeProjectRepo`]/[`FakeLockRepo`] standing in for the durable store, a
 //! [`FakeAgentToolRepo`]/[`FakeVersionProbe`] for the agent registry and auto-detection, a
 //! [`FakeMetricsProbe`]/[`FakePortProbe`] reporting fixed CPU-memory/port readings, a
-//! [`FakeFileWatcher`] feeding synthetic filesystem changes, a [`FakeGitRepository`] answering
+//! [`FakeFileWatcher`] feeding synthetic filesystem changes, a [`FakeWatchScanner`] answering
+//! enumeration reads from paths seeded per root, a [`FakeGitRepository`] answering
 //! working-tree reads from a queue, a [`RecordingNotifier`] capturing
 //! the toasts the notification reactor composes, the [`terminal_registration`]
 //! fixture for driving the supervisor thread, and (in the core's own tests) the
@@ -51,6 +52,7 @@ mod template;
 #[cfg(test)]
 mod tracing_capture;
 mod wait;
+mod watchscan;
 
 pub use agents::{FakeAgentOneShot, FakeAgentToolRepo, FakeVersionProbe};
 pub use clock::MockClock;
@@ -95,3 +97,4 @@ pub use support::FakeFeedbackRepo;
 pub use template::FakeTemplateRepo;
 #[cfg(test)]
 pub use tracing_capture::WarnFlag;
+pub use watchscan::FakeWatchScanner;

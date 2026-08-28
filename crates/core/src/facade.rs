@@ -22,7 +22,7 @@ use crate::coordination::{
     AgentMailbox, Diagrams, Kv, Leases, Scratchpads, Templates, Timers, Todos,
 };
 use crate::events::{DomainEvent, EventBus};
-use crate::filewatch::{FileWatcher, WatchStatus};
+use crate::filewatch::WatchStatus;
 use crate::git::Git;
 use crate::identity::Identity;
 use crate::ids::{ProcessId, ProjectId};
@@ -39,6 +39,7 @@ use crate::settings::{ProjectSettings, Settings, SettingsStore};
 use crate::supervisor::{Registration, Supervisor, SupervisorError};
 use crate::support::Feedback;
 use crate::trust::{TrustRequests, TrustStore};
+use crate::watchset::ProjectWatchSet;
 
 use serde::Serialize;
 
@@ -123,10 +124,10 @@ pub struct Facade {
     clock: Arc<dyn Clock>,
     metrics: Arc<dyn MetricsProbe>,
     port_probe: Arc<dyn PortProbe>,
-    file_watcher: Arc<dyn FileWatcher>,
-    // Shared by both watch reactors, so a project the OS refuses is reported once whichever of
-    // them met the refusal.
-    watch_status: Arc<WatchStatus>,
+    // The single owner of every filesystem watch registration (monitoring C5): plans and
+    // maintains them within the app's budget, and serves the config-reload, restart, and
+    // git-status reactors from one fan-out — each subscribes beyond `&self`.
+    watch_set: ProjectWatchSet,
     // `Arc`, like the supervisor: the git status watch reactor shares it beyond `&self`.
     git: Arc<Git>,
     notifier: Arc<dyn Notifier>,
@@ -184,6 +185,7 @@ impl Facade {
             metrics,
             port_probe,
             file_watcher,
+            watch_scanner,
             git_repository,
             git_forge,
             file_opener,
@@ -206,6 +208,19 @@ impl Facade {
             ..
         } = ports;
         let mailbox = Arc::new(AgentMailbox::new(clock.clone()));
+        // Shared by the watch set and every reactor that reads through it, so a project's watch
+        // status is reported once from a single source of truth.
+        let projects = Arc::new(Projects::new(projects));
+        let watch_status = Arc::new(WatchStatus::new(bus.clone()));
+        let watch_set = ProjectWatchSet::new(
+            clock.clone(),
+            file_watcher,
+            watch_scanner,
+            &bus,
+            projects.clone(),
+            Arc::downgrade(&supervisor),
+            watch_status,
+        );
         Self {
             supervisor,
             kv: Kv::new(kv_repo),
@@ -234,15 +249,14 @@ impl Facade {
                 file_opener,
                 trust.clone(),
             )),
-            watch_status: Arc::new(WatchStatus::new(bus.clone())),
+            watch_set,
             clock,
             metrics,
             port_probe,
-            file_watcher,
             notifier,
             presence: Arc::new(PresenceCell::new()),
             attention: Arc::new(AttentionRegistry::new()),
-            projects: Arc::new(Projects::new(projects)),
+            projects,
             trust: TrustStore::new(trust.clone()),
             config: Arc::new(ConfigEngine::new(trust, bus.clone())),
             idle: Arc::new(IdleTracker::new()),

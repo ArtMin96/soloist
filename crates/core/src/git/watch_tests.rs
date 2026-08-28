@@ -1,18 +1,19 @@
 //! Behavioural tests for [`GitStatusWatchReactor`], kept out of the implementation file. They
-//! drive the real reactor over a [`FakeFileWatcher`] feeding synthetic repository-state and
-//! working-tree changes and a [`FakeGitRepository`] answering the reads, so what is asserted is
+//! drive the real reactor over synthetic repository-state and working-tree changes fed straight
+//! onto a broadcast channel — the same shape [`crate::watchset::ProjectWatchSet`]'s fan-out gives
+//! it in production — and a [`FakeGitRepository`] answering the reads, so what is asserted is
 //! what a surface sees: how many status reads a burst caused, and what the bus announced.
 //!
-//! The watcher reports paths, not event kinds — which kinds of filesystem event reach the core at
-//! all is the adapter's decision, covered by its own integration tests over the real backend. So a
-//! creation and a deletion arrive here as the same thing, a changed path, and what these tests
-//! pin is that the reactor reads and announces for the working tree as well as for `.git`.
+//! Which of a project's directories are actually watched, and what a refusal or a degradation
+//! means, is the watch set's own concern and its own test coverage; this file pins only what the
+//! reactor decides once a change has already been reported: which changed paths belong to which
+//! projects' status ([`super::routing::Routes`]), and when a burst of them is worth a debounced
+//! re-read.
 //!
 //! The quiet window is advanced on the mock clock, so no real debounce elapses. The reads
 //! themselves run on the blocking pool, so the helpers below advance and then wait a bounded
 //! moment for the announcement rather than assuming a fixed number of scheduler turns.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,16 +22,11 @@ use tempfile::TempDir;
 use tokio::sync::broadcast;
 
 use crate::events::{DomainEvent, EventBus};
-use crate::filewatch::WatchStatus;
 use crate::git::{Git, GitError, GitStatus};
 use crate::ids::ProjectId;
 use crate::projects::Projects;
-use crate::testing::{
-    file_change, git_over, git_status, next_matching, FakeFileWatcher, FakeGitRepository,
-    FakeProjectRepo,
-};
+use crate::testing::{file_change, git_over, git_status, FakeGitRepository, FakeProjectRepo};
 use crate::vcs::ChangeKind;
-use crate::watch::{WatchError, WatchPurpose};
 
 use super::GitStatusWatchReactor;
 
@@ -60,11 +56,15 @@ const TICK: Duration = Duration::from_millis(5);
 /// Enough restless steps to run well past the reactor's ceiling on postponement.
 const RESTLESS_STEPS: usize = 60;
 
+/// How many changed paths the test's fan-out buffers before a send starts dropping — generous
+/// for a single test's traffic.
+const CHANGE_BUFFER: usize = 256;
+
 struct Setup {
     bus: EventBus,
     rx: broadcast::Receiver<DomainEvent>,
     clock: crate::testing::MockClock,
-    watcher: Arc<FakeFileWatcher>,
+    changes: broadcast::Sender<PathBuf>,
     projects: Arc<Projects>,
     repository: FakeGitRepository,
     git: Arc<Git>,
@@ -77,13 +77,13 @@ impl Setup {
     /// Feeds a synthetic change for a file inside the project's repository state, as a `git`
     /// invocation writing that file would produce.
     fn repository_wrote(&self, relative: &str) {
-        self.watcher.change(self.root.join(".git").join(relative));
+        let _ = self.changes.send(self.root.join(".git").join(relative));
     }
 
     /// Feeds a synthetic change for a file in the project's working tree, as editing, adding, or
     /// removing that file would produce.
     fn working_tree_changed(&self, relative: &str) {
-        self.watcher.change(self.root.join(relative));
+        let _ = self.changes.send(self.root.join(relative));
     }
 
     /// Advances the quiet window until the reactor announces a status change, and returns the
@@ -178,11 +178,12 @@ fn setup(repository: FakeGitRepository) -> Setup {
     let dir = tempfile::tempdir().expect("temp dir");
     let projects = Arc::new(Projects::new(Arc::new(FakeProjectRepo::new())));
     let record = projects.add(dir.path(), None, None).expect("add project");
+    let (changes, _rx) = broadcast::channel(CHANGE_BUFFER);
     Setup {
         bus,
         rx,
         clock: crate::testing::MockClock::new(),
-        watcher: Arc::new(FakeFileWatcher::new()),
+        changes,
         projects,
         git: git_over(repository.clone()),
         repository,
@@ -208,29 +209,22 @@ fn with_change(path: &str, unstaged: ChangeKind) -> GitStatus {
     status
 }
 
-/// Spawns the reactor and awaits the working-tree watch — the last of the three a project needs, so
-/// waiting for it means every watch is in place before a test feeds a change.
+/// Spawns the reactor over the test's own change fan-out and yields once — the reactor's initial
+/// resync is synchronous and runs before it awaits anything for the first time, so a single
+/// scheduler handoff on this current-thread runtime is enough to guarantee every project already
+/// in the registry has been routed before a test feeds a change.
 async fn start_reactor(s: &Setup) {
     tokio::spawn(
         GitStatusWatchReactor::new(
             Arc::new(s.clock.clone()),
-            s.watcher.clone(),
+            s.changes.subscribe(),
             &s.bus,
             Arc::downgrade(&s.git),
             s.projects.clone(),
-            Arc::new(WatchStatus::new(s.bus.clone())),
         )
         .run(),
     );
-    watch_established(s, &s.root).await;
-}
-
-/// Awaits the watch on `root`, bounded — so a reactor that never asks for it fails the test rather
-/// than waiting for ever.
-async fn watch_established(s: &Setup, root: &std::path::Path) {
-    tokio::time::timeout(SETTLE, s.watcher.asked_for(root))
-        .await
-        .unwrap_or_else(|_| panic!("{} was never watched", root.display()));
+    tokio::task::yield_now().await;
 }
 
 #[tokio::test]
@@ -261,15 +255,8 @@ async fn a_file_added_to_the_working_tree_announces_a_status_change() {
     )));
     start_reactor(&s).await;
 
-    // The working tree is watched as a tree of its own, not only the repository state inside it —
-    // without that watch a file added beside `.git` touches nothing anybody is listening to.
-    assert!(
-        s.watcher.watched().contains(&s.root),
-        "the working tree is watched, not only .git — got {:?}",
-        s.watcher.watched(),
-    );
-
-    // Nothing under `.git` is touched by writing a file the repository does not track yet.
+    // The working tree is routed to as a tree of its own, not only the repository state inside
+    // it — without that routing a file added beside `.git` would match no project at all.
     s.working_tree_changed("notes.md");
 
     assert_eq!(s.next_status_changed().await, s.project);
@@ -345,7 +332,8 @@ async fn a_change_shared_by_two_nested_projects_refreshes_both() {
         ChangeKind::Modified,
     )));
     // A second project rooted inside the first, as opening a repository that lives inside another
-    // project's tree gives: one file, in both working trees.
+    // project's tree gives: one file, in both working trees. Added before the reactor starts, so
+    // its one initial resync routes both.
     let inner_root = s.root.join("inner");
     std::fs::create_dir_all(&inner_root).expect("inner dir");
     let inner = s
@@ -353,7 +341,6 @@ async fn a_change_shared_by_two_nested_projects_refreshes_both() {
         .add(&inner_root, None, None)
         .expect("add nested project");
     start_reactor(&s).await;
-    watch_established(&s, &inner_root).await;
 
     s.working_tree_changed("inner/shared.rs");
 
@@ -398,7 +385,7 @@ async fn one_operation_touching_both_the_working_tree_and_the_repository_reads_t
     assert_eq!(
         s.repository.reads(),
         1,
-        "the two watches share one quiet window, so one operation is one read",
+        "the two sources share one quiet window, so one operation is one read",
     );
 }
 
@@ -484,38 +471,6 @@ async fn a_retry_waits_out_a_quiet_window_even_when_the_read_it_follows_outlaste
 }
 
 #[tokio::test]
-async fn a_working_tree_that_cannot_be_watched_still_reports_what_version_control_writes() {
-    let mut s = setup(FakeGitRepository::answering(vec![
-        Ok(clean()),
-        Ok(on_branch("release")),
-    ]));
-    // The tree watch spends one OS watch per directory beneath it, so it is the one an exhausted
-    // watch budget turns down first — while the repository state beside it costs almost nothing.
-    // Which is why the state is watched in its own right rather than left to the tree watch that
-    // spans it: staging and committing have to survive losing the expensive half.
-    s.watcher.refuse(s.root.clone());
-    start_reactor(&s).await;
-
-    // A file directly inside the repository state, as staging writes.
-    s.repository_wrote("index");
-    assert_eq!(s.next_status_changed().await, s.project, "staging reports");
-
-    // And one nested inside it, as moving a branch writes — a different watch again, because a ref
-    // sits levels down.
-    s.repository_wrote("refs/heads/main");
-    assert_eq!(
-        s.next_status_changed().await,
-        s.project,
-        "a branch moving reports",
-    );
-
-    // The half that was lost is honestly lost: the tree reports nothing, which is what the refusal
-    // is traced for.
-    s.working_tree_changed("notes.md");
-    s.assert_nothing_announced().await;
-}
-
-#[tokio::test]
 async fn a_repository_that_keeps_failing_is_left_alone_after_one_retry() {
     let mut s = setup(FakeGitRepository::answering(vec![Err(GitError::Timeout)]));
     start_reactor(&s).await;
@@ -531,77 +486,17 @@ async fn a_repository_that_keeps_failing_is_left_alone_after_one_retry() {
 }
 
 #[tokio::test]
-async fn removing_a_project_releases_its_watches_and_stops_its_reads() {
+async fn removing_a_project_stops_its_reads() {
     let mut s = setup(FakeGitRepository::reporting(clean()));
     start_reactor(&s).await;
 
     s.projects.remove(s.project).expect("remove project");
     s.bus.publish(DomainEvent::ProjectRemoved { id: s.project });
-    // Bounded, so a reactor that holds on to its watches fails here rather than waiting for ever.
-    tokio::time::timeout(SETTLE, s.watcher.released())
-        .await
-        .expect("the removed project's watches were released");
+    // The removal's resync is synchronous, so one scheduler handoff is enough to guarantee the
+    // project has dropped out of the routing table before the change below is fed.
+    tokio::task::yield_now().await;
 
-    assert!(
-        s.watcher.live().is_empty(),
-        "a removed project leaves no watch behind: {:?}",
-        s.watcher.live(),
-    );
     s.repository_wrote("index");
     s.assert_nothing_announced().await;
     assert_eq!(s.repository.reads(), 0);
-}
-
-#[tokio::test]
-async fn a_working_tree_the_os_refuses_is_reported_instead_of_a_rail_that_stops_keeping_up() {
-    let s = setup(FakeGitRepository::reporting(clean()));
-    // The OS is out of watch descriptors: the tree watch is the largest of the three a project
-    // needs and the first an exhausted budget turns down. Nothing under the root will report, so
-    // the rail silently stops following the working tree unless the refusal is said out loud.
-    s.watcher.refuse(s.root.clone());
-    let mut rx = s.bus.subscribe();
-    start_reactor(&s).await;
-
-    let announced = tokio::time::timeout(
-        SETTLE,
-        next_matching(&mut rx, |e| {
-            matches!(e, DomainEvent::WatchRefusalChanged { .. })
-        }),
-    )
-    .await
-    .expect("the refusal reaches the surfaces");
-    // Only the git rail is named. This project declares no `restart_when_changed` command, so the
-    // restart policy never asks for a watch over it and nothing there has stopped — saying so would
-    // report a consequence that did not follow.
-    let expected = BTreeMap::from([(WatchPurpose::GitStatus, WatchError::BudgetExhausted)]);
-    assert!(
-        matches!(
-            &announced,
-            DomainEvent::WatchRefusalChanged { project, refusals }
-                if *project == s.project && *refusals == expected
-        ),
-        "the user is told which of the project's watches stopped reporting, and why: {announced:?}",
-    );
-}
-
-#[tokio::test]
-async fn a_project_that_is_not_a_repository_reports_no_refusal() {
-    let s = setup(FakeGitRepository::reporting(clean()));
-    // A project with no `.git` at all. Its two repository-state watches cannot be established and
-    // never will be, and that is ordinary rather than a degradation: the working tree is watched,
-    // so restart-on-change still fires and the rail is not missing anything a repository would
-    // report. Reporting it would put a notice on every project that is not under version control,
-    // claiming two things that are both false.
-    s.watcher.refuse(s.root.join(".git"));
-    s.watcher.refuse(s.root.join(".git").join("refs"));
-    let mut rx = s.bus.subscribe();
-    start_reactor(&s).await;
-    tokio::time::sleep(SETTLE).await;
-
-    while let Ok(event) = rx.try_recv() {
-        assert!(
-            !matches!(event, DomainEvent::WatchRefusalChanged { .. }),
-            "a project with no repository state is not one whose watching failed: {event:?}",
-        );
-    }
 }

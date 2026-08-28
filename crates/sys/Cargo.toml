@@ -24,6 +24,12 @@ notify = { version = "8", default-features = false }
 # The file-watch port hands the adapter a tokio mpsc sender to forward changes on; only the
 # sync primitives are needed here.
 tokio = { version = "1", default-features = false, features = ["sync"] }
+# Enumerating which paths under a project are worth watching, honouring git's own ignore
+# precedence: .gitignore, .git/info/exclude, global excludes, and nested ignore files. It is the
+# ripgrep author's crate, and the only in-process implementation of that precedence — the
+# alternative, shelling out to `git check-ignore`, needs a repository (so a non-repository
+# project gets no filtering at all) and a subprocess per scan.
+ignore = { version = "0.4", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
