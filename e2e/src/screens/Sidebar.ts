@@ -10,6 +10,9 @@ import { trustDialog } from "./TrustDialog.js";
 const NAV = 'nav[aria-label="Projects"]';
 const ROW = '[role="treeitem"]';
 const META = '[data-testid="process-meta"]';
+// The travelling highlight a working agent's name wears. Kept here rather than with the markers
+// every process row shares: the orchestration tree renders the same rows and never sweeps them.
+const SWEEP = ':scope > span [data-slot="text-shimmer"]';
 
 // The indicator only ever swaps `data-status` out for `data-activity` while the process is
 // Running (a stopped agent has no activity to report), so an activity marker *is* a Running
@@ -41,6 +44,30 @@ export interface RowHandle {
   port: number | null;
   /** Whether the row wears the unread marker — something happened here nobody has looked at. */
   unread: boolean;
+}
+
+/** The highlight travelling across a working agent's name, as the window has laid it out. */
+export interface Sweep {
+  /** The name the highlight travels across, read from the text it is painted over. */
+  label: string;
+  /** The highlight's own box — what its mask is sized and travelled in percentages of. */
+  overlay: number;
+  /** The width of the name's glyph run, measured over the text itself. */
+  ink: number;
+  /** The width the row gives the name before it has to be clipped. */
+  cell: number;
+}
+
+/** One sweeping row, before its name is known to have been readable. */
+interface RawSweep extends Omit<Sweep, "label" | "ink"> {
+  label: string | null;
+  ink: number | null;
+}
+
+/** Every sweeping row in one pass, with what the window says about reduced motion. */
+interface SweepReading {
+  reducedMotion: boolean;
+  sweeps: RawSweep[];
 }
 
 /** What one row's DOM carries, before the status/activity markers are resolved to a status. */
@@ -212,6 +239,114 @@ export const sidebar = {
       () =>
         `sidebar row "${label}" never became the selected one; selected: ${JSON.stringify(selected)}`,
     );
+  },
+
+  /**
+   * Every row currently sweeping its name, measured in one pass.
+   *
+   * One pass because the three widths only mean something together: the highlight is positioned
+   * against its own box, and a working agent's row re-renders as its activity changes, so widths
+   * gathered a call apart can describe two different layouts. The name is measured with a range
+   * over the text itself rather than over any box enclosing it — the highlight fills that box, so
+   * comparing the two could only ever agree with itself.
+   *
+   * A sweeping row whose name cannot be read comes back with none: the read reports that rather
+   * than substituting a width, so a change to the label markup fails loudly instead of quietly
+   * measuring the wrong thing.
+   */
+  async sweeps(): Promise<SweepReading> {
+    return browser.execute(
+      (nav: string, row: string, sweep: string, text: string) => {
+        const tree = document.querySelector(nav);
+        const rows = tree === null ? [] : [...tree.querySelectorAll(row)];
+        return {
+          reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)")
+            .matches,
+          sweeps: rows.flatMap((node) => {
+            const overlay = node.querySelector(sweep);
+            const cell = node.querySelector(text);
+            const box = overlay?.parentElement;
+            if (!overlay || !cell || !box) return [];
+            // The name's own glyph run: the first text under the highlight's box that the
+            // highlight is not itself, since it carries a hidden copy of the same name.
+            const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+            let ink: number | null = null;
+            let label: string | null = null;
+            for (
+              let written = walker.nextNode();
+              written !== null;
+              written = walker.nextNode()
+            ) {
+              const name = (written.textContent ?? "").trim();
+              if (name === "") continue;
+              if (written.parentElement?.closest("[aria-hidden]")) continue;
+              const range = document.createRange();
+              range.selectNodeContents(written);
+              ink = range.getBoundingClientRect().width;
+              label = name;
+              break;
+            }
+            return [
+              {
+                label,
+                ink,
+                overlay: overlay.getBoundingClientRect().width,
+                cell: cell.getBoundingClientRect().width,
+              },
+            ];
+          }),
+        };
+      },
+      NAV,
+      ROW,
+      SWEEP,
+      ROW_TEXT,
+    );
+  },
+
+  /**
+   * Waits until the row labelled `label` is sweeping its name, and returns that sweep's geometry.
+   *
+   * The wait is on the agent really working: the sweep is rendered from the activity the idle
+   * sampler classifies, so it comes and goes as the agent does, and a spec lands on whichever
+   * working spell it arrives in.
+   */
+  async waitForSweep(label: string): Promise<Sweep> {
+    let sweeping: (string | null)[] = [];
+    let reducedMotion = false;
+    let found: RawSweep | undefined;
+    await waitUntilOr(
+      async () => {
+        const reading = await this.sweeps();
+        reducedMotion = reading.reducedMotion;
+        sweeping = reading.sweeps.map((sweep) => sweep.label);
+        found = reading.sweeps.find((sweep) => sweep.label === label);
+        return found !== undefined;
+      },
+      () =>
+        `no sidebar row labelled "${label}" swept its name; sweeping rows: ${JSON.stringify(sweeping)}`,
+    );
+    const sweep = found as RawSweep;
+    // Raised out here rather than from the wait, which reports its own message in place of any
+    // error thrown inside it. A hidden highlight is still in the DOM and measures zero, and the
+    // window drops it outright under reduced motion — so say so, rather than leave a bare zero to
+    // be read as a geometry failure.
+    if (sweep.overlay === 0) {
+      throw new Error(
+        reducedMotion
+          ? `the sweep on sidebar row "${label}" measures zero because this window reports ` +
+            `prefers-reduced-motion: reduce, which hides it — the suite needs a display whose ` +
+            `animations are enabled`
+          : `the sweep on sidebar row "${label}" measures zero width, and nothing reports reduced motion`,
+      );
+    }
+    if (sweep.ink === null) {
+      throw new Error(
+        `sidebar row "${label}" sweeps a name the harness cannot measure — the label markup ` +
+          `changed and the text the highlight travels across is no longer readable under it`,
+      );
+    }
+    return { ...sweep, label, ink: sweep.ink };
   },
 
   /**
