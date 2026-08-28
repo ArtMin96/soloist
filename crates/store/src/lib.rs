@@ -9,6 +9,7 @@
 
 mod agents;
 mod diagrams;
+mod doc_table;
 mod doc_to_markdown;
 mod feedback;
 mod kv;

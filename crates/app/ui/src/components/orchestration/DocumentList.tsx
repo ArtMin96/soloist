@@ -1,62 +1,77 @@
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import type { DocumentKind } from "@/components/orchestration/DocumentTitle";
 import { humanizeName } from "@/lib/humanize";
 import { cn } from "@/lib/utils";
-import type { ScratchpadSummary } from "@/domain";
 
-interface ScratchpadListProps {
-  scratchpads: ScratchpadSummary[];
+/** The row shape a document summary (scratchpad or diagram) must satisfy to appear in the list. */
+export interface DocumentRow {
+  id: number;
+  name: string;
+  revision: number;
+  gist: string;
+}
+
+/** The DOM handle attribute each document kind's rows are stamped with — the single source an e2e
+ *  reader (e.g. `ScratchpadPanel.ts`'s `NAME_ATTR`) and this list share, so the two can never drift
+ *  apart and a reader addressing one document kind can never end up reading the other's. */
+const DOCUMENT_NAME_ATTRIBUTE = {
+  scratchpad: "data-scratchpad-name",
+  diagram: "data-diagram-name",
+} as const satisfies Record<DocumentKind, string>;
+
+interface DocumentListProps<Row extends DocumentRow> {
+  items: Row[];
   selected: string | null;
   onSelect: (name: string) => void;
   /** The listbox's accessible name — lets a grouped roster label the active vs archived lists apart. */
-  label?: string;
-  /** Shown in place of the list when it is empty; defaults to the first-run guidance. */
-  emptyHint?: ReactNode;
+  label: string;
+  /** Shown in place of the list when it is empty. */
+  emptyHint: ReactNode;
+  /** Which document kind these rows are — selects the row's name-handle attribute via
+   *  `DOCUMENT_NAME_ATTRIBUTE`. */
+  kind: DocumentKind;
 }
 
-// The scratchpad roster: a single-select ARIA listbox, one row per shared document (its humanized
+// A single-select ARIA listbox shared by every document roster: one row per document (its humanized
 // title over a one-line body gist with its revision in mono). The row still selects by the raw name
-// handle — humanization is display only. Arrow keys / Home / End move the roving focus
-// between options; Enter, Space, or a click opens the focused document. Activation is explicit
-// (opening reads the full document) — scan with the arrows, commit with Enter. The option roles ride
-// native <button>s so each is focusable and keyboard-operable, and the listbox rides a generic <div>
-// so no list element's semantics are overridden. Presentational — selection and the choice arrive as
-// props. The tint-in-place selection is the shared macOS source-list language, identical to the
-// sidebar ProcessRow.
-export function ScratchpadList({
-  scratchpads,
+// handle — humanization is display only. Arrow keys / Home / End move the roving focus between
+// options; Enter, Space, or a click opens the focused document. Activation is explicit (opening reads
+// the full document) — scan with the arrows, commit with Enter. The option roles ride native
+// <button>s so each is focusable and keyboard-operable, and the listbox rides a generic <div> so no
+// list element's semantics are overridden. Presentational — selection and the choice arrive as props.
+// The tint-in-place selection is the shared macOS source-list language, identical to the sidebar
+// ProcessRow.
+export function DocumentList<Row extends DocumentRow>({
+  items,
   selected,
   onSelect,
-  label = "Scratchpads",
+  label,
   emptyHint,
-}: ScratchpadListProps) {
+  kind,
+}: DocumentListProps<Row>) {
   const baseId = useId();
-  // Track the roving cursor by the pad's name, not its index, so a scratchpad added or removed live
-  // keeps the cursor on the same document instead of sliding onto a neighbour.
+  // Track the roving cursor by the document's name, not its index, so a document added or removed
+  // live keeps the cursor on the same document instead of sliding onto a neighbour.
   const [activeName, setActiveName] = useState<string | null>(selected);
 
-  if (scratchpads.length === 0) {
+  if (items.length === 0) {
     return (
       <p className="px-3 py-6 text-[0.8125rem] leading-relaxed text-muted-foreground">
-        {emptyHint ?? (
-          <>
-            No scratchpads yet. Agents create them to share a plan or research as they work — they
-            will appear here live.
-          </>
-        )}
+        {emptyHint}
       </p>
     );
   }
 
-  // Resolve the cursor to a live row; a name whose pad was removed falls back to the first row.
+  // Resolve the cursor to a live row; a name whose document was removed falls back to the first row.
   const activeIndex = Math.max(
     0,
-    scratchpads.findIndex((pad) => pad.name === activeName),
+    items.findIndex((item) => item.name === activeName),
   );
   const optionId = (index: number) => `${baseId}-option-${index}`;
 
   function moveTo(index: number) {
-    const clamped = Math.max(0, Math.min(index, scratchpads.length - 1));
-    setActiveName(scratchpads[clamped].name);
+    const clamped = Math.max(0, Math.min(index, items.length - 1));
+    setActiveName(items[clamped].name);
     document.getElementById(optionId(clamped))?.focus();
   }
 
@@ -72,7 +87,7 @@ export function ScratchpadList({
         moveTo(0);
         break;
       case "End":
-        moveTo(scratchpads.length - 1);
+        moveTo(items.length - 1);
         break;
       default:
         return;
@@ -91,22 +106,22 @@ export function ScratchpadList({
       data-selection-scope
       className="flex flex-col gap-px p-1 outline-none"
     >
-      {scratchpads.map((pad, index) => {
-        const isSelected = pad.name === selected;
+      {items.map((item, index) => {
+        const isSelected = item.name === selected;
         return (
           <button
-            key={pad.id}
+            key={item.id}
             id={optionId(index)}
             type="button"
             role="option"
             aria-selected={isSelected}
             // The raw handle the row addresses, kept reachable now that the row reads as prose.
-            data-scratchpad-name={pad.name}
+            {...{ [DOCUMENT_NAME_ATTRIBUTE[kind]]: item.name }}
             // Roving tabindex: only the cursor's option is in the tab order; the arrows move it.
             tabIndex={index === activeIndex ? 0 : -1}
             onClick={() => {
-              setActiveName(pad.name);
-              onSelect(pad.name);
+              setActiveName(item.name);
+              onSelect(item.name);
             }}
             className={cn(
               // The source list's default row height, so a one-line row keeps the same rhythm as
@@ -120,14 +135,14 @@ export function ScratchpadList({
           >
             <span className="flex items-baseline gap-2">
               <span className="min-w-0 flex-1 truncate text-[0.8125rem] leading-4 text-foreground">
-                {humanizeName(pad.name)}
+                {humanizeName(item.name)}
               </span>
               <span className="type-label shrink-0 font-mono tabular-nums text-muted-foreground">
-                r{pad.revision}
+                r{item.revision}
               </span>
             </span>
-            {pad.gist && (
-              <span className="type-label truncate text-muted-foreground">{pad.gist}</span>
+            {item.gist && (
+              <span className="type-label truncate text-muted-foreground">{item.gist}</span>
             )}
           </button>
         );

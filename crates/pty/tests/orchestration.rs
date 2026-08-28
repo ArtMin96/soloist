@@ -140,11 +140,11 @@ async fn a_lead_spawns_a_worker_assigns_a_locked_todo_and_is_woken_when_the_work
         )
         .expect("arm the fire-when-idle timer");
     assert!(
-        !outcome.already_idle,
+        !outcome.timer.already_idle,
         "the freshly spawned worker is not idle yet"
     );
     assert_eq!(
-        outcome.waiting_on,
+        outcome.timer.waiting_on,
         vec![worker],
         "the timer is waiting on the worker"
     );

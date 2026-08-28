@@ -540,3 +540,54 @@ async fn lineage_edges_omits_an_edge_whose_parent_left_the_registry() {
         "a closed lead's edge leaves the read",
     );
 }
+
+#[test]
+fn timer_list_and_the_orchestration_snapshot_agree_with_the_arm_time_report() {
+    // A mixed watched set — one still running, one gone from the registry — so the idle answer is
+    // neither the trivially-empty nor the trivially-full case. `timer_fire_when_idle`, `timer_list`,
+    // and the orchestration snapshot each derive it independently through the same
+    // `IdleMode::idle_report`, so all three must agree.
+    let facade = facade();
+    let (session, _owner) = bound_session(&facade, PROJECT);
+    let watching = agent(&facade, PROJECT, "watcher");
+    let gone = ProcessId::from_raw(9999);
+
+    let outcome = facade
+        .scoped(session)
+        .timer_fire_when_idle(
+            "sync".into(),
+            vec![watching, gone],
+            IdleMode::Any,
+            Some(Duration::from_secs(60)),
+        )
+        .expect("arm the timer");
+
+    let listed = facade.scoped(session).timer_list().expect("list");
+    let snapshot = facade
+        .orchestration_snapshot(PROJECT)
+        .expect("assemble the snapshot");
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(snapshot.timers.len(), 1);
+    assert_eq!(
+        outcome.timer.waiting_on, listed[0].waiting_on,
+        "the arm-time report and timer_list must agree on who is still outstanding"
+    );
+    assert_eq!(
+        outcome.timer.already_idle, listed[0].already_idle,
+        "the arm-time report and timer_list must agree on whether the quorum is met"
+    );
+    assert_eq!(
+        listed[0].waiting_on, snapshot.timers[0].waiting_on,
+        "timer_list and the orchestration snapshot must agree on who is still outstanding"
+    );
+    assert_eq!(
+        listed[0].already_idle, snapshot.timers[0].already_idle,
+        "timer_list and the orchestration snapshot must agree on whether the quorum is met"
+    );
+    assert_eq!(listed[0].waiting_on, vec![watching]);
+    assert!(
+        listed[0].already_idle,
+        "the absent process alone satisfies an Any quorum"
+    );
+}

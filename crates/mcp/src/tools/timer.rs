@@ -37,7 +37,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Set a timer that delivers `body` to your bound process when ANY watched process is idle, or `max_wait_ms` elapses (omit for the default backstop). Returns the timer plus whether the condition is already met and which processes it is still waiting on. The token-free way to react as soon as one worker is free."
+        description = "Set a timer that delivers `body` to your bound process when ANY watched process is idle, or `max_wait_ms` elapses (omit for the default backstop). Returns the armed timer, reporting whether the condition is already met and which processes it is still waiting on. The token-free way to react as soon as one worker is free."
     )]
     pub(crate) async fn timer_fire_when_idle_any(
         &self,
@@ -52,7 +52,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "Set a timer that delivers `body` to your bound process when ALL watched processes are idle, or `max_wait_ms` elapses (omit for the default backstop). Returns the timer plus whether the condition is already met and which processes it is still waiting on. The token-free way to wait until every worker you spawned is done."
+        description = "Set a timer that delivers `body` to your bound process when ALL watched processes are idle, or `max_wait_ms` elapses (omit for the default backstop). Returns the armed timer, reporting whether the condition is already met and which processes it is still waiting on. The token-free way to wait until every worker you spawned is done."
     )]
     pub(crate) async fn timer_fire_when_idle_all(
         &self,
@@ -133,7 +133,7 @@ impl SoloistMcp {
     }
 
     #[tool(
-        description = "List every timer your bound process owns (armed or paused), with each timer's id, body, fire condition, deadline, and status."
+        description = "List every timer your bound process owns (armed or paused), with each timer's id, body, fire condition, deadline, status, and — for a fire-when-idle timer — whether its condition is already met and which processes it is still waiting on, read live."
     )]
     pub(crate) async fn timer_list(&self) -> Result<CallToolResult, ErrorData> {
         match self.client.request(IpcRequest::TimerList).await {

@@ -9,6 +9,248 @@
 
 ## Current state
 
+> **LATEST (2026-08-28): DSA AUDIT SLICE 9 — CODE REVIEW FIX PASS — six Standards findings and one
+> Spec-axis bug fixed, `just lint` exit 0, `just test` exit 0, `Done — pending verify`, UNCOMMITTED.**
+> Branch `refactor/dsa-audit-slice-09-structural-p2`, on top of the slice's own commit `eceb78e`
+> (entry below, whose closing status this supersedes — that work is now committed, not uncommitted;
+> this fix pass is what's uncommitted). A two-axis code review (Standards + Spec, parallel sub-agents)
+> ran against `main...HEAD` and all its findings are applied here as uncommitted follow-up work on the
+> same branch.
+>
+> **Magic strings (§15) fixed.** `data-scratchpad-name`/`data-diagram-name` had each gone from one
+> literal on `main` to two. Now single-sourced in `DOCUMENT_NAME_ATTRIBUTE`
+> (`crates/app/ui/src/components/orchestration/DocumentList.tsx:17-20`), declared
+> `as const satisfies Record<DocumentKind, string>` so the mapping is exhaustive against the kind
+> union at compile time. `DocumentList` and `DocumentRoster` now take `kind: DocumentKind` instead of
+> a `handleAttribute: (name: string) => Record<string, string>` closure.
+>
+> **Dead code (§15) fixed.** `DiagramList.tsx` had no production caller at all; `ScratchpadList.tsx`
+> had only `harness.tsx`. Both wrappers and both their test files were deleted, `harness.tsx` now
+> renders `DocumentList` directly, and coverage was consolidated into a new `DocumentList.test.tsx`
+> (8 tests) that asserts each subject's handle attribute both positively and negatively (a scratchpad
+> list carries no `data-diagram-name`, and vice versa). The duplicated first-run hint resolved as a
+> consequence of that deletion (a §15 DRY fix) — each subject's hint now has one definition.
+>
+> **Speculative generality fixed.** `label` and `emptyHint` were optional props no caller passed; both
+> are now required. `DocumentRoster`'s archived list passes `emptyHint={null}` since that branch only
+> mounts when `archived.length > 0`.
+>
+> **Single source (§15, Rust) fixed.** `IdleMode::quorum_met` and `IdleMode::idle_report` each
+> independently encoded the Any/All-plus-empty-set rule. Extracted a private
+> `IdleMode::met(watched_is_empty, any_idle: impl FnOnce() -> bool, all_idle: impl FnOnce() -> bool)`;
+> the thunks let `quorum_met` keep the scheduler's per-tick short-circuit (only the matched mode's
+> traversal runs) while `idle_report` passes the two booleans it already has. `quorum_met`'s doc
+> comment had become false on two counts — it claimed to be "the single definition of the quorum" and
+> "shared with the façade", but the façade had moved to `idle_report`, leaving `scheduler.rs:154` its
+> only caller. Corrected. New test
+> `quorum_met_and_idle_report_agree_on_the_any_all_and_empty_set_rule`, proven to fail by stripping the
+> empty-set early return.
+>
+> **Comment discipline (§8) fixed.** Four instances of de-duplication narration ("there is no outer
+> copy for it to disagree with") rewritten across `crates/core/src/coordination/timer.rs` and
+> `crates/ipc/src/protocol_tests.rs` to state what the type is rather than what it no longer
+> duplicates. The load-bearing reason the wire-shape test pins exact JSON instead of round-tripping
+> was kept.
+>
+> **File size (§15) fixed.** `facade/coordination.rs` was 398 lines on `main` and the slice pushed it
+> to 412, crossing the ~400 split smell. The timer façade surface moved to a new flat sibling
+> `crates/core/src/facade/timer.rs` (199 lines) with `crates/core/src/facade/timer_tests.rs`
+> (225 lines), matching the existing `git.rs`/`git_draft.rs`/`git_pr.rs`/`git_review.rs` family
+> convention, with `mod timer;` added to `facade.rs`. `coordination.rs` is now 246 lines.
+> `CoordinationError` and the shared `coordination_scope`/`coordination_owner`/`check_payload_size`
+> helpers deliberately stayed in `coordination.rs` — they are used by the scratchpad, diagram, todo,
+> template and kv façade files too. The lint file-size advisory went from 25 files to 24.
+>
+> **Spec-axis bug fixed — the tag chip's selected fill.** The extraction had made
+> `hover:bg-sidebar-accent` unconditional; both originals scoped it to the inactive branch only.
+> Restored. Deeper than that: the base primitive at `crates/app/ui/src/components/ui/toggle.tsx:10`
+> carries unconditional `hover:bg-muted` and `aria-pressed:bg-muted` in its root class, each at the
+> same specificity as a lone `data-[state=on]:` rule — so which one painted the active chip depended on
+> Tailwind's stylesheet emit order, on hover AND at rest. Fixed with a compound
+> `data-[state=on]:aria-pressed:` variant, whose selector carries both attributes and so outranks the
+> base's selectors deterministically. Verified against the real compiled CSS, not inferred. The test
+> asserts the winning declaration and was proven to fail against the single-variant version.
+>
+> **Deliberately not done, each with its reason.** `store/scratchpadSort.ts`/`store/diagramSort.ts`
+> duplication — the audit fences it as another lane's ("name it, do not fix it").
+> `ScratchpadTitle.tsx`/`DiagramTitle.tsx` remain two-line delegating wrappers — inlining them means
+> editing `ScratchpadEditor.tsx`/`DiagramEditor.tsx`, which verifier F fenced off ("do not let a
+> reviewer widen it to the editor header"). The base `ui/toggle.tsx` primitive carries the same
+> `aria-pressed:`/`data-[state=on]:` duplication in its own `cva` variants — shared with
+> `SegmentedControl` and `AppearanceModeCards`, so out of scope here; worth a follow-up. The
+> owner-directed shadcn `Toggle` adoption was **not** reverted — only its regression was fixed.
+>
+> **Gates — one clean run after all fixes.** `just lint` exit 0 (cargo fmt, clippy
+> `--workspace --all-targets -D warnings`, tsc, eslint, prettier, `check-core-deps.sh`
+> "framework-free", `check-core-cycles.sh` no cycles). `just test` exit 0: `cargo test --workspace`
+> **2023 passed / 0 failed / 3 ignored** (the 3 pre-existing `#[ignore]`s); `pnpm -C crates/app/ui
+> test` **176 files / 1304 tests, all passed**. The vitest count moved from slice 9's own 177
+> files/1308 tests to 176/1304 because two duplicated kind-agnostic List suites were consolidated into
+> one `DocumentList.test.tsx` — consolidation, not lost coverage.
+>
+> **Next session should start with:** committing this review-fix pass and opening the PR (still no
+> self-merge) for `refactor/dsa-audit-slice-09-structural-p2` — it now carries both slice 9's own
+> commit (`eceb78e`) and this fix pass. After that, resume the pointer slice 9 itself left below:
+> slice 7's open threads still stand (confirm CI is green there, give S17-F1's reconnect-replay test
+> the mutation pass that session skipped), then the DSA audit's remaining slices **5, 6 and 10**
+> (`.scratch/dsa-audit/slices/`).
+
+> **LATEST (2026-08-27): DSA AUDIT SLICE 9 — STRUCTURAL P2, NO LIVE DEFECT — all four work items landed
+> at the verifier-narrowed scope, `just lint` exit 0, `just test` exit 0, `Done — pending verify`,
+> committed as `eceb78e`.** On `main` `1de3d93`, branch `refactor/dsa-audit-slice-09-structural-p2`.
+> A two-axis code review then ran against this diff and its fixes are recorded in the entry above —
+> that follow-up work is what is uncommitted now, not this slice. Work items **S27-F2**, **S16-F1**,
+> **S26-F1**, **S10-F1(a)(b)**,
+> from `.scratch/dsa-audit/slices/slice-09-structural-p2-no-live-defect.md`, sourced from the Soloist
+> MCP scratchpads (`dsa-audit-contract`, `dsa-audit-S10`/`S16`/`S26`/`S27`,
+> `dsa-audit-verify-B`/`C`/`F`). The slice's own name is accurate for three of the four — duplication,
+> testability and a stale-on-reconnect gap, none reachable as a live defect — while S10-F1(b) turned
+> out to be a genuine wire-shape bug the verifier surfaced along the way; it is called out as such
+> below rather than folded quietly into "structural."
+>
+> **S27-F2 — the Scratchpad/Diagram UI clone family.** Verifier F confirmed 4 of the 5 claimed pairs by
+> normalising both files' nouns to `DOC` and diffing: List 29/273 differing lines, Title 36/226, Roster
+> 24/304, Panel 33/149. The editor pair (67/231, 29%) was rejected as genuine divergence and left
+> alone, as was `domain.ts` — its two summary types mirror two distinct Rust core types and must not
+> merge. The repo owner chose the wider of the two readings on offer: all four confirmed pairs, not
+> just List+Title.
+> New shared components: `DocumentList.tsx` (143 lines), `DocumentTitle.tsx` (122), `DocumentRoster.tsx`
+> (161), `DocumentPanel.tsx` (32). The eight per-subject files became thin wrappers —
+> `ScratchpadTitle.tsx` 113→16, `DiagramTitle.tsx` 113→16, `ScratchpadRoster.tsx` 154→46,
+> `DiagramRoster.tsx` 150→42, `ScratchpadList.tsx` 137→42, `DiagramList.tsx` 136→41 (`ScratchpadPanel.tsx`
+> and `DiagramPanel.tsx` moved less, since each still wires its own hotkeys and editor).
+> Product asymmetries were kept visible rather than defaulted away: `DocumentPanel` takes an optional
+> `panelRef`, and only `ScratchpadPanel` creates one and wires `useScratchpadHotkeys` (Ctrl+Shift+W), so
+> the difference reads as an explicit absence at the call site rather than a silently shared default.
+> The two sort modules are injected via a generic `sortItems` prop.
+> New tests: `DiagramTitle.test.tsx` (85 lines, written against the un-extracted file **before**
+> extracting, so the shared component was proven against both subjects), `DocumentRoster.test.tsx`
+> (100), `ScratchpadPanel.test.tsx` (77). Mutation evidence: deleting
+> `{...handleAttribute(item.name)}` reddened both subjects at once with `expected [null, null, null] to
+> deeply equal ['plan', 'research', 'risks']`; `r{item.revision}` → `{item.revision}` gave `expected
+> 'Auth flow1the login handshake' to contain 'r1'`; the archived-grouping filter and the
+> `editor.loading` branch were each broken and reddened too. `data-scratchpad-name` (read by
+> `e2e/src/screens/ScratchpadPanel.ts`) and `data-diagram-name` survive verbatim via a per-subject
+> `handleAttribute` prop.
+>
+> **S16-F1 — the store's `doc_table`.** Verifier C reproduced the measurement: 152 diff-output lines
+> between `scratchpads.rs` (338 lines) and `diagrams.rs` (302) after normalising, with the substantive
+> content only the module doc, the result-enum names, `update_tags` vs `update_diagram_tags`, and the
+> ~34-line `transfer` block only scratchpads has.
+> **The blocker was resolved, not bypassed:** this finding was filed as "blocked on S08's row-type
+> decision," and that decision already exists inside lane S08 — it explicitly declined unifying the
+> aggregates (scratchpad transfer plus the derived-todo cascade, template seeding, and the
+> heading-skipping `gist` rule are genuine differences), a call the contract's C1 section and verifier C
+> both confirm. So the fix stays adapter-internal: zero core changes, zero schema change, zero
+> migration, zero call-site change.
+> New `crates/store/src/doc_table.rs` (315 lines) holds the shared guard/conflict/decode/tag
+> read-modify-write logic; `scratchpads.rs` 338→205 (keeps `transfer` verbatim), `diagrams.rs` 302→168.
+> **The verifier's caveat was honoured:** no `format!`-built SQL and no interpolated identifiers. Every
+> statement is a full `&'static str` literal per table, passed into the shared logic; the only three
+> remaining `format!` calls build error-message text. The explicit `'[]'` tag insert was preserved in
+> both (scratchpads' column has no `DEFAULT`, diagrams' does), and the locking shape is unchanged —
+> helpers take an already-held `&Connection`.
+> The two "parity tests to add" already existed in `diagrams_tests.rs`, so the agent declined to
+> fabricate duplicates and instead mutation-proved the shared module directly: removing the revision
+> guard in `doc_table.rs` reddened both suites identically (`left: Written(...) right: Conflict { actual:
+> Some(2) }` and `left: 16 right: 1`). A second mutation (tag sort) reddened scratchpads but not
+> diagrams, because that fixture's tags happen to already be sorted — recorded honestly as a
+> test-data coincidence, not claimed as proof. Both pre-existing suites pass with every assertion
+> unedited.
+>
+> **S26-F1 — the `PtyStream` handle.** Verifier F narrowed this hard, knocking down three of four
+> sub-claims, and only the surviving one was built. Rejected and deliberately **not** implemented: the
+> invalid-state framing (`useTerminal.ts:117-118` sets `attachedRef` and `state` together
+> unconditionally, so the claimed illegal pair is unreachable), the "leaked live canceller" (real but
+> harmless), and eliminating `reattachRef` (a genuine `useCallback` cycle the ref exists to break — the
+> verifier predicted 2 surviving refs, not 1).
+> New `terminalStream.ts` (136 lines) + `terminalStream.test.ts` (166); `useTerminal.ts` 432→351, and
+> the ref cluster the finding was about is now exactly the two the verifier predicted: `streamRef` plus
+> the retained `reattachRef`. The justification is testability and ref count, not a bug fix — the
+> backpressure rules were previously reachable only through React, jsdom and a fake xterm.
+> Byte handling confirmed unchanged: no `.subarray` introduced, `api.ts` and `test/fakeTerminal.ts`
+> untouched. All four new tests were mutation-proven, each restored byte-clean and re-diffed clean:
+> removing the `visible()` guard gave `expected [Function flush] to be null`; removing the
+> `PENDING_CAP_BYTES` eviction loop gave `expected false to be true`; removing the detach-by-token line
+> gave `expected [] to deeply equal [ 42 ]`; removing the cancelled guard gave `expected 'after cancel'
+> to be ''`.
+>
+> **S10-F1(a)+(b) — the timer idle answer.** The lane's proposed `TimerLiveView`/`IdleProgress`
+> restructure was rejected by verifier B as a breaking wire change for modest gain and was not built.
+> `TimerView` keeps both fields.
+> The repo owner chose to delete the **outer** duplicate instead: `SetWhenIdleOutcome` is now
+> `{ timer: TimerView }`, and the nested view is enriched, so a response can no longer carry
+> `already_idle: true` beside `timer.already_idle: false` in the same JSON object. That is (a). (b) is
+> the actual behaviour fix: `timer_list` is now enriched too — previously every fire-when-idle timer it
+> returned serialized `"waiting_on": []`, `"already_idle": false` regardless of the live state, which on
+> the wire was indistinguishable from "quorum already met, nothing outstanding."
+> The duplicated derivation is gone: one `IdleMode::idle_report(watched, is_idle)` in
+> `crates/core/src/coordination/timer.rs`, beside `quorum_met`, observing each process once instead of
+> twice; called by `timer_fire_when_idle`, `timer_list` and the orchestration snapshot. `is_idle_now`
+> widened to `pub(in crate::facade)` rather than being re-implemented.
+> `crates/ipc/src/protocol_tests.rs`'s round-trip fixture had been hand-populating a shape the real
+> facade never produced, which is why the divergence survived this long; it now matches reality. MCP
+> tool descriptions were checked and updated so they still tell the truth —
+> `timer_fire_when_idle_any`/`_all` now say "Returns the armed timer, reporting whether..." instead of
+> "Returns the timer plus whether...", and `timer_list`'s description now claims live idle state, true
+> only now that (b) has landed.
+> **No frontend change was needed or made:** `SetWhenIdleOutcome` has no Tauri or UI caller (the UI only
+> calls `timer_cancel`/`_pause`/`_resume`, all returning `bool`), and `TimerView`'s own shape is
+> unchanged. Three new tests, each mutation-proven; the wire-shape pin failed with the extra top-level
+> `already_idle`/`waiting_on` keys visible in the diff before the fix.
+>
+> **A missed call site the scoped runs could not catch.** `crates/pty/tests/orchestration.rs:143,147`
+> still read the old outer fields; the scoped `-p soloist-core -p soloist-ipc -p soloist-mcp` run never
+> compiled `soloist-pty`, so the break stayed invisible until the full `just lint`/`just test` did. Fixed
+> to `outcome.timer.already_idle` / `outcome.timer.waiting_on` — the same two facts asserted, nothing
+> weakened.
+>
+> **Also in this slice — a shadcn adoption pass, owner-directed and outside the audit.** The owner
+> noticed plain `<button>` usage and asked for a pass over the frontend. Findings: shadcn is already
+> installed (`components.json`, style `radix-nova`, 33 components); `@/components/ui/button` is
+> imported in 72 files; 16 hand-roll a `<button>`.
+> **One conversion:** the tag-filter chips became a shadcn `Toggle`, extracted to `TagFilterChips.tsx` +
+> `TagFilterChips.test.tsx`, collapsing three duplicate copies (`ScratchpadRoster`, `DiagramRoster`,
+> `TodoFilters`) into one. It renders a plain `Toggle`, not a `ToggleGroup`, inside the unchanged
+> `role="group" aria-label="Filter by tag"` wrapper — `ToggleGroup type="single"` swaps `aria-pressed`
+> for `aria-checked`/`role="radio"`, which would break the ARIA contract the existing tests assert
+> (confirmed by reading the installed Radix bundle directly).
+> **Fourteen evidenced refusals**, each anchored to something checkable rather than taste:
+> `Button variant="ghost"` carries the glass-ghost hover treatment (border, box-shadow,
+> `backdrop-blur-md`), and `DESIGN.md`'s Elevation Ladder puts rows and cards at Rung 0 ("no shadow and
+> no blur") and ghost buttons at Rung 1 ("only while hovered") — converting the flat list rows would be
+> a visible design regression against the design system, not a neutral refactor. `SettingsTabRail` would
+> regress keyboard behaviour (Radix's vertical roving-focus rail drops ArrowLeft/ArrowRight, verified
+> against the shipped bundle). `SlashCommandList` and `DocumentList` rows are `role="option"` inside a
+> listbox, not standalone buttons. `WindowControls` is OS chrome, already documented as deliberately not
+> `Button`. Zero components were installed for this pass; none was needed.
+>
+> **Gates — run once at the end, over the combined tree.** `just lint` — **exit 0** (rustfmt, workspace
+> clippy `-D warnings`, UI typecheck/lint/format, dependency-direction and cycle guards; the four new
+> UI files needed one `just fmt` pass for Prettier before this run). `just test` — **exit 0**: `cargo
+> test --workspace` **2020 passed / 0 failed / 3 ignored** (the three pre-existing `#[ignore]`d
+> longevity-soak tests in `crates/pty/tests/soak.rs`, reason "longevity soak — run via the nightly soak
+> job or `just soak`" — unchanged); `pnpm -C crates/app/ui test` **177 files / 1308 tests, all passed**.
+> Combined diff: **24 files changed, 586 insertions(+), 1355 deletions(-)**, plus **12 new files**.
+>
+> Status for this slice: **`Done — pending verify`** — both gates are green and every change is
+> mutation-proven, but there is no e2e run and no PR yet, per CLAUDE.md §10's exact vocabulary.
+>
+> **Next session should start with (superseded by the entry above — see its own pointer first):**
+> this slice is now committed as `eceb78e`; committing the review-fix pass above and opening the PR
+> (no self-merge) is the immediate next step. After that, slice 7's open threads still stand —
+> confirm CI is green there and give S17-F1's reconnect-replay test the mutation pass that session
+> skipped. After that, the DSA audit's remaining slices are **5, 6 and 10**
+> (`.scratch/dsa-audit/slices/`). Also worth someone's judgement, recorded rather than
+> acted on: **(a)** `react-doctor` scores the project 74/100 with 26 issues, none in the files this
+> slice touched, concentrated in `App.tsx`, `ThemeEditor.tsx`, `ThemeColorInput.tsx` and some
+> sidebar/store hooks; **(b)** a hand-rolled flat-row pattern is duplicated independently across
+> `CommandList`, `ReviewThreadList`, `EditorOutline`, `ProcessToast` and `AttentionControl`, with no
+> shadcn primitive that fits it — a shared internal component would satisfy DRY here, but none exists
+> yet; **(c)** `crates/store/src/templates.rs` carries a third near-duplicate of the
+> `current_revision`/`read_one` shape `doc_table.rs` now states once for scratchpads and diagrams —
+> deliberately left out of this slice's scope.
+
 > **LATEST (2026-08-27): DSA AUDIT SLICE 8 — E2E TEST ISOLATION — the developer's git configuration
 > no longer reaches the app under test; mutation-proven, `just lint` exit 0, `just test` green.** On
 > `main`, commits `a745889` (the fix) and `dabdc42` (an incidental lead-agent lockfile refresh the
