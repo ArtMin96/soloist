@@ -73,6 +73,15 @@ impl FakeFileWatcher {
         lock(&self.refused).push(root.into());
     }
 
+    /// Reverses [`Self::refuse`]: `root` can be watched again, as a budget that has since freed up
+    /// does. A later [`FileWatcher::watch`] or [`FileWatcher::watch_dir`] call for it succeeds; a
+    /// watch already refused before this call is not retroactively granted — the caller has to ask
+    /// again.
+    pub fn allow(&self, root: impl Into<PathBuf>) {
+        let root = root.into();
+        lock(&self.refused).retain(|refused| *refused != root);
+    }
+
     /// Feeds a synthetic changed absolute path to every live watch covering it (best-effort, like
     /// the real adapter). A path no watch covers reaches the reactor no more than a change in an
     /// unwatched tree would.

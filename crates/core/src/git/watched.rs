@@ -14,7 +14,6 @@
 //!
 //! When a change here is worth re-reading a status is [`super::watch`]'s.
 
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -61,29 +60,76 @@ impl Watched {
                 .strip_prefix(&self.root)
                 .is_ok_and(|relative| !is_ignored(relative))
     }
+
+    /// The three places this project's status can change: the directory holding its repository
+    /// state, the refs tree inside it, and its working tree — each independently watchable, so an
+    /// exhausted budget can grant some and refuse the rest.
+    fn targets(&self) -> [WatchTarget; 3] {
+        [
+            WatchTarget {
+                path: self.state_dir.clone(),
+                recursive: false,
+                reported: false,
+            },
+            WatchTarget {
+                path: self.state_dir.join(REFS_DIR),
+                recursive: true,
+                reported: false,
+            },
+            WatchTarget {
+                path: self.root.clone(),
+                recursive: true,
+                reported: true,
+            },
+        ]
+    }
 }
 
-/// What establishing one project's watches produced.
-struct Established {
-    handles: Vec<Box<dyn WatchHandle>>,
-    /// The working tree's refusal, if it was turned down.
-    refusal: Option<WatchError>,
+/// One of the three paths a project is watched at.
+#[derive(Clone)]
+struct WatchTarget {
+    path: PathBuf,
+    /// Whether the OS is asked to watch the whole subtree (the working tree, the refs tree) or
+    /// only the directory itself (`.git`, whose direct children — `HEAD`, `index`, `packed-refs` —
+    /// are what matter).
+    recursive: bool,
+    /// Whether losing this one is worth telling the user about. Only the working tree's is: a
+    /// project that is not a repository has no `.git`, so a state-dir refusal is the ordinary case
+    /// rather than a loss, and reporting it would put a notice on every project not under version
+    /// control.
+    reported: bool,
+}
+
+/// What a project has for one watched path: the live watch, or the refusal standing in its place
+/// until a later re-sync gets one.
+enum Held {
+    /// The handle *is* the watch — dropping it releases the OS resources, which is its only job;
+    /// nothing here ever reads it back out.
+    Watching(#[expect(dead_code)] Box<dyn WatchHandle>),
+    Refused(WatchError),
+}
+
+/// One open project: where its status is read from, and what it has for each place it is watched.
+struct WatchedProject {
+    watched: Watched,
+    /// Keyed by [`WatchTarget::path`] — the unit of accounting is the path, not the project and
+    /// not a role bucket, because refusal is neither total nor evenly split: the budget can grant
+    /// `.git` and refuse `.git/refs` as easily as the other way round, and only tracking per path
+    /// tells a later re-sync exactly which one to ask for again.
+    held: HashMap<PathBuf, Held>,
 }
 
 /// The watches held for the open projects, and what each of them covers.
 ///
-/// Three lifetimes, kept apart on purpose. A handle *is* a watch — dropping it releases the OS
-/// resources — so an entry in `handles` lives exactly as long as its project stays watched. A
-/// refusal is what the OS said when those watches were established, kept because a re-sync reports
-/// every open project's standing answer and does not re-establish the watches it already holds.
-/// And `watched` is rebuilt from the registry on every re-sync, so a project matched and read at
-/// the path it has now.
+/// One record per project, not three parallel maps: an entry's [`WatchedProject::held`] and
+/// [`WatchedProject::watched`] describe the same project and can never disagree about which one it
+/// is. That is what lets a re-sync ask again for exactly the paths it does not hold — a watch
+/// already granted is left alone, and one still refused is asked for again, so a refusal that has
+/// since cleared is not permanent.
 pub(super) struct Watches {
     watcher: Arc<dyn FileWatcher>,
     changes: mpsc::Sender<PathBuf>,
-    handles: HashMap<ProjectId, Vec<Box<dyn WatchHandle>>>,
-    refusals: HashMap<ProjectId, WatchError>,
-    watched: HashMap<ProjectId, Watched>,
+    projects: HashMap<ProjectId, WatchedProject>,
 }
 
 impl Watches {
@@ -93,49 +139,64 @@ impl Watches {
         Self {
             watcher,
             changes,
-            handles: HashMap::new(),
-            refusals: HashMap::new(),
-            watched: HashMap::new(),
+            projects: HashMap::new(),
         }
     }
 
-    /// Watches `project` at `root`, and reports what the OS said: the answer it has just given, or
-    /// the one it gave when the watches this project already holds were established.
+    /// Watches `project` at `root`, and reports what the OS said about its working-tree watch: the
+    /// answer it has just given, or the one standing from an earlier attempt.
     ///
-    /// A project already watched keeps its watches, so a re-sync causes no churn.
+    /// Every path this project is watched at that is not already [`Held::Watching`] — never asked
+    /// for, or still refused — is asked for again; a path already granted is left untouched, so an
+    /// ordinary re-sync causes no churn.
     pub(super) async fn establish(&mut self, project: ProjectId, root: PathBuf) -> WatchOutcome {
         let watched = Watched::new(root);
-        if let Entry::Vacant(slot) = self.handles.entry(project) {
-            let established = establish(&self.watcher, &watched, self.changes.clone()).await;
-            slot.insert(established.handles);
-            match established.refusal {
-                Some(refusal) => self.refusals.insert(project, refusal),
-                None => self.refusals.remove(&project),
-            };
+        let mut held = self
+            .projects
+            .remove(&project)
+            .map(|entry| entry.held)
+            .unwrap_or_default();
+        let targets = watched.targets();
+        let missing: Vec<WatchTarget> = targets
+            .iter()
+            .filter(|target| !matches!(held.get(&target.path), Some(Held::Watching(_))))
+            .cloned()
+            .collect();
+        if !missing.is_empty() {
+            held.extend(establish_targets(&self.watcher, missing, self.changes.clone()).await);
         }
-        self.watched.insert(project, watched);
-        WatchOutcome {
-            project,
-            refusal: self.refusals.get(&project).copied(),
-        }
+        let refusal = targets
+            .into_iter()
+            .find(|target| target.reported)
+            .and_then(|target| match held.get(&target.path) {
+                Some(Held::Refused(refusal)) => Some(*refusal),
+                _ => None,
+            });
+        self.projects
+            .insert(project, WatchedProject { watched, held });
+        WatchOutcome { project, refusal }
     }
 
-    /// Drops everything held for a project outside `open` — a project that has been removed — which
-    /// releases its OS watches.
+    /// Drops everything held for a project outside `open` — a project that has been removed —
+    /// which releases its OS watches.
     pub(super) fn retain(&mut self, open: &HashSet<ProjectId>) {
-        self.handles.retain(|project, _| open.contains(project));
-        self.refusals.retain(|project, _| open.contains(project));
-        self.watched.retain(|project, _| open.contains(project));
+        self.projects.retain(|project, _| open.contains(project));
     }
 
-    /// Drops `project`'s watches so the next re-sync establishes them again.
+    /// Drops `project`'s watches and forgets its refusals, so the next re-sync establishes
+    /// everything again — for a project whose root may have been replaced (a fresh clone over a
+    /// deleted checkout is a new inode), where a stale refusal would be as wrong as a stale handle.
     pub(super) fn release(&mut self, project: ProjectId) {
-        self.handles.remove(&project);
+        if let Some(entry) = self.projects.get_mut(&project) {
+            entry.held.clear();
+        }
     }
 
-    /// Drops every watch, so the next re-sync establishes them all again.
+    /// Drops every watch and refusal, so the next re-sync establishes them all again.
     pub(super) fn release_all(&mut self) {
-        self.handles.clear();
+        for entry in self.projects.values_mut() {
+            entry.held.clear();
+        }
     }
 
     /// Every watched project whose status `path` is part of.
@@ -148,65 +209,50 @@ impl Watches {
         &'a self,
         path: &'a Path,
     ) -> impl Iterator<Item = ProjectId> + 'a {
-        self.watched
+        self.projects
             .iter()
-            .filter(move |(_, watched)| watched.covers(path))
+            .filter(move |(_, entry)| entry.watched.covers(path))
             .map(|(&project, _)| project)
     }
 
     /// Where `project`'s status is read from, or `None` for one no longer watched.
     pub(super) fn root_of(&self, project: ProjectId) -> Option<PathBuf> {
-        self.watched
+        self.projects
             .get(&project)
-            .map(|watched| watched.root.clone())
+            .map(|entry| entry.watched.root.clone())
     }
 }
 
-/// The watches one project's status needs: its repository state, the refs tree inside it, and its
-/// working tree.
+/// Registers every target in `targets` independently — one refusal never prevents another target
+/// from being asked for — in a single batch off the runtime: the working-tree watch walks the
+/// whole tree, so a large repository must never park a runtime worker while the OS enumerates its
+/// directories.
 ///
-/// Registering them reads the filesystem — the working-tree watch walks the whole tree — so all
-/// three go to the blocking pool together: a large repository must never park a runtime worker
-/// while the OS enumerates its directories.
-///
-/// Each is independent, so what can be watched is. A refused working-tree watch still leaves what
-/// version control itself writes reporting, which is why the repository-state watches are separate
-/// from the tree watch that spans them: the tree watch is the one an exhausted watch budget refuses
-/// first, and losing it must not take committing and staging down with it.
-///
-/// Only the working tree's refusal is reported, though every refusal is traced. A project that is
-/// not a repository has no `.git` to watch, so a state-dir refusal is the ordinary case rather than
-/// a loss — reporting it would put a notice on every project not under version control. The
-/// working-tree watch is the one every project has, and the one whose silence is indistinguishable
-/// from a tree nobody edits.
-async fn establish(
+/// Every refusal is traced, though only the working tree's is reported (see
+/// [`WatchTarget::reported`]): a project that is not a repository has no `.git` to watch, so a
+/// state-dir refusal is the ordinary case rather than a loss.
+async fn establish_targets(
     watcher: &Arc<dyn FileWatcher>,
-    watched: &Watched,
+    targets: Vec<WatchTarget>,
     changes: mpsc::Sender<PathBuf>,
-) -> Established {
+) -> HashMap<PathBuf, Held> {
     let watcher = watcher.clone();
-    let state_dir = watched.state_dir.clone();
-    let refs_dir = state_dir.join(REFS_DIR);
-    let root = watched.root.clone();
     run_blocking(move || {
-        let mut handles: Vec<Box<dyn WatchHandle>> = [
-            (
-                state_dir.clone(),
-                watcher.watch_dir(state_dir, changes.clone()),
-            ),
-            (refs_dir.clone(), watcher.watch(refs_dir, changes.clone())),
-        ]
-        .into_iter()
-        .filter_map(|(path, established)| traced(&path, established).ok())
-        .collect();
-        let refusal = match traced(&root, watcher.watch(root.clone(), changes)) {
-            Ok(handle) => {
-                handles.push(handle);
-                None
-            }
-            Err(refusal) => Some(refusal),
-        };
-        Established { handles, refusal }
+        targets
+            .into_iter()
+            .map(|target| {
+                let registered = if target.recursive {
+                    watcher.watch(target.path.clone(), changes.clone())
+                } else {
+                    watcher.watch_dir(target.path.clone(), changes.clone())
+                };
+                let held = match traced(&target.path, registered) {
+                    Ok(handle) => Held::Watching(handle),
+                    Err(refusal) => Held::Refused(refusal),
+                };
+                (target.path, held)
+            })
+            .collect()
     })
     .await
 }
@@ -231,3 +277,7 @@ fn traced(
 pub(super) fn is_lock(path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext == LOCK_EXTENSION)
 }
+
+#[cfg(test)]
+#[path = "watched_tests.rs"]
+mod tests;
